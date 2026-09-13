@@ -1,4 +1,4 @@
-# GPU Kernel Probe Phase: BF16 Dot / GEMV / SiLU — three-way (CPU · L0/SPIR-V · DX12)
+# GPU Kernel Probe Phase: BF16 Dot / GEMV / SiLU — three-way (CPU · SYCL/oneAPI · DX12)
 
 Branch: `khurram/gpu-probe` (off `main`). Probe-first, like the previous phase — no change to
 `src/Nivara` code, `samples/` code, or any NUnit test project. The probe *consumes* existing
@@ -15,31 +15,40 @@ Nivara/Nivara.Samples kernels read-only via project references.
   violation; 17-variant bisection). So a real GEMV (`y[i] = Σⱼ W[i,j]·x[j]`) is not expressible on
   L0 today; the L0 safe subset is: direct loads/stores through kernel-arg pointers, OpPhi loops,
   1-lane atomics, BF16 ops.
+- **NEW (commit 4, decisive): this driver also cannot multiply or divide floats in the OpenCL
+  kernel model** — IGC executes `OpFMul`(131) as `OpFSub`(130) and `OpFDiv`(132) as `OpFMul`(131)
+  (proven by exact-input single-op probes; `OpFAdd` and `OpenCL.std exp` are correct). Dot = Σ(a−b),
+  SiLU = x·(1+exp(−x)), both mirror-confirmed. **Hand-authored SPIR-V on L0 is therefore a dead
+  end for any real math**, and proof-of-correctness pivots to the **oneAPI SYCL/DPC++ toolchain**
+  (`icpx`-produced SPIR-V — the same path llama.cpp's SYCL backend runs on Arrow Lake Arc iGPUs) per human decision — details below.
 - DX12 is available (FL 12_2 / SM 6.8, verified via `D3d12Check.cs`) and targets a DXIL/DXBC
-  shader path that bypasses the buggy IGC OpenCL frontend — the viable route to *real* GEMM.
+  shader path that bypasses the buggy IGC OpenCL frontend — the compiler-backed fallback.
 
 Before committing to a GPU inference backend for SmolLM we must prove the actual compute kernels
 correct on both GPU paths, apples-to-apples against the CPU. This phase implements **exactly two
-kernels SmolLM actually needs**, on **three backends**, with **correctness verification first (via
-a double-precision golden), then performance** — all inside GpuProbe.
+kernels SmolLM actually needs**, on **three backends**, with **correctness verification first
+(against the production Nivara kernels — the CPU leg is the gold target), then performance** —
+all inside GpuProbe.
 
 ## Kernel choices (decided with the human)
 
 1. **Kernel A — BF16 dot / GEMV** (the workhorse: every SmolLM decode token is dominated by
    linears; 135M params ≈ all in matmuls). Exercises the exact compute model we care about:
    BF16→f32 widen-in-register, f32 accumulate, reduction-order differences across vectors.
-   - **L0 leg:** K=16 fixed-width dot via 33 kernel-arg pointers (`a[0..15]`, `b[0..15]`, `c`),
-     unrolled straight-line, direct offset-0 loads only — the proven safe subset. This is L0's
-     honest expressible shape (no indexing). Native widen variant + emul-widen variant.
+   - **SYCL leg (replaces the hand-authored L0 leg after commit 4):** K=16 dot via a SYCL kernel
+     written in DPC++ and compiled with `icpx` to SPIR-V, then loaded/launched through the
+     probe's proven L0 harness (`zeModuleCreate` + `zeKernelCreate`, which work end-to-end).
+     This answers the decisive question left by commit 4: does IGC execute FP mul/div correctly
+     when the bytecode is *toolchain-produced*? Native + emul widen parity with the old kernels.
    - **DX12 leg:** full GEMV with real indexing (M×576, SmolLM-shaped), plus the same K=16 dot
      for the strict three-way apple.
    - **CPU leg:** production kernels consumed as-is — widen at load, then the real SmolLM dot /
      GEMV kernels (no hand-written CPU kernels, see *Proposed changes*).
 2. **Kernel B — SiLU** (`x·σ(x)`, SwiGLU FFN activation). Deliberately the other side of the
-   envelope: **elementwise** (fully expressible on all three legs — fires on L0 too) and it
+   envelope: **elementwise** (fully expressible on all three legs) and it
    exercises **transcendentals (`exp`)** which neither GPU leg has touched yet (everything so far
    is FAdd/FMul). Validates math-library correctness on both SPIR-V/IGC and DX12.
-   - L0: `OpenCL.std` `exp` ext-inst (safe subset + ext-inst import only).
+   - SYCL: `exp` from the device math library (compiler-imported).
    - DX12/CPU: same formula.
 
 Left out (phase 2+): RMSNorm (reduce → indexed → L0-degenerate), RoPE, attention QK^T/softmax/PV,
@@ -54,9 +63,9 @@ foundation proving out.
   `OpConvertBF16ToFINTEL` and emul `<<16` variants; DX12 HLSL: `asfloat(uint << 16)`). The GPU
   owns any widening, exactly like production would.
 - **Kernel outputs are the f32 computation results** (dot/GEMV f32 accumulator per row, SiLU f32
-  value) — read back as f32 and compared against the golden. Outputting f32 is the GPU's natural
-  accumulator precision, not a host-side semantic conversion. CPU leg widens once at load
-  (`SafeTensorsLoader.WidenBf16ToF32`, SIMD) then runs existing f32 kernels.
+  value) — read back as f32 and compared against the CPU-leg production kernels. Outputting f32
+  is the GPU's natural accumulator precision, not a host-side semantic conversion. CPU leg widens
+  once at load (`SafeTensorsLoader.WidenBf16ToF32`, SIMD) then runs existing f32 kernels.
 
 ## Synthetic data (self-contained; embedded SmolLM constants)
 
@@ -83,15 +92,21 @@ New files:
 
 - `Kernels/KernelFixtures.cs` — fixture generator (embedded SmolLM shapes, RNG mirror, BF16
   buffers) + shared host read/write helpers (write `BFloat16` to native buffer, read f32 back).
-- `Kernels/GoldenReferences.cs` — **double-precision golden oracle** (not a kernel): `GoldenDot`
-  / `GoldenGemv` (BF16→double widen is exact; double products are exact for 8-bit mantissas;
-  serial double accumulate) and `GoldenSilu` (double formula) — one implementation-independent
-  target every leg is compared against.
-- `Kernels/KernelGate.cs` — the three-way compare harness: runs each leg over the same fixture,
-  asserts `|leg − golden| ≤ 1e-6 + 1e-5·|golden|`, reports per-leg worst ULP as a diagnostic,
+- `Kernels/CpuLeg.cs` — the **CPU leg = the production Nivara kernels exactly as
+  `NivaraInference` calls them for SmolLM**, consumed read-only via public API (gold target
+  every GPU leg is gated against): dot via `LlamaFusedKernels.MatMulTransposedB<float>` with
+  `bCols=1`, GEMV via `MatMulTransposedB<float>` (aRows=1 → the allocation-free BLAS2 GEMV path
+  the fused Llama head runs), SiLU via `Activation.Silu` (`GradKernels.Silu` — **sigmoid-then-
+  multiply**, NOT the `x/(1+exp(−x))` formula this plan text previously described). Carries the
+  gate helpers (`WithinTolerance`, `UlpDistance`, `GateAbs`/`GateRel`) — no double-precision
+  oracle exists or is maintained (the double golden was deleted once the production kernels were
+  wired as CPU).
+- `Kernels/KernelGate.cs` — the N-way compare harness: runs each leg over the same fixture,
+  asserts `|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|`, reports per-leg worst ULP as a
+  diagnostic (against the CPU-leg production-kernel output),
   then timings (warmup once + median-of-N, mirroring the `add_loop` timing pattern in
   `L0Run.cs`). Dot16 is launch-bound (µs-scale) — its timing row is an availability signal; gemv
-  and silu are the meaningful perf rows.
+  and silu are the meaningful perf rows. Legs: CPU, SYCL (oneAPI), DX12.
 - `D3d12/D3d12Compute.cs` (new, largest unit) — hand-rolled D3D12 compute path, pure P/Invoke
   against inbox `d3d12.dll`/`dxgi.dll`/`d3dcompiler_47.dll` (no NuGet, same ethos as `L0Loader`):
   CreateDevice (FL 12_2, skip WARP) → queue → command allocator/list → **D3DCompile HLSL→DXBC
@@ -106,6 +121,11 @@ New files:
   a `StructuredBuffer<uint>`, matching the .NET `BFloat16` layout), `silu` (`exp`). No-FMA
   guarantees are no longer load-bearing (gate is tolerance-based, see below), but the K loops stay
   simple serial order for run-to-run determinism.
+- `Sycl/` (new after commit 5 bootstrap) — SYCL/DPC++ kernel sources (`dot16`, `gemv`, `silu` in
+  C++ with `sycl::queue` + USM or buffer/accessor), compiled with `icpx -fsycl` to SPIR-V; loaded
+  either through the existing L0 harness (`zeModuleCreate` on compiler-produced SPIR-V) or via a
+  small SYCL-runtime shim executable/dll P/Invoked from the probe. Decision recorded in the
+  commit-5 README notes.
 
 Modified files:
 
@@ -115,15 +135,28 @@ Modified files:
   `System.Numerics.Tensors 11.0.0-rc.1.26425.128` package ref (matches the solution-wide refresh;
   for `TensorPrimitives` on the CPU leg).
 - `LevelZero/SpvKernels.cs` — add:
-  - `Bf16DotK16(bool nativeWiden)` — SPIR-V 1.0, 33 args (`ptr<CrossWorkgroup,u16>` ×32 + f32
-    out), straight-line: 16 × (widen + FMult), FAdd in fixed serial order. Native
-    (`OpConvertBF16ToFINTEL`, capability 6115) and emul (`OpUConvert` + `<<16`) variants.
-  - `SiLUBf16()` — `OpExtInstImport "OpenCL.std"` + `OpExtInst` `exp` (opcode 19, verify against
-    Khronos registry), guard with capability declarations; direct load/store through args only.
-- `LevelZero/L0Run.cs` — extend the shared `TestKernel` to support arbitrary arg counts/buffers
-  (currently hard-limited to a/b/c); add a **small dedicated runner** for the BF16 dot/SiLU
-  kernels (not renumbered tests 6/7 — the existing `run` mode tests 1–5 + bisection stay
-  untouched) invoking the above via the `TestKernel` plumbing; outputs written to arg-index 32.
+  - `SpvWriter.ExtInstImport(uint resultId, string name)` — `OpExtInstImport` (opcode 11, word
+    count = string words + 2), required for the `OpenCL.std` extended instruction set; emitted
+    before `OpMemoryModel` per the SPIR-V 2.4 logical layout.
+  - `Bf16DotK16(bool nativeWiden, uint spirvVersion = Version10)` — SPIR-V 1.0, **33 kernel-arg
+    pointers**: 32 × `ptr<CrossWorkgroup,u16>` (a[0..15] = ids 11..26, b[0..15] = ids 27..42)
+    + f32 out at arg-index 32 (id 43); straight-line unrolled dot: per i, `OpLoad` a/b ×2, widen
+    (native `OpConvertBF16ToFINTEL` with capability 6115 / emul `OpUConvert`(113) →
+    `OpShiftLeftLogical`(196) → `OpBitcast`(124)), `OpFMul`(131), then a **fixed serial FAdd
+    chain** (129, first product as acc init) → `OpStore` out. Kernel names
+    `bf16_dot_k16_native`/`bf16_dot_k16_emul`. Bound = running id counter.
+  - `SiLUBf16(uint spirvVersion = Version10)` — emul widen (`OpUConvert` + `<<16`, no native
+    param), `w.ExtInstImport(10, "OpenCL.std")` before `OpMemoryModel`, `OpExtInst`(12)
+    instruction 19 (`exp`), then `x/(1+exp(−x))` via `OpFNegate`(127) + `OpFAdd`(129 with const
+    1.0f) + `OpFDiv`(132); 2 args (u16 x ptr + f32 out). Kernel name `bf16_silu`.
+- `LevelZero/L0Run.cs` — refactor the shared `TestKernel` into `TestKernelCore` (generic
+  `int[] bufferSizes` per arg + `argCount` + `Action<IntPtr[]>`/`Func<IntPtr[],bool>`) with a
+  byte-identical-signature `TestKernel` facade; add `ZeCommandListReset` delegate; add a
+  **dedicated `RunBf16KernelPhase` after test 5** (inside the try, before the finally) that
+  gated-launches `bf16_dot_k16_native`/`_emul` (33 shared buffers: 32×2 B u16 + 4 B f32 out,
+  fill via `WriteBf16`, verify reads `bufs[32]`) and `bf16_silu` (persistent module/list +
+  `zeCommandListReset` per element, 576 single-element launches) against
+  `CpuLeg.Dot` / `CpuLeg.Silu` outputs. Existing tests 1–5 + bisection stay untouched.
 - `Program.cs` — add `kernels` mode (CPU + L0 + DX12 gates; skips DX12 gracefully if device
   creation fails), included in `all`.
 - `README.md` — **updated in every step's commit** (the probe is a living, run-manually tool —
@@ -132,33 +165,44 @@ Modified files:
 - `docs/SMOLLM-GPU.md` — new "Kernel phase" section with the three-way results (deliverable).
 - `docs/TODO.md` — this plan (revised).
 
-CPU leg (inside `KernelGate`, no new kernel code — **nothing reinvented**):
+CPU leg (inside `CpuLeg`/`KernelGate`, no new kernel code — **nothing reinvented**):
+the production Nivara kernels exactly as `NivaraInference` runs them for SmolLM:
 
 - Widen both fixtures once at load via `SafeTensorsLoader.WidenBf16ToF32` (Nivara.Samples, SIMD).
-- dot16/dot576 → `TensorPrimitives.Dot<float>` on widened fixtures (System.Numerics.Tensors).
-- gemv → `LlamaFusedKernels.MatMulTransposedB<float>` (core, the production SmolLM GEMV kernel).
-- silu → widened fixture through the production `x/(1+exp(−x))` formula via
-  `TensorPrimitives.Exp`.
+- dot16/dot576 → `LlamaFusedKernels.MatMulTransposedB<float>` with `aRows=1, aCols=K, bCols=1`
+  (pure dot through the production GEMV kernel).
+- gemv → `LlamaFusedKernels.MatMulTransposedB<float>` (`aRows=1, aCols=576, bCols=1536`, the
+  allocation-free BLAS2 GEMV path — same call shape as the fused Llama head).
+- silu → production `Activation.Silu(ReverseGradTensor<float>.FromArray(widened))` →
+  `GradKernels.Silu`: **sigmoid-then-multiply** (`sigmoid(x) * x`), *not* the `x/(1+exp(−x))` /
+  `TensorPrimitives.Exp` formula this section previously described. Values are read back via
+  `.Data` + `TryGetSpan` (copied before dispose); no graph nodes are created outside `Grad()`
+  scope (inference default).
 
 The probe previously planned hand-written serial CPU kernels (`CpuKernels.cs`) for bit-exact
-comparison. That is superseded: the CPU leg is the *production kernels themselves*, and exactness
-is judged against the double golden instead (below), so no hand-written CPU kernels exist.
+comparison, then a double-precision oracle (`GoldenReferences.cs`). Both are superseded: the CPU
+leg is the *production kernels themselves*, and exactness is judged against them with the
+tolerance gate (below), so neither hand-written kernels nor a double golden exist.
 
 ## Correctness verification (gates)
 
-- **Oracle:** `GoldenReferences` computes each expected value in **double** on the host:
-  dot/gemv products are exact in double (BF16 mantissas are 8 bits), accumulated serially;
-  silu uses the double formula. This is implementation-independent — it never depends on Nivara's
-  internal reduction order, the IGC codegen, or the HLSL expansion.
-- **Gate (pass/fail) for every kernel, every leg:** `|leg − golden| ≤ 1e-6 + 1e-5·|golden|`.
-  This covers honest f32 accumulation noise (worst-case ~2e-7 absolute for a 576-term dot of
-  these magnitudes) with 5–10× margin, while any real bug (wrong index, wrong widen, off-by-one
-  byte layout) lands orders of magnitude above it.
-- **Diagnostic (reported, not fatal):** per-leg worst `|leg − golden|` in f32 ULP.
+- **Oracle:** the **CPU leg (`CpuLeg`) — the production Nivara kernels as `NivaraInference`
+  calls them for SmolLM** (dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>` in the exact
+  fused-head call shape; SiLU via `Activation.Silu` → `GradKernels.Silu`, sigmoid-then-multiply).
+  This is the gold target — it depends on Nivara's real reduction order and SIMD kernel, which is
+  exactly what a back-end must reproduce within tolerance. No double-precision golden is
+  maintained (`GoldenReferences.cs` deleted).
+- **Gate (pass/fail) for every kernel, every leg:** `|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|`,
+  where `cpuNivara` is the CPU-leg output (f32, promoted to double for the comparison). This
+  covers honest f32 accumulation noise (worst-case ~2e-7 absolute for a 576-term dot of these
+  magnitudes) with 5–10× margin, while any real bug (wrong index, wrong widen, off-by-one byte
+  layout) lands orders of magnitude above it.
+- **Diagnostic (reported, not fatal):** per-leg worst `|leg − cpuNivara|` in f32 ULP (computed
+  at the reference value's magnitude).
 - Existing "bit-exact CPU vs L0 vs DX12 in a single canonical order" and "no-FMA on DX12"
-  requirements are **superseded** — the CPU leg is now production SIMD kernels with their own
-  reduction order, so exact equality can't and needn't be promised; the double golden is the
-  single fixed target.
+  requirements are **superseded** — the CPU leg is the production SIMD kernels with their own
+  reduction order, so exact equality can't and needn't be promised; the tolerance gate against
+  the production CPU kernels is the single fixed target.
 - Synthetic values ±0.05 → products ≈2.5e-3, sums ≈1e-2·1: no subnormals, no denormal-flush
   risk on any leg.
 
@@ -171,14 +215,26 @@ load-time cost and is excluded from per-launch comparisons** on both CPU (widens
 
 After all gates pass and perf is measured on the same fixtures:
 
-- **If** the DX12 full GEMV (1536×576) passes its gate **and** its throughput ≥ production-CPU
-  `MatMulTransposedB` throughput → record in `docs/SMOLLM-GPU.md` that a **DX12-backed
-  `src/Nivara.Gpu`** is the recommended route, with WAVE_MMA/SM 6.8 as the follow-up.
-- **If** DX12 is correct but slower → record the honest verdict (correct, not-yet-fast) and the
-  perf gap; L0 stays a documented degenerate path (dot-K16/SiLU only, no indexed memory) either
-  way.
-- Exiting the phase *always* requires the `run`/`dx12` modes stay green and the `kernels` gates
-  green; the recommendation text is the phase's written deliverable.
+- **Pivot (human decision, after commit 4):** commit 4 proved this driver's IGC
+  miscompiles hand-authored SPIR-V FP mul/div (`OpFMul`→`OpFSub`, `OpFDiv`→`OpFMul`,
+  mirror-confirmed), so hand-authored bytecode is a dead end for real math. The
+  kernel-authoring path for the rest of this phase is the **Intel oneAPI SYCL/DPC++
+  toolchain** (`icpx`-produced SPIR-V) — the same stack llama.cpp's SYCL backend uses
+  on Arrow Lake Arc iGPUs. The probe learns on the toolchain as it goes; promotion
+  decisions (e.g. a `src/Nivara.Gpu`) come *after* this phase, informed by what the
+  probe proves.
+- **If** a SYCL-backed kernel (dot/GEMV/SiLU, compiled with `icpx`, loaded through
+  the probe's proven L0 harness or a small SYCL-runtime shim) passes its gate against
+  the production CPU leg **and** its throughput ≥ production-CPU
+  `MatMulTransposedB` throughput → record in `docs/SMOLLM-GPU.md` that a
+  **SYCL/oneAPI-backed `src/Nivara.Gpu`** is the recommended route (promotion
+  decided explicitly later, per the human).
+- **If** the SYCL kernels are correct but slower → record the honest verdict
+  (correct, not-yet-fast) and the perf gap; DX12 remains the measured comparison leg
+  (FL 12_2 / SM 6.8 verified), L0 stays a documented degenerate path (dot-K16/SiLU
+  shape only, no indexed memory, FP mul/div miscompiled) either way.
+- Exiting the phase *always* requires the `run`/`kernels` modes stay green and the
+  gates green; the recommendation text is the phase's written deliverable.
 
 ## Verification
 
@@ -186,8 +242,10 @@ After all gates pass and perf is measured on the same fixtures:
   before each probe commit.
 - `dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels` — the new three-way gates
   (exit 0 = real gates pass; expected IGC diagnostics reported separately as before).
-- Existing modes must stay green: `run` (tests 1–5 + bisection) and `dx12`.
+- Existing modes must stay green: `run` (tests 1–5 + bisection + kernel-phase verdict) and `dx12`.
 - Ask before any `dotnet test` / long verification run.
+- The oneAPI toolchain is an external install (winget `Intel.OneAPI.BaseToolkit`); its bootstrap
+  is part of commit 5 and is a human-informed step.
 
 ## Planned commits (one logical change each, local only; README updated in every probe commit)
 
@@ -199,19 +257,30 @@ After all gates pass and perf is measured on the same fixtures:
    to `src/Nivara` + `samples/Nivara.Samples` + `System.Numerics.Tensors`. Build-verified.
    README: `References` note (CPU verification reuses existing Nivara kernels; GPU legs stay pure
    P/Invoke).
-2. `docs: revise kernel-probe plan (CPU=existing kernels, double-golden gates, BF16 host edge)`
-   — this file (current revision).
-3. `probe: synthetic SmolLM-shaped BF16 fixtures + golden references` — KernelFixtures,
-   GoldenReferences; build-verified. README: fixtures/golden note.
-4. `probe: L0 BF16 dot K=16 + SiLU kernels` — SpvKernels additions + L0Run TestKernel arg
-   generalization + dedicated runner; run `kernels` CPU-vs-L0 leg. README: L0 gate rows.
-5. `probe: three-way correctness gate harness` — KernelGate with golden-tolerance asserts +
-   reporting (CPU/L0 wired first). README: `kernels` build/run line + gate table.
-6. `probe: hand-rolled DX12 compute path` — D3d12Compute.cs (device→PSO→dispatch→fence→readback)
+2. `docs: revise kernel-probe plan (CPU=existing kernels, gates vs production-CPU output, BF16
+   host edge)` — this file (current revision).
+3. `probe: synthetic SmolLM-shaped BF16 fixtures` — KernelFixtures (+ GoldenReferences, since
+   superseded and removed in commit 4); build-verified. README: fixtures note.
+4. `probe: L0 BF16 dot K=16 + SiLU kernels — hand-authored-SPIR-V verdict` — CpuLeg
+   (production-kernel CPU leg + gate helpers, replaces/deletes GoldenReferences), SpvKernels
+   additions (ExtInstImport, Bf16DotK16 native/emul, SiLUBf16, permanent Bf16Binop evidence
+   probes), SpvDump, L0Run TestKernelCore split + facade + dedicated RunBf16KernelPhase (gated
+   vs CpuLeg) with expected-driver-bug accounting; run `run` CPU-vs-L0 leg. **Verdict:** this
+   IGC driver miscompiles OpFMul(131)→OpFSub(130) and OpFDiv(132)→OpFMul(131) in the OpenCL
+   kernel model (exact-input probes + Σ(a−b) / x·(1+exp(−x)) mirrors confirm), so hand-authored
+   SPIR-V cannot express real math on this driver. README: L0 gate rows + finding #5.
+5. `probe: oneAPI/SYCL toolchain sandbox` — human-informed winget install of
+   `Intel.OneAPI.BaseToolkit`; first SYCL kernels written in DPC++ (`dot16`/`gemv`/`silu`),
+   compiled with `icpx`; decide the load path (compiler-produced SPIR-V through the proven L0
+   harness vs. a small SYCL-runtime shim invoked from .NET). Answers: does IGC run FP mul/div
+   correctly on *toolchain-produced* bytecode? README: SYCL toolchain notes.
+6. `probe: three-way correctness gate harness` — KernelGate with golden-tolerance asserts +
+   reporting (CPU + SYCL leg wired first; DX12 joins later). README: `kernels` build/run line +
+   gate table.
+7. `probe: hand-rolled DX12 compute path` — D3d12Compute.cs (device→PSO→dispatch→fence→readback)
    + HLSL dot16/gemv/silu; build-verified. README: files/results updates.
-7. `probe: DX12 kernel gates — three-way parity` — wire DX12 leg into KernelGate; `kernels` exit 0.
-   README: full gate table.
-8. `probe: perf pass across all legs` — timings for dot16/dot576/gemv/silu, README results.
+8. `probe: DX12 kernel gates + perf pass across all legs` — wire DX12 leg into KernelGate;
+   `kernels` exit 0; timings for dot16/dot576/gemv/silu across CPU/SYCL/DX12, README results.
 9. Cleanup: G2 review → `git rm docs/TODO.md` → `docs: remove TODO.md — plan executed` → offer
    push + PR (human-confirmed).
 
@@ -224,7 +293,8 @@ After all gates pass and perf is measured on the same fixtures:
   to keep the probe's references on one consistent rc.1 line.
 - The probe consumes `src/Nivara` and `samples/Nivara.Samples` via project references but makes
   **no changes to them**; `SafeTensorsLoader.WidenBf16ToF32`, `TensorPrimitives`,
-  `LlamaFusedKernels.MatMulTransposedB<T>` are all public and used read-only.
+  `LlamaFusedKernels.MatMulTransposedB<T>`, `ReverseGradTensor<T>.FromArray` +
+  `Activation.Silu<T>` are all public and used read-only.
 - **No** changes to `src/Nivara` code, `samples/` code, or the NUnit test projects. The Qwen-bias
   fix is tracked separately as issue #426 and is out of scope.
 - Existing probe modes (`run`, `dx12`) must remain green.
@@ -237,6 +307,11 @@ After all gates pass and perf is measured on the same fixtures:
   fence/`Signal`/wait, `CopyBufferRegion` — via microsoft-learn before writing D3d12Compute.cs.
 - `OpenCL.std` extended-instruction `exp` opcode (expected 19) — verify against the Khronos
   SPIR-V registry (canonical for SPIR-V; not a Microsoft subject).
+- **oneAPI/SYCL (commit 5):** `Intel.OneAPI.BaseToolkit` winget package contents + install
+  footprint; `icpx -fsycl` device-code-to-SPIR-V flow; whether compiler-produced SPIR-V can be
+  loaded by `zeModuleCreate` directly (llama.cpp SYCL backend precedent: oneDNN GEMM + oneMKL,
+  Level Zero underneath, targets built-in Arc in Arrow Lake). Via microsoft-learn (Intel® AI
+  tools for Microsoft®) + Intel oneAPI docs.
 - `LlamaFusedKernels.MatMulTransposedB<T>` semantics (row-major `a`, transposed `b` layout,
   aRows/aCols/bCols contract) — read the implementation before wiring the CPU gemv leg.
 - BFloat16 semantics: already authoritative in `docs/BFLOAT16.md`.

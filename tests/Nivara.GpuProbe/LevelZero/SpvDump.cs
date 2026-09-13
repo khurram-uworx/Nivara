@@ -15,6 +15,12 @@ internal static class SpvDump
             Directory.CreateDirectory(dir);
             Write(Path.Combine(dir, "add_parallel.spv"), SpvKernels.AddParallel(SpvKernels.Version10));
             Write(Path.Combine(dir, "add_loop.spv"), SpvKernels.AddLoop(SpvKernels.Version10));
+            Write(Path.Combine(dir, "bf16_dot_k16_native.spv"), SpvKernels.Bf16DotK16(nativeWiden: true, SpvKernels.Version10));
+            Write(Path.Combine(dir, "bf16_dot_k16_emul.spv"), SpvKernels.Bf16DotK16(nativeWiden: false, SpvKernels.Version10));
+            Write(Path.Combine(dir, "bf16_silu.spv"), SpvKernels.SiLUBf16(SpvKernels.Version10));
+            Write(Path.Combine(dir, "bf16_fmul_probe.spv"), SpvKernels.Bf16Binop("bf16_fmul_probe", 131u, SpvKernels.Version10));
+            Write(Path.Combine(dir, "bf16_fadd_probe.spv"), SpvKernels.Bf16Binop("bf16_fadd_probe", 129u, SpvKernels.Version10));
+            Write(Path.Combine(dir, "bf16_fdiv_probe.spv"), SpvKernels.Bf16Binop("bf16_fdiv_probe", 132u, SpvKernels.Version10));
             Console.WriteLine($"Wrote SPIR-V modules to {dir}");
             return 0;
         }

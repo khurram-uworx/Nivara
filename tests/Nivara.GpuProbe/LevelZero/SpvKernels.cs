@@ -886,6 +886,212 @@ internal static class SpvKernels
         return w.Finish(spirvVersion, 28);
     }
 
+    /// <summary>
+    /// Straight-line K=16 BF16 dot through the safe subset (no indexing — every value is a
+    /// kernel-argument pointer): 32 × <c>ptr&lt;CrossWorkgroup,u16&gt;</c> (a[0..15] then
+    /// b[0..15]) plus an f32 out pointer, so the host pre-allocates 33 shared buffers and
+    /// binds each BF16 element as its own argument. Per i: widen a/b in-register (native
+    /// <c>OpConvertBF16ToFINTEL</c> with capability 6115, or emul <c>OpUConvert</c> → &lt;&lt;16
+    /// → <c>OpBitcast</c>), <c>OpFMul</c>, then a fixed serial <c>OpFAdd</c> chain seeded by the
+    /// first product — the same accumulation order as the host's serial reference.
+    /// </summary>
+    public static uint[] Bf16DotK16(bool nativeWiden, uint spirvVersion = Version10)
+    {
+        string name = nativeWiden ? "bf16_dot_k16_native" : "bf16_dot_k16_emul";
+        var w = new SpvWriter();
+        w.Op(17, 6);                     // OpCapability Kernel
+        w.Op(17, 4);                     // OpCapability Addresses
+        w.Op(17, 5);                     // OpCapability Linkage
+        if (nativeWiden)
+        {
+            w.Op(17, 6115);              // OpCapability BFloat16ConversionINTEL
+            w.Extension("SPV_INTEL_bfloat16_conversion");
+        }
+        w.Op(14, 2, 2);                  // OpMemoryModel Physical64 OpenCL
+        w.EntryPoint(6, 10, name);
+        w.Op(16, 10, 17, 1, 1, 1);       // OpExecutionMode %10 LocalSize 1 1 1
+        w.Op(3, 3, 102000);              // OpSource OpenCL_C 102000
+        w.Name(10, name);                // OpName %10
+        w.Name(11, "a0");                // OpName %11 "a0"
+        w.Name(27, "b0");                // OpName %27 "b0"
+        w.Name(43, "out");               // OpName %43 "out"
+        w.Op(19, 1);                     // %1 = void
+        w.Op(22, 2, 32);                 // %2 = float
+        w.Op(21, 3, 16, 0);              // %3 = u16 (bfloat16 bit pattern storage)
+        w.Op(21, 4, 32, 0);              // %4 = uint (emul widen intermediate)
+        w.Op(32, 5, 5, 3);               // %5 = ptr<CrossWorkgroup, u16>
+        w.Op(32, 6, 5, 2);               // %6 = ptr<CrossWorkgroup, float>
+        w.Op(43, 4, 7, 16);              // %7 = const uint 16 (emul widen shift)
+        var fnArgs = new uint[35];
+        fnArgs[0] = 8;                   // %8 = fn type result id
+        fnArgs[1] = 1;                   // return type void
+        for (int i = 0; i < 32; i++)
+            fnArgs[2 + i] = 5;           // 32 × ptr<CrossWorkgroup, u16> params
+        fnArgs[34] = 6;                  // ptr<CrossWorkgroup, float> (out)
+        w.Op(33, fnArgs);                // %8 = fn(void, 32×ptr u16, ptr f32)
+        w.Op(54, 1, 10, 0, 8);           // OpFunction %1 None %8 %10
+        for (uint i = 0; i < 32; i++)
+            w.Op(55, 5, 11 + i);         // params %11..%42 (a[0..15] = %11..%26, b[0..15] = %27..%42)
+        w.Op(55, 6, 43);                 // %43 = param out (ptr f32)
+        w.Op(248, 44);                   // entry block
+
+        uint next = 45;
+        uint acc = 0;
+        for (uint i = 0; i < 16; i++)
+        {
+            uint la = next++;
+            w.Op(61, 3, la, 11 + i);      // %la = OpLoad u16 %(11+i)
+            uint wa;
+            if (nativeWiden)
+            {
+                wa = next++;
+                w.Op(6117, 2, wa, la);    // %wa = OpConvertBF16ToFINTEL float %la
+            }
+            else
+            {
+                uint ua = next++;
+                w.Op(113, 4, ua, la);     // %ua = OpUConvert uint %la
+                uint sa = next++;
+                w.Op(196, 4, sa, ua, 7);  // %sa = %ua << 16 (f32 bit pattern)
+                wa = next++;
+                w.Op(124, 2, wa, sa);     // %wa = OpBitcast float %sa
+            }
+
+            uint lb = next++;
+            w.Op(61, 3, lb, 27 + i);      // %lb = OpLoad u16 %(27+i)
+            uint wb;
+            if (nativeWiden)
+            {
+                wb = next++;
+                w.Op(6117, 2, wb, lb);    // %wb = OpConvertBF16ToFINTEL float %lb
+            }
+            else
+            {
+                uint ub = next++;
+                w.Op(113, 4, ub, lb);     // %ub = OpUConvert uint %lb
+                uint sb = next++;
+                w.Op(196, 4, sb, ub, 7);  // %sb = %ub << 16
+                wb = next++;
+                w.Op(124, 2, wb, sb);     // %wb = OpBitcast float %sb
+            }
+
+            uint p = next++;
+            w.Op(131, 2, p, wa, wb);      // %p = OpFMul float %wa %wb
+            if (i == 0)
+                acc = p;                  // first product seeds the serial FAdd chain
+            else
+            {
+                uint a2 = next++;
+                w.Op(129, 2, a2, acc, p); // %a2 = acc + %p
+                acc = a2;
+            }
+        }
+
+        w.Op(62, 43, acc);               // store %43 (out) = %acc
+        w.Op(253);                       // OpReturn
+        w.Op(56);                        // OpFunctionEnd
+        return w.Finish(spirvVersion, next);
+    }
+
+    /// <summary>
+    /// Per-element BF16 SiLU through the safe subset: emul widen (OpUConvert → &lt;&lt;16 →
+    /// OpBitcast), then x/(1+exp(−x)) — mathematically x·σ(x) — via the OpenCL.std
+    /// <c>exp</c> extended instruction (opcode 19). 2 args: u16 x ptr + f32 out ptr.
+    /// <c>OpExtInstImport</c> is emitted before <c>OpMemoryModel</c> per the SPIR-V 2.4
+    /// logical layout.
+    /// </summary>
+    public static uint[] SiLUBf16(uint spirvVersion = Version10)
+    {
+        var w = new SpvWriter();
+        w.Op(17, 6);                     // OpCapability Kernel
+        w.Op(17, 4);                     // OpCapability Addresses
+        w.Op(17, 5);                     // OpCapability Linkage
+        w.ExtInstImport(8, "OpenCL.std");// %8 = extended instruction set import
+        w.Op(14, 2, 2);                  // OpMemoryModel Physical64 OpenCL
+        w.EntryPoint(6, 11, "bf16_silu");
+        w.Op(16, 11, 17, 1, 1, 1);       // OpExecutionMode %11 LocalSize 1 1 1
+        w.Op(3, 3, 102000);              // OpSource OpenCL_C 102000
+        w.Name(11, "bf16_silu");         // OpName %11 "bf16_silu"
+        w.Name(12, "x");                 // OpName %12 "x"
+        w.Name(13, "out");               // OpName %13 "out"
+        w.Op(19, 1);                     // %1 = void
+        w.Op(22, 2, 32);                 // %2 = float
+        w.Op(21, 3, 16, 0);              // %3 = u16 (bfloat16 bit pattern storage)
+        w.Op(21, 4, 32, 0);              // %4 = uint (emul widen intermediate)
+        w.Op(32, 5, 5, 3);               // %5 = ptr<CrossWorkgroup, u16>
+        w.Op(32, 6, 5, 2);               // %6 = ptr<CrossWorkgroup, float>
+        w.Op(43, 4, 7, 16);              // %7 = const uint 16 (emul widen shift)
+        w.Op(43, 2, 9, 0x3F800000);      // %9 = const float 1.0
+        w.Op(33, 10, 1, 5, 6);           // %10 = fn(void, ptr u16, ptr f32)
+        w.Op(54, 1, 11, 0, 10);          // OpFunction %1 None %10 %11
+        w.Op(55, 5, 12);                 // %12 = param x (u16 BF16 bits)
+        w.Op(55, 6, 13);                 // %13 = param out (f32)
+        w.Op(248, 14);                   // entry block
+        w.Op(61, 3, 15, 12);             // %15 = OpLoad u16 %12
+        w.Op(113, 4, 16, 15);            // %16 = OpUConvert uint %15
+        w.Op(196, 4, 17, 16, 7);         // %17 = %16 << 16 (f32 bit pattern)
+        w.Op(124, 2, 18, 17);            // %18 = OpBitcast float %17  (x)
+        w.Op(127, 2, 19, 18);            // %19 = OpFNegate %18        (−x)
+        w.Op(12, 2, 20, 8, 19, 19);      // %20 = OpExtInst %8 exp(−x) (instruction 19)
+        w.Op(129, 2, 21, 9, 20);         // %21 = 1.0 + exp(−x)
+        w.Op(132, 2, 22, 18, 21);        // %22 = x / (1 + exp(−x))
+        w.Op(62, 13, 22);                // store %13 (out) = %22
+        w.Op(253);                       // OpReturn
+        w.Op(56);                        // OpFunctionEnd
+        return w.Finish(spirvVersion, 23);
+    }
+
+    /// <summary>
+    /// PERMANENT EVIDENCE: single-float-op probe — out = widen(a) OP widen(b) for a given FP opcode
+    /// (FMul 131, FAdd 129, FDiv 132). With exact BF16 inputs (a = 1.0, b = 2.0) the readback makes
+    /// "which op is miscompiled" decidable from one value. This is the proof that the L0 dot16/SiLU
+    /// gate failures are a driver bug, not a kernel bug: this IGC driver executes OpFMul(131) as
+    /// OpFSub(130) and OpFDiv(132) as OpFMul(131), while OpFAdd(129) and OpenCL.std exp are correct.
+    /// Earlier bisect runs also showed a 5-arg K=2 dot fails (ruling out the 33-arg function shape)
+    /// — this 3-arg opcode probe is the minimal decisive form.
+    /// </summary>
+    public static uint[] Bf16Binop(string name, uint fpOp, uint spirvVersion = Version10)
+    {
+        var w = new SpvWriter();
+        w.Op(17, 6);                     // OpCapability Kernel
+        w.Op(17, 4);                     // OpCapability Addresses
+        w.Op(17, 5);                     // OpCapability Linkage
+        w.Op(14, 2, 2);                  // OpMemoryModel Physical64 OpenCL
+        w.EntryPoint(6, 10, name);
+        w.Op(16, 10, 17, 1, 1, 1);       // OpExecutionMode %10 LocalSize 1 1 1
+        w.Op(3, 3, 102000);              // OpSource OpenCL_C 102000
+        w.Name(10, name);                // OpName %10
+        w.Name(11, "a");                 // OpName %11 "a"
+        w.Name(12, "b");                 // OpName %12 "b"
+        w.Name(13, "out");               // OpName %13 "out"
+        w.Op(19, 1);                     // %1 = void
+        w.Op(22, 2, 32);                 // %2 = float
+        w.Op(21, 3, 16, 0);              // %3 = u16
+        w.Op(21, 4, 32, 0);              // %4 = uint
+        w.Op(32, 5, 5, 3);               // %5 = ptr<CrossWorkgroup, u16>
+        w.Op(32, 6, 5, 2);               // %6 = ptr<CrossWorkgroup, float>
+        w.Op(43, 4, 7, 16);              // %7 = const uint 16
+        w.Op(33, 9, 1, 5, 5, 6);         // %9 = fn(void, ptr u16, ptr u16, ptr f32)
+        w.Op(54, 1, 10, 0, 9);           // OpFunction %1 None %9 %10
+        w.Op(55, 5, 11);                 // %11 = param a
+        w.Op(55, 5, 12);                 // %12 = param b
+        w.Op(55, 6, 13);                 // %13 = param out
+        w.Op(248, 14);                   // entry block
+        w.Op(61, 3, 15, 11);             // %15 = OpLoad u16 %11
+        w.Op(113, 4, 16, 15);            // %16 = OpUConvert uint %15
+        w.Op(196, 4, 17, 16, 7);         // %17 = %16 << 16
+        w.Op(124, 2, 18, 17);            // %18 = OpBitcast float %17 (a)
+        w.Op(61, 3, 19, 12);             // %19 = OpLoad u16 %12
+        w.Op(113, 4, 20, 19);            // %20 = OpUConvert uint %19
+        w.Op(196, 4, 21, 20, 7);         // %21 = %20 << 16
+        w.Op(124, 2, 22, 21);            // %22 = OpBitcast float %21 (b)
+        w.Op(fpOp, 2, 23, 18, 22);       // %23 = a OP b
+        w.Op(62, 13, 23);                // store %13 (out) = %23
+        w.Op(253);                       // OpReturn
+        w.Op(56);                        // OpFunctionEnd
+        return w.Finish(spirvVersion, 24);
+    }
+
     private sealed class SpvWriter
     {
         private readonly List<uint> words = new();
@@ -920,6 +1126,16 @@ internal static class SpvKernels
             // OpExtension (10): LiteralString (variable-length)
             var sw = StringWords(name);
             words.Add(10 | ((uint)(sw.Length + 1) << 16));
+            words.AddRange(sw);
+        }
+
+        public void ExtInstImport(uint resultId, string name)
+        {
+            // OpExtInstImport (11): IdRef result + LiteralString (variable-length).
+            // Word count: 1 opcode + 1 result id + N string words.
+            var sw = StringWords(name);
+            words.Add(11 | ((uint)(sw.Length + 2) << 16));
+            words.Add(resultId);
             words.AddRange(sw);
         }
 
