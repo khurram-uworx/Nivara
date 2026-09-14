@@ -177,7 +177,10 @@ run unless noted):
 | `silu` (576) | 1317 | **6.9** | 29–99 | **~4.6–14× GPU — fastest GPU leg measured on silu** |
 | `gemv` (1536×576) | 1371 | **133.4** | 2291–4745 | **~17–35× GPU** |
 
-Context + OpenCL accelerator creation: ~8.8–9.8 ms once. Per-kernel JIT costs
+Context creation and accelerator creation are timed as part of the leg's setup
+split. Accelerator creation + first device sync measures ~8.8–9.8 ms once
+(context creation costs a one-time few-ms more; both excluded from the
+steady-state table). Per-kernel JIT costs
 land between ~1.3 ms (silu) and ~2.7–3.8 ms (dot16) and are one-time; steady
 state is a single `kernel(stream, extent, …)` + `stream.Synchronize()` per
 dispatch on persistent buffers. `dot16`'s 11.4 µs steady beat every other GPU leg
@@ -201,7 +204,7 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 | **IGC/OpenCL verdict** | **PASS** — compiler-produced OpenCL C handled correctly (same frontend that mangles hand-authored SPIR-V) |
 | **BF16** | no native BF16 kernel type in 1.5.3 (PR #1221 open) → packed-2-per-uint + in-shader widen, byte-identical to DX12 transport |
 | **correctness** | dot16 **0.0 ULP** · silu worst 4.0 ULP · gemv within gate — **3/3 PASS** |
-| **setup cost** | ~9 ms context+accelerator; ~1.3–3.8 ms kernel JIT each |
+| **setup cost** | ~9 ms accelerator creation + first sync (context costs a one-time few-ms more); ~1.3–3.8 ms kernel JIT each |
 | **steady state** | dot16 **11.4 µs** · silu **6.9 µs** (fastest GPU leg) · gemv **133.4 µs** |
 | **footprint** | +3.4 MB (ILGPU 1946 KB + Algorithms 1502 KB); BCL transitives inbox on net11 |
 | **risk** | JIT + ICD layer = two moving compilers (ILGPU → OpenCL C → IGC); no native BF16 today; OpenCL ICD required at runtime |

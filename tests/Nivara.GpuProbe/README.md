@@ -251,8 +251,8 @@ wait per iteration, 1 warmup + 3 timed best-of-3 — the same methodology as the
 SYCL leg. This bypasses the buggy IGC OpenCL/SPIR-V frontend entirely (HLSL →
 DXBC/DXIL → the driver's compute pipeline), so real GEMM/attention kernels are
 expressible while the Level Zero access-chain ICE (bug #1 above) remains
-unfixed on this driver. The `kernels` mode runs the **three-way** CPU·SYCL·DX12
-gate table with a per-GPU-leg timing column; full workflow notes in
+unfixed on this driver. The `kernels` mode runs the **six-way** CPU·SYCL·DX12·
+OV·ILGPU gate table with a per-GPU-leg timing column; full workflow notes in
 `docs/DX12.md`.
 
 ### Kernel binary export (follow-up)
@@ -427,7 +427,7 @@ transport as DX12 (in-shader widen via `Interop.IntAsFloat`, silu via
 Algorithms package). The context is OpenCL-only (`builder.OpenCL()`), the device
 is selected by `CL_DEVICE_TYPE_GPU` + Intel vendor, and the leg **asserts the GPU
 type — a CPU fallback is impossible** (unreachable ⇒ UNBUILT row, never a run on
-CPU). Setup (context/accelerator ~9 ms, per-kernel JIT ~1.3–3.8 ms) is timed
+CPU). Setup (accelerator creation + first sync ~9 ms; per-kernel JIT ~1.3–3.8 ms) is timed
 separately from steady state (1 warmup + best-of-25 synchronized dispatches,
 persistent buffers — the OpenVINO methodology).
 
@@ -469,8 +469,8 @@ entry points by name from `ze_loader.dll`.
 - `Kernels/KernelGate.cs` — the multi-leg correctness gate harness: CPU gold +
   every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, and a
   CPU-vs-GPU timing table (µs); exit code = failed cells. `kernels` CLI mode
-  runs it five-way (SYCL + DX12 + OV-bf16 + OV-f32; SYCL row prints UNBUILT on
-  this machine).
+  runs it six-way (SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU; SYCL row prints
+  UNBUILT on this machine).
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
   gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
   (aRows=1 → the allocation-free BLAS2 GEMV path the fused Llama head runs),

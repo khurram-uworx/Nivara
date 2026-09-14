@@ -4,11 +4,14 @@ using Nivara.GpuProbe.LevelZero;
 namespace Nivara.GpuProbe;
 
 /// <summary>
-/// Probe: can .NET access Intel GPU compute? Pure P/Invoke — no packages. The Level
+/// Probe: can .NET access Intel GPU compute? Pure P/Invoke — no packages — with one
+/// deliberate exception: the phase-4a ILGPU leg (issue #431) is the probe's first
+/// NuGet reference, because there the package *is* the toolchain (a pure-managed
+/// C#→OpenCL JIT runtime). The Level
 /// Zero leg enumerates drivers/devices (Arc 140T iGPU, possibly the NPU) and runs
 /// hand-authored SPIR-V kernels; the DX12 leg runs a hand-rolled compute pipeline;
 /// the OpenVINO leg loads the pip-installed openvino_c.dll and drives IR models on
-/// GPU; the ILGPU leg (phase 4a, issue #431) JIT-compiles C# kernels to OpenCL C.
+/// GPU; the ILGPU leg JIT-compiles C# kernels to OpenCL C.
 /// Each GPU backend runs the same SmolLM-shaped kernel fixtures, gated against
 /// the production Nivara CPU kernels (`kernels` mode).
 /// </summary>
@@ -16,7 +19,7 @@ internal class Program
 {
     static int Main(string[] args)
     {
-        Console.WriteLine("=== Intel GPU Compute Probe (Level Zero / DX12 / OpenVINO / SYCL) ===");
+        Console.WriteLine("=== Intel GPU Compute Probe (Level Zero / DX12 / OpenVINO / SYCL / ILGPU) ===");
         Console.WriteLine($"Runtime: {Environment.Version}  Platform: {RuntimeInformation.OSArchitecture}  OS: {RuntimeInformation.OSDescription}");
         Console.WriteLine();
 
