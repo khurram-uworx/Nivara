@@ -6,6 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The ComputeSharp leg (below) is compile-gated to Windows hosts: its source
+         generator cannot run on non-Windows SDKs (see docs/COMPUTESHARP.md §1), so the
+         leg's code is #if WINDOWS and its package refs are conditioned below. -->
+    <DefineConstants Condition="'$(OS)' == 'Windows_NT'">$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +24,19 @@
   <ItemGroup>
     <PackageReference Include="ILGPU" Version="1.5.3" />
     <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
+  </ItemGroup>
+
+  <!-- Phase 4b (issue #432): second GPU-backend package in the probe. ComputeSharp is a
+       pure-managed C# kernel JIT (MIT) that source-generates HLSL, compiles it to DXIL
+       in-process via the DXC binaries bundled by ComputeSharp.Dxc (no external compiler or
+       toolchain), and dispatches it on the iGPU through D3D12 — the managed-DX12 story the
+       probe's hand-rolled D3d12Compute leg predicts. Requires AllowUnsafeBlocks for the
+       shader source generators. The generator is Windows-host-only (DllNotFoundException
+       kernel32 on Linux), so the refs and leg are gated to Windows builds.
+       Snapshot pin — see docs/COMPUTESHARP.md. -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <PackageReference Include="ComputeSharp" Version="3.2.0" />
+    <PackageReference Include="ComputeSharp.Dxc" Version="3.2.0" />
   </ItemGroup>
 
   <ItemGroup>
