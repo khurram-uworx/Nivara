@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.Runtime.Versioning;
 using ComputeSharp;
 
@@ -8,6 +9,7 @@ namespace Nivara.GpuProbe.ComputeSharp;
 /// and its hardware-acceleration status (a WARP software device means the leg's gate row is
 /// UNBUILT — never a CPU run). Prints the failure when no device is reachable.
 /// </summary>
+/// <remarks>Compiled only on Windows hosts (<c>WINDOWS</c> symbol). See the csproj gate.</remarks>
 [SupportedOSPlatform("windows6.2")] // D3D12 — Windows-only, like the hand-rolled DX12 leg
 internal static class Availability
 {
@@ -34,3 +36,4 @@ internal static class Availability
         }
     }
 }
+#endif

@@ -43,16 +43,28 @@ internal class Program
             "sycl" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
             "ov" => OpenVino.Availability.Run() + OVRun(),
             "ilgpu" => Ilgpu.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg),
+#if WINDOWS
             "computesharp" => ComputeSharp.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg),
+#endif
             "kernels" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(),
                 ("SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
                 ("DX12 (hand-rolled)", D3d12.D3d12Compute.RunLeg),
                 ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16),
                 ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32),
-                ("ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg),
-                ("ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)),
-            "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun() + ComputeSharp.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg),
-            _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun() + ComputeSharp.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)
+                ("ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg)
+#if WINDOWS
+                , ("ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)
+#endif
+                ),
+            "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun()
+#if WINDOWS
+                + ComputeSharp.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)
+#endif
+                ,
+            _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun()
+#if WINDOWS
+                + ComputeSharp.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)
+#endif
         };
     }
 }

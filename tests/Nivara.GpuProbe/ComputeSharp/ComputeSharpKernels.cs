@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.Runtime.Versioning;
 using ComputeSharp;
 
@@ -16,6 +17,9 @@ namespace Nivara.GpuProbe.ComputeSharp;
 /// and every kernel bounds-checks its X index because D3D12 pads the grid to group-size
 /// multiples (same reason the HLSL leg guards <c>dt.x &gt;= n</c>).
 /// </summary>
+/// <remarks>Compiled only on Windows hosts (<c>WINDOWS</c> symbol): the source generator that
+/// emits <see cref="ComputeSharp.Descriptors.IComputeShaderDescriptor{T}"/> requires the
+/// Windows SDK host (DllNotFoundException on Linux). See the csproj gate.</remarks>
 [SupportedOSPlatform("windows6.2")] // D3D12 — the hand-rolled DX12 leg is Windows-only too
 internal static partial class ComputeSharpKernels
 {
@@ -88,3 +92,4 @@ internal static partial class ComputeSharpKernels
         }
     }
 }
+#endif

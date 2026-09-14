@@ -55,6 +55,16 @@ package's runtimes/ assets are deployed to the output), so no external compiler
 or toolchain install exists. Both packages are MIT and target net8.0
 (compatible with the probe's net11.0).
 
+**Windows-host requirement (build-time):** ComputeSharp's *source generator*
+(runs inside the C# compiler to emit the per-shader descriptor) cannot execute
+on a non-Windows host — it throws `DllNotFoundException` loading `kernel32`
+(observed on the probe's ubuntu CI build). The probe therefore gates the leg to
+Windows hosts: the package references are conditioned on `OS == Windows_NT`
+and the leg's code compiles only under the `WINDOWS` symbol. Non-Windows builds
+of the probe omit the ComputeSharp mode/row entirely (the probe's other legs are
+pure P/Invoke and compile anywhere), while the Windows build keeps this leg at
+0-warnings/0-errors.
+
 Footprint (measured, `bin/Release/net11.0`):
 
 | assembly | size |

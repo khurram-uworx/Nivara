@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.Versioning;
@@ -30,6 +31,8 @@ namespace Nivara.GpuProbe.ComputeSharp;
 /// walks adapters with WARP last, and we additionally reject a non-hardware device, so the leg
 /// returns <c>null</c> (the KernelGate UNBUILT row) instead of running on the software rasterizer.
 /// </summary>
+/// <remarks>Compiled only on Windows hosts (<c>WINDOWS</c> symbol): ComputeSharp's source
+/// generator needs the Windows SDK host. See the csproj gate.</remarks>
 [SupportedOSPlatform("windows6.2")] // D3D12 — Windows-only, like the hand-rolled DX12 leg
 internal static class ComputeSharpLeg
 {
@@ -133,3 +136,4 @@ internal static class ComputeSharpLeg
         return GemvKernels.PackBf16(flat);
     }
 }
+#endif

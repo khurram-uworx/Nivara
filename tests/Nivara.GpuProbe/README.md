@@ -121,10 +121,17 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availab
 dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gates (needs Sycl/build.cmd first, see below)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ov      # OpenVINO availability (runtime + GPU readback) + both precision configs' gates
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ilgpu  # ILGPU availability (OpenCL devices + accelerator) + gates (phase 4a)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- computesharp # ComputeSharp availability (default D3D12 device) + gates (phase 4b)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- computesharp # ComputeSharp availability (default D3D12 device) + gates (phase 4b; Windows build only — see below)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # seven-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + ComputeSharp (exit = failed cells)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12 + openvino + computesharp
 ```
+
+The ComputeSharp leg is **compile-gated to Windows hosts** (`WINDOWS`
+symbol + conditioned package refs in the csproj): its source generator cannot
+run on a non-Windows SDK (see [docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md) §1). On a
+Linux/macOS build of the probe the `computesharp` mode, its `kernels` row, and
+its default-mode chain are omitted (seven-way → six-way) so the rest of the
+probe still compiles there.
 
 `kernels` (and `sycl`/`ov`/`ilgpu`/`computesharp`, which route through the same
 harness) is the
