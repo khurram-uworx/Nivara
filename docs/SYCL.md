@@ -1,5 +1,7 @@
 # SYCL / oneAPI GPU Compute on Intel Arc — Lessons from the GpuProbe
 
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md)
+
 All findings below were verified on an **Intel Arc 140T** (8086:7DD1, ~2 GB
 shared RAM, driver **32.0.101.8826**) running Windows 10.0.26200, .NET 11.0,
 oneAPI Base Toolkit **2025.1.3.8**, and VS 2022 Build Tools 17.14 (MSVC
@@ -217,7 +219,7 @@ per kernel would re-initialize the device and skew the timing rows.
    the EU array.
 10. **Simple, deterministic, verifiable first; optimize second.** Gates come
     before speed. Every shipped kernel gets a README gate-table row + a
-    `docs/SYCL.md` lessons entry.
+    [docs/SYCL.md](SYCL.md) lessons entry.
 
 ### 3.5 Adding a new kernel, end to end
 
@@ -345,8 +347,8 @@ kernel launches (batch decode tokens).
 ### CPU vs GPU kernel-only timing (measured, GpuProbe `kernels` mode, Arc 140T)
 
 **Measured figures live in the probe README's consolidated side-by-side table**
-(`tests/Nivara.GpuProbe/README.md` → "Backend comparison — the numbers, side by
-side"), which gathers the SYCL, DX12 and OpenVINO numbers into one view; this
+([tests/Nivara.GpuProbe/README.md](../tests/Nivara.GpuProbe/README.md) → "Backend
+comparison — the numbers, side by side"), which gathers the SYCL, DX12 and OpenVINO numbers into one view; this
 doc's range for this leg was dot16 3.4/13–53 µs, silu 33.5/12–34 µs, gemv
 197.8/170–198 µs — SYCL is launch-bound at K=16, ~2× CPU on silu, ~23× CPU on
 gemv. The **23.1× gemv result is this leg's decisive number**: every decode
@@ -494,3 +496,4 @@ gate results. Exit code 0 = all gates pass.
 - [BF16 format (Wikipedia)](https://en.wikipedia.org/wiki/Bfloat16_floating-point_format)
 - [SmolLM-135M architecture](https://huggingface.co/HuggingFaceTB/SmolLM-135M) — 12 layers, 64 hidden, 1536 intermediate, 6 heads
 - [Qwen-1.5B architecture](https://huggingface.co/Qwen/Qwen1.5-0.5B) — 24 layers, 14334 hidden, 896 intermediate, 16 heads
+- Series: [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) — the GPU-backend case-study series
