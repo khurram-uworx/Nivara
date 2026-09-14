@@ -12,6 +12,15 @@
     <PackageReference Include="System.Numerics.Tensors" Version="11.0.0-rc.1.26425.128" />
   </ItemGroup>
 
+  <!-- Phase 4a (issue #431): first GPU-backend package in the probe. ILGPU is a pure-C#
+       JIT kernel runtime (NCSA license, no native deps) running C# kernels as OpenCL C on
+       the iGPU's in-box OpenCL ICD + Intel driver; ILGPU.Algorithms supplies XMath.Exp for
+       the silu kernel (core IntrinsicMath has no exp). Snapshot pin — see docs/ILGPU.md. -->
+  <ItemGroup>
+    <PackageReference Include="ILGPU" Version="1.5.3" />
+    <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\samples\Nivara.Samples\Nivara.Samples.csproj" />
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />

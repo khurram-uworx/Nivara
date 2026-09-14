@@ -1,7 +1,9 @@
 # Intel OpenVINO GPU Compute from .NET — Lessons from the GpuProbe
 
-This is the fourth GPU-backend case-study doc (after `docs/SPIRV.md`,
-`docs/SYCL.md`, `docs/DX12.md`) and the deliverable for issue #428: the
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md)
+
+This is the fourth GPU-backend case-study doc (after [docs/SPIRV.md](SPIRV.md),
+[docs/SYCL.md](SYCL.md), [docs/DX12.md](DX12.md)) and the deliverable for issue #428: the
 qualitatively different *first-party* option on the stack. The previous phases
 proved three compile/driver paths (hand-authored SPIR-V over Level Zero, the
 oneAPI SYCL/DPC++ toolchain over Level Zero, and hand-rolled HLSL `cs_5_1` over
@@ -57,7 +59,7 @@ rather than in a dedicated doc.
 
 **API surface.** The pinned wheel ships **no headers**, so structs/enums/
 GUIDs were read from the matching release's `openvino.h` on GitHub (tag
-`2026.2.1`) — never from memory (the DX12 lesson, §4 of `docs/DX12.md`). The
+`2026.2.1`) — never from memory (the DX12 lesson, §4 of [docs/DX12.md](DX12.md)). The
 leg uses the small, stable C subset `ov_core_create` →
 `ov_core_set_property`/`ov_core_get_property` → `ov_core_read_model` →
 `ov_core_compile_model` → `ov_compiled_model_get_property` →
@@ -68,7 +70,7 @@ objects are ever constructed or laid out from managed code.
 
 ## 2. The IGC-class question, answered on the Arc 140T
 
-The L0 phase (`docs/SPIRV.md`) proved this driver's IGC OpenCL frontend
+The L0 phase ([docs/SPIRV.md](SPIRV.md)) proved this driver's IGC OpenCL frontend
 **miscompiles hand-authored SPIR-V** — `OpFMul` runs as `OpFSub`, `OpFDiv` as
 `OpFMul`, and any access-chain opcode ICEs the compiler. OpenVINO's GPU plugin
 is delivered on the same OpenCL/IGC stack, so the first question was whether the
@@ -119,7 +121,7 @@ reductions and exactly wrong for the nonlinearity:
   native model — Xe2 DPAS accumulates BF16 products in F32 — so the reduction
   results gate **bit-exact** (dot16) and far inside the tolerance (gemv
   `1.6e-9`). BF16 wire format + F32 accumulation is exactly the production
-  model in `docs/SYCL.md` §4, this time with **zero host-side widening**.
+  model in [docs/SYCL.md](SYCL.md) §4, this time with **zero host-side widening**.
 - **silu carries F16-elementwise rounding.** Sigmoid and the x·σ multiply run
   in F16 on 0.014-magnitude intermediates, so the result lands ~1.9e-5 from the
   F32 CPU gold (13.5k ULP at F16 precision on that row) — legitimately outside
@@ -213,7 +215,7 @@ violate the gate's whole premise and is impossible here by construction.
 ## 6. The four-way decision + rough end-to-end estimate
 
 **All measured figures now live in the probe README's consolidated side-by-side
-table** (`tests/Nivara.GpuProbe/README.md` → "Backend comparison — the numbers,
+table** ([tests/Nivara.GpuProbe/README.md](../tests/Nivara.GpuProbe/README.md) → "Backend comparison — the numbers,
 side by side"), which gathers the SYCL, DX12 and OpenVINO numbers into one view.
 For this leg (Release `kernels` run; OV infer = best-of-25 steady-state) gemv
 ran **137.9 µs (bf16) / 181.7 µs (f32)** — the ~26–34× CPU win over this run's
@@ -229,7 +231,7 @@ the honest elementwise outer loop. Hints observed: `f16` (bf16 row), `f32`
 
 | path | toolchain | packages | gemv (this machine) | verdict |
 |---|---|---|---|---|
-| L0 hand-authored SPIR-V | none (hand bytes) | none | n/a | **dead end** — IGC miscompiles `OpFMul`/`OpFDiv`; access-chain ICE (`docs/SPIRV.md`) |
+| L0 hand-authored SPIR-V | none (hand bytes) | none | n/a | **dead end** — IGC miscompiles `OpFMul`/`OpFDiv`; access-chain ICE ([docs/SPIRV.md](SPIRV.md)) |
 | SYCL/oneAPI DPC++ | icpx+VS Build Tools | none (runtime loaded) | ~170–198 µs | **proven**, compiler-backed; footprint = oneAPI SDK, subprocess/`setvars` (toolchain removed on this machine — row UNBUILT) |
 | DX12 HLSL `cs_5_1` | none (in-process `d3dcompiler_47`) | none | ~152–525 µs | **proven**, fully managed; per-dispatch overhead highest, no external tooling at all |
 | OpenVINO GPU plugin | none | `pip install openvino` | **138–182 µs** | **proven first-party**: no compiler, tuned kernels, byte-exact dot16, gemv ~26–34× CPU; bf16 silu honestly F16-tier |
@@ -244,7 +246,7 @@ elementwise ops run through the same plugin request (the plan's headline
 estimate of **~33 tok/s @ ~8.9 GFLOP/s** sits inside that band). These are
 directional — the probe measures kernels, not a full graph — and the honest
 label is: first-party, compiler-free, and within striking distance of the
-SYCL/DX12 figures from `docs/SYCL.md` §4 / `docs/DX12.md` §5.
+SYCL/DX12 figures from [docs/SYCL.md](SYCL.md) §4 / [docs/DX12.md](DX12.md) §5.
 
 ## Verdict
 
@@ -283,4 +285,4 @@ OS:       Windows 10.0.26200   .NET: 11.0 (Release)
 - [OpenVINO GPU plugin / properties (INFERENCE_PRECISION_HINT, EXECUTION_DEVICES, CACHE_DIR)](https://docs.openvino.ai/2026/openvino-workflow/running-inference/inference-devices-and-modes/gpu-device.html)
 - [OpenVINO IR v11 element names / opset1](https://docs.openvino.ai/2026/documentation/openvino-ir-format.html)
 - [System.Numerics.Tensors / .NET 11 BFloat16 (Microsoft Learn)](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/numeric-guidelines)
-- Series: `docs/SPIRV.md` · `docs/SYCL.md` · `docs/DX12.md` · `docs/OPENVINO.md` — issue #428
+- Series: [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) — the GPU-backend case-study series
