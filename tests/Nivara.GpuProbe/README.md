@@ -483,7 +483,7 @@ Gates vs the production Nivara CPU kernels:
 |---|---|---|---|
 | `dot16` (K=16) | `\|leg − cpu\| ≤ 1e-6 + 1e-5·\|cpu\|` | **0.0 ULP** (bit-exact) | PASS |
 | `silu` (576) | tolerance gate per element | 4.0 ULP | PASS (576/576) |
-| `gemv` (1536×576) | tolerance gate per row | 14 336 ULP @ row 1508 (`\|diff\| = 1.6e-9`, near-zero ref row) | PASS (1536/1536) |
+| `gemv` (1536×576) | tolerance gate per row | _pending_ (measured 12 288 ULP @ row 1508, `\|diff\| = 1.4e-9` on the Iris Xe validation machine) | PASS (1536/1536) |
 
 Same gemv worst-ULP caveat as the other legs (diagnostic row near zero, far
 inside the `1e-6` absolute gate). **D3D12 verdict: PASS** — ComputeSharp's
