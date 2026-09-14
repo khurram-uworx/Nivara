@@ -103,8 +103,9 @@ by `[1536×576]·[576]` GEMVs, and all live GPU legs run it at 133–525 µs vs
 ~2.3–4.7 ms CPU. OpenVINO and ILGPU trade the gemv win run-to-run (86.8 µs tuned
 gemm vs 133.4 µs naive one-thread-per-row); ILGPU is decisively **fastest on
 silu** (6.9 µs, ~5–14× CPU) and on dot16's launch-bound floor (11.4 µs);
-ComputeSharp's steady-state numbers are recorded below (_pending_ until the
-first `kernels` run on this machine). silu splits the GPU legs
+ComputeSharp's Arc 140T steady-state figures are recorded below (_pending_ —
+validated live on a second Iris Xe machine, see its section; a `kernels` run on
+the Arc 140T host fills the cells). silu splits the GPU legs
 (ILGPU/SYCL/OV ≈ 2–14× CPU, DX12 still launch-bound at 576 elements). dot16
 exists only as the smallest correctness probe and stays CPU-fastest everywhere.
 
@@ -492,8 +493,13 @@ shapes, matching the hand-rolled `cs_5_1` DXBC leg. Another evidence point that
 *compiler-produced bytecode* — SYCL SPIR-V, ILGPU OpenCL C, or ComputeSharp
 DXIL — is what the driver runs right, in contrast to hand-authored SPIR-V.
 BF16 rides the same packed-2-per-uint transport as DX12/ILGPU (in-shader expand
-via `Hlsl.AsFloat`, the managed `asfloat`). Steady-state figures: _pending_
-(recorded from the first `kernels` run). Full notes in
+via `Hlsl.AsFloat`, the managed `asfloat`). The leg was validated live on a
+**second machine** (Intel Iris Xe iGPU, D3D12 — not this doc's Arc 140T host):
+3/3 gates PASS, no CPU fallback; an honest case-study in
+[docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md) records that run's measured
+µs (gemv 624.2 µs vs 2824.8 µs CPU on the same run) **clearly labeled as
+non-Arc-140T**, with the Arc 140T steady-state figures _pending_ until a
+`kernels` run happens on that machine. Full notes in
 [docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md).
 
 ## Level Zero P/Invoke surface
