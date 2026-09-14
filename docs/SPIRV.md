@@ -1,6 +1,6 @@
 # Hand-authored SPIR-V on Intel Level Zero — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
 
 This is the first of the GPU-backend case-study docs. It documents what the
 `tests/Nivara.GpuProbe` L0 leg (commits 1–4 of the kernel-probe phase) found

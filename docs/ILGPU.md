@@ -1,6 +1,6 @@
 # ILGPU on the Arc 140T from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
 
 This is the fifth GPU-backend case-study doc (after [docs/SPIRV.md](SPIRV.md), [docs/SYCL.md](SYCL.md),
 [docs/DX12.md](DX12.md), [docs/OPENVINO.md](OPENVINO.md)) and the deliverable for issue #431 (GPU probe
@@ -231,4 +231,4 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
   (see [docs/SPIRV.md](SPIRV.md)); ILGPU's OpenCL C path is equally exposed to future
   frontend changes.
 
-**Series:** [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) — the GPU-backend case-study series
+**Series:** [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [docs/COMPUTESHARP.md](COMPUTESHARP.md) — the GPU-backend case-study series

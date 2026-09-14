@@ -1,6 +1,6 @@
 # SYCL / oneAPI GPU Compute on Intel Arc — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
 
 All findings below were verified on an **Intel Arc 140T** (8086:7DD1, ~2 GB
 shared RAM, driver **32.0.101.8826**) running Windows 10.0.26200, .NET 11.0,
