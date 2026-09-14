@@ -85,19 +85,36 @@ Companion phase 4b = ComputeSharp (#432), same contract, own doc.
 - `dotnet build tests/Nivara.GpuProbe -c Release` → **0 warnings, 0 errors** (each commit).
 - `dotnet run -c Release --project tests/Nivara.GpuProbe -- ilgpu` — banner + gates.
 - `dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels` — six-way gate +
-  timing table. Exit = failed cells; ILGPU passes should keep the documented honest
+  timing table. Exit = failed cells; ILGPU passes keep the documented honest
   baseline (402 OV-bf16-silu + 3 SYCL-unavailable); any new failure is reported honestly.
 - Record measured figures + the IGC verdict in the README table and `docs/ILGPU.md`.
   If ILGPU-generated OpenCL C misbehaves (same IGC as the hand-authored SPIR-V leg),
   evidence-probe it per `docs/SPIRV.md` §2 discipline.
 
+## Measured results (Arc 140T, driver 1.15.37858, .NET 11.0 Release)
+
+- **IGC verdict: PASS** — ILGPU-generated OpenCL C compiles and runs correctly;
+  device printed = `Intel(R) Graphics`, `CL_DEVICE_TYPE_GPU`, vendor
+  `Intel(R) Corporation` (no CPU fallback — asserted and printed).
+- Gates (vs production CpuLeg, `|leg−cpu| ≤ 1e-6 + 1e-5·|cpu|`): dot16 **0.0 ULP
+  PASS**, silu **576/576 PASS (worst 4.0 ULP)**, gemv **1536/1536 PASS**.
+  Failure contribution to `kernels` exit: 0 (exit stays 405).
+- Steady state (1 warmup + best-of-25 synchronized dispatches, best of two runs):
+  dot16 **11.4–11.7 µs**, silu **6.9 µs** (fastest GPU leg measured in the
+  series), gemv **133.4–135.8 µs** (~27× the 3608.7 µs CPU figure in the six-way
+  run). Setup split: context+accelerator ~8.8–9.8 ms; per-kernel JIT (load + first
+  dispatch) ~1.3–2.7 ms (dot16 up to 3.8 ms in the ilgpu-only run).
+- Comparison: gemv trails only OpenVINO bf16's tuned gemm (86.8 µs); beats DX12's
+  naive same-shape kernel (246 µs) ~1.8×. silu/dot16 are the fastest GPU rows in
+  the consolidated table.
+
 ## Planned commits
 
-1. `docs: plan GPU probe phase 4a (ILGPU leg) in TODO.md`
-2. `probe: pin ILGPU 1.5.3 + ILGPU.Algorithms 1.5.3 in Nivara.GpuProbe` (record snapshot + transitive footprint)
-3. `probe: add ILGPU (OpenCL) leg — kernels, leg runner, availability, six-way gate wiring`
-4. `docs: add ILGPU case study and six-way probe results` (measured figures, `docs/ILGPU.md`, README)
-5. final build gate + review fixes if any (G2)
+1. ✓ `docs: plan GPU probe phase 4a (ILGPU leg) in TODO.md`
+2. ✓ `probe: pin ILGPU 1.5.3 + ILGPU.Algorithms 1.5.3 in Nivara.GpuProbe` (record snapshot + transitive footprint)
+3. ✓ `probe: add ILGPU (OpenCL) leg — kernels, leg runner, availability, six-way gate wiring`
+4. (in progress) `docs: add ILGPU case study and six-way probe results` (measured figures, `docs/ILGPU.md`, README)
+5. (pending) final build gate + review fixes if any (G2)
 
 ## Blast radius
 
@@ -110,5 +127,5 @@ Companion phase 4b = ComputeSharp (#432), same contract, own doc.
 
 ## GitHub issues log
 
-- [ ] `#432` — GPU probe phase 4b: ComputeSharp leg (companion, already tracked/cross-linked in #431).
-- [ ] (add any newly discovered deferred work here as it surfaces during execution)
+- [ ] `#432` — GPU probe phase 4b: ComputeSharp leg (companion, already tracked/cross-linked in #431; out of scope for this phase).
+- No new deferred work surfaced during execution — nothing else to log.
