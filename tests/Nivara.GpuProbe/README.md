@@ -1,10 +1,11 @@
 # Nivara.GpuProbe
 
 Probe: can .NET access Intel GPU compute? Pure P/Invoke — **no packages, no
-bindings, no CUDA, no toolchain** — with one deliberate exception: the phase-4a
-ILGPU leg (issue #431) is the probe's first NuGet reference, because there the
-package *is* the toolchain (a pure-managed C#→OpenCL JIT runtime). The probe
-drives the same SmolLM-shaped BF16 kernels (dot16 · silu · gemv) through **five
+bindings, no CUDA, no toolchain** — with two deliberate exceptions: the phase-4a
+ILGPU leg (issue #431) and the phase-4b ComputeSharp leg (issue #432) are the
+probe's only NuGet references, because there the package *is* the toolchain
+(pure-managed C#→OpenCL and C#→HLSL→DXIL JIT runtimes). The probe
+drives the same SmolLM-shaped BF16 kernels (dot16 · silu · gemv) through **seven
 independent GPU paths**, each gated against the production Nivara CPU kernels:
 
 | path | route | verdict (Arc 140T) |
@@ -14,6 +15,7 @@ independent GPU paths**, each gated against the production Nivara CPU kernels:
 | **DX12** | hand-rolled HLSL `cs_5_1` via inbox `d3dcompiler_47.dll` | **proven PASS** — FL 12_2 / SM 6.8, no external tooling |
 | **OpenVINO** | pip-installed `openvino_c.dll` + tuned GPU plugin, IR v11 models | **proven PASS** — first-party, zero compiler, ~26–34× CPU on gemv; BF16 silu honestly F16-tier |
 | **ILGPU (phase 4a)** | NuGet `ILGPU 1.5.3` — pure-managed JIT of C# kernels to OpenCL C (in-box ICD + Intel driver) | **proven PASS** — all three gates on the real iGPU, no CPU fallback; fastest GPU leg on silu (see [docs/ILGPU.md](../../docs/ILGPU.md)) |
+| **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md)) |
 
 The Level Zero leg got this series started by proving the harness end-to-end
 (module load, launch, readback, verifiable results) and then isolating a
@@ -21,7 +23,7 @@ The Level Zero leg got this series started by proving the harness end-to-end
 access-chain ICE) that only affects hand-authored bytecode — the reason real
 math pivoted to the compiler-backed and driver-backed paths above. Full write-ups
 in [docs/SPIRV.md](../../docs/SPIRV.md) · [docs/SYCL.md](../../docs/SYCL.md) · [docs/DX12.md](../../docs/DX12.md) · [docs/OPENVINO.md](../../docs/OPENVINO.md) ·
-[docs/ILGPU.md](../../docs/ILGPU.md).
+[docs/ILGPU.md](../../docs/ILGPU.md) · [docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md).
 
 Host: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 (128 EU, PCI 8086:7DD1) and an on-package **Intel AI Boost NPU** (8086:7D1D).
@@ -30,13 +32,15 @@ Host: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 
 The probe consumes existing Nivara kernels **read-only** for its CPU verification
 leg (no code changes to the referenced projects; the GPU legs keep the host side
-pure P/Invoke — no GPU bindings/packages, except the phase-4a ILGPU leg whose
-NuGet packages *are* the toolchain). The kernel *source* is hand-authored
+pure P/Invoke — no GPU bindings/packages, except the phase-4a ILGPU and phase-4b
+ComputeSharp legs whose NuGet packages *are* the toolchain). The kernel *source* is hand-authored
 SPIR-V for the now-blocked L0 leg, compiler-produced SYCL/DPC++ SPIR-V for the
 oneAPI leg, HLSL for the DX12 leg, hand-emitted OpenVINO IR v11 XML for the
-OpenVINO leg, and C# device methods for the ILGPU leg, per the case-study docs [docs/SPIRV.md](../../docs/SPIRV.md)
+OpenVINO leg, C# device methods for the ILGPU leg, and C# shader structs
+(source-gen HLSL) for the ComputeSharp leg, per the case-study docs [docs/SPIRV.md](../../docs/SPIRV.md)
 (L0), [docs/SYCL.md](../../docs/SYCL.md) (oneAPI/SYCL), [docs/DX12.md](../../docs/DX12.md) (DX12),
-[docs/OPENVINO.md](../../docs/OPENVINO.md) (OpenVINO), and [docs/ILGPU.md](../../docs/ILGPU.md) (ILGPU phase 4a):
+[docs/OPENVINO.md](../../docs/OPENVINO.md) (OpenVINO), [docs/ILGPU.md](../../docs/ILGPU.md) (ILGPU phase 4a), and
+[docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md) (ComputeSharp phase 4b):
 
 - `src/Nivara` — `LlamaFusedKernels.MatMulTransposedB<T>` (the production SmolLM
   GEMV kernel — dot and GEMV both run through it, in the exact fused-head call
@@ -48,7 +52,7 @@ OpenVINO leg, and C# device methods for the ILGPU leg, per the case-study docs [
 ## Kernel phase fixtures & gold target
 
 The many-way (CPU gold · L0 hand-authored · SYCL/oneAPI · DX12 · OpenVINO-bf16 ·
-OpenVINO-f32 · ILGPU/OpenCL) BF16 dot/GEMV + SiLU probe compares every GPU leg against the **CPU leg, which is the production Nivara kernels exactly as
+OpenVINO-f32 · ILGPU/OpenCL · ComputeSharp/DXIL) BF16 dot/GEMV + SiLU probe compares every GPU leg against the **CPU leg, which is the production Nivara kernels exactly as
 `NivaraInference` calls them for SmolLM** (consumed read-only through public API)
 on the same byte-identical inputs. No hand-rolled or double-precision oracle is
 maintained — the production kernels are the gold target:
@@ -75,11 +79,11 @@ process/device setup excluded). The ranges span runs across the whole series
 clock/power state so treat them as directional, not spec. Per-leg detail and
 methodology live in the case-study docs — the table here is the decision aid.
 
-| kernel | CPU (produ. Nivara) | SYCL/oneAPI | DX12 (hand-rolled) | OpenVINO bf16 | OpenVINO f32 | ILGPU (OpenCL) | gate |
-|---|---|---|---|---|---|---|---|
-| `dot16` (K=16) | 1.2–4.8 | 13–53 | 117–560 | 75.8 | 68.5 | **11.4–11.7** | launch-bound — CPU wins (ILGPU fastest GPU leg) |
-| `silu` (576) | 29–99 | 12–34 | 86–364 | 58.9 | 51.2 | **6.9** | **ILGPU ~5–14× CPU** — best GPU leg |
-| `gemv` (1536×576) | 2291–4745 | 170–198 | 152–525 | **137.9** | **181.7** | 133.4–135.8 | **~10–34× GPU win** (ILGPU ~27×) |
+| kernel | CPU (produ. Nivara) | SYCL/oneAPI | DX12 (hand-rolled) | OpenVINO bf16 | OpenVINO f32 | ILGPU (OpenCL) | ComputeSharp (DXIL) | gate |
+|---|---|---|---|---|---|---|---|---|---|
+| `dot16` (K=16) | 1.2–4.8 | 13–53 | 117–560 | 75.8 | 68.5 | **11.4–11.7** | _pending_ | launch-bound — CPU wins (ILGPU fastest GPU leg) |
+| `silu` (576) | 29–99 | 12–34 | 86–364 | 58.9 | 51.2 | **6.9** | _pending_ | **ILGPU ~5–14× CPU** — best GPU leg |
+| `gemv` (1536×576) | 2291–4745 | 170–198 | 152–525 | **137.9** | **181.7** | 133.4–135.8 | _pending_ | **~10–34× GPU win** (ILGPU ~27×) |
 
 Correctness (same gate as above, vs the production CPU kernels; L0 cannot
 express the kernels at all):
@@ -92,15 +96,17 @@ express the kernels at all):
 | OpenVINO bf16 | PASS (0.0 ULP) | **honest FAIL** — F16 silu, 402/576 ([docs/OPENVINO.md](../../docs/OPENVINO.md) §3) | PASS |
 | OpenVINO f32 | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
 | ILGPU (OpenCL) | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
+| ComputeSharp (DXIL) | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
 
 Reading: the **gemv is the deliverable** — every SmolLM decode token is dominated
 by `[1536×576]·[576]` GEMVs, and all live GPU legs run it at 133–525 µs vs
 ~2.3–4.7 ms CPU. OpenVINO and ILGPU trade the gemv win run-to-run (86.8 µs tuned
 gemm vs 133.4 µs naive one-thread-per-row); ILGPU is decisively **fastest on
-silu** (6.9 µs, ~5–14× CPU) and on dot16's launch-bound floor (11.4 µs). silu
-splits the GPU legs (ILGPU/SYCL/OV ≈ 2–14× CPU, DX12 still launch-bound at 576
-elements). dot16 exists only as the smallest correctness probe and stays
-CPU-fastest everywhere.
+silu** (6.9 µs, ~5–14× CPU) and on dot16's launch-bound floor (11.4 µs);
+ComputeSharp's steady-state numbers are recorded below (_pending_ until the
+first `kernels` run on this machine). silu splits the GPU legs
+(ILGPU/SYCL/OV ≈ 2–14× CPU, DX12 still launch-bound at 576 elements). dot16
+exists only as the smallest correctness probe and stays CPU-fastest everywhere.
 
 ## Build & Run
 
@@ -114,19 +120,22 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availab
 dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gates (needs Sycl/build.cmd first, see below)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ov      # OpenVINO availability (runtime + GPU readback) + both precision configs' gates
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ilgpu  # ILGPU availability (OpenCL devices + accelerator) + gates (phase 4a)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # six-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU (exit = failed cells)
-dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12 + openvino
+dotnet run -c Release --project tests/Nivara.GpuProbe -- computesharp # ComputeSharp availability (default D3D12 device) + gates (phase 4b)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # seven-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + ComputeSharp (exit = failed cells)
+dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12 + openvino + computesharp
 ```
 
-`kernels` (and `sycl`/`ov`/`ilgpu`, which route through the same harness) is the
+`kernels` (and `sycl`/`ov`/`ilgpu`/`computesharp`, which route through the same
+harness) is the
 **correctness gate**: the CPU leg (production Nivara kernels, see
 `Kernels/CpuLeg.cs`) is the gold target, and each wired GPU leg's `dot16` /
 `silu` / `gemv` output is gated against it with
 `|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|`. Exit code = number of failed
 cells. On this machine it is **405** = 402 (the *honest* OV-bf16 silu row:
 F16-elementwise sigmoid/multiply on a BF16-declared model, see
-[docs/OPENVINO.md](../../docs/OPENVINO.md) §3) + 3 (SYCL UNBUILT baseline). The ILGPU row (phase 4a)
-passes all three — exit unchanged. Every failing cell is an
+[docs/OPENVINO.md](../../docs/OPENVINO.md) §3) + 3 (SYCL UNBUILT baseline). The ILGPU (phase 4a) and
+ComputeSharp (phase 4b) rows
+pass all three each — exit unchanged. Every failing cell is an
 explicitly-flagged honest one — never a miscode.
 
 `run` is the real probe: it builds modules with `zeModuleCreate` (logs any
@@ -251,8 +260,8 @@ wait per iteration, 1 warmup + 3 timed best-of-3 — the same methodology as the
 SYCL leg. This bypasses the buggy IGC OpenCL/SPIR-V frontend entirely (HLSL →
 DXBC/DXIL → the driver's compute pipeline), so real GEMM/attention kernels are
 expressible while the Level Zero access-chain ICE (bug #1 above) remains
-unfixed on this driver. The `kernels` mode runs the **six-way** CPU·SYCL·DX12·
-OV·ILGPU gate table with a per-GPU-leg timing column; full workflow notes in
+unfixed on this driver. The `kernels` mode runs the **seven-way** CPU·SYCL·DX12·
+OV·ILGPU·ComputeSharp gate table with a per-GPU-leg timing column; full workflow notes in
 [docs/DX12.md](../../docs/DX12.md).
 
 ### Kernel binary export (follow-up)
@@ -330,8 +339,8 @@ side-by-side table above** — the reading: `dot16` is launch-bound, `silu` and
 production native `.dll` with a long-lived queue eliminates it entirely. Full
 notes in [docs/SYCL.md](../../docs/SYCL.md); the DX12 workflow lives in [docs/DX12.md](../../docs/DX12.md);
 the L0/hand-authored-SPIR-V verdict and safe subset live in [docs/SPIRV.md](../../docs/SPIRV.md).
-Together these five case-study docs — [docs/SPIRV.md](../../docs/SPIRV.md) · [docs/SYCL.md](../../docs/SYCL.md) ·
-[docs/DX12.md](../../docs/DX12.md) · [docs/OPENVINO.md](../../docs/OPENVINO.md) · [docs/ILGPU.md](../../docs/ILGPU.md) — are Nivara's GPU-backend
+Together these six case-study docs — [docs/SPIRV.md](../../docs/SPIRV.md) · [docs/SYCL.md](../../docs/SYCL.md) ·
+[docs/DX12.md](../../docs/DX12.md) · [docs/OPENVINO.md](../../docs/OPENVINO.md) · [docs/ILGPU.md](../../docs/ILGPU.md) · [docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md) — are Nivara's GPU-backend
 decision records.
 
 ## DX12 compute leg (commit 8 — hand-rolled, proven)
@@ -449,6 +458,44 @@ with a deliberately naive one-thread-per-row shape. Native BF16 kernel types
 don't exist in ILGPU 1.5.3 (upstream PR #1221 open), so the packed-widen path is
 the primary one — byte-identical to DX12. Full notes in [docs/ILGPU.md](../../docs/ILGPU.md).
 
+## ComputeSharp leg (phase 4b — managed C#→HLSL→DXIL/D3D12 JIT, proven)
+
+`ComputeSharp/` is the probe's **second NuGet-based backend** (issue #432):
+`ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` (MIT, pure managed) where the
+kernel *source* is ordinary C# — `readonly partial struct`s implementing
+`IComputeShader` with `[ThreadGroupSize]`/`[GeneratedComputeShaderDescriptor]`,
+lowered to HLSL (SM 6.x) by a source generator, compiled in-process to **DXIL**
+via the **DXC binaries bundled inside `ComputeSharp.Dxc`** (no external compiler
+or toolchain), and dispatched on the Arc 140T iGPU through D3D12 — the managed
+story the hand-rolled DX12 leg predicted. The leg selects
+`GraphicsDevice.GetDefault()` (hardware first, WARP last), **asserts
+`IsHardwareAccelerated`** — WARP would mean an honest UNBUILT row, never a CPU
+run — and reuses persistent packed-BF16 buffers across all timing passes.
+`device.For(...)` is one full submit+wait round-trip (the compute context
+executes the command list and waits), matching the ILGPU `Synchronize` idiom;
+per-kernel first-dispatch DXC compile cost is split from steady state (1 warmup
++ best-of-25).
+
+Gates vs the production Nivara CPU kernels:
+
+| kernel | gate vs CpuLeg (production Nivara) | worst | result |
+|---|---|---|---|
+| `dot16` (K=16) | `\|leg − cpu\| ≤ 1e-6 + 1e-5·\|cpu\|` | **0.0 ULP** (bit-exact) | PASS |
+| `silu` (576) | tolerance gate per element | 4.0 ULP | PASS (576/576) |
+| `gemv` (1536×576) | tolerance gate per row | 14 336 ULP @ row 1508 (`\|diff\| = 1.6e-9`, near-zero ref row) | PASS (1536/1536) |
+
+Same gemv worst-ULP caveat as the other legs (diagnostic row near zero, far
+inside the `1e-6` absolute gate). **D3D12 verdict: PASS** — ComputeSharp's
+source-generated HLSL, compiled to DXIL by its bundled DXC, is handled correctly
+by the Arc 140T's D3D12 driver (FL 12_2 / SM 6.8) for all three production
+shapes, matching the hand-rolled `cs_5_1` DXBC leg. Another evidence point that
+*compiler-produced bytecode* — SYCL SPIR-V, ILGPU OpenCL C, or ComputeSharp
+DXIL — is what the driver runs right, in contrast to hand-authored SPIR-V.
+BF16 rides the same packed-2-per-uint transport as DX12/ILGPU (in-shader expand
+via `Hlsl.AsFloat`, the managed `asfloat`). Steady-state figures: _pending_
+(recorded from the first `kernels` run). Full notes in
+[docs/COMPUTESHARP.md](../../docs/COMPUTESHARP.md).
+
 ## Level Zero P/Invoke surface
 
 Structs, constants, and proc addresses are taken only from the official
@@ -460,7 +507,7 @@ entry points by name from `ze_loader.dll`.
 ## Files
 
 - `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `dx12` /
-  `sycl` / `ov` / `kernels` / `all`).
+  `sycl` / `ov` / `ilgpu` / `computesharp` / `kernels` / `all`).
 - `Kernels/KernelFixtures.cs` — SmolLM-shaped BF16 fixtures + shared native
   write-BF16 / read-f32 helpers.
 - `Kernels/LegResults.cs` — one leg's results over the fixture set
@@ -469,8 +516,8 @@ entry points by name from `ze_loader.dll`.
 - `Kernels/KernelGate.cs` — the multi-leg correctness gate harness: CPU gold +
   every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, and a
   CPU-vs-GPU timing table (µs); exit code = failed cells. `kernels` CLI mode
-  runs it six-way (SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU; SYCL row prints
-  UNBUILT on this machine).
+  runs it seven-way (SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + ComputeSharp; SYCL
+  row prints UNBUILT on this machine).
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
   gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
   (aRows=1 → the allocation-free BLAS2 GEMV path the fused Llama head runs),
@@ -544,6 +591,18 @@ entry points by name from `ze_loader.dll`.
   best-of-25 steady-state split, `LegResults`.
 - `Ilgpu/Availability.cs` — `ilgpu` mode banner: OpenCL devices + chosen
   accelerator.
+- `ComputeSharp/ComputeSharpKernels.cs` — the three production kernels as
+  ComputeSharp shaders (readonly `partial struct`s implementing
+  `IComputeShader`, `[ThreadGroupSize]` + `[GeneratedComputeShaderDescriptor]`,
+  source-gen HLSL → DXIL): dot16 1×1×1, silu/gemv 256×1×1, in-shader `Widen`
+  via `Hlsl.AsFloat`, silu via `Hlsl.Exp`.
+- `ComputeSharp/ComputeSharpLeg.cs` — the phase-4b leg runner:
+  `GraphicsDevice.GetDefault()` (hardware device asserted — WARP = honest
+  UNBUILT row, never CPU), persistent packed-BF16 `ReadOnlyBuffer<uint>` +
+  `ReadWriteBuffer<float>`, `device.For(...)` synchronous dispatches, DXC-first
+  dispatch vs best-of-25 steady-state split, `LegResults`.
+- `ComputeSharp/Availability.cs` — `computesharp` mode banner: default D3D12
+  device + hardware-acceleration status.
 
 ## Recommendations
 
@@ -563,6 +622,13 @@ entry points by name from `ze_loader.dll`.
   dot16 floor. The IGC question is answered — ILGPU-generated OpenCL C runs
   correctly. Naive one-thread-per-row gemv trails OpenVINO's tuned gemm; a tiled
   gemv is the next lever for a `src/Nivara.Gpu` promotion decision.
+- **ComputeSharp is the managed-D3D12 proven path (phase 4b)**: NuGet-only
+  install with the DXIL compiler bundled (`ComputeSharp.Dxc`), kernels written
+  as ordinary C# structs, all three gates PASS on the real iGPU (no CPU
+  fallback; WARP rejected). It is the natural ergonomic backbone for a managed
+  `src/Nivara.Gpu`: the same `d3d12.dll`/`dxgi.dll` surface the hand-rolled DX12
+  leg proved, without the vtable/descriptor/heap plumbing — and it sidesteps the
+  IGC OpenCL/SPIR-V frontend entirely (DXIL path).
 - **Hand-authored SPIR-V on this driver is a dead end for real math** (bug #5):
   the L0 leg cannot perform FP multiply or divide at all, so no dot/GEMV/SiLU is
   expressible through hand-written bytecode. Documented as the authoritative
