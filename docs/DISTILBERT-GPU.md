@@ -165,6 +165,39 @@ lands below ~0.3 T MAC/s, step back and re-evaluate against the proven
 OpenVINO path (closed tuned runtime) before committing the full model kernel
 set.
 
+### 4.3 Measured (keystone gate — PASSED, AC power)
+
+Measured 2026-09-19 on AC power. `Row4` = register-blocked 1×4 GEMM (each
+thread owns 4 accumulators sharing one A-tile load; per-output-column
+accumulation order unchanged → bit-identical results to the 1×1 kernel).
+
+| shape | 1×1 (OneToOne) | 1×4 (Row4) | gate (≥ 0.3 T MAC/s) |
+|---|---|---|---|
+| q/k/v/o `[128,768]·[768,768]` | 174 GMAC/s | **303 GMAC/s** | **PASS** |
+| lin1 `[128,768]·[768,3072]` | 203 GMAC/s | **321 GMAC/s** | **PASS** |
+| lin2 `[128,3072]·[3072,768]` | 185 GMAC/s | **318 GMAC/s** | **PASS** |
+| square `[1024,1024]·[1024,1024]` | 257 GMAC/s | **379 GMAC/s** | **PASS** |
+
+All four shapes clear the ~0.3 T MAC/s decision gate. Correctness gate vs the
+double-precision naive truth: maxAbs 4.4e-5 at K=768 … 1.55e-4 at K=3072 —
+the f32 summation-order floor (two different reduction orders, both valid),
+not a layout artifact. GEMM-only extrapolation at the Row4 rate: ~5.8 ms per
+layer → ~35 ms across 6 layers (attention/elementwise/readback excluded; final
+E2E recorded when the model forward is gated). The 303→379 GMAC/s spread
+across shapes is occupancy/register-pressure headroom for a future 2×2 or
+tile-32 pass — deliberately deferred.
+
+Two measurement findings worth recording:
+
+- **Battery throttles the iGPU hard**: on battery every shape flattened to
+  ~150–160 GMAC/s regardless of size; on AC the 1×1 square jumped 141 → 256
+  GMAC/s. This finally explains the probe's flat gemv class of numbers — perf
+  measurements on this machine require AC power.
+- A Row4 `colBase` bug surfaced during measurement (global thread-Y used
+  instead of the group index → garbage maxAbs ~40–77) and was fixed; it also
+  justifies keeping the double-precision-truth bounds check in any future
+  GEMM regression gate.
+
 Fixed-cost budget (fine at any plausible tiled-GEMM number): ~40–50 dispatches
 per forward × ~11 µs launch floor ≈ 0.5–1 ms; upload 255.5 MB ≈ 30–50 ms once;
 per-kernel JIT 1.3–3.8 ms once (~10–12 kernels ≈ 20–40 ms once). Steady-state
@@ -216,9 +249,13 @@ the least possible new machinery, using only the numbers already recorded.
    - Run the §3 kernel set: tiled GEMM, attention core, LayerNorm, GELU(erf),
      bias/residual adds, embedding gather.
    - **Readback + gate**: hidden states vs the CPU path and the PyTorch fixture
-     (`last_hidden_state_py.bin`, today's max abs diff 5e-6) with the probe's
-     gate contract `|gpu − cpu| ≤ 1e-6 + 1e-5·|cpu|`; SST-2 prints the 8-sentence
-     argmax table (CPU parity 8/8 expected).
+     (`last_hidden_state_py.bin`, today's CPU max abs diff 5e-6). **Gate
+     contract** (revised from the probe's `1e-6 + 1e-5·|cpu|` — two genuinely
+     different f32 summation orders cannot meet that; measured GEMM maxAbs vs
+     double truth is 4.4e-5..1.6e-4 at K=768..3072, §4.3): per-element
+     `|gpu − cpu| ≤ 1e-3·(1 + |cpu|)` on the final hidden state and logits
+     (a real bug produces ~40-class outliers, so this bound still catches
+     broken kernels), plus SST-2 argmax parity 8/8.
    - `benchmark` mode: `--gpu` reports per-forward GPU median (existing
      `benchmark` plumbing) → the headline **GPU vs CPU (185 ms) vs PyTorch
      (35 ms)** number.
@@ -245,11 +282,11 @@ the least possible new machinery, using only the numbers already recorded.
 
 | # | risk | mitigation / gate |
 |---|---|---|
-| 1 | **Tiled GEMM underperforms** (below ~0.3 T MAC/s on Arc 140T f32) | measure first; fallback = OpenVINO proven path or revisit f32 tiling strategy before writing the full kernel set |
+| 1 | ~~Tiled GEMM underperforms~~ — **RESOLVED 2026-09-19**: Row4 measured 303–379 GMAC/s ≥ 0.3 T MAC/s on all DistilBERT shapes (§4.3) | measured first; OpenVINO fallback not triggered |
 | 2 | `XMath` gap: no erf in ILGPU core/Algorithms (GELU) | implement managed erf poly (CPU `GeluExact`-class) in the sample kernel — verify availability during kernel authoring |
 | 3 | Transpose-free layout hurts tiled GEMM coalescing | host-side one-time transpose at upload (255 MB class, ~30–50 ms) |
 | 4 | OpenCL ICD / driver variance | device-select assert (`CL_DEVICE_TYPE_GPU`, no CPU fallback); re-run probe `kernels` gate after driver bumps (seconds) |
-| 5 | Precision drift vs CPU f32 path | per-tensor gate against CPU hidden states at ~1e-6 class; SST-2 argmax 8/8 |
+| 5 | Precision drift vs CPU f32 path | per-element `|gpu − cpu| ≤ 1e-3·(1+|cpu|)` on final hidden state + logits (revised from the 1e-6 class — f32 summation-order floor, §4.3); SST-2 argmax 8/8 |
 | 6 | bf16 temptation mid-phase | deferred — f32-only, explicit rejection message (keeps the first E2E diff clean) |
 
 ## 9. References
