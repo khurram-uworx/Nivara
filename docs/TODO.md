@@ -36,6 +36,34 @@ the OpenVINO path).
 - F32-only: `--gpu` + `--precision bf16|fp16` → clear rejection message.
 - No SmolLM/Qwen GPU, no KV-cache/decode GPU, no training on GPU, no bf16 GPU.
 
+## Grounding (G1) — verified before implementation
+
+- **ILGPU official docs** (ilgpu.net tutorials + master samples, fetched 2026-09-19):
+  - Implicitly-grouped kernels **cannot** use shared memory / group intrinsics — the
+    tiled GEMM **must** be an explicitly-grouped kernel (`LoadKernel` /
+    `LoadStreamKernel` + launch config `(numGroups, groupSize)`, indices via
+    `Grid.GlobalIndex.XY`, `Group.IdxX`/`Group.IdxY`, `Group.Barrier()`).
+  - Shared memory on OpenCL confirmed: `SharedMemory.Allocate2D<float,
+    Stride2D.DenseX>(new Index2D(size, size), new Stride2D.DenseX(size))`.
+  - Canonical reference pattern: official `Samples/MatrixMultiply/Program.cs`
+    (tiled kernel TILE staging + zero-fill bounds checks) — saved to
+    `%TEMP%\opencode\ilgpu_matrixmultiply_Program.cs` during grounding.
+  - Buffer path precedents (probe-verified): `Allocate1D`/`Allocate2DDenseX`,
+    `CopyFromCPU`, views, `AsContiguous().GetAsArray()` / `GetAsArray2D`,
+    `CLDeviceType.GPU` + Intel vendor assert, `XMath.Exp` from ILGPU.Algorithms.
+- **`XMath` has NO `erf`** (verified in ILGPU master `Src/ILGPU.Algorithms/XMath.cs`).
+  GELU erf is therefore not a "fallback" — the A–S 7.1.26 polynomial port with
+  `XMath.Exp` (identical formula to CPU `GradKernels.Erf<float>`) is the primary
+  path; this makes CPU/GPU GELU parity *tighter* than the 1e-6+1e-5·|x| gate.
+- **CPU gate kernel confirmed** (code-memory MCP): `MatMulTransposedB<T>(
+  ReadOnlySpan<T>, ReadOnlySpan<T>, T[], int aRows, int aCols, int bCols)` in
+  `src/Nivara/AutoDiff/Nn/LlamaFusedKernels.cs` — the production f32 reference
+  for the tiled-GEMM temp harness.
+- **MS Learn**: no ILGPU coverage (expected — not a Microsoft tool); adjacent
+  authoritative source is the Windows OpenCL dev-notes page (API reference is
+  Khronos, OpenCL.dll ships with Windows). Nothing else to ground there.
+- Blast radius unchanged from §below.
+
 ## DistilBERT kernel inventory (what the GPU forward runs)
 
 From the assessment (§3): 6 layers × (`q/k/v/o` `[128,768]·[768,768]`×4, fused
