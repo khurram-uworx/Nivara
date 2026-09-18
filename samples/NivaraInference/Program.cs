@@ -16,6 +16,7 @@ namespace NivaraInference;
 
 class Program
 {
+    const double GateRelTol = 1e-3; // GPU-vs-CPU f32 parity bound: |gpu − ref| ≤ GateRelTol·(1+|ref|)
     static int Main(string[] args)
     {
         Console.WriteLine("=== Nivara HuggingFace Inference ===");
@@ -226,9 +227,10 @@ class Program
             case "distilbert":
                 if (useGpu)
                 {
-                    if (compare)
+                    if (compare) return RunDistilBertGpuCompare(tensors);
+                    if (mode is "predict" or "compare_diag")
                     {
-                        Console.Error.WriteLine("--gpu compare (CPU/PyTorch parity gate) lands with the gating commit; use bare or benchmark for now.");
+                        Console.Error.WriteLine($"--gpu does not support mode '{mode}' for distilbert (supported: default, benchmark, compare).");
                         return 1;
                     }
                     return benchmark ? BenchmarkDistilBertGpu(tensors) : RunDistilBertGpuInference(tensors);
@@ -241,9 +243,10 @@ class Program
                 if (useGpu)
                 {
                     if (benchmark) return BenchmarkDistilBertSstGpu(tensors);
-                    if (compare || mode == "predict")
+                    if (compare) return RunDistilBertSstGpuCompare(tensors);
+                    if (mode == "predict")
                     {
-                        Console.Error.WriteLine("--gpu compare/predict (CPU/PyTorch parity gate) lands with the gating commit; use bare (8-sentence table) or benchmark for now.");
+                        Console.Error.WriteLine("--gpu does not support the 'predict' REPL for distilbert_sst yet (supported: default 8-sentence table, benchmark, compare).");
                         return 1;
                     }
                     return RunDistilBertSstGpuInference(tensors);
@@ -1411,6 +1414,172 @@ class Program
         Console.WriteLine($"  Max:     {times.Max()} ms");
         Console.WriteLine();
     }
+
+    static (double MaxAbs, double MaxRel, int Violations, int Total) ParityStats(float[] gpu, float[] cpu)
+    {
+        int n = Math.Min(gpu.Length, cpu.Length);
+        double maxAbs = 0, maxRel = 0;
+        int violations = 0;
+        for (int i = 0; i < n; i++)
+        {
+            double g = gpu[i], c = cpu[i];
+            double abs = Math.Abs(g - c);
+            double rel = abs / (1.0 + Math.Abs(c));
+            if (abs > maxAbs) maxAbs = abs;
+            if (rel > maxRel) maxRel = rel;
+            if (rel > GateRelTol) violations++;
+        }
+        return (maxAbs, maxRel, violations, n);
+    }
+
+    static void ReportParity(float[] gpu, float[] reference, string what)
+    {
+        var stats = ParityStats(gpu, reference);
+        Console.WriteLine($"  {what}: maxAbs={stats.MaxAbs:E3}  maxRel={stats.MaxRel:E3}  violations={stats.Violations}/{stats.Total}  (tol: |g−r| ≤ {GateRelTol}·(1+|r|))");
+    }
+
+    static int RunDistilBertGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT GPU vs CPU/PyTorch Gate ===");
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a test sentence.";
+
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        Console.WriteLine($"Input: \"{text}\" (seqLen={intIds.Length})");
+        Console.WriteLine();
+
+        var cpuSw = Stopwatch.StartNew();
+        var encoder = DistilBertLoader.LoadEncoder(tensors, config.ToBertConfig());
+        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
+        encoder.Eval();
+        var cpuOutput = mask != null ? encoder.ForwardWithMask(input, mask) : encoder.Forward(input);
+        var cpuHidden = new float[cpuOutput.Length];
+        cpuOutput.Data.TryGetSpan(out var cpuSpan);
+        if (!cpuSpan.IsEmpty) cpuSpan.CopyTo(cpuHidden);
+        cpuSw.Stop();
+        Console.WriteLine($"CPU reference forward: {cpuSw.ElapsedMilliseconds} ms");
+
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+
+        var fwdSw = Stopwatch.StartNew();
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        fwdSw.Stop();
+        Console.WriteLine($"GPU forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        ReportParity(result.Hidden, cpuHidden, "final hidden state (GPU vs CPU)");
+
+        string refPath = Path.Combine("samples", "data", "distilbert", "last_hidden_state_py.bin");
+        if (File.Exists(refPath))
+        {
+            var rawBytes = File.ReadAllBytes(refPath);
+            float[] refData = new float[rawBytes.Length / 4];
+            Buffer.BlockCopy(rawBytes, 0, refData, 0, rawBytes.Length);
+            ReportParity(result.Hidden, refData, "final hidden state (GPU vs PyTorch)");
+        }
+        else
+        {
+            Console.WriteLine("  (PyTorch fixture last_hidden_state_py.bin not found; GPU-vs-CPU gate only)");
+        }
+        Console.WriteLine();
+
+        Console.WriteLine($"GATE: {GateVerdict(ParityStats(result.Hidden, cpuHidden))}");
+        return 0;
+    }
+
+    static int RunDistilBertSstGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 GPU vs CPU/PyTorch Gate ===");
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        int n = DistilBertSst.CompareSentences.Length;
+
+        var cpuSw = Stopwatch.StartNew();
+        var model = DistilBertSst.Load(tensors, modelDir);
+        model.Eval();
+        var cpuLogits = new float[n * 2];
+        for (int s = 0; s < n; s++)
+        {
+            var output = DistilBertSst.PredictLogits(model, tokenizer, DistilBertSst.CompareSentences[s], maxLen: 128);
+            cpuLogits[s * 2] = output.Data[0];
+            cpuLogits[s * 2 + 1] = output.Data[1];
+        }
+        cpuSw.Stop();
+        Console.WriteLine($"CPU reference (8 sentences): {cpuSw.ElapsedMilliseconds} ms");
+
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var gpuLogits = new float[n * 2];
+        int argmaxAgree = 0;
+        var perSentence = new List<long>();
+        for (int s = 0; s < n; s++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, DistilBertSst.CompareSentences[s], maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var sw = Stopwatch.StartNew();
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            sw.Stop();
+            perSentence.Add(sw.ElapsedMilliseconds);
+            gpuLogits[s * 2] = result.Logits![0];
+            gpuLogits[s * 2 + 1] = result.Logits![1];
+
+            int gpuArg = gpuLogits[s * 2 + 1] > gpuLogits[s * 2] ? 1 : 0;
+            int cpuArg = cpuLogits[s * 2 + 1] > cpuLogits[s * 2] ? 1 : 0;
+            if (gpuArg == cpuArg) argmaxAgree++;
+            Console.WriteLine($"  [{s}] GPU {DistilBertSst.Label(gpuArg),-8}  CPU {DistilBertSst.Label(cpuArg),-8}  {(gpuArg == cpuArg ? "" : "<- MISMATCH")}  {sw.ElapsedMilliseconds} ms");
+        }
+        Console.WriteLine();
+
+        var stats = ParityStats(gpuLogits, cpuLogits);
+        ReportParity(gpuLogits, cpuLogits, "logits (GPU vs CPU)");
+        Console.WriteLine($"  argmax agreement GPU-vs-CPU: {argmaxAgree}/{n}");
+        Console.WriteLine();
+
+        string pyPath = Path.Combine("samples", "data", "compare_distilbert_sst_py.bin");
+        if (File.Exists(pyPath))
+        {
+            var py = DistilBertSst.ReadCompareOutput(pyPath, n);
+            if (py != null)
+            {
+                ReportParity(gpuLogits, py.Value.Logits, "logits (GPU vs PyTorch)");
+                int pyAgree = 0;
+                for (int s = 0; s < n; s++)
+                {
+                    int gpuArg = gpuLogits[s * 2 + 1] > gpuLogits[s * 2] ? 1 : 0;
+                    int pyArg = py.Value.Logits[s * 2 + 1] > py.Value.Logits[s * 2] ? 1 : 0;
+                    if (gpuArg == pyArg) pyAgree++;
+                }
+                Console.WriteLine($"  argmax agreement GPU-vs-PyTorch: {pyAgree}/{n}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("  (PyTorch fixture compare_distilbert_sst_py.bin not found; GPU-vs-CPU gate only)");
+        }
+        Console.WriteLine();
+
+        Console.WriteLine($"GATE: {GateVerdict(stats)} (argmax {argmaxAgree}/{n})");
+        return 0;
+    }
+
+    static string GateVerdict((double MaxAbs, double MaxRel, int Violations, int Total) stats)
+        => stats.Violations == 0 ? $"PASS (maxAbs {stats.MaxAbs:E3}, maxRel {stats.MaxRel:E3}, {stats.Violations} violations)" : $"FAIL ({stats.Violations} violations, maxRel {stats.MaxRel:E3})";
 
     static int RunDistilBertSstInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
