@@ -1244,7 +1244,7 @@ class Program
         Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
 
         var buildSw = Stopwatch.StartNew();
-        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
         Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
 
@@ -1289,7 +1289,7 @@ class Program
 
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -1323,7 +1323,7 @@ class Program
         Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
 
         var buildSw = Stopwatch.StartNew();
-        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
         buildSw.Stop();
         Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
@@ -1364,7 +1364,7 @@ class Program
         string modelDir = Path.Combine("samples", "data", "distilbert_sst");
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -1465,7 +1465,7 @@ class Program
         using var rt = new IlgpuRuntime();
         Console.WriteLine($"Device: {rt.DeviceName}");
         var buildSw = Stopwatch.StartNew();
-        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -1520,7 +1520,7 @@ class Program
         using var rt = new IlgpuRuntime();
         Console.WriteLine($"Device: {rt.DeviceName}");
         var buildSw = Stopwatch.StartNew();
-        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
