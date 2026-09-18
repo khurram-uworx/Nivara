@@ -2,9 +2,17 @@
 
 ## Status
 
-Plan committed (this file). Implementation pending G1 grounding (microsoft-learn) + human
-clearance; branches off `khurram/distilbert-gpu` HEAD (PR #436 unmerged — the MiniLM work builds
-on the GPU infra that only exists there; when PR #436 merges, this PR retargets to `main`).
+**Implementing.** Branch `khurram/minilm-gpu` off `khurram/distilbert-gpu` HEAD (PR #436 unmerged
+— the MiniLM work builds on the GPU infra that only exists there; when PR #436 merges, this PR
+retargets to `main`). Commits so far: plan doc; `BertEncoderGpuRunner` rename + config/naming-driven
+generalization; `minilm --gpu` inference/benchmark/compare + CLS/L2 pooling + gates; token-type row
+0 fix (gate caught the MiniLM-vs-DistilBERT embedding difference — see commit 3d25e6b).
+
+Correctness gates run: `minilm --gpu compare` **GATE PASS** (hidden maxRel 1.0e-5, 0/245760
+violations; pooled-embedding cosine 1.000000), `minilm --gpu` (L2 norm 1.000000), f32-only reject,
+`distilbert --gpu` + `distilbert_sst --gpu` regression PASS, `minilm` CPU regression unchanged.
+Remaining: AC-power `minilm --gpu benchmark` (human-gated), README/reflection/roadmap docs,
+G2, TODO.md deletion, push/PR offer.
 
 ## Problem
 
@@ -41,6 +49,16 @@ stream) lands — a separate tracked follow-up that lifts both models.
   regenerate it (5 sentences, 5×384 f32 — same sentence list as the CPU compare).
 - Assumed from discussion (recommended defaults): **correctness-first** — no fusion/lazy-stream in
   this pass; M2 is its own plan (issue to be created). No MiniLM training, no bf16/fp16.
+
+## Findings during implementation
+
+- MiniLM (BERT-style keys) differs from DistilBERT in one unexpected way: **token-type embeddings
+  are used**. The CPU reference (`MiniLMDistilled` → `BertEncoder includeTokenTypeEmbedding: true`
+  default) and PyTorch both add `token_type_embeddings[0]` (all-zero segment ids) at every position;
+  DistilBERT (`includeTokenTypeEmbedding: false` via `DistilBertLoader`) has no token-type at all.
+  The runner now uploads the token-type table when the key is present and broadcasts row 0 via the
+  existing `addBias` kernel (key-presence driven, so DistilBERT is untouched). The gate's failure
+  signature (cosine ~0.95 but ~99% tolerance violations) diagnosed it — see commit 3d25e6b.
 
 ## Proposed changes
 
