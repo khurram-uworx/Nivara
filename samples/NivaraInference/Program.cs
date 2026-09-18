@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
 using Nivara.Samples;
+using Nivara.Samples.Gpu;
 using System.Diagnostics;
 using System.Drawing;
 using System.Numerics;
@@ -34,6 +35,7 @@ class Program
         bool force = false;
         bool syntheticWeights = false;
         bool plain = false;
+        bool useGpu = false;
         int teacherExamples = 0;
         int seed = 42;
         string text = "";
@@ -79,6 +81,8 @@ class Program
                 syntheticWeights = true;
             else if (args[i] == "--plain")
                 plain = true;
+            else if (args[i] == "--gpu")
+                useGpu = true;
             else if (args[i] == "--text" && i + 1 < args.Length)
             {
                 text = args[i + 1];
@@ -102,6 +106,10 @@ class Program
             Console.WriteLine("  tools             Native Qwen2.5 function calling (getWeather tool loop)");
             Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
+            Console.WriteLine();
+            Console.WriteLine("GPU (distilbert / distilbert_sst only, this phase):");
+            Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
+            Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine();
             Console.WriteLine("Qwen options:");
             Console.WriteLine("  --text \"...\"      Override the default user prompt (tools or plain mode; default: Paris weather)");
@@ -162,6 +170,12 @@ class Program
             return 1;
         }
 
+        if (useGpu && (bf16 || fp16))
+        {
+            Console.Error.WriteLine("--gpu is F32-only in this phase: the ILGPU path has no bf16/fp16 kernels yet. Drop --precision bf16|fp16 (or --gpu) and rerun.");
+            return 1;
+        }
+
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
         var loadSw = Stopwatch.StartNew();
         var tensors = syntheticWeights ? null! : SafeTensorsLoader.Read(modelPath);
@@ -210,11 +224,30 @@ class Program
                 bool similarity = mode == "similarity";
                 return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
             case "distilbert":
+                if (useGpu)
+                {
+                    if (compare)
+                    {
+                        Console.Error.WriteLine("--gpu compare (CPU/PyTorch parity gate) lands with the gating commit; use bare or benchmark for now.");
+                        return 1;
+                    }
+                    return benchmark ? BenchmarkDistilBertGpu(tensors) : RunDistilBertGpuInference(tensors);
+                }
                 if (bf16) return benchmark ? BenchmarkDistilBert(tensorsBf16, "BFloat16") : RunDistilBertBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBert(tensorsHalf, "Half") : RunDistilBertHalf(tensorsHalf);
                 if (compare) return RunDistilBertCompare(tensors);
                 return benchmark ? BenchmarkDistilBert(tensors, "F32") : RunDistilBertInference(tensors);
             case "distilbert_sst":
+                if (useGpu)
+                {
+                    if (benchmark) return BenchmarkDistilBertSstGpu(tensors);
+                    if (compare || mode == "predict")
+                    {
+                        Console.Error.WriteLine("--gpu compare/predict (CPU/PyTorch parity gate) lands with the gating commit; use bare (8-sentence table) or benchmark for now.");
+                        return 1;
+                    }
+                    return RunDistilBertSstGpuInference(tensors);
+                }
                 if (bf16) return benchmark ? BenchmarkDistilBertSst(tensorsBf16, "BFloat16") : RunDistilBertSstBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBertSst(tensorsHalf, "Half") : RunDistilBertSstHalf(tensorsHalf);
                 if (compare) return RunDistilBertSstCompare(tensors);
@@ -1195,6 +1228,188 @@ class Program
         Console.WriteLine("]");
 
         return 0;
+    }
+
+    static int RunDistilBertGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT GPU Inference ===");
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        Console.WriteLine();
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
+
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 4.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        Console.WriteLine($"Input tokens (first 10): [{string.Join(", ", intIds.Take(10))}] (seqLen={intIds.Length})");
+        Console.WriteLine();
+
+        var fwdSw = Stopwatch.StartNew();
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        fwdSw.Stop();
+
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{1 * intIds.Length}, {config.Dim}]");
+        Console.WriteLine($"Output stats: min={TensorPrimitives.Min(result.Hidden.AsSpan()):F6}, max={TensorPrimitives.Max(result.Hidden.AsSpan()):F6}, mean={TensorPrimitives.Average(result.Hidden.AsSpan()):F6}, std={StdDev(result.Hidden):F6}");
+        Console.Write("Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, result.Hidden.Length); i++)
+        {
+            Console.Write($"{result.Hidden[i]:F6}");
+            if (i < Math.Min(10, result.Hidden.Length) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+
+        return 0;
+    }
+
+    static int BenchmarkDistilBertGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT GPU Benchmark ===");
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        Console.WriteLine();
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 4.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the DistilBERT model inference across multiple tokens for benchmarking purposes.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: {intIds.Length}");
+        Console.WriteLine();
+
+        ReportGpuTiming(() => runner.Forward(intIds, attnMask, 1, intIds.Length));
+        return 0;
+    }
+
+    static int RunDistilBertSstGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 GPU Inference ===");
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
+
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        buildSw.Stop();
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = DistilBertSst.CountParameters(tensors);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {DistilBertSst.WeightMb(tensors):F1} MB");
+        Console.WriteLine();
+
+        Console.WriteLine($"Sentences ({DistilBertSst.CompareSentences.Length}):");
+        for (int i = 0; i < DistilBertSst.CompareSentences.Length; i++)
+            Console.WriteLine($"  [{i}] {DistilBertSst.CompareSentences[i]}");
+        Console.WriteLine();
+
+        for (int i = 0; i < DistilBertSst.CompareSentences.Length; i++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, DistilBertSst.CompareSentences[i], maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var sw = Stopwatch.StartNew();
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            sw.Stop();
+            var logits = result.Logits!;
+            var (argMax, probs) = DistilBertSst.Softmax(logits.AsSpan());
+            Console.WriteLine($"  [{i}] {DistilBertSst.Label(argMax),-8} {probs[argMax] * 100,5:F1}%   logits=[{logits[0]:F3}, {logits[1]:F3}]  {sw.ElapsedMilliseconds} ms");
+        }
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int BenchmarkDistilBertSstGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 GPU Benchmark ===");
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new DistilBertGpuRunner(rt, config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = DistilBertSst.CountParameters(tensors);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {DistilBertSst.WeightMb(tensors):F1} MB");
+        Console.WriteLine();
+
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the DistilBERT SST-2 model inference across multiple tokens for benchmarking purposes.";
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: 128");
+        Console.WriteLine();
+
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        ReportGpuTiming(() => runner.Forward(intIds, attnMask, 1, intIds.Length));
+
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        var logits = result.Logits!;
+        var (argMax, probs) = DistilBertSst.Softmax(logits.AsSpan());
+        Console.WriteLine($"Last pass sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static void ReportGpuTiming(Action forward, int warmup = 3, int passes = 10)
+    {
+        Console.WriteLine($"Warmup ({warmup} passes)...");
+        for (int i = 0; i < warmup; i++)
+            forward();
+
+        Console.WriteLine($"Benchmarking ({passes} passes)...");
+        var times = new List<long>();
+        for (int i = 0; i < passes; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            forward();
+            sw.Stop();
+            times.Add(sw.ElapsedMilliseconds);
+        }
+
+        Console.WriteLine($"  Average: {times.Average():F1} ms");
+        Console.WriteLine($"  Min:     {times.Min()} ms");
+        Console.WriteLine($"  Max:     {times.Max()} ms");
+        Console.WriteLine();
     }
 
     static int RunDistilBertSstInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
