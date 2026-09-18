@@ -78,7 +78,9 @@ static class BertGpuKeys
 /// loader weight key set once (GEMM weights pre-transposed [out,in] → Bt [in,out] so C = A·Bt is
 /// plain row-major, per the assessment layout note), then runs the batch forward with every
 /// intermediate resident on the GPU and only the final hidden state / logits read back. Mirrors
-/// the CPU AutoDiff forward exactly: embedding gather (word + position, no token-type), embed
+/// the CPU AutoDiff forward exactly: embedding gather (word + position, plus the token-type
+/// row 0 when the model ships token-type embeddings — BERT-naming — mirroring the CPU
+/// includeTokenTypeEmbedding default), embed
 /// LayerNorm, then per layer q/k/v projections → fused attention (scale, +-inf padding mask, row
 /// softmax) → o-projection → residual + LN1 → fc1 → exact GELU → fc2 → residual + LN2; optional
 /// pre_classifier → ReLU → classifier. One kernel-launch-per-op (no fusion) — correctness first;
@@ -106,6 +108,8 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly MemoryBuffer1D<float, Stride1D.Dense> posEmb;
     readonly MemoryBuffer1D<float, Stride1D.Dense> embLnW;
     readonly MemoryBuffer1D<float, Stride1D.Dense> embLnB;
+    readonly MemoryBuffer1D<float, Stride1D.Dense>? tokenTypeEmb;
+    readonly bool hasTokenType;
     readonly LayerGpuWeights[] layers;
     readonly MemoryBuffer1D<float, Stride1D.Dense>? preW;
     readonly MemoryBuffer1D<float, Stride1D.Dense>? preB;
@@ -170,6 +174,13 @@ public sealed class BertEncoderGpuRunner : IDisposable
         embLnW.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.weight").Data);
         embLnB = Alloc(acc, hiddenDim);
         embLnB.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.bias").Data);
+
+        hasTokenType = tensors.ContainsKey($"{emb}.token_type_embeddings.weight");
+        if (hasTokenType)
+        {
+            tokenTypeEmb = Alloc(acc, 2 * hiddenDim);
+            tokenTypeEmb.CopyFromCPU(Req(tensors, $"{emb}.token_type_embeddings.weight").Data);
+        }
 
         layers = new LayerGpuWeights[numLayers];
         for (int i = 0; i < numLayers; i++)
@@ -256,10 +267,14 @@ public sealed class BertEncoderGpuRunner : IDisposable
 
         var stream = runtime.Stream;
 
-        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row), then embed LN.
+        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row), + token-type row 0 for
+        // models that ship one (BERT-naming; mirrors the CPU includeTokenTypeEmbedding default —
+        // all-zero token-type ids). Then embed LN.
         Gather1D(wordEmb.View, idsBuf.View, x.View, hiddenDim, rows * hiddenDim);
         Gather1D(posEmb.View, posIdsBuf.View, e.View, hiddenDim, rows * hiddenDim);
         Add1D(x.View, e.View, x.View, rows * hiddenDim);
+        if (hasTokenType)
+            Bias1D(x.View, tokenTypeEmb!.View, x.View, rows, hiddenDim);
         LayerNorm1D(x.View, embLnW.View, embLnB.View, x.View, rows, hiddenDim);
 
         for (int i = 0; i < numLayers; i++)
@@ -320,6 +335,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
         posEmb.Dispose();
         embLnW.Dispose();
         embLnB.Dispose();
+        tokenTypeEmb?.Dispose();
         foreach (var layer in layers) layer.Dispose();
         preW?.Dispose();
         preB?.Dispose();
@@ -450,24 +466,24 @@ public sealed class BertEncoderGpuRunner : IDisposable
             BertGpuNaming naming,
             int index)
         {
-            Q = UploadTransposed(acc, tensors, BertGpuKeys.Attention(naming, index, 'q'));
-            K = UploadTransposed(acc, tensors, BertGpuKeys.Attention(naming, index, 'k'));
-            V = UploadTransposed(acc, tensors, BertGpuKeys.Attention(naming, index, 'v'));
-            O = UploadTransposed(acc, tensors, BertGpuKeys.Attention(naming, index, 'o'));
-            W1 = UploadTransposed(acc, tensors, BertGpuKeys.Ffn(naming, index, 1));
-            W2 = UploadTransposed(acc, tensors, BertGpuKeys.Ffn(naming, index, 2));
+            Q = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'q')}.weight");
+            K = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'k')}.weight");
+            V = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'v')}.weight");
+            O = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.weight");
+            W1 = UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.weight");
+            W2 = UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.weight");
 
-            Bq = UploadPlain(acc, tensors, BertGpuKeys.Attention(naming, index, 'q'));
-            Bk = UploadPlain(acc, tensors, BertGpuKeys.Attention(naming, index, 'k'));
-            Bv = UploadPlain(acc, tensors, BertGpuKeys.Attention(naming, index, 'v'));
-            Bo = UploadPlain(acc, tensors, BertGpuKeys.Attention(naming, index, 'o'));
-            B1 = UploadPlain(acc, tensors, BertGpuKeys.Ffn(naming, index, 1));
-            B2 = UploadPlain(acc, tensors, BertGpuKeys.Ffn(naming, index, 2));
+            Bq = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'q')}.bias");
+            Bk = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'k')}.bias");
+            Bv = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'v')}.bias");
+            Bo = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.bias");
+            B1 = UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.bias");
+            B2 = UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.bias");
 
-            Ln1W = UploadPlain(acc, tensors, BertGpuKeys.LayerNorm(naming, index, 1));
-            Ln1B = UploadPlain(acc, tensors, BertGpuKeys.LayerNorm(naming, index, 1));
-            Ln2W = UploadPlain(acc, tensors, BertGpuKeys.LayerNorm(naming, index, 2));
-            Ln2B = UploadPlain(acc, tensors, BertGpuKeys.LayerNorm(naming, index, 2));
+            Ln1W = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.weight");
+            Ln1B = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.bias");
+            Ln2W = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.weight");
+            Ln2B = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.bias");
         }
 
         public void Dispose()
