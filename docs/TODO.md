@@ -1,8 +1,8 @@
 # DistilBERT GPU first scenario — `distilbert --gpu` via ILGPU (branch `khurram/distilbert-gpu`)
 
-Status: **In progress — keystone measured and gated; commit 4 done
-(`349b481`).** Plan committed; assessment committed in
-[docs/DISTILBERT-GPU.md](DISTILBERT-GPU.md) (`cb28485`).
+Status: **Complete — all commits landed and all gates PASSED** (correctness on
+battery, benchmarks on AC power, 2026-09-19). Commit 8 (docs) below; final G2
+review then delete this file.
 
 > Reminder: as each task executes, if you find deferred work or a concern
 > (known limitations, follow-ups, refactors) that is outside the current plan,
@@ -81,8 +81,10 @@ K=768–3072, see DISTILBERT-GPU.md §4.3/§6).
 ## Planned commits (one logical change each)
 
 1. ✅ `docs: add DistilBERT GPU assessment (DISTILBERT-GPU.md)` — **done** (`cb28485`)
-2. `docs: plan DistilBERT GPU first scenario in TODO.md` — this commit
-3. `samples: add ILGPU 1.5.3 references to Nivara.Samples` — `ILGPU` +
+2. ✅ `docs: plan DistilBERT GPU first scenario in TODO.md` — **committed**
+   (`de63a5a`)
+3. ✅ `samples: add ILGPU 1.5.3 references to Nivara.Samples` — **committed**
+   (`87f592e`) — `ILGPU` +
    `ILGPU.Algorithms` (same versions as the probe); restores now pull ILGPU
    transitively for Nivara.Tests / PerformanceTests / GpuProbe / other samples
    (pure-managed, build-harmless; no code change)
@@ -101,27 +103,35 @@ K=768–3072, see DISTILBERT-GPU.md §4.3/§6).
      truth (maxAbs 4.4e-5..1.6e-4 at K=768..3072, tight enough); **Row4 gate
      PASS** 303–379 GMAC/s on all shapes (recorded in DISTILBERT-GPU.md §4.3);
      OpenVINO fallback **not** triggered
-5. `samples: add DistilBERT GPU forward — attention, LayerNorm, GELU, gather` —
+5. ✅ `samples: add DistilBERT GPU forward — attention, LayerNorm, GELU, gather` —
+   **committed** (`c52eea2`):
    `Gpu/AttentionKernels.cs` (fused 12-head score+scale+mask+row-softmax+weighted-V,
    `XMath.Exp`), `Gpu/ElementwiseKernels.cs` (LayerNorm row-reduce, GELU via
    direct port of `GradKernels.Erf` A-S 7.1.26 poly with `XMath.Exp`, bias/residual
    adds, embedding gather), `Gpu/DistilBertGpuRunner.cs` (uploads weights
    (transposed) by the exact `DistilBertLoader` key set, runs the §-inventory
    forward, returns readback `float[]` per stage for gating)
-6. `samples: wire --gpu into distilbert/distilbert_sst + benchmark` —
+6. ✅ `samples: wire --gpu into distilbert/distilbert_sst + benchmark` —
+   **committed** (`736fd79`):
    `Program.cs` gains `--gpu`; `distilbert --gpu` prints output stats + timing;
-   `distilbert --gpu benchmark` (3 warmup + 10 timed); `distilbert_sst --gpu`
-   prints the 8-sentence argmax table; `--precision bf16|fp16` + `--gpu` →
-   clear "GPU is f32-only in this phase" error; CPU modes untouched
-7. `samples: gate GPU forward vs CPU/PyTorch (hidden states, SST-2 argmax)` —
-   same-process CPU reference forward, per-stage diff
-   (`|gpu − cpu| ≤ 1e-3·(1+|cpu|)` on final hidden state + logits — revised
-   from `1e-6 + 1e-5·|cpu|`, see §4.3), SST-2 argmax parity 8/8, and diff vs
-   `last_hidden_state_py.bin` / `compare_distilbert_sst_py.bin` when fixtures
-   exist
+   `distilbert --gpu benchmark` (3 warmup + 10 timed, `ReportGpuTiming` mirror);
+   `distilbert_sst --gpu` prints the 8-sentence argmax table; `--precision bf16|fp16`
+   + `--gpu` → clear "GPU is f32-only in this phase" error; CPU modes untouched;
+   GPU `compare`/`predict` defer to commit 7
+7. ✅ `samples: gate GPU forward vs CPU/PyTorch (hidden states, SST-2 argmax)` —
+   **committed** (`ce19bb3`):
+   `distilbert --gpu compare` runs the same-process CPU reference
+   (`BertEncoder.Forward` path, identical tokenization) vs the GPU runner,
+   per-stage diff (`|gpu − cpu| ≤ 1e-3·(1+|cpu|)` on final hidden state + logits
+   — revised from `1e-6 + 1e-5·|cpu|`, see §4.3), plus diff vs
+   `last_hidden_state_py.bin` when present; `distilbert_sst --gpu compare` = 8
+   sentences logits parity + argmax 8/8 + GPU-vs-PyTorch diff vs
+   `compare_distilbert_sst_py.bin` when present; explicit GATE PASS/FAIL verdict
+   lines — **executed 2026-09-19, both gates PASS** (see Verification below)
 8. `docs: record measured DistilBERT GPU numbers` — update
-   `docs/DISTILBERT-GPU.md` (§4 estimate → measured table) and
-   `samples/NivaraInference/README.md` (GPU rows, `--gpu` usage)
+   `docs/DISTILBERT-GPU.md` (§4 estimate → measured table, §4.4) and
+   `samples/NivaraInference/README.md` (GPU rows, `--gpu` usage) — **committed**
+   (docs commit, this file's sibling in the same change)
 
 ## Verification (each gated step)
 
@@ -130,13 +140,39 @@ K=768–3072, see DISTILBERT-GPU.md §4.3/§6).
   sample-only changes should not affect it, snapshot runs as needed)
 - Tiled-GEMM temp harness: gates + GMAC/s table → recorded in
   `docs/DISTILBERT-GPU.md` before the model kernel set is written
-- `dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu`
-  (weights already at `samples/data/distilbert`) — CPU-parity gate prints PASS
-- `dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu benchmark`
-  — per-forward median ms (target ~10–30 ms vs 185 ms CPU; headline number)
-- `dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu`
-  — 8/8 argmax vs CPU, fixture diff when present
-- CPU regression sanity: `distilbert` (no `--gpu`) timing/numerics unchanged
+- ✅ **Correctness gates PASSED (battery, weights downloaded from HF cache
+  misses — the checkpoints were not pre-provisioned; ~511 MB via `hf download`
+  into `samples/data/distilbert{,_sst}` on 2026-09-19)**:
+  - `distilbert --gpu compare` → **GATE PASS** — hidden [128,768] parity vs CPU
+    `maxAbs 1.53e-5, maxRel 3.24e-6, 0/98304 violations` (tol 1e-3·(1+|r|));
+    `last_hidden_state_py.bin` absent (fixture optional)
+  - `distilbert_sst --gpu compare` → **GATE PASS** — logits parity vs CPU
+    `maxAbs 3.8e-6, maxRel 6.7e-7, 0/16`, argmax **8/8**; vs PyTorch fixture
+    `compare_distilbert_sst_py.bin` `maxAbs 3.3e-6, maxRel 5.8e-7`, argmax
+    **8/8** (CPU's own doc'd bound vs HF is 9.5e-7 — same class)
+  - `distilbert --gpu` → 110–135 ms fwd (battery), stats sane
+  - `distilbert_sst --gpu` → 8 sensible argmax (4 POS / 4 NEG), per-sentence
+    88–163 ms (battery)
+- **Fix during verification** (`5ad36e5`): ILGPU array `CopyFromCPU(T[])`
+  requires `data.Length ≥ view.Length` (fills the whole view) — 128-element
+  payloads into 1024-cap workspace threw `ArgumentOutOfRangeException('data')`.
+  Payload copies now use explicit-length `View.SubView(0, n)` on `runtime.Stream`
+  (ordered with kernel launches); ctor ends with a device sync so default-stream
+  weight uploads are visible to kernel launches
+- ✅ **Perf runs (AC power, 2026-09-19)** — 3 warmup + 10 timed each, same
+  session per row (GPU vs CPU columns recorded together):
+  - `distilbert --gpu benchmark` → **GPU 65.3 ms avg (62–73)** vs CPU `distilbert
+    benchmark` **194.7 ms avg (152–232)** → **~3.0×**
+  - `distilbert_sst --gpu benchmark` → **GPU 64.0 ms avg (61–71)** vs CPU
+    `distilbert_sst benchmark` **166.4 ms avg (134–208)** → **~2.6×**
+  - `--precision bf16|fp16` + `--gpu` rejection verified (clear F32-only
+    message, exit 1)
+  - Numbers recorded in docs/DISTILBERT-GPU.md §4.4 + README; plan §4 estimated
+    ~15–25 ms — the ~65 ms gap is launch/dispatch overhead at 128-row shapes (one
+    kernel per op, ~100 dispatches/forward), not GEMM throughput (flagged follow-up:
+    lazy stream + per-op fusion). Battery reference: ~110–135 ms/forward.
+- ✅ CPU regression sanity: `distilbert` (no `--gpu`) timing/numerics unchanged
+  (194.7 ms avg matches the pre-GPU ~185 ms class; remote HT uses same path)
 
 ## Blast radius
 

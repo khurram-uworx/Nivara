@@ -40,6 +40,15 @@ dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 
+# DistilBERT on the OpenCL iGPU (ILGPU 1.5.3; --gpu is F32-only in this phase —
+# combine with --precision bf16|fp16 to hit the explicit rejection path)
+dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu
+dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu compare     # CPU/PyTorch parity gate
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu          # 8-sentence sentiment table
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu compare  # logits + argmax 8/8 gate
+
 # Narrow-precision inference (half weight memory; see "Narrow-precision inference" below)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
 dotnet run --project samples/NivaraInference -c Release -- distilbert bf16
@@ -213,6 +222,10 @@ The 6-layer, 768-dim pre-trained encoder (the baby-step before the fine-tuned SS
 - **GELU activation** in the FFN intermediate (exact erf)
 - **Weight mapping** from `distilbert.*` SafeTensors keys via `DistilBertLoader.LoadEncoderWeights`
 - **Verification**: `last_hidden_state` matches HuggingFace to `max abs diff 5e-6` (cosine 0.99999988)
+- **GPU (`--gpu`)**: ILGPU/OpenCL iGPU forward, F32-only — `compare` gate PASSED vs the
+  same-process CPU path on the final hidden state: `maxAbs 1.5e-5, maxRel 3.2e-6,
+  0/98304 violations` (bound `|gpu−cpu| ≤ 1e-3·(1+|cpu|)`); benchmark median
+  **~65 ms vs ~195 ms CPU** (~3.0×, AC power; battery throttles the iGPU)
 
 Nivara modules used: `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>` (fused `ReverseGradOperations.MultiHeadAttention`), `ReverseGradOperations.GeluExact`, `ReverseGradOperations.Add`.
 
@@ -229,6 +242,9 @@ The fine-tuned sequence-classification showcase: the base encoder plus a classif
 - **Inference-default path**: `PredictLogits` runs outside any `Grad()` scope, producing leaf logits with no computation-graph overhead
 - **Padded-input contract**: `BertEncoder.ForwardBatched` requires attention-mask tensors of length `batchSize * seqLen`; token IDs are passed as exact `int[]` (see the BFloat16 note) so they survive narrow-precision dtypes, and `PredictLogits` passes the padded `[maxLen]` token ids
 - **Verification**: `compare` matches HuggingFace to `max abs logit diff 9.5e-7`, `argmax agreement 8/8`; the `bf16` mode matches the same reference at `8/8` argmax with a `max abs logit diff ~0.33` (genuine BFloat16 precision)
+- **GPU (`--gpu`)**: F32-only ILGPU/OpenCL forward + head — `compare` gate PASSED vs
+  CPU and the PyTorch fixture: logits `maxRel 6.7e-7` (CPU) / `5.8e-7` (PyTorch),
+  **argmax 8/8** both; benchmark median **~64 ms vs ~166 ms CPU** (~2.6×, AC power)
 
 Nivara modules used: `DistilBertForSequenceClassification<T>` (shared from `Nivara.Samples`), `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>`, `ReverseGradOperations.GeluExact` (encoder FFN), `ReverseGradOperations.Relu` (head), `ReverseGradOperations.Softmax`, `ReverseGradOperations.MatMul`.
 
@@ -778,6 +794,33 @@ PyTorch-vs-Nivara ratio is meaningful.
 | **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 1778 ms | 16792 ms | **~9×** |
 
 *Recorded 2026-09-01 — Intel Core Ultra 7 255H, 16 logical processors, Nivara .NET 11.0.0, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass (3 warmup + 10 timed), except SmolLM which is one 32-token greedy generation (median of 3 runs, both sides same-dtype CPU). SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).*
+
+**GPU (iGPU, `--gpu`)** — same machine, Arc 140T-class iGPU (Intel Graphics) via
+ILGPU 1.5.3 (OpenCL), 3-pass warmup + 10 timed, F32 only. GPU and CPU-Nivara
+columns below were recorded in the **same session** (2026-09-19); the PyTorch
+(CPU) column is the recorded CPU baseline from the table above (2026-09-01) —
+only same-row GPU↔CPU-Nivara ratios are same-session:
+
+| Model | Input | GPU Nivara (iGPU) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU Nivara | vs PyTorch |
+|-------|-------|-------------------|---------------------------|---------------|---------------|------------|
+| **DistilBERT** | 128 tokens | 65.3 ms (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | **~1.9× slower** |
+| **DistilBERT SST-2** | 128 tokens | 64.0 ms (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
+
+The GPU forward is ~3.0×/~2.6× **faster than Nivara CPU** — but still ~1.9×/~1.8×
+**slower than PyTorch CPU**: PyTorch starts far ahead of Nivara-CPU (~5.6× on the
+distilbert row), so the iGPU closes most of that gap without fully beating it.
+Same-row GPU↔CPU-Nivara ratios are same-session; the PyTorch column is the
+recorded 2026-09-01 baseline from the CPU table above (same architecture for
+both rows).
+
+The GPU path is sample-scoped (`--gpu` on `distilbert` / `distilbert_sst` only),
+one launch per op — parity gates PASS vs CPU and the PyTorch fixture (hidden-state
+`maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8), so the ~3× here is a
+correctness-gated speedup. **AC power required**: battery throttles the iGPU —
+every GEMM shape flattens to ~150–160 GMAC/s, and the same benchmark on battery was
+~110–135 ms/forward (vs 62–73 ms on AC). The remaining gap vs a fully fused
+pipeline (see `docs/DISTILBERT-GPU.md` §4.4) is launch overhead at these small
+shapes, not GEMM throughput — per-op launch fusion is the flagged follow-up.
 
 The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
 weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).

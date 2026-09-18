@@ -203,6 +203,49 @@ per forward × ~11 µs launch floor ≈ 0.5–1 ms; upload 255.5 MB ≈ 30–50 
 per-kernel JIT 1.3–3.8 ms once (~10–12 kernels ≈ 20–40 ms once). Steady-state
 per-forward GPU cost is dominated by the GEMMs, exactly as on CPU.
 
+### 4.4 Measured (full model forward — gates PASSED, AC power)
+
+Verified 2026-09-19. Weights were **not** pre-provisioned — the two checkpoints
+(~511 MB) were fetched via `hf download` into `samples/data/distilbert{,_sst}`
+(config.json + model.safetensors + vocab.txt + tokenizer_config.json).
+One launch per op, one stream, one device sync before readbacks; weights
+uploaded once (transposed) at ctor. Same machine as §4.3.
+
+| scenario | GPU Nivara (iGPU, `--gpu`) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU | vs PyTorch |
+|---|---|---|---|---|---|
+| distilbert, 128 tok | **65.3 ms** avg (62–73) | 194.7 ms avg (152–232) | 35 ms | **~3.0× faster** | **~1.9× slower** |
+| distilbert_sst, 128 tok | **64.0 ms** avg (61–71) | 166.4 ms avg (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
+
+(3-pass warmup + 10 timed passes per side, AC power. GPU↔CPU-Nivara columns
+same-session. The iGPU wins against Nivara's own CPU (~3.0×/~2.6×) but stays
+~1.9×/~1.8× behind PyTorch CPU 35 ms — PyTorch starts ~5.6× ahead of Nivara-CPU,
+and the GPU closes most of that gap. PyTorch CPU figures: recorded baseline, §2.1.)
+
+Correctness gates (power-independent):
+- `distilbert --gpu compare`: final hidden [128,768] vs CPU —
+  **maxAbs 1.53e-5, maxRel 3.24e-6, 0/98304 violations** (gate
+  `|gpu−cpu| ≤ 1e-3·(1+|cpu|)`, §6); `last_hidden_state_py.bin` absent (optional
+  fixture).
+- `distilbert_sst --gpu compare`: logits vs CPU — **maxAbs 3.8e-6,
+  maxRel 6.7e-7, 0/16**; vs PyTorch fixture `compare_distilbert_sst_py.bin` —
+  **maxAbs 3.3e-6, maxRel 5.8e-7**; **argmax 8/8** both (CPU's own doc'd bound
+  vs HF is 9.5e-7 — same class).
+- `distilbert --gpu` / `distilbert_sst --gpu`: stats sane; 8 sentences resolve
+  4 POS / 4 NEG at 100% confidence.
+- `--precision bf16|fp16` + `--gpu` → clear "GPU is F32-only in this phase"
+  rejection (exit 1) — verified.
+
+The measured ~65 ms sits above the §4.2 estimate (~15–25 ms). The gap is
+dispatch/launch overhead, **not** GEMM throughput: the correctness-first runner
+issues one launch per op (~100 dispatches/forward, unfused attention and
+elementwise legs), and at these shapes most kernels run far below the §4.3
+Row4 saturation sizes (128-row GEMMs; 1.5k–24k-item elementwise kernels). The
+GEMM legs alone at §4.3 rates ≈ 20–30 ms of the 65; attention +
+elementwise + ~0.4–0.7 ms/dispatch overhead make up the rest. The flagged
+follow-ups (lazy stream, kernel fusion — keep attention partially resident,
+fuse bias/activation/LN chains) should recover most of the gap; the CPU side is
+unchanged (194.7 ms row matches the pre-GPU ~185 ms class).
+
 ## 5. Why ILGPU long term (the strategic read)
 
 From the probe's side-by-side, ILGPU is the strongest *managed* backend:
@@ -283,11 +326,11 @@ the least possible new machinery, using only the numbers already recorded.
 | # | risk | mitigation / gate |
 |---|---|---|
 | 1 | ~~Tiled GEMM underperforms~~ — **RESOLVED 2026-09-19**: Row4 measured 303–379 GMAC/s ≥ 0.3 T MAC/s on all DistilBERT shapes (§4.3) | measured first; OpenVINO fallback not triggered |
-| 2 | `XMath` gap: no erf in ILGPU core/Algorithms (GELU) | implement managed erf poly (CPU `GeluExact`-class) in the sample kernel — verify availability during kernel authoring |
+| 2 | ~~`XMath` gap: no erf in ILGPU core/Algorithms (GELU)~~ — **RESOLVED 2026-09-19**: managed erf poly (direct port of `GradKernels.Erf` A–S 7.1.26) written in-kernel; GELU verified inside hidden-state parity (maxRel 3.2e-6, §4.4) | implement managed erf poly (CPU `GeluExact`-class) in the sample kernel — verify availability during kernel authoring |
 | 3 | Transpose-free layout hurts tiled GEMM coalescing | host-side one-time transpose at upload (255 MB class, ~30–50 ms) |
 | 4 | OpenCL ICD / driver variance | device-select assert (`CL_DEVICE_TYPE_GPU`, no CPU fallback); re-run probe `kernels` gate after driver bumps (seconds) |
-| 5 | Precision drift vs CPU f32 path | per-element `|gpu − cpu| ≤ 1e-3·(1+|cpu|)` on final hidden state + logits (revised from the 1e-6 class — f32 summation-order floor, §4.3); SST-2 argmax 8/8 |
-| 6 | bf16 temptation mid-phase | deferred — f32-only, explicit rejection message (keeps the first E2E diff clean) |
+| 5 | ~~Precision drift vs CPU f32 path~~ — **VERIFIED WITHIN BOUND 2026-09-19**: final hidden maxRel 3.2e-6, logits maxRel 6.7e-7 (CPU) / 5.8e-7 (PyTorch), argmax 8/8 — comfortably inside the 1e-3 bound (§4.4) | per-element `|gpu − cpu| ≤ 1e-3·(1+|cpu|)` on final hidden state + logits (revised from the 1e-6 class — f32 summation-order floor, §4.3); SST-2 argmax 8/8 |
+| 6 | ~~bf16 temptation mid-phase~~ — **GUARD IN PLACE 2026-09-19**: `--precision bf16|fp16` + `--gpu` rejects with a clear "GPU is F32-only in this phase" message (exit 1, verified) | deferred — f32-only, explicit rejection message (keeps the first E2E diff clean) |
 
 ## 9. References
 
