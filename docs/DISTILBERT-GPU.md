@@ -148,8 +148,23 @@ Prioritized for the next iterations of the GPU journey (see also
    GEMM regression harness).
 3. **Transpose-free in-kernel GEMM** — dropped for first-cut correctness; worth
    revisiting if upload time ever matters (it doesn't here — shared DRAM).
-4. **bf16/fp16 GPU** — later decision; ILGPU 1.5.3 has no native BF16 (proven
-   unmerged packed-widen path only). The F32-only reject keeps the door clean.
+4. **bf16/fp16 GPU** — later decision; neither precision gets **native** support
+   in ILGPU 1.5.3, so F32 stays the GPU path until a promotion-phase decision
+   (possibly re-evaluating the backend for that model class):
+   - **BF16: no native type or kernels at all.** The only proven route is the
+     "unmerged packed-widen" trick — pack two BF16 values per 32-bit slot, widen
+     to FP32 on load, compute in FP32, pack back. That pays FP32-class compute
+     plus pack/unpack overhead, negating most of BF16's memory/bandwidth win.
+   - **FP16 (`Half`): software-emulated only.** ILGPU ships a `Half` kernel type
+     but its arithmetic is emulated scalar math — there are **no native
+     vectorized FP16 kernels**. Real hardware FP16 in OpenCL requires the
+     `cl_khr_fp16` extension (device/context-gated), which ILGPU's OpenCL path
+     does not drive for you, so no hardware-FP16 performance is reachable either.
+   - For contrast: OpenVINO's bf16 gemm probe row (86.8 µs, ~5.9 T MAC/s) is
+     genuinely native — it sits on Xe2 **DPAS BF16** hardware instructions that
+     ILGPU 1.5.3 cannot reach.
+   The F32-only reject (`--gpu` + `--precision bf16|fp16` → clear error) keeps
+   the door clean until that decision.
 5. **Second model**: MiniLM (same encoder shape class, already in the sample
    inventory) or SmolLM once KV-cached decode exists (see SMOLLM-GPU.md).
 6. **Promotion decision**: with real measured numbers in hand, decide whether
