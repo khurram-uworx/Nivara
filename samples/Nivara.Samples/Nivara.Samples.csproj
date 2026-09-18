@@ -12,6 +12,12 @@
     <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0-preview.26457.2" />
     <PackageReference Include="Streamix" Version="1.2.3" />
+    <!-- DistilBERT gpu inference (phase 1): ILGPU is the chosen long-term GPU
+         backend; pure-managed C# to OpenCL JIT, no native deps.
+         ILGPU.Algorithms supplies XMath math (Exp for softmax/erf). Same
+         snapshot pin as tests/Nivara.GpuProbe (docs/ILGPU.md). -->
+    <PackageReference Include="ILGPU" Version="1.5.3" />
+    <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
   </ItemGroup>
 
   <ItemGroup>
