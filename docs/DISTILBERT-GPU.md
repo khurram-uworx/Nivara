@@ -1,350 +1,183 @@
-# DistilBERT on GPU — assessment before the first end-to-end sample scenario
+# DistilBERT on GPU — first ILGPU model: implementation reflection
 
-Status: **Assessment only — no code.** Decision record for the first GPU
-end-to-end scenario in `samples/NivaraInference`: `distilbert --gpu` (F32 via
-ILGPU). Follows the probe verdicts in [docs/ILGPU.md](ILGPU.md) and the
-SmolLM GPU investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)); supersedes the
-SmolLM-first plan for the *first* scenario (see "Why DistilBERT first").
+Status: **Implemented, gated, and measured** (2026-09-19, PR #436). This is a
+**reflection/documentation** of what we built and what we learned while adding
+the first end-to-end GPU model support through ILGPU — it is *not* a usage guide
+(that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md))
+and *not* the forward-looking roadmap (that lives in
+[ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md)). Historical assessment content
+before implementation was rewritten away; only the durable facts and lessons
+remain.
 
-## TL;DR
+Related: probe verdicts in [docs/ILGPU.md](ILGPU.md), the SmolLM GPU
+investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)).
 
-- **ILGPU is the right long-term backend bet** for Nivara: pure-managed C#→OpenCL
-  JIT, `dotnet restore` is the whole install, kernels are the same language as
-  the host, 3/3 correctness gates PASS on this exact machine (Intel Core Ultra 7
-  255H / Arc 140T), and it is the fastest GPU leg measured on elementwise
-  (`silu` 6.9 µs, ~5–14× CPU) with a gemv within 1.5× of OpenVINO's *tuned*
-  gemm using a deliberately naive shape.
-- **DistilBERT is the right first scenario**: single encoder forward pass, no KV
-  cache, no greedy decode loop, F32 weights already on disk (255.5 MB), a
-  PyTorch CPU baseline (35 ms) and Nivara CPU baseline (185 ms) already
-  recorded, and an existing PyTorch compare fixture (`last_hidden_state_py.bin`)
-  to gate against. SmolLM is a farther target: it needs cache-free→KV-cached
-  decode work first and its generation loop compounds per-token error.
-- **The probe's gemv win does not transfer to DistilBERT's GEMM shapes as-is.**
-  DistilBERT is dominated by batch-128 GEMMs (`[128,768]·[768,3072]`-class). A
-  naive one-thread-per-row GEMM at the probe's measured 6.6 GMAC/s would run
-  **slower than CPU (~825 ms)**. A tiled/shared-memory GEMM is the open lever and
-  the first kernel to build + measure; the estimate below (5–15 ms matmul
-  portion) is a target, not yet a measurement.
-- **Scope of the sample phase**: add `ILGPU 1.5.3` reference in
-  `samples/Nivara.Samples` *only*. No `src/Nivara`, no `Nivara.Extensions`, no
-  `src/Nivara.Gpu` project. F32-only (`--precision` ignored/rejected with a
-  clear message until narrow GPU is a later decision). Final library design
-  postponed to after the first measured E2E numbers.
+## 1. Result — gated and measured
 
----
+First end-to-end GPU sample scenario: `distilbert --gpu` / `distilbert_sst --gpu`,
+F32-only, OpenCL iGPU via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
+`Nivara.Extensions`, or `src/Nivara.Gpu` changes). 128 tokens, 3-pass warmup +
+10 timed, AC power (GPU↔CPU-Nivara same-session; PyTorch = recorded CPU baseline):
 
-## 1. Why DistilBERT first (not SmolLM)
-
-| dimension | DistilBERT (encoder) | SmolLM (causal LM) |
-|---|---|---|
-| forward shape | one `[128,768]` pass through 6 layers + head | greedy loop; currently **cache-free** re-forward of the whole growing sequence per token (`model.Forward(sequence)` per token) |
-| KV cache | none (bidirectional) | needs cache-free → KV-cached decode first (the Qwen work exists but is not in the SmolLM path) |
-| precision story | F32 on disk; bf16/fp16 are load-time truncations, all 8/8 argmax | BF16-native on disk; native BF16 GPU needs ILGPU's **unmerged** packed-widen path (no native BF16 kernels in 1.5.3) |
-| E2E numbers available | **yes** — PyTorch 35 ms vs Nivara 185 ms (128 tok), SST-2 184 ms, compare fixture + logit diffs | yes, but decode-loop semantics muddy a kernel comparison |
-| correctness gate | hidden states vs `last_hidden_state_py.bin` (max abs diff 5e-6, cosine 0.99999988 today); SST-2 argmax 8/8 | 32-token greedy argmax agreement (25/32 F32, "numeric precision diff" class) |
-
-The user-facing goal of the first scenario is a *clean* GPU-vs-CPU number and a
-verifiable, impactful demo (SST-2 sentiment REPL at interactive latency). That is
-DistilBERT. SmolLM stays the follow-up generative target once a KV cache exists.
-
-## 2. What we already know (the numbers we have)
-
-### 2.1 CPU baselines — same machine class as the probe
-
-From `samples/NivaraInference/README.md` (Intel Core Ultra 7 255H, .NET 11,
-Release, recorded 2026-09-01; probe host is the same Arrow Lake-H iGPU class):
-
-| model / input | PyTorch (CPU) | Nivara (CPU) | slowdown |
-|---|---|---|---|
-| MiniLM-L6, 128 tok | 11 ms | 64 ms | ~6× |
-| **DistilBERT, 128 tok** | **35 ms** | **185 ms** | **~5×** |
-| **DistilBERT SST-2, 128 tok** | 35 ms (same arch) | **184 ms** | ~5× |
-
-Precision ground truth (vs F32 HF reference, CPU): SST-2 argmax **8/8** for F32 /
-BFloat16 / Half; max abs logit diff ~1e-6 / ~0.33 / ~0.22. Encoder hidden states
-match HF to max abs diff 5e-6. These are the fidelities the GPU path must preserve
-(with f32-first, the expectation is CPU-parity numbers, i.e. ~1e-6-class diffs).
-
-### 2.2 ILGPU probe micro-kernels — same machine (Arc 140T, ILGPU 1.5.3)
-
-From [docs/ILGPU.md](ILGPU.md) / `tests/Nivara.GpuProbe` (steady state = 1
-warmup + best-of-25, persistent buffers; production Nivara kernels as gold):
-
-| kernel | shape | ILGPU | CPU Nivara | margin |
-|---|---|---|---|---|
-| `dot16` | K=16 | 11.4 µs | 1.2–4.8 µs | launch-bound — **CPU wins** (floor for any GPU dispatch) |
-| `silu` | 576 | **6.9 µs** | 29–99 µs | ~5–14× (fastest GPU leg) |
-| `gemv` | 1536×576 | **133.4 µs** | 2291–4745 µs | ~17–35× (one thread per row, naive) |
-
-Setup, one-time: accelerator creation + first sync ~9 ms; per-kernel JIT
-~1.3–3.8 ms. Correctness: all three kernels gate PASS against production Nivara
-within `|gpu − cpu| ≤ 1e-6 + 1e-5·|cpu|` (dot16 0.0 ULP, worst 4.0 ULP).
-
-The gemv figure is the only ILGPU matmul measurement that exists. Rate implied:
-1536×576 dots = 884 736 MAC in 133.4 µs ≈ **6.6 GMAC/s** (naive shape; compare
-OpenVINO's *tuned* gemm bf16 at 86.8 µs on the same shape ≈ 5.9 T MAC/s — two to
-three orders of magnitude apart for the same hardware).
-
-## 3. DistilBERT F32 work inventory (what the GPU must run)
-
-Config: `dim=768`, `n_layers=6`, `n_heads=12` (head 64), FFN 3072, seqLen 128,
-batch 1. Per layer, the matmul rows (base `distilbert` = `BertEncoder`; SST-2
-adds a `[1,768]`-class head):
-
-| kernel | shape | MACs | share of layer matmuls |
-|---|---|---|---|
-| `q_lin` / `k_lin` / `v_lin` / `out_lin` | `[128,768]·[768,768]` ×4 | 4 × 75.5M = 302M | 33% |
-| attention core (QKᵀ, softmax, ·V) | 12 heads × `[128,64]·[64,128]` + `[128,128]·[128,64]` | ~25M | ~3% |
-| `ffn.lin1` | `[128,768]·[768,3072]` | 302M | 33% |
-| `ffn.lin2` | `[128,3072]·[3072,768]` | 302M | 33% |
-| LayerNorm ×2, GELU(erf), bias adds | elementwise/row-reduce over 768/3072 | — | — |
-
-6 layers ≈ **5.44 GMAC matmul + ~0.15 GMAC attention** ≈ **~5.6 GMAC**, plus
-embeddings (two gathers, no matmul — `[30522,768]`/`[512,768]` tables) and the
-small head. CPU Nivara runs this in ~185 ms → effective ~30 GMAC/s (≈60 GFLOPS),
-so **the CPU is already running the GEMMs near the naive-GPU rate** — that is the
-whole point of tiling.
-
-Weight footprint: 66.9M params F32 = **255.5 MB**. iGPU shares system DRAM with
-the CPU, so device upload is a memcpy-class one-time cost (~30–50 ms at
-5–10 GB/s), not a PCIe bottleneck. The iGPU also shares bandwidth/l3 with the
-CPU — the E2E win comes from *compute* (128 EU), not bandwidth.
-
-GPU kernel set needed (all expressible in ILGPU C#):
-1. **Tiled GEMM** (the keystone; see §4) — one kernel parameterized by
-   `aRows/aCols/bCols` covers q/k/v/o, lin1, lin2, and the head.
-2. **Attention core** — per-head QKᵀ (or the 12-head batched form), fused
-   scale+mask+row-softmax (the CPU `AttentionKernels<T>` pattern), ·V, O-scatter.
-   Needs `XMath.Exp` (ILGPU.Algorithms, already proven).
-3. **Row reductions / LayerNorm** (mean+var over 768 per row) and **GELU(erf)**
-   elementwise (erf needs a poly/rational approximation or `XMath` — ILGPU core
-   has no erf; `ILGPU.Algorithms` provides distributions/`XMath`; erf can be
-   built from `XMath.Tanh`-class primitives or a table poly — verify availability
-   in 1.5.3 during implementation; fallback: load `System.Math`-free managed erf
-   poly, same precision class as CPU `GeluExact`).
-4. **Bias adds + residual adds** — elementwise, trivial.
-5. **Embedding gather** — index `[30522,768]`/`[512,768]` tables; either a gather
-   kernel or host-side copy (tables are 118 MB; upload once, gather on device).
-
-Layout: Nivara weights are stored row-major `[out, in]` and the CPU path is
-transpose-free (`MatMulTransposedB` reads `B[c, k]`). On the GPU the simplest
-correct first cut is a **one-time host-side transpose at upload** so the GEMM
-consumes plain row-major operands; a transpose-free in-kernel variant is a
-follow-up optimization. First-cut correctness >> first-cut layout cleverness.
-
-## 4. Expected impact — honest estimate, not measurement
-
-### 4.1 The naive shape loses
-
-At the probe's measured naive rate (6.6 GMAC/s), DistilBERT's 5.44 GMAC would
-take **~825 ms** of pure matmul — ~4.5× *slower* than CPU. The probe gemv shape
-(one thread per 576-length row dot) is memory-latency-bound, not compute-bound,
-and does not generalize to batch-128 GEMMs. **A tiled GEMM is a requirement,
-not an optimization.**
-
-### 4.2 A realistic tiled-GEMM range (target, to be measured)
-
-Arc 140T = 128 EU. F32 FMA-class theoretical peak on this iGPU is ~4 T MAC/s
-(order-of-magnitude; Xe2 DPAS gives BF16 ~2× that for the OpenVINO bf16 gemm
-row). A competent ILGPU tiled GEMM (work-group tiling, local-memory staging,
-vectorized FMA loop) typically lands at 15–40% of peak → **0.6–1.6 T MAC/s** →
-
-| scenario | matmul time (5.44 GMAC) | E2E (with attention/LN/GELU/readback) |
-|---|---|---|
-| CPU Nivara today | ~170–180 ms | **185 ms** |
-| naive GPU (measured rate, 6.6 GMAC/s) | ~825 ms | ~900 ms — **loses** |
-| tiled GPU, conservative 0.6 T MAC/s | ~9 ms | ~15–25 ms |
-| tiled GPU, good 1.6 T MAC/s | ~3.4 ms | ~8–15 ms |
-
-vs **PyTorch CPU 35 ms**: even the conservative tiled case is a clear win; the
-SST-2 REPL (8 sentences, 184 ms each → 1.5 s today) would drop to ~100–200 ms
-for all eight — interactive. **Decision gate**: build the tiled GEMM first,
-measure it on the Arc 140T before writing the rest of the kernel set. If it
-lands below ~0.3 T MAC/s, step back and re-evaluate against the proven
-OpenVINO path (closed tuned runtime) before committing the full model kernel
-set.
-
-### 4.3 Measured (keystone gate — PASSED, AC power)
-
-Measured 2026-09-19 on AC power. `Row4` = register-blocked 1×4 GEMM (each
-thread owns 4 accumulators sharing one A-tile load; per-output-column
-accumulation order unchanged → bit-identical results to the 1×1 kernel).
-
-| shape | 1×1 (OneToOne) | 1×4 (Row4) | gate (≥ 0.3 T MAC/s) |
-|---|---|---|---|
-| q/k/v/o `[128,768]·[768,768]` | 174 GMAC/s | **303 GMAC/s** | **PASS** |
-| lin1 `[128,768]·[768,3072]` | 203 GMAC/s | **321 GMAC/s** | **PASS** |
-| lin2 `[128,3072]·[3072,768]` | 185 GMAC/s | **318 GMAC/s** | **PASS** |
-| square `[1024,1024]·[1024,1024]` | 257 GMAC/s | **379 GMAC/s** | **PASS** |
-
-All four shapes clear the ~0.3 T MAC/s decision gate. Correctness gate vs the
-double-precision naive truth: maxAbs 4.4e-5 at K=768 … 1.55e-4 at K=3072 —
-the f32 summation-order floor (two different reduction orders, both valid),
-not a layout artifact. GEMM-only extrapolation at the Row4 rate: ~5.8 ms per
-layer → ~35 ms across 6 layers (attention/elementwise/readback excluded; final
-E2E recorded when the model forward is gated). The 303→379 GMAC/s spread
-across shapes is occupancy/register-pressure headroom for a future 2×2 or
-tile-32 pass — deliberately deferred.
-
-Two measurement findings worth recording:
-
-- **Battery throttles the iGPU hard**: on battery every shape flattened to
-  ~150–160 GMAC/s regardless of size; on AC the 1×1 square jumped 141 → 256
-  GMAC/s. This finally explains the probe's flat gemv class of numbers — perf
-  measurements on this machine require AC power.
-- A Row4 `colBase` bug surfaced during measurement (global thread-Y used
-  instead of the group index → garbage maxAbs ~40–77) and was fixed; it also
-  justifies keeping the double-precision-truth bounds check in any future
-  GEMM regression gate.
-
-Fixed-cost budget (fine at any plausible tiled-GEMM number): ~40–50 dispatches
-per forward × ~11 µs launch floor ≈ 0.5–1 ms; upload 255.5 MB ≈ 30–50 ms once;
-per-kernel JIT 1.3–3.8 ms once (~10–12 kernels ≈ 20–40 ms once). Steady-state
-per-forward GPU cost is dominated by the GEMMs, exactly as on CPU.
-
-### 4.4 Measured (full model forward — gates PASSED, AC power)
-
-Verified 2026-09-19. Weights were **not** pre-provisioned — the two checkpoints
-(~511 MB) were fetched via `hf download` into `samples/data/distilbert{,_sst}`
-(config.json + model.safetensors + vocab.txt + tokenizer_config.json).
-One launch per op, one stream, one device sync before readbacks; weights
-uploaded once (transposed) at ctor. Same machine as §4.3.
-
-| scenario | GPU Nivara (iGPU, `--gpu`) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU | vs PyTorch |
+| scenario | Nivara GPU (iGPU) | Nivara CPU | PyTorch CPU | vs Nivara CPU | vs PyTorch |
 |---|---|---|---|---|---|
-| distilbert, 128 tok | **65.3 ms** avg (62–73) | 194.7 ms avg (152–232) | 35 ms | **~3.0× faster** | **~1.9× slower** |
-| distilbert_sst, 128 tok | **64.0 ms** avg (61–71) | 166.4 ms avg (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
+| distilbert | **65.3 ms** (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | ~1.9× slower |
+| distilbert_sst | **64.0 ms** (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | ~1.8× slower |
 
-(3-pass warmup + 10 timed passes per side, AC power. GPU↔CPU-Nivara columns
-same-session. The iGPU wins against Nivara's own CPU (~3.0×/~2.6×) but stays
-~1.9×/~1.8× behind PyTorch CPU 35 ms — PyTorch starts ~5.6× ahead of Nivara-CPU,
-and the GPU closes most of that gap. PyTorch CPU figures: recorded baseline, §2.1.)
+Correctness gates — **all PASS**:
+- `distilbert --gpu compare`: final hidden `[128,768]` vs same-process CPU —
+  maxAbs 1.53e-5, maxRel 3.24e-6, **0/98304 violations**
+  (bound `|gpu−cpu| ≤ 1e-3·(1+|cpu|)`).
+- `distilbert_sst --gpu compare`: logits vs CPU maxRel 6.7e-7, vs PyTorch
+  fixture maxRel 5.8e-7, **argmax 8/8** both (CPU's own doc'd bound vs HF is
+  9.5e-7 — same class).
+- `--precision bf16|fp16` + `--gpu` → clear F32-only rejection (exit 1).
 
-Correctness gates (power-independent):
-- `distilbert --gpu compare`: final hidden [128,768] vs CPU —
-  **maxAbs 1.53e-5, maxRel 3.24e-6, 0/98304 violations** (gate
-  `|gpu−cpu| ≤ 1e-3·(1+|cpu|)`, §6); `last_hidden_state_py.bin` absent (optional
-  fixture).
-- `distilbert_sst --gpu compare`: logits vs CPU — **maxAbs 3.8e-6,
-  maxRel 6.7e-7, 0/16**; vs PyTorch fixture `compare_distilbert_sst_py.bin` —
-  **maxAbs 3.3e-6, maxRel 5.8e-7**; **argmax 8/8** both (CPU's own doc'd bound
-  vs HF is 9.5e-7 — same class).
-- `distilbert --gpu` / `distilbert_sst --gpu`: stats sane; 8 sentences resolve
-  4 POS / 4 NEG at 100% confidence.
-- `--precision bf16|fp16` + `--gpu` → clear "GPU is F32-only in this phase"
-  rejection (exit 1) — verified.
+## 2. What shipped — architecture and decisions
 
-The measured ~65 ms sits above the §4.2 estimate (~15–25 ms). The gap is
-dispatch/launch overhead, **not** GEMM throughput: the correctness-first runner
-issues one launch per op (~100 dispatches/forward, unfused attention and
-elementwise legs), and at these shapes most kernels run far below the §4.3
-Row4 saturation sizes (128-row GEMMs; 1.5k–24k-item elementwise kernels). The
-GEMM legs alone at §4.3 rates ≈ 20–30 ms of the 65; attention +
-elementwise + ~0.4–0.7 ms/dispatch overhead make up the rest. The flagged
-follow-ups (lazy stream, kernel fusion — keep attention partially resident,
-fuse bias/activation/LN chains) should recover most of the gap; the CPU side is
-unchanged (194.7 ms row matches the pre-GPU ~185 ms class).
+All GPU code lives in `samples/Nivara.Samples/Gpu/`:
 
-## 5. Why ILGPU long term (the strategic read)
+| file | contents |
+|---|---|
+| `IlgpuRuntime.cs` | context/accelerator/stream lifecycle; device select (`CL_DEVICE_TYPE_GPU` + Intel vendor, **asserted — no CPU fallback**); persistent buffer upload/download helpers |
+| `GemmKernels.cs` | **Row4** register-blocked 1×4 tiled GEMM (local-memory staging, `TiledGemmKernelRow4`) — the keystone; used for every matmul (q/k/v/o, lin1, lin2, head) |
+| `AttentionKernels.cs` | fused 12-head score+scale+mask+row-softmax+weighted-V (`XMath.Exp`) |
+| `ElementwiseKernels.cs` | LayerNorm row-reduce, GELU (direct A–S 7.1.26 erf poly port of `GradKernels.Erf`, `XMath.Exp`), bias/residual adds, embedding gather |
+| `DistilBertGpuRunner.cs` | uploads weights (transposed once at ctor) by the exact `DistilBertLoader` key set; runs the full forward + SST-2 head; returns per-stage readbacks for gating |
 
-From the probe's side-by-side, ILGPU is the strongest *managed* backend:
+Design decisions (deliberate, and worth keeping for the next model):
+- **Correctness-first runner**: one kernel launch per operation, everything on
+  one stream, one device sync before readbacks. Fusion/stream tricks were
+  deliberately deferred — the first milestone had to be trivially verifiable.
+- **Weights transposed once at upload** so the GEMM consumes plain row-major
+  operands (first-cut correctness over layout cleverness, as the assessment said).
+- **Persistent cap-sized workspace** with `Ensure`-only growth; payload copies
+  (mask/ids/posIds/clsIds) go through explicit-length `View.SubView(0, n)` —
+  see the `CopyFromCPU` lesson below.
+- **Attention mask semantics copied exactly from CPU**: per-batch column-j
+  `−inf` when `mask[b][j] < 0.5`, identical across query rows.
+- **Gate discipline**: hidden states + logits vs same-process CPU forward
+  (identical tokenization) with the per-element bound above; SST-2 argmax 8/8;
+  explicit GATE PASS/FAIL verdicts. Weights were **not** pre-provisioned —
+  provisioned via `hf download` (`samples/data/distilbert{,_sst}`, ~511 MB,
+  now part of the README quick start).
 
-- **Delivery**: NuGet `ILGPU 1.5.3` + `ILGPU.Algorithms 1.5.3` (NCSA, pure C#);
-  in-box Windows `OpenCL.dll` ICD + Intel driver — no SDK, no toolchain, no
-  native install. This is the only backend where adding a package reference
-  *is* the whole story.
-- **Correctness**: 3/3 gates PASS on the real iGPU with no CPU fallback — the
-  IGC question is answered (compiler-produced OpenCL C runs correctly; only
-  hand-authored SPIR-V breaks).
-- **Kernel ergonomics**: kernels are the same language as the rest of Nivara
-  (C# static methods, `Index1D`, high-level launchers, no boxing) — the natural
-  long-term substrate for a managed `src/Nivara.Gpu` without introducing a shader
-  language into the codebase.
-- **Measured strengths**: fastest GPU leg on silu (elementwise/activation class);
-  gemv within 1.5× of OpenVINO's *tuned* gemm with a deliberately naive shape —
-  i.e. the tiling lever is still mostly unused.
-- **Honest gaps / watch items**: no native BF16 in 1.5.3 (packed-widen path is
-  proven but non-trivial); OpenCL ICD must exist at runtime; two moving
-  compilers (ILGPU JIT + IGC frontend) — re-run `kernels` after every driver
-  bump; gemv *tuned* still trails OpenVINO today.
+## 3. What we learned using ILGPU (for the next model)
 
-ComputeSharp (DXIL/D3D12) is the complementary managed option — same ergonomics
-story, different driver stack — and remains the fallback/alternative if the
-OpenCL ICD story ever regresses. The sample phase can be ILGPU-only; it costs
-nothing to keep that door open.
+These are the durable, non-obvious lessons from implementing the first model:
 
-## 6. First end-to-end scenario spec (the sample-phase deliverable)
+1. **`ArrayView.CopyFromCPU<T>(T[])` fills the *whole* view** — its guard is
+   `data.Length ≥ view.Length` and it throws `ArgumentOutOfRangeException('data')`
+   if your payload is shorter than the buffer. Copying a 128-element payload into
+   a 1024-cap persistent buffer crashed the first gate run. Fix: copy into an
+   explicit-length `View.SubView(0, n)`. There is no "copy prefix" overload.
+2. **Stream ordering is your responsibility.** Buffer-level `CopyFromCPU` uses
+   the default stream; kernels run on your own stream. Route *all* payload copies
+   through the kernel stream, and add a device sync after bulk ctor uploads, or
+   the uploads may not be visible to kernel launches. (This bit us; it also
+   silently would have produced flaky results.)
+3. **Launch/dispatch overhead dominates at inference shapes.** ~100 dispatches
+   per forward, ~0.4–0.7 ms each end-to-end at 128-row shapes. The GEMM legs
+   alone match the Row4 extrapolation (~20–30 ms of the 65 ms); the rest is
+   per-launch overhead on small kernels. **Fusion + a lazy stream are the next
+   lever, not GEMM work.**
+4. **A tiled GEMM is a requirement, not an optimization**: the probe's naive
+   gemv rate (6.6 GMAC/s) would take ~825 ms for DistilBERT's matmuls. Row4
+   (1 thread owns 4 accumulators, one shared A-tile load) hit **303–379 GMAC/s**
+   on all DistilBERT shapes, keeping the per-output-column accumulation order
+   unchanged → bit-identical results to the 1×1 kernel, which kept parity simple.
+5. **Double-precision-truth GEMM gates catch real bugs.** A Row4 `colBase` bug
+   (global thread-Y instead of group index) produced maxAbs ~40–77 and was
+   caught by the bounds check. This is why issue #435 (a lasting GEMM
+   correctness+perf harness) is worth doing.
+6. **f32 parity between different summation orders has a floor.** Two valid
+   reduction orders disagree at ~4.4e-5…1.6e-4 (K=768…3072), so a `1e-6`-class
+   gate is impossible — the `1e-3·(1+|x|)` bound is right, and real bugs still
+   produce ~40-class outliers that trip it. Measured hidden maxAbs 1.5e-5 is the
+   summation-order floor, not a kernel defect.
+7. **`XMath` has no `erf`** — GELU needs an in-kernel polynomial. The direct
+   A–S 7.1.26 port with `XMath.Exp` matched CPU `GeluExact` inside hidden-state
+   parity (maxRel 3.2e-6); no `XMath.Tanh`-based approximation needed.
+8. **Battery throttles the iGPU flat** — every shape drops to ~150–160 GMAC/s
+   regardless of size (this finally explained the probe's flat gemv class). **All
+   GPU perf claims require AC power.**
+9. **ILGPU deployment is the whole story**: NuGet package = entire install,
+   in-box Windows `OpenCL.dll` + Intel ICD; kernels are C# static methods.
+   Assert `CL_DEVICE_TYPE_GPU` (no silent CPU fallback) and re-run the gates
+   after every driver bump (two compilers in the path: ILGPU JIT + IGC).
+10. **iGPU shares DRAM** — the 255.5 MB weight upload is memcpy-class (not a
+    PCIe bottleneck); transposing once at upload costs nothing and buys GEMM
+    coalescing.
+11. **Workspace hygiene**: allocate cap buffers once and reuse (`Ensure` only
+    grows); integer payloads need an explicit integer-buffer alloc. Readbacks
+    via `GetAsArray()` return the full cap — always slice by payload length.
+12. **Same-process CPU reference beats fixture-only gating**: the compare mode
+    (identical tokenization, `BertEncoder.Forward` vs the GPU runner in one
+    process) caught everything the fixture couldn't (fixtures may be absent).
 
-Goal: a real, measurable, gated GPU forward of DistilBERT on the Arc 140T with
-the least possible new machinery, using only the numbers already recorded.
+## 4. Where reality diverged from the pre-implementation estimate
 
-1. **`samples/Nivara.Samples` gains the ILGPU references** (the only package
-   change this phase): `ILGPU 1.5.3`, `ILGPU.Algorithms 1.5.3`. No `src/Nivara`
-   or `Nivara.Extensions` edits; no new project.
-2. **`distilbert --gpu`** (and **`distilbert_sst --gpu`**) in `NivaraInference`:
-   - **F32-only**; `--precision bf16|fp16` with `--gpu` is rejected with a clear
-     "GPU is f32-only in this phase" message (no precision confusion; bf16 GPU is
-     a later decision because ILGPU 1.5.3 has no native BF16).
-   - Load the existing `float[]` tensors (no load-path change), transpose weights
-     once at upload into persistent ILGPU buffers (iGPU shared memory ⇒ upload is
-     memcpy-class).
-   - Run the §3 kernel set: tiled GEMM, attention core, LayerNorm, GELU(erf),
-     bias/residual adds, embedding gather.
-   - **Readback + gate**: hidden states vs the CPU path and the PyTorch fixture
-     (`last_hidden_state_py.bin`, today's CPU max abs diff 5e-6). **Gate
-     contract** (revised from the probe's `1e-6 + 1e-5·|cpu|` — two genuinely
-     different f32 summation orders cannot meet that; measured GEMM maxAbs vs
-     double truth is 4.4e-5..1.6e-4 at K=768..3072, §4.3): per-element
-     `|gpu − cpu| ≤ 1e-3·(1 + |cpu|)` on the final hidden state and logits
-     (a real bug produces ~40-class outliers, so this bound still catches
-     broken kernels), plus SST-2 argmax parity 8/8.
-   - `benchmark` mode: `--gpu` reports per-forward GPU median (existing
-     `benchmark` plumbing) → the headline **GPU vs CPU (185 ms) vs PyTorch
-     (35 ms)** number.
-3. **Keep the sample-scoped convention**: all GPU orchestration lives in
-   `samples/Nivara.Samples` (like `Gpt2BpeTokenizer`, `LlamaLoader`,
-   `DistilBertLoader`) gated by a `UseGpu` flag / `GpuRunner<T>`-style sample
-   helper — nothing public in core, no `src/Nivara.Gpu` yet. If the numbers
-   justify it, the *next* phase decides the promotion (which backend, which
-   project, bf16, which models).
+Honest delta between the assessment's expectations and the measured outcome:
 
-## 7. Scope / non-goals for the sample phase
+- **E2E landed at ~65 ms vs the estimated ~15–25 ms.** The GEMM extrapolation
+  was right (Row4 rates × 5.44 GMAC ≈ 20–30 ms); the miss was the *unmeasured
+  portion* — attention + elementwise legs **plus ~0.4–0.7 ms per launch × ~100
+  dispatches**. Lesson: on small-shape inference, launch cost is a first-class
+  budget line, not a footnote. Fusion (M2) targets exactly this.
+- **The "clear win vs PyTorch CPU 35 ms" did not materialize.** The iGPU is
+  ~1.9× *behind* PyTorch's MKL-backed CPU path here (PyTorch starts ~5.6× ahead
+  of Nivara-CPU). We still won ~3.0× over our own CPU, which was the scenario's
+  actual goal — but the assessment's PyTorch-vs-GPU framing was optimistic for
+  a 128-EU iGPU.
+- **The keystone GEMM decision gate held exactly as designed**: Row4 measured
+  303–379 GMAC/s (inside the 0.6–1.6 T MAC/s *good* window) and the OpenVINO
+  fallback was never needed.
 
-- **No** `src/Nivara` changes (no GPU branches in `GradKernels` /
-  `LlamaFusedKernels` / `AttentionKernels`), **no** `Nivara.Extensions` changes,
-  **no** `src/Nivara.Gpu` project, **no** `-gpu` in core APIs.
-- No bf16/fp16 GPU; no SmolLM/Qwen GPU; no KV-cache/decoding GPU; no training on
-  GPU.
-- The probe (`tests/Nivara.GpuProbe`) is untouched except optionally a
-  tiled-GEMM reference kernel if a probe-first micro-benchmark is preferred to
-  going straight to the sample (see §4.2 decision gate — either way the tiled
-  GEMM is measured before the model kernel set is written).
+## 5. Suggestions & follow-ups
 
-## 8. Risks & decision gates
+Prioritized for the next iterations of the GPU journey (see also
+[ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md) for the CPU-side picture):
 
-| # | risk | mitigation / gate |
-|---|---|---|
-| 1 | ~~Tiled GEMM underperforms~~ — **RESOLVED 2026-09-19**: Row4 measured 303–379 GMAC/s ≥ 0.3 T MAC/s on all DistilBERT shapes (§4.3) | measured first; OpenVINO fallback not triggered |
-| 2 | ~~`XMath` gap: no erf in ILGPU core/Algorithms (GELU)~~ — **RESOLVED 2026-09-19**: managed erf poly (direct port of `GradKernels.Erf` A–S 7.1.26) written in-kernel; GELU verified inside hidden-state parity (maxRel 3.2e-6, §4.4) | implement managed erf poly (CPU `GeluExact`-class) in the sample kernel — verify availability during kernel authoring |
-| 3 | Transpose-free layout hurts tiled GEMM coalescing | host-side one-time transpose at upload (255 MB class, ~30–50 ms) |
-| 4 | OpenCL ICD / driver variance | device-select assert (`CL_DEVICE_TYPE_GPU`, no CPU fallback); re-run probe `kernels` gate after driver bumps (seconds) |
-| 5 | ~~Precision drift vs CPU f32 path~~ — **VERIFIED WITHIN BOUND 2026-09-19**: final hidden maxRel 3.2e-6, logits maxRel 6.7e-7 (CPU) / 5.8e-7 (PyTorch), argmax 8/8 — comfortably inside the 1e-3 bound (§4.4) | per-element `|gpu − cpu| ≤ 1e-3·(1+|cpu|)` on final hidden state + logits (revised from the 1e-6 class — f32 summation-order floor, §4.3); SST-2 argmax 8/8 |
-| 6 | ~~bf16 temptation mid-phase~~ — **GUARD IN PLACE 2026-09-19**: `--precision bf16|fp16` + `--gpu` rejects with a clear "GPU is F32-only in this phase" message (exit 1, verified) | deferred — f32-only, explicit rejection message (keeps the first E2E diff clean) |
+1. **Kernel fusion + lazy stream (M2)** — the single biggest known win: fuse the
+   bias/activation/LN chains, keep attention partially resident, and eliminate
+   per-launch syncs. Target: 65 ms → ~25 ms class. The parity gates make fusion
+   safe to iterate on.
+2. **GEMM headroom**: a 2×2 or tile-32 register-block pass (Row4 measured
+   303→379 GMAC/s across shapes; occupancy/register headroom exists). Keep the
+   double-truth bounds check — and promote it into issue **#435** (lasting
+   GEMM regression harness).
+3. **Transpose-free in-kernel GEMM** — dropped for first-cut correctness; worth
+   revisiting if upload time ever matters (it doesn't here — shared DRAM).
+4. **bf16/fp16 GPU** — later decision; ILGPU 1.5.3 has no native BF16 (proven
+   unmerged packed-widen path only). The F32-only reject keeps the door clean.
+5. **Second model**: MiniLM (same encoder shape class, already in the sample
+   inventory) or SmolLM once KV-cached decode exists (see SMOLLM-GPU.md).
+6. **Promotion decision**: with real measured numbers in hand, decide whether
+   GPU support moves into `src/Nivara.Gpu` (which backend, which project, bf16,
+   which models). Nothing in core changes until that decision.
+7. **Regenerate the `last_hidden_state_py.bin` fixture** (absent in this
+   checkout) to restore the full 3-way GPU-vs-CPU-vs-PyTorch gate on hidden
+   states, matching the SST-2 fixture coverage.
+8. **Driver-bump hygiene**: re-run the probe `kernels` gate (seconds) and the
+   two model compares after any Intel driver update (two compilers in the path).
+9. **CPU-side performance (independent thread)** — a managed tiled GEMM and/or
+   an opt-in native BLAS bridge would close the ~5.6× Nivara-CPU deficit
+   (possibly beating the GPU at these shapes); options, targets, and the
+   M1/M2/M3 decision gate are captured in ROADMAP-SUGGESTION.md.
 
-## 9. References
+## 6. References
 
-- [ILGPU case study](ILGPU.md) (§5 setup/steady split, §6 PRO/CON) — the probe
-  verdict and all ILGPU gotchas (`Index1D`, padded-grid bounds checks,
-  `CL_DEVICE_TYPE_GPU`, `AsContiguous().GetAsArray()`, `MathMode.Fast` off)
-- [ComputeSharp case study](COMPUTESHARP.md) — the alternative managed-D3D12
-  backend, kept in reserve
-- [SmolLM GPU investigation](SMOLLM-GPU.md) — why SmolLM is the follow-up, not
-  the first scenario
-- [`tests/Nivara.GpuProbe/README.md`](../tests/Nivara.GpuProbe/README.md) — the
-  seven-way backend comparison table (gemv 133.4 µs ILGPU vs 137.9 µs OpenVINO
-  tuned) and the `kernels` correctness gate
-- `samples/NivaraInference/README.md` — CPU baselines, precision results, compare
-  fixtures
-- `samples/Nivara.Samples/BertModel.cs`, `DistilBertModel.cs` — the exact
-  DistilBERT kernel shapes in §3
+- [ILGPU.md](ILGPU.md) — probe verdicts: `Index1D`, padded-grid bounds checks,
+  `CL_DEVICE_TYPE_GPU`, `AsContiguous().GetAsArray()`, `MathMode.Fast` off
+- [COMPUTESHARP.md](COMPUTESHARP.md) — the complementary managed-D3D12 backend,
+  kept in reserve
+- [SMOLLM-GPU.md](SMOLLM-GPU.md) — why SmolLM is the follow-up, not the first
+  scenario
+- [ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md) — CPU/GPU-next roadmap, options,
+  decision gate
+- [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md) —
+  usage, `--gpu` quick start, benchmark tables, CPU baselines
+- [`tests/Nivara.GpuProbe/README.md`](../tests/Nivara.GpuProbe/README.md) —
+  seven-way backend comparison, `kernels` correctness gate
+- Issues: **#435** (tiled-GEMM regression gate, open) · **PR #436** (this
+  scenario)
