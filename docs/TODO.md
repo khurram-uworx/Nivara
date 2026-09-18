@@ -156,5 +156,10 @@ K=768–3072, see DISTILBERT-GPU.md §4.3/§6).
 
 ## GitHub issues log
 
-- (empty — create issues during execution for anything deferred, e.g. bf16 GPU,
-  `src/Nivara.Gpu` promotion decision, tiled-GEMM regression gate into the probe)
+- **#435** — promote tiled-GEMM correctness+perf harness into a lasting
+  regression gate (probe or sample bench); created while executing plan commit
+  4 — the temp harness's double-precision-truth gate caught a real Row4
+  `colBase` bug during the keystone run (maxAbs ~40–77) before the harness was
+  deleted
+- (create issues during execution for anything deferred, e.g. bf16 GPU,
+  `src/Nivara.Gpu` promotion decision)
