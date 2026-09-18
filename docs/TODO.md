@@ -131,9 +131,8 @@ Rename file/class/result record; make the runner neutral:
 
 ## GitHub issues log
 
-- [ ] — M2 GPU kernel fusion / lazy-stream to cut per-dispatch launch overhead (deferred from the
-  DistilBERT + MiniLM milestones; lifts both models). Create via `gh issue create` during execution
-  if not already tracked, and record the number.
+- [ ] #437 — M2 GPU kernel fusion / lazy-stream to cut per-dispatch launch overhead (deferred from
+  the DistilBERT + MiniLM milestones; lifts both models). Created during G1 grounding.
 
 ## Reminder
 
