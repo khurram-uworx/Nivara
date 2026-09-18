@@ -1,0 +1,411 @@
+using ILGPU;
+using ILGPU.Runtime;
+
+namespace Nivara.Samples.Gpu;
+
+/// <summary>Result of a DistilBERT GPU forward: the encoder's final hidden state
+/// ([batch*seqLen, 768]) and, when the classification head weights are present
+/// (pre_classifier/classifier keys), the [batch, numClasses] logits.</summary>
+public sealed record DistilBertGpuResult(float[] Hidden, float[]? Logits);
+
+/// <summary>
+/// Sample-scoped DistilBERT GPU forward (docs/DISTILBERT-GPU.md §3, §6): uploads the
+/// DistilBertLoader weight key set once (GEMM weights pre-transposed [out,in] → Bt
+/// [in,out] so C = A·Bt is plain row-major, per the assessment layout note), then runs
+/// the batch forward with every intermediate resident on the GPU and only the final
+/// hidden state / logits read back. Mirrors the CPU AutoDiff forward exactly: embedding
+/// gather (word + position, no token-type), embed LayerNorm, then per layer
+/// q/k/v projections → fused attention (scale, +-inf padding mask, row softmax) →
+/// o-projection → residual + LN1 → fc1 → exact GELU → fc2 → residual + LN2; optional
+/// pre_classifier → ReLU → classifier. One kernel-launch-per-op (no fusion) —
+/// correctness first; fusion is a flagged follow-up.
+/// </summary>
+public sealed class DistilBertGpuRunner : IDisposable
+{
+    const string WordEmbKey = "distilbert.embeddings.word_embeddings.weight";
+    const string PosEmbKey = "distilbert.embeddings.position_embeddings.weight";
+    const string EmbLnKey = "distilbert.embeddings.LayerNorm";
+    const string PreWKey = "pre_classifier.weight";
+    const string PreBKey = "pre_classifier.bias";
+    const string ClsWKey = "classifier.weight";
+    const string ClsBKey = "classifier.bias";
+
+    readonly IlgpuRuntime runtime;
+    readonly int hiddenDim;
+    readonly int intermediateDim;
+    readonly int numHeads;
+    readonly int headDim;
+    readonly int numLayers;
+    readonly float eps;
+    readonly float scale;
+    readonly bool hasHead;
+
+    readonly MemoryBuffer1D<float, Stride1D.Dense> wordEmb;
+    readonly MemoryBuffer1D<float, Stride1D.Dense> posEmb;
+    readonly MemoryBuffer1D<float, Stride1D.Dense> embLnW;
+    readonly MemoryBuffer1D<float, Stride1D.Dense> embLnB;
+    readonly LayerGpuWeights[] layers;
+    readonly MemoryBuffer1D<float, Stride1D.Dense>? preW;
+    readonly MemoryBuffer1D<float, Stride1D.Dense>? preB;
+    readonly MemoryBuffer1D<float, Stride1D.Dense>? clsW;
+    readonly MemoryBuffer1D<float, Stride1D.Dense>? clsB;
+
+    MemoryBuffer1D<float, Stride1D.Dense> x = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> e = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> q = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> k = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> v = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> attn = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> h = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> f1 = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> clsOut = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> logits = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> scores = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> maskBuf = null!;
+    MemoryBuffer1D<int, Stride1D.Dense> idsBuf = null!;
+    MemoryBuffer1D<int, Stride1D.Dense> posIdsBuf = null!;
+    MemoryBuffer1D<int, Stride1D.Dense> clsIdsBuf = null!;
+
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<int>, ArrayView<float>, int> gather;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> addBias;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>> add;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>> gelu;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>> relu;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemm;
+
+    /// <summary>
+    /// Creates the runner, uploads every weight from the loader tensors (GEMM weights
+    /// transposed once), and JIT-compiles the kernel set. Throws if required encoder
+    /// keys are missing; the head weights are optional.
+    /// </summary>
+    public DistilBertGpuRunner(
+        IlgpuRuntime runtime,
+        DistilBertConfig config,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        this.runtime = runtime;
+        hiddenDim = config.Dim;
+        intermediateDim = config.HiddenDim;
+        numHeads = config.NHeads;
+        headDim = hiddenDim / numHeads;
+        numLayers = config.NLayers;
+        eps = config.Eps;
+        scale = (float)(1.0 / Math.Sqrt(headDim));
+
+        var acc = runtime.Accelerator;
+
+        var wordEmbT = Req(tensors, WordEmbKey);
+        wordEmb = Alloc(acc, wordEmbT.Data.Length);
+        wordEmb.CopyFromCPU(wordEmbT.Data);
+        var posEmbT = Req(tensors, PosEmbKey);
+        posEmb = Alloc(acc, posEmbT.Data.Length);
+        posEmb.CopyFromCPU(posEmbT.Data);
+        embLnW = Alloc(acc, hiddenDim);
+        embLnW.CopyFromCPU(Req(tensors, $"{EmbLnKey}.weight").Data);
+        embLnB = Alloc(acc, hiddenDim);
+        embLnB.CopyFromCPU(Req(tensors, $"{EmbLnKey}.bias").Data);
+
+        layers = new LayerGpuWeights[numLayers];
+        for (int i = 0; i < numLayers; i++)
+            layers[i] = new LayerGpuWeights(acc, tensors, $"distilbert.transformer.layer.{i}");
+
+        hasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
+        if (hasHead)
+        {
+            preW = UploadTransposed(acc, tensors, PreWKey);
+            preB = UploadPlain(acc, tensors, PreBKey);
+            clsW = UploadTransposed(acc, tensors, ClsWKey);
+            clsB = UploadPlain(acc, tensors, ClsBKey);
+        }
+
+        // Persistent activation workspace (caps: batch <= 8, seqLen <= 128 — the
+        // scenario's actual maxima; per-call payload buffers grow on demand).
+        int rowsCap = 8 * 128;
+        x = Alloc(acc, rowsCap * hiddenDim);
+        e = Alloc(acc, rowsCap * hiddenDim);
+        q = Alloc(acc, rowsCap * hiddenDim);
+        k = Alloc(acc, rowsCap * hiddenDim);
+        v = Alloc(acc, rowsCap * hiddenDim);
+        attn = Alloc(acc, rowsCap * hiddenDim);
+        h = Alloc(acc, rowsCap * hiddenDim);
+        f1 = Alloc(acc, rowsCap * intermediateDim);
+        clsOut = Alloc(acc, 8 * hiddenDim);
+        logits = Alloc(acc, 8 * 2);
+        scores = Alloc(acc, 8 * numHeads * 128 * 128);
+        maskBuf = Alloc(acc, rowsCap);
+        idsBuf = AllocInt(acc, rowsCap);
+        posIdsBuf = AllocInt(acc, rowsCap);
+        clsIdsBuf = AllocInt(acc, 8);
+
+        gather = acc.LoadKernel<ArrayView<float>, ArrayView<int>, ArrayView<float>, int>(ElementwiseKernels.Gather);
+        addBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(ElementwiseKernels.AddBias);
+        add = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Add);
+        layerNorm = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float>(ElementwiseKernels.LayerNorm1D);
+        gelu = acc.LoadKernel<ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Gelu);
+        relu = acc.LoadKernel<ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Relu);
+        attention = acc.LoadKernel<
+            ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
+            ArrayView<float>, ArrayView<float>, int, int, int, int, float>(
+            AttentionKernels.BatchedAttention);
+        gemm = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4);
+    }
+
+    public string DeviceName => runtime.DeviceName;
+
+    /// <summary>
+    /// Runs the DistilBERT encoder (and, when the head weights are present, the
+    /// pre_classifier/ReLU/classifier head) for a padded batch of token IDs.
+    /// Token IDs and the attention mask must be padded exactly like the CPU path
+    /// (MiniLMTokenizer.Encode → mask 0 on padding positions; positional embedding ids
+    /// are 0..seqLen-1 repeated per batch row). Returns the read-back hidden state
+    /// [batch*seqLen, hiddenDim] and, if a head exists, the [batch, numClasses] logits.
+    /// </summary>
+    public DistilBertGpuResult Forward(int[] tokenIds, float[] attentionMask, int batch, int seqLen)
+    {
+        int rows = batch * seqLen;
+        if (tokenIds.Length != rows)
+            throw new ArgumentException($"tokenIds.Length ({tokenIds.Length}) must equal batch*seqLen ({rows}).", nameof(tokenIds));
+        if (attentionMask.Length != rows)
+            throw new ArgumentException($"attentionMask.Length ({attentionMask.Length}) must equal batch*seqLen ({rows}).", nameof(attentionMask));
+        if (batch > 8 || seqLen > 128)
+            throw new ArgumentOutOfRangeException(nameof(batch),
+                $"The DistilBertGpuRunner workspace caps at batch<=8, seqLen<=128 (scenario's actual maxima: batch 1, seqLen 128); got batch={batch}, seqLen={seqLen}.");
+
+        Ensure(ref maskBuf, rows);
+        maskBuf.CopyFromCPU(attentionMask);
+        Ensure(ref idsBuf, rows);
+        idsBuf.CopyFromCPU(tokenIds);
+
+        var posIds = new int[rows];
+        for (int b = 0; b < batch; b++)
+            for (int i = 0; i < seqLen; i++)
+                posIds[b * seqLen + i] = i;
+        Ensure(ref posIdsBuf, rows);
+        posIdsBuf.CopyFromCPU(posIds);
+
+        var stream = runtime.Stream;
+
+        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row), then embed LN.
+        Gather1D(wordEmb.View, idsBuf.View, x.View, hiddenDim, rows * hiddenDim);
+        Gather1D(posEmb.View, posIdsBuf.View, e.View, hiddenDim, rows * hiddenDim);
+        Add1D(x.View, e.View, x.View, rows * hiddenDim);
+        LayerNorm1D(x.View, embLnW.View, embLnB.View, x.View, rows, hiddenDim);
+
+        for (int i = 0; i < numLayers; i++)
+        {
+            var w = layers[i];
+
+            Gemm(x.View, w.Q.View, q.View, rows, hiddenDim, hiddenDim);
+            Bias1D(q.View, w.Bq.View, q.View, rows, hiddenDim);
+            Gemm(x.View, w.K.View, k.View, rows, hiddenDim, hiddenDim);
+            Bias1D(k.View, w.Bk.View, k.View, rows, hiddenDim);
+            Gemm(x.View, w.V.View, v.View, rows, hiddenDim, hiddenDim);
+            Bias1D(v.View, w.Bv.View, v.View, rows, hiddenDim);
+
+            Attention1D(q.View, k.View, v.View, maskBuf.View, attn.View, scores.View, batch, seqLen);
+            Gemm(attn.View, w.O.View, h.View, rows, hiddenDim, hiddenDim);
+            Bias1D(h.View, w.Bo.View, h.View, rows, hiddenDim);
+            Add1D(h.View, x.View, h.View, rows * hiddenDim);
+            LayerNorm1D(h.View, w.Ln1W.View, w.Ln1B.View, h.View, rows, hiddenDim);
+
+            Gemm(h.View, w.W1.View, f1.View, rows, hiddenDim, intermediateDim);
+            Bias1D(f1.View, w.B1.View, f1.View, rows, intermediateDim);
+            Gelu1D(f1.View, f1.View, rows * intermediateDim);
+
+            Gemm(f1.View, w.W2.View, attn.View, rows, intermediateDim, hiddenDim);
+            Bias1D(attn.View, w.B2.View, attn.View, rows, hiddenDim);
+            Add1D(attn.View, h.View, h.View, rows * hiddenDim);
+            LayerNorm1D(h.View, w.Ln2W.View, w.Ln2B.View, x.View, rows, hiddenDim);
+        }
+
+        float[]? logitsArr = null;
+        if (hasHead)
+        {
+            var clsIds = new int[batch];
+            for (int b = 0; b < batch; b++)
+                clsIds[b] = b * seqLen;
+            Ensure(ref clsIdsBuf, batch);
+            clsIdsBuf.CopyFromCPU(clsIds);
+
+            Gather1D(x.View, clsIdsBuf.View, clsOut.View, hiddenDim, batch * hiddenDim);
+            Gemm(clsOut.View, preW!.View, h.View, batch, hiddenDim, hiddenDim);
+            Bias1D(h.View, preB!.View, h.View, batch, hiddenDim);
+            Relu1D(h.View, h.View, batch * hiddenDim);
+            Gemm(h.View, clsW!.View, logits.View, batch, hiddenDim, 2);
+            Bias1D(logits.View, clsB!.View, logits.View, batch, 2);
+
+            runtime.Synchronize();
+            logitsArr = Readback(logits, batch * 2);
+        }
+
+        runtime.Synchronize();
+        var hidden = Readback(x, rows * hiddenDim);
+        return new DistilBertGpuResult(hidden, logitsArr);
+    }
+
+    public void Dispose()
+    {
+        wordEmb.Dispose();
+        posEmb.Dispose();
+        embLnW.Dispose();
+        embLnB.Dispose();
+        foreach (var layer in layers) layer.Dispose();
+        preW?.Dispose();
+        preB?.Dispose();
+        clsW?.Dispose();
+        clsB?.Dispose();
+        x.Dispose(); e.Dispose(); q.Dispose(); k.Dispose(); v.Dispose();
+        attn.Dispose(); h.Dispose(); f1.Dispose(); clsOut.Dispose(); logits.Dispose();
+        scores.Dispose(); maskBuf.Dispose(); idsBuf.Dispose(); posIdsBuf.Dispose(); clsIdsBuf.Dispose();
+    }
+
+    // ── launch helpers ────────────────────────────────────────────
+
+    void Gather1D(ArrayView<float> table, ArrayView<int> ids, ArrayView<float> output, int hidden, int total)
+        => gather(runtime.Stream, (Cfg(total), 256), table, ids, output, hidden);
+
+    void Add1D(ArrayView<float> a, ArrayView<float> b, ArrayView<float> y, int total)
+        => add(runtime.Stream, (Cfg(total), 256), a, b, y);
+
+    void Bias1D(ArrayView<float> x, ArrayView<float> bias, ArrayView<float> y, int rows, int cols)
+        => addBias(runtime.Stream, (Cfg(rows * cols), 256), x, bias, y, rows, cols);
+
+    void Gelu1D(ArrayView<float> x, ArrayView<float> y, int total)
+        => gelu(runtime.Stream, (Cfg(total), 256), x, y);
+
+    void Relu1D(ArrayView<float> x, ArrayView<float> y, int total)
+        => relu(runtime.Stream, (Cfg(total), 256), x, y);
+
+    void LayerNorm1D(ArrayView<float> x, ArrayView<float> gamma, ArrayView<float> beta, ArrayView<float> y, int rows, int cols)
+        => layerNorm(runtime.Stream, (Cfg(rows), 256), x, gamma, beta, y, rows, cols, eps);
+
+    void Attention1D(
+        ArrayView<float> q, ArrayView<float> k, ArrayView<float> v,
+        ArrayView<float> mask, ArrayView<float> attnOut, ArrayView<float> scores,
+        int batch, int seqLen)
+        => attention(runtime.Stream, (Cfg(batch * numHeads * seqLen), 256),
+            q, k, v, mask, attnOut, scores, batch, seqLen, numHeads, headDim, scale);
+
+    void Gemm(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, int aRows, int aCols, int bCols)
+    {
+        int blockCols = GemmKernels.TileSize * GemmKernels.BlockCols;
+        var numGroups = new Index2D((aRows + GemmKernels.TileSize - 1) / GemmKernels.TileSize, (bCols + blockCols - 1) / blockCols);
+        var groupSize = new Index2D(GemmKernels.TileSize, GemmKernels.TileSize);
+        gemm(runtime.Stream, (numGroups, groupSize), a, bt, c, aRows, aCols, bCols);
+    }
+
+    static int Cfg(int total) => total <= 0 ? 1 : (total + 255) / 256;
+
+    static float[] Readback(MemoryBuffer1D<float, Stride1D.Dense> buffer, int length)
+    {
+        var arr = buffer.AsContiguous().GetAsArray();
+        if (arr.Length < length)
+            throw new InvalidOperationException("GPU readback returned a shorter buffer than requested.");
+        var result = new float[length];
+        Array.Copy(arr, result, length);
+        return result;
+    }
+
+    void Ensure(ref MemoryBuffer1D<float, Stride1D.Dense> buffer, int length)
+    {
+        if (buffer.Length < length)
+        {
+            var acc = runtime.Accelerator;
+            buffer.Dispose();
+            buffer = acc.Allocate1D<float>(length);
+        }
+    }
+
+    void Ensure(ref MemoryBuffer1D<int, Stride1D.Dense> buffer, int length)
+    {
+        if (buffer.Length < length)
+        {
+            var acc = runtime.Accelerator;
+            buffer.Dispose();
+            buffer = acc.Allocate1D<int>(length);
+        }
+    }
+
+    // ── weight upload helpers ──────────────────────────────────────
+
+    static MemoryBuffer1D<float, Stride1D.Dense> UploadTransposed(
+        ILGPU.Runtime.Accelerator acc,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string key)
+    {
+        var t = Req(tensors, key);
+        int outDim = t.Shape[0];
+        int inDim = t.Shape[1];
+        var bt = new float[outDim * inDim];
+        for (int r = 0; r < outDim; r++)
+            for (int c = 0; c < inDim; c++)
+                bt[c * outDim + r] = t.Data[r * inDim + c];
+        var buf = Alloc(acc, bt.Length);
+        buf.CopyFromCPU(bt);
+        return buf;
+    }
+
+    static MemoryBuffer1D<float, Stride1D.Dense> UploadPlain(
+        ILGPU.Runtime.Accelerator acc,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string key)
+    {
+        var buf = Alloc(acc, Req(tensors, key).Data.Length);
+        buf.CopyFromCPU(Req(tensors, key).Data);
+        return buf;
+    }
+
+    static (float[] Data, int[] Shape) Req(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
+        => tensors.TryGetValue(key, out var t)
+            ? t
+            : throw new InvalidOperationException($"Missing weight key '{key}' for the --gpu forward.");
+
+    static MemoryBuffer1D<float, Stride1D.Dense> Alloc(ILGPU.Runtime.Accelerator acc, int length)
+        => acc.Allocate1D<float>(length);
+
+    static MemoryBuffer1D<int, Stride1D.Dense> AllocInt(ILGPU.Runtime.Accelerator acc, int length)
+        => acc.Allocate1D<int>(length);
+
+    sealed class LayerGpuWeights : IDisposable
+    {
+        public readonly MemoryBuffer1D<float, Stride1D.Dense> Q, K, V, O, W1, W2;
+        public readonly MemoryBuffer1D<float, Stride1D.Dense> Bq, Bk, Bv, Bo, B1, B2;
+        public readonly MemoryBuffer1D<float, Stride1D.Dense> Ln1W, Ln1B, Ln2W, Ln2B;
+
+        public LayerGpuWeights(
+            ILGPU.Runtime.Accelerator acc,
+            Dictionary<string, (float[] Data, int[] Shape)> tensors,
+            string prefix)
+        {
+            Q = UploadTransposed(acc, tensors, $"{prefix}.attention.q_lin.weight");
+            K = UploadTransposed(acc, tensors, $"{prefix}.attention.k_lin.weight");
+            V = UploadTransposed(acc, tensors, $"{prefix}.attention.v_lin.weight");
+            O = UploadTransposed(acc, tensors, $"{prefix}.attention.out_lin.weight");
+            W1 = UploadTransposed(acc, tensors, $"{prefix}.ffn.lin1.weight");
+            W2 = UploadTransposed(acc, tensors, $"{prefix}.ffn.lin2.weight");
+
+            Bq = UploadPlain(acc, tensors, $"{prefix}.attention.q_lin.bias");
+            Bk = UploadPlain(acc, tensors, $"{prefix}.attention.k_lin.bias");
+            Bv = UploadPlain(acc, tensors, $"{prefix}.attention.v_lin.bias");
+            Bo = UploadPlain(acc, tensors, $"{prefix}.attention.out_lin.bias");
+            B1 = UploadPlain(acc, tensors, $"{prefix}.ffn.lin1.bias");
+            B2 = UploadPlain(acc, tensors, $"{prefix}.ffn.lin2.bias");
+
+            Ln1W = UploadPlain(acc, tensors, $"{prefix}.sa_layer_norm.weight");
+            Ln1B = UploadPlain(acc, tensors, $"{prefix}.sa_layer_norm.bias");
+            Ln2W = UploadPlain(acc, tensors, $"{prefix}.output_layer_norm.weight");
+            Ln2B = UploadPlain(acc, tensors, $"{prefix}.output_layer_norm.bias");
+        }
+
+        public void Dispose()
+        {
+            Q.Dispose(); K.Dispose(); V.Dispose(); O.Dispose(); W1.Dispose(); W2.Dispose();
+            Bq.Dispose(); Bk.Dispose(); Bv.Dispose(); Bo.Dispose(); B1.Dispose(); B2.Dispose();
+            Ln1W.Dispose(); Ln1B.Dispose(); Ln2W.Dispose(); Ln2B.Dispose();
+        }
+    }
+}
