@@ -151,6 +151,10 @@ public sealed class DistilBertGpuRunner : IDisposable
             AttentionKernels.BatchedAttention);
         gemm = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
             GemmKernels.TiledGemmKernelRow4);
+
+        // Weight uploads ran on the default stream; sync the device so they are
+        // visible to the kernel launches (running on runtime.Stream) in Forward.
+        runtime.Synchronize();
     }
 
     public string DeviceName => runtime.DeviceName;
@@ -175,16 +179,16 @@ public sealed class DistilBertGpuRunner : IDisposable
                 $"The DistilBertGpuRunner workspace caps at batch<=8, seqLen<=128 (scenario's actual maxima: batch 1, seqLen 128); got batch={batch}, seqLen={seqLen}.");
 
         Ensure(ref maskBuf, rows);
-        maskBuf.CopyFromCPU(attentionMask);
+        maskBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, attentionMask);
         Ensure(ref idsBuf, rows);
-        idsBuf.CopyFromCPU(tokenIds);
+        idsBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, tokenIds);
 
         var posIds = new int[rows];
         for (int b = 0; b < batch; b++)
             for (int i = 0; i < seqLen; i++)
                 posIds[b * seqLen + i] = i;
         Ensure(ref posIdsBuf, rows);
-        posIdsBuf.CopyFromCPU(posIds);
+        posIdsBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, posIds);
 
         var stream = runtime.Stream;
 
@@ -228,7 +232,7 @@ public sealed class DistilBertGpuRunner : IDisposable
             for (int b = 0; b < batch; b++)
                 clsIds[b] = b * seqLen;
             Ensure(ref clsIdsBuf, batch);
-            clsIdsBuf.CopyFromCPU(clsIds);
+            clsIdsBuf.View.SubView(0, batch).CopyFromCPU(runtime.Stream, clsIds);
 
             Gather1D(x.View, clsIdsBuf.View, clsOut.View, hiddenDim, batch * hiddenDim);
             Gemm(clsOut.View, preW!.View, h.View, batch, hiddenDim, hiddenDim);
