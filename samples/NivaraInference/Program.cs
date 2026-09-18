@@ -108,7 +108,7 @@ class Program
             Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
-            Console.WriteLine("GPU (distilbert / distilbert_sst only, this phase):");
+            Console.WriteLine("GPU (distilbert / distilbert_sst / minilm only, this phase):");
             Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine();
@@ -219,6 +219,17 @@ class Program
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             case "minilm":
+                if (useGpu)
+                {
+                    if (benchmark) return BenchmarkMiniLmGpu(tensors);
+                    if (compare) return RunMiniLmGpuCompare(tensors);
+                    if (mode == "similarity")
+                    {
+                        Console.Error.WriteLine("--gpu does not support mode 'similarity' for minilm (supported: default, benchmark, compare).");
+                        return 1;
+                    }
+                    return RunMiniLmGpuInference(tensors);
+                }
                 if (bf16) return benchmark ? BenchmarkMiniLM(tensorsBf16, "BFloat16") : RunMiniLMBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkMiniLM(tensorsHalf, "Half") : RunMiniLMHalf(tensorsHalf);
                 if (compare) return RunMiniLMCompare(tensors);
@@ -1010,6 +1021,223 @@ class Program
         Console.WriteLine($"Saved embeddings to {savePath}");
 
         return 0;
+    }
+
+    static int RunMiniLmGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM GPU Inference ===");
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        Console.WriteLine($"Config: dim={config.HiddenSize}, layers={config.NumHiddenLayers}, heads={config.NumAttentionHeads}, intermediate={config.IntermediateSize}");
+
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new BertEncoderGpuRunner(rt, config, tensors, BertGpuNaming.Bert);
+        buildSw.Stop();
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 4.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        Console.WriteLine($"Input tokens (first 10): [{string.Join(", ", intIds.Take(10))}] (seqLen={intIds.Length})");
+        Console.WriteLine();
+
+        var fwdSw = Stopwatch.StartNew();
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        fwdSw.Stop();
+
+        var embedding = MiniLmClsEmbeddings(result.Hidden, 1, intIds.Length, config.HiddenSize)[0];
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{config.HiddenSize}]");
+        Console.WriteLine($"Output stats: min={TensorPrimitives.Min(embedding.AsSpan()):F6}, max={TensorPrimitives.Max(embedding.AsSpan()):F6}, mean={TensorPrimitives.Average(embedding.AsSpan()):F6}");
+        Console.Write("Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, embedding.Length); i++)
+        {
+            Console.Write($"{embedding[i]:F6}");
+            if (i < Math.Min(10, embedding.Length) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+        float norm = TensorPrimitives.Norm(embedding.AsSpan());
+        Console.WriteLine($"L2 norm: {norm:F6} (should be ~1.0 for normalized embeddings)");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int BenchmarkMiniLmGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM GPU Benchmark ===");
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new BertEncoderGpuRunner(rt, config, tensors, BertGpuNaming.Bert);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 4.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the MiniLM model inference across multiple tokens for benchmarking purposes.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: {intIds.Length}");
+        Console.WriteLine();
+
+        ReportGpuTiming(() => runner.Forward(intIds, attnMask, 1, intIds.Length));
+
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        var embedding = MiniLmClsEmbeddings(result.Hidden, 1, intIds.Length, config.HiddenSize)[0];
+        float norm = TensorPrimitives.Norm(embedding.AsSpan());
+        Console.WriteLine($"Last pass embedding L2 norm: {norm:F6}");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunMiniLmGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM GPU vs CPU/PyTorch Gate ===");
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+        int n = sentences.Length;
+
+        var cpuSw = Stopwatch.StartNew();
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+        model.Eval();
+        var cpuHidden = new float[n][];
+        var cpuEmbeddings = new float[n][];
+        for (int s = 0; s < n; s++)
+        {
+            var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, sentences[s], maxLen: 128);
+            var outHidden = model.encoder.ForwardWithMask(input, mask);
+            var hiddenData = new float[outHidden.Length];
+            outHidden.Data.TryGetSpan(out var hiddenSpan);
+            if (!hiddenSpan.IsEmpty) hiddenSpan.CopyTo(hiddenData);
+            cpuHidden[s] = hiddenData;
+
+            var outEmb = mask != null ? model.ForwardWithMask(input, mask) : model.Forward(input);
+            var embData = new float[outEmb.Length];
+            outEmb.Data.TryGetSpan(out var embSpan);
+            if (!embSpan.IsEmpty) embSpan.CopyTo(embData);
+            cpuEmbeddings[s] = embData;
+        }
+        cpuSw.Stop();
+        Console.WriteLine($"CPU reference ({n} sentences): {cpuSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        using var rt = new IlgpuRuntime();
+        Console.WriteLine($"Device: {rt.DeviceName}");
+        var buildSw = Stopwatch.StartNew();
+        using var runner = new BertEncoderGpuRunner(rt, config, tensors, BertGpuNaming.Bert);
+        buildSw.Stop();
+        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var gpuHidden = new float[n][];
+        var gpuEmbeddings = new float[n][];
+        var perSentence = new List<long>();
+        double worstCosine = 1.0;
+        for (int s = 0; s < n; s++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, sentences[s], maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var sw = Stopwatch.StartNew();
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            sw.Stop();
+            perSentence.Add(sw.ElapsedMilliseconds);
+            gpuHidden[s] = result.Hidden;
+            gpuEmbeddings[s] = MiniLmClsEmbeddings(result.Hidden, 1, intIds.Length, config.HiddenSize)[0];
+
+            var hiddenStats = ParityStats(result.Hidden, cpuHidden[s]);
+            var embStats = ParityStats(gpuEmbeddings[s], cpuEmbeddings[s]);
+            double cosine = TensorPrimitives.CosineSimilarity(gpuEmbeddings[s].AsSpan(), cpuEmbeddings[s].AsSpan());
+            if (cosine < worstCosine) worstCosine = cosine;
+            Console.WriteLine($"  [{s}] \"{sentences[s]}\"  cosine(GPU,CPU)={cosine:F6}  hiddenMaxRel={hiddenStats.MaxRel:E3}  embMaxRel={embStats.MaxRel:E3}  {sw.ElapsedMilliseconds} ms");
+        }
+        Console.WriteLine();
+
+        var hiddenAll = gpuHidden.SelectMany(x => x).ToArray();
+        var cpuHiddenAll = cpuHidden.SelectMany(x => x).ToArray();
+        var embAll = gpuEmbeddings.SelectMany(x => x).ToArray();
+        var cpuEmbAll = cpuEmbeddings.SelectMany(x => x).ToArray();
+        ReportParity(hiddenAll, cpuHiddenAll, "hidden (GPU vs CPU, all sentences)");
+        ReportParity(embAll, cpuEmbAll, "pooled embeddings (GPU vs CPU, all sentences)");
+        Console.WriteLine($"  pooled-embedding cosine min (GPU vs CPU): {worstCosine:F6} (target >= 0.9999)");
+        Console.WriteLine();
+
+        string pyPath = Path.Combine("samples", "data", "compare_minilm_embeddings_py.bin");
+        if (File.Exists(pyPath))
+        {
+            var rawBytes = File.ReadAllBytes(pyPath);
+            float[] pyData = new float[rawBytes.Length / 4];
+            Buffer.BlockCopy(rawBytes, 0, pyData, 0, rawBytes.Length);
+            var pyEmbAll = new float[n * config.HiddenSize];
+            Array.Copy(pyData, pyEmbAll, Math.Min(pyData.Length, pyEmbAll.Length));
+            ReportParity(embAll, pyEmbAll, "pooled embeddings (GPU vs PyTorch)");
+        }
+        else
+        {
+            Console.WriteLine("  (PyTorch fixture compare_minilm_embeddings_py.bin not found; GPU-vs-CPU gate only)");
+        }
+        Console.WriteLine();
+
+        var gate = ParityStats(hiddenAll, cpuHiddenAll);
+        var embGate = ParityStats(embAll, cpuEmbAll);
+        Console.WriteLine($"GATE: {GateVerdict(gate)} | pooled: {GateVerdict(embGate)} (cosine min {worstCosine:F6})");
+        return 0;
+    }
+
+    /// <summary>Replicates MiniLMDistilled.ForwardWithMask pooling exactly: row 0 (CLS token) of
+    /// each batch segment of the [batch*seqLen, hiddenDim] hidden state, L2-normalized — matches
+    /// Python/minilm_compare.py. Host-side; the runner stays GPU-pure.</summary>
+    static float[][] MiniLmClsEmbeddings(float[] hidden, int batch, int seqLen, int hiddenDim)
+    {
+        var result = new float[batch][];
+        for (int b = 0; b < batch; b++)
+        {
+            var embedding = new float[hiddenDim];
+            Array.Copy(hidden, b * seqLen * hiddenDim, embedding, 0, hiddenDim);
+            float norm = 0f;
+            for (int i = 0; i < hiddenDim; i++)
+                norm += embedding[i] * embedding[i];
+            norm = MathF.Sqrt(norm);
+            if (norm > 1e-12f)
+            {
+                float inv = 1f / norm;
+                for (int i = 0; i < hiddenDim; i++)
+                    embedding[i] *= inv;
+            }
+            result[b] = embedding;
+        }
+        return result;
     }
 
     static void ReportTiming<T>(Func<ReverseGradTensor<T>> forward, int warmup = 3, int passes = 10)
