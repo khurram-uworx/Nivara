@@ -27,6 +27,38 @@ via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
 | distilbert_sst | **64.0 ms** (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | ~1.8× slower |
 | minilm | **26.8 ms** (25–29) | 76.3 ms (49–102) | 11 ms | **~2.9× faster** | ~2.4× slower |
 
+**M2 — kernel fusion (issue #437) landed 2026-09-19** on `khurram/lazystream-gpu`
+(PR targets `khurram/minilm-gpu`). Same session, AC power:
+
+| scenario | pre-M2 (M1) | post-M2 | Δ |
+|---|---|---|---|
+| minilm | 26.8 ms | **24.3 ms** (23–25) | **1.10×** |
+| distilbert | 65.3 ms | **63.1 ms** (61–67) | **1.04×** |
+| distilbert_sst | 64.0 ms | **63.7 ms** (62–67) | ~1.00× |
+
+What fused (all sample-scoped; parity gates byte-identical at every step —
+MiniLM maxAbs 1.87e-5 / DistilBERT 1.53e-5 / SST 3.8e-6 + argmax 8/8): GEMM
+epilogue bias (+ exact-GELU for fc1, ReLU for the head pre-classifier) via lean
+per-activation sibling kernels; `q/k/v` merged into **one** GEMM writing a
+block-separable destination (`[q-block | k-block | v-block]`, dense SubViews for
+the unchanged attention kernel); residual-add folded into LayerNorm;
+word/position/token-type embedding sums fused into one gather; seqLen-
+deterministic posIds cached. Dispatches went **~113–119 → 44–48** per forward.
+
+**Honest outcome:** the pre-M2 launch model was wrong. Removing ~70 dispatches
+moved MiniLM 26.8 → 24.3 ms, i.e. **~30 µs per dependent kernel** (not the
+~0.18–0.2 ms first estimated — the model was off ~6× because GEMM + non-GEMM
+compute dominate at these shapes). The #437 ">2× for MiniLM" acceptance
+(~13.4 ms) is **not reachable via fusion on this iGPU** — it would need ~420
+more dispatches removed, and only ~50 exist. The real lever is GEMM *throughput*
+(§5 item 2); even an optimistic 2–3× GEMM speedup lands MiniLM near ~22 ms at
+batch 1. The remaining micro-fusions were completed because they were already
+designed; the numbers above are the honest result.
+
+**Battery caveat confirmed again:** an intermediate session on battery produced
+contaminated 25.6–33 ms MiniLM numbers drifting downward as the charge drained —
+only AC numbers are valid. Do not benchmark this path on battery.
+
 Correctness gates — **all PASS**:
 - `distilbert --gpu compare`: final hidden `[128,768]` vs same-process CPU —
   maxAbs 1.53e-5, maxRel 3.24e-6, **0/98304 violations**
@@ -45,10 +77,10 @@ All GPU code lives in `samples/Nivara.Samples/Gpu/`:
 | file | contents |
 |---|---|
 | `IlgpuRuntime.cs` | context/accelerator/stream lifecycle; device select (`CL_DEVICE_TYPE_GPU` + Intel vendor, **asserted — no CPU fallback**); persistent buffer upload/download helpers |
-| `GemmKernels.cs` | **Row4** register-blocked 1×4 tiled GEMM (local-memory staging, `TiledGemmKernelRow4`) — the keystone; used for every matmul (q/k/v/o, lin1, lin2, head) |
-| `AttentionKernels.cs` | fused 12-head score+scale+mask+row-softmax+weighted-V (`XMath.Exp`) |
-| `ElementwiseKernels.cs` | LayerNorm row-reduce, GELU (direct A–S 7.1.26 erf poly port of `GradKernels.Erf`, `XMath.Exp`), bias/residual adds, embedding gather |
-| `BertEncoderGpuRunner.cs` (was `DistilBertGpuRunner.cs`) | uploads weights (transposed once at ctor) by the loader key set — naming/role-resolved via `BertGpuNaming` (`DistilBert` | `Bert`), config-driven from `BertConfig`; runs the full BERT-family encoder forward + optional SST-2 head; returns per-stage readbacks for gating |
+| `GemmKernels.cs` | **Row4** register-blocked 1×4 tiled GEMM (local-memory staging, `TiledGemmKernelRow4`) — the keystone; used for every matmul (q/k/v/o, lin1, lin2, head). M2 added the fused-epilogue siblings (`Row4Bias`/`Row4Gelu`/`Row4Relu` — bias added in the register accumulators, GELU/ReLU folded into fc1 / head pre-classifier) and `Row4Qkv` — one packed `q/k/v` GEMM with a block-separable destination |
+| `AttentionKernels.cs` | fused 12-head score+scale+mask+row-softmax+weighted-V (`XMath.Exp`) — unchanged by M2 (consumes the q/k/v SubViews as dense row-major views) |
+| `ElementwiseKernels.cs` | LayerNorm row-reduce, GELU (direct A–S 7.1.26 erf poly port of `GradKernels.Erf`, `XMath.Exp`), bias/residual adds, embedding gather. M2 added `LayerNormResidual1D` (residual folded into the LN row-reduction) and `EmbeddingSum` (word/position/token-type gathers + sum in one launch) |
+| `BertEncoderGpuRunner.cs` (was `DistilBertGpuRunner.cs`) | uploads weights (transposed once at ctor) by the loader key set — naming/role-resolved via `BertGpuNaming` (`DistilBert` | `Bert`), config-driven from `BertConfig`; runs the full BERT-family encoder forward + optional SST-2 head; returns per-stage readbacks for gating. M2: every projection through a fused epilogue launch, `q/k/v` one packed GEMM (`Wqkv`/`Bqkv` uploads), posIds cached per seqLen, `Add`/`AddBias` launches removed |
 
 Design decisions (deliberate, and worth keeping for the next model):
 - **Correctness-first runner**: one kernel launch per operation, everything on
@@ -81,11 +113,13 @@ These are the durable, non-obvious lessons from implementing the first model:
    through the kernel stream, and add a device sync after bulk ctor uploads, or
    the uploads may not be visible to kernel launches. (This bit us; it also
    silently would have produced flaky results.)
-3. **Launch/dispatch overhead dominates at inference shapes.** ~100 dispatches
-   per forward, ~0.4–0.7 ms each end-to-end at 128-row shapes. The GEMM legs
-   alone match the Row4 extrapolation (~20–30 ms of the 65 ms); the rest is
-   per-launch overhead on small kernels. **Fusion + a lazy stream are the next
-   lever, not GEMM work.**
+3. **Launch/dispatch overhead dominates at inference shapes — but the per-kernel
+   cost is ~30 µs, not the ~0.4–0.7 ms first estimated.** ~100 dispatches per
+   forward at 128-row shapes. M2 (#437) removed ~70 of them and moved MiniLM
+   26.8 → 24.3 ms / DistilBERT 65.3 → 63.1 ms — consistent with a
+   **~30 µs dependent-kernel latency**. The corrected model: launch overhead
+   was ~3 ms of the baseline, not ~21 ms. Fusion is nearly exhausted; the next
+   lever is kernel *throughput* (GEMM headroom, §5 item 2), not launch count.
 4. **A tiled GEMM is a requirement, not an optimization**: the probe's naive
    gemv rate (6.6 GMAC/s) would take ~825 ms for DistilBERT's matmuls. Row4
    (1 thread owns 4 accumulators, one shared A-tile load) hit **303–379 GMAC/s**
@@ -126,9 +160,15 @@ Honest delta between the assessment's expectations and the measured outcome:
 
 - **E2E landed at ~65 ms vs the estimated ~15–25 ms.** The GEMM extrapolation
   was right (Row4 rates × 5.44 GMAC ≈ 20–30 ms); the miss was the *unmeasured
-  portion* — attention + elementwise legs **plus ~0.4–0.7 ms per launch × ~100
-  dispatches**. Lesson: on small-shape inference, launch cost is a first-class
-  budget line, not a footnote. Fusion (M2) targets exactly this.
+  portion* — attention + elementwise legs **plus per-dispatch overhead × ~100
+  dispatches**, first over-estimated at ~0.4–0.7 ms/launch. M2 measured the
+  truth: **~30 µs/dependent kernel**, so the ~70 dispatches fusion removed
+  (MiniLM 26.8 → 24.3 ms) matched the corrected model, and the remaining gap is
+  kernel throughput — not a launch-count problem fusion can fix.
+- **M2's >2× acceptance was not reachable.** The #437 ">2× MiniLM" target
+  (~13.4 ms) assumed ~0.19 ms/launch; at the measured ~30 µs it would need
+  ~420 fewer dispatches than exist. Re-scoped to honest ~1.1× with the GEMM-
+  throughput item promoted to the leading GPU follow-up.
 - **The "clear win vs PyTorch CPU 35 ms" did not materialize.** The iGPU is
   ~1.9× *behind* PyTorch's MKL-backed CPU path here (PyTorch starts ~5.6× ahead
   of Nivara-CPU). We still won ~3.0× over our own CPU, which was the scenario's
@@ -143,14 +183,19 @@ Honest delta between the assessment's expectations and the measured outcome:
 Prioritized for the next iterations of the GPU journey (see also
 [ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md) for the CPU-side picture):
 
-1. **Kernel fusion + lazy stream (M2)** — the single biggest known win: fuse the
-   bias/activation/LN chains, keep attention partially resident, and eliminate
-   per-launch syncs. Target: 65 ms → ~25 ms class. The parity gates make fusion
-   safe to iterate on.
-2. **GEMM headroom**: a 2×2 or tile-32 register-block pass (Row4 measured
-   303→379 GMAC/s across shapes; occupancy/register headroom exists). Keep the
-   double-truth bounds check — and promote it into issue **#435** (lasting
-   GEMM regression harness).
+1. ~~**Kernel fusion + lazy stream (M2)**~~ — **DONE 2026-09-19**
+   (`khurram/lazystream-gpu` → PR targets `khurram/minilm-gpu`): every planned
+   fusion landed and the parity gates stayed byte-identical. The lazy-stream
+   half was already true (one stream, one sync before readback). Honest result:
+   MiniLM 26.8 → **24.3 ms**, DistilBERT 65.3 → **63.1 ms** — the per-launch
+   model was corrected by measurement to ~30 µs, so launch-count fusion is
+   nearly exhausted; the remaining gap is kernel throughput.
+2. **GEMM headroom is now the leading GPU item** — a 2×2 or tile-32
+   register-block pass (Row4 measured 303→379 GMAC/s across shapes;
+   occupancy/register headroom exists) is the only realistic path toward the
+   2×-class numbers fusion-targeted. Tracked as issue **#440** (filed from M2;
+   see ROADMAP-SUGGESTION.md). Keep the double-truth bounds check —
+   and promote it into issue **#435** (lasting GEMM regression harness).
 3. **Transpose-free in-kernel GEMM** — dropped for first-cut correctness; worth
    revisiting if upload time ever matters (it doesn't here — shared DRAM).
 4. **bf16/fp16 GPU** — later decision; neither precision gets **native** support
@@ -182,7 +227,10 @@ Prioritized for the next iterations of the GPU journey (see also
    driven, so the DistilBERT path is untouched). Gates: hidden `maxRel 1.0e-5`,
    0/245760 violations, pooled-embedding cosine 1.000000; benchmark **26.8 ms**
    iGPU vs 76.3 ms Nivara CPU (~2.9×), launch-overhead-bound at ≈1.36 GMAC —
-   tracked as **#437**. SmolLM once KV-cached decode exists (see SMOLLM-GPU.md)
+   tracked as **#437**; post-M2 (fused epilogues + q/k/v merge, same runner):
+    **24.3 ms** (see the M2 block in §1) — still latency-bound at batch 1, which
+    is exactly why the GEMM-throughput item (§5.2) is now the leading follow-up.
+    SmolLM once KV-cached decode exists (see SMOLLM-GPU.md)
    remains the next, much larger candidate.
 6. **Promotion decision**: with real measured numbers in hand, decide whether
    GPU support moves into `src/Nivara.Gpu` (which backend, which project, bf16,
