@@ -3,28 +3,92 @@ using ILGPU.Runtime;
 
 namespace Nivara.Samples.Gpu;
 
-/// <summary>Result of a DistilBERT GPU forward: the encoder's final hidden state
-/// ([batch*seqLen, 768]) and, when the classification head weights are present
+/// <summary>Result of a BERT-family encoder GPU forward: the encoder's final hidden state
+/// ([batch*seqLen, hiddenDim]) and, when the classification head weights are present
 /// (pre_classifier/classifier keys), the [batch, numClasses] logits.</summary>
-public sealed record DistilBertGpuResult(float[] Hidden, float[]? Logits);
+public sealed record BertEncoderGpuResult(float[] Hidden, float[]? Logits);
+
+/// <summary>Weight-key naming style for a BERT-family encoder: HuggingFace 'distilbert.*' keys
+/// (DistilBERT), or BERT-style keys already stripped of the 'bert.' module prefix during
+/// provisioning (MiniLM — the sample weights hold 'embeddings.*' / 'encoder.layer.N.*' keys).</summary>
+public enum BertGpuNaming
+{
+    DistilBert,
+    Bert
+}
 
 /// <summary>
-/// Sample-scoped DistilBERT GPU forward (docs/DISTILBERT-GPU.md §3, §6): uploads the
-/// DistilBertLoader weight key set once (GEMM weights pre-transposed [out,in] → Bt
-/// [in,out] so C = A·Bt is plain row-major, per the assessment layout note), then runs
-/// the batch forward with every intermediate resident on the GPU and only the final
-/// hidden state / logits read back. Mirrors the CPU AutoDiff forward exactly: embedding
-/// gather (word + position, no token-type), embed LayerNorm, then per layer
-/// q/k/v projections → fused attention (scale, +-inf padding mask, row softmax) →
-/// o-projection → residual + LN1 → fc1 → exact GELU → fc2 → residual + LN2; optional
-/// pre_classifier → ReLU → classifier. One kernel-launch-per-op (no fusion) —
-/// correctness first; fusion is a flagged follow-up.
+/// Resolves the model-specific weight key names to the roles the runner consumes (word/position
+/// embeddings + embed LayerNorm, per-layer q/k/v/o projections, ffn1/ffn2, ln1/ln2). Both naming
+/// styles map to the same layer roles, so the runner is config-driven across the BERT family.
 /// </summary>
-public sealed class DistilBertGpuRunner : IDisposable
+static class BertGpuKeys
 {
-    const string WordEmbKey = "distilbert.embeddings.word_embeddings.weight";
-    const string PosEmbKey = "distilbert.embeddings.position_embeddings.weight";
-    const string EmbLnKey = "distilbert.embeddings.LayerNorm";
+    public static string Embeddings(BertGpuNaming naming)
+        => naming == BertGpuNaming.Bert ? "embeddings" : "distilbert.embeddings";
+
+    public static string Layer(BertGpuNaming naming, int index)
+        => naming == BertGpuNaming.Bert
+            ? $"encoder.layer.{index}"
+            : $"distilbert.transformer.layer.{index}";
+
+    public static string Attention(BertGpuNaming naming, int index, char role) => naming switch
+    {
+        BertGpuNaming.Bert => role switch
+        {
+            'q' => $"{Layer(naming, index)}.attention.self.query",
+            'k' => $"{Layer(naming, index)}.attention.self.key",
+            'v' => $"{Layer(naming, index)}.attention.self.value",
+            'o' => $"{Layer(naming, index)}.attention.output.dense",
+            _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Expected q/k/v/o.")
+        },
+        _ => role switch
+        {
+            'q' => $"{Layer(naming, index)}.attention.q_lin",
+            'k' => $"{Layer(naming, index)}.attention.k_lin",
+            'v' => $"{Layer(naming, index)}.attention.v_lin",
+            'o' => $"{Layer(naming, index)}.attention.out_lin",
+            _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Expected q/k/v/o.")
+        }
+    };
+
+    public static string Ffn(BertGpuNaming naming, int index, int which) => naming switch
+    {
+        BertGpuNaming.Bert => which == 1
+            ? $"{Layer(naming, index)}.intermediate.dense"
+            : $"{Layer(naming, index)}.output.dense",
+        _ => which == 1
+            ? $"{Layer(naming, index)}.ffn.lin1"
+            : $"{Layer(naming, index)}.ffn.lin2"
+    };
+
+    public static string LayerNorm(BertGpuNaming naming, int index, int which) => naming switch
+    {
+        BertGpuNaming.Bert => which == 1
+            ? $"{Layer(naming, index)}.attention.output.LayerNorm"
+            : $"{Layer(naming, index)}.output.LayerNorm",
+        _ => which == 1
+            ? $"{Layer(naming, index)}.sa_layer_norm"
+            : $"{Layer(naming, index)}.output_layer_norm"
+    };
+}
+
+/// <summary>
+/// Sample-scoped BERT-family encoder GPU forward (docs/BERT-GPU.md §3, §6): uploads the
+/// loader weight key set once (GEMM weights pre-transposed [out,in] → Bt [in,out] so C = A·Bt is
+/// plain row-major, per the assessment layout note), then runs the batch forward with every
+/// intermediate resident on the GPU and only the final hidden state / logits read back. Mirrors
+/// the CPU AutoDiff forward exactly: embedding gather (word + position, plus the token-type
+/// row 0 when the model ships token-type embeddings — BERT-naming — mirroring the CPU
+/// includeTokenTypeEmbedding default), embed
+/// LayerNorm, then per layer q/k/v projections → fused attention (scale, +-inf padding mask, row
+/// softmax) → o-projection → residual + LN1 → fc1 → exact GELU → fc2 → residual + LN2; optional
+/// pre_classifier → ReLU → classifier. One kernel-launch-per-op (no fusion) — correctness first;
+/// fusion is a tracked follow-up (issue #437). Config- and naming-driven so DistilBERT and
+/// MiniLM (BERT-style keys) share the runner.
+/// </summary>
+public sealed class BertEncoderGpuRunner : IDisposable
+{
     const string PreWKey = "pre_classifier.weight";
     const string PreBKey = "pre_classifier.bias";
     const string ClsWKey = "classifier.weight";
@@ -44,6 +108,8 @@ public sealed class DistilBertGpuRunner : IDisposable
     readonly MemoryBuffer1D<float, Stride1D.Dense> posEmb;
     readonly MemoryBuffer1D<float, Stride1D.Dense> embLnW;
     readonly MemoryBuffer1D<float, Stride1D.Dense> embLnB;
+    readonly MemoryBuffer1D<float, Stride1D.Dense>? tokenTypeEmb;
+    readonly bool hasTokenType;
     readonly LayerGpuWeights[] layers;
     readonly MemoryBuffer1D<float, Stride1D.Dense>? preW;
     readonly MemoryBuffer1D<float, Stride1D.Dense>? preB;
@@ -80,36 +146,45 @@ public sealed class DistilBertGpuRunner : IDisposable
     /// transposed once), and JIT-compiles the kernel set. Throws if required encoder
     /// keys are missing; the head weights are optional.
     /// </summary>
-    public DistilBertGpuRunner(
+    public BertEncoderGpuRunner(
         IlgpuRuntime runtime,
-        DistilBertConfig config,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        BertConfig config,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        BertGpuNaming naming)
     {
         this.runtime = runtime;
-        hiddenDim = config.Dim;
-        intermediateDim = config.HiddenDim;
-        numHeads = config.NHeads;
+        hiddenDim = config.HiddenSize;
+        intermediateDim = config.IntermediateSize;
+        numHeads = config.NumAttentionHeads;
         headDim = hiddenDim / numHeads;
-        numLayers = config.NLayers;
-        eps = config.Eps;
+        numLayers = config.NumHiddenLayers;
+        eps = config.LayerNormEps;
         scale = (float)(1.0 / Math.Sqrt(headDim));
 
         var acc = runtime.Accelerator;
+        var emb = BertGpuKeys.Embeddings(naming);
 
-        var wordEmbT = Req(tensors, WordEmbKey);
+        var wordEmbT = Req(tensors, $"{emb}.word_embeddings.weight");
         wordEmb = Alloc(acc, wordEmbT.Data.Length);
         wordEmb.CopyFromCPU(wordEmbT.Data);
-        var posEmbT = Req(tensors, PosEmbKey);
+        var posEmbT = Req(tensors, $"{emb}.position_embeddings.weight");
         posEmb = Alloc(acc, posEmbT.Data.Length);
         posEmb.CopyFromCPU(posEmbT.Data);
         embLnW = Alloc(acc, hiddenDim);
-        embLnW.CopyFromCPU(Req(tensors, $"{EmbLnKey}.weight").Data);
+        embLnW.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.weight").Data);
         embLnB = Alloc(acc, hiddenDim);
-        embLnB.CopyFromCPU(Req(tensors, $"{EmbLnKey}.bias").Data);
+        embLnB.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.bias").Data);
+
+        hasTokenType = tensors.ContainsKey($"{emb}.token_type_embeddings.weight");
+        if (hasTokenType)
+        {
+            tokenTypeEmb = Alloc(acc, 2 * hiddenDim);
+            tokenTypeEmb.CopyFromCPU(Req(tensors, $"{emb}.token_type_embeddings.weight").Data);
+        }
 
         layers = new LayerGpuWeights[numLayers];
         for (int i = 0; i < numLayers; i++)
-            layers[i] = new LayerGpuWeights(acc, tensors, $"distilbert.transformer.layer.{i}");
+            layers[i] = new LayerGpuWeights(acc, tensors, naming, i);
 
         hasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
         if (hasHead)
@@ -160,14 +235,14 @@ public sealed class DistilBertGpuRunner : IDisposable
     public string DeviceName => runtime.DeviceName;
 
     /// <summary>
-    /// Runs the DistilBERT encoder (and, when the head weights are present, the
+    /// Runs the BERT-family encoder (and, when the head weights are present, the
     /// pre_classifier/ReLU/classifier head) for a padded batch of token IDs.
     /// Token IDs and the attention mask must be padded exactly like the CPU path
     /// (MiniLMTokenizer.Encode → mask 0 on padding positions; positional embedding ids
     /// are 0..seqLen-1 repeated per batch row). Returns the read-back hidden state
     /// [batch*seqLen, hiddenDim] and, if a head exists, the [batch, numClasses] logits.
     /// </summary>
-    public DistilBertGpuResult Forward(int[] tokenIds, float[] attentionMask, int batch, int seqLen)
+    public BertEncoderGpuResult Forward(int[] tokenIds, float[] attentionMask, int batch, int seqLen)
     {
         int rows = batch * seqLen;
         if (tokenIds.Length != rows)
@@ -176,7 +251,7 @@ public sealed class DistilBertGpuRunner : IDisposable
             throw new ArgumentException($"attentionMask.Length ({attentionMask.Length}) must equal batch*seqLen ({rows}).", nameof(attentionMask));
         if (batch > 8 || seqLen > 128)
             throw new ArgumentOutOfRangeException(nameof(batch),
-                $"The DistilBertGpuRunner workspace caps at batch<=8, seqLen<=128 (scenario's actual maxima: batch 1, seqLen 128); got batch={batch}, seqLen={seqLen}.");
+                $"The BertEncoderGpuRunner workspace caps at batch<=8, seqLen<=128 (scenario's actual maxima: batch 1, seqLen 128); got batch={batch}, seqLen={seqLen}.");
 
         Ensure(ref maskBuf, rows);
         maskBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, attentionMask);
@@ -192,10 +267,14 @@ public sealed class DistilBertGpuRunner : IDisposable
 
         var stream = runtime.Stream;
 
-        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row), then embed LN.
+        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row), + token-type row 0 for
+        // models that ship one (BERT-naming; mirrors the CPU includeTokenTypeEmbedding default —
+        // all-zero token-type ids). Then embed LN.
         Gather1D(wordEmb.View, idsBuf.View, x.View, hiddenDim, rows * hiddenDim);
         Gather1D(posEmb.View, posIdsBuf.View, e.View, hiddenDim, rows * hiddenDim);
         Add1D(x.View, e.View, x.View, rows * hiddenDim);
+        if (hasTokenType)
+            Bias1D(x.View, tokenTypeEmb!.View, x.View, rows, hiddenDim);
         LayerNorm1D(x.View, embLnW.View, embLnB.View, x.View, rows, hiddenDim);
 
         for (int i = 0; i < numLayers; i++)
@@ -247,7 +326,7 @@ public sealed class DistilBertGpuRunner : IDisposable
 
         runtime.Synchronize();
         var hidden = Readback(x, rows * hiddenDim);
-        return new DistilBertGpuResult(hidden, logitsArr);
+        return new BertEncoderGpuResult(hidden, logitsArr);
     }
 
     public void Dispose()
@@ -256,6 +335,7 @@ public sealed class DistilBertGpuRunner : IDisposable
         posEmb.Dispose();
         embLnW.Dispose();
         embLnB.Dispose();
+        tokenTypeEmb?.Dispose();
         foreach (var layer in layers) layer.Dispose();
         preW?.Dispose();
         preB?.Dispose();
@@ -383,26 +463,27 @@ public sealed class DistilBertGpuRunner : IDisposable
         public LayerGpuWeights(
             ILGPU.Runtime.Accelerator acc,
             Dictionary<string, (float[] Data, int[] Shape)> tensors,
-            string prefix)
+            BertGpuNaming naming,
+            int index)
         {
-            Q = UploadTransposed(acc, tensors, $"{prefix}.attention.q_lin.weight");
-            K = UploadTransposed(acc, tensors, $"{prefix}.attention.k_lin.weight");
-            V = UploadTransposed(acc, tensors, $"{prefix}.attention.v_lin.weight");
-            O = UploadTransposed(acc, tensors, $"{prefix}.attention.out_lin.weight");
-            W1 = UploadTransposed(acc, tensors, $"{prefix}.ffn.lin1.weight");
-            W2 = UploadTransposed(acc, tensors, $"{prefix}.ffn.lin2.weight");
+            Q = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'q')}.weight");
+            K = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'k')}.weight");
+            V = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'v')}.weight");
+            O = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.weight");
+            W1 = UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.weight");
+            W2 = UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.weight");
 
-            Bq = UploadPlain(acc, tensors, $"{prefix}.attention.q_lin.bias");
-            Bk = UploadPlain(acc, tensors, $"{prefix}.attention.k_lin.bias");
-            Bv = UploadPlain(acc, tensors, $"{prefix}.attention.v_lin.bias");
-            Bo = UploadPlain(acc, tensors, $"{prefix}.attention.out_lin.bias");
-            B1 = UploadPlain(acc, tensors, $"{prefix}.ffn.lin1.bias");
-            B2 = UploadPlain(acc, tensors, $"{prefix}.ffn.lin2.bias");
+            Bq = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'q')}.bias");
+            Bk = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'k')}.bias");
+            Bv = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'v')}.bias");
+            Bo = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.bias");
+            B1 = UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.bias");
+            B2 = UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.bias");
 
-            Ln1W = UploadPlain(acc, tensors, $"{prefix}.sa_layer_norm.weight");
-            Ln1B = UploadPlain(acc, tensors, $"{prefix}.sa_layer_norm.bias");
-            Ln2W = UploadPlain(acc, tensors, $"{prefix}.output_layer_norm.weight");
-            Ln2B = UploadPlain(acc, tensors, $"{prefix}.output_layer_norm.bias");
+            Ln1W = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.weight");
+            Ln1B = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.bias");
+            Ln2W = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.weight");
+            Ln2B = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.bias");
         }
 
         public void Dispose()

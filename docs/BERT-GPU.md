@@ -1,6 +1,7 @@
-# DistilBERT on GPU — first ILGPU model: implementation reflection
+# BERT-family encoders on GPU — first ILGPU model: implementation reflection
 
-Status: **Implemented, gated, and measured** (2026-09-19, PR #436). This is a
+Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR
+#436, MiniLM via `khurram/minilm-gpu`). This is a
 **reflection/documentation** of what we built and what we learned while adding
 the first end-to-end GPU model support through ILGPU — it is *not* a usage guide
 (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md))
@@ -14,8 +15,9 @@ investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)).
 
 ## 1. Result — gated and measured
 
-First end-to-end GPU sample scenario: `distilbert --gpu` / `distilbert_sst --gpu`,
-F32-only, OpenCL iGPU via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
+First end-to-end GPU sample scenarios: `distilbert --gpu` / `distilbert_sst --gpu`,
+then `minilm --gpu` on the same config-driven runner. All F32-only, OpenCL iGPU
+via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
 `Nivara.Extensions`, or `src/Nivara.Gpu` changes). 128 tokens, 3-pass warmup +
 10 timed, AC power (GPU↔CPU-Nivara same-session; PyTorch = recorded CPU baseline):
 
@@ -23,6 +25,7 @@ F32-only, OpenCL iGPU via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
 |---|---|---|---|---|---|
 | distilbert | **65.3 ms** (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | ~1.9× slower |
 | distilbert_sst | **64.0 ms** (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | ~1.8× slower |
+| minilm | **26.8 ms** (25–29) | 76.3 ms (49–102) | 11 ms | **~2.9× faster** | ~2.4× slower |
 
 Correctness gates — **all PASS**:
 - `distilbert --gpu compare`: final hidden `[128,768]` vs same-process CPU —
@@ -31,6 +34,8 @@ Correctness gates — **all PASS**:
 - `distilbert_sst --gpu compare`: logits vs CPU maxRel 6.7e-7, vs PyTorch
   fixture maxRel 5.8e-7, **argmax 8/8** both (CPU's own doc'd bound vs HF is
   9.5e-7 — same class).
+- `minilm --gpu compare`: hidden `maxRel 1.04e-5`, pooled-embedding `maxRel 1.5e-7`,
+  **0/245760 violations**, minimum pooled-embedding cosine **1.000000**.
 - `--precision bf16|fp16` + `--gpu` → clear F32-only rejection (exit 1).
 
 ## 2. What shipped — architecture and decisions
@@ -43,7 +48,7 @@ All GPU code lives in `samples/Nivara.Samples/Gpu/`:
 | `GemmKernels.cs` | **Row4** register-blocked 1×4 tiled GEMM (local-memory staging, `TiledGemmKernelRow4`) — the keystone; used for every matmul (q/k/v/o, lin1, lin2, head) |
 | `AttentionKernels.cs` | fused 12-head score+scale+mask+row-softmax+weighted-V (`XMath.Exp`) |
 | `ElementwiseKernels.cs` | LayerNorm row-reduce, GELU (direct A–S 7.1.26 erf poly port of `GradKernels.Erf`, `XMath.Exp`), bias/residual adds, embedding gather |
-| `DistilBertGpuRunner.cs` | uploads weights (transposed once at ctor) by the exact `DistilBertLoader` key set; runs the full forward + SST-2 head; returns per-stage readbacks for gating |
+| `BertEncoderGpuRunner.cs` (was `DistilBertGpuRunner.cs`) | uploads weights (transposed once at ctor) by the loader key set — naming/role-resolved via `BertGpuNaming` (`DistilBert` | `Bert`), config-driven from `BertConfig`; runs the full BERT-family encoder forward + optional SST-2 head; returns per-stage readbacks for gating |
 
 Design decisions (deliberate, and worth keeping for the next model):
 - **Correctness-first runner**: one kernel launch per operation, everything on
@@ -165,8 +170,20 @@ Prioritized for the next iterations of the GPU journey (see also
      ILGPU 1.5.3 cannot reach.
    The F32-only reject (`--gpu` + `--precision bf16|fp16` → clear error) keeps
    the door clean until that decision.
-5. **Second model**: MiniLM (same encoder shape class, already in the sample
-   inventory) or SmolLM once KV-cached decode exists (see SMOLLM-GPU.md).
+5. ~~**Second model**: MiniLM~~ — **DONE on `khurram/minilm-gpu`** (PR follows; on
+   the same "one config-driven runner, N encoder models" shape at ~20% of the
+   original effort): the runner is now `BertEncoderGpuRunner`, naming- and
+   config-driven (`BertGpuNaming.DistilBert | Bert`; `BertConfig` ctor), so
+   MiniLM reused the kernel set unchanged. One genuine generalization lesson:
+   MiniLM (BERT-style keys) **does** feed token-type embeddings — the CPU
+   `BertEncoder` defaults `includeTokenTypeEmbedding: true` and PyTorch adds
+   `token_type_embeddings[0]` (all-zero segment ids) — where DistilBERT does
+   not; the runner broadcasts that row 0 when the key is present (key-presence
+   driven, so the DistilBERT path is untouched). Gates: hidden `maxRel 1.0e-5`,
+   0/245760 violations, pooled-embedding cosine 1.000000; benchmark **26.8 ms**
+   iGPU vs 76.3 ms Nivara CPU (~2.9×), launch-overhead-bound at ≈1.36 GMAC —
+   tracked as **#437**. SmolLM once KV-cached decode exists (see SMOLLM-GPU.md)
+   remains the next, much larger candidate.
 6. **Promotion decision**: with real measured numbers in hand, decide whether
    GPU support moves into `src/Nivara.Gpu` (which backend, which project, bf16,
    which models). Nothing in core changes until that decision.

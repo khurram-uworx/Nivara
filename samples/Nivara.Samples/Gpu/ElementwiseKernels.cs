@@ -6,7 +6,7 @@ namespace Nivara.Samples.Gpu;
 
 /// <summary>
 /// Flat f32 elementwise / row-reduce kernels for the DistilBERT GPU forward
-/// (docs/DISTILBERT-GPU.md §3): embedding gather, bias and residual adds, LayerNorm
+/// (docs/BERT-GPU.md §3): embedding gather, bias and residual adds, LayerNorm
 /// (per-row mean/variance + affine), exact-GELU via a direct port of the CPU
 /// GradKernels.Erf A–S 7.1.26 polynomial (XMath.Exp replaces Math.Exp — the only
 /// divergence is the erf evaluation; ILGPU core/Algorithms has no erf), and ReLU.
