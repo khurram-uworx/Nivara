@@ -31,15 +31,17 @@ Dispatch inventory today → after:
 | head (SST) | 6 | 2–3 |
 | **total** | ~114–119 | **~44–47** |
 
-### 1. GEMM epilogue fusion — `GemmKernels.cs` (`TiledGemmKernelRow4`)
-Add a `bias` `ArrayView<float>` + `activation` byte (0 none / 1 GELU / 2 ReLU) to
-the Row4 signature. The four register accumulators add `bias[col]` before the
-epilogue write; GELU uses the same A–S 7.1.26 polynomial port as
-`ElementwiseKernels.Gelu` (`XMath.Exp`). Folds `bias` into every projection
-(q/k/v/o/fc1/fc2 + head) and GELU into fc1 — kills 7 bias/activation launches per
+### 1. GEMM epilogue fusion — `GemmKernels.cs` (new `TiledGemmKernelRow4Fused`)
+Add a **fused sibling kernel** `TiledGemmKernelRow4Fused(a, b, c, bias, aRows,
+aCols, bCols, activation)` — the existing `TiledGemmKernelRow4` stays untouched
+because the `TiledGemm` probe harness loads it by signature (GemmKernels.cs:151);
+the runner switches to the fused variant. The four register accumulators add
+`bias[col]` before the epilogue write; the `activation` byte (0 none / 1 GELU /
+2 ReLU) applies GELU to fc1 and ReLU to the head pre-classifier — same A–S
+7.1.26 polynomial as `ElementwiseKernels.Gelu` (`XMath.Exp`). Folds `bias` into
+every projection (q/k/v/o/fc1/fc2 + head) — kills 7 bias/activation launches per
 layer. Bit-identical elementwise (register `acc + bias` vs stored-then-added by
-`AddBias`; same GELU polynomial). The 1×1 `TiledGemmKernel` and the `TiledGemm`
-probe harness stay untouched.
+`AddBias`; same GELU polynomial).
 
 ### 2. QKV-concat — `BertEncoderGpuRunner.cs` (upload) + launch site
 Upload `[Wq|Wk|Wv]` as one pre-transposed `[hidden × 3·hidden]` buffer (per-layer),
@@ -120,8 +122,9 @@ harness** (its README §Performance benchmarks):
 
 ## Blast radius
 
-- `samples/Nivara.Samples/Gpu/GemmKernels.cs` — Row4 signature gains bias +
-  activation params; 1×1 kernel untouched; `TiledGemm` probe harness unchanged.
+- `samples/Nivara.Samples/Gpu/GemmKernels.cs` — adds the fused
+  `TiledGemmKernelRow4Fused` sibling; original Row4 + 1×1 + `TiledGemm` probe
+  harness untouched.
 - `samples/Nivara.Samples/Gpu/ElementwiseKernels.cs` — adds `LayerNormResidual1D`
   + `EmbeddingSum`; existing kernels untouched.
 - `samples/Nivara.Samples/Gpu/BertEncoderGpuRunner.cs` — qkv concat at upload,
