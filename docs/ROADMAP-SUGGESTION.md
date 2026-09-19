@@ -40,7 +40,7 @@ dispatches ~113–119 → 44–48. Measured (AC): MiniLM 26.8 → **24.3 ms**,
 DistilBERT 65.3 → **63.1 ms**. The pre-M2 "~0.19 ms/launch" model was corrected
 by measurement to **~30 µs/dependent kernel**, so launch-count fusion is nearly
 exhausted and the >2× acceptance is honestly unmet — the real lever is GEMM
-throughput (M2's follow-up issue; see §5.2 in docs/BERT-GPU.md).
+throughput (issue **#440**; see §5.2 in docs/BERT-GPU.md).
 
 ## 2. The gap we want to attack (CPU GEMM)
 
@@ -171,8 +171,8 @@ native bridge. Measure both and publish both in the README table.
 - **#437** — M2 GPU kernel fusion / lazy stream — **shipped 2026-09-19** (see the
   M2 block above): dispatches 44–48, MiniLM 26.8 → 24.3 ms, DistilBERT 65.3 →
   63.1 ms. The measured per-dispatch dependency latency (~30 µs) corrected the
-  launch model; the follow-up issue files the GEMM-throughput item (tile-32/2×2)
-  that the >2× target actually needs.
+  launch model; **#440** files the GEMM-throughput item (tile-32/2×2) that the
+  >2× target actually needs.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
   documented in `docs/BERT-GPU.md` §1/§5).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after

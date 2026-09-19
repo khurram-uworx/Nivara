@@ -193,8 +193,8 @@ Prioritized for the next iterations of the GPU journey (see also
 2. **GEMM headroom is now the leading GPU item** — a 2×2 or tile-32
    register-block pass (Row4 measured 303→379 GMAC/s across shapes;
    occupancy/register headroom exists) is the only realistic path toward the
-   2×-class numbers fusion-targeted. Tracked as the follow-up issue created from
-   M2 (see #437 + ROADMAP-SUGGESTION.md). Keep the double-truth bounds check —
+   2×-class numbers fusion-targeted. Tracked as issue **#440** (filed from M2;
+   see ROADMAP-SUGGESTION.md). Keep the double-truth bounds check —
    and promote it into issue **#435** (lasting GEMM regression harness).
 3. **Transpose-free in-kernel GEMM** — dropped for first-cut correctness; worth
    revisiting if upload time ever matters (it doesn't here — shared DRAM).

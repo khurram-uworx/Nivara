@@ -836,7 +836,7 @@ forward. All parity gates stayed byte-identical at every step (hidden-state
 24.3 ms and DistilBERT 65.3 → 63.1 ms, i.e. **~30 µs per dependent kernel** —
 the earlier "~0.19 ms/launch" model was ~6× too optimistic, so the fusion-only
 ">2×" acceptance in #437 is not reachable on this iGPU (the real lever is GEMM
-*throughput* — tracked as the follow-up issue; see `docs/BERT-GPU.md` §1/§5).
+*throughput* — issue **#440**; see `docs/BERT-GPU.md` §1/§5).
 **AC power required**: battery throttles the iGPU — an intermediate session on
 battery produced contaminated 25.6–33 ms MiniLM numbers drifting as the charge
 drained; only AC numbers above are valid.
