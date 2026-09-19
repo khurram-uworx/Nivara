@@ -111,7 +111,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly MemoryBuffer1D<float, Stride1D.Dense> posEmb;
     readonly MemoryBuffer1D<float, Stride1D.Dense> embLnW;
     readonly MemoryBuffer1D<float, Stride1D.Dense> embLnB;
-    readonly MemoryBuffer1D<float, Stride1D.Dense>? tokenTypeEmb;
+    readonly MemoryBuffer1D<float, Stride1D.Dense> tokenTypeEmb;
     readonly bool hasTokenType;
     readonly LayerGpuWeights[] layers;
     readonly MemoryBuffer1D<float, Stride1D.Dense>? preW;
@@ -120,7 +120,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly MemoryBuffer1D<float, Stride1D.Dense>? clsB;
 
     MemoryBuffer1D<float, Stride1D.Dense> x = null!;
-    MemoryBuffer1D<float, Stride1D.Dense> e = null!;
     MemoryBuffer1D<float, Stride1D.Dense> qkv = null!;
     MemoryBuffer1D<float, Stride1D.Dense> attn = null!;
     MemoryBuffer1D<float, Stride1D.Dense> h = null!;
@@ -134,9 +133,9 @@ public sealed class BertEncoderGpuRunner : IDisposable
     MemoryBuffer1D<int, Stride1D.Dense> clsIdsBuf = null!;
 
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<int>, ArrayView<float>, int> gather;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> addBias;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>> add;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> embeddingSum;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNormResidual;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmBias;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmGelu;
@@ -178,11 +177,9 @@ public sealed class BertEncoderGpuRunner : IDisposable
         embLnB.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.bias").Data);
 
         hasTokenType = tensors.ContainsKey($"{emb}.token_type_embeddings.weight");
+        tokenTypeEmb = Alloc(acc, 2 * hiddenDim);
         if (hasTokenType)
-        {
-            tokenTypeEmb = Alloc(acc, 2 * hiddenDim);
             tokenTypeEmb.CopyFromCPU(Req(tensors, $"{emb}.token_type_embeddings.weight").Data);
-        }
 
         layers = new LayerGpuWeights[numLayers];
         for (int i = 0; i < numLayers; i++)
@@ -201,7 +198,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
         // scenario's actual maxima; per-call payload buffers grow on demand).
         int rowsCap = 8 * 128;
         x = Alloc(acc, rowsCap * hiddenDim);
-        e = Alloc(acc, rowsCap * hiddenDim);
         qkv = Alloc(acc, rowsCap * 3 * hiddenDim);
         attn = Alloc(acc, rowsCap * hiddenDim);
         h = Alloc(acc, rowsCap * hiddenDim);
@@ -215,9 +211,11 @@ public sealed class BertEncoderGpuRunner : IDisposable
         clsIdsBuf = AllocInt(acc, 8);
 
         gather = acc.LoadKernel<ArrayView<float>, ArrayView<int>, ArrayView<float>, int>(ElementwiseKernels.Gather);
-        addBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(ElementwiseKernels.AddBias);
-        add = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Add);
+        embeddingSum = acc.LoadKernel<ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(
+            ElementwiseKernels.EmbeddingSum);
         layerNorm = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float>(ElementwiseKernels.LayerNorm1D);
+        layerNormResidual = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float>(
+            ElementwiseKernels.LayerNormResidual1D);
         attention = acc.LoadKernel<
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
             ArrayView<float>, ArrayView<float>, int, int, int, int, float>(
@@ -271,14 +269,11 @@ public sealed class BertEncoderGpuRunner : IDisposable
 
         var stream = runtime.Stream;
 
-        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row), + token-type row 0 for
+        // embeddings: x = word_emb(ids) + pos_emb(0..seqLen-1 per row) + token-type row 0 for
         // models that ship one (BERT-naming; mirrors the CPU includeTokenTypeEmbedding default —
-        // all-zero token-type ids). Then embed LN.
-        Gather1D(wordEmb.View, idsBuf.View, x.View, hiddenDim, rows * hiddenDim);
-        Gather1D(posEmb.View, posIdsBuf.View, e.View, hiddenDim, rows * hiddenDim);
-        Add1D(x.View, e.View, x.View, rows * hiddenDim);
-        if (hasTokenType)
-            Bias1D(x.View, tokenTypeEmb!.View, x.View, rows, hiddenDim);
+        // all-zero token-type ids). Then embed LN. One fused launch (word/pos gathers + sum +
+        // optional token-type row).
+        EmbeddingSum1D(idsBuf.View, posIdsBuf.View, wordEmb.View, posEmb.View, tokenTypeEmb.View, x.View, hiddenDim, rows * hiddenDim, hasTokenType ? 1 : 0);
         LayerNorm1D(x.View, embLnW.View, embLnB.View, x.View, rows, hiddenDim);
 
         for (int i = 0; i < numLayers; i++)
@@ -292,14 +287,12 @@ public sealed class BertEncoderGpuRunner : IDisposable
 
             Attention1D(qView, kView, vView, maskBuf.View, attn.View, scores.View, batch, seqLen);
             GemmBias(attn.View, w.O.View, h.View, w.Bo.View, rows, hiddenDim, hiddenDim);
-            Add1D(h.View, x.View, h.View, rows * hiddenDim);
-            LayerNorm1D(h.View, w.Ln1W.View, w.Ln1B.View, h.View, rows, hiddenDim);
+            LayerNormResidual1D(h.View, x.View, w.Ln1W.View, w.Ln1B.View, h.View, rows, hiddenDim);
 
             GemmBias(h.View, w.W1.View, f1.View, w.B1.View, rows, hiddenDim, intermediateDim, activation: 1);
 
             GemmBias(f1.View, w.W2.View, attn.View, w.B2.View, rows, intermediateDim, hiddenDim);
-            Add1D(attn.View, h.View, h.View, rows * hiddenDim);
-            LayerNorm1D(h.View, w.Ln2W.View, w.Ln2B.View, x.View, rows, hiddenDim);
+            LayerNormResidual1D(attn.View, h.View, w.Ln2W.View, w.Ln2B.View, x.View, rows, hiddenDim);
         }
 
         float[]? logitsArr = null;
@@ -330,13 +323,13 @@ public sealed class BertEncoderGpuRunner : IDisposable
         posEmb.Dispose();
         embLnW.Dispose();
         embLnB.Dispose();
-        tokenTypeEmb?.Dispose();
+        tokenTypeEmb.Dispose();
         foreach (var layer in layers) layer.Dispose();
         preW?.Dispose();
         preB?.Dispose();
         clsW?.Dispose();
         clsB?.Dispose();
-        x.Dispose(); e.Dispose(); qkv.Dispose();
+        x.Dispose(); qkv.Dispose();
         attn.Dispose(); h.Dispose(); f1.Dispose(); clsOut.Dispose(); logits.Dispose();
         scores.Dispose(); maskBuf.Dispose(); idsBuf.Dispose(); posIdsBuf.Dispose(); clsIdsBuf.Dispose();
     }
@@ -346,11 +339,14 @@ public sealed class BertEncoderGpuRunner : IDisposable
     void Gather1D(ArrayView<float> table, ArrayView<int> ids, ArrayView<float> output, int hidden, int total)
         => gather(runtime.Stream, (Cfg(total), 256), table, ids, output, hidden);
 
-    void Add1D(ArrayView<float> a, ArrayView<float> b, ArrayView<float> y, int total)
-        => add(runtime.Stream, (Cfg(total), 256), a, b, y);
+    void EmbeddingSum1D(
+        ArrayView<int> ids, ArrayView<int> posIds,
+        ArrayView<float> wordEmb, ArrayView<float> posEmb, ArrayView<float> tokenType, ArrayView<float> y,
+        int hidden, int total, int includeTt)
+        => embeddingSum(runtime.Stream, (Cfg(total), 256), ids, posIds, wordEmb, posEmb, tokenType, y, hidden, includeTt);
 
-    void Bias1D(ArrayView<float> x, ArrayView<float> bias, ArrayView<float> y, int rows, int cols)
-        => addBias(runtime.Stream, (Cfg(rows * cols), 256), x, bias, y, rows, cols);
+    void LayerNormResidual1D(ArrayView<float> a, ArrayView<float> b, ArrayView<float> gamma, ArrayView<float> beta, ArrayView<float> y, int rows, int cols)
+        => layerNormResidual(runtime.Stream, (Cfg(rows), 256), a, b, gamma, beta, y, rows, cols, eps);
 
     void LayerNorm1D(ArrayView<float> x, ArrayView<float> gamma, ArrayView<float> beta, ArrayView<float> y, int rows, int cols)
         => layerNorm(runtime.Stream, (Cfg(rows), 256), x, gamma, beta, y, rows, cols, eps);
