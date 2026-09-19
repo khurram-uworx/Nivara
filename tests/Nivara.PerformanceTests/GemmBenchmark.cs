@@ -72,7 +72,11 @@ internal static class GemmBenchmark
         }
 
         using (runtime)
-        {
+            return RunGate(runtime);
+    }
+
+    static int RunGate(IlgpuRuntime runtime)
+    {
         Console.WriteLine($"  Device: {runtime.DeviceName}");
         Console.WriteLine($"  Gate  : maxAbs(gpu - dp-truth) <= {GateMaxAbs} (f32-vs-DP floor is 4.4e-5..1.6e-4 at K=768..3072; real kernel bugs land ~40-77)");
         Console.WriteLine($"  Timing: 1 JIT + {Warmups} warmup + best-of-{TimedRounds} synchronized launches");
@@ -171,7 +175,6 @@ internal static class GemmBenchmark
             ? $"Gate PASS — all {CountCells()} (kernel, shape) cells within {GateMaxAbs} of double-precision truth."
             : $"Gate FAIL — {failures} of {CountCells()} cells exceed {GateMaxAbs}.");
         return failures;
-        }
     }
 
     static bool TryCreateRuntime(out IlgpuRuntime runtime, out string reason)
