@@ -814,29 +814,50 @@ only same-row GPU↔CPU-Nivara ratios are same-session:
 
 | Model | Input | GPU Nivara (iGPU) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU Nivara | vs PyTorch |
 |-------|-------|-------------------|---------------------------|---------------|---------------|------------|
-| **MiniLM** | 128 tokens | 26.8 ms (25–29) | 76.3 ms (49–102) | 11 ms | **~2.9× faster** | **~2.4× slower** |
-| **DistilBERT** | 128 tokens | 65.3 ms (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | **~1.9× slower** |
-| **DistilBERT SST-2** | 128 tokens | 64.0 ms (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
+| **MiniLM** | 128 tokens | 24.3 ms (23–25) | 76.3 ms (49–102) | 11 ms | **~3.1× faster** | **~2.2× slower** |
+| **DistilBERT** | 128 tokens | 63.1 ms (61–67) | 194.7 ms (152–232) | 35 ms | **~3.1× faster** | **~1.8× slower** |
+| **DistilBERT SST-2** | 128 tokens | 63.7 ms (62–67) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
 
-The GPU forward is ~3.0×/~2.6×/~2.9× **faster than Nivara CPU** — but still
-~1.9×/~1.8×/~2.4× **slower than PyTorch CPU**: PyTorch starts far ahead of
+The GPU forward is ~3.1×/~2.6×/~3.1× **faster than Nivara CPU** — but still
+~1.8×/~1.8×/~2.2× **slower than PyTorch CPU**: PyTorch starts far ahead of
 Nivara-CPU (~5.6× on the distilbert row), so the iGPU closes most of that gap
 without fully beating it. Same-row GPU↔CPU-Nivara ratios are same-session; the
 PyTorch column is the recorded 2026-09-01 baseline from the CPU table above
 (same architecture for the distilbert rows; MiniLM reuses its 11 ms CPU-table row).
 
 The GPU path is sample-scoped (`--gpu` on `distilbert` / `distilbert_sst` / `minilm`
-only), one launch per op — parity gates PASS vs CPU and the PyTorch fixture
-(hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM
-hidden `maxRel 1.0e-5`), so the ~3× here is a
-correctness-gated speedup. **AC power required**: battery throttles the iGPU —
-every GEMM shape flattens to ~150–160 GMAC/s, and the same benchmark on battery was
-~110–135 ms/forward (vs 62–73 ms on AC). The remaining gap vs a fully fused
-pipeline (see `docs/BERT-GPU.md` §4.4) is launch overhead at these small
-shapes, not GEMM throughput — per-op launch fusion is the flagged follow-up
-(issue #437). MiniLM is the clearest proof: at ≈1.36 GMAC its GEMM legs need only
-~5 ms; the rest of its 26.8 ms/forward is the ~100 per-op launches, so fusion
-should help the small encoder even more than DistilBERT.
+only). **M2 kernel fusion (issue #437, 2026-09-19)** folded bias + GELU/ReLU into
+the GEMM epilogue, merged q/k/v into one packed GEMM, fused residual-add into
+LayerNorm and the embedding gathers into one launch, and cached the
+seqLen-deterministic posIds — dispatches went from ~113–119 to **44–48** per
+forward. All parity gates stayed byte-identical at every step (hidden-state
+`maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM hidden
+`maxRel 1.0e-5`). Honest outcome: removing ~70 dispatches moved MiniLM 26.8 →
+24.3 ms and DistilBERT 65.3 → 63.1 ms, i.e. **~30 µs per dependent kernel** —
+the earlier "~0.19 ms/launch" model was ~6× too optimistic, so the fusion-only
+">2×" acceptance in #437 is not reachable on this iGPU (the real lever is GEMM
+*throughput* — tracked as the follow-up issue; see `docs/BERT-GPU.md` §1/§5).
+**AC power required**: battery throttles the iGPU — an intermediate session on
+battery produced contaminated 25.6–33 ms MiniLM numbers drifting as the charge
+drained; only AC numbers above are valid.
+
+**DistilBERT fine-tuning slice (CPU, NivaraFineTuning)** — measured 2026-09-19 on
+the same machine, per the established methodology (NivaraFineTuning README
+§Performance benchmarks): first run of a 13-batch slice
+
+```
+dotnet run --project samples/NivaraFineTuning -c Release -- --mode train --epochs 1 --batch-size 2 --max-examples 25
+```
+
+Batch times (loss-printing): batch 1 **2.7 s** (JIT/model-build warmup — excluded
+from steady state), batches 2–13: 1.9, 2.0, 2.2, 2.1, 1.8, 2.0, 1.9, 1.9, 1.7,
+1.4, 1.7, 1.5 s → steady-state **~1.84 s/batch** average, settling to
+**~1.5–1.7 s/batch** by the tail (seqLen 128, batch 2, 6 layers, AdamW lr 2e-5;
+first few batches only — a full 67,349-example epoch at batch 2 would be ~33,675
+batches ≈ **~17 h**, not run). This sits around the 2026-08-21 record
+(**1.54 s/batch** Nivara vs **0.499 s/batch** PyTorch, same methodology) within
+normal run-to-run/thermal variance — no regression signal. Optional same-code
+PyTorch A/B: `samples/NivaraFineTuning/Python/benchmark_timing.py`.
 
 The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
 weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).

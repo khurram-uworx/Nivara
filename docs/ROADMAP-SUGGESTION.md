@@ -31,7 +31,16 @@ A **second model shipped on the same infra** (`khurram/minilm-gpu`): the runner
 generalized to a config/naming-driven `BertEncoderGpuRunner`, so MiniLM (BERT-style
 keys, 384-dim) reused the kernel set unchanged at ~20% of the original effort —
 26.8 ms iGPU vs 76.3 ms Nivara CPU (~2.9×). Details and the token-type lesson in
-`docs/BERT-GPU.md` §5.5; launch-overhead follow-up is issue **#437**.
+`docs/BERT-GPU.md` §5.5; launch-overhead follow-up was issue **#437**.
+
+**M2 fusion (issue #437) shipped 2026-09-19** (`khurram/lazystream-gpu` → PR
+targets `khurram/minilm-gpu`): GEMM epilogue bias+GELU/ReLU, packed q/k/v GEMM,
+residual folded into LayerNorm, embedding sums fused, posIds cached —
+dispatches ~113–119 → 44–48. Measured (AC): MiniLM 26.8 → **24.3 ms**,
+DistilBERT 65.3 → **63.1 ms**. The pre-M2 "~0.19 ms/launch" model was corrected
+by measurement to **~30 µs/dependent kernel**, so launch-count fusion is nearly
+exhausted and the >2× acceptance is honestly unmet — the real lever is GEMM
+throughput (M2's follow-up issue; see §5.2 in docs/BERT-GPU.md).
 
 ## 2. The gap we want to attack (CPU GEMM)
 
@@ -116,9 +125,13 @@ native bridge. Measure both and publish both in the README table.
    cache blocking, single-thread first, then threaded); measure % of MKL reached
    on DistilBERT shapes; record honestly in the README table (same-session
    methodology). Highest leverage: benefits all transformer paths + training.
-2. **M2 — GPU fusion follow-up** (from PR #436, independent of M1): lazy stream +
+2. **M2 — GPU fusion follow-up** (from PR #436, independent of M1): ~~lazy stream +
    per-op launch fusion to attack the 65 ms → ~25 ms gap (one kernel per op,
-   ~100 dispatches/forward, is overhead-bound at 128-row shapes).
+   ~100 dispatches/forward, is overhead-bound at 128-row shapes)~~ — **DONE
+   2026-09-19**: dispatches 44–48, MiniLM 26.8 → 24.3 ms, DistilBERT 65.3 →
+   63.1 ms. Measurement corrected the launch model to ~30 µs/dependent kernel;
+   the >2× target needs kernel *throughput* (filed as the M2 follow-up issue —
+   GEMM register-block/tile-32 headroom), which is the leading GPU item.
 3. **M3 — Decide the native bridge only from M1's measured numbers**:
    - managed ≥ ~50% of MKL on these shapes → managed enough; skip native (keep
      pure).
@@ -155,10 +168,13 @@ native bridge. Measure both and publish both in the README table.
 
 - **#435** — promote tiled-GEMM correctness+perf harness into a lasting
   regression gate (probe or sample bench) — covers the gate half of M1.
-- **#437** — M2 GPU kernel fusion / lazy stream to cut per-dispatch launch
-  overhead (small encoders are launch-bound; MiniLM's GEMM legs are only ~5 ms).
+- **#437** — M2 GPU kernel fusion / lazy stream — **shipped 2026-09-19** (see the
+  M2 block above): dispatches 44–48, MiniLM 26.8 → 24.3 ms, DistilBERT 65.3 →
+  63.1 ms. The measured per-dispatch dependency latency (~30 µs) corrected the
+  launch model; the follow-up issue files the GEMM-throughput item (tile-32/2×2)
+  that the >2× target actually needs.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
-  documented in `docs/BERT-GPU.md` §4.4).
+  documented in `docs/BERT-GPU.md` §1/§5).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after
   #436 merges): second config-driven model on the shared runner.
 - Any decision to *start* M1/M2/M3 should first be recorded as GitHub issues and
