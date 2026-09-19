@@ -1163,7 +1163,6 @@ class Program
 
         var gpuHidden = new float[n][];
         var gpuEmbeddings = new float[n][];
-        var perSentence = new List<long>();
         double worstCosine = 1.0;
         for (int s = 0; s < n; s++)
         {
@@ -1172,7 +1171,6 @@ class Program
             var sw = Stopwatch.StartNew();
             var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
             sw.Stop();
-            perSentence.Add(sw.ElapsedMilliseconds);
             gpuHidden[s] = result.Hidden;
             gpuEmbeddings[s] = MiniLmClsEmbeddings(result.Hidden, 1, intIds.Length, config.HiddenSize)[0];
 
