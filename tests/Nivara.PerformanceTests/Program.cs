@@ -30,7 +30,7 @@ static class Program
 
     static int Main(string[] args)
     {
-        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm) = ParseArgs(args);
 
         if (datasetTest)
         {
@@ -43,6 +43,9 @@ static class Program
             SafeTensorsLoadBenchmark.Run(args);
             return 0;
         }
+
+        if (gemm)
+            return GemmBenchmark.Run(args);
 
         if (runs > 1)
         {
@@ -994,13 +997,14 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool Gemm) ParseArgs(string[] args)
     {
         string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
         double minOpsFraction = GateEvaluator.DefaultMinOpsFraction;
         bool datasetTest = false;
         bool safetensorsMmap = false;
+        bool gemm = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1011,6 +1015,9 @@ static class Program
                     break;
                 case "--safetensors-mmap":
                     safetensorsMmap = true;
+                    break;
+                case "--gemm":
+                    gemm = true;
                     break;
                 case "--only" when i + 1 < args.Length:
                     only = args[++i];
@@ -1029,13 +1036,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)
