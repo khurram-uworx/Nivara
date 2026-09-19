@@ -72,6 +72,26 @@ fusion-only edge; micro-opts add margin. If the acceptance check lands short, we
 report the honest number and optionally pull GEMM tile-32 headroom (separate item,
 not in this plan).
 
+### 5. DistilBERT fine-tuning measurements (CPU, Nivara) — past methodology
+
+Separate from the GPU inference track, the human wants a fresh DistilBERT training
+measurement recorded, following the **established `NivaraFineTuning` slice
+harness** (its README §Performance benchmarks):
+
+- Run: `dotnet run -c Release --project samples/NivaraFineTuning -- --mode train
+  --epochs 1 --batch-size 2 --max-examples 25` — 13 batches; the full
+  67,349-example epoch is ~32 h and out of reach, so the slice is the documented
+  compromise. **First (JIT warmup) batch is excluded** from steady-state ms/batch.
+  AC power for stable thermals. Inform the human before the run.
+- Record steady-state ms/batch and compare to the last recorded Nivara number
+  (2026-08-21: **1540 ms/batch**, ~3× vs PyTorch 499 ms/batch on the same slice).
+- Optional PyTorch A/B via `samples/NivaraFineTuning/Python/benchmark_timing.py`
+  when the Python env is available (same-session, same methodology).
+- **Detail the measurement in the NivaraInference README** per the human's
+  direction (date, machine, exact command, per-side numbers, full-epoch
+  extrapolation), with a pointer to the NivaraFineTuning methodology. Training is
+  CPU-side (no ILGPU involvement) and is unaffected by the fusion work.
+
 ## Verification steps (gates after every step)
 
 - After each step: `minilm --gpu compare`, `distilbert --gpu compare`,
@@ -83,6 +103,8 @@ not in this plan).
   **AC power** (inform the human first), same-session numbers → update README GPU
   table + `docs/BERT-GPU.md` (item 1 "65 → ~25 ms class" gets measured truth;
   MiniLM ~2×) + `docs/ROADMAP-SUGGESTION.md` M2 row.
+- DistilBERT fine-tuning slice measurement (see Proposed changes §5) — Nivara
+  number + optional PyTorch A/B, recorded in the NivaraInference README.
 - Quick `--gpu benchmark` between steps (AC) to watch the improvement curve.
 
 ## Planned commits
@@ -93,7 +115,8 @@ not in this plan).
 4. `samples: fuse residual-add into LayerNorm and embedding sums into one kernel`
 5. `samples: cache positional ids per seqLen in BertEncoderGpuRunner`
 6. `docs: M2 benchmark numbers + README/BERT-GPU/ROADMAP updates`
-7. `docs: remove TODO.md — M2 plan executed (after G2)`
+7. `docs: record DistilBERT fine-tuning slice measurement in NivaraInference README`
+8. `docs: remove TODO.md — M2 plan executed (after G2)`
 
 ## Blast radius
 
@@ -105,6 +128,10 @@ not in this plan).
   epilogue-aware launch call sites, posIds cache. Core forward logic unchanged.
 - `samples/NivaraInference/Program.cs` — no functional change expected; GPU gate
   run-modes unchanged.
+- `samples/NivaraInference/README.md` — gains a DistilBERT fine-tuning measurement
+  note (§5 of this plan); inference tables updated with fusion numbers.
+- `samples/NivaraFineTuning` + `samples/data/sst2|distilbert` — **used read-only**
+  for the training measurement (no code change to the sample).
 - No `src/Nivara`, `Nivara.Extensions`, `src/Nivara.Gpu`, or `tests/` changes.
 - GPU gates are run-mode verification (`minilm|distilbert|distilbert_sst --gpu
   compare`), not NUnit — no new unit tests needed; existing compares are the
