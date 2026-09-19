@@ -55,6 +55,43 @@ a throwaway harness:
   managed-heap high-water (`GC.GetTotalMemory`), and retained-after-GC over 3 alternating
   rounds. Defaults to `samples/data/qwen2.5-0.5b-instruct/model.safetensors` when no path
   is given.
+- `--gemm` — tiled-GEMM regression gate (#435): the lasting promotion of the deleted
+  `%TEMP%\opencode\gemm-measure\` harness. Loads all six committed ILGPU GEMM kernels
+  (`samples/Nivara.Samples/Gpu/GemmKernels.cs` — `OneToOne`, `Row4`, and the M2 fused
+  siblings `Row4Bias`/`Row4Gelu`/`Row4Relu`/`Row4Qkv`) through the public `IlgpuRuntime` and
+  runs them over the model GEMM shapes (DistilBERT 768/3072, MiniLM 384/1536, seq-len 128)
+  plus two padded-grid edge shapes (non-multiple-of-16 rows/K/cols). Each (kernel, shape)
+  cell is gated `maxAbs(gpu − double-precision truth) ≤ 1e-3` and timed best-of-25
+  synchronized launches, reporting GMAC/s; exit code 0 = pass, N = failed cells,
+  10 = UNBUILT (no OpenCL GPU). Runs on AC power only — the harness warns on battery
+  because the iGPU throttles flat (the correctness leg still runs). Re-run after any
+  driver/IGC bump and compare the GMAC/s column (docs/BERT-GPU.md). The baseline below was
+  recorded on this machine's first run.
+
+#### GEMM gate baseline (2026-09-19)
+
+`dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gemm` — Intel Core
+Ultra 7 255H (Arc iGPU via OpenCL/ILGPU 1.5.3), AC line. 36 cells, all PASS
+(`maxAbs ≤ 1e-3`). Per-shape worst maxAbs and the best kernel's GMAC/s:
+
+| shape | maxAbs (worst kernel) | GMAC/s (best kernel) |
+|---|---|---|
+| distilbert qkv/o [128·768·768] | 4.06e-5 | 180 (Row4Bias) |
+| distilbert fc1 [128·768·3072] | 5.27e-5 | 183 (Row4Bias) |
+| distilbert fc2 [128·3072·768] | 1.70e-4 | 177 (Row4Bias) |
+| distilbert head [128·768·2] | 2.19e-5 | 3 (OneToOne; launch-overhead bound) |
+| minilm qkv/o [128·384·384] | 1.86e-5 | 139 (Row4) |
+| minilm fc1 [128·384·1536] | 2.42e-5 | 164 (Row4Gelu) |
+| minilm fc2 [128·1536·384] | 8.18e-5 | 164 (Row4) |
+| minilm head [128·384·2] | 9.81e-6 | 3 (OneToOne; launch-overhead bound) |
+| edge padded rows [100·770·70] | 3.47e-5 | 55 (Row4) |
+| edge padded K [64·1032·130] | 4.64e-5 | 68 (OneToOne) |
+
+The maxAbs values reproduce the documented f32-vs-DP summation-order floor exactly
+(K=768 → 4.0e-5, K=3072 → 1.7e-4), leaving ~25–250× margin to the 1e-3 gate and ~6 orders
+to the Row4 `colBase`-class bug signal (~40). GMAC/s is load-sensitive (this run read the
+Arc iGPU at ~half the idle-machine scenario benchmark 303–379 GMAC/s, docs/BERT-GPU.md) —
+the correctness gate is the primary contract; compare GMAC/s moves, not absolutes.
 
 ### No-regression gate (P4)
 
