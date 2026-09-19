@@ -83,11 +83,12 @@ static class BertGpuKeys
 /// includeTokenTypeEmbedding default), embed
 /// LayerNorm, then per layer q/k/v projections → fused attention (scale, +-inf padding mask, row
 /// softmax) → o-projection → residual + LN1 → fc1 → exact GELU → fc2 → residual + LN2; optional
-/// pre_classifier → ReLU → classifier. Every projection GEMM runs the fused
-/// <see cref="GemmKernels.TiledGemmKernelRow4Fused"/> epilogue (bias added in the register
-/// accumulators; GELU/ReLU folded into the fc1 / pre-classifier launches), so bias and
-/// activation no longer dispatch separate kernels (issue #437). Config- and naming-driven so
-/// DistilBERT and MiniLM (BERT-style keys) share the runner.
+/// pre_classifier → ReLU → classifier. Every projection GEMM runs a fused epilogue kernel
+/// (bias added in the register accumulators; GELU/ReLU folded into the fc1 / pre-classifier
+/// launches via the lean <see cref="GemmKernels.TiledGemmKernelRow4Bias"/> /
+/// <see cref="GemmKernels.TiledGemmKernelRow4Gelu"/> / <see cref="GemmKernels.TiledGemmKernelRow4Relu"/>
+/// siblings), so bias and activation no longer dispatch separate kernels (issue #437). Config-
+/// and naming-driven so DistilBERT and MiniLM (BERT-style keys) share the runner.
 /// </summary>
 public sealed class BertEncoderGpuRunner : IDisposable
 {
@@ -139,7 +140,9 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>> add;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int> gemmFused;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmBias;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmGelu;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmRelu;
 
     /// <summary>
     /// Creates the runner, uploads every weight from the loader tensors (GEMM weights
@@ -222,8 +225,12 @@ public sealed class BertEncoderGpuRunner : IDisposable
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
             ArrayView<float>, ArrayView<float>, int, int, int, int, float>(
             AttentionKernels.BatchedAttention);
-        gemmFused = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
-            GemmKernels.TiledGemmKernelRow4Fused);
+        gemmBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4Bias);
+        gemmGelu = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4Gelu);
+        gemmRelu = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4Relu);
 
         // Weight uploads ran on the default stream; sync the device so they are
         // visible to the kernel launches (running on runtime.Stream) in Forward.
@@ -360,7 +367,13 @@ public sealed class BertEncoderGpuRunner : IDisposable
         int blockCols = GemmKernels.TileSize * GemmKernels.BlockCols;
         var numGroups = new Index2D((aRows + GemmKernels.TileSize - 1) / GemmKernels.TileSize, (bCols + blockCols - 1) / blockCols);
         var groupSize = new Index2D(GemmKernels.TileSize, GemmKernels.TileSize);
-        gemmFused(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols, activation);
+        switch (activation)
+        {
+            // Each epilogue form is its own lean kernel (no dead-path code on hot launches).
+            case 1: gemmGelu(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols); break;
+            case 2: gemmRelu(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols); break;
+            default: gemmBias(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols); break;
+        }
     }
 
     static int Cfg(int total) => total <= 0 ? 1 : (total + 255) / 256;
