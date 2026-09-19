@@ -40,8 +40,11 @@ dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 
-# DistilBERT on the OpenCL iGPU (ILGPU 1.5.3; --gpu is F32-only in this phase —
+# BERT-family encoders on the OpenCL iGPU (ILGPU 1.5.3; --gpu is F32-only in this phase —
 # combine with --precision bf16|fp16 to hit the explicit rejection path)
+dotnet run --project samples/NivaraInference -c Release -- minilm --gpu          # 384-dim sentence embedding
+dotnet run --project samples/NivaraInference -c Release -- minilm --gpu benchmark
+dotnet run --project samples/NivaraInference -c Release -- minilm --gpu compare  # CPU/PyTorch parity gate
 dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu
 dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu compare     # CPU/PyTorch parity gate
@@ -109,8 +112,11 @@ dotnet run --project samples/NivaraInference -- minilm
 # Benchmark (10 passes)
 dotnet run --project samples/NivaraInference -- minilm benchmark
 
-# Pairwise cosine similarity demo
+# Pairwise cosine similarity demo (CPU; --gpu handles default / benchmark / compare)
 dotnet run --project samples/NivaraInference -- minilm similarity
+dotnet run --project samples/NivaraInference -- minilm --gpu         # iGPU sentence embedding (F32)
+dotnet run --project samples/NivaraInference -- minilm --gpu benchmark
+dotnet run --project samples/NivaraInference -- minilm --gpu compare # CPU/PyTorch parity gate
 ```
 
 **DistilBERT:**
@@ -210,6 +216,11 @@ A 6-layer Post-LN BERT encoder producing 384-dimensional sentence embeddings:
 - **[CLS] token pooling** — extracts the first token's embedding from the output sequence
 - **L2 normalization** — output embedding normalized to unit length for cosine similarity
 - **Tokenization** via `Microsoft.ML.Tokenizers.BertTokenizer` (sample-only dependency)
+- **GPU (`--gpu`)**: ILGPU/OpenCL iGPU forward, F32-only, via the shared `BertEncoderGpuRunner`
+  (BERT-style keys; token-type row 0 is added at the embedding stack, mirroring the CPU
+  `includeTokenTypeEmbedding` default). `minilm --gpu compare` gate PASSED vs the CPU reference —
+  hidden `maxRel 1.0e-5`, pooled embeddings `maxRel 1.5e-7`, 0 violations (bound
+  `|gpu−cpu| ≤ 1e-3·(1+|cpu|)`), minimum pooled-embedding cosine 1.000000.
 
 Nivara modules used: `Embedding<T>` (Gather path), `LayerNorm<T>`, `Linear<T>`, `MultiheadAttention<T>`, `ReverseGradOperations.GeluExact`, `ReverseGradOperations.Add`.
 
@@ -803,24 +814,29 @@ only same-row GPU↔CPU-Nivara ratios are same-session:
 
 | Model | Input | GPU Nivara (iGPU) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU Nivara | vs PyTorch |
 |-------|-------|-------------------|---------------------------|---------------|---------------|------------|
+| **MiniLM** | 128 tokens | 26.8 ms (25–29) | 76.3 ms (49–102) | 11 ms | **~2.9× faster** | **~2.4× slower** |
 | **DistilBERT** | 128 tokens | 65.3 ms (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | **~1.9× slower** |
 | **DistilBERT SST-2** | 128 tokens | 64.0 ms (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
 
-The GPU forward is ~3.0×/~2.6× **faster than Nivara CPU** — but still ~1.9×/~1.8×
-**slower than PyTorch CPU**: PyTorch starts far ahead of Nivara-CPU (~5.6× on the
-distilbert row), so the iGPU closes most of that gap without fully beating it.
-Same-row GPU↔CPU-Nivara ratios are same-session; the PyTorch column is the
-recorded 2026-09-01 baseline from the CPU table above (same architecture for
-both rows).
+The GPU forward is ~3.0×/~2.6×/~2.9× **faster than Nivara CPU** — but still
+~1.9×/~1.8×/~2.4× **slower than PyTorch CPU**: PyTorch starts far ahead of
+Nivara-CPU (~5.6× on the distilbert row), so the iGPU closes most of that gap
+without fully beating it. Same-row GPU↔CPU-Nivara ratios are same-session; the
+PyTorch column is the recorded 2026-09-01 baseline from the CPU table above
+(same architecture for the distilbert rows; MiniLM reuses its 11 ms CPU-table row).
 
-The GPU path is sample-scoped (`--gpu` on `distilbert` / `distilbert_sst` only),
-one launch per op — parity gates PASS vs CPU and the PyTorch fixture (hidden-state
-`maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8), so the ~3× here is a
+The GPU path is sample-scoped (`--gpu` on `distilbert` / `distilbert_sst` / `minilm`
+only), one launch per op — parity gates PASS vs CPU and the PyTorch fixture
+(hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM
+hidden `maxRel 1.0e-5`), so the ~3× here is a
 correctness-gated speedup. **AC power required**: battery throttles the iGPU —
 every GEMM shape flattens to ~150–160 GMAC/s, and the same benchmark on battery was
 ~110–135 ms/forward (vs 62–73 ms on AC). The remaining gap vs a fully fused
 pipeline (see `docs/DISTILBERT-GPU.md` §4.4) is launch overhead at these small
-shapes, not GEMM throughput — per-op launch fusion is the flagged follow-up.
+shapes, not GEMM throughput — per-op launch fusion is the flagged follow-up
+(issue #437). MiniLM is the clearest proof: at ≈1.36 GMAC its GEMM legs need only
+~5 ms; the rest of its 26.8 ms/forward is the ~100 per-op launches, so fusion
+should help the small encoder even more than DistilBERT.
 
 The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
 weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).

@@ -43,7 +43,7 @@ All GPU code lives in `samples/Nivara.Samples/Gpu/`:
 | `GemmKernels.cs` | **Row4** register-blocked 1×4 tiled GEMM (local-memory staging, `TiledGemmKernelRow4`) — the keystone; used for every matmul (q/k/v/o, lin1, lin2, head) |
 | `AttentionKernels.cs` | fused 12-head score+scale+mask+row-softmax+weighted-V (`XMath.Exp`) |
 | `ElementwiseKernels.cs` | LayerNorm row-reduce, GELU (direct A–S 7.1.26 erf poly port of `GradKernels.Erf`, `XMath.Exp`), bias/residual adds, embedding gather |
-| `DistilBertGpuRunner.cs` | uploads weights (transposed once at ctor) by the exact `DistilBertLoader` key set; runs the full forward + SST-2 head; returns per-stage readbacks for gating |
+| `BertEncoderGpuRunner.cs` (was `DistilBertGpuRunner.cs`) | uploads weights (transposed once at ctor) by the loader key set — naming/role-resolved via `BertGpuNaming` (`DistilBert` | `Bert`), config-driven from `BertConfig`; runs the full BERT-family encoder forward + optional SST-2 head; returns per-stage readbacks for gating |
 
 Design decisions (deliberate, and worth keeping for the next model):
 - **Correctness-first runner**: one kernel launch per operation, everything on
@@ -165,8 +165,20 @@ Prioritized for the next iterations of the GPU journey (see also
      ILGPU 1.5.3 cannot reach.
    The F32-only reject (`--gpu` + `--precision bf16|fp16` → clear error) keeps
    the door clean until that decision.
-5. **Second model**: MiniLM (same encoder shape class, already in the sample
-   inventory) or SmolLM once KV-cached decode exists (see SMOLLM-GPU.md).
+5. ~~**Second model**: MiniLM~~ — **DONE on `khurram/minilm-gpu`** (PR follows; on
+   the same "one config-driven runner, N encoder models" shape at ~20% of the
+   original effort): the runner is now `BertEncoderGpuRunner`, naming- and
+   config-driven (`BertGpuNaming.DistilBert | Bert`; `BertConfig` ctor), so
+   MiniLM reused the kernel set unchanged. One genuine generalization lesson:
+   MiniLM (BERT-style keys) **does** feed token-type embeddings — the CPU
+   `BertEncoder` defaults `includeTokenTypeEmbedding: true` and PyTorch adds
+   `token_type_embeddings[0]` (all-zero segment ids) — where DistilBERT does
+   not; the runner broadcasts that row 0 when the key is present (key-presence
+   driven, so the DistilBERT path is untouched). Gates: hidden `maxRel 1.0e-5`,
+   0/245760 violations, pooled-embedding cosine 1.000000; benchmark **26.8 ms**
+   iGPU vs 76.3 ms Nivara CPU (~2.9×), launch-overhead-bound at ≈1.36 GMAC —
+   tracked as **#437**. SmolLM once KV-cached decode exists (see SMOLLM-GPU.md)
+   remains the next, much larger candidate.
 6. **Promotion decision**: with real measured numbers in hand, decide whether
    GPU support moves into `src/Nivara.Gpu` (which backend, which project, bf16,
    which models). Nothing in core changes until that decision.

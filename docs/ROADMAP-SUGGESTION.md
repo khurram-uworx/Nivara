@@ -27,6 +27,12 @@ PyTorch = recorded 2026-09-01 CPU baseline, aligned architecture):
 - Battery note: iGPU throttles to ~150–160 GMAC/s (all shapes); GPU timings only
   meaningful on AC (~110–135 ms/forward on battery vs 62–73 ms on AC).
 
+A **second model shipped on the same infra** (`khurram/minilm-gpu`): the runner
+generalized to a config/naming-driven `BertEncoderGpuRunner`, so MiniLM (BERT-style
+keys, 384-dim) reused the kernel set unchanged at ~20% of the original effort —
+26.8 ms iGPU vs 76.3 ms Nivara CPU (~2.9×). Details and the token-type lesson in
+`docs/DISTILBERT-GPU.md` §5.5; launch-overhead follow-up is issue **#437**.
+
 ## 2. The gap we want to attack (CPU GEMM)
 
 PyTorch's 35 ms CPU figure is MKL-class:
@@ -149,7 +155,11 @@ native bridge. Measure both and publish both in the README table.
 
 - **#435** — promote tiled-GEMM correctness+perf harness into a lasting
   regression gate (probe or sample bench) — covers the gate half of M1.
+- **#437** — M2 GPU kernel fusion / lazy stream to cut per-dispatch launch
+  overhead (small encoders are launch-bound; MiniLM's GEMM legs are only ~5 ms).
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
   documented in `docs/DISTILBERT-GPU.md` §4.4).
+- **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after
+  #436 merges): second config-driven model on the shared runner.
 - Any decision to *start* M1/M2/M3 should first be recorded as GitHub issues and
   a proper plan (grounding + gates), per the iterative-work conventions.
