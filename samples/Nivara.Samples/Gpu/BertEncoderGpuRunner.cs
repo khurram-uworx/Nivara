@@ -83,9 +83,11 @@ static class BertGpuKeys
 /// includeTokenTypeEmbedding default), embed
 /// LayerNorm, then per layer q/k/v projections → fused attention (scale, +-inf padding mask, row
 /// softmax) → o-projection → residual + LN1 → fc1 → exact GELU → fc2 → residual + LN2; optional
-/// pre_classifier → ReLU → classifier. One kernel-launch-per-op (no fusion) — correctness first;
-/// fusion is a tracked follow-up (issue #437). Config- and naming-driven so DistilBERT and
-/// MiniLM (BERT-style keys) share the runner.
+/// pre_classifier → ReLU → classifier. Every projection GEMM runs the fused
+/// <see cref="GemmKernels.TiledGemmKernelRow4Fused"/> epilogue (bias added in the register
+/// accumulators; GELU/ReLU folded into the fc1 / pre-classifier launches), so bias and
+/// activation no longer dispatch separate kernels (issue #437). Config- and naming-driven so
+/// DistilBERT and MiniLM (BERT-style keys) share the runner.
 /// </summary>
 public sealed class BertEncoderGpuRunner : IDisposable
 {
@@ -136,10 +138,8 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> addBias;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>> add;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>> gelu;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>> relu;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemm;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int> gemmFused;
 
     /// <summary>
     /// Creates the runner, uploads every weight from the loader tensors (GEMM weights
@@ -218,14 +218,12 @@ public sealed class BertEncoderGpuRunner : IDisposable
         addBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(ElementwiseKernels.AddBias);
         add = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Add);
         layerNorm = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float>(ElementwiseKernels.LayerNorm1D);
-        gelu = acc.LoadKernel<ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Gelu);
-        relu = acc.LoadKernel<ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Relu);
         attention = acc.LoadKernel<
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
             ArrayView<float>, ArrayView<float>, int, int, int, int, float>(
             AttentionKernels.BatchedAttention);
-        gemm = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
-            GemmKernels.TiledGemmKernelRow4);
+        gemmFused = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4Fused);
 
         // Weight uploads ran on the default stream; sync the device so they are
         // visible to the kernel launches (running on runtime.Stream) in Forward.
@@ -281,25 +279,18 @@ public sealed class BertEncoderGpuRunner : IDisposable
         {
             var w = layers[i];
 
-            Gemm(x.View, w.Q.View, q.View, rows, hiddenDim, hiddenDim);
-            Bias1D(q.View, w.Bq.View, q.View, rows, hiddenDim);
-            Gemm(x.View, w.K.View, k.View, rows, hiddenDim, hiddenDim);
-            Bias1D(k.View, w.Bk.View, k.View, rows, hiddenDim);
-            Gemm(x.View, w.V.View, v.View, rows, hiddenDim, hiddenDim);
-            Bias1D(v.View, w.Bv.View, v.View, rows, hiddenDim);
+            GemmBias(x.View, w.Q.View, q.View, w.Bq.View, rows, hiddenDim, hiddenDim);
+            GemmBias(x.View, w.K.View, k.View, w.Bk.View, rows, hiddenDim, hiddenDim);
+            GemmBias(x.View, w.V.View, v.View, w.Bv.View, rows, hiddenDim, hiddenDim);
 
             Attention1D(q.View, k.View, v.View, maskBuf.View, attn.View, scores.View, batch, seqLen);
-            Gemm(attn.View, w.O.View, h.View, rows, hiddenDim, hiddenDim);
-            Bias1D(h.View, w.Bo.View, h.View, rows, hiddenDim);
+            GemmBias(attn.View, w.O.View, h.View, w.Bo.View, rows, hiddenDim, hiddenDim);
             Add1D(h.View, x.View, h.View, rows * hiddenDim);
             LayerNorm1D(h.View, w.Ln1W.View, w.Ln1B.View, h.View, rows, hiddenDim);
 
-            Gemm(h.View, w.W1.View, f1.View, rows, hiddenDim, intermediateDim);
-            Bias1D(f1.View, w.B1.View, f1.View, rows, intermediateDim);
-            Gelu1D(f1.View, f1.View, rows * intermediateDim);
+            GemmBias(h.View, w.W1.View, f1.View, w.B1.View, rows, hiddenDim, intermediateDim, activation: 1);
 
-            Gemm(f1.View, w.W2.View, attn.View, rows, intermediateDim, hiddenDim);
-            Bias1D(attn.View, w.B2.View, attn.View, rows, hiddenDim);
+            GemmBias(f1.View, w.W2.View, attn.View, w.B2.View, rows, intermediateDim, hiddenDim);
             Add1D(attn.View, h.View, h.View, rows * hiddenDim);
             LayerNorm1D(h.View, w.Ln2W.View, w.Ln2B.View, x.View, rows, hiddenDim);
         }
@@ -314,11 +305,8 @@ public sealed class BertEncoderGpuRunner : IDisposable
             clsIdsBuf.View.SubView(0, batch).CopyFromCPU(runtime.Stream, clsIds);
 
             Gather1D(x.View, clsIdsBuf.View, clsOut.View, hiddenDim, batch * hiddenDim);
-            Gemm(clsOut.View, preW!.View, h.View, batch, hiddenDim, hiddenDim);
-            Bias1D(h.View, preB!.View, h.View, batch, hiddenDim);
-            Relu1D(h.View, h.View, batch * hiddenDim);
-            Gemm(h.View, clsW!.View, logits.View, batch, hiddenDim, 2);
-            Bias1D(logits.View, clsB!.View, logits.View, batch, 2);
+            GemmBias(clsOut.View, preW!.View, h.View, preB!.View, batch, hiddenDim, hiddenDim, activation: 2);
+            GemmBias(h.View, clsW!.View, logits.View, clsB!.View, batch, hiddenDim, 2);
 
             runtime.Synchronize();
             logitsArr = Readback(logits, batch * 2);
@@ -357,12 +345,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
     void Bias1D(ArrayView<float> x, ArrayView<float> bias, ArrayView<float> y, int rows, int cols)
         => addBias(runtime.Stream, (Cfg(rows * cols), 256), x, bias, y, rows, cols);
 
-    void Gelu1D(ArrayView<float> x, ArrayView<float> y, int total)
-        => gelu(runtime.Stream, (Cfg(total), 256), x, y);
-
-    void Relu1D(ArrayView<float> x, ArrayView<float> y, int total)
-        => relu(runtime.Stream, (Cfg(total), 256), x, y);
-
     void LayerNorm1D(ArrayView<float> x, ArrayView<float> gamma, ArrayView<float> beta, ArrayView<float> y, int rows, int cols)
         => layerNorm(runtime.Stream, (Cfg(rows), 256), x, gamma, beta, y, rows, cols, eps);
 
@@ -373,12 +355,12 @@ public sealed class BertEncoderGpuRunner : IDisposable
         => attention(runtime.Stream, (Cfg(batch * numHeads * seqLen), 256),
             q, k, v, mask, attnOut, scores, batch, seqLen, numHeads, headDim, scale);
 
-    void Gemm(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, int aRows, int aCols, int bCols)
+    void GemmBias(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, ArrayView<float> bias, int aRows, int aCols, int bCols, int activation = 0)
     {
         int blockCols = GemmKernels.TileSize * GemmKernels.BlockCols;
         var numGroups = new Index2D((aRows + GemmKernels.TileSize - 1) / GemmKernels.TileSize, (bCols + blockCols - 1) / blockCols);
         var groupSize = new Index2D(GemmKernels.TileSize, GemmKernels.TileSize);
-        gemm(runtime.Stream, (numGroups, groupSize), a, bt, c, aRows, aCols, bCols);
+        gemmFused(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols, activation);
     }
 
     static int Cfg(int total) => total <= 0 ? 1 : (total + 255) / 256;
