@@ -8,10 +8,11 @@ gated by all three GPU compares after every step.
 
 The ILGPU runner is correctness-first: **one kernel launch per op** —
 ~114 dispatches/forward for MiniLM, ~119 for DistilBERT (incl. SST head). On the
-iGPU at 128-row shapes each launch costs ~0.18–0.2 ms end-to-end:
+iGPU at 128-row shapes each dependent kernel costs **~29 µs** measured (not the
+~0.18–0.2 ms first estimated — see Expected effect):
 
-- MiniLM (1.36 GMAC): GEMM legs ~4–6 ms of the 26.8 ms total → ~21 ms overhead.
-- DistilBERT (5.44 GMAC): ~20–30 ms GEMM legs of the 65.3 ms total → ~35 ms overhead.
+- MiniLM (1.36 GMAC): 26.8 ms total; ~113 launches in the baseline.
+- DistilBERT (5.44 GMAC): 65.3 ms total; ~119 launches.
 
 The runner **already** enqueues everything on one stream (`runtime.Stream`) with a
 single `Synchronize()` before readback — the "lazy stream" half of #437 is
@@ -23,25 +24,35 @@ seqLen-deterministic), and 3 separate `CopyFromCPU` payload uploads per forward.
 
 Dispatch inventory today → after:
 
-| stage | now | after |
+| stage | now (post‑step‑1) | after |
 |---|---|---|
-| embeddings (gather×2, add, [token-type], LN) | 4–5 | 2 (EmbeddingSum + LN) |
-| per layer: q/k/v GEMM+bias (6), attention (1), o+bias (2), add+LN1 (2), fc1+bias+GELU (3), fc2+bias (2), add+LN2 (2) | 18 | 7 |
-| ×6 layers | 108 | 42 |
-| head (SST) | 6 | 2–3 |
-| **total** | ~114–119 | **~44–47** |
+| embeddings (gather×2, add, [token-type], LN) | 4–5 | 3 (EmbeddingSum + word gather + LN) |
+| per layer: q/k/v GEMM+bias (3), attention (1), o+bias (1), add+LN1 (2), fc1+GELU (1), fc2 (1), add+LN2 (2) | 11 | 7 |
+| ×6 layers | 66 | 42 |
+| head (SST) | 3 (gather + 2 fused GEMMs) | 3 |
+| **total** | ~71–72 (was 113–119) | **~45–48** |
 
-### 1. GEMM epilogue fusion — `GemmKernels.cs` (new `TiledGemmKernelRow4Fused`)
-Add a **fused sibling kernel** `TiledGemmKernelRow4Fused(a, b, c, bias, aRows,
-aCols, bCols, activation)` — the existing `TiledGemmKernelRow4` stays untouched
-because the `TiledGemm` probe harness loads it by signature (GemmKernels.cs:151);
-the runner switches to the fused variant. The four register accumulators add
-`bias[col]` before the epilogue write; the `activation` byte (0 none / 1 GELU /
-2 ReLU) applies GELU to fc1 and ReLU to the head pre-classifier — same A–S
-7.1.26 polynomial as `ElementwiseKernels.Gelu` (`XMath.Exp`). Folds `bias` into
-every projection (q/k/v/o/fc1/fc2 + head) — kills 7 bias/activation launches per
-layer. Bit-identical elementwise (register `acc + bias` vs stored-then-added by
-`AddBias`; same GELU polynomial).
+Measured so far (2026-09-19, AC): step 1 (epilogue fusion) took 42 + head
+dispatches out; MiniLM 26.8 → **25.6 ms**, DistilBERT ~66 ms. Per-dispatch
+dependency latency ≈ **29 µs**, so the remaining −24 dispatches buy ~0.7 ms.
+
+### 1. GEMM epilogue fusion — `GemmKernels.cs` (lean sibling kernels)
+Bias + activation folded into the Row4 GEMM (DONE, `b1cd089`, gated all three
+compares). The existing `TiledGemmKernelRow4` stays untouched because the
+`TiledGemm` probe harness loads it by signature; the runner switched to fused
+launches via an `activation` byte (0 none / 1 GELU / 2 ReLU) with the A–S 7.1.26
+GELU port. Folds `bias` into every projection (q/k/v/o/fc1/fc2 + head) — 42
+dispatches/forward removed. Bit-identical elementwise; gates held at the
+existing maxAbs floor.
+
+**Refinement (post-measurement):** the single fat kernel inlines all three
+epilogues plus `XMath.Exp` for every launch — a suspected register-pressure cost
+on the lean (identity) GEMM legs. Split into three lean siblings
+`TiledGemmKernelRow4Bias` / `TiledGemmKernelRow4Gelu` / `TiledGemmKernelRow4Relu`
+(shared tile+K-loop device helper, hard-coded epilogue per method) and load all
+three; q/k/v/o/fc2 + head-cls take the bias-only kernel, fc1 the GELU kernel, head
+pre-classifier the ReLU kernel. Re-measure after the split to see how much of the
+missing gain was epilogue overhead vs the corrected per-kernel latency floor.
 
 ### 2. QKV-concat — `BertEncoderGpuRunner.cs` (upload) + launch site
 Upload `[Wq|Wk|Wv]` as one pre-transposed `[hidden × 3·hidden]` buffer (per-layer),
@@ -66,13 +77,17 @@ recompute + re-upload when unchanged. Batch mask/ids payload uploads where trivi
 **Benchmark path stays byte-identical (readback kept)** so the measured number is
 apples-to-apples with the 26.8 ms baseline — no no-readback variant.
 
-### Expected effect (math, AC power)
-Linear-in-count overhead model: MiniLM `~44 × 0.19 ≈ 8.4 ms` + 4–6 ms GEMM legs
-≈ **13–14 ms (~1.9–2.1×)**; DistilBERT `~47 × 0.19 ≈ 9 ms` + ~25 ms ≈
-**~32–35 ms (~1.9×)**. The #437 ">2× for MiniLM" acceptance sits right at the
-fusion-only edge; micro-opts add margin. If the acceptance check lands short, we
-report the honest number and optionally pull GEMM tile-32 headroom (separate item,
-not in this plan).
+### Expected effect (measured truth, AC power)
+Per-dispatch dependency latency is **~29 µs** (measured: −42 dispatches → −1.2 ms
+on MiniLM 26.8 → 25.6 ms), not the ~0.19 ms first modelled — the model was off
+~6.5× because the GEMM legs and non-GEMM compute dominate. Remaining micro-opts
+(−24 dispatches) buy only **~0.5–0.7 ms**: MiniLM **~24–25 ms (~1.1×)**,
+DistilBERT **~65 ms**. The #437 ">2× for MiniLM" acceptance is **not reachable
+via fusion on this iGPU** (would need ~420 more kernels removed). The >2× lever
+is kernel throughput (GEMM tile-32/2×2 — the deferred separate item); even an
+optimistic 2–3× GEMM speedup lands MiniLM ~22 ms, not 13.4. Acceptance is
+reported honestly as unmet with the measured numbers, and a follow-up issue tracks
+the GEMM-throughput item.
 
 ### 5. DistilBERT fine-tuning measurements (CPU, Nivara) — past methodology
 
@@ -103,8 +118,11 @@ harness** (its README §Performance benchmarks):
 - `minilm --gpu` (embedding L2 norm) + f32-only rejection path — unchanged.
 - Final measurement: `minilm --gpu benchmark` + `distilbert --gpu benchmark` on
   **AC power** (inform the human first), same-session numbers → update README GPU
-  table + `docs/BERT-GPU.md` (item 1 "65 → ~25 ms class" gets measured truth;
-  MiniLM ~2×) + `docs/ROADMAP-SUGGESTION.md` M2 row.
+  table + `docs/BERT-GPU.md` (item 1 gets measured truth: MiniLM ~24–25 ms,
+  DistilBERT ~65 ms — acceptance documented as unmet) +
+  `docs/ROADMAP-SUGGESTION.md` M2 row.
+- File a follow-up GitHub issue for the GEMM-throughput item (tile-32/2×2) that
+  the >2× target actually requires — the honest lever identified by measurement.
 - DistilBERT fine-tuning slice measurement (see Proposed changes §5) — Nivara
   number + optional PyTorch A/B, recorded in the NivaraInference README.
 - Quick `--gpu benchmark` between steps (AC) to watch the improvement curve.
@@ -113,17 +131,18 @@ harness** (its README §Performance benchmarks):
 
 1. `docs: plan M2 GPU kernel fusion (launch-overhead reduction) in TODO.md`
 2. `samples: fuse bias (+GELU/ReLU) into the Row4 GEMM epilogue`
-3. `samples: concat Q/K/V into one GEMM with sliced views for attention`
-4. `samples: fuse residual-add into LayerNorm and embedding sums into one kernel`
-5. `samples: cache positional ids per seqLen in BertEncoderGpuRunner`
-6. `docs: M2 benchmark numbers + README/BERT-GPU/ROADMAP updates`
-7. `docs: record DistilBERT fine-tuning slice measurement in NivaraInference README`
-8. `docs: remove TODO.md — M2 plan executed (after G2)`
+3. `samples: split the fused GEMM epilogue into lean bias/GELU/ReLU siblings`
+4. `samples: concat Q/K/V into one GEMM with sliced views for attention`
+5. `samples: fuse residual-add into LayerNorm and embedding sums into one kernel`
+6. `samples: cache positional ids per seqLen in BertEncoderGpuRunner`
+7. `docs: M2 benchmark numbers + README/BERT-GPU/ROADMAP updates`
+8. `docs: record DistilBERT fine-tuning slice measurement in NivaraInference README`
+9. `docs: remove TODO.md — M2 plan executed (after G2)`
 
 ## Blast radius
 
-- `samples/Nivara.Samples/Gpu/GemmKernels.cs` — adds the fused
-  `TiledGemmKernelRow4Fused` sibling; original Row4 + 1×1 + `TiledGemm` probe
+- `samples/Nivara.Samples/Gpu/GemmKernels.cs` — adds fused GEMM siblings
+  (row4 + lean bias/GELU/ReLU forms); original Row4 + 1×1 + `TiledGemm` probe
   harness untouched.
 - `samples/Nivara.Samples/Gpu/ElementwiseKernels.cs` — adds `LayerNormResidual1D`
   + `EmbeddingSum`; existing kernels untouched.
