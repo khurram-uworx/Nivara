@@ -6,7 +6,7 @@ namespace Nivara.Samples.Gpu;
 
 /// <summary>
 /// Fused batched multi-head attention forward for the DistilBERT GPU scenario
-/// (docs/DISTILBERT-GPU.md §3), mirroring the CPU AutoDiff BatchedMultiHeadAttention
+/// (docs/BERT-GPU.md §3), mirroring the CPU AutoDiff BatchedMultiHeadAttention
 /// exactly. Q/K/V live as head-interleaved [batch*seqLen, D] views (D = numHeads*headDim,
 /// output of the q/k/v projections). One work item per (b, h, q):
 ///   score[b,h,q,j] = dot(Q[b,q,hd], K[b,j,hd]) over the head's headDim columns

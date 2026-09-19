@@ -832,7 +832,7 @@ hidden `maxRel 1.0e-5`), so the ~3× here is a
 correctness-gated speedup. **AC power required**: battery throttles the iGPU —
 every GEMM shape flattens to ~150–160 GMAC/s, and the same benchmark on battery was
 ~110–135 ms/forward (vs 62–73 ms on AC). The remaining gap vs a fully fused
-pipeline (see `docs/DISTILBERT-GPU.md` §4.4) is launch overhead at these small
+pipeline (see `docs/BERT-GPU.md` §4.4) is launch overhead at these small
 shapes, not GEMM throughput — per-op launch fusion is the flagged follow-up
 (issue #437). MiniLM is the clearest proof: at ≈1.36 GMAC its GEMM legs need only
 ~5 ms; the rest of its 26.8 ms/forward is the ~100 per-op launches, so fusion

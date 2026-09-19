@@ -74,7 +74,7 @@ static class BertGpuKeys
 }
 
 /// <summary>
-/// Sample-scoped BERT-family encoder GPU forward (docs/DISTILBERT-GPU.md §3, §6): uploads the
+/// Sample-scoped BERT-family encoder GPU forward (docs/BERT-GPU.md §3, §6): uploads the
 /// loader weight key set once (GEMM weights pre-transposed [out,in] → Bt [in,out] so C = A·Bt is
 /// plain row-major, per the assessment layout note), then runs the batch forward with every
 /// intermediate resident on the GPU and only the final hidden state / logits read back. Mirrors

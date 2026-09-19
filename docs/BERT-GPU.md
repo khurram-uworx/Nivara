@@ -1,6 +1,7 @@
-# DistilBERT on GPU — first ILGPU model: implementation reflection
+# BERT-family encoders on GPU — first ILGPU model: implementation reflection
 
-Status: **Implemented, gated, and measured** (2026-09-19, PR #436). This is a
+Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR
+#436, MiniLM via `khurram/minilm-gpu`). This is a
 **reflection/documentation** of what we built and what we learned while adding
 the first end-to-end GPU model support through ILGPU — it is *not* a usage guide
 (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md))
@@ -14,8 +15,9 @@ investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)).
 
 ## 1. Result — gated and measured
 
-First end-to-end GPU sample scenario: `distilbert --gpu` / `distilbert_sst --gpu`,
-F32-only, OpenCL iGPU via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
+First end-to-end GPU sample scenarios: `distilbert --gpu` / `distilbert_sst --gpu`,
+then `minilm --gpu` on the same config-driven runner. All F32-only, OpenCL iGPU
+via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
 `Nivara.Extensions`, or `src/Nivara.Gpu` changes). 128 tokens, 3-pass warmup +
 10 timed, AC power (GPU↔CPU-Nivara same-session; PyTorch = recorded CPU baseline):
 
@@ -23,6 +25,7 @@ F32-only, OpenCL iGPU via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
 |---|---|---|---|---|---|
 | distilbert | **65.3 ms** (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | ~1.9× slower |
 | distilbert_sst | **64.0 ms** (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | ~1.8× slower |
+| minilm | **26.8 ms** (25–29) | 76.3 ms (49–102) | 11 ms | **~2.9× faster** | ~2.4× slower |
 
 Correctness gates — **all PASS**:
 - `distilbert --gpu compare`: final hidden `[128,768]` vs same-process CPU —
@@ -31,6 +34,8 @@ Correctness gates — **all PASS**:
 - `distilbert_sst --gpu compare`: logits vs CPU maxRel 6.7e-7, vs PyTorch
   fixture maxRel 5.8e-7, **argmax 8/8** both (CPU's own doc'd bound vs HF is
   9.5e-7 — same class).
+- `minilm --gpu compare`: hidden `maxRel 1.04e-5`, pooled-embedding `maxRel 1.5e-7`,
+  **0/245760 violations**, minimum pooled-embedding cosine **1.000000**.
 - `--precision bf16|fp16` + `--gpu` → clear F32-only rejection (exit 1).
 
 ## 2. What shipped — architecture and decisions

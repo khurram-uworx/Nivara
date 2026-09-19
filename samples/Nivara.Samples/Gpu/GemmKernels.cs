@@ -4,7 +4,7 @@ using ILGPU.Runtime;
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// Tiled f32 GEMM kernels for the DistilBERT GPU forward (docs/DISTILBERT-GPU.md §3).
+/// Tiled f32 GEMM kernels for the DistilBERT GPU forward (docs/BERT-GPU.md §3).
 /// Computes C[aRows × bCols] = A[aRows × aCols] · Bt[aCols × bCols] over plain
 /// row-major 1D views; Bt is the weight matrix pre-transposed once at upload so
 /// global reads are coalesced along the K axis. Both kernels are explicitly-grouped
@@ -129,7 +129,7 @@ public enum IlgpuGemmVariant
 /// <summary>
 /// Persistent f32 tiled-GEMM workspace over the shared <see cref="IlgpuRuntime"/>:
 /// the Bt weight buffer stays resident (uploaded once; the caller pre-transposes,
-/// docs/DISTILBERT-GPU.md §3) and per-forward activations are copied in / read back
+/// docs/BERT-GPU.md §3) and per-forward activations are copied in / read back
 /// around a launch. Buffers are allocated once and reused — no per-call allocation
 /// on the inference hot path (probe lesson, docs/ILGPU.md).
 /// </summary>
