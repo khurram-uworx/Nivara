@@ -312,7 +312,7 @@ static class DistilBertSst
         static int argmaxOf(float[] logits, int s) => logits[s * 2 + 1] > logits[s * 2] ? 1 : 0;
     }
 
-    static (float[] Logits, float[] Probs)? ReadCompareOutput(string path, int sentenceCount)
+    public static (float[] Logits, float[] Probs)? ReadCompareOutput(string path, int sentenceCount)
     {
         var bytes = File.ReadAllBytes(path);
         if (bytes.Length < 4) return null;
