@@ -131,6 +131,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
     MemoryBuffer1D<int, Stride1D.Dense> idsBuf = null!;
     MemoryBuffer1D<int, Stride1D.Dense> posIdsBuf = null!;
     MemoryBuffer1D<int, Stride1D.Dense> clsIdsBuf = null!;
+    int cachedPosSeqLen = -1;
 
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<int>, ArrayView<float>, int> gather;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> embeddingSum;
@@ -260,12 +261,19 @@ public sealed class BertEncoderGpuRunner : IDisposable
         Ensure(ref idsBuf, rows);
         idsBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, tokenIds);
 
-        var posIds = new int[rows];
-        for (int b = 0; b < batch; b++)
-            for (int i = 0; i < seqLen; i++)
-                posIds[b * seqLen + i] = i;
-        Ensure(ref posIdsBuf, rows);
-        posIdsBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, posIds);
+        // posIds are seqLen-deterministic (row % seqLen): rebuild + re-upload only when
+        // seqLen changes (or the workspace grows), so the repeat-forward benchmark path
+        // skips the allocation and host->device copy (M2, issue #437).
+        int posRows = batch * seqLen;
+        if (cachedPosSeqLen != seqLen || posIdsBuf.Length < posRows)
+        {
+            Ensure(ref posIdsBuf, posRows);
+            var posIds = new int[posRows];
+            for (int i = 0; i < posRows; i++)
+                posIds[i] = i % seqLen;
+            posIdsBuf.View.SubView(0, posRows).CopyFromCPU(runtime.Stream, posIds);
+            cachedPosSeqLen = seqLen;
+        }
 
         var stream = runtime.Stream;
 
