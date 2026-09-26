@@ -27,7 +27,22 @@ public sealed record ModernBertConfig
     public float NormEps { get; init; } = 1e-5f;
     public int LocalAttention { get; init; } = 128;
     public int GlobalAttnEveryNLayers { get; init; } = 3;
-    public IReadOnlyList<string> LayerTypes { get; init; } = [];
+
+    /// <summary>
+    /// Gets or sets the per-layer attention type. Left unset, it is derived the way HuggingFace
+    /// derives it — a layer attends globally when its index is a multiple of
+    /// <see cref="GlobalAttnEveryNLayers"/> — so a hand-built config is usable without repeating
+    /// the pattern. <see cref="FromJson(string)"/> sets it explicitly when the checkpoint ships a
+    /// <c>layer_types</c> array.
+    /// </summary>
+    public IReadOnlyList<string> LayerTypes
+    {
+        get => layerTypes ??= DeriveLayerTypes(GlobalAttnEveryNLayers, NumHiddenLayers);
+        init => layerTypes = value;
+    }
+
+    IReadOnlyList<string>? layerTypes;
+
     public float RopeThetaFull { get; init; } = 160000f;
     public float RopeThetaSliding { get; init; } = 10000f;
     public string HiddenActivation { get; init; } = "gelu";
@@ -97,6 +112,19 @@ public sealed record ModernBertConfig
         };
     }
 
+    static IReadOnlyList<string> DeriveLayerTypes(int globalEveryN, int numLayers)
+    {
+        if (globalEveryN <= 0)
+            throw new InvalidOperationException($"global_attn_every_n_layers must be positive, got {globalEveryN}.");
+        if (numLayers <= 0)
+            throw new InvalidOperationException($"num_hidden_layers must be positive, got {numLayers}.");
+
+        var derived = new string[numLayers];
+        for (int i = 0; i < numLayers; i++)
+            derived[i] = i % globalEveryN == 0 ? FullAttentionType : SlidingAttentionType;
+        return derived;
+    }
+
     /// <summary>
     /// Reads the explicit <c>layer_types</c> array when present, otherwise reproduces the
     /// HuggingFace derivation: a layer attends globally when its index is a multiple of
@@ -110,13 +138,7 @@ public sealed record ModernBertConfig
             return layerTypes.EnumerateArray().Select(t => t.GetString() ?? SlidingAttentionType).ToArray();
         }
 
-        if (globalEveryN <= 0)
-            throw new InvalidOperationException($"global_attn_every_n_layers must be positive, got {globalEveryN}.");
-
-        var derived = new string[numLayers];
-        for (int i = 0; i < numLayers; i++)
-            derived[i] = i % globalEveryN == 0 ? FullAttentionType : SlidingAttentionType;
-        return derived;
+        return DeriveLayerTypes(globalEveryN, numLayers);
     }
 
     /// <summary>
