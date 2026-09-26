@@ -39,119 +39,205 @@ Verified against the sources — see `docs/LAYA.md` §5:
 - `Embedding<T>.Forward(int[])`, `SafeTensorsLoader.Read<float>` (handles Laya's F16-on-disk),
   `StateDictLoader.LoadLinear/LoadLayerNorm/LoadRMSNorm`.
 
-**`src/Nivara` needs no changes in Phase 1.** The two real gaps are sample-side.
+`src/Nivara` needed no new ops in Phase 1 — but it did need one behavioural fix to the existing
+softmax (see the bug list below).
 
-## Two corrections from grounding (recorded so nobody re-derives them)
+## Corrections from grounding (recorded so nobody re-derives them)
 
 - **Not RMSNorm, not layer scale.** ModernBERT's norm is bias-free **LayerNorm**
-  (`modeling_modernbert.py:319`, `norm_bias: false` in both configs), and the residual is a
-  plain add — `answerdotai/ModernBERT src/bert_layers/layers.py:304,323` has no `gamma`
-  anywhere. Layer scale is a common misattribution; building it would have been wasted work
-  *and* wrong.
-- **`Wi` gate is the second half.** `input, gate = Wi(x).chunk(2, dim=-1)` then
-  `act(gate) * input` → rows `[0:2624]` = up, `[2624:5248]` = gate.
-- **Sliding window is symmetric and inclusive**: `abs(i - j) <= local_attention / 2` (band 129),
-  matching answerdotai's flash `window_size=(64, 64)`.
+  (`norm_bias: false` in config), and the residual is a plain add — the upstream
+  `answerdotai/ModernBERT src/bert_layers/layers.py` has no `gamma` anywhere. Layer scale is a
+  common misattribution; building it would have been wasted work *and* wrong.
+- **`Wi` activation is on the FIRST half, not the second.** `modeling_modernbert.py:90-91`:
+  ```python
+  input, gate = self.Wi(hidden_states).chunk(2, dim=-1)
+  return self.Wo(self.drop(self.act(input) * gate))
+  ```
+  So rows `[0:2624]` carry the exact-erf GELU and rows `[2624:5248]` are the *unactivated*
+  "gate". This plan originally recorded the opposite, because the HF variable named `gate` is the
+  one that is **not** activated. Building it the recorded way gave cosine 0.82 at layer 0 and was
+  the single hardest bug in Phase 1. Note the loader hands the **upper** row block to `inputProj`.
+- **Sliding window is symmetric and inclusive**: `abs(i - j) <= local_attention / 2` (band 129).
+  `config.sliding_window` is the half-window (64). The `+1` in
+  `ModernBertAttention.__init__` (`self.sliding_window = config.sliding_window + 1`) is
+  flash-attention **window-size** semantics; the sdpa path goes through
+  `create_bidirectional_sliding_window_mask`, which reads `getattr(config, "sliding_window")`
+  and builds `abs(q_idx - kv_idx) <= 64` directly. The `+1` must not be applied on the mask path.
+- **`Wqkv` split is three contiguous blocks.** `qkv.view(*input_shape, 3, -1, head_dim)` then
+  `unbind(dim=-3)` yields Q = rows `[0:1024]`, K = `[1024:2048]`, V = `[2048:3072]` — the obvious
+  guess, and correct, but worth having confirmed rather than assumed.
+- **ModernBERT-large has no QK-norm.** The checkpoint holds exactly 6 tensors per layer
+  (`attn.Wqkv.weight`, `attn.Wo.weight`, `attn_norm.weight`, `mlp.Wi.weight`, `mlp.Wo.weight`,
+  `mlp_norm.weight`) and 5 at layer 0, which has no `attn_norm`. QK-norm is a ModernBERT-*base* vs
+  *large* distinction that is easy to misremember in the wrong direction.
+
+## Two `src/Nivara`-adjacent bugs found and fixed on the way
+
+Both were latent before ModernBERT; ModernBERT is simply the first workload here that reaches them.
+
+1. **`Gpt2BpeTokenizer` pre-tokenized the byte-mapped string instead of the raw text**
+   (`89b487d`). Byte level maps a space to U+0120, which `\p{L}` calls a letter, so the space lost
+   its class in front of a number: `" 2026"` became `"Ġ"` + `"2026"` instead of `"Ġ20"` + `"26"`.
+   Letter runs were unaffected by accident (`"Ġ"` + letters is still one all-letter chunk), which
+   is why the SmolLM tests never caught it. Punctuation broke the same way.
+2. **`GradKernels` returned `NaN` for a fully-masked softmax row** (`7f19f28`). A bidirectional
+   sliding-window layer leaves rows past `valid_length + window` with no visible key, so the row max
+   was `-inf` and `x - max` was `NaN`. Because the mask is applied as `score + (-inf)` and
+   `NaN + (-inf) is NaN`, those rows escaped suppression in the *next* layer and poisoned every
+   query row — so the whole output went `NaN` from layer 2 onward, not just the padding rows.
+   PyTorch's sdpa clamps this case to zeros; the kernels now do too. Unreachable for a causal
+   model, so no existing model changes behaviour.
+
+The second fix is the one place Phase 1 touched `src/Nivara`, and it was a deliberate decision:
+the alternative was a sample-level fudge that gives padding rows a real attention result where
+HuggingFace gives zero, which Phase 2's Laya head would have inherited.
+
 
 ---
 
-## Phase 1 — ModernBERT encoder
+## Phase 1 — ModernBERT encoder — **GATE PASSED**
+
+### Phase 1 result
+
+`modernbert compare` against HuggingFace 5.14.1 (`attn_implementation=sdpa`), padded 128-token
+sequence, 26 valid tokens, diffing the valid region only:
+
+| metric | value |
+| --- | --- |
+| token ids | 128/128 identical (both sides) |
+| max abs diff | 1.62e-5 |
+| mean abs diff | 9.22e-7 |
+| max rel diff (`|ref| >= 0.01`) | 6.09e-4 |
+| cosine similarity | 1.0000000000 |
+| non-finite (valid region) | 0 vs 0 |
+| non-finite (padding region) | 0 vs 0 |
+
+`compare_diag` shows every stage from embeddings through layer 26 matching, and the last layer's
+raw output magnitude matching to 0.04% (25730.7 vs 25741.3). The gate bound is 1e-3 relative, so
+the observed 6.09e-4 is inside it, and the absolute error is two orders below the 1e-5 target.
+
+Two notes on reading that table:
+
+- **`max rel diff` is high only because of the small-reference denominator.** It is taken over the
+  positions where `|ref| >= 0.01`, and 26 values sit just above that floor, so a 1e-5 absolute
+  difference is a 6e-4 ratio there. `max abs diff` and the cosine are the honest measures.
+- **Padding is now compared too, and matches.** Because of the softmax fix, a fully-masked padding
+  row is finite on both sides. That was not true of the first attempt, where the whole output was
+  `NaN`.
+
+### Debug ladder — what actually went wrong
+
+The `compare_diag` mode (per-stage diff against `output_hidden_states`) localized the failure to
+layer 0 in one run, and the ladder then identified it immediately. Recorded because the ladder was
+right and the recorded plan was wrong:
+
+1. ✅ `Wi` halves: the activation was on the wrong half (see corrections above). This was rung 1 in
+   the ladder and rung "gate is the second half" in the plan; the plan was the error.
+2. Not it: `Wqkv` thirds are correct (confirmed against `view(..., 3, -1, head_dim)`).
+3. Not it: layer-0 `attn_norm` is correctly skipped; the embedding stage matched to 1e-6, which
+   proves norms, embeddings and tokenizer were already right.
+4. Not it: the band is 64 inclusive, not 65 — see corrections above.
+5. Not it: theta per layer type is correct.
+
+Two other failures were **not** on the ladder because they were not layer arithmetic:
+
+- The tokenizer's byte-map ordering (found while reading the mismatched ids, not from a diff).
+- The fully-masked-row `NaN` (found by `compare_diag`'s original non-finite report, before it grew
+  into a per-stage diff).
+
+**HuggingFace's `hidden_states` is off by one from the obvious mapping.** It returns
+`num_layers + 1` entries for a 28-layer model: the post-embedding-norm state, the output of every
+layer *except the last*, then the final-norm state (verified: `hs[28] == last_hidden_state`). The
+last layer's raw output is never exposed, and its residual stream reaches ~2.6e4 before
+`final_norm` rescales it to ~28. `compare_diag` reports that one stage by magnitude and verifies it
+through the final norm. Diffing it directly against `hs[28]` shows a 25708 "difference" that is
+just the missing LayerNorm.
 
 ### 1.1 Data + gitignore
 
-- [ ] `.gitignore`: add `samples/data/modernbert/` and `samples/data/laya/` (one line each,
-      following the `samples/data/distilbert/` pattern at `.gitignore:360`).
-- [ ] Document the download in `samples/NivaraInference/README.md`:
-      `hf download answerdotai/ModernBERT-large --local-dir samples/data/modernbert`
-      (single 1.6 GB F32 `model.safetensors` + `config.json` + `tokenizer.json`).
-- [ ] Download it locally (outside the repo tree it lands in the gitignored dir, so this is safe).
+- [x] `.gitignore`: `samples/data/modernbert/` and `samples/data/laya/` added.
+- [ ] Document the download in `samples/NivaraInference/README.md` (moved to 1.8).
+- [x] Downloaded: `model.safetensors` 1510 MB, `config.json`, `tokenizer.json`, `tokenizer_config.json`,
+      `special_tokens_map.json`.
 
 ### 1.2 `samples/Nivara.Samples/ModernBertModel.cs` (new)
 
-- `ModernBertConfig` — parse `config.json` with `JsonDocument` (NOT the string-search
-  `BertConfig.FromJson` idiom: ModernBERT has nested `rope_parameters` and a `layer_types`
-  array). Fields: `HiddenSize`, `NumAttentionHeads`, `NumHiddenLayers`, `IntermediateSize`,
-  `VocabSize`, `MaxPositionEmbeddings`, `NormEps`, `LocalAttention`, `LayerTypes[]`,
-  `RopeThetaFull`, `RopeThetaSliding`, `PadTokenId`, `ClsTokenId`, `SepTokenId`, `MaskTokenId`.
-  Derived: `HeadDim`, `SlidingWindow => LocalAttention / 2`, per-layer
-  `(bool IsFull, float RopeTheta)`.
-- `ModernBertAttention<T>` — `qProj/kProj/vProj/oProj` all `bias: false`; a `RotaryEmbedding<T>`
-  sized `HeadDim`; `Forward(hidden, mask?)` = project → rope(Q), rope(K) →
-  `MultiHeadAttention(Q, K, V, numHeads, 1/sqrt(HeadDim), mask)` → `oProj`.
-- `ModernBertMlp<T>` — `upProj`/`gateProj`/`downProj`, all `bias: false`;
-  `Forward` = `Multiply(GeluExact(gate), up)` → `downProj`.
-- `ModernBertLayer<T>` — `attnNorm` (**null / Identity for layer 0**) + `mlpNorm`, both
-  `LayerNorm<T>(hidden, normEps, affine: true)` with Beta left at zero;
-  `h = h + attn(attnNorm(h))`; `h = h + mlp(mlpNorm(h))`.
-- `ModernBertEncoder<T>` — `tokEmbed`, `embedNorm`, `layers[]`, `finalNorm`;
-  `Forward(int[] tokenIds, int[]? validLengths)` → `[L, HiddenSize]`;
-  `ForwardBatched(int[][], int[][] validLengths)` via `BatchedMultiHeadAttention`.
-- `ModernBertMasks` (static, same file) — additive `[B, L, L]` / `[L, L]` builder:
-  `-inf` where `Math.Abs(i - j) > band` (band = -1 → no band) **or** `j >= validLength`.
-  Band is per-*layer*, not per-head, so one mask serves the layer. Fail loudly (not silently
-  full-attention) when `seqLen` exceeds the dense-mask budget — see issue log.
-- `ModernBertLoader` — `LoadWeights<TModel, TWeight>(tensors, config, prefix)` where `prefix` is
-  `"model"` (stock HF) or `"encoder"` (Laya) so **one class serves both checkpoints**;
-  per-layer `attn_norm`/`mlp_norm` weight load, with layer 0's `attn_norm` skipped.
+- [x] `ModernBertConfig` — `JsonDocument`-based, understands both the 4.47-era
+      (`global_rope_theta` / `local_rope_theta` + `global_attn_every_n_layers`) and the newer
+      explicit (`layer_types` + `rope_parameters`) layouts. Derived: `HeadDim`, `SlidingWindow`,
+      `IsFullAttention(i)`, `RopeTheta(i)`.
+- [x] `ModernBertAttention<T>` — fused `Wqkv` split three ways, `RotaryEmbedding<T>(HeadDim, ...)`
+      with per-layer-type theta, `MultiHeadAttention(..., 1/sqrt(HeadDim), mask)`, `Wo`.
+- [x] `ModernBertMlp<T>` — `inputProj`/`gateProj`/`downProj`; `GeluExact` on the **first** half.
+- [x] `ModernBertLayer<T>` — `attnNorm` null for layer 0, `mlpNorm` always, pre-norm residuals.
+- [x] `ModernBertEncoder<T>` — `tokenEmbedding`, `embedNorm`, `layers[]`, `finalNorm`;
+      `Forward(int[] tokenIds, int validLength)`; `LoadWeights(tensors, config, prefix = "model")`
+      so **one class serves both** the stock checkpoint and Laya's `encoder.`-prefixed copy.
+- [x] `ModernBertMasks` — dense `[L, L]` additive mask fusing padding and band, with
+      `MaxDenseLength = 2048` throwing rather than silently allocating 268 MB.
+- [ ] `ForwardBatched` via `BatchedMultiHeadAttention` — **deferred**: no batched caller exists in
+      Phase 1, and the Laya head is single-sequence. YAGNI until something needs it.
 
 ### 1.3 `samples/Nivara.Samples/StateDictLoader.cs` (additive)
 
-- [ ] `LoadLinearSlice<TModel, TWeight>(Linear<TModel> target, tensors, key, rowOffset, rowCount)`
-      — bind one row block out of a fused weight. Required because `Wqkv` is `[3H, H]` and `Wi`
-      is `[2I, H]`. Validate the fused shape and fail with a clear message.
-- [ ] `LoadLayerNorm` already tolerates a missing `.bias` — no change (only the weight is loaded
-      for ModernBERT's bias-free norms).
+- [x] `LoadLinearSlice<TModel, TWeight>(target, tensors, key, rowOffset, rowCount)` — binds one row
+      block of a fused `[out, in]` weight; validates the fused shape.
+- [x] `LoadLayerNorm` needed no change.
 
-### 1.4 `samples/Nivara.Samples/Gpt2BpeTokenizer.cs` (additive)
+### 1.4 `samples/Nivara.Samples/Gpt2BpeTokenizer.cs`
 
-- [ ] `LoadFromTokenizerJson(string path)` — ModernBERT ships **no `vocab.json`/`merges.txt`**,
-      only `tokenizer.json` with inline `model.vocab` (dict) + `model.merges` (list). Reuse the
-      existing `added_tokens` merge path.
-- [ ] NFC normalization: ModernBERT declares `normalizer: {"type": "NFC"}`; apply
-      `text.Normalize(NormalizationForm.FormC)` before pretokenizing. Keep it opt-in via the new
-      entry point so the SmolLM/Qwen paths are byte-unchanged.
-- [ ] `EncodeIds(string, bool addSpecialTokens)` helper returning `[CLS] … [SEP]` for the
-      ModernBERT convention (`[CLS]`=50281, `[SEP]`=50282, `[PAD]`=50283, `[MASK]`=50284).
+- [x] `LoadFromTokenizerJson(path, unkToken, normalizeNfc = true)` — reads inline `model.vocab` +
+      `model.merges`; reuses the existing `added_tokens` path.
+- [x] NFC as an opt-in flag, default on only for the new factory, so SmolLM/Qwen stay byte-identical.
+- [x] `EncodeWithSpecialTokens(text, cls, sep)`, plus `RequireTokenId` and the merges readers.
+- [x] **Bug fix** (pre-existing, `89b487d`): pre-tokenize the raw text, then byte-map each chunk.
+      See the bug list above.
+- [ ] Known divergence, not fixed: ModernBERT's `added_tokens` includes 23 whitespace-run tokens
+      (ids 50254–50276) and the `|||EMAIL_ADDRESS|||` family. We match added tokens over the raw
+      text (leftmost-longest); HF extracts them **per pre-tokenized piece**, after the
+      pre-tokenizer. Text with a run of 2+ spaces can therefore diverge. The fixture sentence is
+      single-spaced, so the gate is unaffected. Changing this would alter the shared SmolLM/Qwen
+      path, so it is an issue rather than a drive-by fix.
 
 ### 1.5 `samples/NivaraInference/ModernBert.cs` (new) + `Program.cs`
 
-- [ ] `RunModernBertInference` — tokenize a fixed sentence, forward, print shape/stats
-      (mirrors `RunDistilBertInference`).
-- [ ] `BenchmarkModernBert` — 3 warmup + 10 timed, avg/min/max ms + params + weight MB
-      (mirrors `BenchmarkDistilBert`).
-- [ ] `RunModernBertCompare` — load `last_hidden_state_py.bin` + `input_ids_py.bin` when present;
-      report maxAbs, maxRel, cosine, violation count against the established bound
-      `|cs − py| ≤ 1e-3·(1 + |py|)`; also assert **tokenizer id agreement**. Print
-      "reference not found; skipping diff" otherwise (existing convention).
-- [ ] `Program.cs`: add `case "modernbert":` next to the other text models.
+- [x] Default mode — `last_hidden_state` stats for 10 sentences.
+- [x] `benchmark` — median/min ms, tok/s and ms/layer at padded lengths 128 and 256, after one
+      untimed pass so JIT and the RoPE cache are not in the samples.
+- [x] `compare` — **the gate**. Checks token ids first (one wrong id invalidates the numeric diff),
+      then diffs the valid region and reports non-finite counts for both regions.
+- [x] `compare_diag` — per-stage diff against `output_hidden_states`; prints magnitude instead of a
+      diff for the one stage HF does not expose.
+- [x] `Program.cs`: `case "modernbert":` plus the usage line and `--gpu`/precision guard rails.
+- [x] F32 / BF16 / FP16 for inference and benchmark via the generic `LoadWeights<TModel, TWeight>`;
+      `compare` is F32-only by construction, because a narrow-precision run would report its own
+      weight-rounding error instead of a porting defect.
 
 ### 1.6 `samples/NivaraInference/Python/modernbert_compare.py` (new)
 
-- [ ] Mirror `distilbert_compare.py`: `AutoModel` + `AutoTokenizer`, one fixed sentence,
-      `padding="max_length", truncation=True, max_length=128`, save
-      `samples/data/modernbert/last_hidden_state_py.bin` (and the ids, so the tokenizer is gated
-      independently of the model).
+- [x] `AutoModel` + `AutoTokenizer`, one fixed sentence, `padding="max_length"`, `max_length=128`,
+      `output_hidden_states=True`; writes `last_hidden_state_py.bin`, `input_ids_py.bin`,
+      `hidden_states_py.bin`, `compare_meta.json`.
 
 ### 1.7 Tests (`tests/Nivara.Tests`)
 
 - [ ] `AutoDiff/ModernBertMaskTests.cs` — band boundaries (`|i-j| == band` visible, `band+1`
-      suppressed), pad interaction (padded `j` suppressed, valid `j` not), full-attention layer
-      has no band, batched vs single-sequence agreement.
-- [ ] Extend `AutoDiff/Gpt2BpeTokenizerTests.cs` — `tokenizer.json`-only load produces the same
-      ids as `vocab.json`+`merges.txt` for the same vocab; NFC input.
-- [ ] `StateDictLoader.LoadLinearSlice` — row-block extraction from a fused weight, and a
-      clear throw on a shape mismatch.
-- [ ] Weight-mapping test: synthetic `model.`-prefixed and `encoder.`-prefixed tensor dicts both
-      bind a tiny ModernBERT config, and the two loaders agree (proves the prefix parameter).
-- [ ] `StateDictLoader` already has no dedicated test file → cover it in the ModernBERT tests
-      rather than creating a third file for one method.
+      suppressed), pad interaction, full-attention layer has no band, `MaxDenseLength` throws.
+- [ ] Extend `AutoDiff/Gpt2BpeTokenizerTests.cs` — the pre-tokenize-order regression (a space before
+      a digit, and before punctuation), `tokenizer.json`-only load, NFC on/off.
+- [ ] `StateDictLoader.LoadLinearSlice` — row-block extraction and a clear throw on shape mismatch.
+- [ ] `GradKernels` — a fully-masked softmax row returns zeros, not `NaN` (regression guard for the
+      core fix, which currently has no test at all).
+- [ ] Weight-mapping test: synthetic `model.`- and `encoder.`-prefixed dicts both bind a tiny config.
+- [ ] `StateDictLoader` has no dedicated test file → cover it in the ModernBERT tests.
 
 ### 1.8 Docs
 
-- [ ] `samples/NivaraInference/README.md` — `modernbert` row in Supported models, quick-start
-      commands, architecture section (and the two corrections, since a reader will assume layer
-      scale), the core/sample reuse table, the PyTorch-vs-Nivara benchmark row, and the
-      `hf download` command. Note the F32-only choice for Phase 1 and why.
+- [ ] `samples/NivaraInference/README.md` — `modernbert` row, quick-start commands, architecture
+      section (including the corrections, since a reader will assume layer scale), the
+      PyTorch-vs-Nivara benchmark row, the `hf download` command, the ~1.7 GB load, the dense-mask
+      cap, and the tokenizer whitespace-token divergence.
+
 
 ## Phase 2 — Laya head (after Phase 1's gate passes)
 
@@ -177,84 +263,158 @@ Verified against the sources — see `docs/LAYA.md` §5:
 - [ ] Out of scope unless asked: `laya-multilingual` (mmBERT-base, different tokenizer +
   8k context), `laya-typed-decisions` subfolder, training/RLCD, temperature refitting.
 
+## Phase 3 — GPU path
+
+The existing GPU path is ILGPU-based and `BertEncoderGpuRunner` is hard-wired to post-LN BERT
+(`docs/BERT-GPU.md` §3), so ModernBERT needs four new pieces rather than a port:
+
+- [ ] **`ElementwiseKernels.Rotary`** — RoPE does not exist on the GPU path at all. One elementwise
+      kernel applying the `rotate_half` layout with a per-row cos/sin lookup, run over Q and K.
+      Two theta tables (160000 full / 10000 sliding) live on the device.
+- [ ] **GeGLU** — `GemmKernels.TiledGemmKernelRow4Gelu` folds a *plain* GELU into the GEMM epilogue,
+      which cannot gate. v1: run the unfused tiled GEMM into an `[S, 2I]` buffer and add a
+      `ElementwiseKernels.GeGlu` (`gelu(second half) * first half`). The runner already has
+      `UploadQkvConcat`, so a `UploadGateUpConcat` uploads the fused `[up; gate]` weight directly.
+      Fusing the gate into the epilogue is a later optimisation, not a v1 requirement.
+- [ ] **Pre-norm restructure** — `LayerNorm1D` and `Add` both exist, so pre-norm is
+      `LN → GEMM → attn → Add → LN → GEMM → GeGLU → Add`. `LayerNormResidual1D` (post-norm fused)
+      is not reusable; the two primitives already in the file cover it.
+- [ ] **Sliding-window band** — `AttentionKernels.BatchedAttention` takes a `[B, S]` 0/1 *padding*
+      mask, not a dense matrix, so the band is one extra condition (`|qPos - j| > band`) at the
+      three places the mask is applied. A `band` parameter of -1 means global.
+- [ ] **Fused-QKV weight upload** — the runner re-concatenates separately-stored q/k/v; ModernBERT
+      ships `Wqkv` already fused, so add the mirror path (or split on the CPU: 3×1M floats).
+- [ ] **`ModernBertGpuRunner`** (~500 lines, following `BertEncoderGpuRunner`) plus
+      `modernbert --gpu` dispatch, and the gate below.
+- [ ] **Gate: GPU vs CPU, not GPU vs PyTorch.** The CPU encoder is already pinned to PyTorch in
+      Phase 1, so diffing the GPU runner against the CPU runner pins it transitively at the cost of
+      one fixture. Hold the same bound (`maxRel ~1e-5`) so an F32-vs-F32 divergence is still caught.
+- [ ] Expect the naive `BatchedAttention` (it recomputes each score three times and materialises a
+      `[B, H, S, S]` score buffer) to dominate at ModernBERT-large's 28×1024 depth/width. A tiled
+      or banded GPU attention kernel is the follow-up if the numbers justify it.
+
+
 ## Verification steps
 
-1. `dotnet build Nivara.slnx` — clean, no new warnings.
-2. `hf download answerdotai/ModernBERT-large --local-dir samples/data/modernbert`.
-3. `python samples/NivaraInference/Python/modernbert_compare.py` — fixture written.
-4. `dotnet run --project samples/NivaraInference -c Release -- modernbert` — forward runs.
-5. `dotnet run --project samples/NivaraInference -c Release -- modernbert compare` —
-   **the gate**: token ids match, `maxRel` at DistilBERT class (~1e-5), 0 violations.
-   A cosine below ~0.999 means a structural bug, not precision.
-6. `dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark` — record
-   Nivara ms.
-7. `python samples/NivaraInference/Python/modernbert_benchmark.py` — same methodology, record
-   PyTorch ms, compute the ratio in the same session.
-8. **Ask before** `dotnet test`; then run the new test files, then the AutoDiff suite as the
-   regression guardrail.
-9. Smoke-check that the SmolLM/Qwen/DistilBERT modes still run (the `Gpt2BpeTokenizer` and
-   `StateDictLoader` edits are shared code).
+1. ✅ `dotnet build Nivara.slnx` — clean, 0 warnings, 0 errors.
+2. ✅ Downloaded the checkpoint (see 1.1).
+3. ✅ `python samples/NivaraInference/Python/modernbert_compare.py` — fixture written.
+4. ✅ `modernbert` — forward runs; stats are stable across all 10 sentences
+   (std 0.986–1.016, min ≈ −24, max ≈ +16), which is the expected shape for a
+   final-LayerNorm'd encoder and a good smoke test.
+5. ✅ `modernbert compare` — **the gate passed** (table above).
+6. ✅ `modernbert benchmark` — record Nivara ms (below).
+7. ⬜ `python samples/NivaraInference/Python/modernbert_benchmark.py` — same methodology, record
+   PyTorch ms, compute the ratio in the same session. **Not written yet**; the ratio is the one
+   number the README is missing.
+8. ⬜ **Ask before** `dotnet test`; then run the new test files, then the AutoDiff suite as the
+   regression guardrail (the softmax fix is the reason this matters most).
+9. ⬜ Smoke-check that the SmolLM/Qwen/DistilBERT modes still run — the `Gpt2BpeTokenizer` and
+   `StateDictLoader` edits are shared code, and the tokenizer fix changes byte-level BPE behaviour
+   for every legacy-path caller. The existing SmolLM test uses letter-only text and is therefore
+   **not** a sufficient guardrail for that change; a real SmolLM `compare` run is.
 
-## Debug ladder (if the gate fails)
+### Nivara CPU timings (F32, Release, 10-core desktop class, .NET 11)
 
-Parity failures in this architecture are almost always one of exactly five things, in
-descending likelihood:
+| padded length | valid tokens | median | min | tok/s | ms/layer |
+| --- | --- | --- | --- | --- | --- |
+| 128 | 26 | 2749.5 ms | 2724.6 ms | 9.5 | 98.2 |
+| 256 | 26 | 5117.2 ms | 4618.9 ms | 5.1 | 182.8 |
 
-1. `Wi` gate/up halves swapped (or Q/K/V thirds swapped in `Wqkv`).
-2. Gate omitted entirely — some ports silently use a plain 2-layer MLP.
-3. Layer-0 `attn_norm` skipped/duplicated (or a `mlp_norm` applied post-residual).
+395,881,664 parameters (1510.2 MB as F32); safetensors parse ≈ 3.0 s, weight load into modules
+≈ 10–13 s. Timing is dominated by the dense `[L, L]` mask, which makes sliding layers cost the
+same as full ones — the banded kernel in the issue log is the fix, and it is also the main reason a
+2× length increase costs 1.9× instead of ~2×.
+
+## Debug ladder (superseded — see the Phase 1 result section)
+
+The ladder is kept because it was accurate; only its item 1 was applied to a *plan* that was
+wrong, not to the code.
+
+1. ✅ `Wi` gate/up halves swapped (this was it).
+2. Gate omitted entirely.
+3. Layer-0 `attn_norm` skipped/duplicated, or `mlp_norm` applied post-residual.
 4. Sliding-window band off by one (64 vs 65) or applied to full-attention layers.
 5. RoPE theta swapped between the full (160000) and sliding (10000) layer types.
 
-Bisect by comparing `last_hidden_state` after layer 0, 1, 2, 3… — the first diverging layer
-identifies the bug. Add a temporary `compare_diag`-style mode only if the ladder is not enough.
+`compare_diag` (per-stage diff against `output_hidden_states`) is the bisect tool and is now
+permanent, so future parity work does not have to rebuild it.
 
-## Blast radius
+## Blast radius — as executed
 
-- `src/Nivara`: **no changes planned in Phase 1.** All new code is `samples/` + tests + docs.
-- `samples/Nivara.Samples/Gpt2BpeTokenizer.cs` — shared by SmolLM, Qwen, and their tests.
-  Additive only: a new factory + an opt-in NFC flag. The existing ctor and encode path must stay
-  byte-identical; verified by the existing `Gpt2BpeTokenizerTests` and `Qwen/*` parity suites.
-- `samples/Nivara.Samples/StateDictLoader.cs` — shared by DistilBERT/MiniLM/Llama. Additive
-  method only; `LoadLinear`/`LoadLayerNorm`/`LoadRMSNorm` untouched.
-- `samples/NivaraInference/Program.cs` — one new `switch` case; the existing models' behaviour is
-  unchanged (guard with a smoke run of one text model).
+- `src/Nivara`: **one behavioural change**, `GradKernels.SoftmaxSingle` / `SoftmaxSingleStrided`
+  clamping a fully-masked row to zeros. Reachable only where every key is suppressed, which a
+  causal mask never produces, so no shipped model changes behaviour. It has **no unit test yet**,
+  which is the one real gap in this commit.
+- `samples/Nivara.Samples/Gpt2BpeTokenizer.cs` — shared by SmolLM, Qwen and their tests. Two
+  changes: the additive `LoadFromTokenizerJson` / `EncodeWithSpecialTokens` / opt-in NFC, and the
+  pre-tokenize-order fix, which **is** a behaviour change for every legacy-path caller. It makes
+  them match HuggingFace, and the existing tests still pass, but see verification step 9.
+- `samples/Nivara.Samples/StateDictLoader.cs` — additive `LoadLinearSlice` only;
+  `LoadLinear`/`LoadLayerNorm`/`LoadRMSNorm` untouched.
+- `samples/NivaraInference/Program.cs` — one new `switch` case plus the usage string.
 - `.gitignore` — two new lines, no existing rule modified.
-- Memory: a 1.6 GB F32 checkpoint read into `float[]` tensors is ~1.7 GB managed heap (the same
-  shape as the Qwen 989 MB BF16 load, which peaked at ~1.88 GB). Fine on this machine, worth
-  stating in the README.
-- Dense-mask memory: `[512, 512]` additive mask is 1 MB per layer per forward. **Never** build it
-  at 8192 tokens (would be ~1 GB) — the builder must throw, not fall back.
+- Memory: the 1510 MB F32 checkpoint read into `float[]` tensors plus module copies peaks around
+  2.5–3 GB managed heap. Higher than the Qwen BF16 load (which peaked at ~1.88 GB) because F32
+  doubles the element size. Worth stating in the README.
+- Dense-mask memory: `[L, L]` F32 is 4·L² bytes — 1 MB at 512, 16 MB at 2048, and **268 MB** at
+  8192. `MaxDenseLength = 2048` throws above that. (An earlier draft of this plan said ~1 GB at
+  8192; that was wrong by ~4×.)
 
-## Planned commits
 
-1. `docs: add LAYA.md — ModernBERT/Laya research reference and plan` (this file + `LAYA.md`)
-2. `feat: add ModernBERT encoder (GeGLU, RoPE, banded attention) to the inference sample`
-3. `feat: add modernbert inference mode with HuggingFace parity gate`
-4. `test: cover ModernBERT band masks, fused weight splits, tokenizer.json-only BPE load`
-5. `docs: document the modernbert mode in NivaraInference README`
+## Planned commits — as executed
+
+1. `cc3fb2f` `docs: add LAYA.md — ModernBERT/Laya research reference and branch plan`
+2. `89b487d` `fix(samples): pre-tokenize raw text before byte-level mapping`
+3. `7f19f28` `fix(autodiff): clamp fully-masked softmax rows to zero`
+4. `6fc0465` `feat(samples): ModernBERT-large encoder with a HuggingFace parity gate`
+5. ⬜ `test: cover band masks, fused weight splits, tokenizer.json load, masked softmax`
+6. ⬜ `docs: document the modernbert mode in NivaraInference README`
+
+Fixes 2 and 3 are separate from the feature on purpose: each builds and stands on its own, so a
+bisect points straight at whichever one broke a model.
 
 ## Open questions for the human
 
 - **Laya reference source.** Port `rl_common.py` into `Python/laya_compare.py` (self-contained,
   no new deps) vs `pip install laya` and diff against the real package (strongest ground truth,
   adds an install). Default to the port, cross-check if the install is cheap.
-- **Phase 2 checkpoint.** 808 MB F16 for Laya on top of the 1.6 GB ModernBERT download. Confirm
-  both are wanted locally, or whether Phase 2 should reuse Laya's encoder for its own parity gate
-  and skip the stock ModernBERT download.
-- **`samples/data/modernbert/` vs reusing `samples/data/laya/encoder/`** for the Phase 1 gate.
-  Default: separate dirs, since Phase 1 stands alone.
+- **Phase 2 checkpoint.** 842.6 MB for Laya on top of the 1510 MB ModernBERT download. Confirmed
+  wanted in G1; download after Phase 1's gate passed, which it now has.
+- ~~`samples/data/modernbert/` vs reusing `samples/data/laya/encoder/`~~ — resolved in G1: separate
+  directories, Phase 1 stands alone.
+- **Is the safe-softmax clamp enough, or should the mask also be applied as a select?** With the
+  clamp, ModernBERT matches PyTorch exactly. But a `NaN` already present in q/k/v still is not
+  suppressed, because `NaN + (-inf) = NaN`. Nothing in the current model suite produces that, so it
+  is filed rather than fixed — but it is a latent trap for any future model that can emit `NaN`
+  upstream. Decided in G1: clamp only, file the select variant.
 
 ## GitHub issues log
 
+Numbers are filled in as they are created; per the instruction at the top of this file, each is
+raised **when the work is deferred**, not at the end.
+
 - [ ] #NNN — `LayerNorm<T>` has no bias-free mode (`bias: false`); ModernBERT's `norm_bias: false`
-      is emulated by a zero Beta, which is exact for inference but wrong for fine-tuning.
-- [ ] #NNN — banded/sparse attention kernel: a dense `[L, L]` mask cannot serve ModernBERT at
-      `max_position_embeddings = 8192` (≈1 GB), and makes sliding layers cost the same as full ones.
-- [ ] #NNN — ILGPU/OpenCL GPU path for ModernBERT (`BertEncoderGpuRunner` is Post-LN BERT only).
-- [ ] #NNN — `LayerNorm` norm-after-residual vs ModernBERT pre-norm fused block: a
-      ModernBERT-specific fused forward (per-layer band + theta) is a perf follow-up.
+      is emulated by a zero Beta, which is exact for inference but wrong for fine-tuning
+      (the zero Beta would take a gradient instead of staying fixed).
+- [ ] #NNN — banded/sparse attention kernel. A dense `[L, L]` mask cannot serve ModernBERT at
+      `max_position_embeddings = 8192` (268 MB per mask), and it makes sliding layers cost the same
+      as full ones, which is the dominant cost in the Phase 1 timings. This is the highest-value
+      follow-up of the lot.
+- [ ] #NNN — `GradKernels`: apply the attention mask as a select (forced `-inf`) rather than an add,
+      so a `NaN` in q/k/v cannot escape suppression via `NaN + (-inf) = NaN`. The safe-softmax clamp
+      removes the known trigger; this removes the class.
+- [ ] #NNN — no unit test for the masked-softmax clamp (`SoftmaxSingle` / `SoftmaxSingleStrided`).
+      A core behavioural change landed in this branch on the strength of a sample-mode gate alone.
+- [ ] #NNN — ILGPU/OpenCL GPU path for ModernBERT (`BertEncoderGpuRunner` is Post-LN BERT only, and
+      there is no RoPE kernel on the GPU path at all). See Phase 3 for the component list.
+- [ ] #NNN — ModernBERT-specific fused pre-norm block (per-layer band + theta + GeGLU epilogue) as
+      a perf follow-up; the CPU path is 28 separate module forwards with two materialized masks.
+- [ ] #NNN — `Gpt2BpeTokenizer` matches `added_tokens` over the raw text; HuggingFace extracts them
+      per pre-tokenized piece. Diverges for runs of 2+ spaces with ModernBERT's whitespace-run added
+      tokens, and likely for the `|||EMAIL_ADDRESS|||` family.
 - [ ] #NNN — Laya `act_head` / escalate signal is documented as unusable (AUROC 0.30);
       investigate or explicitly close.
 - [ ] #NNN — NFC normalization is only implemented on the new `tokenizer.json` entry point;
       consider promoting it to the shared byte-level BPE path.
+

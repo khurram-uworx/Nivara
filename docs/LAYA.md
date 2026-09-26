@@ -155,11 +155,18 @@ so there is no "layer scale" op to build. (Corroborating: `model.layers.0` has n
 - **Layer types**: `layer_types` starts `"full_attention"` and repeats every 3
   (`global_attn_every_n_layers = 3`) → layers 0, 3, 6, …, 27 are full (10), the other 18 are
   sliding. **Band mask is per-layer, not per-head** — one `[L, L]` additive mask serves a layer.
-- **MLP (GeGLU)**: `input, gate = self.Wi(hidden_states).chunk(2, dim=-1)` then
-  `act(gate) * input` (`modeling_modernbert.py:90`, `mlp.py:162`). So **`Wi` rows `[0:2624]` are
-  the `input`/up projection and rows `[2624:5248]` are the `gate`** — gate is the *second* half.
+- **MLP (GeGLU)**: `modeling_modernbert.py:89-91`
+  ```python
+  def forward(self, hidden_states):
+      input, gate = self.Wi(hidden_states).chunk(2, dim=-1)
+      return self.Wo(self.drop(self.act(input) * gate))
+  ```
+  So **`Wi` rows `[0:2624]` (`input`) carry the activation and rows `[2624:5248]` (`gate`) do
+  not** — the product is `act(input) * gate`. The variable HF calls `gate` is the *unactivated*
+  one; this reads backwards and was the hardest bug in Phase 1 (cosine 0.82 at layer 0). The
+  loader hands the **upper** row block to the activated projection.
   `act` for ModernBERT-large is `hidden_activation: "gelu"` = **exact erf GELU** (HF `gelu`, not
-  `gelu_new`), matching `GradKernels.GeluExact` / `ReverseGradOperations.GeluExact` in Nivara.
+  `gelu_new`), matching `ReverseGradOperations.GeluExact` in Nivara.
 - Config: `hidden_size 1024`, `intermediate_size 2624`, `28` layers, `16` heads,
   `norm_eps 1e-5`, `local_attention 128`, `global_rope_theta 160000`,
   `local_rope_theta 10000`, `max_position_embeddings 8192`, `vocab_size 50368`,
@@ -170,6 +177,32 @@ so there is no "layer scale" op to build. (Corroborating: `model.layers.0` has n
   (`build_model(..., attn_implementation="sdpa")`, which is what Laya does) builds exactly
   that padding mask — so a dense additive mask is the correct reference semantics, not a
   approximation.
+- **A bidirectional band can leave a query row with no visible key.** With `local_attention 128`
+  the half-window is 64, so any query row beyond `valid_len + 64` has its whole valid range
+  outside the band and is fully masked. This is unreachable for a causal model and is the first
+  thing to check when a *bidirectional* encoder produces `NaN`. Verified in Phase 1: with the
+  clamp, HF and Nivara agree on those rows too (both zero); without it, the `NaN` compounds
+  across layers because the mask is an *add* and `NaN + (-inf) = NaN`.
+- **QK-norm: ModernBERT-large has none.** The stock checkpoint holds exactly 6 tensors per layer
+  (`attn.Wqkv.weight`, `attn.Wo.weight`, `attn_norm.weight`, `mlp.Wi.weight`, `mlp.Wo.weight`,
+  `mlp_norm.weight`) and 5 at layer 0, which has no `attn_norm`. QK-norm is a base-vs-large
+  distinction, and it is easy to remember backwards.
+
+### 3.5 Reading HF's per-stage output (a trap worth writing down)
+
+`model(**inputs, output_hidden_states=True)` on `ModernBertModel` returns `num_layers + 1`
+states, but **not** the obvious "embeddings, then one per layer". Measured on the 28-layer
+stock model:
+
+- `hidden_states[0]` = post-embedding-norm state
+- `hidden_states[1 .. 27]` = the output of layers 0 .. 26
+- `hidden_states[28]` = the **final-norm** state, i.e. `last_hidden_state`
+  (verified `torch.equal(hidden_states[28], last_hidden_state[0])`)
+
+The last layer's **raw** output is never exposed, and that matters: ModernBERT's residual stream
+reaches absmax ≈ 2.57e4 there, which `final_norm` rescales to ≈ 27.6. Diffing a raw last-layer
+output against `hidden_states[28]` therefore reports a "difference" of ~25708 that is nothing but
+the missing LayerNorm. Diff the final norm against `hidden_states[28]` instead.
 
 ### 3.4 Tokenizer
 
@@ -181,6 +214,22 @@ Specials: `[CLS]`=50281, `[SEP]`=50282, `[PAD]`=50283, `[MASK]`=50284, `[UNK]`.
 This is the plain GPT-2-style byte-level BPE, i.e. the `Gpt2BpeTokenizer` path (no `Split`
 pretokenizer, unlike Qwen). The repo ships **no `vocab.json` / `merges.txt`**, only
 `tokenizer.json` — so the loader must read vocab/merges inline from the JSON.
+
+⚠️ **Run the pre-tokenizer pattern over the RAW text, then byte-map each chunk** — not the other
+way round. Byte level maps a space (0x20) to `Ġ` (U+0120), which `\p{L}` classifies as a letter,
+so matching on the mapped string gives `"Ġ"` + `"2026"` where HF gives `"Ġ20"` + `"26"`
+(ids 209, 938 vs 1384). Letter runs hide the bug, because `"Ġ"` plus letters is still one
+all-letter chunk. This is fixed in `Gpt2BpeTokenizer` but it is the single easiest thing to get
+wrong when porting any byte-level BPE.
+
+Two known divergences from HF, both documented rather than fixed (fixing them would change the
+shared SmolLM/Qwen path):
+
+- `added_tokens` are matched over the **raw text** (leftmost-longest) here, but HF extracts them
+  **per pre-tokenized piece**. ModernBERT declares 23 whitespace-run tokens (ids 50254–50276,
+  runs of 24 down to 2 spaces) plus the `|||EMAIL_ADDRESS|||` family, so text containing a run of
+  2+ spaces can diverge. Single-spaced text agrees, which is what the parity fixture uses.
+- NFC is applied only through `LoadFromTokenizerJson`, not on the shared legacy path.
 
 ---
 
@@ -247,7 +296,7 @@ def build_sequence(tok, state, q, max_len, head_max_len, ...):
 |---|---|---|
 | Bias-free LayerNorm, eps 1e-5 | `LayerNorm<T>(n, eps, affine)` | `affine:true` always allocates a Beta too; a zero Beta is exactly `bias=False`, so **no core change needed** (see §7) |
 | RoPE, `rotate_half`, full head-dim, per-instance theta | `RotaryEmbedding<T>(headDim, maxPos, theta)` (`src/Nivara/AutoDiff/Nn/RotaryEmbedding.cs`) | ✅ direct reuse — same HF convention, same half-split |
-| Gated MLP `act(gate) · up` | house style = two `Linear<T>` + `Activation.Silu` + `ReverseGradOperations.Multiply` (`LlamaDecoderBlock.cs:105-107`) | ✅ **same shape with `GeluExact` instead of `Silu`** — no new op |
+| Gated MLP `act(input) · gate` | house style = two `Linear<T>` + `Activation.Silu` + `ReverseGradOperations.Multiply` (`LlamaDecoderBlock.cs:105-107`) | ✅ **same shape with `GeluExact` instead of `Silu`** — no new op |
 | Exact-erf GELU | `ReverseGradOperations.GeluExact` / `GradKernels.GeluExact` | ✅ |
 | Bidirectional masked attention, arbitrary additive mask | `ReverseGradOperations.MultiHeadAttention` (`[qLen,kvLen]` mask) and `BatchedMultiHeadAttention` (`[B,qLen,kvLen]`) | ✅ **sliding window = a band mask, no new op** |
 | Fused QKV / fused gate-up weight split | `StateDictLoader.LoadLinear` binds one prefix; splitting = contiguous row-block copies at load | ✅ sample-side loader helper |
@@ -264,15 +313,18 @@ mode — and (b) is only cosmetic (a zero Beta is numerically identical).
 
 1. **Banded attention is not free.** Expressing the 129-wide window as a dense `[512, 512]`
    additive mask makes sliding layers cost the same as full layers. At 512 tokens the mask is
-   1 MB (fine); at `max_position_embeddings = 8192` a dense mask would be 268M floats ≈ 1 GB —
-   **must not be materialised**. So: dense mask ≤ ~1–2k tokens, banded/spared kernel beyond.
+   1 MB (fine); at `max_position_embeddings = 8192` a dense mask is 67M elements — 268 MB in F32 —
+   **must not be materialised**. So: dense mask ≤ `ModernBertMasks.MaxDenseLength` (2048, 16 MB),
+   which throws above that rather than silently allocating; banded/sparse kernel beyond.
 2. **No MLM head work yet.** `decoder.bias` / `head.dense` / `head.norm` are in the backbone
    checkpoint but are only needed for masked-token tasks, not for Laya. Out of Phase 1.
 3. **Per-layer theta + per-layer band** means the encoder cannot use one shared fused
    decoder-block kernel the way `LlamaDecoderBlock` does; a ModernBERT-specific fused forward is
    a follow-up optimisation, not a Phase-1 requirement.
-4. **GPU path** (`--gpu`, `BertEncoderGpuRunner`) is a Post-LN BERT kernel; extending it is a
-   separate piece of work.
+4. **GPU path** (`--gpu`, `BertEncoderGpuRunner`) is a post-LN BERT kernel built on the
+   HuggingFace split-`query`/`key`/`value` naming; extending it is Phase 3 and needs four new
+   pieces (RoPE kernel, GeGLU, pre-norm restructure, banded attention mask) rather than a port.
+   See `docs/TODO.md` for the itemised plan.
 5. **Laya head needs `nn.MultiheadAttention` semantics with a fused biased in-proj** — expressible
    with the existing `MultiHeadAttention` op + `ReverseGradOperations.AddBias`, no new op.
 
@@ -313,3 +365,7 @@ it.
   marker scorer, temperature calibration), `LayaPromptBuilder` (a C# port of `build_sequence` +
   `render_options`), a `laya` mode with a PyTorch parity gate on the same fixture methodology.
   `act_head` optional; multilingual/typed-decisions subfolders optional.
+- **Phase 3 — GPU path.** An ILGPU `ModernBertGpuRunner`: a RoPE elementwise kernel (absent
+  entirely today), GeGLU, a pre-norm restructure, and a band parameter in the fused attention
+  kernel. Gated GPU-vs-CPU rather than GPU-vs-PyTorch, since Phase 1 already pins the CPU path to
+  HuggingFace.
