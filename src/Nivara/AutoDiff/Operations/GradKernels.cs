@@ -472,6 +472,17 @@ internal static class GradKernels
         T max = input[0];
         for (int i = 1; i < input.Length; i++)
             if (input[i] > max) max = input[i];
+
+        // A row whose entries are all -inf (an attention query with every key suppressed by an
+        // additive mask) has an undefined distribution: max is -inf, so the usual x - max is NaN.
+        // PyTorch's scaled_dot_product_attention clamps this and returns zeros; match it so a
+        // padded query row stays finite instead of poisoning the layers above it.
+        if (!T.IsFinite(max))
+        {
+            output.Clear();
+            return;
+        }
+
         TensorPrimitives.Subtract(input, max, output);
         TensorPrimitives.Exp(output, output);
         TensorPrimitives.Divide(output, TensorPrimitives.Sum(output), output);
@@ -588,6 +599,15 @@ internal static class GradKernels
             T value = input[start + k * stride];
             if (value > max) max = value;
         }
+
+        // See SoftmaxSingle: an all -inf row is clamped to zeros, matching PyTorch's safe softmax.
+        if (!T.IsFinite(max))
+        {
+            for (int k = 0; k < count; k++)
+                output[start + k * stride] = T.Zero;
+            return;
+        }
+
         for (int k = 0; k < count; k++)
             temp[k] = input[start + k * stride] - max;
         TensorPrimitives.Exp(temp.AsSpan(0, count), temp.AsSpan(0, count));
