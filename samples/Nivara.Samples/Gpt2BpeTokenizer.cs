@@ -35,6 +35,14 @@ public sealed class Gpt2BpeTokenizer
     /// </summary>
     readonly Regex? declaredSplitRegex;
 
+    /// <summary>
+    /// When true, text is NFC-normalized before pretokenizing, for tokenizers whose serialized
+    /// <c>normalizer</c> declares NFC (ModernBERT does). Off unless
+    /// <see cref="LoadFromTokenizerJson"/> is asked for it, so the SmolLM and Qwen encode paths
+    /// stay byte-identical.
+    /// </summary>
+    readonly bool normalizeNfc;
+
     /// <summary>Gets the total number of tokens known to this tokenizer (base vocab plus added tokens).</summary>
     public int VocabSize => vocab.Count + addedTokens.Count;
 
@@ -68,8 +76,19 @@ public sealed class Gpt2BpeTokenizer
         string mergesPath,
         string unkToken = "<|endoftext|>",
         string? tokenizerJsonPath = null)
+        : this(JsonVocab(File.ReadAllText(vocabPath)), ReadMergesFile(mergesPath), tokenizerJsonPath, unkToken, normalizeNfc: false)
     {
-        vocab = JsonVocab(File.ReadAllText(vocabPath));
+    }
+
+    Gpt2BpeTokenizer(
+        Dictionary<string, int> vocab,
+        List<(string, string)> merges,
+        string? tokenizerJsonPath,
+        string unkToken,
+        bool normalizeNfc)
+    {
+        this.vocab = vocab;
+        this.normalizeNfc = normalizeNfc;
         idToToken = new Dictionary<int, string>(vocab.Count);
         foreach (var (token, id) in vocab)
             idToToken[id] = token;
@@ -88,21 +107,108 @@ public sealed class Gpt2BpeTokenizer
 
         (byteToChar, charToByte) = BuildByteMap();
 
-        var mergesList = new List<(string, string)>();
-        var lines = File.ReadAllLines(mergesPath);
-        foreach (var line in lines)
+        mergeRanks = new Dictionary<(string, string), int>(merges.Count);
+        for (int i = 0; i < merges.Count; i++)
+            mergeRanks[merges[i]] = i;
+    }
+
+    /// <summary>
+    /// Loads a byte-level BPE tokenizer from a <c>tokenizer.json</c> alone, reading the inline
+    /// <c>model.vocab</c> map and <c>model.merges</c> list. Checkpoints that ship only the
+    /// serialized tokenizer — ModernBERT, for instance — have no <c>vocab.json</c> / <c>merges.txt</c>
+    /// pair to read.
+    /// </summary>
+    /// <param name="tokenizerJsonPath">Path to tokenizer.json</param>
+    /// <param name="unkToken">Unknown-token string (must be a known token)</param>
+    /// <param name="normalizeNfc">Apply NFC normalization before pretokenizing, for tokenizers whose
+    /// <c>normalizer</c> declares it. Off by default so the SmolLM and Qwen paths are unaffected.</param>
+    public static Gpt2BpeTokenizer LoadFromTokenizerJson(
+        string tokenizerJsonPath,
+        string unkToken = "<|endoftext|>",
+        bool normalizeNfc = true)
+    {
+        var json = File.ReadAllText(tokenizerJsonPath);
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("model", out var model) || model.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException(
+                $"'{tokenizerJsonPath}' has no top-level 'model' object, so it is not a BPE tokenizer.json.");
+        if (!model.TryGetProperty("vocab", out var vocabElement))
+            throw new InvalidOperationException($"'{tokenizerJsonPath}' has no 'model.vocab'.");
+        if (!model.TryGetProperty("merges", out var mergesElement) || mergesElement.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException($"'{tokenizerJsonPath}' has no 'model.merges' array.");
+
+        return new Gpt2BpeTokenizer(
+            JsonVocab(vocabElement),
+            ReadInlineMerges(mergesElement),
+            tokenizerJsonPath,
+            unkToken,
+            normalizeNfc);
+    }
+
+    /// <summary>
+    /// Encodes text and wraps it in the BERT-family post-processor convention
+    /// (<c>[CLS] … [SEP]</c>), matching a <c>TemplateProcessing</c> single sequence.
+    /// </summary>
+    public IReadOnlyList<int> EncodeWithSpecialTokens(
+        string text,
+        string clsToken = "[CLS]",
+        string sepToken = "[SEP]")
+    {
+        int clsId = RequireTokenId(clsToken);
+        int sepId = RequireTokenId(sepToken);
+
+        var body = Encode(text);
+        var ids = new List<int>(body.Count + 2);
+        ids.Add(clsId);
+        ids.AddRange(body);
+        ids.Add(sepId);
+        return ids;
+    }
+
+    int RequireTokenId(string token)
+    {
+        int id = TokenId(token);
+        if (id < 0)
+            throw new InvalidOperationException(
+                $"Token '{token}' is not in the vocabulary, so special-token wrapping is not possible.");
+        return id;
+    }
+
+    static List<(string, string)> ReadMergesFile(string mergesPath)
+    {
+        var merges = new List<(string, string)>();
+        foreach (var line in File.ReadAllLines(mergesPath))
         {
             if (line.Length == 0 || line[0] == '#')
                 continue;
             int sp = line.IndexOf(' ');
             if (sp <= 0 || sp == line.Length - 1)
                 continue;
-            mergesList.Add((line.Substring(0, sp), line.Substring(sp + 1)));
+            merges.Add((line.Substring(0, sp), line.Substring(sp + 1)));
         }
+        return merges;
+    }
 
-        mergeRanks = new Dictionary<(string, string), int>(mergesList.Count);
-        for (int i = 0; i < mergesList.Count; i++)
-            mergeRanks[mergesList[i]] = i;
+    /// <summary>
+    /// Reads the inline <c>model.merges</c> array, whose entries use the same
+    /// <c>"left right"</c> space-separated form as a <c>merges.txt</c> line.
+    /// </summary>
+    static List<(string, string)> ReadInlineMerges(JsonElement merges)
+    {
+        var result = new List<(string, string)>(merges.GetArrayLength());
+        foreach (var item in merges.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String)
+                continue;
+            var line = item.GetString();
+            if (line == null)
+                continue;
+            int sp = line.IndexOf(' ');
+            if (sp <= 0 || sp == line.Length - 1)
+                continue;
+            result.Add((line.Substring(0, sp), line.Substring(sp + 1)));
+        }
+        return result;
     }
 
     /// <summary>Encodes text into token ids (no special-token wrapping). Added tokens declared in
@@ -111,6 +217,8 @@ public sealed class Gpt2BpeTokenizer
     public IReadOnlyList<int> Encode(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+        if (normalizeNfc)
+            text = text.Normalize(NormalizationForm.FormC);
 
         var ids = new List<int>();
         int pos = 0;
@@ -140,6 +248,8 @@ public sealed class Gpt2BpeTokenizer
     public IReadOnlyList<string> EncodePieces(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+        if (normalizeNfc)
+            text = text.Normalize(NormalizationForm.FormC);
 
         var result = new List<string>();
         int pos = 0;
@@ -179,21 +289,39 @@ public sealed class Gpt2BpeTokenizer
             return ids;
         }
 
-        var mapped = MapBytesToChars(text);
-        var matches = BytePretoken.Matches(mapped);
-        foreach (Match m in matches)
-        {
-            var word = m.Value;
-            if (vocab.TryGetValue(word, out var directId))
-            {
-                ids.Add(directId);
-                continue;
-            }
-
-            foreach (var piece in Bpe(word))
-                ids.Add(vocab.TryGetValue(piece, out var id) ? id : unkTokenId);
-        }
+        foreach (var chunk in ByteMappedChunks(text))
+            AppendMappedChunkIds(ids, chunk);
         return ids;
+    }
+
+    /// <summary>
+    /// Splits <paramref name="text"/> with the GPT-2 pre-tokenizer pattern and byte-maps each chunk.
+    /// </summary>
+    /// <remarks>
+    /// The pattern runs over the RAW text, never over the byte-mapped string. Byte level maps a
+    /// space (0x20) to <c>Ġ</c> (U+0120), which <c>\p{L}</c> classifies as a letter, so matching on
+    /// the mapped string splits <c>" 2026"</c> into the chunks <c>Ġ</c> and <c>2026</c> and loses
+    /// HuggingFace's <c>Ġ20</c> + <c>26</c>. Mapping first also puts the leading space in the wrong
+    /// class before punctuation, so <c>" - x"</c> became three chunks instead of two. Chunk
+    /// boundaries always fall between chars, so each chunk's UTF-8 bytes stay intact.
+    /// </remarks>
+    IEnumerable<string> ByteMappedChunks(string text)
+    {
+        foreach (Match match in BytePretoken.Matches(text))
+            yield return MapBytesToChars(match.Value);
+    }
+
+    /// <summary>Appends the ids for one already byte-mapped chunk.</summary>
+    void AppendMappedChunkIds(List<int> ids, string mapped)
+    {
+        if (vocab.TryGetValue(mapped, out var directId))
+        {
+            ids.Add(directId);
+            return;
+        }
+
+        foreach (var piece in Bpe(mapped))
+            ids.Add(vocab.TryGetValue(piece, out var id) ? id : unkTokenId);
     }
 
     /// <summary>Runs the byte-level BPE pipeline over a text chunk that contains no added tokens,
@@ -211,9 +339,8 @@ public sealed class Gpt2BpeTokenizer
             return result;
         }
 
-        var mapped = MapBytesToChars(text);
-        foreach (Match m in BytePretoken.Matches(mapped))
-            result.AddRange(Bpe(m.Value));
+        foreach (var chunk in ByteMappedChunks(text))
+            result.AddRange(Bpe(chunk));
         return result;
     }
 
@@ -382,8 +509,13 @@ public sealed class Gpt2BpeTokenizer
     static Dictionary<string, int> JsonVocab(string json)
     {
         using var doc = JsonDocument.Parse(json);
-        var dict = new Dictionary<string, int>(doc.RootElement.EnumerateObject().Count());
-        foreach (var prop in doc.RootElement.EnumerateObject())
+        return JsonVocab(doc.RootElement);
+    }
+
+    static Dictionary<string, int> JsonVocab(JsonElement vocabElement)
+    {
+        var dict = new Dictionary<string, int>(vocabElement.EnumerateObject().Count());
+        foreach (var prop in vocabElement.EnumerateObject())
             dict[prop.Name] = prop.Value.GetInt32();
         return dict;
     }
