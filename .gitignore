@@ -363,6 +363,8 @@ samples/data/smollm-135m/
 samples/data/smollm-fn-135m/
 samples/data/qwen2.5-0.5b-instruct/
 samples/data/qwen2.5-0.5b-instruct-gguf/
+samples/data/modernbert/
+samples/data/laya/
 
 # Benchmark output
 samples/NivaraFineTuning/benchmark_results.txt
