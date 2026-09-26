@@ -220,16 +220,32 @@ way round. Byte level maps a space (0x20) to `Ġ` (U+0120), which `\p{L}` classi
 so matching on the mapped string gives `"Ġ"` + `"2026"` where HF gives `"Ġ20"` + `"26"`
 (ids 209, 938 vs 1384). Letter runs hide the bug, because `"Ġ"` plus letters is still one
 all-letter chunk. This is fixed in `Gpt2BpeTokenizer` but it is the single easiest thing to get
-wrong when porting any byte-level BPE.
+wrong when porting any byte-level BPE. On SmolLM the visible form is punctuation: `"a - b"`
+byte-maps to `"aĠ-Ġb"`, which the mapped-string order chunks as `["aĠ", "-Ġ", "b"]` and so can
+never emit the real `" -"` token that HF produces (id 731).
 
-Two known divergences from HF, both documented rather than fixed (fixing them would change the
-shared SmolLM/Qwen path):
+**`added_tokens` are matched over the RAW text, leftmost-longest — which is what HF does.**
+Measured against `AutoTokenizer`, not assumed:
 
-- `added_tokens` are matched over the **raw text** (leftmost-longest) here, but HF extracts them
-  **per pre-tokenized piece**. ModernBERT declares 23 whitespace-run tokens (ids 50254–50276,
-  runs of 24 down to 2 spaces) plus the `|||EMAIL_ADDRESS|||` family, so text containing a run of
-  2+ spaces can diverge. Single-spaced text agrees, which is what the parity fixture uses.
-- NFC is applied only through `LoadFromTokenizerJson`, not on the shared legacy path.
+| input | HF ids | pieces |
+| --- | --- | --- |
+| `"a  b"` | `66, 50276, 67` | `a`, `␣␣` (the 2-space added token), `b` |
+| `"a" + 24×" " + "b"` | `66, 50254, 67` | `a`, `␣×24` (longest added token), `b` |
+| `"a" + 25×" " + "b"` | `66, 50254, 270` | 24 spaces, then `␣b` — the *leftover* space starts a new chunk |
+| `"mail \|\|\|EMAIL_ADDRESS\|\|\| here"` | `5719, 209, 50277, 1060` | added token found mid-string |
+| `"[unused1]"` | `50286` | whole string is an added token |
+
+The 25-space row is the decisive one: it can only be produced by leftmost-longest raw-text
+matching, because the GPT-2 pattern never emits a whitespace-only piece that ends mid-run, so
+per-piece extraction could not find a 24-space token there. ModernBERT declares 116 added tokens
+(`tokenizer.json`): the `|||IP_ADDRESS|||` / `|||EMAIL_ADDRESS|||` / `|||PHONE_ADDRESS|||` family at
+ids 0 and 50277–50285, `[unusedN]` from 50286, 23 whitespace-run tokens (ids 50254–50276, runs of
+24 down to 2 spaces), and the BERT specials at 50281–50284.
+
+One real remaining divergence: NFC is applied only through `LoadFromTokenizerJson`, not on the
+shared legacy byte-level BPE path. It also only applies to added tokens declared
+`"normalized": true`; the few declared `false` (the `special: true` entries) are matched on the
+un-normalized text, which is moot for ASCII specials like `[CLS]` / `[SEP]`.
 
 ---
 

@@ -22,10 +22,12 @@ public static class ModernBert
     const string ModelTypeName = "ModernBERT-large";
 
     /// <summary>
-    /// Sentences used by the default and benchmark modes. Deliberately single-spaced: ModernBERT
-    /// declares 23 whitespace-run tokens in its added vocabulary, which our tokenizer matches over
-    /// the raw text rather than per pre-tokenized piece, so a run of two or more spaces is a known
-    /// divergence from HuggingFace. See the tokenizer notes in the README.
+    /// Sentences used by the default and benchmark modes. The first one is the parity fixture's
+    /// sentence, so the benchmark times the same 26 tokens <c>compare</c> gates on. They are
+    /// deliberately single-spaced and ASCII: ModernBERT's added vocabulary includes whitespace-run
+    /// tokens, and while they are matched the same way HuggingFace matches them (leftmost-longest
+    /// over the raw text), a run longer than the longest token (24 spaces) is the one shape worth
+    /// keeping out of a timing run.
     /// </summary>
     static readonly string[] SampleSentences =
     [

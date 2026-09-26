@@ -192,12 +192,15 @@ just the missing LayerNorm.
 - [x] `EncodeWithSpecialTokens(text, cls, sep)`, plus `RequireTokenId` and the merges readers.
 - [x] **Bug fix** (pre-existing, `89b487d`): pre-tokenize the raw text, then byte-map each chunk.
       See the bug list above.
-- [ ] Known divergence, not fixed: ModernBERT's `added_tokens` includes 23 whitespace-run tokens
-      (ids 50254–50276) and the `|||EMAIL_ADDRESS|||` family. We match added tokens over the raw
-      text (leftmost-longest); HF extracts them **per pre-tokenized piece**, after the
-      pre-tokenizer. Text with a run of 2+ spaces can therefore diverge. The fixture sentence is
-      single-spaced, so the gate is unaffected. Changing this would alter the shared SmolLM/Qwen
-      path, so it is an issue rather than a drive-by fix.
+- [x] `added_tokens` matching verified against HF rather than assumed. An earlier draft of this
+      plan claimed HF extracts them **per pre-tokenized piece** and that runs of 2+ spaces
+      therefore diverge. That is wrong: HF matches over the raw text, leftmost-longest, which is
+      what this implementation already did. The decisive case is 25 spaces → the 24-space added
+      token (50254) followed by `" b"` (270) — only reachable by raw-text matching, since the
+      GPT-2 pattern never emits a whitespace-only piece that ends mid-run. Pinned by
+      `Encode_WhitespaceRunLongerThanTheLongestToken_TakesTheLongestThenContinues` and three
+      sibling tests. See `docs/LAYA.md` §3.4.
+- [x] Still a real gap: NFC is opt-in on the new factory only, not the shared legacy path.
 
 ### 1.5 `samples/NivaraInference/ModernBert.cs` (new) + `Program.cs`
 
@@ -221,15 +224,33 @@ just the missing LayerNorm.
 
 ### 1.7 Tests (`tests/Nivara.Tests`)
 
-- [ ] `AutoDiff/ModernBertMaskTests.cs` — band boundaries (`|i-j| == band` visible, `band+1`
-      suppressed), pad interaction, full-attention layer has no band, `MaxDenseLength` throws.
-- [ ] Extend `AutoDiff/Gpt2BpeTokenizerTests.cs` — the pre-tokenize-order regression (a space before
-      a digit, and before punctuation), `tokenizer.json`-only load, NFC on/off.
-- [ ] `StateDictLoader.LoadLinearSlice` — row-block extraction and a clear throw on shape mismatch.
-- [ ] `GradKernels` — a fully-masked softmax row returns zeros, not `NaN` (regression guard for the
-      core fix, which currently has no test at all).
-- [ ] Weight-mapping test: synthetic `model.`- and `encoder.`-prefixed dicts both bind a tiny config.
-- [ ] `StateDictLoader` has no dedicated test file → cover it in the ModernBERT tests.
+- [x] `AutoDiff/ModernBertMaskTests.cs` (16 tests) — band boundary inclusive at `|i-j| == band` and
+      suppressed at `band + 1`; band is bidirectional; padded keys suppressed for every query;
+      padded queries are themselves fully masked (the precondition for the softmax clamp); band
+      clipping; square shape; suppressed entries are exactly `-inf`; `MaxDenseLength` throws with
+      the "banded attention kernel" hint; invalid-argument throws; the two HuggingFace entry
+      counts (13056 full / 14369 sliding) with the arithmetic spelled out; and config derivation
+      (layer types, the `local_attention / 2` half-window, per-layer-type theta and band, the
+      explicit `layer_types` + `rope_parameters` layout, and the non-`gelu` rejection).
+- [x] `AutoDiff/GradKernelsTests.cs` (+3) — the safe-softmax clamp: a fully-masked row returns
+      zeros, a partially-masked row stays normalized, and the strided `SoftmaxDim` path clamps a
+      fully-masked strided group. **This closes the gap that the core fix had no test for.**
+- [x] `AutoDiff/ModernBertWeightLoadingTests.cs` (13 tests) — `LoadLinearSlice` row-block
+      extraction, first-block case, missing-tensor message naming the key, row-block-past-end,
+      in-features mismatch, negative/zero ranges, null target; the fused `Wqkv` thirds bind to
+      consecutive row blocks; the fused `Wi` halves bind **activated-first** (the regression guard
+      for the one bug that cost cosine 0.82); every tensor loads and layer 0's `attnNorm` is null;
+      `model.` and `encoder.` prefixes bind the same architecture; per-layer scales land on the
+      right layer.
+- [x] `AutoDiff/Gpt2BpeTokenizerTests.cs` (+10) — the pre-tokenize-order regression on SmolLM
+      (`"a - b"` → `[81, 731, 278]`, which the mapped-string order cannot produce, plus the digit
+      and mixed cases, all verified against the real `AutoTokenizer`); `tokenizer.json`-only load
+      (vocab size 50280, the 26-id fixture sentence, `[CLS]`/`[SEP]` wrapping, unknown-special
+      throw, malformed-JSON throw); NFC on/off; and four added-token parity tests including the
+      25-space case that proves leftmost-longest raw-text matching.
+- [x] Test project builds clean, 0 warnings.
+- [ ] **Ask before** `dotnet test`; then the four fixtures, then the AutoDiff suite as the
+      regression guardrail (the softmax fix and the shared-tokenizer change are why this matters).
 
 ### 1.8 Docs
 
@@ -304,27 +325,48 @@ The existing GPU path is ILGPU-based and `BertEncoderGpuRunner` is hard-wired to
    final-LayerNorm'd encoder and a good smoke test.
 5. ✅ `modernbert compare` — **the gate passed** (table above).
 6. ✅ `modernbert benchmark` — record Nivara ms (below).
-7. ⬜ `python samples/NivaraInference/Python/modernbert_benchmark.py` — same methodology, record
-   PyTorch ms, compute the ratio in the same session. **Not written yet**; the ratio is the one
-   number the README is missing.
-8. ⬜ **Ask before** `dotnet test`; then run the new test files, then the AutoDiff suite as the
-   regression guardrail (the softmax fix is the reason this matters most).
+7. ✅ `python samples/NivaraInference/Python/modernbert_benchmark.py` — written and run in the
+   **same session** as the C# side, so the ratio is honest. PyTorch: 813.6 ms median at seq 128,
+   1164.4 ms at seq 256.
+8. ✅ **Asked before** `dotnet test`. New/changed fixtures: **126 passed, 0 failed**. Full
+   `Nivara.Tests` suite: **3516 passed, 1 failed, 14 skipped, 7m46s** — the one failure is
+   `TensorsHelperTests.Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization`
+   (`[Category("Performance")]`, a timing comparison between the tiled transpose kernel and the
+   BCL view+flatten route). It **passes in isolation** (423 ms) and failed only because the full
+   run shared the machine. Unrelated to this branch: no softmax, tokenizer, or ModernBERT code is
+   involved. Treated as machine-load flake, not a regression.
 9. ⬜ Smoke-check that the SmolLM/Qwen/DistilBERT modes still run — the `Gpt2BpeTokenizer` and
    `StateDictLoader` edits are shared code, and the tokenizer fix changes byte-level BPE behaviour
    for every legacy-path caller. The existing SmolLM test uses letter-only text and is therefore
-   **not** a sufficient guardrail for that change; a real SmolLM `compare` run is.
+   **not** a sufficient guardrail for that change; a real SmolLM `compare` run is. (The new
+   punctuation test `"a - b"` → `[81, 731, 278]` does pin the fixed order against HF, but it pins
+   the *vocab*, not the SmolLM *checkpoint*, so a live run is still worth doing.)
 
-### Nivara CPU timings (F32, Release, 10-core desktop class, .NET 11)
+### CPU timings — PyTorch vs Nivara, same session (2026-09-27, F32, Release, .NET 11)
 
-| padded length | valid tokens | median | min | tok/s | ms/layer |
-| --- | --- | --- | --- | --- | --- |
-| 128 | 26 | 2749.5 ms | 2724.6 ms | 9.5 | 98.2 |
-| 256 | 26 | 5117.2 ms | 4618.9 ms | 5.1 | 182.8 |
+| padded length | valid tokens | PyTorch median | Nivara median | Slowdown | Nivara tok/s | Nivara ms/layer |
+| --- | --- | --- | --- | --- | --- | --- |
+| 128 | 26 | 813.6 ms (min 751.9) | 2589.5 ms (min 2526.4) | **~3.2×** | 10.0 | 92.48 |
+| 256 | 26 | 1164.4 ms (min 1155.7) | 4853.3 ms (min 4663.9) | **~4.2×** | 5.4 | 173.33 |
 
-395,881,664 parameters (1510.2 MB as F32); safetensors parse ≈ 3.0 s, weight load into modules
-≈ 10–13 s. Timing is dominated by the dense `[L, L]` mask, which makes sliding layers cost the
-same as full ones — the banded kernel in the issue log is the fix, and it is also the main reason a
-2× length increase costs 1.9× instead of ~2×.
+**Parameter count corrected.** The checkpoint file holds **173** tensors summing to 395,881,664,
+but three of them are an MLM head that `ModernBertModel` never instantiates:
+`head.dense.weight` (1,048,576), `head.norm.weight` (1,024), `decoder.bias` (50,368) —
+**1,099,968** in total. The encoder's own **170 tensors / 394,781,696** is the number that
+matches `sum(p.numel() for p in model.parameters())` exactly. The earlier "395,881,664 params"
+figure in this plan was the file total, not the encoder.
+
+1510.2 MB as F32; safetensors parse ≈ 2.7 s (all 173 tensors), weight load into modules ≈ 10.7 s
+(170 bound). So a cold `benchmark` run is load-dominated: ~13.4 s of setup against a 2.59 s
+seq-128 forward.
+
+**The most useful number in the table is not the ratio — it is the disagreement between the two
+length columns.** Doubling the padded length costs Nivara **1.87×** but PyTorch only **1.43×**.
+PyTorch's sliding-window SDPA skips out-of-band blocks, so 18 of its 28 layers get *cheaper* per
+token as the sequence grows; Nivara builds a dense `[L, L]` mask and does the full product
+regardless, so its cost tracks `L²` and the window buys nothing. That is the banded-kernel issue in
+the log below, now quantified rather than asserted — it is worth ~1.4× at seq 256 and much more
+near the 8192-token context, where the dense mask is 268 MB and the cap throws.
 
 ## Debug ladder (superseded — see the Phase 1 result section)
 
@@ -344,14 +386,20 @@ permanent, so future parity work does not have to rebuild it.
 
 - `src/Nivara`: **one behavioural change**, `GradKernels.SoftmaxSingle` / `SoftmaxSingleStrided`
   clamping a fully-masked row to zeros. Reachable only where every key is suppressed, which a
-  causal mask never produces, so no shipped model changes behaviour. It has **no unit test yet**,
-  which is the one real gap in this commit.
-- `samples/Nivara.Samples/Gpt2BpeTokenizer.cs` — shared by SmolLM, Qwen and their tests. Two
-  changes: the additive `LoadFromTokenizerJson` / `EncodeWithSpecialTokens` / opt-in NFC, and the
-  pre-tokenize-order fix, which **is** a behaviour change for every legacy-path caller. It makes
-  them match HuggingFace, and the existing tests still pass, but see verification step 9.
+  causal mask never produces, so no shipped model changes behaviour. Now covered by three tests in
+  `GradKernelsTests` (the gap this branch originally had).
+- `samples/Nivara.Samples/Gpt2BpeTokenizer.cs` — shared by SmolLM, Qwen and their tests. Three
+  changes: the additive `LoadFromTokenizerJson` / `EncodeWithSpecialTokens` / opt-in NFC, the
+  pre-tokenize-order fix (**a behaviour change for every legacy-path caller**), and the
+  `ModernBertConfig`-independent `VocabSize` now including added tokens. The fix makes them match
+  HuggingFace, and all pre-existing tests still pass, but see verification step 9.
 - `samples/Nivara.Samples/StateDictLoader.cs` — additive `LoadLinearSlice` only;
   `LoadLinear`/`LoadLayerNorm`/`LoadRMSNorm` untouched.
+- `samples/Nivara.Samples/ModernBertModel.cs` — `LayerTypes` changed from a plain `init` property
+  defaulting to `[]` to a lazily **derived** one. Found by the new tests: a hand-built
+  `ModernBertConfig` previously threw `ArgumentOutOfRangeException` from `IsFullAttention` because
+  the array was empty, so the type was only usable via `FromJson`. `FromJson` behaviour is
+  unchanged (it always set `LayerTypes` explicitly).
 - `samples/NivaraInference/Program.cs` — one new `switch` case plus the usage string.
 - `.gitignore` — two new lines, no existing rule modified.
 - Memory: the 1510 MB F32 checkpoint read into `float[]` tensors plus module copies peaks around
@@ -404,17 +452,14 @@ raised **when the work is deferred**, not at the end.
 - [ ] #NNN — `GradKernels`: apply the attention mask as a select (forced `-inf`) rather than an add,
       so a `NaN` in q/k/v cannot escape suppression via `NaN + (-inf) = NaN`. The safe-softmax clamp
       removes the known trigger; this removes the class.
-- [ ] #NNN — no unit test for the masked-softmax clamp (`SoftmaxSingle` / `SoftmaxSingleStrided`).
-      A core behavioural change landed in this branch on the strength of a sample-mode gate alone.
 - [ ] #NNN — ILGPU/OpenCL GPU path for ModernBERT (`BertEncoderGpuRunner` is Post-LN BERT only, and
       there is no RoPE kernel on the GPU path at all). See Phase 3 for the component list.
 - [ ] #NNN — ModernBERT-specific fused pre-norm block (per-layer band + theta + GeGLU epilogue) as
       a perf follow-up; the CPU path is 28 separate module forwards with two materialized masks.
-- [ ] #NNN — `Gpt2BpeTokenizer` matches `added_tokens` over the raw text; HuggingFace extracts them
-      per pre-tokenized piece. Diverges for runs of 2+ spaces with ModernBERT's whitespace-run added
-      tokens, and likely for the `|||EMAIL_ADDRESS|||` family.
+- [ ] #NNN — NFC normalization is only implemented on the new `tokenizer.json` entry point;
+      consider promoting it to the shared byte-level BPE path. (The related `added_tokens`
+      per-piece concern turned out not to exist — HF matches over raw text, and that is now
+      pinned by tests.)
 - [ ] #NNN — Laya `act_head` / escalate signal is documented as unusable (AUROC 0.30);
       investigate or explicitly close.
-- [ ] #NNN — NFC normalization is only implemented on the new `tokenizer.json` entry point;
-      consider promoting it to the shared byte-level BPE path.
 
