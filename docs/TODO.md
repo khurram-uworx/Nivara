@@ -335,12 +335,27 @@ The existing GPU path is ILGPU-based and `BertEncoderGpuRunner` is hard-wired to
    BCL view+flatten route). It **passes in isolation** (423 ms) and failed only because the full
    run shared the machine. Unrelated to this branch: no softmax, tokenizer, or ModernBERT code is
    involved. Treated as machine-load flake, not a regression.
-9. ⬜ Smoke-check that the SmolLM/Qwen/DistilBERT modes still run — the `Gpt2BpeTokenizer` and
+9. ✅ Smoke-check that the SmolLM/Qwen/DistilBERT modes still run — the `Gpt2BpeTokenizer` and
    `StateDictLoader` edits are shared code, and the tokenizer fix changes byte-level BPE behaviour
    for every legacy-path caller. The existing SmolLM test uses letter-only text and is therefore
    **not** a sufficient guardrail for that change; a real SmolLM `compare` run is. (The new
-   punctuation test `"a - b"` → `[81, 731, 278]` does pin the fixed order against HF, but it pins
-   the *vocab*, not the SmolLM *checkpoint*, so a live run is still worth doing.)
+   punctuation test `"a - b"` → `[81, 731, 278]` pins the fixed order against HF, but it pins the
+   *vocab*, not the SmolLM *checkpoint*, so a live run is still worth doing.)
+   - **Result**: `smollm compare --dtype float32` on this branch produces output **byte-identical**
+     to the base commit `73d0035`, verified by building that commit in a scratch worktree
+     (`git worktree add --detach … 73d0035`) and running the same command there. Prompt ids match
+     the HF fixture exactly (`[504, 3575, 282, 4649, 314]`) and the 32-token stream is the same.
+     No blast radius.
+   - **But it surfaced a pre-existing defect, not a regression**: SmolLM greedy generation diverges
+     from PyTorch at generated token 30 (`argmax match 25/32`, final-logits `cosine 0.243`,
+     `max abs diff 31.9`). Identical on `73d0035`, so it predates this branch. Already disclosed in
+     the README, so nothing to correct there; the root cause is filed in the issues log. The first
+     25 tokens match exactly, and the same README table shows BF16 matching *better* than F32
+     (22/32 but 0.94 cosine vs 25/32 and 0.24), which is the part worth explaining.
+   - Qwen could **not** be smoke-checked: `samples/data/qwen2.5-0.5b-instruct` is absent, so its
+     parity tests skip and its `Split`-pretokenizer path is covered only by unit tests. Worth doing
+     on a machine that has the 989 MB checkpoint. DistilBERT and MiniLM use WordPiece
+     (`Microsoft.ML.Tokenizers`), not the byte-level BPE path, so they are untouched by construction.
 
 ### CPU timings — PyTorch vs Nivara, same session (2026-09-27, F32, Release, .NET 11)
 
@@ -416,8 +431,10 @@ permanent, so future parity work does not have to rebuild it.
 2. `89b487d` `fix(samples): pre-tokenize raw text before byte-level mapping`
 3. `7f19f28` `fix(autodiff): clamp fully-masked softmax rows to zero`
 4. `6fc0465` `feat(samples): ModernBERT-large encoder with a HuggingFace parity gate`
-5. ⬜ `test: cover band masks, fused weight splits, tokenizer.json load, masked softmax`
-6. ⬜ `docs: document the modernbert mode in NivaraInference README`
+5. `5697832` `docs: record Phase 1 gate result and correct the Wi activation note`
+6. `0bf10ff` `test(samples): cover the ModernBERT encoder, tokenizer order, and masked softmax`
+7. `27fbf81` `docs: document ModernBERT, and correct a false tokenizer-divergence claim`
+8. ⬜ `docs: Phase 1 close-out` — this file, then deleted by the two-gate review
 
 Fixes 2 and 3 are separate from the feature on purpose: each builds and stands on its own, so a
 bisect points straight at whichever one broke a model.
@@ -462,4 +479,13 @@ raised **when the work is deferred**, not at the end.
       pinned by tests.)
 - [ ] #NNN — Laya `act_head` / escalate signal is documented as unusable (AUROC 0.30);
       investigate or explicitly close.
+- [ ] #NNN — **pre-existing, surfaced by the Phase 1 blast-radius check**: SmolLM-135M F32 greedy
+      generation diverges from PyTorch at generated token 30 (`argmax match 25/32`, final-position
+      `cosine 0.243`). Verified byte-identical on `73d0035`, so it predates this branch and is
+      unrelated to it. Already **disclosed** in the README's SmolLM diff table (25/32 F32, 22/32
+      BF16), and the odd result is that BF16 — the *less* precise dtype — matches far better, which
+      suggests the F32 path is accumulating error that BF16's rounding happens to cancel rather than
+      a near-tie walk-off. Ask here is a root cause: where do the two implementations' logits begin
+      to separate, and why is BF16 closer than F32? It matters because "use BF16 for SmolLM" is
+      currently justified by an empirical observation nobody has explained.
 
