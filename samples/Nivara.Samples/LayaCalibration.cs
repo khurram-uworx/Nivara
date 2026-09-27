@@ -272,9 +272,12 @@ public sealed class LayaCalibration
                 for (int i = 1; i < p.Length; i++)
                     if (p[i] > p[best])
                         best = i;
+                // The key, not the rendered "key: description". The rendered text is prompt
+                // content; the wheel's agent reports crit.keys()[argmax], and that is the answer
+                // a caller acts on. They coincide only when the option has no description.
                 return decision with
                 {
-                    Choice = options[best],
+                    Choice = question.Options[best].Key,
                     Probabilities = [.. p.Select(v => Round(v, roundTo))],
                     Confidence = Round(ConfidenceFromProbs(p, k), roundTo)
                 };

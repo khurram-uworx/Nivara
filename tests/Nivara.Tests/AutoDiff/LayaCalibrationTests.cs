@@ -168,6 +168,27 @@ public class LayaCalibrationTests
     }
 
     [Test]
+    public void Decode_Choice_ReportsTheKeyNotTheRenderedDescription()
+    {
+        // The wheel's agent reports crit.keys()[argmax]. "other: not a password question" is the
+        // prompt text, and reporting it would make the typed decision disagree with the reference
+        // on every described option.
+        var calibration = new LayaCalibration(ShippedPerType, ShippedBuckets());
+        var q = new LayaQuestion
+        {
+            Id = "q",
+            Type = LayaQuestionType.Choice,
+            Instructions = "pick",
+            Options = [new("reset", null), new("other", "not a password question")]
+        };
+
+        var d = calibration.Decode(q, [0.1f, 5.0f], actProbability: 0.5);
+
+        Assert.That(d.Choice, Is.EqualTo("other"));
+        Assert.That(d.Choice, Is.Not.EqualTo("other: not a password question"));
+    }
+
+    [Test]
     public void Decode_Score_ReportsTheExpectationOverOptionIndices()
     {
         var calibration = new LayaCalibration(ShippedPerType, ShippedBuckets());
