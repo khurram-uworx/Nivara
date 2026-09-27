@@ -1,30 +1,29 @@
-# BERT-family encoders on GPU — first ILGPU model: implementation reflection
+# GPU Acceleration — ILGPU on Intel Arc
 
 Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR
 #436, MiniLM via `khurram/minilm-gpu`, ModernBERT via issue #449 on
-`khurram/449`). This is a
-**reflection/documentation** of what we built and what we learned while adding
-the first end-to-end GPU model support through ILGPU — it is *not* a usage guide
-(that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md))
-and *not* the forward-looking roadmap (that lives in
-[ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md)). Historical assessment content
-before implementation was rewritten away; only the durable facts and lessons
-remain.
+`khurram/449`). This is the **GPU acceleration index** — measured tables,
+ILGPU lessons, and follow-ups. For model-specific architecture and usage,
+see the model pages:
 
-Related: probe verdicts in [docs/ILGPU.md](ILGPU.md), the SmolLM GPU
-investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)), the Laya decision-head
-investigation ([docs/LAYA.md](LAYA.md)).
+- [DISTELBERT.md](DISTELBERT.md) — DistilBERT, MiniLM, SST-2
+- [MODERNBERT.md](MODERNBERT.md) — ModernBERT-large
+- [SMOLLM.md](SMOLLM.md) — SmolLM-135M
+- [QWEN.md](QWEN.md) — Qwen2.5-0.5B-Instruct
+- [LAYA.md](LAYA.md) — Laya decision head
+- [VISION.md](VISION.md) — MobileNetV2, ResNet-18
 
-## 1. Result — gated and measured
+Related: probe verdicts in [docs/ILGPU.md](ILGPU.md), backend case studies in
+`tests/Nivara.GpuProbe/`.
 
-First end-to-end GPU sample scenarios: `distilbert --gpu` / `distilbert_sst --gpu`,
-then `minilm --gpu` on the same config-driven runner. All F32-only, OpenCL iGPU
-via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
+## 1. Measured results
+
+All F32-only, OpenCL iGPU via ILGPU 1.5.3. Sample-scoped (no `src/Nivara`,
 `Nivara.Extensions`, or `src/Nivara.Gpu` changes). 128 tokens, 3-pass warmup +
 10 timed, AC power (GPU↔CPU-Nivara same-session; PyTorch = recorded CPU baseline):
 
 | scenario | Nivara GPU (iGPU) | Nivara CPU | PyTorch CPU | vs Nivara CPU | vs PyTorch |
-|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | distilbert | **65.3 ms** (62–73) | 194.7 ms (152–232) | 35 ms | **~3.0× faster** | ~1.9× slower |
 | distilbert_sst | **64.0 ms** (61–71) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | ~1.8× slower |
 | minilm | **26.8 ms** (25–29) | 76.3 ms (49–102) | 11 ms | **~2.9× faster** | ~2.4× slower |
@@ -72,17 +71,13 @@ Correctness gates — **all PASS**:
   **0/245760 violations**, minimum pooled-embedding cosine **1.000000**.
 - `--precision bf16|fp16` + `--gpu` → clear F32-only rejection (exit 1).
 
-### 1b. ModernBERT — the first model that is not BERT-family (issue #449)
+### ModernBERT GPU (issue #449)
 
-`ModernBertGpuRunner` + `modernbert --gpu`, on `khurram/449`. Same device
-(`Intel(R) Graphics`), same ILGPU 1.5.3 OpenCL path, still sample-scoped. This
-is the first runner whose architecture shares **no** structure with DistilBERT or
-MiniLM: rotary instead of learned positions, a gated feed-forward instead of a
-plain FFN, pre-norm instead of post-norm, and — the part that made it a real
-test of the kernel set — **per-layer attention geometry**. ModernBERT-large is
-hidden 1024 / 16 heads / 28 layers / intermediate 2624, with
-`global_attn_every_n_layers 3` giving **10 full + 18 sliding** layers, and a
-**different rope theta per layer type** (160000 full / 10000 sliding).
+`ModernBertGpuRunner` + `modernbert --gpu`. Same device (`Intel(R) Graphics`),
+same ILGPU 1.5.3 OpenCL path, still sample-scoped. This is the first runner
+whose architecture shares **no** structure with DistilBERT or MiniLM: rotary
+instead of learned positions, a gated feed-forward instead of a plain FFN,
+pre-norm instead of post-norm, and **per-layer attention geometry**.
 
 The gate is GPU-vs-CPU in-process, so it needs no PyTorch fixture (Phase 1 had
 already pinned the CPU encoder to HuggingFace, so this pins the GPU runner
@@ -396,15 +391,11 @@ Prioritized for the next iterations of the GPU journey (see also
     not a kernel defect. A 2x2 or tile-32 register block is the only realistic
     path to moving the ModernBERT numbers, and it is already filed as **#440**.
 
-
 ## 6. References
 
 - [ILGPU.md](ILGPU.md) — probe verdicts: `Index1D`, padded-grid bounds checks,
   `CL_DEVICE_TYPE_GPU`, `AsContiguous().GetAsArray()`, `MathMode.Fast` off
-- [COMPUTESHARP.md](COMPUTESHARP.md) — the complementary managed-D3D12 backend,
-  kept in reserve
-- [SMOLLM-GPU.md](SMOLLM-GPU.md) — why SmolLM is the follow-up, not the first
-  scenario
+- [SMOLLM.md](SMOLLM.md) — SmolLM GPU investigation
 - [ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md) — CPU/GPU-next roadmap, options,
   decision gate
 - [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md) —
