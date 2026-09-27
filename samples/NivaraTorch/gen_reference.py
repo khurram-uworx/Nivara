@@ -1591,6 +1591,114 @@ def run():
     print(f"  {dec_b_name}: input=[{dec_b_seq},{dec_b_hidden}] q_bias={list(dec_b_bq.shape)} output={list(dec_b_out.shape)}")
 
     # =========================================================================
+    # Banded bidirectional + padding mask (ModernBERT semantics), safe-softmax parity
+    # =========================================================================
+    # Uses a DEDICATED generator (band_rng) rather than the shared attn_rng stream, so no
+    # previously generated fixture is perturbed: every existing .bin stays byte-identical.
+    # Verified after regenerating.
+    #
+    # The reference is F.scaled_dot_product_attention, NOT torch.softmax. SDPA is the code
+    # path that runs torch's internal _safe_softmax, and the two differ in exactly the case
+    # this exists to pin: a query row with every key suppressed has row max == -inf, where
+    # plain softmax yields NaN and _safe_softmax yields zeros. Nivara's GradKernels clamps
+    # that row to zeros, so only SDPA is a valid reference for it.
+    #
+    # Geometry (mirrors ModernBertMasks.Build): inclusive band abs(i-j) <= 1 intersected
+    # with a padding mask over the last 2 positions. Visible keys per query row are
+    # [2,3,3,3,3,2,1,0], so row 7 is FULLY masked - the degenerate row the clamp exists for.
+    band_rng = torch.Generator().manual_seed(717)
+    band_L, band_D, band_H = 8, 16, 4
+    band_hd = band_D // band_H
+    band_width, band_valid = 1, 6
+    band_q = torch.randn(band_L, band_D, generator=band_rng)
+    band_k = torch.randn(band_L, band_D, generator=band_rng)
+    band_v = torch.randn(band_L, band_D, generator=band_rng)
+    band_dout = torch.randn(band_L, band_D, generator=band_rng)
+
+    def band_heads(t):
+        """[L, D] -> [1, H, L, hd], the head-major split Nivara's MultiHeadAttention uses."""
+        return t.view(band_L, band_H, band_hd).permute(1, 0, 2).unsqueeze(0).contiguous()
+
+    def band_from_heads(t):
+        return t.squeeze(0).permute(1, 0, 2).reshape(band_L, band_D).contiguous()
+
+    def band_mask(fill):
+        """ModernBertMasks.Build rule: abs(i-j) <= band, intersected with the padding mask."""
+        m = torch.full((band_L, band_L), fill, dtype=torch.float32)
+        for i in range(band_L):
+            for j in range(max(0, i - band_width), min(band_valid - 1, i + band_width) + 1):
+                m[i, j] = 0.0
+        return m
+
+    def save_band_attn_case(name, mask, fill_label, with_grads=True):
+        qg, kg, vg = (t.detach().clone().requires_grad_(True) for t in (band_q, band_k, band_v))
+        out = F.scaled_dot_product_attention(
+            band_heads(qg), band_heads(kg), band_heads(vg),
+            attn_mask=mask.reshape(1, 1, band_L, band_L))
+        prefix = os.path.join(TEST_DIR, f"{name}_")
+        mask.detach().numpy().astype(np.float32).tofile(prefix + "mask.bin")
+        band_q.numpy().astype(np.float32).tofile(prefix + "q.bin")
+        band_k.numpy().astype(np.float32).tofile(prefix + "k.bin")
+        band_v.numpy().astype(np.float32).tofile(prefix + "v.bin")
+        band_dout.numpy().astype(np.float32).tofile(prefix + "dout.bin")
+        band_from_heads(out).detach().numpy().astype(np.float32).tofile(prefix + "output.bin")
+        entry = {
+            "layer": "MultiHeadAttention",
+            "attention": "banded_bidirectional_with_padding",
+            "reference": "F.scaled_dot_product_attention",
+            "q_shape": [band_L, band_D],
+            "k_shape": [band_L, band_D],
+            "v_shape": [band_L, band_D],
+            "mask_shape": [band_L, band_L],
+            "num_heads": band_H,
+            "head_dim": band_hd,
+            "scale": float(1.0 / math.sqrt(band_hd)),
+            "band": band_width,
+            "valid_length": band_valid,
+            "mask_fill": fill_label,
+            "fully_masked_rows": [i for i in range(band_L) if bool((mask[i] == 0).sum() == 0)],
+            "output_shape": [band_L, band_D],
+        }
+        if with_grads:
+            dq, dk, dv = torch.autograd.grad(out, (qg, kg, vg), grad_outputs=band_heads(band_dout))
+            # dq/dk/dv are gradients w.r.t. the [L, D] leaves, so they are already in
+            # [seq, d_model] layout - band_from_heads must NOT be applied to them.
+            dq, dk, dv = dq.detach(), dk.detach(), dv.detach()
+            dq.numpy().astype(np.float32).tofile(prefix + "dq.bin")
+            dk.numpy().astype(np.float32).tofile(prefix + "dk.bin")
+            dv.numpy().astype(np.float32).tofile(prefix + "dv.bin")
+            entry["grads"] = True
+            entry["grads_finite"] = bool(
+                torch.isfinite(dq).all() and torch.isfinite(dk).all() and torch.isfinite(dv).all())
+        manifest[name] = entry
+        print(f"  {name}: fill={entry['mask_fill']} fully_masked_rows={entry['fully_masked_rows']} "
+              f"grads_finite={entry.get('grads_finite')}")
+
+    # Case 1: Nivara's own convention (-inf fill). Must match Nivara exactly, including
+    # the fully-masked row 7, which is zeros.
+    save_band_attn_case("attn_band_padding", band_mask(float("-inf")), "neg_inf")
+
+    # Case 2: HuggingFace's convention (finfo.min fill), same geometry. The two
+    # conventions agree BIT-EXACTLY on every non-fully-masked row (verified: max|diff|
+    # == 0.0) and differ only on row 7's forward output. In the backward pass dq still
+    # agrees on visible rows, but dk/dv differ at EVERY key, because a uniform-weight
+    # row 7 contributes to every key's gradient while a zero-weight row 7 contributes
+    # nothing. Pinned so the divergence is auditable rather than a comment.
+    save_band_attn_case("attn_band_padding_minfill",
+                        band_mask(torch.finfo(torch.float32).min), "finfo_min")
+
+    # Case 3: non-finite additive mask cells. A +inf cell makes its row's scores +inf and
+    # a NaN cell poisons its row; _safe_softmax returns all-NaN for both, while a
+    # `!IsFinite` clamp would zero them. Nivara narrows its clamp to `max == -inf`
+    # precisely so these propagate. Forward only: the gradients of a NaN row are NaN
+    # everywhere and carry no extra signal.
+    nonfinite_mask = torch.zeros(band_L, band_L, dtype=torch.float32)
+    nonfinite_mask[0, 3] = float("inf")
+    nonfinite_mask[1, 2] = float("nan")
+    save_band_attn_case("attn_mask_nonfinite", nonfinite_mask, "zero_with_inf_and_nan_cells",
+                        with_grads=False)
+
+    # =========================================================================
     # Write manifest
     # =========================================================================
     manifest_path = os.path.join(TEST_DIR, "manifest.json")

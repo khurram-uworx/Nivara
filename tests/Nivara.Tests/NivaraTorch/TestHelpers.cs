@@ -95,6 +95,61 @@ public static class TestHelpers
         return tensor[0];
     }
 
+    /// <summary>
+    /// Compares two tensors while treating non-finite values as a first-class, assertable
+    /// outcome. <see cref="AssertTensorEqual"/> cannot do this: it computes
+    /// <c>MathF.Abs(expected - actual)</c> and skips anything failing <c>diff &gt; threshold</c>,
+    /// but <c>NaN &gt; x</c> is false, so a reference NaN matched against a finite actual value
+    /// passes silently - the exact discrimination a safe-softmax test needs (clamp to zeros vs
+    /// propagate NaN) would be unverifiable.
+    /// </summary>
+    internal static void AssertTensorClose(float[] expected, float[] actual, float absTol = 1e-5f, float relTol = 1e-4f, string? label = null)
+    {
+        Assert.That(actual.Length, Is.EqualTo(expected.Length),
+            $"{label}: length mismatch {actual.Length} vs {expected.Length}");
+
+        var mismatches = new List<string>();
+        int nanPositions = 0;
+        float maxDiff = 0f;
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            float e = expected[i];
+            float a = actual[i];
+            bool eNan = float.IsNaN(e);
+            bool aNan = float.IsNaN(a);
+
+            if (eNan || aNan)
+            {
+                if (eNan && aNan) nanPositions++;
+                else mismatches.Add($"  [{i}] NaN mismatch: expected={Format(e)} actual={Format(a)}");
+                continue;
+            }
+
+            if (float.IsInfinity(e) || float.IsInfinity(a))
+            {
+                if (e != a) mismatches.Add($"  [{i}] infinity mismatch: expected={Format(e)} actual={Format(a)}");
+                continue;
+            }
+
+            float diff = MathF.Abs(e - a);
+            if (diff > maxDiff) maxDiff = diff;
+            if (diff > absTol + relTol * MathF.Abs(e))
+                mismatches.Add($"  [{i}] expected={Format(e)} actual={Format(a)} diff={diff:G7}");
+        }
+
+        if (mismatches.Count > 0)
+        {
+            int show = Math.Min(5, mismatches.Count);
+            string extra = mismatches.Count > show ? $"\n  ... and {mismatches.Count - show} more" : string.Empty;
+            Assert.Fail($"{label}: {mismatches.Count} element(s) differ " +
+                        $"(max finite diff={maxDiff:G7}, matching NaN positions={nanPositions}).\n" +
+                        string.Join("\n", mismatches.Take(show)) + extra);
+        }
+    }
+
+    static string Format(float value) => float.IsNaN(value) ? "NaN" : value.ToString("G9");
+
     internal static void AssertScalarEqual(float expected, float actual, float absTol = 1e-4f, float relTol = 1e-3f, string? label = null)
     {
         float diff = MathF.Abs(expected - actual);

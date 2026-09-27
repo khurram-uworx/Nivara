@@ -38,6 +38,55 @@ public static class StateDictLoader
         if (dict.Count > 0) linear.LoadStateDict(dict);
     }
 
+    /// <summary>
+    /// Loads one contiguous row block out of a fused weight into a <see cref="Linear{T}"/>. ModernBERT
+    /// fuses its QKV projections into a single <c>Wqkv</c> and its MLP gate/up projections into a
+    /// single <c>Wi</c>; each target projection is a row slice of the fused matrix because
+    /// <see cref="Linear{T}"/> stores its weight as <c>[outFeatures, inFeatures]</c>.
+    /// </summary>
+    /// <param name="rowOffset">Index of the first row of the block within the fused weight.</param>
+    /// <param name="rowCount">Number of rows in the block.</param>
+    public static void LoadLinearSlice<TModel, TWeight>(
+        Linear<TModel> linear,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string prefix,
+        int rowOffset,
+        int rowCount)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        ArgumentNullException.ThrowIfNull(linear);
+
+        if (rowOffset < 0)
+            throw new ArgumentOutOfRangeException(nameof(rowOffset), $"rowOffset must be non-negative, got {rowOffset}.");
+        if (rowCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rowCount), $"rowCount must be positive, got {rowCount}.");
+
+        if (!tensors.TryGetValue($"{prefix}.weight", out var w))
+            throw new KeyNotFoundException($"Missing tensor: {prefix}.weight");
+
+        if (w.Shape.Length != 2)
+            throw new InvalidOperationException(
+                $"Expected a 2D weight at {prefix}.weight to slice, got rank {w.Shape.Length}.");
+
+        int inFeatures = w.Shape[1];
+        int fusedRows = w.Shape[0];
+        if (rowOffset + rowCount > fusedRows)
+            throw new InvalidOperationException(
+                $"Row block [{rowOffset}, {rowOffset + rowCount}) exceeds the {fusedRows} rows of {prefix}.weight.");
+        if (inFeatures != linear.InFeatures || rowCount != linear.OutFeatures)
+            throw new InvalidOperationException(
+                $"Row block of {prefix}.weight is [{rowCount}, {inFeatures}] but the target linear is " +
+                $"[{linear.OutFeatures}, {linear.InFeatures}].");
+
+        var slice = new TWeight[rowCount * inFeatures];
+        Array.Copy(w.Data, rowOffset * inFeatures, slice, 0, slice.Length);
+
+        var tensor = TypeConverter.Convert<TWeight, TModel>(
+            ReverseGradTensor<TWeight>.FromMatrix(slice, rowCount, inFeatures));
+        linear.LoadStateDict(new Dictionary<string, ReverseGradTensor<TModel>> { ["Weight"] = tensor });
+    }
+
     public static void LoadLayerNorm<TModel, TWeight>(
         LayerNorm<TModel> ln,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,

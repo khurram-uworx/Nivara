@@ -95,7 +95,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|smollm|qwen> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|smollm|qwen> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
@@ -267,6 +267,12 @@ class Program
                 if (compare) return RunDistilBertSstCompare(tensors);
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
+            case "modernbert":
+                if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
+                if (compare) return ModernBert.Compare(tensors, modelDir);
+                if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
+                if (fp16) return ModernBert.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
+                return ModernBert.Run<float, float>(tensors, modelDir, mode, "F32");
             case "smollm":
                 if (mode == "ab")
                 {
