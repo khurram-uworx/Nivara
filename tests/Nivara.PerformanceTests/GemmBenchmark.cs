@@ -10,7 +10,7 @@ namespace Nivara.PerformanceTests;
 /// On-demand tiled-GEMM regression gate (#435): the lasting promotion of the deleted
 /// %TEMP%\opencode\gemm-measure harness. Runs all six committed ILGPU GEMM kernels
 /// (samples/Nivara.Samples/Gpu/GemmKernels.cs — OneToOne, Row4, and the M2 fused siblings
-/// Row4Bias/Row4Gelu/Row4Relu/Row4Qkv) over the model + padded-edge shapes, gating each
+/// Row4Bias/Row4Gelu/Row4Relu/Row4Qkv) over the model + padded-edge + Laya shapes, gating each
 /// (kernel, shape) cell against a host double-precision truth (maxAbs ≤ 1e-3) and reporting
 /// best-of-N synced-launch GMAC/s. Run only on explicit request (<c>--gemm</c>) — it is
 /// GPU-dependent, so it is never part of the default scenario suite or the
@@ -25,12 +25,12 @@ internal static class GemmBenchmark
 
     enum GemmVariant { OneToOne, Row4, Row4Bias, Row4Gelu, Row4Relu, Row4Qkv }
 
-    readonly record struct GemmShape(string Name, int Arows, int Acols, int Bcols)
+    internal readonly record struct GemmShape(string Name, int Arows, int Acols, int Bcols)
     {
         public long Macs => (long)Arows * Acols * Bcols;
     }
 
-    static readonly GemmShape[] s_shapes =
+    internal static readonly GemmShape[] s_shapes =
     [
         new("distilbert qkv/o", 128, 768, 768),
         new("distilbert fc1", 128, 768, 3072),
@@ -42,6 +42,21 @@ internal static class GemmBenchmark
         new("minilm head", 128, 384, 2),
         new("edge padded rows", 100, 770, 70),
         new("edge padded K", 64, 1032, 130),
+
+        // Laya / ModernBERT-large: 28L d=1024, Wi=5248 (fused input|gate), ffn=2624.
+        // The DistilBERT/MiniLM rows above are S=128 at d=768/384; Laya is d=1024 at
+        // S=512, so its GEMMs are 4-30x larger and dominate the model. Row count is
+        // the padded prompt length; K/N come from the checkpoint's tensor shapes.
+        new("laya qkv", 512, 1024, 3072),        // Wqkv — fused 3x d, 3072/3 = 1024 exact
+        new("laya attn out", 512, 1024, 1024),   // Wo
+        new("laya fc1 (Wi)", 512, 1024, 5248),   // fused input|gate -> GeGLU
+        new("laya fc2 (Wo)", 512, 2624, 1024),   // back down from ffn 2624
+        new("laya head ff1", 512, 1024, 4096),   // decision head linear1
+        new("laya head ff2", 512, 4096, 1024),   // decision head linear2 (ReLU head)
+        new("laya act 1", 512, 1028, 256),       // d + 4 act features
+        new("laya scorer 1", 8, 1024, 1024),     // k option markers -> d
+        new("laya scorer 2", 8, 1024, 1),        // d -> 1 logit: GEMV-shaped, bandwidth-bound
+        new("laya qkv@128", 128, 1024, 3072),    // S=128 control, comparable to the BERT rows
     ];
 
     [StructLayout(LayoutKind.Sequential)]
@@ -177,7 +192,7 @@ internal static class GemmBenchmark
         return failures;
     }
 
-    static bool TryCreateRuntime(out IlgpuRuntime runtime, out string reason)
+    internal static bool TryCreateRuntime(out IlgpuRuntime runtime, out string reason)
     {
         try
         {
@@ -201,7 +216,7 @@ internal static class GemmBenchmark
         return count;
     }
 
-    static void PrintPowerState()
+    internal static void PrintPowerState()
     {
         if (!GetSystemPowerStatus(out var status))
         {
@@ -311,6 +326,11 @@ internal static class GemmBenchmark
         "distilbert qkv/o" or "minilm qkv/o" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Qkv],
         "distilbert fc1" or "minilm fc1" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Gelu],
         "distilbert head" or "minilm head" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Relu],
+        // Laya picks the fused epilogue its real activation uses, so the rows measure the
+        // kernels this model would actually run rather than a generic bias add.
+        "laya qkv" or "laya qkv@128" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Qkv],
+        "laya fc1 (Wi)" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Gelu],
+        "laya head ff2" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Relu],
         _ => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias],
     };
 

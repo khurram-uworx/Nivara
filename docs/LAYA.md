@@ -624,3 +624,60 @@ Phase 2 does not depend on it.
   entirely today), GeGLU, a pre-norm restructure, and a band parameter in the fused attention
   kernel. Gated GPU-vs-CPU rather than GPU-vs-PyTorch, since Phase 1 already pins the CPU path to
   HuggingFace.
+
+### Backend decision: GPU (settled 2026-09-27)
+
+Measured, not assumed. The probe lives in `tests/Nivara.PerformanceTests` as three
+on-demand modes and satisfies #435's lasting-GEMM-harness request rather than inventing a
+throwaway harness:
+
+| mode | what it measured | result |
+|---|---|---|
+| `--gpu-alloc` | can the iGPU back Laya's F32 working set? | **1.685 GB (1.569 GiB) allocates, fills at 8.3 GB/s, verifies** on a 7.559 GiB Arc iGPU. 3 GB also works. |
+| `--gemm` | GPU GEMM at Laya's shapes | **188-205 GMAC/s**; 70/70 cells within the 1e-3 double-precision gate |
+| `--cpu-gemm` | the CPU's achievable ceiling | **66-80 GMAC/s**; best leg projects a 2414 ms Laya forward, GEMM only |
+
+Rolled up: **GPU ~920 ms vs CPU ~2414 ms for a Laya forward, GEMM only - GPU 2.6x faster.**
+
+**Why this direction is the safe one.** The decision rule was fixed before the probe ran,
+precisely because an unfixed-GPU-vs-fixed-CPU comparison is not a decision. As it turned
+out the CPU side could not be improved at all: the probe wrote a register-blocked
+`Parallel.For` GEMM (four output columns in `Vector<float>` registers across the whole K
+loop, A and B read in place with no `RentCopy`) to test the hypothesis that
+`MultiplyRowFloat`'s one-`Dot`-per-output-element structure was the bottleneck, and it came
+in at 2529 ms against the in-tree kernel's 2414 ms. BCL's `TensorPrimitives.Dot` is already
+well tuned, so a blocked rewrite of the GEMM is not the lever. The one CPU cost the probe
+did not isolate is the per-call `RentCopy` of A inside `MultiplyCore`; it is bounded rather
+than measured, and an encoder layer's four 2 MB copies against 6.3 G MACs puts it at a
+low-single-digit percentage, far short of a 2.6x gap. So the CPU was given its *best
+available* showing and still lost by 2.6x, while the GPU was measured exactly as committed
+with #440's tile-32/2x2 - a 2-3x speedup - still unclaimed. The GPU number is also the conservative one, because this harness reads the iGPU
+at roughly half the idle-machine rate.
+
+**What the decision does and does not license.**
+
+- It settles the backend. Laya is GPU-only. The CPU is not a viable path for this model at
+  S=512, and no amount of CPU-side optimisation closes a 2.6x gap on the dominant term.
+- It does **not** make the CPU's known ~6.1-6.5x deficit vs PyTorch disappear. The CPU GEMM
+  does 66-80 GMAC/s against a 26 GMAC/s end-to-end reading, so ~3x of that deficit is in
+  non-GEMM work - norms, attention, elementwise, per-op dispatch. Closing #456 (whose stated
+  defect was already fixed) removed the only open issue on that gap, so **#458** now tracks
+  it. That is a known, accepted gap, not a solved one.
+- It does **not** retire the attention question, it only declines to measure it. At S=512
+  attention is 8.4 M MACs per layer against 6.3 G for the four GEMMs (~0.13%), so it cannot
+  move the backend choice. Its real hazard - `AttentionKernels` has no finite-check on the
+  row max, so a fully-masked row yields `Exp(-inf - -inf) = NaN` where the CPU
+  `GradKernels.SoftmaxSingle` returns zeros - is filed on #448 on the static reading.
+
+**Consequence for the phases.** Phase 3 is now the critical path, and it is worth being
+precise about which half is hard. The Laya **head** is the easy half: plain pre-norm,
+biased, ReLU, 2 layers, 24 tensors (2 x 12), no `head.pos` - close enough to a duplicate of
+`BertEncoderGpuRunner` that the existing kernel family should carry it. The ModernBERT
+**encoder** is the awkward one: bias-free norm, RoPE (absent from the GPU path entirely),
+GeGLU, a band parameter, and alternating norm placement. `BertEncoderGpuRunner` is
+hard-wired post-LN BERT and cannot be extended to ModernBERT by configuration, so Phase 3
+is a new runner, not a config change. Tracked as **#449**.
+
+Priority within Phase 3, now that GEMM is known to dominate: **#440** (tile-32 / 2x2) is the
+highest-value item, because GEMM is ~99.9% of Laya's arithmetic and a 2-3x kernel win is
+worth more than any dispatch reduction on a model this GEMM-dense.
