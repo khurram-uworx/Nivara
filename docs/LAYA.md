@@ -5,8 +5,10 @@ and its ModernBERT backbone in Nivara. Everything here was verified against prim
 (the HF checkpoint's own safetensors header, the `answerdotai/ModernBERT` reference implementation,
 and the installed `transformers` 5.14.1 source) rather than assumed.
 
-The executable plan for the branch lives in `docs/TODO.md`. This file is the "why" that must not
-be re-derived: architecture semantics, tensor maps, prompt format, reuse map, and the traps.
+This file is the "why" that must not be re-derived: architecture semantics, tensor maps, prompt
+format, reuse map, and the traps. It is also where the remaining phases are tracked — §9 carries the
+Phase 2 and Phase 3 scope and the decisions still open, so the phase-1 working plan
+(`docs/TODO.md`) was retired once its two review gates cleared and nothing here needed to move.
 
 ---
 
@@ -343,7 +345,7 @@ mode — and (b) is only cosmetic (a zero Beta is numerically identical).
 4. **GPU path** (`--gpu`, `BertEncoderGpuRunner`) is a post-LN BERT kernel built on the
    HuggingFace split-`query`/`key`/`value` naming; extending it is Phase 3 and needs four new
    pieces (RoPE kernel, GeGLU, pre-norm restructure, banded attention mask) rather than a port.
-   See `docs/TODO.md` for the itemised plan.
+   See issue #449 for the itemised plan, and §9 for the phase sequencing.
 5. **Laya head needs `nn.MultiheadAttention` semantics with a fused biased in-proj** — expressible
    with the existing `MultiHeadAttention` op + `ReverseGradOperations.AddBias`, no new op.
 
@@ -383,7 +385,21 @@ it.
 - **Phase 2 — Laya head.** `LayaDecisionHead<T>` (2 pre-norm transformer layers, type embedding,
   marker scorer, temperature calibration), `LayaPromptBuilder` (a C# port of `build_sequence` +
   `render_options`), a `laya` mode with a PyTorch parity gate on the same fixture methodology.
-  `act_head` optional; multilingual/typed-decisions subfolders optional.
+  `act_head` optional; multilingual/typed-decisions subfolders optional. The `act_head` AUROC-0.30
+  concern is **deliberately not filed as an issue yet**: it asserts a measurement about a checkpoint
+  this repo has not downloaded, and an issue that turns out to be wrong about a model nobody has run
+  is worse than no issue. Raise it once the checkpoint is loaded and the number is reproduced or
+  refuted.
+  - **Open decision — reference source.** Port `rl_common.py`'s `build_sequence` / `render_options`
+    into `Python/laya_compare.py` (self-contained, no new dependency, ~60 lines, Apache-2.0) **or**
+    `pip install laya` and diff against the real package (strongest ground truth, adds an install and
+    a version to keep in sync). Default to the port and cross-check against the install if it proves
+    cheap; the port is also the only option that keeps `laya compare` runnable on a clean checkout.
+    Byte-exact prompt parity is the gate either way, because the prompt is the API contract and a
+    silently different render still "runs".
+  - Resolved earlier, recorded so they are not re-asked: `samples/data/modernbert/` and
+    `samples/data/laya/encoder/` are **separate** directories, so Phase 1 stands alone; the Laya
+    checkpoint is 842.6 MB on top of the 1510 MB ModernBERT download and was confirmed wanted.
 - **Phase 3 — GPU path.** An ILGPU `ModernBertGpuRunner`: a RoPE elementwise kernel (absent
   entirely today), GeGLU, a pre-norm restructure, and a band parameter in the fused attention
   kernel. Gated GPU-vs-CPU rather than GPU-vs-PyTorch, since Phase 1 already pins the CPU path to
