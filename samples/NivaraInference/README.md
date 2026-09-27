@@ -1083,28 +1083,129 @@ Two things changed on AC and are worth recording rather than smoothing over:
 
 AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor closed most of the gap: on the 2026-08-04 machine it cut vision inference ~4× (MobileNetV2 ~2,254 ms → ~563 ms, ResNet-18 ~641 ms → ~263 ms) and transformers ~1.5× (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~508 ms on this laptop.
 
+### Laya backend probe (CPU vs GPU, decided 2026-09-27)
+
+Laya is a ModernBERT-large encoder (28 layers, d=1024, fused input|gate `Wi`=5248,
+ffn=2624) plus a 2-layer decision head, run at S=512. That is **175.7 G MACs** for the
+encoder, ~32x DistilBERT, so it is the first model in this repo where the backend choice
+is not a foregone conclusion. Three measurements settled it. All are reproducible:
+
+```
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gpu-alloc
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gemm
+```
+
+**1. Memory: the binary gate passes.** Laya's checkpoint is 421,293,830 F16 parameters and
+`--gpu` is F32-only, so F32 needs 1.685 GB (1.569 GiB) of device buffers. Every GPU row in
+this document is 66-110M parameters (0.26-0.44 GB), so this was a 4-6x jump. The probe
+allocates in 64 MiB chunks (an embedding table plus ~200 per-layer tensors is the realistic
+shape), fills every chunk from the host and reads a sample back:
+
+| target | buffers | alloc ms | fill GB/s | result |
+|---|---|---|---|---|
+| 1.569 GiB (Laya F32) | 26 | 109.1 | 8.31 | ok |
+| 3.000 GB | 48 | 788.5 | 7.58 | ok |
+
+The full working set allocates and verifies on a 7.559 GiB Arc iGPU. F16 device buffers are
+therefore a later optimisation, not a prerequisite. Note allocation cost is superlinear
+(109 ms at 1.569 GiB, 789 ms at 3 GB) - driver paging, not Nivara.
+
+**2. Throughput: GPU wins on the dominant term.** Both backends were measured at identical
+shapes, in the same session, each cell gated against the same host double-precision truth
+(`maxAbs <= 1e-3`), so this is a like-for-like comparison rather than a cross-harness one.
+
+| shape | GPU GMAC/s (best kernel) | CPU GMAC/s (best leg) |
+|---|---|---|
+| laya qkv [512x1024x3072] | 202 (Row4Qkv) | 83.2 (Blocked) |
+| laya attn out [512x1024x1024] | 202 (Row4) | 111.3 (AutoDiff) |
+| laya fc1 (Wi) [512x1024x5248] | 205 (Row4) | 69.7 (AutoDiff) |
+| laya fc2 (Wo) [512x2624x1024] | 197 (Row4Bias) | 87.0 (Blocked) |
+| laya head ff1 [512x1024x4096] | 204 (Row4Bias) | 78.5 (Blocked) |
+| laya head ff2 [512x4096x1024] | 155 (Row4Relu) | 70.5 (Blocked) |
+| laya act 1 [512x1028x256] | 188 (Row4Bias) | 100.0 (Blocked) |
+| laya scorer 1 [8x1024x1024] | 59 (Row4Bias) | 30.3 (Blocked) |
+| laya qkv@128 [128x1024x3072] | 193 (Row4Qkv) | 63.5 (Blocked) |
+
+Rolled up into a projected Laya forward, GEMM only (28 layers of qkv + attn out + Wi + Wo,
+plus the 2-layer head and the act/scorer tail):
+
+| leg | total ms | GMAC/s |
+|---|---|---|
+| GPU, Row4 as committed | **~920** | ~200 |
+| CPU, best in-tree leg (`MatMulTransposedB`) | 2414 | 76 |
+| CPU, per-call B transpose (`MatMul`) | 2791 | 66 |
+| CPU, register-blocked reference (probe-local) | 2529 | 73 |
+
+**GPU is 2.6x faster on GEMM**, and the GPU figure is the conservative one: this harness
+reads the iGPU at roughly half the idle-machine rate (see the `--gemm` note in
+`tests/Nivara.PerformanceTests/README.md`), so the real margin is likely wider. The GPU
+side also has #440's tile-32/2x2 still unclaimed, which is a 2-3x *speedup* and can only
+widen the gap.
+
+Two findings worth keeping, both negative:
+
+- **A register-blocked CPU GEMM does not help.** The probe wrote one (`Parallel.For` over
+  disjoint output rows, four output columns in `Vector<float>` registers across the whole K
+  loop, A and B read in place with no `RentCopy`) on the hypothesis that
+  `MultiplyRowFloat`'s one-`Dot`-per-output-element structure was the bottleneck. It came
+  in at 2529 ms against the in-tree kernel's 2414 ms. BCL's `TensorPrimitives.Dot` is
+  already well tuned. There is no CPU GEMM fix worth making.
+- **Therefore the CPU's known ~6.1-6.5x deficit is not a GEMM problem.** The CPU GEMM does
+  66-80 GMAC/s against a 26 GMAC/s end-to-end reading, so ~3x of the deficit is in
+  non-GEMM work. That is the open lead, and it is untracked - see item 1 below.
+
+**3. Attention was deliberately left out of the measurement.** At S=512 it is 8.4 M MACs per
+layer against 6.3 G for the four GEMMs, about **0.13%** of the work, so it cannot move the
+decision. Its one real hazard - `AttentionKernels` computes `Exp(s - max)` with
+`s = max = -inf` on a fully-masked row and has no finite-check, unlike the CPU
+`GradKernels.SoftmaxSingle` - is filed on **#448** on the static reading instead.
+
+**Caveat on the CPU numbers.** Individual probe rows vary up to 6.5x run to run
+(`distilbert fc1` `AutoDiff` read 6.3 ms and 41.3 ms on consecutive runs, most likely
+`ArrayPool` `clearArray` interacting with GC). The projected roll-up is stable to ~2%
+because it sums eight shapes across 28 layers. Conclusions rest on the roll-up.
+
+**Decision: GPU**, and it is the safe direction of the two. The comparison is
+unusually favourable because the CPU side was given its best available showing - a
+purpose-built register-blocked kernel - and still lost, while the GPU side was measured
+exactly as committed with a known 2-3x improvement (#440) still in hand. Full reasoning in
+`docs/LAYA.md` §9.
+
 ### Core library improvements (surfaced by the 2026-09-27 retake)
 
 Each item below is an observation from the measurements above plus a code check in
 `src/Nivara` — not a guess. Where a cause is not yet isolated, that is said explicitly.
 
-**1. The AutoDiff transformer GEMM is single-threaded, and a row-parallel matmul already
-exists in the codebase.** `Linear` → `ReverseGradOperations.MatMulTransposedB` →
-`GradKernels.MatMulTransposedB`, a SIMD row kernel with no `Parallel.For`. The only
-`Parallel.For` in the AutoDiff op path is the *batch* dimension of attention
-(`ReverseGradOperations.cs:779`), and every benchmark here runs batch 1, so that is one
-iteration. By contrast `TensorsHelper.MatMul` (`TensorsHelper.cs:191`) parallelizes over rows,
-gated by `ShouldParallelize` (`aRows >= 4 && rows*cols*inner >= 2 Mi` elements,
-`TensorsHelper.cs:158`). ModernBERT's per-layer GEMMs are 128×1024×2624 and 128×1024×1024 —
-far above that gate. Porting the existing pattern onto the AutoDiff path is small and
-well-scoped, and it is the most concrete lever for the ~6.1–6.5× transformer gap.
+**1. CORRECTED - the AutoDiff transformer GEMM is already row-parallel, and GEMM is not the CPU
+bottleneck.** This item previously claimed `GradKernels.MatMulTransposedB` was "a SIMD row
+kernel with no `Parallel.For`", and filed that as **#456**. That is no longer true and
+**#456 is closed**. `GradKernels.MatMulTransposedB` (`GradKernels.cs:748`) is now a one-line
+delegation to `TensorsHelper.MultiplyCore(..., bTransposed: true)`, which reaches
+`Parallel.For(0, aRows, ...)` at `TensorsHelper.cs:191`; `MultiplyCoreDouble` (`:226`) and
+`MultiplyCoreGeneric` (`:261`) parallelize as well. The `ShouldParallelize` gate
+(`aRows >= 4 && rows*cols*inner >= 2 Mi`, `TensorsHelper.cs:312`) opens for every transformer
+GEMM measured here - the smallest, MiniLM 128x384x1536, is 7.6e7 MACs against a 2.1e6
+threshold. (`TensorsHelper.MatMul` also no longer exists as a name; the public entry points
+are `GradKernels.MatMul` and `GradKernels.MatMulTransposedB`, both delegating to
+`MultiplyCore`.)
 
-*Not yet isolated:* pinning the .NET processor count to 1 (`DOTNET_PROCESSOR_COUNT=1`) made
-ModernBERT@128 **1.62× slower** (1249.8 → 2026.6 ms, with non-overlapping min/median
-spreads), so the process is not purely serial — something already spreads across threads. The
-candidates are the attention `Parallel.For` and GC, and this measurement does not distinguish
-them. Read the 1.62× as evidence that thread headroom exists, **not** as a measured kernel
-speedup.
+The `DOTNET_PROCESSOR_COUNT=1` experiment stands and is now explained: the process was
+already spreading across threads, which is exactly what that `Parallel.For` does. Read the
+1.62x as evidence that thread headroom exists, **not** as a measured kernel speedup - which
+is how this item originally misread it.
+
+**What the Laya probe then measured (see "Laya backend probe" below):** the CPU GEMM
+sustains **66-80 GMAC/s** at Laya's shapes, roughly 3x the 26 GMAC/s end-to-end reading from
+the BERT rows. So GEMM is not where the ~6.1-6.5x transformer gap lives, and a
+register-blocked CPU GEMM was measured and **did not beat the in-tree kernel** (2529 ms vs
+2414 ms projected for a Laya forward). The remaining CPU deficit is in non-GEMM work -
+norms, attention, elementwise, per-op dispatch - and is *not yet isolated*.
+
+**Gap to be aware of:** closing #456 removed the only open issue tracking that ~6.1-6.5x
+Nivara-CPU-vs-PyTorch gap, and the investigation above found no GEMM lever to replace it. The
+signal now lives only in this document until someone files a replacement issue for the
+non-GEMM side.
 
 **2. Convolution kernels are naive nested loops with no SIMD and no parallelism** — the
 largest single gap in the table. MobileNetV2 ~33× and ResNet-18 ~18×, against ~6.4× for the

@@ -59,8 +59,10 @@ a throwaway harness:
   `%TEMP%\opencode\gemm-measure\` harness. Loads all six committed ILGPU GEMM kernels
   (`samples/Nivara.Samples/Gpu/GemmKernels.cs` — `OneToOne`, `Row4`, and the M2 fused
   siblings `Row4Bias`/`Row4Gelu`/`Row4Relu`/`Row4Qkv`) through the public `IlgpuRuntime` and
-  runs them over the model GEMM shapes (DistilBERT 768/3072, MiniLM 384/1536, seq-len 128)
-  plus two padded-grid edge shapes (non-multiple-of-16 rows/K/cols). Each (kernel, shape)
+  runs them over the model GEMM shapes (DistilBERT 768/3072, MiniLM 384/1536, seq-len 128),
+  the Laya / ModernBERT-large shapes (d=1024, fused input|gate Wi=5248, ffn=2624, seq-len
+  512, plus the 2-layer decision head and the act/scorer tail), and two padded-grid edge
+  shapes (non-multiple-of-16 rows/K/cols). Each (kernel, shape)
   cell is gated `maxAbs(gpu − double-precision truth) ≤ 1e-3` and timed best-of-25
   synchronized launches, reporting GMAC/s; exit code 0 = pass, N = failed cells,
   10 = UNBUILT (no OpenCL GPU). Runs on AC power only — the harness warns on battery
@@ -92,6 +94,131 @@ The maxAbs values reproduce the documented f32-vs-DP summation-order floor exact
 to the Row4 `colBase`-class bug signal (~40). GMAC/s is load-sensitive (this run read the
 Arc iGPU at ~half the idle-machine scenario benchmark 303–379 GMAC/s, docs/BERT-GPU.md) —
 the correctness gate is the primary contract; compare GMAC/s moves, not absolutes.
+
+#### GEMM gate baseline (2026-09-27, Laya shapes extended)
+
+70 cells, all PASS. The ten pre-existing shapes reproduce the 2026-09-19 rows above; these
+are the ten Laya shapes, which is what the Laya backend decision (#449) turns on. Gate
+runtime 94 s on AC.
+
+| shape | maxAbs (worst kernel) | GMAC/s (best kernel) |
+|---|---|---|
+| laya qkv [512x1024x3072] | 7.18e-5 | 202 (Row4 / Row4Bias / Row4Qkv, tied) |
+| laya attn out [512x1024x1024] | 6.46e-5 | 202 (Row4) |
+| laya fc1 (Wi) [512x1024x5248] | 7.18e-5 | 205 (Row4) |
+| laya fc2 (Wo) [512x2624x1024] | 1.68e-4 | 197 (Row4 / Row4Bias, tied) |
+| laya head ff1 [512x1024x4096] | 7.18e-5 | 204 (Row4Bias) |
+| laya head ff2 [512x4096x1024] | 2.40e-4 | 155 (Row4Bias / Row4Relu, tied) |
+| laya act 1 [512x1028x256] | 5.79e-5 | 188 (Row4 / Row4Bias, tied) |
+| laya scorer 1 [8x1024x1024] | 4.41e-5 | 59 (Row4Bias) |
+| laya scorer 2 [8x1024x1] | 1.34e-5 | under 1 (launch-overhead bound) |
+| laya qkv@128 [128x1024x3072] | 6.54e-5 | 193 (Row4Bias / Row4Qkv, tied) |
+
+The pre-existing rows also drifted up to 182-189 GMAC/s from 177-183 in the same session,
+which is the load-sensitivity the note above warns about rather than a kernel change - the
+ten shapes added here cannot affect ten other shapes' timings, since `DpCore` is computed
+once per shape and the variants loop is per shape.
+
+`laya scorer 1`/`2` are M=8 and M=8/N=1: too few rows and columns to fill the device, so
+they are launch- and bandwidth-bound at 59 and under 1 GMAC/s. They are in the gate because
+they are Laya's real decision-tail shapes, and a gate that only measures fat shapes would
+miss the tail. `laya head ff2` is the one Laya shape that does not reach 190 (155 GMAC/s):
+K=4096 with N=1024 is a worse aspect ratio for the 16x16 tile than the other head shapes.
+
+#### `--gpu-alloc` - device-memory ceiling
+
+`dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gpu-alloc`
+
+Answers one binary question: can the iGPU back Laya's working set? Laya's checkpoint is
+421,293,830 F16 parameters and the GPU path is F32-only, so F32 needs
+`421,293,830 * 4 B = 1.685 GB` (1.569 GiB) of device buffers. Every published GPU row in
+`samples/NivaraInference/README.md` is 66-110M parameters (0.26-0.44 GB), so this is a 4-6x
+jump beyond anything known to work on this device.
+
+Allocation is chunked at 64 MiB rather than taken as one contiguous block, because Laya's
+working set is an embedding table plus ~200 per-layer weight tensors - the real question is
+whether the device can back many medium buffers totalling 1.569 GiB. Every chunk is
+host-filled and a sample read back, since a reservation that succeeds but cannot be written
+is not a working set. Targets step 256 MB to 3 GB so a failure localises to a size.
+
+Exit 0 = Laya's working set allocated, filled and verified; 1 = it did not; 10 = UNBUILT.
+
+Measured 2026-09-27, AC, Intel Arc iGPU (7.559 GiB reported):
+
+| target | buffers | alloc ms | fill GB/s | result |
+|---|---|---|---|---|
+| 256 MB | 4 | 26.7 | 6.79 | ok |
+| 512 MB | 8 | 40.4 | 7.68 | ok |
+| 1.000 GB | 16 | 87.3 | 8.04 | ok |
+| 1.500 GB | 24 | 104.1 | 8.33 | ok |
+| **1.569 GiB (Laya F32)** | 26 | 109.1 | 8.31 | **ok** |
+| 2.000 GB | 32 | 245.7 | 8.26 | ok |
+| 3.000 GB | 48 | 788.5 | 7.58 | ok |
+
+Allocation cost is superlinear - 109 ms at 1.569 GiB but 789 ms at 3 GB for 1.9x the
+memory, which is driver paging/eviction rather than anything in Nivara. It does not affect
+a one-time load, but it means the headroom above Laya's size is narrower than the raw
+7.559 GiB figure suggests.
+
+#### `--cpu-gemm` - CPU GEMM ceiling
+
+`dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm`
+
+Measures what the CPU can do at the same shapes the GPU gate uses, so the two backends are
+compared on identical inputs rather than across harnesses. Three legs, all gated
+`maxAbs(leg - double-precision truth) <= 1e-3` against the same truth the GPU gate uses:
+
+| leg | what it is |
+|---|---|
+| `AutoDiff` | `GradKernels.MatMulTransposedB`, B as `[N x K]`, no per-call transpose - what the AutoDiff path calls |
+| `BTranspose` | `GradKernels.MatMul`, B as `[K x N]`, transposes B on every call |
+| `Blocked` | probe-local `Parallel.For` + `Vector<float>` register accumulators held across the whole K loop, A and B read in place with no `RentCopy` and no staging copy |
+
+`Blocked` exists because there is no BCL matrix multiply to compare against
+(`TensorPrimitives.Dot` is the *vector* dot product; `Tensor.MatrixMultiply` has not
+shipped, dotnet/runtime#95863, noted at `TensorsHelper.cs:30-36`). It is the shape a
+register-blocked CPU GEMM would take, written in the harness so it measures a number
+instead of proposing a change to `src/Nivara`.
+
+Note the two in-tree legs take **different B layouts** - `MatMulTransposedB` means "B is
+already transposed" and expects `[N x K]`, while `MatMul` takes `[K x N]` and transposes.
+Both compute `A[M x K] · B[K x N]`.
+
+Projected Laya forward, GEMM only (28 encoder layers of qkv + attn out + Wi + Wo at S=512,
+plus the 2-layer decision head and the act/scorer tail; attention, norms and dispatch
+excluded, so it is a lower bound on wall-clock for every leg equally):
+
+| leg | enc layer ms | x28 layers ms | head ms | total ms | GMAC/s |
+|---|---|---|---|---|---|
+| AutoDiff | 81.5 | 2282 | 132.3 | **2414** | 76 |
+| BTranspose | 93.0 | 2603 | 188.4 | 2791 | 66 |
+| Blocked | 86.1 | 2412 | 117.3 | 2529 | 73 |
+
+`Blocked` does **not** beat the in-tree kernel (2529 vs 2414 ms), so the hypothesis that
+`MultiplyRowFloat`'s one-`Dot`-per-output-element structure is the CPU bottleneck is
+falsified - BCL's `Dot` is already well tuned. The `AutoDiff` vs `BTranspose` gap (1.16x
+overall, up to 1.51x at head ff2) is the real cost of the per-call B transpose, avoidable
+by hoisting the transpose to weight-load time as the GPU path already does.
+
+Caveat: individual rows vary up to 6.5x run to run (`distilbert fc1` `AutoDiff` read 6.3 ms
+and 41.3 ms on consecutive runs, most likely `ArrayPool` `clearArray` interacting with GC).
+The projected roll-up is stable to ~2% because it sums eight shapes across 28 layers, so
+read conclusions off the roll-up, not single rows. Runs in ~7 s.
+
+**Steady-state vs per-call.** The two in-tree legs are exactly the two cases the probe plan
+asked to distinguish. `AutoDiff` receives B as `[N x K]` ready-made, so it is the
+steady-state case a real inference loop reaches after one transpose at load; `BTranspose`
+pays the transpose on every call. Their 2414 vs 2791 ms gap (1.16x overall, 1.51x at
+`laya head ff2`) is therefore the measured cost of not hoisting it, and hoisting it is what
+the GPU path already does.
+
+**Not delivered.** The plan also asked for the pooled `bT` staging buffer and
+`RentCopy(a)` to be reported separately, on the grounds that they are copies rather than
+GEMM work. The `bT` half of that is what the `AutoDiff`/`BTranspose` pair above measures, so
+it is covered. The `RentCopy` half was not measured: it sits inside the parallel path that
+both in-tree legs take, and separating it would have needed a fourth leg. It was dropped
+once the blocked reference failed to beat the in-tree kernel, since the question it was
+meant to inform - "is there a CPU GEMM fix worth making" - had been answered no.
 
 ### No-regression gate (P4)
 
