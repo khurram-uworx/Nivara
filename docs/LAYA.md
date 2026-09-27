@@ -660,9 +660,9 @@ at roughly half the idle-machine rate.
   S=512, and no amount of CPU-side optimisation closes a 2.6x gap on the dominant term.
 - It does **not** make the CPU's known ~6.1-6.5x deficit vs PyTorch disappear. The CPU GEMM
   does 66-80 GMAC/s against a 26 GMAC/s end-to-end reading, so ~3x of that deficit is in
-  non-GEMM work - norms, attention, elementwise, per-op dispatch - and is untracked. Closing
-  #456 (whose stated defect was already fixed) removed the only open issue on that gap.
-  That is a known, accepted gap, not a solved one.
+  non-GEMM work - norms, attention, elementwise, per-op dispatch. Closing #456 (whose stated
+  defect was already fixed) removed the only open issue on that gap, so **#458** now tracks
+  it. That is a known, accepted gap, not a solved one.
 - It does **not** retire the attention question, it only declines to measure it. At S=512
   attention is 8.4 M MACs per layer against 6.3 G for the four GEMMs (~0.13%), so it cannot
   move the backend choice. Its real hazard - `AttentionKernels` has no finite-check on the

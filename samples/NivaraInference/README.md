@@ -1161,9 +1161,20 @@ Two findings worth keeping, both negative:
   in-tree legs pay it. Bounded rather than measured: an encoder layer copies A four times
   at 512x1024 floats (2 MB each) against 6.3 G MACs, so even eliminating it entirely is a
   low-single-digit percentage - two orders of magnitude short of what a 2.6x gap needs.
-- **Therefore the CPU's known ~6.1-6.5x deficit is not a GEMM problem.** The CPU GEMM does
-  66-80 GMAC/s against a 26 GMAC/s end-to-end reading, so ~3x of the deficit is in
-  non-GEMM work. That is the open lead, and it is untracked - see item 1 below.
+- **Therefore the CPU's known ~6.1-6.5x deficit is not a GEMM problem** - at Laya's shapes.
+  The CPU GEMM does 66-80 GMAC/s against a 26 GMAC/s end-to-end reading, so ~3x of the
+  deficit is in non-GEMM work. That is the open lead, tracked as **#458**.
+
+  **But this does not transfer to S=128, which is where the gap is actually measured.** The
+  same run shows the in-tree CPU GEMM 6-10x behind the probe's own blocked reference at the
+  d=768 / S=128 shapes - `distilbert qkv/o` 12.325 ms vs 1.238 ms, `distilbert fc1` 40.033 ms
+  vs 6.385 ms - where at M=512 the two are within 5% of each other. Both are gated correct, so
+  it is a throughput shape effect, not a bug; the likely cause is `Parallel.For` partitioning
+  plus the per-call `RentCopy` of A being amortised over 4x fewer output rows. Every published
+  transformer number in the table above is at S=128, so the "GEMM is not the problem" reading
+  should be read as true for Laya-scale work and unproven at the shapes the 6.1-6.5x gap comes
+  from. **#458** carries both leads; treat the small-M one as unconfirmed pending a
+  repeated-rounds measurement, since single rows in that mode vary up to 6.5x run to run.
 
 **3. Attention was deliberately left out of the measurement.** At S=512 it is 8.4 M MACs per
 layer against 6.3 G for the four GEMMs, about **0.13%** of the work, so it cannot move the
@@ -1213,9 +1224,12 @@ register-blocked CPU GEMM was measured and **did not beat the in-tree kernel** (
 norms, attention, elementwise, per-op dispatch - and is *not yet isolated*.
 
 **Gap to be aware of:** closing #456 removed the only open issue tracking that ~6.1-6.5x
-Nivara-CPU-vs-PyTorch gap, and the investigation above found no GEMM lever to replace it. The
-signal now lives only in this document until someone files a replacement issue for the
-non-GEMM side.
+Nivara-CPU-vs-PyTorch gap, and the investigation above found no GEMM lever to replace it. That
+gap is now tracked as **#458**, which also carries a second lead this probe turned up: at
+S=128 / d=768 - the shapes every published transformer number uses - the in-tree CPU GEMM is
+6-10x slower than the same probe's blocked reference, which is the opposite of the M=512 result
+and does not transfer. So there is a small-M GEMM inefficiency *and* an unidentified non-GEMM
+cost, of different sizes at different sequence lengths.
 
 **2. Convolution kernels are naive nested loops with no SIMD and no parallelism** — the
 largest single gap in the table. MobileNetV2 ~33× and ResNet-18 ~18×, against ~6.4× for the
