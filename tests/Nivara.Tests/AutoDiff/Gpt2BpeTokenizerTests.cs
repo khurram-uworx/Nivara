@@ -200,8 +200,14 @@ public class Gpt2BpeTokenizerTests
     [Test]
     public void EncodeWithSpecialTokens_UnknownSpecialToken_Throws()
     {
+        // Resolve the tokenizer before the assertion. When samples/data/modernbert is absent (it is
+        // gitignored, so this is the normal CI case) ModernBertTokenizer calls Assert.Ignore, and an
+        // Ignore raised inside an Assert.Throws lambda escapes as IgnoreException — which NUnit
+        // reports as a failure rather than a skip. Resolving first keeps the skip at test-body level.
+        var tokenizer = ModernBertTokenizer;
+
         var ex = Assert.Throws<InvalidOperationException>(
-            () => ModernBertTokenizer.EncodeWithSpecialTokens("Nivara", "<NOT_A_TOKEN>"));
+            () => tokenizer.EncodeWithSpecialTokens("Nivara", "<NOT_A_TOKEN>"));
         Assert.That(ex!.Message, Does.Contain("not in the vocabulary"));
     }
 
