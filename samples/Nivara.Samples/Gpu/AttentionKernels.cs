@@ -16,10 +16,12 @@ namespace Nivara.Samples.Gpu;
 /// A row whose keys are all suppressed writes zeros rather than NaN, mirroring the CPU
 /// safe-softmax clamp; such a row is an artifact of the mask constant and never reaches a
 /// valid position, because a valid query never reads a padding key.
-/// The score row is recomputed per pass (no per-work-item array); the p_j row is
-/// spilled to a per-(b,h,q) global scratch row so each output element's accumulation
-/// is a plain sequential j loop — the same effective per-element order and precision
-/// shape as the CPU kernel.
+/// The score row is recomputed per pass (no per-work-item array), and the third pass
+/// accumulates the probability-weighted V rows in a local-memory tile instead of spilling
+/// the p_j row to global scratch: [B, H, S, S] would be 268 MB at S=2048 and 4.3 GB at
+/// S=8192, and only the per-(b,h,q) accumulator needs to be live. Each output element's
+/// j loop stays sequential and ascending, so the accumulation order and precision shape
+/// match the CPU kernel exactly.
 /// </summary>
 internal static class AttentionKernels
 {
@@ -29,7 +31,6 @@ internal static class AttentionKernels
         ArrayView<float> v,
         ArrayView<float> mask,
         ArrayView<float> attnOut,
-        ArrayView<float> scores,
         int batch,
         int seqLen,
         int numHeads,
@@ -79,21 +80,33 @@ internal static class AttentionKernels
             sum += XMath.Exp(s - max);
         }
 
-        int scoreBase = (b * numHeads + h) * (seqLen * seqLen) + qPos * seqLen;
+        // Shared-memory accumulator tile. ILGPU's SharedMemory is per work *group*, not per
+        // work item, so the tile is [MaxHeadDim rows x AttentionGroupSize columns] and column
+        // Group.IdxX is this thread's private slice - two work items in a group would otherwise
+        // race on the same accumulators. DenseX keeps a thread's MaxHeadDim floats contiguous
+        // (offset = d + lane * MaxHeadDim). Both dimensions are compile-time constants because
+        // ILGPU requires a statically known allocation size and headDim/group size are runtime
+        // arguments; only the first headDim rows are touched, and
+        // GpuBuffers.ValidateAttentionLocalMemory rejects a larger headDim at construction.
+        var acc = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(GpuBuffers.MaxHeadDim, GpuBuffers.AttentionGroupSize),
+            new Stride2D.DenseX(GpuBuffers.MaxHeadDim));
+        int lane = Group.IdxX;
+        for (int d = 0; d < headDim; d++)
+            acc[d, lane] = 0f;
+
         for (int j = 0; j < seqLen; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
             if (mask[maskBase + j] < 0.5f) s = float.NegativeInfinity;
-            scores[scoreBase + j] = XMath.Exp(s - max) / sum;
+            float p = XMath.Exp(s - max) / sum;
+            int vBase = (b * seqLen + j) * D + dOffset;
+            for (int d = 0; d < headDim; d++)
+                acc[d, lane] += p * v[vBase + d];
         }
 
         for (int d = 0; d < headDim; d++)
-        {
-            float acc = 0f;
-            for (int j = 0; j < seqLen; j++)
-                acc += scores[scoreBase + j] * v[(b * seqLen + j) * D + dOffset + d];
-            attnOut[outBase + dOffset + d] = acc;
-        }
+            attnOut[outBase + dOffset + d] = acc[d, lane];
     }
 
     static float RowScore(

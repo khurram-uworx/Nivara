@@ -139,12 +139,24 @@ yields plausible-looking but wrong output.
   | 2048 | 268 MB | 0 |
   | 8192 | 4.3 GB | 0 |
 
-  **Implementation constraint:** the tile is `headDim` floats *per thread* and the
-  current launch is `(Cfg(...), 256)`. At 64 threads x 64 floats x 4 B = 16 KB
-  (fits OpenCL's 32 KB local minimum); 256 threads would need 64 KB and fail.
-  **Drop the attention group size to 64** and check `MaxLocalMemorySize` at
-  construction. Occupancy drops, but attention is 0.13% of the arithmetic, so this
-  is not a perf risk.
+  **Two implementation constraints, both found by running the gate (not by reading):**
+  1. ILGPU requires a `SharedMemory.Allocate` size to be **statically known**, and `headDim`
+     is a runtime argument — `SharedMemory.Allocate<float>(headDim)` throws
+     `NotSupportedException: The allocation size of type 'Float32' must be statically known`.
+     The tile is over-allocated to `GpuBuffers.MaxHeadDim = 64` (compile-time const) and only
+     the first `headDim` rows are touched. All three encoders have headDim 64, so this costs
+     nothing. `ValidateAttentionLocalMemory` rejects a larger headDim rather than letting it
+     read past the tile.
+  2. **ILGPU's `SharedMemory` is per work *group*, not per work item.** The first attempt gave
+     each thread its own `SharedMemory.Allocate<float>(64)` and every thread in the group wrote
+     the same 64 floats — a race that the gate caught immediately as 97809 violations at
+     maxRel 3.42, i.e. structurally wrong rather than rounding-level. The tile is therefore
+     2-D: `[MaxHeadDim rows × AttentionGroupSize columns]`, with column `Group.IdxX` the
+     thread's private slice and `DenseX` keeping each thread's row block contiguous.
+
+  **Device limit queried, not assumed.** `Accelerator.MaxSharedMemoryPerGroup` (and
+  `MaxNumThreadsPerGroup`) are checked at construction. Note the property is
+  `MaxSharedMemoryPerGroup`, not `MaxLocalMemorySize` — the plan's original name was wrong.
 
 ### 5. `BertEncoderGpuRunner` — follow the signature change
 

@@ -126,7 +126,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
     MemoryBuffer1D<float, Stride1D.Dense> f1 = null!;
     MemoryBuffer1D<float, Stride1D.Dense> clsOut = null!;
     MemoryBuffer1D<float, Stride1D.Dense> logits = null!;
-    MemoryBuffer1D<float, Stride1D.Dense> scores = null!;
     MemoryBuffer1D<float, Stride1D.Dense> maskBuf = null!;
     MemoryBuffer1D<int, Stride1D.Dense> idsBuf = null!;
     MemoryBuffer1D<int, Stride1D.Dense> posIdsBuf = null!;
@@ -137,7 +136,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> embeddingSum;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNormResidual;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmBias;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmGelu;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmRelu;
@@ -164,6 +163,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
         scale = (float)(1.0 / Math.Sqrt(headDim));
 
         var acc = runtime.Accelerator;
+        GpuBuffers.ValidateAttentionLocalMemory(acc, headDim);
         var emb = BertGpuKeys.Embeddings(naming);
 
         var wordEmbT = GpuBuffers.Req(tensors, $"{emb}.word_embeddings.weight");
@@ -205,7 +205,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
         f1 = GpuBuffers.Alloc(acc, rowsCap * intermediateDim);
         clsOut = GpuBuffers.Alloc(acc, 8 * hiddenDim);
         logits = GpuBuffers.Alloc(acc, 8 * 2);
-        scores = GpuBuffers.Alloc(acc, 8 * numHeads * 128 * 128);
         maskBuf = GpuBuffers.Alloc(acc, rowsCap);
         idsBuf = GpuBuffers.AllocInt(acc, rowsCap);
         posIdsBuf = GpuBuffers.AllocInt(acc, rowsCap);
@@ -219,7 +218,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             ElementwiseKernels.LayerNormResidual1D);
         attention = acc.LoadKernel<
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
-            ArrayView<float>, ArrayView<float>, int, int, int, int, float>(
+            ArrayView<float>, int, int, int, int, float>(
             AttentionKernels.BatchedAttention);
         gemmBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
             GemmKernels.TiledGemmKernelRow4Bias);
@@ -293,7 +292,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             var kView = qkv.View.SubView(rows * (long)hiddenDim, rows * (long)hiddenDim);
             var vView = qkv.View.SubView(2 * rows * (long)hiddenDim, rows * (long)hiddenDim);
 
-            Attention1D(qView, kView, vView, maskBuf.View, attn.View, scores.View, batch, seqLen);
+            Attention1D(qView, kView, vView, maskBuf.View, attn.View, batch, seqLen);
             GemmBias(attn.View, w.O.View, h.View, w.Bo.View, rows, hiddenDim, hiddenDim);
             LayerNormResidual1D(h.View, x.View, w.Ln1W.View, w.Ln1B.View, h.View, rows, hiddenDim);
 
@@ -339,7 +338,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
         clsB?.Dispose();
         x.Dispose(); qkv.Dispose();
         attn.Dispose(); h.Dispose(); f1.Dispose(); clsOut.Dispose(); logits.Dispose();
-        scores.Dispose(); maskBuf.Dispose(); idsBuf.Dispose(); posIdsBuf.Dispose(); clsIdsBuf.Dispose();
+        maskBuf.Dispose(); idsBuf.Dispose(); posIdsBuf.Dispose(); clsIdsBuf.Dispose();
     }
 
     // ── launch helpers ────────────────────────────────────────────
@@ -361,10 +360,10 @@ public sealed class BertEncoderGpuRunner : IDisposable
 
     void Attention1D(
         ArrayView<float> q, ArrayView<float> k, ArrayView<float> v,
-        ArrayView<float> mask, ArrayView<float> attnOut, ArrayView<float> scores,
+        ArrayView<float> mask, ArrayView<float> attnOut,
         int batch, int seqLen)
         => attention(runtime.Stream, GpuBuffers.Cfg1D(batch * numHeads * seqLen, GpuBuffers.AttentionGroupSize),
-            q, k, v, mask, attnOut, scores, batch, seqLen, numHeads, headDim, scale);
+            q, k, v, mask, attnOut, batch, seqLen, numHeads, headDim, scale);
 
     void GemmQkv(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, ArrayView<float> bias, int aRows, int aCols, int bCols, int blockWidth)
     {

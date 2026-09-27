@@ -16,11 +16,48 @@ internal static class GpuBuffers
     /// <summary>
     /// Group size for the fused attention kernel. Lower than <see cref="LinearGroupSize"/>
     /// because that kernel stages a <c>headDim</c>-float accumulator tile per thread in local
-    /// memory: at headDim 64 the linear size would need 256 x 64 x 4 B = 64 KB per group, past
-    /// the local-memory budget. The runner asserts the queried
-    /// <c>MaxLocalMemorySize</c> covers the active product before launching.
+    /// memory, and local memory is allocated per work item in the group.
     /// </summary>
     public const int AttentionGroupSize = 64;
+
+    /// <summary>
+    /// Compile-time bound on the fused attention kernel's per-thread accumulator tile. ILGPU
+    /// requires a <c>SharedMemory.Allocate</c> size to be statically known, and the kernel's
+    /// <c>headDim</c> is a runtime argument, so the tile is over-allocated to this constant and
+    /// only the first <c>headDim</c> entries are used. Every encoder on the GPU path
+    /// (DistilBERT, MiniLM, ModernBERT) has headDim 64, so this costs no extra local memory.
+    /// <see cref="ValidateAttentionLocalMemory"/> rejects a larger headDim rather than letting
+    /// it read past the tile.
+    /// </summary>
+    public const int MaxHeadDim = 64;
+
+    /// <summary>
+    /// Fails unless the fused attention kernel's local-memory tile fits the device: the
+    /// per-thread tile must be within <see cref="MaxHeadDim"/>, a whole group of
+    /// <see cref="AttentionGroupSize"/> work items must fit the accelerator's reported shared
+    /// memory, and the group size must be within the work-group limit. Queried rather than
+    /// assumed, because the OpenCL spec's minimum is not a value any particular driver is
+    /// obliged to hit exactly.
+    /// </summary>
+    public static void ValidateAttentionLocalMemory(Accelerator accelerator, int headDim)
+    {
+        if (headDim > MaxHeadDim)
+            throw new InvalidOperationException(
+                $"The fused GPU attention kernel stages a {MaxHeadDim}-float accumulator tile per " +
+                $"work item (an ILGPU compile-time limit), so headDim must be <= {MaxHeadDim}; got {headDim}.");
+
+        if (AttentionGroupSize > accelerator.MaxNumThreadsPerGroup)
+            throw new InvalidOperationException(
+                $"The fused GPU attention kernel launches groups of {AttentionGroupSize}, but " +
+                $"{accelerator.Name} allows at most {accelerator.MaxNumThreadsPerGroup} threads per group.");
+
+        long bytes = (long)AttentionGroupSize * MaxHeadDim * sizeof(float);
+        if (bytes > accelerator.MaxSharedMemoryPerGroup)
+            throw new InvalidOperationException(
+                $"The fused GPU attention kernel needs {bytes} B of shared memory per group " +
+                $"({AttentionGroupSize} work items x {MaxHeadDim} floats), but {accelerator.Name} " +
+                $"reports only {accelerator.MaxSharedMemoryPerGroup} B. Lower GpuBuffers.AttentionGroupSize.");
+    }
 
     // ── launch configuration ──────────────────────────────────────
 
