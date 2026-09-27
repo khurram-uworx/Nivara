@@ -200,11 +200,52 @@ and the F32 summation-order floor are both non-obvious and belong there) plus th
 ModernBERT row. `samples/NivaraInference/README.md` — model table, mode list, the
 `--gpu` capability line, and the Phase 3 status.
 
+## Grounding (G1) — done, cleared
+
+Every file the plan touches was read end to end. The plan's claims all held, with two
+corrections.
+
+**Confirmed by reading, not assumption.** `BatchedAttention` applies the mask at exactly
+`:54/:62/:70`, spills at `:66`, has no `-inf` clamp, and `grep IsFinite|NaN|IsNaN` over
+`samples/Nivara.Samples/Gpu/` returns zero hits. The spill removal is **bit-identical**: the
+current inner loop is `for d { acc=0; for j ascending: acc += p_j * v_jd }`; keeping `d`
+outer, `j` inner ascending, and recomputing `p` by the same expression preserves every
+per-`d` addition order, and `p` is the same f32 whether stored to the spill or used
+directly. `ModernBertMasks.Build` confirms `band < 0` means global — the `band: -1`
+convention matches the CPU's own. `ModernBertMlp.cs:336-338` confirms the first
+`Wi` half is activated; `ModernBertAttention` applies RoPE to **q and k only**, not v;
+layer 0's attention norm is a true identity with no checkpoint weights.
+`TiledGemmKernelRow4` (no bias) exists at `GemmKernels.cs:67`.
+
+**Correction A — extract a shared `GpuBuffers` helper.** `UploadTransposed`,
+`UploadPlain`, `Alloc`, `AllocInt`, `Req`, `Ensure`, `Readback`, `Cfg` and the GEMM
+grid/groupSize math are all `private static` on `BertEncoderGpuRunner`, so
+`ModernBertGpuRunner` cannot reach any of them, and it needs the identical
+`(ceil(rows/16), ceil(cols/64))`-of-`16x16` launch. ~40 lines get extracted into one
+authoritative helper both runners call (AGENTS.md rule 8) rather than duplicated.
+
+**Correction B — query the local-memory limit, do not hard-code it.** MS Learn has no
+OpenCL local-memory reference (it redirects to the Khronos registry), so the "32 KB
+full-profile minimum" figure is not verifiable in-repo. `runtime.Accelerator
+.MaxLocalMemorySize` is reachable, so the runner **asserts
+`groupSize * headDim * 4 <= MaxLocalMemorySize`** at construction and derives the group
+size from the queried value. Strictly safer than hard-coding 64 or citing the spec.
+
+**Baseline recorded** (this branch is still identical to `main`). GPU reachable:
+`Intel(R) Graphics (Intel(R) Corporation)`; distilbert GPU forward 75 ms vs CPU 1434 ms.
+
+| Gate | maxAbs | maxRel | violations |
+|---|---|---|---|
+| `distilbert --gpu compare` (seqLen 128) | 1.526E-005 | 3.238E-006 | 0/98304 |
+| `minilm --gpu compare` hidden | 1.872E-005 | 1.037E-005 | 0/245760 |
+| `minilm --gpu compare` pooled | 1.788E-007 | 1.471E-007 | 0/1920 |
+
+Both PASS. Because the spill removal is claimed to be bit-identical, these must come back
+**identical to the digit** after the change — the strongest available regression check.
+
 ## Verification
 
-1. **Pre-flight baseline (before any edit).** `distilbert --gpu compare` and
-   `minilm --gpu compare` on `main`, recorded. Confirms a GPU is reachable *and*
-   gives the numbers the shared `BatchedAttention` change must not move.
+1. ~~Pre-flight baseline~~ **done** — see Grounding (G1) above.
 2. `dotnet build Nivara.slnx` clean, no new warnings.
 3. `ElementwiseGernels` GELU promotion is a no-op: the distilbert/minilm gates from
    (1) are unchanged to the digit.
@@ -239,17 +280,19 @@ numerics live in `samples/Nivara.Samples` and the sample CLI.
 ## Planned commits
 
 1. `docs: plan #449 ModernBERT GPU path in TODO.md`
-2. `refactor: promote the duplicated GPU GELU polynomial to one scalar helper`
-3. `fix: clamp a fully-masked attention row to zeros on the GPU path`
-4. `perf: drop the [B,H,S,S] score spill from the fused GPU attention kernel`
-5. `feat: add the RoPE and GeGLU elementwise kernels for the GPU path`
-6. `feat: add ModernBertGpuRunner with per-layer band and rope theta`
-7. `feat: wire modernbert --gpu and add the GPU-vs-CPU compare gate`
-8. `docs: record the ModernBERT GPU path in BERT-GPU.md and the sample README`
+2. `refactor: extract the shared GPU upload/launch helpers into GpuBuffers`
+3. `refactor: promote the duplicated GPU GELU polynomial to one scalar helper`
+4. `fix: clamp a fully-masked attention row to zeros on the GPU path`
+5. `perf: drop the [B,H,S,S] score spill from the fused GPU attention kernel`
+6. `feat: add the RoPE and GeGLU elementwise kernels for the GPU path`
+7. `feat: make the RoPE position tables reachable from a GPU runner`
+8. `feat: add ModernBertGpuRunner with per-layer band and rope theta`
+9. `feat: wire modernbert --gpu and add the GPU-vs-CPU compare gate`
+10. `docs: record the ModernBERT GPU path in BERT-GPU.md and the sample README`
 
-Commits 3 and 4 are separate on purpose: the clamp is a correctness fix that
-stands alone, and the spill removal is the perf/memory change. Both touch the same
-kernel, so they may land as one if the intermediate state does not build.
+Commits 4 and 5 are separate on purpose: the clamp is a correctness fix that stands
+alone, and the spill removal is the perf/memory change. Both touch the same kernel, so they
+may land as one if the intermediate state does not build.
 
 ## GitHub issues log
 
@@ -257,13 +300,12 @@ As each task executes, if deferred work or a concern is found, create it
 immediately (`gh issue create --repo khurram-uworx/Nivara`) and record the number
 here. Do not rely on memory — compaction can lose it.
 
-- [ ] #449 — this work (GPU path for ModernBERT)
-- [ ] #440 — tile-32/2x2 GEMM; LAYA.md's stated top Phase 3 item, untouched here
-- [ ] #447 — banded/sparse attention kernel; also the reason the CPU
+- [x] #449 — this work (GPU path for ModernBERT)
+- [x] #440 — tile-32/2x2 GEMM; LAYA.md's stated top Phase 3 item, untouched here
+- [x] #447 — banded/sparse attention kernel; also the reason the CPU
       `MaxDenseLength` cap and the `BertEncoderGpuRunner` `seqLen<=128` cap stay
-- [ ] #448 — mask-as-select; **not** a prerequisite (the local `-inf` clamp is),
+- [x] #448 — mask-as-select; **not** a prerequisite (the local `-inf` clamp is),
   but the same class and should be closed by the same reasoning
-- [ ] Phase 2 Laya head — `LayaDecisionHead<T>` + `LayaPromptBuilder` + `laya` mode
-  + PyTorch gate. Does not exist today; discovered while scoping #449. The GPU head
-  is a small follow-up once the CPU head is gated (zero new kernels). **To file at
-  G1 — confirm with human.**
+- [x] #460 — Phase 2 Laya head (`LayaDecisionHead<T>` + `LayaPromptBuilder` + `laya`
+  mode + PyTorch gate). Discovered while scoping #449; filed. The GPU head needs zero
+  new kernels and becomes a small follow-up once the CPU head is gated.
