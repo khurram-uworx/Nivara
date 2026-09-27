@@ -582,6 +582,10 @@ public static class ModernBert
         Console.WriteLine();
 
         string text = SampleSentences[0];
+        Console.WriteLine("1 warmup + 3 timed passes, median reported. Fewer than the 3 + 10 used by");
+        Console.WriteLine("the DistilBERT/MiniLM GPU benchmarks: at S=4096 one pass is ~60 s, so the");
+        Console.WriteLine("long rows would cost minutes. Not directly comparable to those tables.");
+        Console.WriteLine();
         foreach (int maxLength in new[] { 128, 512, 2048, 4096 })
         {
             if (maxLength > config.MaxPositionEmbeddings)

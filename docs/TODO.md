@@ -274,12 +274,24 @@ grid/groupSize math are all `private static` on `BertEncoderGpuRunner`, so
 `(ceil(rows/16), ceil(cols/64))`-of-`16x16` launch. ~40 lines get extracted into one
 authoritative helper both runners call (AGENTS.md rule 8) rather than duplicated.
 
-**Correction B — query the local-memory limit, do not hard-code it.** MS Learn has no
+**Correction B — query the local-memory limit, do not cite the spec.** MS Learn has no
 OpenCL local-memory reference (it redirects to the Khronos registry), so the "32 KB
-full-profile minimum" figure is not verifiable in-repo. `runtime.Accelerator
-.MaxLocalMemorySize` is reachable, so the runner **asserts
-`groupSize * headDim * 4 <= MaxLocalMemorySize`** at construction and derives the group
-size from the queried value. Strictly safer than hard-coding 64 or citing the spec.
+full-profile minimum" figure is not verifiable in-repo, and hard-coding a group size
+that a given device cannot honour is the failure mode. The correction to the plan's
+own first draft is two-fold and both parts are in the code:
+
+- The property is **`Accelerator.MaxSharedMemoryPerGroup`**, not
+  `MaxLocalMemorySize` (which does not exist on `Accelerator` in ILGPU 1.5.3).
+  `MaxNumThreadsPerGroup` is checked alongside it.
+- The group size is **not derived** from the queried limit. It is the named constant
+  `GpuBuffers.AttentionGroupSize = 64`, and
+  `GpuBuffers.ValidateAttentionLocalMemory` **asserts the constant against the queried
+  limits** at both runners' construction. A named const is the right shape here because
+  the shared-memory allocation is `new Index2D(MaxHeadDim, AttentionGroupSize)` inside
+  the kernel — ILGPU needs those extents statically known, so a runtime-derived group
+  size could not express it. The assertion turns "this device cannot run this tile"
+  into a named startup error instead of a kernel-level failure. Both runners call it,
+  so DistilBERT / SST-2 / MiniLM get the guard too.
 
 **Baseline recorded** (this branch is still identical to `main`). GPU reachable:
 `Intel(R) Graphics (Intel(R) Corporation)`; distilbert GPU forward 75 ms vs CPU 1434 ms.
@@ -400,11 +412,30 @@ numerics live in `samples/Nivara.Samples` and the sample CLI.
 7. `feat: make the RoPE position tables reachable from a GPU runner` — `94193d2`
 8. `feat: add ModernBertGpuRunner with per-layer band and rope theta` — `863d29b`
 9. `feat: wire modernbert --gpu and add the GPU-vs-CPU compare gate` — `a33e053`
-10. `docs: record the ModernBERT GPU path in BERT-GPU.md and the sample README` — pending
+10. `docs: record the ModernBERT GPU path in BERT-GPU.md and the sample README` — `c13e3b3`
+11. `refactor: look the shared-mem tile key up once, and correct the G1 local-memory claim` —
+    G2 finding, below.
 
 Commits 4 and 5 are separate on purpose: the clamp is a correctness fix that stands
 alone, and the spill removal is the perf/memory change. Both touch the same kernel, so they
 may land as one if the intermediate state does not build.
+
+### G2 findings
+
+Two defects, both introduced by *this* branch rather than inherited, both exactly the kind
+the two gates exist to catch:
+
+1. **Plan contradicted the code on the local-memory property.** G1's `Correction B` said
+   `Accelerator.MaxLocalMemorySize` and that the group size is *derived* from it. The shipped
+   code uses `MaxSharedMemoryPerGroup` and validates a named `const` against it. The code is
+   right (see the corrected `Correction B` above); the plan was the stale artifact, and a
+   reader trusting it would go looking for a property that does not exist. Corrected in place.
+2. **`GpuBuffers.UploadPlain` did the dictionary lookup twice.** Extracted verbatim from
+   `BertEncoderGpuRunner` (which had the same double `Req` call), so it is inherited rather
+   than new — but carrying it into the file that exists specifically to hold *one*
+   authoritative implementation is the wrong call, so it is fixed here.
+
+Neither is behaviour-affecting; both are honesty-about-the-code fixes.
 
 
 ## GitHub issues log

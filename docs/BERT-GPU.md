@@ -98,6 +98,11 @@ Forward: **415–449 ms GPU vs a 7.3–7.5 s CPU reference** (the CPU figure is 
 "correctness, not speed" below). Benchmark rows scale with sequence length, as
 they must: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s.
 
+Those rows use **1 warmup + 3 timed passes, median reported**, not the 3 + 10
+of the §1 table — at S=4096 a single pass is ~60 s, so the full protocol would
+cost minutes per row. They are therefore not comparable to the §1 numbers, which
+is why they are not in that table. The mode prints this caveat itself.
+
 **Three kernel changes and one shared-kernel fix:**
 - `BatchedAttention` grew a **`band` parameter** (negative = global, the CPU's
   own `ModernBertMasks.Build` convention) folded into one `Keep` predicate at

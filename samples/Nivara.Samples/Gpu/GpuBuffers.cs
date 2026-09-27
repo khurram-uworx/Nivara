@@ -161,8 +161,9 @@ internal static class GpuBuffers
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string key)
     {
-        var buffer = accelerator.Allocate1D<float>(Req(tensors, key).Data.Length);
-        buffer.CopyFromCPU(Req(tensors, key).Data);
+        var data = Req(tensors, key).Data;
+        var buffer = accelerator.Allocate1D<float>(data.Length);
+        buffer.CopyFromCPU(data);
         return buffer;
     }
 

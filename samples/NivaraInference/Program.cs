@@ -272,6 +272,11 @@ class Program
                 {
                     if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir);
                     if (compare) return ModernBert.CompareGpu(tensors, modelDir);
+                    if (compareDiag)
+                    {
+                        Console.Error.WriteLine("--gpu does not support 'compare_diag' for modernbert: the per-stage diff reads named CPU intermediates, and the GPU runner has no per-stage hook. 'modernbert --gpu compare' gates the final hidden state instead (supported: default, benchmark, compare).");
+                        return 1;
+                    }
                     return ModernBert.RunGpu(tensors, modelDir);
                 }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
