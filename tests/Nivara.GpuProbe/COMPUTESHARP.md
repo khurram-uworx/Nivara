@@ -17,7 +17,7 @@ correctness with a fraction of the plumbing** (no vtable dispatch, no root
 signature, no descriptor heaps), and where does its steady-state perf land?
 This doc records the measured answer.
 
-The hand-rolled DX12 leg ([docs/DX12.md](DX12.md)) proved in phase 2 that managed
+The hand-rolled DX12 leg ([DX12](DX12.md)) proved in phase 2 that managed
 .NET can drive the iGPU's D3D12 compute pipeline directly. ComputeSharp is the
 library wrapper around exactly that idea — the same `d3d12.dll`/`dxgi.dll`
 surface, reached through a NuGet package instead of hand-pinned vtable slots.
@@ -284,4 +284,4 @@ shape.
   seconds via `dotnet run … -- kernels`. DXIL handling is driver-versioned like
   every other path in the series.
 
-**Series:** [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · **ComputeSharp** — the GPU-backend case-study series
+**Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp** — the GPU-backend case-study series

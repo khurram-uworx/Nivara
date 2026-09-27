@@ -1,9 +1,9 @@
 # ILGPU on the Arc 140T from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
+> **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md)
 
-This is the fifth GPU-backend case-study doc (after [docs/SPIRV.md](SPIRV.md), [docs/SYCL.md](SYCL.md),
-[docs/DX12.md](DX12.md), [docs/OPENVINO.md](OPENVINO.md)) and the deliverable for issue #431 (GPU probe
+This is the fifth GPU-backend case-study doc (after [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md), [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md),
+[DX12](../tests/Nivara.GpuProbe/DX12.md), [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md)) and the deliverable for issue #431 (GPU probe
 phase 4a). The previous phases proved three compile/driver paths (hand-authored
 SPIR-V over Level Zero — honest dead end; the oneAPI SYCL/DPC++ toolchain over
 Level Zero; hand-rolled HLSL `cs_5_1` over D3D12) and one first-party runtime
@@ -134,7 +134,7 @@ stays the documented 405 = 402 (honest OV-bf16 silu) + 3 (SYCL UNBUILT); the
 ILGPU row contributes **0** failures.
 
 Reading: the bug class that blocks hand-authored bytecode (§3 of
-[docs/SPIRV.md](SPIRV.md)) does **not** affect ILGPU — as with SYCL, **compiler-produced
+[SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md)) does **not** affect ILGPU — as with SYCL, **compiler-produced
 code is what IGC handles correctly**. For ILGPU the "compiler" is a .NET
 library, not a toolchain install.
 
@@ -228,7 +228,7 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
   OV's tuned gemm currently leads.
 - Re-test after any driver update: the whole kernel surface re-measures in
   seconds via `dotnet run … -- kernels`. The IGC bug class is driver-versioned
-  (see [docs/SPIRV.md](SPIRV.md)); ILGPU's OpenCL C path is equally exposed to future
+  (see [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md)); ILGPU's OpenCL C path is equally exposed to future
   frontend changes.
 
-**Series:** [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [docs/COMPUTESHARP.md](COMPUTESHARP.md) — the GPU-backend case-study series
+**Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) — the GPU-backend case-study series

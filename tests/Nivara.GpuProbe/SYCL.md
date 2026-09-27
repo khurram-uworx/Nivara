@@ -219,7 +219,7 @@ per kernel would re-initialize the device and skew the timing rows.
    the EU array.
 10. **Simple, deterministic, verifiable first; optimize second.** Gates come
     before speed. Every shipped kernel gets a README gate-table row + a
-    [docs/SYCL.md](SYCL.md) lessons entry.
+    [SYCL / oneAPI](SYCL.md) lessons entry.
 
 ### 3.5 Adding a new kernel, end to end
 
@@ -496,4 +496,4 @@ gate results. Exit code 0 = all gates pass.
 - [BF16 format (Wikipedia)](https://en.wikipedia.org/wiki/Bfloat16_floating-point_format)
 - [SmolLM-135M architecture](https://huggingface.co/HuggingFaceTB/SmolLM-135M) — 12 layers, 64 hidden, 1536 intermediate, 6 heads
 - [Qwen-1.5B architecture](https://huggingface.co/Qwen/Qwen1.5-0.5B) — 24 layers, 14334 hidden, 896 intermediate, 16 heads
-- Series: [docs/SPIRV.md](SPIRV.md) · [docs/SYCL.md](SYCL.md) · [docs/DX12.md](DX12.md) · [docs/OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) — the GPU-backend case-study series
+- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) — the GPU-backend case-study series

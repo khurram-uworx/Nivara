@@ -8,7 +8,7 @@
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- The ComputeSharp leg (below) is compile-gated to Windows hosts: its source
-         generator cannot run on non-Windows SDKs (see docs/COMPUTESHARP.md §1), so the
+         generator cannot run on non-Windows SDKs (see COMPUTESHARP.md §1), so the
          leg's code is #if WINDOWS and its package refs are conditioned below. -->
     <DefineConstants Condition="'$(OS)' == 'Windows_NT'">$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
@@ -33,7 +33,7 @@
        probe's hand-rolled D3d12Compute leg predicts. Requires AllowUnsafeBlocks for the
        shader source generators. The generator is Windows-host-only (DllNotFoundException
        kernel32 on Linux), so the refs and leg are gated to Windows builds.
-       Snapshot pin — see docs/COMPUTESHARP.md. -->
+       Snapshot pin — see COMPUTESHARP.md. -->
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <PackageReference Include="ComputeSharp" Version="3.2.0" />
     <PackageReference Include="ComputeSharp.Dxc" Version="3.2.0" />
