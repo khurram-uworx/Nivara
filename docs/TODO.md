@@ -464,27 +464,30 @@ bisect points straight at whichever one broke a model.
 Numbers are filled in as they are created; per the instruction at the top of this file, each is
 raised **when the work is deferred**, not at the end.
 
-- [ ] #NNN — `LayerNorm<T>` has no bias-free mode (`bias: false`); ModernBERT's `norm_bias: false`
+- [#446](https://github.com/khurram-uworx/Nivara/issues/446) — `LayerNorm<T>` has no bias-free mode (`bias: false`); ModernBERT's `norm_bias: false`
       is emulated by a zero Beta, which is exact for inference but wrong for fine-tuning
       (the zero Beta would take a gradient instead of staying fixed).
-- [ ] #NNN — banded/sparse attention kernel. A dense `[L, L]` mask cannot serve ModernBERT at
+- [#447](https://github.com/khurram-uworx/Nivara/issues/447) — banded/sparse attention kernel. A dense `[L, L]` mask cannot serve ModernBERT at
       `max_position_embeddings = 8192` (268 MB per mask), and it makes sliding layers cost the same
       as full ones, which is the dominant cost in the Phase 1 timings. This is the highest-value
       follow-up of the lot.
-- [ ] #NNN — `GradKernels`: apply the attention mask as a select (forced `-inf`) rather than an add,
+- [#448](https://github.com/khurram-uworx/Nivara/issues/448) — `GradKernels`: apply the attention mask as a select (forced `-inf`) rather than an add,
       so a `NaN` in q/k/v cannot escape suppression via `NaN + (-inf) = NaN`. The safe-softmax clamp
       removes the known trigger; this removes the class.
-- [ ] #NNN — ILGPU/OpenCL GPU path for ModernBERT (`BertEncoderGpuRunner` is Post-LN BERT only, and
+- [#449](https://github.com/khurram-uworx/Nivara/issues/449) — ILGPU/OpenCL GPU path for ModernBERT (`BertEncoderGpuRunner` is Post-LN BERT only, and
       there is no RoPE kernel on the GPU path at all). See Phase 3 for the component list.
-- [ ] #NNN — ModernBERT-specific fused pre-norm block (per-layer band + theta + GeGLU epilogue) as
+- [#450](https://github.com/khurram-uworx/Nivara/issues/450) — ModernBERT-specific fused pre-norm block (per-layer band + theta + GeGLU epilogue) as
       a perf follow-up; the CPU path is 28 separate module forwards with two materialized masks.
-- [ ] #NNN — NFC normalization is only implemented on the new `tokenizer.json` entry point;
+- [#451](https://github.com/khurram-uworx/Nivara/issues/451) — NFC normalization is only implemented on the new `tokenizer.json` entry point;
       consider promoting it to the shared byte-level BPE path. (The related `added_tokens`
       per-piece concern turned out not to exist — HF matches over raw text, and that is now
       pinned by tests.)
 - [ ] #NNN — Laya `act_head` / escalate signal is documented as unusable (AUROC 0.30);
-      investigate or explicitly close.
-- [ ] #NNN — **pre-existing, surfaced by the Phase 1 blast-radius check**: SmolLM-135M F32 greedy
+      investigate or explicitly close. **Deliberately not raised yet**: it asserts a measurement
+      about a checkpoint this branch has not downloaded. Raise it in Phase 2 once
+      `samples/data/laya/` is loaded and the claim is either reproduced or refuted — an issue that
+      turns out to be wrong about a model we have never run is worse than no issue.
+- [#452](https://github.com/khurram-uworx/Nivara/issues/452) — **pre-existing, surfaced by the Phase 1 blast-radius check**: SmolLM-135M F32 greedy
       generation diverges from PyTorch at generated token 30 (`argmax match 25/32`, final-position
       `cosine 0.243`). Verified byte-identical on `73d0035`, so it predates this branch and is
       unrelated to it. Already **disclosed** in the README's SmolLM diff table (25/32 F32, 22/32
