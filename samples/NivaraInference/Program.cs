@@ -95,7 +95,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|smollm|qwen> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
@@ -267,6 +267,21 @@ class Program
                 if (compare) return RunDistilBertSstCompare(tensors);
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
+            case "laya":
+                if (useGpu)
+                {
+                    Console.Error.WriteLine("--gpu is not wired for laya yet: the decision head runs on CPU, and so does 'laya compare'. The GPU path covers the encoder only (supported: default, benchmark, compare).");
+                    return 1;
+                }
+                if (compareDiag)
+                {
+                    Console.Error.WriteLine("laya does not support 'compare_diag' (supported: default, benchmark, compare).");
+                    return 1;
+                }
+                if (compare) return Laya.Compare(tensors, modelDir);
+                if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
+                if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
+                return Laya.Run<float, float>(tensors, modelDir, mode, "F32");
             case "modernbert":
                 if (useGpu)
                 {

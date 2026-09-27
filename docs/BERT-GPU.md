@@ -135,11 +135,12 @@ exactly as DistilBERT was. The value delivered here is that the architecture is
 *portable at all* — a banded RoPE'd gated pre-norm encoder now runs on the
 accelerator and is pinned to the CPU encoder — not that it is faster.
 
-**The Laya head is out of scope** (#449's Phase 2). `LayaDecisionHead<T>` does
-not exist in the tree, so a head gate would have to run GPU-vs-PyTorch directly
-and drag in all of Phase 2's fixture apparatus. The head needs **zero** new
-kernels (pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV) and becomes a
-small follow-up once a CPU head exists. Filed as issue **#460**.
+**The Laya head was out of scope for #449** (its Phase 2). It has since landed
+on CPU as issue **#460** — `LayaDecisionHead<T>`, gated against the
+`laya==0.3.20` wheel, reflection in [docs/LAYA.md](LAYA.md). The "zero new
+kernels" claim held: pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV.
+Wiring that head onto this runner has not been done, and it should be gated
+GPU-vs-CPU against the CPU head rather than against PyTorch directly.
 
 ## 2. What shipped — architecture and decisions
 
@@ -369,13 +370,13 @@ Prioritized for the next iterations of the GPU journey (see also
    an opt-in native BLAS bridge would close the ~5.6× Nivara-CPU deficit
    (possibly beating the GPU at these shapes); options, targets, and the
    M1/M2/M3 decision gate are captured in ROADMAP-SUGGESTION.md.
-10. **Laya Phase 2 — the decision head (issue #460)**, filed while scoping
-    #449. `LayaDecisionHead<T>` + `LayaPromptBuilder` + a `laya` mode + a
-    PyTorch gate, all on the CPU side first; the GPU head then needs **zero**
-    new kernels (pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV) and
-    reuses `ModernBertGpuRunner`'s trunk. Scope the CPU head first — a GPU head
-    with no CPU head to gate against would have to be pinned to PyTorch
-    directly.
+10. ~~**Laya Phase 2 — the decision head (issue #460)**~~ — **CPU head done
+    2026-09-27** (`khurram/laya`): `LayaDecisionHead<T>` + `LayaPromptBuilder` +
+    a `laya` mode + a wheel gate (prompt ids byte-exact, logits max |diff|
+    1.3e-5). The GPU head still needs **zero** new kernels (pre-norm, *biased*
+    LayerNorm, ReLU, fused *biased* QKV) and reuses `ModernBertGpuRunner`'s
+    trunk; it is not wired. Gate it GPU-vs-CPU against the CPU head. Reflection
+    in [docs/LAYA.md](LAYA.md).
 11. **Mask-as-select (issue #448)** — the local `max == -inf → zeros` clamp in
     `BatchedAttention` is the *prerequisite* #449 landed and is not the same
     thing. #448 is the structural version (suppress via selection rather than
