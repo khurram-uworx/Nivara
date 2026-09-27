@@ -727,8 +727,12 @@ Nivara modules used: `ModernBertEncoder<T>` / `ModernBertLayer<T>` / `ModernBert
 > `validLength + window` with no visible key, so the row max is `-inf` and `x - max` is `NaN` — and
 > because the mask is applied as an **add**, `NaN + (-inf) = NaN` meant the poisoned row escaped
 > suppression in the next layer and took every other query row with it. The kernels now clamp a
-> non-finite row max to zeros, matching `scaled_dot_product_attention`. The residual gap — a `NaN`
-> already present in q/k/v is still not suppressed — is filed.
+> row whose max is exactly `-inf` to zeros, which is the one case PyTorch's `_safe_softmax` (what
+> `scaled_dot_product_attention` uses) clamps too. The test is deliberately `max == -inf` and not
+> `!max.IsFinite`: a `NaN` or `+inf` row max means the model already diverged, PyTorch propagates
+> both to `NaN`, and zeroing them would delete the most useful diagnostic a diverging run produces.
+> The residual gap — a `NaN` already present in q/k/v is still not suppressed, because
+> `NaN + (-inf) = NaN` — is filed as #448.
 
 ### Weight loading
 

@@ -11,8 +11,10 @@ namespace NivaraInference;
 /// ModernBERT-large encoder inference. Unlike the causal and classifier models, this mode has no
 /// task head: it reports the encoder's <c>last_hidden_state</c>, which is what a masked-LM or
 /// embedding model consumes. The <c>compare</c> mode is the parity gate against HuggingFace and
-/// diffs only the valid (non-padding) positions, because a padding row far enough from the valid
-/// region has every key suppressed and is non-finite on both sides.
+/// diffs only the valid (non-padding) positions: a padding row far enough from the valid region has
+/// every key suppressed, and what a fully-masked row produces is an artifact of the mask constant
+/// rather than a meaningful value (Nivara masks with <c>-inf</c> and returns zeros; HuggingFace masks
+/// with <c>finfo.min</c> and returns a uniform distribution).
 /// </summary>
 public static class ModernBert
 {
@@ -427,9 +429,12 @@ public static class ModernBert
         }
 
         // Only the valid prefix is comparable. A padding row beyond the sliding window has every key
-        // suppressed, so its softmax denominator is zero: we produce NaN (Nivara's row softmax has no
-        // safe-softmax clamp) while PyTorch's sdpa produces zeros. Neither value is meaningful and
-        // neither can reach a valid position, because a valid query never reads a padding key.
+        // suppressed, and the value that comes out is an artifact of the mask constant, not a result:
+        // Nivara's mask is additive -inf, so the row max is -inf and the safe-softmax clamp returns
+        // zeros, whereas HuggingFace masks with torch.finfo(dtype).min, so the row max is finite and
+        // it returns a uniform distribution (the output is the mean of the value vectors). Both are
+        // finite and neither is meaningful. It cannot reach a valid position in any case, because a
+        // valid query never reads a padding key.
         int validValues = validLength * refCols;
         var actualValid = actual.AsSpan(0, validValues);
         var referenceValid = reference.AsSpan(0, validValues);

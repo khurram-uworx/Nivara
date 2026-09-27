@@ -164,7 +164,7 @@ so there is no "layer scale" op to build. (Corroborating: `model.layers.0` has n
   So **`Wi` rows `[0:2624]` (`input`) carry the activation and rows `[2624:5248]` (`gate`) do
   not** — the product is `act(input) * gate`. The variable HF calls `gate` is the *unactivated*
   one; this reads backwards and was the hardest bug in Phase 1 (cosine 0.82 at layer 0). The
-  loader hands the **upper** row block to the activated projection.
+  loader hands the **first** row block to the activated projection.
   `act` for ModernBERT-large is `hidden_activation: "gelu"` = **exact erf GELU** (HF `gelu`, not
   `gelu_new`), matching `ReverseGradOperations.GeluExact` in Nivara.
 - Config: `hidden_size 1024`, `intermediate_size 2624`, `28` layers, `16` heads,
@@ -180,9 +180,12 @@ so there is no "layer scale" op to build. (Corroborating: `model.layers.0` has n
 - **A bidirectional band can leave a query row with no visible key.** With `local_attention 128`
   the half-window is 64, so any query row beyond `valid_len + 64` has its whole valid range
   outside the band and is fully masked. This is unreachable for a causal model and is the first
-  thing to check when a *bidirectional* encoder produces `NaN`. Verified in Phase 1: with the
-  clamp, HF and Nivara agree on those rows too (both zero); without it, the `NaN` compounds
-  across layers because the mask is an *add* and `NaN + (-inf) = NaN`.
+  thing to check when a *bidirectional* encoder produces `NaN`. Verified in Phase 1: the clamp makes
+  those rows finite on the Nivara side (zeros). It does **not** make the two implementations agree
+  on those rows — HF masks with `torch.finfo(dtype).min`, so its row max is finite and it produces a
+  *uniform* distribution, not zeros. That is why the gate diffs the valid prefix only. Without the
+  clamp, the `NaN` compounds across layers because the mask is an *add* and
+  `NaN + (-inf) = NaN`.
 - **QK-norm: ModernBERT-large has none.** The stock checkpoint holds exactly 6 tensors per layer
   (`attn.Wqkv.weight`, `attn.Wo.weight`, `attn_norm.weight`, `mlp.Wi.weight`, `mlp.Wo.weight`,
   `mlp_norm.weight`) and 5 at layer 0, which has no `attn_norm`. QK-norm is a base-vs-large

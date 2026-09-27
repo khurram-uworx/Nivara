@@ -86,8 +86,9 @@ Both were latent before ModernBERT; ModernBERT is simply the first workload here
    was `-inf` and `x - max` was `NaN`. Because the mask is applied as `score + (-inf)` and
    `NaN + (-inf) is NaN`, those rows escaped suppression in the *next* layer and poisoned every
    query row — so the whole output went `NaN` from layer 2 onward, not just the padding rows.
-   PyTorch's sdpa clamps this case to zeros; the kernels now do too. Unreachable for a causal
-   model, so no existing model changes behaviour.
+   PyTorch's `_safe_softmax` clamps this one case to zeros, so the kernels do too. Note the guard is
+   `max == -inf`, **not** `!max.IsFinite` — a `NaN` or `+inf` row max propagates, as in PyTorch.
+   Unreachable for a causal model, so no existing model changes behaviour.
 
 The second fix is the one place Phase 1 touched `src/Nivara`, and it was a deliberate decision:
 the alternative was a sample-level fudge that gives padding rows a real attention result where

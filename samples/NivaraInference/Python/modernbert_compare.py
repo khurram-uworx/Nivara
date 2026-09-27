@@ -48,9 +48,12 @@ def main():
     print(f"Output[:10]: {[f'{v:.6f}' for v in hidden.flatten()[:10]]}")
 
     # Attention is bidirectional, so a padding row far enough from the valid region has every key
-    # suppressed and yields non-finite values. HuggingFace's padded sdpa path has the same
-    # property, and it never reaches a valid position because a valid query never reads a pad key.
-    # The C# gate therefore diffs the valid positions only and reports these counts on both sides.
+    # suppressed. What such a row yields is an artifact of the mask constant, and it is not a result
+    # worth comparing: this side masks with finfo.min, so the row max is finite and the row softmax is
+    # uniform (the output is the mean of the value vectors), while the C# side masks with -inf, gets a
+    # row max of -inf, and its safe-softmax clamp returns zeros. Both are finite, and neither can reach
+    # a valid position because a valid query never reads a pad key. The C# gate therefore diffs the
+    # valid positions only and reports these counts on both sides.
     row_finite = np.isfinite(hidden).all(axis=1)
     non_finite_rows = int((~row_finite).sum())
     print(f"Non-finite rows: {non_finite_rows} (all at padding positions: "
