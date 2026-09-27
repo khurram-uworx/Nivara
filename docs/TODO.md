@@ -157,30 +157,59 @@ Grounded before implementation, as the iterative-work workflow requires.
 
 ## G1 corrections - `docs/LAYA.md` §4 vs `laya/common.py` 0.3.20
 
-Found while grounding. Nine places where §4's transcription is wrong. Two would be silent bugs if
-copied, which is the argument for D1. Fixed in Unit 5.
+Re-derived line by line against `laya/common.py` and then **empirically checked where a claim was
+behavioural**. Six stand. Three did not survive - they are struck out below rather than deleted, so
+the record shows what a first reading of the reference got wrong.
 
-1. **Option tokenization.** §4 shows `tok(...)[:48]`. The wheel uses
-   `tok(..., truncation=True, max_length=48)` **inside the tokenizer call**, with a comment saying
-   the post-hoc slice "still makes the tokenizer process the whole (possibly long) description".
-   Differs when a token straddles the 48 boundary.
-2. **State truncation direction.** §4 says "take the *last* `room` tokens". The wheel's default is
-   `truncate_left=False` -> `state_ids[:room]`, the **first** `room`. `agent.py:568` sets
-   `truncate_left = isinstance(state, list)`. Left-truncation is the exception.
-3. **`room` is off by one in §4.** Wheel: `room = max(0, max_len - len(ids) - 1)`; the `- 1` pays
-   for the trailing `[SEP]`.
-4. **`opt_budget` is recomputed** after the per-option shrink and only then used for
-   `head_ids[:max(8, opt_budget)]`. §4 uses the stale value.
-5. **Markers are filtered:** `[m for m in markers if m < max_len]`. §4 omits it, so
-   `len(markers) != len(opts)` is reachable - which is exactly what `agent.py:582` raises on.
-6. **Temperature is not applied in the head.** The buffer is registered and never read in
-   `forward`; `agent.py:662-668` divides after `masked_fill`.
-7. **State tokenization has no `max_length`**, so HF truncates at `model_max_length = 8192` with a
-   warning. A port must replicate that or long-state prompts diverge.
-8. **Noul criterion fallbacks are part of the prompt** - `"no, the statement does not hold"` /
-   `"yes, the statement holds"`. §4 does not record them.
-9. `_resolve_noul_labels` strips whitespace and requires two distinct non-empty strings;
-   `render_criterion` JSON-dumps structured values with `separators=(", ", ": ")`.
+**Why this mattered enough to re-check:** the first pass produced nine candidate corrections. Three
+were wrong, and two of those would have shipped a false claim into a durable reference document
+while looking rigorous. #1 and #7 in particular were asserted confidently and are both falsified by
+a two-line probe. The lesson is the same one D1 already encodes - a plausible reading of a
+reference is not a verified one.
+
+### Stands - real misstatements or omissions in §4
+
+2. **State truncation direction (§4.380).** §4 says "take the *last* `room` tokens of the state".
+   The wheel's `build_sequence` default is `truncate_left=False` -> `state_ids[:room]`, the
+   **first** `room` (`common.py:118`). `agent.py:568` sets `truncate_left = isinstance(state, list)`,
+   so left-truncation is the exception for conversation lists, not the rule. **A port copying §4
+   would keep the wrong end of a long state and still run.**
+3. **`room` is never defined in §4.** The wheel is `room = max(0, max_len - len(ids) - 1)`
+   (`common.py:114`); the `- 1` pays for the trailing `[SEP]`. §4 line 369 uses `room` as if given.
+4. **Marker filtering omitted.** The return is `ids[:max_len], [m for m in markers if m < max_len]`
+   (`common.py:120`). §4 line 370 returns `marker_positions` unfiltered, so a port can end up with
+   `len(markers) != len(opts)` - which is exactly what `agent.py:582` raises on.
+5. **Temperature is not applied in the head.** `DecisionModel.__init__` registers the buffer and
+   `forward` never reads it (`common.py:136`, `:139-175`); `agent.py:666` divides by `t_scale`
+   *after* the logits come back. §4 states the values but not the application point, which is the
+   part a port has to match.
+6. **Noul criterion fallbacks are prompt text.** `"no, the statement does not hold"` /
+   `"yes, the statement holds"` (`common.py:64,66`). §4 line 374 elides them behind `…`, so a
+   port that drops them changes the prompt for any `noul` question without a `false`/`true`
+   criterion.
+7. **Undocumented validation.** `_resolve_noul_labels` strips whitespace and requires two distinct
+   non-empty strings (`common.py:43-46`); `render_criterion` JSON-dumps structured values with
+   `separators=(", ", ": ")` and `ensure_ascii=False` (`common.py:32`).
+
+### Falsified - struck out, do not propagate
+
+1. ~~**Option tokenization is capped inside the tokenizer call.**~~ The wheel does use
+   `tok(..., truncation=True, max_length=48)`, but §4's `tok(...)[:48]` produces **byte-identical
+   ids** - verified: `truncation=True, max_length=48` == `[:48]` on a 200-token description
+   straddling the boundary (`True len 48`). The wheel's own comment says the slice "is exactly what
+   the previous slice produced"; the change was about not tokenizing a long tail, i.e. throughput.
+   The earlier claim that it "differs when a token straddles the 48 boundary" was simply wrong.
+   §4 line 364 is correct as written.
+8. ~~**The state is truncated at `model_max_length` = 8192.**~~ Verified against the real Laya
+   tokenizer: tokenizing a 20,001-token state with no `max_length` **returns all 20,001 ids** and
+   emits only a warning ("Token indices sequence length is longer than the specified maximum
+   sequence length ... will result in indexing errors"). HF does not truncate there. The state is
+   bounded solely by `room`, i.e. by `max_len` = 512. **So the C# port must not impose an 8192
+   cap** - doing so would have been the divergence I was about to introduce.
+9. ~~**`opt_budget` is recomputed after the shrink and §4 uses the stale value.**~~ §4 line 368 is
+   `head_ids[:max(8, head_max_len - sum(len(o) for o in opt_ids))]`, evaluated *after* the shrink
+   block, so it already uses the recomputed sum and is equivalent to the wheel's two-step
+   `opt_budget = ...` / `head_ids[:max(8, opt_budget)]`. §4 line 368 is correct.
 
 ## Already free (verified - do not rebuild)
 
