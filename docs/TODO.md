@@ -82,6 +82,15 @@ byte-identical A–S 7.1.26 erf ports. Promote the scalar to one authoritative
 kernel and all `GemmKernels` epilogues at it (AGENTS.md rule 8). Zero behavior
 change; `GeGlu` needs the scalar form regardless.
 
+**Correction found while implementing.** The two *GPU* copies were identical, but
+neither is bit-identical to the CPU: `GradKernels.Erf<T>` chains
+`T.FusedMultiplyAdd` (`:826-829`) while the GPU port does separate
+multiply-then-add, because `XMath` exposes no FMA. Measured agreement is better
+than `1e-6` relative, so the new cross-check test asserts `1e-6` — not equality —
+and the plan's earlier "bit-identical to the CPU" wording for GELU was wrong. This
+does **not** move the gate: DistilBERT's f32 FFN already routes through this kernel,
+and the recorded baseline passes at `maxRel 3.238E-006` with it in the path.
+
 ### 2. `ElementwiseKernels.Rotary`
 
 One thread per `(row, head, freqIndex)`, writing both halves of the pair, so

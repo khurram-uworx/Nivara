@@ -13,6 +13,9 @@ namespace Nivara.Samples.Gpu;
 ///                  * scale; -inf where the padding mask is 0 (mask[j] &lt; 0.5)
 ///   row softmax (max-subtract, exp, /sum) — same numerics as the CPU SoftmaxSingle
 ///   attnOut[b,q,h*headDim+d] = sum_j p_j * V[b,j,h*headDim+d]
+/// A row whose keys are all suppressed writes zeros rather than NaN, mirroring the CPU
+/// safe-softmax clamp; such a row is an artifact of the mask constant and never reaches a
+/// valid position, because a valid query never reads a padding key.
 /// The score row is recomputed per pass (no per-work-item array); the p_j row is
 /// spilled to a per-(b,h,q) global scratch row so each output element's accumulation
 /// is a plain sequential j loop — the same effective per-element order and precision
@@ -46,6 +49,7 @@ internal static class AttentionKernels
         int dOffset = h * headDim;
         int qRow = b * seqLen + qPos;
         int maskBase = b * seqLen;
+        int outBase = qRow * D;
 
         float max = float.NegativeInfinity;
         for (int j = 0; j < seqLen; j++)
@@ -53,6 +57,18 @@ internal static class AttentionKernels
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
             if (mask[maskBase + j] < 0.5f) s = float.NegativeInfinity;
             if (s > max) max = s;
+        }
+
+        // Every key suppressed: the row max is -inf, so s - max is NaN and the whole output
+        // goes NaN from here. Mirrors the CPU safe-softmax clamp (GradKernels.cs) — such a row
+        // produces zeros, which is a mask-constant artifact that never reaches a valid
+        // position. Reachable as soon as a caller can suppress an entire row, e.g. a
+        // sliding-window band over a padded batch.
+        if (max == float.NegativeInfinity)
+        {
+            for (int d = 0; d < headDim; d++)
+                attnOut[outBase + dOffset + d] = 0f;
+            return;
         }
 
         float sum = 0f;
@@ -71,7 +87,6 @@ internal static class AttentionKernels
             scores[scoreBase + j] = XMath.Exp(s - max) / sum;
         }
 
-        int outBase = qRow * D;
         for (int d = 0; d < headDim; d++)
         {
             float acc = 0f;
