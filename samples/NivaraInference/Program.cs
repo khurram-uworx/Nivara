@@ -270,14 +270,15 @@ class Program
             case "laya":
                 if (useGpu)
                 {
-                    Console.Error.WriteLine("--gpu is not wired for laya yet: the decision head runs on CPU. The GPU path covers the encoder only (supported: default, benchmark).");
+                    Console.Error.WriteLine("--gpu is not wired for laya yet: the decision head runs on CPU, and so does 'laya compare'. The GPU path covers the encoder only (supported: default, benchmark, compare).");
                     return 1;
                 }
-                if (compare || compareDiag)
+                if (compareDiag)
                 {
-                    Console.Error.WriteLine("laya does not support '" + (compare ? "compare" : "compare_diag") + "' yet (supported: default, benchmark).");
+                    Console.Error.WriteLine("laya does not support 'compare_diag' (supported: default, benchmark, compare).");
                     return 1;
                 }
+                if (compare) return Laya.Compare(tensors, modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
                 if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
                 return Laya.Run<float, float>(tensors, modelDir, mode, "F32");

@@ -27,6 +27,9 @@ public static class Laya
 {
     const string ModelTypeName = "Laya";
 
+    /// <summary>Parity bound: |csharp - reference| &lt;= GateRelTol * (1 + |reference|).</summary>
+    const double GateRelTol = 1e-3;
+
     const string FixtureState = "User: how do I reset my password?\nAgent: open settings, then security.";
 
     /// <summary>
@@ -314,6 +317,335 @@ public static class Laya
         // and again as a footer so it cannot be mistaken for one of the confidences.
         Console.WriteLine($"  act_head: {decision.ActionProbability:F4}  (not a signal; reads ~1.0 regardless of input)");
         Console.WriteLine();
+    }
+
+    /// <summary>
+    /// The wheel parity gate. F32-only: the reference fixtures are float32, so a narrow-precision run
+    /// would report its own weight rounding rather than a porting defect.
+    /// </summary>
+    /// <remarks>
+    /// Prompt parity runs first and fails the gate on its own. A silently different render still
+    /// produces logits, and comparing those would report a numeric disagreement whose real cause was
+    /// a different question. The fixtures come from <c>Python/laya_compare.py</c>, which loads
+    /// <c>laya/common.py</c> out of the <c>laya==0.3.20</c> wheel rather than transcribing it.
+    /// </remarks>
+    public static int Compare(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    {
+        string metaPath = Path.Combine(modelDir, "laya_meta.json");
+        string promptsPath = Path.Combine(modelDir, "prompts_py.bin");
+        string logitsPath = Path.Combine(modelDir, "logits_py.bin");
+        string actPath = Path.Combine(modelDir, "act_py.bin");
+        string answersPath = Path.Combine(modelDir, "answers_py.json");
+        foreach (string required in new[] { metaPath, promptsPath, logitsPath, actPath, answersPath })
+        {
+            if (File.Exists(required)) continue;
+            Console.Error.WriteLine($"Reference file not found: {required}");
+            Console.Error.WriteLine("Run: python samples/NivaraInference/Python/laya_compare.py");
+            return 1;
+        }
+
+        Console.WriteLine($"=== {ModelTypeName} Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        using var metaDoc = JsonDocument.Parse(File.ReadAllText(metaPath));
+        var meta = metaDoc.RootElement;
+        string wheel = meta.GetProperty("wheel").GetString() ?? "";
+        if (wheel != "laya==0.3.20")
+        {
+            Console.Error.WriteLine($"Fixtures were generated from '{wheel}', expected laya==0.3.20. Regenerate them.");
+            return 1;
+        }
+        if (meta.GetProperty("state").GetString() != FixtureState)
+        {
+            Console.Error.WriteLine("Fixture state does not match the sample. Regenerate the fixtures.");
+            return 1;
+        }
+
+        var questionIds = meta.GetProperty("question_ids").EnumerateArray()
+            .Select(e => e.GetString()).ToArray();
+        if (!questionIds.SequenceEqual(FixtureQuestions.Select(q => q.Id)))
+        {
+            Console.Error.WriteLine(
+                "Fixture question order does not match the sample " +
+                $"({string.Join(", ", questionIds)}). Regenerate the fixtures.");
+            return 1;
+        }
+
+        var agent = LoadAgentConfig(modelDir);
+        var tokenizer = LoadTokenizer(modelDir);
+        var prompts = ReadPrompts(promptsPath);
+        if (prompts.Length != FixtureQuestions.Length)
+        {
+            Console.Error.WriteLine(
+                $"prompts_py.bin has {prompts.Length} questions, the sample has {FixtureQuestions.Length}.");
+            return 1;
+        }
+
+        Console.WriteLine($"Reference: {wheel}, attn_implementation=" +
+                          $"{meta.GetProperty("attn_implementation").GetString()}");
+        Console.WriteLine();
+        Console.WriteLine("Prompt parity (byte-exact, before any numeric comparison):");
+
+        bool promptsOk = true;
+        for (int q = 0; q < FixtureQuestions.Length; q++)
+        {
+            var question = FixtureQuestions[q];
+            var sequence = LayaPromptBuilder.BuildSequence(
+                tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen);
+            var (refIds, refMarkers) = prompts[q];
+
+            int idMismatches = CountMismatches(sequence.Ids, refIds);
+            int markerMismatches = CountMismatches(sequence.Markers, refMarkers);
+            bool ok = idMismatches == 0 && markerMismatches == 0 && sequence.Ids.Length == refIds.Length
+                      && sequence.Markers.Length == refMarkers.Length;
+            promptsOk &= ok;
+            Console.WriteLine(
+                $"  {question.Id,-10} {sequence.Length,4} tok  {sequence.Markers.Length,2} markers  " +
+                $"{(ok ? "match" : $"MISMATCH ids={idMismatches} markers={markerMismatches}")}");
+            if (ok) continue;
+
+            int shown = Math.Min(8, Math.Max(sequence.Ids.Length, refIds.Length));
+            Console.WriteLine($"    csharp ids[:{shown}]: {string.Join(", ", sequence.Ids.Take(shown))}");
+            Console.WriteLine($"    python ids[:{shown}]: {string.Join(", ", refIds.Take(shown))}");
+        }
+        Console.WriteLine();
+
+        if (!promptsOk)
+        {
+            Console.WriteLine("Prompt parity: FAIL");
+            Console.WriteLine("Not comparing logits: a different prompt makes a numeric diff meaningless.");
+            return 1;
+        }
+        Console.WriteLine("Prompt parity: PASS");
+        Console.WriteLine();
+
+        var config = LoadEncoderConfig(modelDir);
+        var (encoder, head, buildMs) = LoadModels<float, float>(tensors, config, agent);
+        Console.WriteLine($"Load weights: {buildMs} ms");
+        Console.WriteLine();
+
+        float[] refLogits = ReadFloats(logitsPath);
+        float[] refAct = ReadFloats(actPath);
+        using var answersDoc = JsonDocument.Parse(File.ReadAllText(answersPath));
+        var answers = answersDoc.RootElement;
+        var calibration = new LayaCalibration(agent.Temperature, agent.TemperatureByOptions);
+
+        bool logitsOk = true;
+        bool decisionsOk = true;
+        int logitCursor = 0;
+        for (int q = 0; q < FixtureQuestions.Length; q++)
+        {
+            var question = FixtureQuestions[q];
+            var (refIds, refMarkers) = prompts[q];
+
+            var hidden = encoder.Forward(refIds, refIds.Length);
+            var output = head.Forward(hidden, question.Type, refMarkers, refIds.Length);
+
+            int k = refMarkers.Length;
+            if (logitCursor + k > refLogits.Length || output.Logits.Length != k)
+            {
+                Console.Error.WriteLine(
+                    $"{question.Id}: logit shape mismatch, csharp {output.Logits.Length}, reference {k}.");
+                return 1;
+            }
+
+            var reference = refLogits.AsSpan(logitCursor, k);
+            logitCursor += k;
+            logitsOk &= ReportLogits(question.Id, output.Logits, reference);
+
+            if (q * 2 + 1 >= refAct.Length)
+            {
+                Console.Error.WriteLine("act_py.bin is shorter than the question list.");
+                return 1;
+            }
+            double refActProbability = SoftmaxFirst(refAct[q * 2], refAct[q * 2 + 1]);
+            double actDiff = Math.Abs(output.ActionProbability - refActProbability);
+            Console.WriteLine(
+                $"  act probability: csharp {output.ActionProbability:F6}  python {refActProbability:F6}  " +
+                $"diff {actDiff:F8}  (weak signal: the shipped head saturates near 1.0)");
+
+            var decision = calibration.Decode(question, output.Logits, output.ActionProbability);
+            decisionsOk &= ReportDecision(question, decision, answers.GetProperty(question.Id));
+            Console.WriteLine();
+        }
+
+        if (logitCursor != refLogits.Length)
+        {
+            Console.Error.WriteLine(
+                $"logits_py.bin has {refLogits.Length} values, the prompts account for {logitCursor}.");
+            return 1;
+        }
+
+        Console.WriteLine($"Prompt parity:  PASS");
+        Console.WriteLine($"Logit parity:   {(logitsOk ? "PASS" : $"FAIL (beyond {GateRelTol:G} relative)")}");
+        Console.WriteLine($"Decision parity: {(decisionsOk ? "PASS" : "FAIL")}");
+
+        if (!logitsOk || !decisionsOk) return 1;
+
+        Console.WriteLine();
+        Console.WriteLine("Gate passed. Prompts, marker logits, and the typed decision match the laya 0.3.20 wheel.");
+        return 0;
+    }
+
+    static bool ReportLogits(string questionId, float[] actual, ReadOnlySpan<float> reference)
+    {
+        double maxAbs = 0.0;
+        int beyond = 0;
+        for (int i = 0; i < actual.Length; i++)
+        {
+            double diff = Math.Abs(actual[i] - reference[i]);
+            if (diff > maxAbs) maxAbs = diff;
+            double allowed = GateRelTol * (1.0 + Math.Abs(reference[i]));
+            if (diff > allowed) beyond++;
+        }
+
+        Console.WriteLine(
+            $"[{questionId}] logits ({actual.Length}): max|diff|={maxAbs:F6}  " +
+            $"{(beyond == 0 ? "match" : $"{beyond} beyond {GateRelTol:G} relative")}");
+        Console.WriteLine($"  csharp: {string.Join("  ", actual.Select(v => v.ToString("F4")))}");
+        Console.WriteLine($"  python: {string.Join("  ", reference.ToArray().Select(v => v.ToString("F4")))}");
+        return beyond == 0;
+    }
+
+    static bool ReportDecision(LayaQuestion question, LayaDecision decision, JsonElement expected)
+    {
+        var mismatches = new List<string>();
+
+        void Check(string name, string actual, string? reference)
+        {
+            if (actual == reference) return;
+            mismatches.Add($"{name}: csharp '{actual}' python '{reference}'");
+        }
+
+        void CheckNumber(string name, double actual, double reference)
+        {
+            // Both sides round to 4 decimal places for the reported figures. Half a display unit
+            // is the disagreement worth failing on; anything smaller is the same printed number.
+            if (Math.Abs(actual - reference) <= 5e-5) return;
+            mismatches.Add($"{name}: csharp {actual:F4} python {reference:F4}");
+        }
+
+        Check("type", LayaPromptBuilder.TypeName(question.Type), expected.GetProperty("type").GetString());
+        Check("bucket", decision.Temperature.Bucket, expected.GetProperty("temperature_bucket").GetString());
+
+        bool fromBucket = expected.GetProperty("temperature_from_bucket").GetBoolean();
+        bool wasClamped = expected.GetProperty("temperature_was_clamped").GetBoolean();
+        if (decision.Temperature.FromBucketTable != fromBucket)
+            mismatches.Add($"from_bucket: csharp {decision.Temperature.FromBucketTable} python {fromBucket}");
+        if (decision.Temperature.WasClamped != wasClamped)
+            mismatches.Add($"was_clamped: csharp {decision.Temperature.WasClamped} python {wasClamped}");
+        if (Math.Abs(decision.Temperature.Scale - expected.GetProperty("temperature_scale").GetDouble()) > 1e-9)
+            mismatches.Add(
+                $"temperature: csharp {decision.Temperature.Scale:R} python {expected.GetProperty("temperature_scale").GetDouble():R}");
+
+        switch (question.Type)
+        {
+            case LayaQuestionType.Choice:
+                Check("choice", decision.Choice ?? "", expected.GetProperty("choice").GetString());
+                CheckRoundedList("probabilities", decision.Probabilities, expected.GetProperty("probabilities"), mismatches);
+                CheckNumber("confidence", decision.Confidence, expected.GetProperty("confidence").GetDouble());
+                break;
+            case LayaQuestionType.Score:
+                CheckNumber("score", decision.Score ?? double.NaN, expected.GetProperty("score").GetDouble());
+                CheckRoundedList("probabilities", decision.Probabilities, expected.GetProperty("probabilities"), mismatches);
+                CheckNumber("confidence", decision.Confidence, expected.GetProperty("confidence").GetDouble());
+                break;
+            case LayaQuestionType.Noul:
+                CheckNumber("noul", decision.NoulProbability ?? double.NaN, expected.GetProperty("noul").GetDouble());
+                CheckNumber("confidence", decision.Confidence, expected.GetProperty("confidence").GetDouble());
+                break;
+        }
+
+        CheckNumber("answer_confidence", decision.AnswerConfidence, expected.GetProperty("answer_confidence").GetDouble());
+        CheckNumber("act_probability", decision.ActionProbability, expected.GetProperty("act_probability").GetDouble());
+
+        if (mismatches.Count == 0)
+        {
+            Console.WriteLine($"  decision: match ({decision.Temperature.Bucket}" +
+                              $"{(decision.Temperature.WasClamped ? ", clamped" : "")})");
+            return true;
+        }
+
+        Console.WriteLine($"  decision: {mismatches.Count} MISMATCH(ES)");
+        foreach (string mismatch in mismatches)
+            Console.WriteLine($"    {mismatch}");
+        return false;
+    }
+
+    static void CheckRoundedList(
+        string name, IReadOnlyList<double> actual, JsonElement expected, List<string> mismatches)
+    {
+        var reference = expected.EnumerateArray().Select(e => e.GetDouble()).ToArray();
+        if (actual.Count != reference.Length)
+        {
+            mismatches.Add($"{name}: csharp {actual.Count} values, python {reference.Length}");
+            return;
+        }
+        for (int i = 0; i < actual.Count; i++)
+        {
+            if (Math.Abs(actual[i] - reference[i]) <= 5e-5) continue;
+            mismatches.Add($"{name}[{i}]: csharp {actual[i]:F4} python {reference[i]:F4}");
+        }
+    }
+
+    static int CountMismatches(int[] actual, int[] reference)
+    {
+        int n = Math.Min(actual.Length, reference.Length);
+        int mismatches = Math.Abs(actual.Length - reference.Length);
+        for (int i = 0; i < n; i++)
+            if (actual[i] != reference[i]) mismatches++;
+        return mismatches;
+    }
+
+    static (int[] Ids, int[] Markers)[] ReadPrompts(string path)
+    {
+        int[] words = ReadInts(path);
+        if (words.Length == 0)
+            throw new InvalidDataException($"{path} is empty.");
+
+        int cursor = 0;
+        int n = words[cursor++];
+        var prompts = new (int[] Ids, int[] Markers)[n];
+        for (int q = 0; q < n; q++)
+        {
+            int nIds = words[cursor++];
+            var ids = new int[nIds];
+            Array.Copy(words, cursor, ids, 0, nIds);
+            cursor += nIds;
+            int nMarkers = words[cursor++];
+            var markers = new int[nMarkers];
+            Array.Copy(words, cursor, markers, 0, nMarkers);
+            cursor += nMarkers;
+            prompts[q] = (ids, markers);
+        }
+        if (cursor != words.Length)
+            throw new InvalidDataException($"{path} has {words.Length - cursor} trailing words.");
+        return prompts;
+    }
+
+    static double SoftmaxFirst(float a, float b)
+    {
+        double max = Math.Max(a, b);
+        double ea = Math.Exp(a - max);
+        double eb = Math.Exp(b - max);
+        return ea / (ea + eb);
+    }
+
+    static float[] ReadFloats(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var values = new float[bytes.Length / sizeof(float)];
+        Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
+        return values;
+    }
+
+    static int[] ReadInts(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var values = new int[bytes.Length / sizeof(int)];
+        Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
+        return values;
     }
 
     static string Truncate(string text, int width)
