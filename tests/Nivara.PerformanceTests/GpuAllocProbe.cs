@@ -69,7 +69,7 @@ internal static class GpuAllocProbe
             for (int i = 0; i < host.Length; i++)
                 host[i] = i * 0.5f;
 
-            Console.WriteLine($"{"target",-12} {"buffers",-9} {"alloc ms",-10} {"fill GB/s",-11} {"verify",-9} {"result",-8}");
+            Console.WriteLine($"{"target",-17} {"buffers",-9} {"alloc ms",-10} {"fill GB/s",-11} {"verify",-9} {"result",-8}");
             long largestOk = 0;
             bool layaOk = false;
 
@@ -120,8 +120,10 @@ internal static class GpuAllocProbe
                         b.Dispose();
                 }
 
-                string label = target == LayaF32Bytes ? "1.685 GB*" : Format(target);
-                Console.WriteLine($"{label,-12} {chunks,-9} {allocWatch.Elapsed.TotalMilliseconds,-10:F1} {fillGbps,-11:F2} {"-",-9} {result,-8}");
+                // Same Format() as every other row, so the table and the header agree on units
+                // (Format reports GiB as "GB"; 1.569 GiB is 1.685 GB decimal).
+                string label = target == LayaF32Bytes ? Format(LayaF32Bytes) + " (Laya)" : Format(target);
+                Console.WriteLine($"{label,-17} {chunks,-9} {allocWatch.Elapsed.TotalMilliseconds,-10:F1} {fillGbps,-11:F2} {"-",-9} {result,-8}");
             }
 
             Console.WriteLine();

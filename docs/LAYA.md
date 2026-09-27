@@ -646,9 +646,12 @@ out the CPU side could not be improved at all: the probe wrote a register-blocke
 loop, A and B read in place with no `RentCopy`) to test the hypothesis that
 `MultiplyRowFloat`'s one-`Dot`-per-output-element structure was the bottleneck, and it came
 in at 2529 ms against the in-tree kernel's 2414 ms. BCL's `TensorPrimitives.Dot` is already
-well tuned. So the CPU was given its *best available* showing and still lost by 2.6x, while
-the GPU was measured exactly as committed with #440's tile-32/2x2 - a 2-3x speedup - still
-unclaimed. The GPU number is also the conservative one, because this harness reads the iGPU
+well tuned, so a blocked rewrite of the GEMM is not the lever. The one CPU cost the probe
+did not isolate is the per-call `RentCopy` of A inside `MultiplyCore`; it is bounded rather
+than measured, and an encoder layer's four 2 MB copies against 6.3 G MACs puts it at a
+low-single-digit percentage, far short of a 2.6x gap. So the CPU was given its *best
+available* showing and still lost by 2.6x, while the GPU was measured exactly as committed
+with #440's tile-32/2x2 - a 2-3x speedup - still unclaimed. The GPU number is also the conservative one, because this harness reads the iGPU
 at roughly half the idle-machine rate.
 
 **What the decision does and does not license.**

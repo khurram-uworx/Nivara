@@ -1111,6 +1111,10 @@ The full working set allocates and verifies on a 7.559 GiB Arc iGPU. F16 device 
 therefore a later optimisation, not a prerequisite. Note allocation cost is superlinear
 (109 ms at 1.569 GiB, 789 ms at 3 GB) - driver paging, not Nivara.
 
+Treat the milliseconds as indicative only. Four consecutive runs gave Laya's row 109.1 /
+147.7 / 133.1 / 100.6 ms at 8.31 / 7.32 / 7.18 / 7.77 GB/s, every one of them returning
+the same verdict and exit 0. The gate is binary; the fill rate is a rough estimate.
+
 **2. Throughput: GPU wins on the dominant term.** Both backends were measured at identical
 shapes, in the same session, each cell gated against the same host double-precision truth
 (`maxAbs <= 1e-3`), so this is a like-for-like comparison rather than a cross-harness one.
@@ -1150,7 +1154,13 @@ Two findings worth keeping, both negative:
   loop, A and B read in place with no `RentCopy`) on the hypothesis that
   `MultiplyRowFloat`'s one-`Dot`-per-output-element structure was the bottleneck. It came
   in at 2529 ms against the in-tree kernel's 2414 ms. BCL's `TensorPrimitives.Dot` is
-  already well tuned. There is no CPU GEMM fix worth making.
+  already well tuned, so **a blocked rewrite of the GEMM is not the lever** - which is the
+  specific thing #456-era thinking pointed at.
+  One CPU-side cost the probe did *not* isolate is the per-call `RentCopy` of A that
+  `MultiplyCore` performs once `ShouldParallelize` opens; `Blocked` skips it and both
+  in-tree legs pay it. Bounded rather than measured: an encoder layer copies A four times
+  at 512x1024 floats (2 MB each) against 6.3 G MACs, so even eliminating it entirely is a
+  low-single-digit percentage - two orders of magnitude short of what a 2.6x gap needs.
 - **Therefore the CPU's known ~6.1-6.5x deficit is not a GEMM problem.** The CPU GEMM does
   66-80 GMAC/s against a 26 GMAC/s end-to-end reading, so ~3x of the deficit is in
   non-GEMM work. That is the open lead, and it is untracked - see item 1 below.

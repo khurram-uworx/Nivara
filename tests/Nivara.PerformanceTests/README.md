@@ -160,6 +160,14 @@ memory, which is driver paging/eviction rather than anything in Nivara. It does 
 a one-time load, but it means the headroom above Laya's size is narrower than the raw
 7.559 GiB figure suggests.
 
+**The `alloc ms` and `fill GB/s` columns are not a contract; the verdict is.** Four
+consecutive runs on the same machine and AC line gave Laya's row 109.1 / 147.7 / 133.1 /
+100.6 ms and 8.31 / 7.32 / 7.18 / 7.77 GB/s, and the 1.500 GB row ranged 104-259 ms. Every
+run returned exit 0 with the same verdict, so the answer is stable and the timings are not.
+Read this mode as a binary gate plus a rough fill-rate estimate; do not threshold on the
+milliseconds. (Same class of instability as the single-row variance noted under
+`--cpu-gemm`.)
+
 #### `--cpu-gemm` - CPU GEMM ceiling
 
 `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm`
@@ -202,8 +210,12 @@ by hoisting the transpose to weight-load time as the GPU path already does.
 
 Caveat: individual rows vary up to 6.5x run to run (`distilbert fc1` `AutoDiff` read 6.3 ms
 and 41.3 ms on consecutive runs, most likely `ArrayPool` `clearArray` interacting with GC).
-The projected roll-up is stable to ~2% because it sums eight shapes across 28 layers, so
-read conclusions off the roll-up, not single rows. Runs in ~7 s.
+The in-tree legs' projected roll-up is stable to ~2% across three runs (2414 / 2462 /
+2453 ms for `AutoDiff`), so read conclusions off the roll-up, not single rows. The
+probe-local `Blocked` leg is looser (~9%: 2529 / 2646 / 2772 ms) because it carries its own
+`Parallel.For` scheduling behaviour, which widens the interval on the thin `scorer` rows
+where task overhead is a large share of the row. It was behind `AutoDiff` in all three
+runs, so the conclusion does not depend on the spread. Runs in ~7 s.
 
 **Steady-state vs per-call.** The two in-tree legs are exactly the two cases the probe plan
 asked to distinguish. `AutoDiff` receives B as `[N x K]` ready-made, so it is the
