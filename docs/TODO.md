@@ -52,12 +52,23 @@ int nhead = Math.Max(1, d / 64);
 T scale  = T.CreateChecked(1.0 / Math.Sqrt(d / (double)nhead));
 ```
 
-- `LayaHeadAttention<T>` - fused `in_proj_weight` [3072,1024] + `in_proj_bias` [3072] split into
-  q/k/v row blocks, `out_proj` [1024,1024] + bias. No RoPE, no band. Dense `[L,L]` additive mask
-  with `T.NegativeInfinity` in the `pad` columns, built from `pad = ~attention_mask` (True =
-  ignore) - the **inverse polarity** of the encoder's additive float mask.
-- `LayaHeadLayer<T>` - pre-norm: `x + attn(norm1(x))`, then `x + linear2(relu(linear1(norm2(x))))`.
-  Biased `LayerNorm(1024, 1e-5)` throughout (PyTorch `nn.LayerNorm`, `eps` default 1e-5).
+- **Attention: reuse `BertSelfAttention<T>` (`BertModel.cs:46`), do not write a new one.** G1
+  found the plan's planned `LayaHeadAttention<T>` would be a near-duplicate. `BertSelfAttention<T>`
+  already has biased q/k/v, a biased `oProj`, the dense `[L,L]` additive mask with
+  `T.NegativeInfinity`, and the `1/sqrt(embedDim/numHeads)` scale, and its local `MultiHeadAttention`
+  helper (`BertModel.cs:140`) delegates to `ReverseGradOperations.MultiHeadAttention` with the right
+  `numHeads` and scale. The checkpoint's *fused* `in_proj` is a **load-time** concern, not a
+  runtime one: `LoadLinearSlice` slices the weight row blocks and the new bias-slice helper slices
+  `in_proj_bias`. The mask polarity needs no special handling either - the reference's
+  `pad = ~attention_mask` (True = ignore) and this convention's "below 0.5 = ignore" are the same
+  predicate given a 1/0 `attention_mask`, so the raw mask is passed straight through. AGENTS.md
+  rule 8 prefers one authoritative implementation over copies.
+- `LayaHeadLayer<T>` - **genuinely new; no existing type fits.** Pre-norm:
+  `x + attn(norm1(x))`, then `x + linear2(relu(linear1(norm2(x))))`. Biased `LayerNorm(1024, 1e-5)`
+  throughout (PyTorch `nn.LayerNorm`, `eps` default 1e-5). The two candidates were both checked
+  and rejected: `BertLayer` is **post**-LN with GELU, and `TransformerBlock` is pre-norm but has a
+  GELU MLP, a pre-computed *causal* mask (the head needs a per-call padding mask), and
+  `NormType` defaulting to RMSNorm.
 - `LayaDecisionHead<T>` - `type_emb` (3x1024) broadcast over the sequence, 2 layers, `scorer`
   (`LayerNorm` -> `Linear` -> `GeluExact` -> `Linear`->1), `act_head`
   (`Linear(1028->256)` -> `GeluExact` -> `Linear(256->2)`), the marker gather, and
@@ -116,6 +127,33 @@ thing to get backwards), then the doc commit.
 | D3 | **Keep the CPU default mode, labelled a reference.** It gates CPU-vs-PyTorch at the 1e-5 class and is the reference the GPU head later diffs. |
 | D4 | **B=1, loop per question.** `k = markers.Length`, so `marker_mask` padding slots never exist and the `-1e4` `masked_fill` is a no-op at this batch size. |
 | D5 | **Phase 3 folded into Phase 2** - #449 shipped the GPU encoder. |
+
+## G1 grounding outcome (recorded after the plan commit)
+
+Grounded before implementation, as the iterative-work workflow requires.
+
+- **microsoft-learn.** `TensorPrimitives` plus `Vector<T>` / the fixed-width `Vector128/256/512<T>`
+  types are the right primitive layer. This work adds **no new kernel** - the head is composed
+  from existing `ReverseGradOperations` ops - so the guidance produced no design change. The
+  grounding that mattered was reading the wheel and the checkpoint header directly.
+- **code-memory.** Confirms the issue: only two `Laya*` symbols exist in the repo, both in the
+  probe harnesses (`CpuGemmProbe.ProjectLayaForward`, `GpuAllocProbe.LayaF32Bytes`). The symbol
+  index is partial for the generic methods in `ReverseGradOperations.cs`, so those were verified
+  against source rather than the index.
+- **Reference environment** (checked, not assumed): `torch` 2.13.0+cpu, `transformers` 5.14.1,
+  `numpy` 2.2.1, `pip` 26.1.2. `transformers` >= 5 matters - the Laya config carries the newer
+  `rope_parameters` key, which the shim path only emulates. `laya` is **not** installed, which is
+  precisely why D1 downloads the wheel and loads `common.py` by path instead of installing.
+- **Norm placement confirmed in the installed reference.** `transformers`
+  `ModernBertEncoderLayer.__init__` is literally `if layer_idx == 0: self.attn_norm =
+  nn.Identity()`, matching both the checkpoint (28 layers, `mlp_norm` on all, `attn_norm` on 27)
+  and what `ModernBertLayer` hard-codes. The one untested assumption is now a checked fact.
+- **Amendment (Unit 2).** The planned `LayaHeadAttention<T>` was dropped as duplication - see
+  Unit 2 above. Strict reduction, no behaviour change, no new risk; the plan is amended rather
+  than re-litigated.
+- **Blast radius** as documented below, with one line added: `StateDictLoader` gains a member
+  (additive, no existing caller changes) and `BertSelfAttention<T>` is reused read-only.
+  **`src/Nivara` is still untouched.**
 
 ## G1 corrections - `docs/LAYA.md` §4 vs `laya/common.py` 0.3.20
 
