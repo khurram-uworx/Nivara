@@ -474,10 +474,17 @@ internal static class GradKernels
             if (input[i] > max) max = input[i];
 
         // A row whose entries are all -inf (an attention query with every key suppressed by an
-        // additive mask) has an undefined distribution: max is -inf, so the usual x - max is NaN.
-        // PyTorch's scaled_dot_product_attention clamps this and returns zeros; match it so a
-        // padded query row stays finite instead of poisoning the layers above it.
-        if (!T.IsFinite(max))
+        // additive -inf mask) has an undefined distribution: max is -inf, so the usual x - max is
+        // NaN. PyTorch's _safe_softmax - the one scaled_dot_product_attention uses - clamps exactly
+        // this case to zeros, so match it and a fully-masked row stays finite instead of poisoning
+        // the layers above it.
+        //
+        // The test is `max == -inf` and deliberately NOT `!max.IsFinite`. A row max of NaN or +inf
+        // means the model has already diverged upstream, and PyTorch propagates both to NaN
+        // (verified against torch 2.x: _safe_softmax returns NaN for a +inf or NaN row). Zeroing
+        // those instead would delete the most useful diagnostic a diverging run produces, and would
+        // silently answer a wrong-but-finite question. So only the -inf row is clamped.
+        if (max == T.NegativeInfinity)
         {
             output.Clear();
             return;
@@ -600,8 +607,9 @@ internal static class GradKernels
             if (value > max) max = value;
         }
 
-        // See SoftmaxSingle: an all -inf row is clamped to zeros, matching PyTorch's safe softmax.
-        if (!T.IsFinite(max))
+        // See SoftmaxSingle: only an all -inf row is clamped to zeros, matching PyTorch's
+        // _safe_softmax. A NaN or +inf row max propagates rather than being zeroed.
+        if (max == T.NegativeInfinity)
         {
             for (int k = 0; k < count; k++)
                 output[start + k * stride] = T.Zero;

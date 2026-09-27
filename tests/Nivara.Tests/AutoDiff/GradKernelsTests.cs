@@ -492,10 +492,14 @@ public class GradKernelsTests
 
     //  Fully-masked rows. A bidirectional attention mask can suppress every key for a query row
     //  (ModernBERT's sliding window leaves rows past valid_length + window with nothing in band),
-    //  so the row maximum is -inf and the usual x - max would be NaN. PyTorch's
-    //  scaled_dot_product_attention returns zeros for that case and the kernels must agree,
-    //  otherwise the NaN compounds: the mask is an *add*, and NaN + (-inf) is NaN, so the poisoned
-    //  row escapes suppression in the next layer and takes every other query row with it.
+    //  so the row maximum is -inf and the usual x - max would be NaN. PyTorch's _safe_softmax --
+    //  what scaled_dot_product_attention uses -- returns zeros for exactly that case and the kernels
+    //  must agree, otherwise the NaN compounds: the mask is an *add*, and NaN + (-inf) is NaN, so the
+    //  poisoned row escapes suppression in the next layer and takes every other query row with it.
+    //
+    //  The guard is `max == -inf` and NOT `!max.IsFinite`. A NaN or +inf row maximum means the model
+    //  has already diverged upstream; PyTorch propagates both to NaN, and zeroing them would delete
+    //  the most useful diagnostic a diverging run produces. The two tests below pin that.
 
     [Test]
     public void Softmax_FullyMaskedRow_ReturnsZeros()
@@ -509,6 +513,63 @@ public class GradKernelsTests
         AssertRowSoftmax(new[] { 1.0f, 2.0f, 3.0f }, firstRow, 3);
         for (int i = 3; i < actual.Length; i++)
             Assert.That(actual[i], Is.EqualTo(0.0f), $"Index {i}");
+    }
+
+    [Test]
+    public void Softmax_RowContainingNaN_PropagatesNaN()
+    {
+        // The row maximum here is finite (NaN never wins a `>` comparison), so this exercises the
+        // path where the NaN survives the max scan and poisons the sum. The point is that the kernel
+        // does not paper over it: a NaN reaching the output is how a diverged run announces itself.
+        float nan = float.NaN;
+        var input = new[] { 1.0f, 2.0f, nan, 0.0f, 1.0f, 2.0f };
+        var actual = new float[input.Length];
+        GradKernels.Softmax<float>(input, actual, 3);
+
+        for (int i = 0; i < 3; i++)
+            Assert.That(float.IsNaN(actual[i]), Is.True, $"Index {i} should stay NaN");
+
+        // The healthy row is unaffected, proving the clamp decision is per-row and not sticky.
+        AssertRowSoftmax(new[] { 0.0f, 1.0f, 2.0f }, new[] { actual[3], actual[4], actual[5] }, 3);
+    }
+
+    [Test]
+    public void Softmax_RowContainingPositiveInfinity_PropagatesNaN()
+    {
+        // A +inf score is the narrow-dtype-overflow case. PyTorch's _safe_softmax returns NaN here,
+        // and so must the kernel: a zero distribution would look like a valid answer.
+        float posInf = float.PositiveInfinity;
+        var input = new[] { posInf, 1.0f, 2.0f, 0.0f, 1.0f, 2.0f };
+        var actual = new float[input.Length];
+        GradKernels.Softmax<float>(input, actual, 3);
+
+        for (int i = 0; i < 3; i++)
+            Assert.That(float.IsNaN(actual[i]), Is.True, $"Index {i} should be NaN");
+
+        AssertRowSoftmax(new[] { 0.0f, 1.0f, 2.0f }, new[] { actual[3], actual[4], actual[5] }, 3);
+    }
+
+    [Test]
+    public void SoftmaxDim_FullyMaskedGroupZeros_ButNaNGroupPropagates()
+    {
+        // Layout [outer=2][classCount=3][inner=2]; class elements are strided by inner, so group
+        // (slice 0, o 0) is indices 0/2/4, (slice 0, o 1) is 1/3/5, and slice 1 is 6..11.
+        float negInf = float.NegativeInfinity;
+        float nan = float.NaN;
+        var input = new[]
+        {
+            negInf, 1.0f, negInf, nan, negInf, 1.0f,
+            1.0f, 1.0f, 2.0f, 2.0f, 3.0f, 3.0f,
+        };
+        var actual = new float[input.Length];
+        GradKernels.SoftmaxDim<float>(input, actual, 2, 3, 2);
+
+        foreach (int i in new[] { 0, 2, 4 })
+            Assert.That(actual[i], Is.EqualTo(0.0f), $"Index {i} should be the -inf clamp");
+        foreach (int i in new[] { 1, 3, 5 })
+            Assert.That(float.IsNaN(actual[i]), Is.True, $"Index {i} should stay NaN");
+        AssertRowSoftmax(new[] { 1.0f, 2.0f, 3.0f }, new[] { actual[6], actual[8], actual[10] }, 3);
+        AssertRowSoftmax(new[] { 1.0f, 2.0f, 3.0f }, new[] { actual[7], actual[9], actual[11] }, 3);
     }
 
     [Test]
