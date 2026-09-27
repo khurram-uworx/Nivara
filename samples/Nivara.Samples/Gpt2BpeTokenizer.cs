@@ -196,23 +196,49 @@ public sealed class Gpt2BpeTokenizer
     }
 
     /// <summary>
-    /// Reads the inline <c>model.merges</c> array, whose entries use the same
-    /// <c>"left right"</c> space-separated form as a <c>merges.txt</c> line.
+    /// Reads the inline <c>model.merges</c> array. Two encodings are in the wild and both must be
+    /// accepted: the <c>"left right"</c> space-separated string (ModernBERT, SmolLM) and the
+    /// two-element array (Laya, and current <c>tokenizers</c> builds).
     /// </summary>
+    /// <remarks>
+    /// The distinction is not cosmetic. A tokenizer whose merges all fail to parse still produces
+    /// ids, because any chunk that happens to be a whole vocabulary entry is looked up directly and
+    /// only the leftovers fall back to ranked BPE. The result is a tokenizer that agrees with the
+    /// reference on well-known words and silently diverges on everything else - which is exactly how
+    /// a missing-merge bug stays invisible.
+    /// </remarks>
     static List<(string, string)> ReadInlineMerges(JsonElement merges)
     {
         var result = new List<(string, string)>(merges.GetArrayLength());
         foreach (var item in merges.EnumerateArray())
         {
-            if (item.ValueKind != JsonValueKind.String)
-                continue;
-            var line = item.GetString();
-            if (line == null)
-                continue;
-            int sp = line.IndexOf(' ');
-            if (sp <= 0 || sp == line.Length - 1)
-                continue;
-            result.Add((line.Substring(0, sp), line.Substring(sp + 1)));
+            string? left = null;
+            string? right = null;
+
+            if (item.ValueKind == JsonValueKind.Array)
+            {
+                if (item.GetArrayLength() == 2)
+                {
+                    left = item[0].GetString();
+                    right = item[1].GetString();
+                }
+            }
+            else if (item.ValueKind == JsonValueKind.String)
+            {
+                string? line = item.GetString();
+                if (line != null)
+                {
+                    int sp = line.IndexOf(' ');
+                    if (sp > 0)
+                    {
+                        left = line[..sp];
+                        right = line[(sp + 1)..];
+                    }
+                }
+            }
+
+            if (left is { Length: > 0 } && right is { Length: > 0 })
+                result.Add((left, right));
         }
         return result;
     }
