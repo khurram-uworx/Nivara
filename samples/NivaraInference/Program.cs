@@ -268,6 +268,12 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "modernbert":
+                if (useGpu)
+                {
+                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir);
+                    if (compare) return ModernBert.CompareGpu(tensors, modelDir);
+                    return ModernBert.RunGpu(tensors, modelDir);
+                }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                 if (compare) return ModernBert.Compare(tensors, modelDir);
                 if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
