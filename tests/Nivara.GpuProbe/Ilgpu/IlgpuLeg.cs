@@ -63,7 +63,7 @@ internal static class IlgpuLeg
         using AcceleratorStream stream = accelerator.CreateStream();
 
         // Persistent buffers, allocated once and reused across all timed iterations
-        // (the D3D12 one-shot-transient lesson — see docs/DX12.md).
+        // (the D3D12 one-shot-transient lesson — see DX12.md).
         using MemoryBuffer1D<uint, Stride1D.Dense> dot16Input = accelerator.Allocate1D<uint>(KernelFixtures.Dot16Length);
         using MemoryBuffer1D<uint, Stride1D.Dense> siluInput = accelerator.Allocate1D<uint>(KernelFixtures.HiddenSize / 2);
         using MemoryBuffer1D<uint, Stride1D.Dense> gemvInput = accelerator.Allocate1D<uint>(

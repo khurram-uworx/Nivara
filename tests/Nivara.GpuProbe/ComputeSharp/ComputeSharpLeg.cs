@@ -66,7 +66,7 @@ internal static class ComputeSharpLeg
         var sw = new Stopwatch();
 
         // Persistent buffers, allocated once and reused across all timed iterations
-        // (the D3D12 one-shot-transient lesson — see docs/DX12.md). The shaders read
+        // (the D3D12 one-shot-transient lesson — see DX12.md). The shaders read
         // packed-BF16 input as uint (2 elements per 4-byte element) and write f32.
         using ReadOnlyBuffer<uint> dot16Input = device.AllocateReadOnlyBuffer(PackConcat(fixtures.Dot16A, fixtures.Dot16B));
         using ReadOnlyBuffer<uint> siluInput = device.AllocateReadOnlyBuffer(GemvKernels.PackBf16(fixtures.SiluX));

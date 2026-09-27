@@ -31,7 +31,7 @@ A **second model shipped on the same infra** (`khurram/minilm-gpu`): the runner
 generalized to a config/naming-driven `BertEncoderGpuRunner`, so MiniLM (BERT-style
 keys, 384-dim) reused the kernel set unchanged at ~20% of the original effort —
 26.8 ms iGPU vs 76.3 ms Nivara CPU (~2.9×). Details and the token-type lesson in
-`docs/BERT-GPU.md` §5.5; launch-overhead follow-up was issue **#437**.
+`docs/ACCELERATION.md` §5.5; launch-overhead follow-up was issue **#437**.
 
 **M2 fusion (issue #437) shipped 2026-09-19** (`khurram/lazystream-gpu` → PR
 targets `khurram/minilm-gpu`): GEMM epilogue bias+GELU/ReLU, packed q/k/v GEMM,
@@ -40,7 +40,7 @@ dispatches ~113–119 → 44–48. Measured (AC): MiniLM 26.8 → **24.3 ms**,
 DistilBERT 65.3 → **63.1 ms**. The pre-M2 "~0.19 ms/launch" model was corrected
 by measurement to **~30 µs/dependent kernel**, so launch-count fusion is nearly
 exhausted and the >2× acceptance is honestly unmet — the real lever is GEMM
-throughput (issue **#440**; see §5.2 in docs/BERT-GPU.md).
+throughput (issue **#440**; see §5.2 in docs/ACCELERATION.md).
 
 ## 2. The gap we want to attack (CPU GEMM)
 
@@ -174,7 +174,7 @@ native bridge. Measure both and publish both in the README table.
   launch model; **#440** files the GEMM-throughput item (tile-32/2×2) that the
   >2× target actually needs.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
-  documented in `docs/BERT-GPU.md` §1/§5).
+  documented in `docs/ACCELERATION.md` §1/§5).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after
   #436 merges): second config-driven model on the shared runner.
 - Any decision to *start* M1/M2/M3 should first be recorded as GitHub issues and
