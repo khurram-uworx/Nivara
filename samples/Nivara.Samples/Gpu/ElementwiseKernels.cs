@@ -140,13 +140,12 @@ internal static class ElementwiseKernels
 
     /// <summary>
     /// Exact GELU via the A–S 7.1.26 erf port: the same polynomial and argument
-    /// normalization (x * 1/sqrt(2)) as CPU GradKernels.GeluExact/Erf.
+    /// normalization (x * 1/sqrt(2)) as CPU GradKernels.GeluExact/Erf. The single scalar
+    /// form both the vector kernel and every GEMM epilogue call, so the polynomial has one
+    /// authoritative definition on the GPU path.
     /// </summary>
-    public static void Gelu(ArrayView<float> x, ArrayView<float> y)
+    internal static float GeluExact(float v)
     {
-        int idx = Grid.GlobalIndex.X;
-        if (idx >= y.Length) return;
-        float v = x[idx];
         float z = v * 0.7071067811865475f;
         float az = XMath.Abs(z);
         float t = 1f / (1f + 0.3275911f * az);
@@ -156,7 +155,14 @@ internal static class ElementwiseKernels
         p = p * t + 0.254829592f;
         float erf = 1f - p * t * XMath.Exp(-az * az);
         if (z < 0f) erf = -erf;
-        y[idx] = 0.5f * v * (1f + erf);
+        return 0.5f * v * (1f + erf);
+    }
+
+    public static void Gelu(ArrayView<float> x, ArrayView<float> y)
+    {
+        int idx = Grid.GlobalIndex.X;
+        if (idx >= y.Length) return;
+        y[idx] = GeluExact(x[idx]);
     }
 
     /// <summary>y[i] = max(x[i], 0).</summary>

@@ -258,10 +258,10 @@ internal static class GemmKernels
             float b2 = c2 < bCols ? bias[c2] : 0f;
             float b3 = c3 < bCols ? bias[c3] : 0f;
 
-            if (c0 < bCols) c[rowBase + 0] = Gelu(acc0 + b0);
-            if (c1 < bCols) c[rowBase + 1] = Gelu(acc1 + b1);
-            if (c2 < bCols) c[rowBase + 2] = Gelu(acc2 + b2);
-            if (c3 < bCols) c[rowBase + 3] = Gelu(acc3 + b3);
+            if (c0 < bCols) c[rowBase + 0] = ElementwiseKernels.GeluExact(acc0 + b0);
+            if (c1 < bCols) c[rowBase + 1] = ElementwiseKernels.GeluExact(acc1 + b1);
+            if (c2 < bCols) c[rowBase + 2] = ElementwiseKernels.GeluExact(acc2 + b2);
+            if (c3 < bCols) c[rowBase + 3] = ElementwiseKernels.GeluExact(acc3 + b3);
         }
     }
 
@@ -422,21 +422,6 @@ internal static class GemmKernels
         int block = j / blockWidth;
         int colInBlock = j - block * blockWidth;
         return block * aRows * blockWidth + outRow * blockWidth + colInBlock;
-    }
-
-    /// <summary>Exact GELU via the A–S 7.1.26 erf port (same polynomial as <see cref="ElementwiseKernels.Gelu"/>).</summary>
-    static float Gelu(float v)
-    {
-        float z = v * 0.7071067811865475f;
-        float az = XMath.Abs(z);
-        float t = 1f / (1f + 0.3275911f * az);
-        float p = 1.061405429f * t - 1.453152027f;
-        p = p * t + 1.421413741f;
-        p = p * t - 0.284496736f;
-        p = p * t + 0.254829592f;
-        float erf = 1f - p * t * XMath.Exp(-az * az);
-        if (z < 0f) erf = -erf;
-        return 0.5f * v * (1f + erf);
     }
 }
 
