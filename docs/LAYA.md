@@ -36,7 +36,7 @@ Phase 2 and Phase 3 scope and the decisions still open, so the phase-1 working p
 ### Repo file inventory (HF, `convaiinnovations/laya`)
 
 ```
-model.safetensors            # single file, F16 on disk, ~808 MB, 206 tensors (encoder + head)
+model.safetensors            # single file, F16 on disk, 842,609,210 B (842.6 MB / 803.6 MiB), 206 tensors
 encoder/config.json          # ModernBERT-large config (the backbone config)
 rl_agent_config.json         # head depth, budgets, temperatures, act costs
 tokenizer/tokenizer.json     # ModernBERT byte-level BPE (same tokenizer as the backbone)
@@ -68,8 +68,9 @@ Note there is **no `model.safetensors.index.json`** — one monolithic F16 file.
 | `encoder.layers.N.mlp_norm.weight` | `[1024]` | LayerNorm, no bias |
 | `encoder.final_norm.weight` | `[1024]` | LayerNorm, no bias |
 
-29 + 1 + 28×5 = **170 encoder tensors**. 28 layers, hidden 1024, 16 heads (headDim 64),
-intermediate 2624.
+170 encoder tensors = 3 non-layer (`embeddings.norm`, `embeddings.tok_embeddings`, `final_norm`)
++ 167 layer tensors (layer 0 holds 5 — no `attn_norm`; layers 1-27 hold 6 each: 5 + 27×6 = 167).
+28 layers, hidden 1024, 16 heads (headDim 64), intermediate 2624.
 
 **There is no position-embedding tensor and no token-type-embedding tensor.** Positions come
 purely from RoPE. There are no biases anywhere in the encoder, and no QK-norm.
@@ -148,12 +149,29 @@ so there is no "layer scale" op to build. (Corroborating: `model.layers.0` has n
   **half-split `rotate_half`** layout, i.e. *identical* to Llama/`RotaryEmbedding<T>` in Nivara.
   `theta` is **per layer type**: `160000` for full attention, `10000` for sliding.
 - **Sliding window**: `config.sliding_window = local_attention // 2 = 64`, and HF's bidirectional
-  overlay is `abs(q_idx - kv_idx) <= sliding_window` (`masking_utils.py:141-151`). So the band is
-  **129 wide (64 each side + self)**. The `answerdotai` reference agrees via flash-attn
-  `window_size = (config.sliding_window // 2, config.sliding_window // 2)` = `(64, 64)`,
-  inclusive (`src/bert_layers/attention.py:308-315`; the `+1` in HF's
-  `self.sliding_window = config.sliding_window + 1` is flash-attn's inclusive-boundary
-  adjustment, not a different band).
+  overlay is `abs(q_idx - kv_idx) <= sliding_window` (`masking_utils.py:141-151`). So the **half-width
+  (`band`) is 64** and a query therefore sees **129 keys** (64 each side plus itself). Do not conflate
+  the two: `ModernBertConfig.Band` and `ModernBertMasks.Build` both use 64, and 129 is the
+  keys-seen count, not the band.
+
+  HF's two attention backends reach that same 129 by different arithmetic, and it is worth knowing
+  both so the numbers are not misread. The SDPA path above uses `config.sliding_window` directly. The
+  flash-attention path bumps it first (`modeling_modernbert.py:258-260`), with HF's own comment
+  recording that `config.sliding_window` is the "half-window size, e.g. 64 for local_attention=128"
+  and that the `+1` "is needed because flash attention sets inclusive boundaries" — giving
+  `self.sliding_window = 65`. Then `modeling_flash_attention_utils.py:652-653` emits
+  `flash_kwargs["window_size"] = (sliding_window - 1, sliding_window - 1)` = `(64, 64)`. The `+1`
+  and the `−1` cancel exactly; flash-attn's `(64, 64)` is inclusive, so it is 64 left + self + 64
+  right = the same 129 keys. The `+1` is an inclusive-boundary adjustment, **not** a different band.
+
+  The `answerdotai` reference reaches the same 64 **from a different convention**, which is worth
+  stating because the two `sliding_window` fields are *not* the same number:
+  `src/bert_layers/configuration_bert.py:208` stores `sliding_window` as the **full** width and
+  documents it as "window size `n` … split between the [two sides]", then
+  `src/bert_layers/attention.py:311` halves it — `window_size = (config.sliding_window // 2,
+  config.sliding_window // 2)` — which is `(64, 64)` when their `sliding_window` is 128. HF instead
+  publishes `sliding_window` **already halved** at 64 and never halves it again, so re-halving HF's
+  value would wrongly give 32. Both land on a half-width of 64; HF is the authority here.
 - **Layer types**: `layer_types` starts `"full_attention"` and repeats every 3
   (`global_attn_every_n_layers = 3`) → layers 0, 3, 6, …, 27 are full (10), the other 18 are
   sliding. **Band mask is per-layer, not per-head** — one `[L, L]` additive mask serves a layer.
@@ -193,7 +211,7 @@ so there is no "layer scale" op to build. (Corroborating: `model.layers.0` has n
   `mlp_norm.weight`) and 5 at layer 0, which has no `attn_norm`. QK-norm is a base-vs-large
   distinction, and it is easy to remember backwards.
 
-### 3.5 Reading HF's per-stage output (a trap worth writing down)
+### 3.4 Reading HF's per-stage output (a trap worth writing down)
 
 `model(**inputs, output_hidden_states=True)` on `ModernBertModel` returns `num_layers + 1`
 states, but **not** the obvious "embeddings, then one per layer". Measured on the 28-layer
@@ -209,13 +227,22 @@ reaches absmax ≈ 2.57e4 there, which `final_norm` rescales to ≈ 27.6. Diffin
 output against `hidden_states[28]` therefore reports a "difference" of ~25708 that is nothing but
 the missing LayerNorm. Diff the final norm against `hidden_states[28]` instead.
 
-### 3.4 Tokenizer
+This is what `compare_diag` consumes, so a parity failure can be localised to a layer in one run.
+
+### 3.5 Tokenizer
 
 `tokenizer/tokenizer.json`: BPE, `pre_tokenizer = ByteLevel{use_regex: true}`,
 `normalizer = NFC`, `decoder = ByteLevel`, inline `model.vocab` (50280 entries) + `model.merges`,
-`added_tokens` ids `0, 1, 50254…50263`. `tokenizer_config.json` declares
+`added_tokens` = 116 entries whose ids are `0, 1, 50254-50276` and `50277-50367` (i.e. the 23
+whitespace runs occupy 50254-50276 and everything from 50277 up is contiguous).
+`tokenizer_config.json` declares
 `model_input_names: ["input_ids", "attention_mask"]` — **no `token_type_ids`**.
-Specials: `[CLS]`=50281, `[SEP]`=50282, `[PAD]`=50283, `[MASK]`=50284, `[UNK]`.
+
+**Specials — 7 of them, not 4** (all declared `special: true`, `normalized: false`):
+`1` = `<|padding|>`, `50279` = `<|endoftext|>`, `50280` = `[UNK]`, `50281` = `[CLS]`,
+`50282` = `[SEP]`, `50283` = `[PAD]`, `50284` = `[MASK]`. Note `<|padding|>` sits at id **1** and
+`[UNK]` at **50280** — both *below* the 50280-entry base vocab's specials, and `1` collides with a
+base-vocab id (see the collision note below).
 This is the plain GPT-2-style byte-level BPE, i.e. the `Gpt2BpeTokenizer` path (no `Split`
 pretokenizer, unlike Qwen). The repo ships **no `vocab.json` / `merges.txt`**, only
 `tokenizer.json` — so the loader must read vocab/merges inline from the JSON.
@@ -243,14 +270,39 @@ Measured against `AutoTokenizer`, not assumed:
 The 25-space row is the decisive one: it can only be produced by leftmost-longest raw-text
 matching, because the GPT-2 pattern never emits a whitespace-only piece that ends mid-run, so
 per-piece extraction could not find a 24-space token there. ModernBERT declares 116 added tokens
-(`tokenizer.json`): the `|||IP_ADDRESS|||` / `|||EMAIL_ADDRESS|||` / `|||PHONE_ADDRESS|||` family at
-ids 0 and 50277–50285, `[unusedN]` from 50286, 23 whitespace-run tokens (ids 50254–50276, runs of
-24 down to 2 spaces), and the BERT specials at 50281–50284.
+(`tokenizer.json`), which partition exactly as follows — measured, not estimated:
 
-One real remaining divergence: NFC is applied only through `LoadFromTokenizerJson`, not on the
-shared legacy byte-level BPE path. It also only applies to added tokens declared
-`"normalized": true`; the few declared `false` (the `special: true` entries) are matched on the
-un-normalized text, which is moot for ASCII specials like `[CLS]` / `[SEP]`.
+| Group | n | ids | contents |
+| --- | --- | --- | --- |
+| `\|\|\|…\|\|\|` address markers | 3 | `0`, `50277`, `50278` | `\|\|\|IP_ADDRESS\|\|\|`, `\|\|\|EMAIL_ADDRESS\|\|\|`, `\|\|\|PHONE_NUMBER\|\|\|` |
+| whitespace runs | 23 | `50254`-`50276` | runs of 24 spaces down to 2 |
+| specials | 7 | `1`, `50279`-`50284` | see the specials list above |
+| `[unusedN]` | 83 | `50285`-`50367` | `[unused0]` at **50285** upward |
+
+Three things here are easy to get wrong and were wrong in an earlier draft of this file: the
+whitespace range ends at **50276**, not 50263; the address-marker family is **3 tokens**, not
+`0` plus `50277-50285` (that range also contains 6 specials); and `[unusedN]` starts at **50285**,
+not 50286. The marker family is named `PHONE_NUMBER`, not `PHONE_ADDRESS`.
+
+**Added-token ids that collide with the base vocab.** Ids `0` and `1` are declared added tokens
+*and* already exist in the 50280-entry base vocab, so the 116 added tokens span only **50368
+distinct ids** — which is `config.json`'s `vocab_size`, and HuggingFace's `len(tokenizer)`. Do not
+compute it as `50280 + 116`. The collision resolves in favour of the added token on HF's side too
+(`convert_ids_to_tokens(0)` is `|||IP_ADDRESS|||`), so overwriting the base entry is correct
+behaviour, not a bug.
+
+**NFC scope — one real divergence, and one non-divergence that is easy to mistake for one.**
+`Gpt2BpeTokenizer` never reads the `normalized` field of an added token. It normalizes the *entire
+input text* once, up front, whenever `normalizeNfc` is set — so every added token, including the 7
+declared `normalized: false`, is matched against **normalized** text. HF instead matches a
+`normalized: false` added token against **pre-normalization** text. That is a genuine difference in
+principle, but it is unobservable here: the only `normalized: false` entries are the 7 ASCII
+specials (`<|padding|>`, `<|endoftext|>`, `[UNK]`, `[CLS]`, `[SEP]`, `[PAD]`, `[MASK]`), and NFC
+leaves ASCII unchanged. Worth stating precisely because the earlier draft of this file asserted the
+opposite — that Nivara honoured the per-token flag and matched the specials un-normalized.
+
+The real remaining divergence is different: NFC is applied only through `LoadFromTokenizerJson`, not
+on the shared legacy byte-level BPE path, so it is a per-call-site decision. That is #451.
 
 ---
 
@@ -315,7 +367,7 @@ def build_sequence(tok, state, q, max_len, head_max_len, ...):
 
 | ModernBERT / Laya need | Nivara | Verdict |
 |---|---|---|
-| Bias-free LayerNorm, eps 1e-5 | `LayerNorm<T>(n, eps, affine)` | `affine:true` always allocates a Beta too; a zero Beta is exactly `bias=False`, so **no core change needed** (see §7) |
+| Bias-free LayerNorm, eps 1e-5 | `LayerNorm<T>(n, eps, affine)` | `affine:true` always allocates a Beta too; a zero Beta is exactly `bias=False`, so **inference needs no core change** — but a fine-tuning Beta receives a gradient and is *not* a no-op, so it is #446 (see §7) |
 | RoPE, `rotate_half`, full head-dim, per-instance theta | `RotaryEmbedding<T>(headDim, maxPos, theta)` (`src/Nivara/AutoDiff/Nn/RotaryEmbedding.cs`) | ✅ direct reuse — same HF convention, same half-split |
 | Gated MLP `act(input) · gate` | house style = two `Linear<T>` + `Activation.Silu` + `ReverseGradOperations.Multiply` (`LlamaDecoderBlock.cs:105-107`) | ✅ **same shape with `GeluExact` instead of `Silu`** — no new op |
 | Exact-erf GELU | `ReverseGradOperations.GeluExact` / `GradKernels.GeluExact` | ✅ |
@@ -323,12 +375,12 @@ def build_sequence(tok, state, q, max_len, head_max_len, ...):
 | Fused QKV / fused gate-up weight split | `StateDictLoader.LoadLinear` binds one prefix; splitting = contiguous row-block copies at load | ✅ sample-side loader helper |
 | Exact-integer token ids (BF16/Half-safe) | `Embedding<T>.Forward(int[])` (the DistilBERT fix, `docs/BFLOAT16.md`) | ✅ |
 | F16-on-disk safetensors → F32 | `SafeTensorsLoader.Read<float>` `ConvertF16` | ✅ Laya's checkpoint is F16 |
-| Memory-mapped load, no full-file `byte[]` | `SafeTensorsLoader.Read<T>(path)` | ✅ (808 MB < the 2 GB limit) |
+| Memory-mapped load, no full-file `byte[]` | `SafeTensorsLoader.Read<T>(path)` | ✅ (842.6 MB < the 2 GB limit) |
 | Byte-level BPE from `tokenizer.json` | `Gpt2BpeTokenizer` (built for SmolLM/Qwen) | ⚠️ needs a `tokenizer.json`-only entry point (no `vocab.json`/`merges.txt` shipped) + NFC |
 
-**Net: the encoder is close to entirely sample-side.** The two real gaps are (a) a
-`Gpt2BpeTokenizer` entry point that reads `tokenizer.json` alone, and (b) a bias-free LayerNorm
-mode — and (b) is only cosmetic (a zero Beta is numerically identical).
+**Net: the encoder is close to entirely sample-side.** Both of the two original gaps are now closed
+by Phase 1: (a) a `Gpt2BpeTokenizer` entry point that reads `tokenizer.json` alone, and (b) standing
+in for `bias=False` with a zero Beta. Gap (b) remains only a *fine-tuning* concern — see #446.
 
 ## 6. Gaps / cost
 
@@ -352,8 +404,9 @@ mode — and (b) is only cosmetic (a zero Beta is numerically identical).
 ## 7. Deliberate shortcuts (documented, not accidental)
 
 - **LayerNorm `affine: true` with an unset (zero) Beta** stands in for HF's `bias=False`. Numerically
-  identical. The only cost is an unused parameter and a `+0`. If we ever fine-tune ModernBERT,
-  this should become a real `LayerNorm(…, bias: false)` flag — tracked in the TODO's issues log.
+  identical in both directions, so inference is exact. The cost is an extra parameter that a
+  fine-tuning loop would give a gradient to — so this is a real gap the moment anything is trained,
+  which is why it is #446 rather than a footnote.
 - **Dense `[L, L]` band mask** instead of a sparse/banded kernel, gated on sequence length
   (see §6.1).
 
@@ -363,17 +416,17 @@ Weights live under `samples/data/`, gitignored, like every other model:
 
 | Path | Contents | Source |
 |---|---|---|
-| `samples/data/modernbert/` | `model.safetensors` (1.6 GB F32, single file), `config.json`, `tokenizer.json`, `tokenizer_config.json` | `hf download answerdotai/ModernBERT-large` |
-| `samples/data/laya/` | `model.safetensors` (808 MB F16, single file), `encoder/config.json`, `rl_agent_config.json`, `tokenizer/tokenizer.json` | `hf download convaiinnovations/laya` |
+| `samples/data/modernbert/` | `model.safetensors` (1510.2 MB F32, single file), `config.json`, `tokenizer.json`, `tokenizer_config.json` | `hf download answerdotai/ModernBERT-large` |
+| `samples/data/laya/` | `model.safetensors` (842.6 MB F16, single file), `encoder/config.json`, `rl_agent_config.json`, `tokenizer/tokenizer.json`, `tokenizer/tokenizer_config.json` | `hf download convaiinnovations/laya` |
 
-`samples/data/modernbert/` and `samples/data/laya/` need `.gitignore` entries
-(the existing pattern is one line per model dir, e.g. `samples/data/distilbert/` at
-`.gitignore:360`). Reference fixtures (`last_hidden_state_py.bin`, Laya logits/probs) go in the
-same directories, which are already ignored.
+Both directories are already in `.gitignore` (`.gitignore:366-367`, following the existing
+one-line-per-model pattern, e.g. `samples/data/distilbert/` at `.gitignore:360`). Reference
+fixtures (`last_hidden_state_py.bin`, Laya logits/probs) go in the same directories, so they are
+covered by the same entries.
 
-The ModernBERT-large download is only needed for the *stock-backbone* parity gate; the Laya
-checkpoint contains its own (fine-tuned) copy of the same encoder, so Phase 2 does not depend on
-it.
+The ModernBERT-large download was needed only for the *stock-backbone* parity gate, which Phase 1
+has now passed. The Laya checkpoint contains its own (fine-tuned) copy of the same encoder, so
+Phase 2 does not depend on it.
 
 ## 9. Phases
 
