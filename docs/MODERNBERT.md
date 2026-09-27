@@ -73,4 +73,4 @@ The gate is GPU-vs-CPU in-process (no PyTorch fixture needed). Fixture seqLen 12
 | valid | **2.861E-005** | 5.577E-004 | 1.0000001 | 0 |
 | padding | 6.866E-004 | 4.867E-003 | — | 0 |
 
-Benchmark rows scale with sequence length: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s. See [docs/GPU-ACCL.md](GPU-ACCL.md) §1b for full details.
+Benchmark rows scale with sequence length: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s. See [docs/ACCELERATION.md](ACCELERATION.md) §1b for full details.

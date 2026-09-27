@@ -85,7 +85,7 @@ For architecture, verification, performance, and GPU-path details per model:
 | SmolLM-135M-Instruct | [docs/SMOLLM.md](../../docs/SMOLLM.md) |
 | Qwen2.5-0.5B-Instruct | [docs/QWEN.md](../../docs/QWEN.md) |
 | Laya | [docs/LAYA.md](../../docs/LAYA.md) |
-| GPU acceleration (all models) | [docs/GPU-ACCL.md](../../docs/GPU-ACCL.md) |
+| GPU acceleration (all models) | [docs/ACCELERATION.md](../../docs/ACCELERATION.md) |
 
 ## Usage
 
@@ -174,7 +174,7 @@ Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 log
 | **DistilBERT** | 63.3 ms | 209.7 ms | **~3.3× faster** |
 | **DistilBERT SST-2** | 63.8 ms | 199.9 ms | **~3.1× faster** |
 
-See [docs/GPU-ACCL.md](../../docs/GPU-ACCL.md) for full GPU details.
+See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
 
 ## Sample data
 

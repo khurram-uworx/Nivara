@@ -4,7 +4,7 @@ Status: **Implemented and gated** (2026-09-27, issue #460, branch `khurram/laya`
 
 This is a reflection of what we built and what we learned while porting Laya's typed decision head onto the ModernBERT encoder that #449 already runs. It is *not* a usage guide (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md)) and *not* a roadmap.
 
-Related: the encoder's GPU reflection in [docs/GPU-ACCL.md](GPU-ACCL.md) §1b, the backend probe in the inference sample's README.
+Related: the encoder's GPU reflection in [docs/ACCELERATION.md](ACCELERATION.md) §1b, the backend probe in the inference sample's README.
 
 ## Model overview
 
@@ -212,4 +212,4 @@ Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biase
 - Checkpoint: `hf download convaiinnovations/laya` into `samples/data/laya/` (gitignored). Encoder config in `encoder/`, tokenizer in `tokenizer/`.
 - Gate: `python samples/NivaraInference/Python/laya_compare.py` then `dotnet run --project samples/NivaraInference -c Release -- laya compare`.
 - Upstream limitation, not ours: [NandhaKishorM/laya#185](https://github.com/NandhaKishorM/laya/issues/185).
-- Encoder GPU path and the GEMM argument: [docs/GPU-ACCL.md](GPU-ACCL.md) §1b, issues #449, #440, #448, #447.
+- Encoder GPU path and the GEMM argument: [docs/ACCELERATION.md](ACCELERATION.md) §1b, issues #449, #440, #448, #447.

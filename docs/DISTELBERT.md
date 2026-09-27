@@ -113,7 +113,7 @@ Half uses a 10-bit mantissa (vs BF16's 7), which is why its logits land closer t
 
 ## Performance
 
-See [docs/GPU-ACCL.md](GPU-ACCL.md) §1 for GPU benchmark tables. CPU benchmarks live in the [NivaraInference README](../samples/NivaraInference/README.md).
+See [docs/ACCELERATION.md](ACCELERATION.md) §1 for GPU benchmark tables. CPU benchmarks live in the [NivaraInference README](../samples/NivaraInference/README.md).
 
 ## GPU path
 
@@ -125,4 +125,4 @@ All three models run on the OpenCL iGPU via ILGPU 1.5.3 on the shared `BertEncod
 | SST-2 | 64.0 ms | 166.4 ms | ~2.6× faster |
 | MiniLM | 26.8 ms | 76.3 ms | ~2.9× faster |
 
-M2 kernel fusion (issue #437) brought MiniLM to 24.3 ms and DistilBERT to 63.1 ms. Dispatches went from ~113–119 to **44–48** per forward. All parity gates stayed byte-identical at every step (hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM hidden `maxRel 1.0e-5`). See [docs/GPU-ACCL.md](GPU-ACCL.md) for full details and ILGPU lessons.
+M2 kernel fusion (issue #437) brought MiniLM to 24.3 ms and DistilBERT to 63.1 ms. Dispatches went from ~113–119 to **44–48** per forward. All parity gates stayed byte-identical at every step (hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM hidden `maxRel 1.0e-5`). See [docs/ACCELERATION.md](ACCELERATION.md) for full details and ILGPU lessons.
