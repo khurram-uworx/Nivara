@@ -1,0 +1,250 @@
+# Laya decision head (Phase 2) - #460
+
+## Problem
+
+`docs/LAYA.md` sequences the Laya port as three phases. Phase 1 (ModernBERT encoder) shipped in
+PR #453; Phase 3's encoder (the ILGPU runner) shipped in PR #461 / #449. What is missing is
+**Phase 2 - the Laya decision head** - and nothing in the repo implements it. There is no
+`LayaDecisionHead<T>`, no prompt builder, no `laya` mode. Without the head the ModernBERT encoder
+cannot produce a Laya decision, so the port is not usable.
+
+Phase 3 is folded into Phase 2 here: #449 delivered the GPU encoder, so the remaining GPU work
+(the GPU head, plus #440) is part of this scope. The backend was settled as **GPU-only** by
+measurement (PR #459, `docs/LAYA.md` "Backend decision"), so the CPU forward this issue builds is
+a **parity reference, not a deployment path**.
+
+## Proposed changes
+
+### Unit 1 - `LayaPromptBuilder` + unit tests
+
+`samples/Nivara.Samples/LayaPromptBuilder.cs` - the C# port of the prompt surface in
+`laya/common.py` (PyPI `laya` 0.3.20):
+
+- `render_criterion` - strings pass through; structured values become compact JSON.
+- `render_options` - `choice` -> `"key: description"` (bare `key` when the description is
+  `None`/`""` only; `0` and `False` are real values), `score` -> `"level {i}: {c}"`,
+  `noul` -> two options with the resolved labels and the fallback criterion strings.
+- `_resolve_noul_labels` - requires exactly `false`/`true` mapped to two distinct non-empty
+  strings, stripped; `labels` on a non-noul question raises.
+- `build_sequence` - `[CLS] <type> question: <ins> [SEP] [MASK] opt0 ... [SEP] state [SEP]`, with
+  the `opt_budget < 16` per-option shrink, the `opt_budget` **recompute**, the
+  `head_ids[:max(8, opt_budget)]` clamp, `room = max(0, max_len - len(ids) - 1)`, the
+  `truncateLeft` slice, and the `[m for m in markers if m < max_len]` filter.
+- `clamp_temperature` (`TEMP_MIN = 0.5`, `TEMP_MAX = 5.0`, NaN/inf/non-numeric -> 1.0) and
+  `temp_bucket(qtype, k)`.
+- The `agent.py` decode path: `answer_confidence` = `max(p[:k])`, `confidence_from_probs` =
+  `1 - H(p)/log(k)`, the `choice` / `score` / `noul` typed answers, the `t_scale` lookup, and the
+  4-dp rounding.
+
+Typed input, not raw JSON: a `LayaQuestion` record (`t`, `ins`, ordered `crit`, optional
+`labels`) plus a `string stateText`. `crit` is an ordered key/value list for `choice` (Python
+dict insertion order is the contract), a list for `score`, and a two-key map for `noul`. A
+non-string state throws `NotSupportedException` - see "Out of scope".
+
+### Unit 2 - `LayaDecisionHead<T>` + the biased fused-QKV module
+
+`samples/Nivara.Samples/LayaHeadModel.cs`:
+
+```csharp
+// nhead is derived, not hardcoded: a different d changes the head shape and the
+// checkpoint would not load, so this must fail loudly rather than mis-load.
+int nhead = Math.Max(1, d / 64);
+T scale  = T.CreateChecked(1.0 / Math.Sqrt(d / (double)nhead));
+```
+
+- `LayaHeadAttention<T>` - fused `in_proj_weight` [3072,1024] + `in_proj_bias` [3072] split into
+  q/k/v row blocks, `out_proj` [1024,1024] + bias. No RoPE, no band. Dense `[L,L]` additive mask
+  with `T.NegativeInfinity` in the `pad` columns, built from `pad = ~attention_mask` (True =
+  ignore) - the **inverse polarity** of the encoder's additive float mask.
+- `LayaHeadLayer<T>` - pre-norm: `x + attn(norm1(x))`, then `x + linear2(relu(linear1(norm2(x))))`.
+  Biased `LayerNorm(1024, 1e-5)` throughout (PyTorch `nn.LayerNorm`, `eps` default 1e-5).
+- `LayaDecisionHead<T>` - `type_emb` (3x1024) broadcast over the sequence, 2 layers, `scorer`
+  (`LayerNorm` -> `Linear` -> `GeluExact` -> `Linear`->1), `act_head`
+  (`Linear(1028->256)` -> `GeluExact` -> `Linear(256->2)`), the marker gather, and
+  `feats = [top1, top1-top2, ent, k/255]` with `k = max(markers, 2)`, entropy normalised by
+  `log(k)`, and the one-option `top2` pad with 0.0.
+- `StateDictLoader` - add a bias-slice sibling of `LoadLinearSlice` for the fused QKV bias.
+
+`Forward` takes the encoder output `[L, d]`, `qtype`, and `int[] markerPos`, and returns
+`(float[] Logits, float[] ActLogits)`. **Temperature is not applied inside the head** - the
+reference registers the buffer and never reads it in `forward`; `agent.py` divides after
+`masked_fill`. Expose it to the caller.
+
+### Unit 3 - `laya` mode in `samples/NivaraInference`
+
+`Laya.cs` with the default and `benchmark` sub-modes, wired into `Program.cs` (usage line, model
+map, dispatch). Runs the fixture's questions through encoder + head and prints the typed answer,
+`answer_confidence`, `confidence`, per-option probabilities, the temperature actually applied, and
+the `act_head` reading **with the ~1.0 caveat inline** so a reader is not misled into gating on
+it (upstream `NandhaKishorM/laya#185`; the model card documents the same limitation).
+
+### Unit 4 - `Python/laya_compare.py` + the `laya compare` gate
+
+The generator does **not** transcribe the reference. It runs `pip download laya==0.3.20 --no-deps`,
+unzips to a temp dir, and loads `common.py` by path with `importlib` (bypassing
+`laya/__init__.py`, which pulls in unrelated modules). The reference is therefore the wheel
+itself and is structurally incapable of sharing a misreading with the C# port.
+
+Emits into `samples/data/laya/`: `prompts_py.bin` (ids + marker positions per question),
+`logits_py.bin`, `act_py.bin`, `answers_py.json` (typed decision, confidences, per-option probs,
+the applied temperature and its raw-vs-clamped provenance so the `choice:11+` -> 0.5 clamp is
+visible), and `laya_meta.json`.
+
+The C# gate runs **prompt parity first as its own gate**: ids compared byte-exact, a mismatch
+fails before any numeric comparison, because a silently different render still "runs". Then the
+numeric gate on the marker-scorer logits, then the typed decision and temperature bucket. Skips
+cleanly when the wheel is unreachable and the fixtures are absent, matching `modernbert compare`.
+
+### Unit 5 - tests, then documentation
+
+Head composition tests (shapes, and the `~attention_mask` polarity assertion - the single easiest
+thing to get backwards), then the doc commit.
+
+- `docs/LAYA.md` rewritten in the `docs/BERT-GPU.md` shape: result and what is gated; what shipped
+  (architecture + the decisions below); what we learned; where reality diverged from the
+  pre-implementation estimate; what's next. Phase 3 folded into Phase 2, with #440 named as the
+  highest-value remaining item because GEMM is ~99.9% of Laya's arithmetic.
+- `samples/NivaraInference/README.md` - a Laya section, the fixture commands, and the CPU path
+  labelled a reference with the probe's numbers rather than a deployment claim.
+
+## Decisions (settled with the human)
+
+| # | Decision |
+|---|---|
+| D1 | **Python reference = the real wheel**, loaded via `importlib`. Not a transcription. |
+| D2 | **JSON fixture file** for questions + state, read by both sides so the inputs cannot drift. **String states only.** |
+| D3 | **Keep the CPU default mode, labelled a reference.** It gates CPU-vs-PyTorch at the 1e-5 class and is the reference the GPU head later diffs. |
+| D4 | **B=1, loop per question.** `k = markers.Length`, so `marker_mask` padding slots never exist and the `-1e4` `masked_fill` is a no-op at this batch size. |
+| D5 | **Phase 3 folded into Phase 2** - #449 shipped the GPU encoder. |
+
+## G1 corrections - `docs/LAYA.md` §4 vs `laya/common.py` 0.3.20
+
+Found while grounding. Nine places where §4's transcription is wrong. Two would be silent bugs if
+copied, which is the argument for D1. Fixed in Unit 5.
+
+1. **Option tokenization.** §4 shows `tok(...)[:48]`. The wheel uses
+   `tok(..., truncation=True, max_length=48)` **inside the tokenizer call**, with a comment saying
+   the post-hoc slice "still makes the tokenizer process the whole (possibly long) description".
+   Differs when a token straddles the 48 boundary.
+2. **State truncation direction.** §4 says "take the *last* `room` tokens". The wheel's default is
+   `truncate_left=False` -> `state_ids[:room]`, the **first** `room`. `agent.py:568` sets
+   `truncate_left = isinstance(state, list)`. Left-truncation is the exception.
+3. **`room` is off by one in §4.** Wheel: `room = max(0, max_len - len(ids) - 1)`; the `- 1` pays
+   for the trailing `[SEP]`.
+4. **`opt_budget` is recomputed** after the per-option shrink and only then used for
+   `head_ids[:max(8, opt_budget)]`. §4 uses the stale value.
+5. **Markers are filtered:** `[m for m in markers if m < max_len]`. §4 omits it, so
+   `len(markers) != len(opts)` is reachable - which is exactly what `agent.py:582` raises on.
+6. **Temperature is not applied in the head.** The buffer is registered and never read in
+   `forward`; `agent.py:662-668` divides after `masked_fill`.
+7. **State tokenization has no `max_length`**, so HF truncates at `model_max_length = 8192` with a
+   warning. A port must replicate that or long-state prompts diverge.
+8. **Noul criterion fallbacks are part of the prompt** - `"no, the statement does not hold"` /
+   `"yes, the statement holds"`. §4 does not record them.
+9. `_resolve_noul_labels` strips whitespace and requires two distinct non-empty strings;
+   `render_criterion` JSON-dumps structured values with `separators=(", ", ": ")`.
+
+## Already free (verified - do not rebuild)
+
+- **Encoder.** `ModernBertEncoder.LoadWeights(tensors, config, prefix: "encoder")` exists and its
+  doc comment names Laya. The 170 `encoder.*` keys match exactly: `embeddings.tok_embeddings.weight`
+  / `embeddings.norm` / `final_norm`, and per layer `attn.Wqkv` [3072,1024] / `attn.Wo` [1024,1024]
+  / `mlp.Wi` [5248,1024] / `mlp.Wo` [1024,2624], with `mlp_norm` on all 28 layers and `attn_norm`
+  on layers 1-27 only - exactly what `ModernBertLayer` hard-codes. No biases under `encoder.*`.
+- **Config.** `samples/data/laya/encoder/config.json` is architecturally identical to the stock
+  ModernBERT-large config (d=1024, 28L, inter=2624, 16 heads, local_attention 128, every-3 global)
+  and differs only in using the newer `layer_types` + `rope_parameters` keys, which
+  `ModernBertConfig.FromJson` already handles. **This parse path is untested** - Phase 1's gate
+  exercised the legacy flat keys against the stock checkpoint.
+- **Tokenizer.** `Gpt2BpeTokenizer.LoadFromTokenizerJson` is the ModernBERT path. The Laya
+  `tokenizer/tokenizer.json` is structurally identical (NFC normalizer, ByteLevel
+  `add_prefix_space:false`, 6878 vocab / 50009 merges / 116 added, same TemplateProcessing
+  specials) but a different file hash, so it needs its own id parity check.
+- **Head ops.** All present in core, no new op: `LayerNorm.Bias`, `Linear.Bias`,
+  `MultiHeadAttention(q,k,v,numHeads,scale,mask)` with an additive `[qLen,kvLen]` mask using
+  `T.NegativeInfinity`, `GeluExact` (matches PyTorch `nn.GELU()`'s exact-erf default), `Gather`,
+  `Concat`, `Add`, `Softmax`, `LogSoftmax`, `Embedding.Forward(int[])`.
+- **Checkpoint header** (read directly): 206 tensors - `encoder.*` 170, `head.*` 24 (2 x 12),
+  `scorer.*` 6, `act_head.*` 4, `type_emb.weight` [3,1024], `temperature` [3]. All F16 except
+  `temperature`, which is F32.
+- **GPU epilogues.** `GemmKernels` already has `TiledGemmKernelRow4Qkv` and
+  `TiledGemmKernelRow4Relu`, and the probe timed both on Laya shapes at parity with their
+  siblings (`qkv` 202 vs 202 GMAC/s; `head ff2` `Row4Relu` 155 vs `Row4Bias` 155). The GPU head
+  is wiring, not kernels.
+
+## Blast radius
+
+**`src/Nivara` is not touched.** Every new type is sample-side. The one pre-existing type this
+adds a member to is `StateDictLoader` (in `samples/Nivara.Samples`), and it is additive only.
+
+| Change | Files | Downstream impact |
+|---|---|---|
+| `LayaPromptBuilder`, `LayaQuestion` | new, `samples/Nivara.Samples` | none - new surface |
+| `LayaDecisionHead<T>`, `LayaHeadLayer<T>`, `LayaHeadAttention<T>` | new, `samples/Nivara.Samples` | none - new surface |
+| `StateDictLoader.LoadLinearBiasSlice` | additive, `samples/Nivara.Samples` | none - no existing caller changes |
+| `Laya.cs` + `Program.cs` dispatch | `samples/NivaraInference` | `Program.cs` gains one `case` + the usage line; the switch is exhaustive over `modelType` and every existing case is untouched |
+| `laya compare` | new sub-mode | additive; the fixture-absent path must skip, not throw |
+| Tests | new, `tests/Nivara.Tests` | none - additive |
+| Docs | `docs/LAYA.md`, `samples/NivaraInference/README.md` | none |
+
+Covered by the existing suite: nothing changes behaviourally, so the existing 1948 tests are the
+regression guardrail. The new tests cover the head composition and the prompt edge cases.
+
+**Memory.** Loading the 822 MB F16 checkpoint through `SafeTensorsLoader.Read<float>` widens all
+421M params to F32 = **1.685 GB** of managed arrays (the same pattern the stock 1510 MB F32
+ModernBERT already uses at 3 GB). Both the encoder and the head need to be resident for a
+`laya` run, so the peak is the whole checkpoint, not one half. The probe measured the GPU
+allocating that same working set (1.569 GiB) in 64 MiB chunks; the host side has not been measured
+at 1.685 GB for this checkpoint specifically.
+
+## Out of scope (decided, recorded not deferred silently)
+
+- **Structured (dict/list) states and structured criteria.** `serialize_state` and
+  `render_criterion` JSON-dump with Python's `ensure_ascii=False` and `separators=(", ", ": ")`.
+  Matching that byte-for-byte from C# is its own port with its own float/exponent edge cases, and
+  D2 scopes the gate to string states. A structured state throws `NotSupportedException` naming
+  this decision.
+- **Batched multi-question forward.** Each question has its own sequence and valid length, and
+  the encoder is 2D `[L, d]` only. D4 loops at B=1.
+- **Multilingual / typed-decisions subfolders.** Noted optional in §9, untouched.
+- **`act_head` as a signal.** Reproduced faithfully (4 tensors, `forward` computes it
+  unconditionally) and exposed, but the ~1.0 reading is an upstream model limitation, not a Nivara
+  defect - so no Nivara issue is filed. The cheap check is whether `act_probability` reads ~1.0 for
+  arbitrary synthetic inputs, which needs no eval data and no labels.
+
+## Verification steps
+
+1. `dotnet build Nivara.slnx -c Release` - 0 errors, 0 warnings, after **each** unit.
+2. The `laya` mode runs the encoder + head end to end on CPU. Confirmed against the real
+   822 MB checkpoint in `samples/data/laya/`.
+3. `laya compare` - prompt ids byte-exact, then marker-scorer logits, then the typed decision and
+   temperature bucket. **Requires the wheel download and a PyTorch environment - ask the human
+   before running.**
+4. `dotnet test` - **ask the human before running.**
+5. `git show --stat` against the intended message before moving to the next unit.
+
+## Planned commits
+
+1. `docs: plan the Laya decision head (Phase 2) in TODO.md` - this file.
+2. `feat: add the Laya prompt builder as a port of the wheel's build_sequence`
+3. `feat: add the Laya decision head with a biased fused QKV projection`
+4. `feat: add a laya mode running the encoder and head end to end`
+5. `perf: gate the Laya prompt and head against the laya 0.3.20 wheel`
+6. `test: cover the Laya head composition and the mask polarity`
+7. `docs: rewrite LAYA.md as an implementation reflection and mark Phase 2 complete`
+
+Additive fix/test commits are permitted after any unit. No amend, no rebase, no squash.
+
+## GitHub issues log
+
+- [ ] #460 - this work (Laya decision head, Phase 2)
+
+As each task executes, if you find deferred work or a concern (known limitations, follow-ups,
+refactors) outside this plan, create it immediately (`gh issue create --repo khurram-uworx/Nivara`)
+and record the number here. Do not rely on memory - compaction during execution can lose it.
+
+## Reference
+
+- `laya/common.py` from PyPI `laya` 0.3.20 is the **maintained** reference. The HF repo's
+  `rl_common.py` is **stale** and has three defects, two of which fail silently (`docs/LAYA.md` §4.1).
+  Re-verify the source with `pip download laya==0.3.20 --no-deps` - nothing needs installing.
