@@ -5,11 +5,12 @@ using ILGPU.Runtime;
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// Flat f32 elementwise / row-reduce kernels for the DistilBERT GPU forward
+/// Flat f32 elementwise / row-reduce kernels for the GPU encoder forwards
 /// (docs/BERT-GPU.md §3): embedding gather, bias and residual adds, LayerNorm
 /// (per-row mean/variance + affine), exact-GELU via a direct port of the CPU
 /// GradKernels.Erf A–S 7.1.26 polynomial (XMath.Exp replaces Math.Exp — the only
-/// divergence is the erf evaluation; ILGPU core/Algorithms has no erf), and ReLU.
+/// divergence is the erf evaluation; ILGPU core/Algorithms has no erf), ReLU, and the two
+/// primitives the rotary ModernBERT encoder needs (half-split RoPE and gated GeGLU).
 /// All kernels are implicitly-grouped 1D kernels over flattened buffers.
 /// </summary>
 internal static class ElementwiseKernels
@@ -172,5 +173,63 @@ internal static class ElementwiseKernels
         if (idx >= y.Length) return;
         float v = x[idx];
         y[idx] = v > 0f ? v : 0f;
+    }
+
+    /// <summary>
+    /// Half-split rotary position embedding (HF <c>rotate_half</c>) over a head-interleaved
+    /// [rows, numHeads*headDim] buffer — the layout the fused attention kernel reads. One work
+    /// item per (row, head, frequency index) and it writes *both* halves of the pair, so
+    /// rotate_half needs no cross-work-item communication. Frequency index <c>i</c> pairs columns
+    /// <c>i</c> and <c>i + headDim/2</c>; <paramref name="posIds"/> gives each row's position within
+    /// the sequence, and <paramref name="cos"/>/<paramref name="sin"/> are the
+    /// [maxPosition, headDim/2] tables, so the table lookup is <c>posIds[row] * (headDim/2) + i</c>.
+    /// Operation-for-operation the CPU <c>GradKernels.RotaryForward</c>, so it is bit-identical
+    /// when fed the CPU's own tables.
+    /// </summary>
+    public static void Rotary(
+        ArrayView<float> x,
+        ArrayView<int> posIds,
+        ArrayView<float> cos,
+        ArrayView<float> sin,
+        ArrayView<float> y,
+        int rows,
+        int numHeads,
+        int headDim)
+    {
+        int half = headDim / 2;
+        int idx = Grid.GlobalIndex.X;
+        if (idx >= rows * numHeads * half) return;
+
+        int i = idx % half;
+        int rem = idx / half;
+        int h = rem % numHeads;
+        int row = rem / numHeads;
+
+        int t = posIds[row] * half + i;
+        float c = cos[t];
+        float s = sin[t];
+        int b = row * (numHeads * headDim) + h * headDim;
+        float x0 = x[b + i];
+        float x1 = x[b + i + half];
+        y[b + i] = x0 * c - x1 * s;
+        y[b + i + half] = x0 * s + x1 * c;
+    }
+
+    /// <summary>
+    /// ModernBERT's gated feed-forward activation: the fused <c>Wi</c> projection produces two
+    /// halves side by side, and it is the <em>first</em> half that carries the exact-erf GELU
+    /// (HF <c>input, gate = Wi(x).chunk(2, -1)</c>; <c>act(input) * gate</c>). So for an input
+    /// [rows, 2*intermediate], <c>y[r, i] = gelu(x[r, i]) * x[r, i + intermediate]</c> over
+    /// <c>i</c> in [0, intermediate). Reversing the halves is the easy mistake here: it still
+    /// produces plausible-looking output.
+    /// </summary>
+    public static void GeGlu(ArrayView<float> x, ArrayView<float> y, int rows, int intermediate)
+    {
+        int idx = Grid.GlobalIndex.X;
+        if (idx >= rows * intermediate) return;
+        int col = idx % intermediate;
+        int row = idx / intermediate;
+        int xBase = row * 2 * intermediate;
+        y[idx] = GeluExact(x[xBase + col]) * x[xBase + intermediate + col];
     }
 }
