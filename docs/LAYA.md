@@ -305,6 +305,25 @@ whitespace range ends at **50276**, not 50263; the address-marker family is **3 
 `0` plus `50277-50285` (that range also contains 6 specials); and `[unusedN]` starts at **50285**,
 not 50286. The marker family is named `PHONE_NUMBER`, not `PHONE_ADDRESS`.
 
+⚠️ **`AutoTokenizer.vocab_size` is 50280 here, but the real vocabulary is 50368.** HF reports
+only the base BPE `model.vocab` and excludes the 116 `added_tokens`, while the embedding matrix
+is `[50368, 1024]` and the ids in use run to 50367. Sizing an embedding (or an id→piece table, or
+an output projection) from `tokenizer.vocab_size` silently loses the last 88 ids, which is
+precisely the range holding `[MASK]` (50284) and the whole `[unusedN]` family (50285-50367). Take
+50368 from `config.vocab_size` / the checkpoint's embedding shape, or from
+`Tokenizer.get_vocab_size()` on the raw backend (50368), never from `AutoTokenizer`.
+
+**The tokenizer lives in a subdirectory, so the load path matters.**
+`AutoTokenizer.from_pretrained("samples/data/laya")` **fails** — there is no top-level
+`tokenizer.json`, so it falls through to slow-tokenizer conversion and raises. Point it at
+`samples/data/laya/tokenizer/`, where it loads as `TokenizersBackend` with
+`mask_token_id=50284`, `cls_token_id=50281`, `sep_token_id=50282`, and produces ids identical to
+the raw `tokenizers.Tokenizer` backend (verified on `"hello world"` → `[25521, 1533]` and
+`" [MASK] option"` → `[50284, 4500]`). Note the two backends *display* that second one
+differently (`' [MASK]'` vs `'[MASK]'`) because of added-token whitespace normalization, but the
+ids agree — so compare ids, never token strings. `build_sequence` only ever needs
+`cls_token_id`, `sep_token_id`, `mask_token`, `mask_token_id` off the tokenizer.
+
 **Added-token ids that collide with the base vocab.** Ids `0` and `1` are declared added tokens
 *and* already exist in the 50280-entry base vocab, so the 116 added tokens span only **50368
 distinct ids** — which is `config.json`'s `vocab_size`, and HuggingFace's `len(tokenizer)`. Do not
@@ -367,12 +386,27 @@ def build_sequence(tok, state, q, max_len, head_max_len, ...):
 - **Every option is scored at its own `[MASK]` token.** The answer space is defined at request
   time, so new schemas need no retraining. Markers are gathered from the encoder output after
   the head.
-- **Head** (`DecisionModel.forward`), applied to the *encoder* output:
+- **Head** (`DecisionModel.forward`). Read the real signature, because it contradicts what the
+  prose around it used to imply:
+  `forward(input_ids, attention_mask, marker_pos, marker_mask, qtype, detach_encoder=False)`.
+  **It takes `input_ids`, not `h`** — line 1 is
+  `h = self.encoder(input_ids=…, attention_mask=…).last_hidden_state`, because
+  `DecisionModel.__init__(encoder, …)` *holds* the encoder as `self.encoder` (that is why
+  `encoder.*` and `head.*` share one `model.safetensors`). A port is free to keep the seam
+  explicit — run `ModernBertEncoder<T>`, then the head — but the two must agree that the
+  encoder is fed `input_ids` + an `attention_mask`, and `detach_encoder` (training-only)
+  is the flag that decides whether gradients reach it.
   1. `h = h + type_emb(qtype)[:, None, :]` — question-type embedding broadcast over the sequence.
   2. 2 × `nn.TransformerEncoderLayer(d=1024, nhead=16, dim_feedforward=4096, dropout=0.1,
      norm_first=True)` with `src_key_padding_mask`. So **pre-norm**, attention + ReLU FFN,
      `nn.LayerNorm` **with bias** (`eps` default 1e-5), ReLU (not GELU) in the FFN, all
-     projections biased. In eval, dropout is identity.
+     projections biased. In eval, dropout is identity. Verified detail: `nhead` is *derived*,
+     `nhead = max(1, d // 64)` → 16 for d=1024, not hardcoded — so a different `d` changes the
+     head shape and the checkpoint would not load. `nn.TransformerEncoder` is built with
+     `enable_nested_tensor=False` and **no `norm=`**, so there is no final LayerNorm, and no
+     positional encoding either (correctly: the encoder's RoPE has already been applied to `h`).
+     `pad = ~attention_mask.bool()` is a *boolean* mask whose `True` means **ignore**, the
+     opposite polarity to the encoder's additive float mask — do not reuse one for the other.
   3. `logits = scorer(gather(h, marker_pos)).squeeze(-1)`, `masked_fill(~marker_mask, -1e4)`.
   4. `act_head(cat([h[:, 0], feats]))` where `feats = [top1, top1-top2, normalized_entropy, k/255]`
      computed from the **detached** softmax. `k = marker_mask.sum(-1).clamp(min=2)`, so entropy
@@ -440,8 +474,22 @@ than tokenizing the whole string and slicing `[:48]` (same output, less work).
 - `DecisionModel`'s `head_checkpointing` branch is training-only and irrelevant to inference —
   its one difference (keyword vs positional `src_key_padding_mask` in a non-reentrant
   `checkpoint` call) does not affect Phase 2.
-- The cheap cross-check is `pip download laya==0.3.20 --no-deps` (118 KB wheel, nothing
-  installed) — no need to `pip install` to diff the normative source.
+- **The wheel can be used as a live reference without installing it.** `pip download
+  laya==0.3.20 --no-deps` (118 KB wheel), extract, and prepend to `sys.path`: `import laya` and
+  `from laya import common` both succeed, exposing the entire Phase 2 surface
+  (`build_sequence`, `render_options`, `render_criterion`, `_resolve_noul_labels`,
+  `clamp_temperature`, `temp_bucket`, `serialize_state`, `DecisionModel`, `build_model`,
+  `confidence_from_probs`, `TEMP_MIN`, `TEMP_MAX`, `QTYPES`). `common.py`'s only third-party
+  imports are `numpy`, `torch` and `transformers`, all already present — the prompt builder
+  itself needs **no** ML dependency at all. This is strictly stronger than diffing text: the
+  fixture generator can call upstream's real `build_sequence` and upstream's real
+  `DecisionModel` as the reference, so a shared misreading of the *specification* cannot make a
+  broken port pass. A textual diff only catches a misreading of the *code*.
+
+  Verified behaviour worth pinning: `clamp_temperature(0.10058280825614929)` returns `0.5`
+  (raised to `TEMP_MIN`), while `1.9063563346862793` and `1.2514300346374512` pass through
+  unchanged. And `DecisionModel.__init__` takes the **encoder module**, not a width —
+  `DecisionModel(1024, 2)` raises `AttributeError: 'int' object has no attribute 'config'`.
 
 ### What the model card says is *not* worth building first
 
