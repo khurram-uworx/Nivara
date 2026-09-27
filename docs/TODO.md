@@ -28,18 +28,57 @@ Two readings point in opposite directions and both are wrong to assume:
    28 layers, four large GEMMs per layer), so the 1.9x deficit vs PyTorch should mostly
    evaporate. The GEMM arithmetic says GPU ~0.52 s at S=512.
 2. **The CPU number is not a hardware wall.** 26 GMAC/s is ~1% of this CPU's theoretical FMA
-   peak. `GradKernels.MatMulTransposedB` has no `Parallel.For` while `TensorsHelper.MatMul:191`
-   does — that is issue **#456**, not silicon. If BCL `TensorPrimitives.Dot` reaches
-   300-500 GMAC/s at these shapes, the CPU is very much alive and the 8x reading collapses.
+   peak, so something in the kernel, not the silicon, is responsible. Grounding (below)
+   identified the shape of that something, and it is **not** a missing `Parallel.For`.
 
 Neither has been measured at Laya's shapes. **#435** already asks for a lasting GEMM
 regression harness and **#440** already identifies GEMM throughput as the GPU bottleneck, so
 this probe extends existing, gated harnesses rather than inventing new ones.
 
+## Grounding corrections (G1)
+
+Grounding against MS Learn and the source invalidated three things this plan originally
+assumed. They are recorded here rather than silently dropped, because two of them change what
+the probe measures.
+
+**1. `TensorPrimitives.Dot` is not a GEMM, and no BCL matrix multiply exists.**
+`Dot<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y) → T` is the *vector* dot product. There are zero
+`TensorPrimitives.MatMul` call sites in the repo, and `TensorsHelper.cs:30-36` already records
+why: `Tensor.MatrixMultiply` has not shipped (upstream `dotnet/runtime#95863`). The original
+plan proposed BCL `TensorPrimitives.Dot` as the CPU's "optimized reference" leg; that would
+have measured a vector reduction, not a GEMM. Leg removed.
+
+**2. #456 is stale — the CPU GEMM already has a `Parallel.For`.**
+#456 asserts `GradKernels.MatMulTransposedB` is "a SIMD row kernel with **no** `Parallel.For`".
+Today it is a one-line delegation (`GradKernels.cs:748`) to
+`TensorsHelper.MultiplyCore(..., bTransposed: true)`, which reaches `Parallel.For(0, aRows, ...)`
+at `TensorsHelper.cs:191`, gated by `ShouldParallelize` (`:312`,
+`aRows >= 4 && aRows*aCols*bCols >= 2<<20`). The gate opens at every shape in this plan — the
+smallest, MiniLM 128×384×1536, is 7.6e7 MACs against a 2.1e6 threshold. So "26 GMAC/s is a
+missing `Parallel.For`" is false, and the plan's fix-the-CPU-then-compare framing collapses.
+#456 is being closed with a comment carrying the evidence and the line refs it got wrong.
+
+**3. The real CPU suspect is the kernel's shape, not its threading.**
+`MultiplyRowFloat` computes every output element as its *own* `TensorPrimitives.Dot` over
+`aCols` floats (`TensorsHelper.cs:293`). A 512×1024 @ 1024×3072 GEMM therefore runs
+512×3072 = **1.57M independent horizontal reductions of length 1024**, each paying reduction
+latency and flushing the accumulator, instead of holding an output tile in registers across the
+K loop. That is a plausible cause of ~1%-of-peak throughput, and it is a *different* fix than
+the one #456 asked for.
+
+**Consequence.** The decision rule below no longer compares "fixed CPU vs unfixed GPU". The CPU
+ceiling does not exist anywhere in-tree, so the probe has to supply it — which is why leg 3
+writes a register-accumulator GEMM rather than calling a BCL API.
+
+**Also cut on grounding.** The attention leg was dropped: at S=512 attention is 8.4M MACs per
+layer against 6.3 G per layer for the four GEMMs, i.e. **~0.13%** of the work. It cannot
+change the decision. Its one real hazard (NaN from `Exp(s - max)` on a fully-masked row, where
+`max == -inf`) is filed against #448 now, without needing a benchmark to justify it.
+
 ## What this probe is NOT
 
 It does not implement Laya. It does not build a GPU runner. It does not choose a gate
-strategy. It produces four measurements and one decision. Laya itself is the next branch.
+strategy. It produces three measurements and one decision. Laya itself is the next branch.
 
 ## Proposed changes
 
@@ -89,59 +128,58 @@ compute-bound, and a GEMM benchmark that only measures fat shapes would miss tha
 
 ### 3. The CPU's achievable ceiling (the decisive leg)
 
-New mode `--cpu-gemm`. At each Laya shape, time four CPU legs and report GMAC/s for each:
+New mode `--cpu-gemm`. At each Laya shape, time three CPU legs and report GMAC/s for each.
+The first two are in-tree paths; the third is written by this probe, because as grounding
+established, no in-tree path is a properly blocked GEMM.
 
-| leg | what it is | why it is in the probe |
+| leg | what it is | what it tells us |
 |---|---|---|
-| `GradKernels.MatMulTransposedB` | the AutoDiff GEMM Laya would actually call | today's CPU cost; single-threaded — **#456** |
-| `ReverseGradOperations.MatMulTransposedB` | the autograd wrapper | isolates graph-node/dispatch overhead from the kernel |
-| `TensorsHelper.MatMul` | has `ShouldParallelize` + `Parallel.For` | the CPU's "cheap fix" already in-tree |
-| `TensorPrimitives.Dot` | BCL, multi-threaded + SIMD | the realistic CPU ceiling |
+| `GradKernels.MatMulTransposedB` | the AutoDiff path Laya would actually call (`bTransposed: true`) | today's real CPU cost |
+| `TensorsHelper.MatMul` | the same kernel with `bTransposed: false` | isolates the cost of the per-call B transpose |
+| probe-local `Parallel.For` + `Vector<float>` | output tiles, register accumulators held across the K loop, A/B spans shared with no `RentCopy` | the CPU's **achievable** ceiling |
 
-This answers the question nobody has asked: **how much of the CPU's 26 GMAC/s is the missing
-`Parallel.For`?** Note `TensorsHelper.MatMul` `RentCopy`s all of A when parallel, so at
-M=512/K=1024 it copies 2 MB per call — worth reporting, since it is a cost a `Parallel.For`
-port of #456 would not pay.
+The third leg is the whole point of the probe, and it is ~20 lines: partition output rows
+across workers, and for each output row walk K in `Vector<float>`-width steps accumulating into
+register-resident vectors, storing only at the end. It is the shape of the fix that finding 3
+implies, written where it measures a number instead of shipping a change to `src/Nivara`.
 
-### 4. Attention ceiling at S=512
+Two costs the in-tree legs carry that the reference leg does not, and which must be reported
+separately because they are not GEMM work:
 
-New mode `--gpu-attn`, reusing `AttentionKernels.BatchedAttention` as-is. It recomputes every
-score **three times** and materialises a `[B,H,S,S]` F32 buffer (16 heads x 512 x 512 x 4 B =
-**16.8 MB per layer**) — both artifacts of mirroring the CPU kernel's accumulation order. Time
-it at S=512 for band=-1 (global) and, for comparison, the arithmetic cost of a banded rewrite
-that skips out-of-band keys:
+- `RentCopy(a)` — a full copy of A whenever `ShouldParallelize` opens. At M=512/K=1024 that is
+  2 MB copied per call, for no reason: output rows are disjoint and A/B are read-only.
+- the pooled `bT` staging buffer — `b.CopyTo` when `bTransposed`, `Transpose` otherwise. For
+  `laya fc1` (Wi) that is 1024×5248 = 5.4M elements staged **per call**.
 
-```
-naive:   28 x 512 x 3              = 43,008 score-units
-banded:  (10 x 512 + 18 x 129) x 1 =  7,442 score-units   -> ~5.8x less
-```
+Whether to time steady-state (prep hoisted, as a real inference loop would do after one
+transpose at load) or per-call (prep included, as the code does today) is reported for both,
+because the honest end-to-end number depends on how often weights are reused. At batch 1 that
+distinction is the difference between a memory-bound loop and a compute-bound one.
 
-(10 global + 18 sliding from `global_attn_every_n_layers = 3`; band half-width 64 from
-`local_attention = 128`.) That ratio is arithmetic, not measurement, and the probe must report
-it as such. Also record whether the kernel returns `NaN` on a fully-masked row — it computes
-`Exp(s - max)` with `s = max = -inf`, so it should, and the CPU `GradKernels` already guards
-this (`if (max == T.NegativeInfinity)`). #448 is exactly "a NaN masquerading as a bad model", so
-this is recorded whether or not Laya can reach that state.
-
-### 5. Record the evidence, then decide
+### 4. Record the evidence, then decide
 
 Write the results into `samples/NivaraInference/README.md` (the canonical perf document) as a
 new probe section, and the decision + its reasoning into `docs/LAYA.md` §9. Comment the measured
-numbers back onto **#435**, **#440** and **#456** so the three open issues carry current
-evidence rather than September estimates.
+numbers back onto **#435** and **#440** so those open issues carry current evidence rather than
+September estimates.
 
 ## Decision rule (fixed before the probe runs, so it cannot be rationalised afterwards)
 
-Compare **GPU-as-it-is** against **CPU-with-its-cheap-fix-already-in-tree** (`TensorsHelper.MatMul`
-and `TensorPrimitives.Dot` — both exist today, so this needs no new code):
+Compare **GPU-as-it-is** against the **probe's register-accumulator CPU ceiling**:
 
 - **GPU wins** -> the decision is **safe**, because #440's tile-32/2x2 is a 2-3x *speedup* and
   can only reinforce it. Laya goes GPU-only.
 - **CPU wins** -> the decision is **not** safe, because GPU's cheap fix has not been written.
   Either implement #440 and re-probe, or choose CPU. Do not conclude "CPU" from a probe that
   measured an unfixed GPU against a fixed CPU.
+- **`--gpu-alloc` fails at 1.69 GB** -> GPU is out on memory before throughput is even
+  considered, and F16 device buffers become a prerequisite rather than a later optimisation.
 
-This asymmetry is the whole reason the rule is written down first.
+This asymmetry is the whole reason the rule is written down first. Note the rule survived
+grounding even though its justification did not: the CPU side is no longer "the fix that
+already exists in-tree" but "the fix the probe writes", which is a strictly *stronger* CPU
+showing and therefore a *conservative* test of the GPU. The direction of the bias is unchanged
+and still favours concluding GPU.
 
 ## Verification steps
 
@@ -149,12 +187,14 @@ This asymmetry is the whole reason the rule is written down first.
 2. `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gemm` — the **existing**
    gate must still pass, with the DistilBERT/MiniLM rows unchanged. This is the regression
    guardrail: if adding shapes perturbs existing numbers, the probe is measuring something else.
-3. `dotnet run ... -- --gpu-alloc`, `--cpu-gemm`, `--gpu-attn` — the new modes, on **AC power
-   only**. `GemmBenchmark` already prints AC/battery state via `GetSystemPowerStatus`; all
-   three new modes must do the same, because the 2026-09-27 retake established that battery
-   contaminates the iGPU by 6-30%.
-4. **Ask the human before running any `dotnet test`.**
-5. Cross-check the probe against history: the DistilBERT shapes must reproduce the published
+3. `dotnet run ... -- --gpu-alloc`, `--cpu-gemm` — the new modes, on **AC power only**.
+   `GemmBenchmark` already prints AC/battery state via `GetSystemPowerStatus`; both new modes
+   must do the same, because the 2026-09-27 retake established that battery contaminates the
+   iGPU by 6-30%.
+4. Each CPU leg must be gated against the same host double-precision truth the GPU legs use, so
+   a fast-but-wrong reference leg cannot win the comparison. Max abs ≤ 1e-3, as `--gemm` does.
+5. **Ask the human before running any `dotnet test`.**
+6. Cross-check the probe against history: the DistilBERT shapes must reproduce the published
    303-379 GMAC/s band for the GPU. If they do not, the probe is wrong before its answer is.
 
 ## Blast radius
@@ -162,12 +202,17 @@ This asymmetry is the whole reason the rule is written down first.
 - `tests/Nivara.PerformanceTests/GemmBenchmark.cs` — **additive only**: new rows in
   `s_shapes`, no change to `GateMaxAbs`, the DP-truth gate, the kernel list, or the timing loop.
   The existing `--gemm` invocation must behave identically.
-- **New files**: `CpuGemmProbe.cs`, `GpuAllocProbe.cs`, `GpuAttentionProbe.cs` + dispatch lines
-  in `Program.cs` + `README.md` mode docs. All new modes are on-demand, GPU-dependent, and
-  excluded from the default scenario suite and the `--json`/`--compare` gate, exactly as
-  `--gemm` is.
-- `src/Nivara/**` — **untouched.** This probe measures; it does not fix. #456 and #440 stay open
-  and unmodified; this branch only supplies the evidence that decides whether to prioritise them.
+- **New files**: `CpuGemmProbe.cs`, `GpuAllocProbe.cs` + dispatch lines in `Program.cs` +
+  `README.md` mode docs. All new modes are on-demand and excluded from the default scenario
+  suite and the `--json`/`--compare` gate, exactly as `--gemm` is. `--gpu-alloc` is
+  GPU-dependent; `--cpu-gemm` is not, and can run anywhere.
+- `src/Nivara/**` — **untouched.** This probe measures; it does not fix. #440 stays open and
+  unmodified; this branch supplies the evidence that decides whether to prioritise it.
+- **#456 is closed** (human decision) with a comment carrying the evidence and the correction.
+  Consequence to accept: after this, the ~6.1-6.5x Nivara-CPU-vs-PyTorch gap has **no open
+  issue** tracking it. The closing comment points at the real remaining suspect, and the
+  probe's leg-3 numbers will quantify it; whether to file a follow-up issue for the
+  horizontal-reduction structure is a follow-up decision, deliberately not taken here.
 - `samples/NivaraInference/README.md`, `docs/LAYA.md` — documentation only.
 - No public API change, no library behaviour change, no dependency added.
 - The only way this breaks existing behaviour is if the added shapes change `--gemm`'s reported
@@ -176,18 +221,24 @@ This asymmetry is the whole reason the rule is written down first.
 ## Planned commits
 
 1. `docs: plan the Laya CPU/GPU probe in TODO.md` (this file)
-2. `perf: add Laya GEMM shapes to the #435 regression gate`
-3. `perf: add --cpu-gemm to measure the CPU ceiling behind #456`
+2. `docs: correct the probe plan after grounding` (this amendment — G1)
+3. `perf: add Laya GEMM shapes to the #435 regression gate`
 4. `perf: add --gpu-alloc to test the 1.69 GB Laya working set`
-5. `perf: add --gpu-attn to establish the attention ceiling at S=512`
+5. `perf: add --cpu-gemm to measure the CPU ceiling and the GEMM structure cost`
 6. `docs: record the probe evidence and the backend decision`
 
 ## GitHub issues log
 
-- [ ] #435 — lasting GEMM regression harness (this probe *is* that harness; will be satisfied)
+- [x] #435 — lasting GEMM regression harness (this probe *is* that harness; will be satisfied)
 - [ ] #440 — iGPU GEMM throughput, tile-32/2x2 (evidence pending; not fixed here)
-- [ ] #456 — AutoDiff `MatMulTransposedB` has no `Parallel.For` (evidence pending; not fixed here)
-- [ ] #448 — non-finite probabilities masquerading as model quality (`--gpu-attn` NaN row)
+- [x] #456 — **closed**: the `Parallel.For` its body claims is missing already exists at
+  `TensorsHelper.cs:191`; its line refs (`ReverseGradOperations.cs:431`,
+  `TensorsHelper.cs:158`) are stale
+- [ ] #448 — non-finite probabilities masquerading as model quality. `AttentionKernels`
+  computes `Exp(s - max)` with `s = max = -inf` on a fully-masked row and has no guard, unlike
+  the CPU `GradKernels` (`if (max == T.NegativeInfinity)`). Unreachable for Laya (`[CLS]` at
+  position 0 is never masked) but a real hazard for any future model. Filing on the hazard
+  alone, without needing the benchmark that was cut.
 - [ ] #449 — GPU path for ModernBERT (depends on the decision; stays open either way)
 - [ ] #437 — M2 kernel fusion, already shipped (regression check only)
 
