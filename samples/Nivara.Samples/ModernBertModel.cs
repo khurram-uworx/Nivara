@@ -29,19 +29,27 @@ public sealed record ModernBertConfig
     public int GlobalAttnEveryNLayers { get; init; } = 3;
 
     /// <summary>
-    /// Gets or sets the per-layer attention type. Left unset, it is derived the way HuggingFace
-    /// derives it — a layer attends globally when its index is a multiple of
-    /// <see cref="GlobalAttnEveryNLayers"/> — so a hand-built config is usable without repeating
-    /// the pattern. <see cref="FromJson(string)"/> sets it explicitly when the checkpoint ships a
+    /// Gets or sets the per-layer attention type exactly as the checkpoint declared it, or null when
+    /// it did not. <see cref="FromJson(string)"/> sets this when the checkpoint ships a
     /// <c>layer_types</c> array.
     /// </summary>
-    public IReadOnlyList<string> LayerTypes
-    {
-        get => layerTypes ??= DeriveLayerTypes(GlobalAttnEveryNLayers, NumHiddenLayers);
-        init => layerTypes = value;
-    }
+    public IReadOnlyList<string>? ExplicitLayerTypes { get; init; }
 
-    IReadOnlyList<string>? layerTypes;
+    /// <summary>
+    /// Gets the per-layer attention type. Left unset, it is derived the way HuggingFace derives it — a
+    /// layer attends globally when its index is a multiple of
+    /// <see cref="GlobalAttnEveryNLayers"/> — so a hand-built config is usable without repeating
+    /// the pattern.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately computed rather than lazily cached in a private field. A record's synthesized
+    /// equality compares every instance field, so a cache field would make two equal configs compare
+    /// unequal depending on whether <c>LayerTypes</c> had been read, and <c>with</c> would carry a
+    /// stale array across a change to <see cref="NumHiddenLayers"/>. Deriving 28 interned strings per
+    /// call is negligible — it happens once per layer during construction.
+    /// </remarks>
+    public IReadOnlyList<string> LayerTypes
+        => ExplicitLayerTypes ?? DeriveLayerTypes(GlobalAttnEveryNLayers, NumHiddenLayers);
 
     public float RopeThetaFull { get; init; } = 160000f;
     public float RopeThetaSliding { get; init; } = 10000f;
@@ -106,7 +114,7 @@ public sealed record ModernBertConfig
 
         return config with
         {
-            LayerTypes = ReadLayerTypes(root, config.GlobalAttnEveryNLayers, numLayers),
+            ExplicitLayerTypes = ReadLayerTypes(root, config.GlobalAttnEveryNLayers, numLayers),
             RopeThetaFull = ReadRopeTheta(root, FullAttentionType, "global_rope_theta", 160000f),
             RopeThetaSliding = ReadRopeTheta(root, SlidingAttentionType, "local_rope_theta", 10000f),
         };
@@ -135,7 +143,14 @@ public sealed record ModernBertConfig
         if (root.TryGetProperty("layer_types", out var layerTypes)
             && layerTypes.ValueKind == JsonValueKind.Array)
         {
-            return layerTypes.EnumerateArray().Select(t => t.GetString() ?? SlidingAttentionType).ToArray();
+            var declared = layerTypes.EnumerateArray().Select(t => t.GetString() ?? SlidingAttentionType).ToArray();
+            if (declared.Length != numLayers)
+                throw new InvalidOperationException(
+                    $"layer_types has {declared.Length} entries but num_hidden_layers is {numLayers}. " +
+                    "HuggingFace validates this too; a short array would otherwise surface as an " +
+                    "IndexOutOfRangeException from IsFullAttention, and a long one would be " +
+                    "silently ignored.");
+            return declared;
         }
 
         return DeriveLayerTypes(globalEveryN, numLayers);
@@ -189,9 +204,12 @@ public sealed record ModernBertConfig
 /// </summary>
 /// <remarks>
 /// Attention is bidirectional, so a padding row far enough from the valid region can end up with
-/// every key suppressed and produce non-finite values. That matches HuggingFace, which has the same
-/// property on its padded sdpa path, and it never leaks into the valid positions because a valid
-/// query never reads a padding key. Compare only the valid positions when diffing against a
+/// every key suppressed. What such a row produces is an artifact of the mask constant rather than a
+/// meaningful value, and the two implementations do <em>not</em> agree on it: this mask is additive
+/// <c>-inf</c>, so the row max is <c>-inf</c> and the safe-softmax clamp returns zeros, while
+/// HuggingFace masks with <c>torch.finfo(dtype).min</c>, so its row max is finite and it returns a
+/// uniform distribution. Both are finite. Either way it never leaks into the valid positions,
+/// because a valid query never reads a padding key, so compare only the valid positions against a
 /// reference.
 /// </remarks>
 public static class ModernBertMasks

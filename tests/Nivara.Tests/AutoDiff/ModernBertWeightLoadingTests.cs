@@ -87,6 +87,13 @@ public class ModernBertWeightLoadingTests
         return span.ToArray();
     }
 
+    static float[] NormWeight(LayerNorm<float> norm)
+    {
+        var tensor = norm.Weight!.Tensor;
+        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
+        return span.ToArray();
+    }
+
     //  ── LoadLinearSlice ───────────────────────────────────────────────────────
 
     [Test]
@@ -173,6 +180,8 @@ public class ModernBertWeightLoadingTests
             () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", -1, 3));
         Assert.Throws<ArgumentOutOfRangeException>(
             () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 0, -3));
     }
 
     [Test]
@@ -240,6 +249,28 @@ public class ModernBertWeightLoadingTests
             Assert.That(layer.mlpNorm, Is.Not.Null);
 
         Assert.That(EmbeddingWeight(encoder.tokenEmbedding).Length, Is.EqualTo(Vocab * Hidden));
+    }
+
+    [Test]
+    public void LoadWeights_NormWeightsCarryTheirOwnLayerScale()
+    {
+        // Binding is not enough: LoadLayerNorm silently leaves the default gamma (all 1.0) when the
+        // key is missing, so a mistyped norm prefix yields a *plausible* untrained model rather than
+        // an error. BuildStateDict gives layer i's norms the values [i, i+1, ... i+Hidden-1], which no
+        // real checkpoint contains, so the content itself proves which tensor was bound.
+        var config = TinyConfig;
+        var encoder = ModernBertEncoder<float>.LoadWeights(BuildStateDict("model"), config);
+
+        for (int i = 0; i < Layers; i++)
+        {
+            var expected = Filled(Hidden, 1, i);
+            Assert.That(NormWeight(encoder.layers[i].mlpNorm), Is.EqualTo(expected), $"layer {i} mlp_norm");
+            if (i > 0)
+                Assert.That(NormWeight(encoder.layers[i].attnNorm!), Is.EqualTo(expected), $"layer {i} attn_norm");
+        }
+
+        Assert.That(NormWeight(encoder.embedNorm), Is.EqualTo(Filled(Hidden, 1, 0f)));
+        Assert.That(NormWeight(encoder.finalNorm), Is.EqualTo(Filled(Hidden, 1, 0f)));
     }
 
     //  ── prefix parameter ─────────────────────────────────────────────────────

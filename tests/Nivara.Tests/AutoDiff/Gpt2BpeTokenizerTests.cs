@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Nivara.Samples;
 using NUnit.Framework;
 
@@ -131,8 +132,43 @@ public class Gpt2BpeTokenizerTests
     [Test]
     public void TokenizerJson_LoadsVocabAndMergesInline()
     {
-        // 50280 inline vocab entries plus the 116 added tokens that MergeAddedTokens folds in.
-        Assert.That(ModernBertTokenizer.VocabSize, Is.EqualTo(50396));
+        // 50280 inline vocab entries, and 116 declared added tokens that span 50368 *distinct* ids.
+        // They do not add up: the added list reuses ids the base vocab already claims (id 0 is
+        // |||IP_ADDRESS||| and id 1 is <|padding|>, both present in the 50280 base entries, and the
+        // 23 whitespace-run tokens sit at 50254-50276). Counting the two sets and adding would
+        // report 50396. The correct number is the distinct id count, which is what HuggingFace's
+        // len(tokenizer) and get_vocab() report (50368) and what the checkpoint's own
+        // vocab_size says.
+        Assert.That(ModernBertTokenizer.VocabSize, Is.EqualTo(50368));
+    }
+
+    [Test]
+    public void TokenizerJson_VocabSizeMatchesTheCheckpointConfig()
+    {
+        // The two numbers come from different files and different code paths, so agreeing is a real
+        // check rather than a restatement: one is derived from tokenizer.json, the other read from
+        // config.json. A silent off-by-N here is the kind of thing an embedding table gets sized from.
+        var configPath = Path.Combine(ModernBertDir, "config.json");
+        if (!File.Exists(configPath))
+            Assert.Ignore("ModernBERT config absent; skipping the vocab_size cross-check.");
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
+        Assert.That(ModernBertTokenizer.VocabSize, Is.EqualTo(doc.RootElement.GetProperty("vocab_size").GetInt32()));
+    }
+
+    [Test]
+    public void TokenizerJson_DecodeAddedTokenThatCollidesWithABaseVocabId()
+    {
+        // ModernBERT declares added tokens at ids 0 and 1 that the base vocab also uses. HuggingFace
+        // resolves the collision in favour of the added token -- convert_ids_to_tokens(0) is
+        // '|||IP_ADDRESS|||', not the base entry -- so Decode must emit the marker verbatim rather
+        // than byte-decoding it into mojibake.
+        Assert.That(ModernBertTokenizer.Decode(new[] { 0 }), Is.EqualTo("|||IP_ADDRESS|||"));
+        Assert.That(ModernBertTokenizer.Decode(new[] { 1 }), Is.EqualTo("<|padding|>"));
+
+        // A non-colliding id is unaffected, and specials still decode.
+        Assert.That(ModernBertTokenizer.Decode(new[] { 2 }), Is.EqualTo("!"));
+        Assert.That(ModernBertTokenizer.Decode(new[] { 50281 }), Is.EqualTo("[CLS]"));
     }
 
     [Test]

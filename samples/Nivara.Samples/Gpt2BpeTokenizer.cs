@@ -30,7 +30,7 @@ public sealed class Gpt2BpeTokenizer
     /// When the tokenizer.json declares a <c>Split</c> pretokenizer with a regex (Qwen-style
     /// pipeline), that regex is applied to the RAW normalized text first and each resulting
     /// chunk is byte-mapped afterwards — matching HuggingFace's Split + ByteLevel(use_regex:false)
-    /// composition. Null keeps the legacy GPT-2 path (regex applied to the mapped text), which
+    /// composition. Null applies the built-in GPT-2 pattern to the RAW text, the same order, which
     /// is what SmolLM's <c>Gpt2BpeTokenizer(vocab, merges)</c> construction relies on.
     /// </summary>
     readonly Regex? declaredSplitRegex;
@@ -43,8 +43,14 @@ public sealed class Gpt2BpeTokenizer
     /// </summary>
     readonly bool normalizeNfc;
 
-    /// <summary>Gets the total number of tokens known to this tokenizer (base vocab plus added tokens).</summary>
-    public int VocabSize => vocab.Count + addedTokens.Count;
+    /// <summary>
+    /// Gets the number of distinct token ids this tokenizer knows. Added tokens whose id is already
+    /// claimed by the base vocab do not add an id — ModernBERT declares <c>|||IP_ADDRESS|||</c> at id
+    /// 0 and <c>&lt;|padding|&gt;</c> at id 1, both of which exist in the 50280-entry base vocab, so
+    /// its 116 added tokens span 50368 distinct ids in total, not 50396. That matches
+    /// HuggingFace's <c>len(tokenizer)</c> and the model's <c>vocab_size</c>.
+    /// </summary>
+    public int VocabSize => idToToken.Count;
 
     /// <summary>Gets the unknown-token id.</summary>
     public int UnknownTokenId => unkTokenId;
