@@ -21,15 +21,13 @@ Probe/PoC: use TypeSafeAI NuGet + Ollaya (local decision-model server) to classi
 
 ## Verification
 
-- Build: `dotnet build samples/NivaraChat/NivaraChat.csproj`
-- Run: `dotnet run --project samples/NivaraChat -- --typesafe`
-- Validate output shows structured assessments for each news item
+- Build: `dotnet build samples/NivaraChat/NivaraChat.csproj` — PASSED (0 warnings, 0 errors)
+- Run: `dotnet run --project samples/NivaraChat -- --typesafe` — PASSED (all 6 items assessed)
 
 ## Planned Commits
 
-1. `docs: plan TypeSafeAI news assessment PoC in TODO.md`
-2. `feat: add TypesafeMode with Ollaya endpoint and news assessment questions`
-3. `feat: wire --typesafe mode into Program.cs`
+1. `docs: plan TypeSafeAI news assessment PoC in TODO.md` — DONE
+2. `feat: add TypesafeMode with Ollaya endpoint and news assessment questions` — DONE
 
 ## Blast Radius
 
@@ -39,4 +37,4 @@ Probe/PoC: use TypeSafeAI NuGet + Ollaya (local decision-model server) to classi
 
 ## GitHub issues log
 
-- (none yet)
+- (none)
