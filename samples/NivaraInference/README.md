@@ -902,53 +902,91 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H
 (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels.
-Both use batch size 1 with 3-pass warmup + 10 timed passes. Both columns were
-recorded in the same session. Numbers vary with machine load — only the same-row
-PyTorch-vs-Nivara ratio is meaningful.
+Batch size 1, 3-pass warmup + 10 timed passes. Both frameworks are always measured in
+the same session. Numbers vary with machine load — only the same-row
+PyTorch-vs-Nivara ratio is meaningful, and (see below) the absolute times are *not*
+comparable across power states.
 
-| Model | Input | PyTorch (CPU) | Nivara (.NET) | Slowdown |
-|-------|-------|---------------|-------------------|----------|
-| **MobileNetV2** | 1×3×224×224 | 22 ms | 665 ms | **~30×** |
-| **ResNet-18** | 1×3×224×224 | 14 ms | 251 ms | **~18×** |
-| **MiniLM-L6** | 128 tokens | 11 ms | 64 ms | **~6×** |
-| **DistilBERT** | 128 tokens | 35 ms | 185 ms | **~5×** |
-| **DistilBERT SST-2** | 128 tokens | 35 ms | 184 ms | **~5×** |
-| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 1740 ms | 10976 ms | **~6×** |
-| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 1778 ms | 16792 ms | **~9×** |
-| **ModernBERT-large** | 128 tokens | 814 ms | 2590 ms | **~3.2×** |
-| **ModernBERT-large** | 256 tokens | 1164 ms | 4853 ms | **~4.2×** |
+| Model | Input | PyTorch prev | PyTorch cur | Nivara prev | Nivara cur | Slowdown prev | Slowdown cur |
+|-------|-------|--------------|-------------|-------------|-------------|---------------|--------------|
+| **MobileNetV2** | 1×3×224×224 | 22.0 ms | 22.4 ms | 665 ms | 731.7 ms | ~30× | **~33×** |
+| **ResNet-18** | 1×3×224×224 | 14.0 ms | 14.1 ms | 251 ms | 249.4 ms | ~18× | **~18×** |
+| **MiniLM-L6** | 128 tokens | 11 ms | 10.9 ms | 64 ms | 71.2 ms | ~6× | **~6.5×** |
+| **DistilBERT** | 128 tokens | 35 ms | 32.8 ms | 185 ms | 209.7 ms | ~5× | **~6.4×** |
+| **DistilBERT SST-2** | 128 tokens | 35 ms | 32.8 ms | 184 ms | 199.9 ms | ~5× | **~6.1×** |
+| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 1740 ms | 947 ms | 10976 ms | 7404 ms | ~6× | **~7.8×** |
+| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 1778 ms | 806 ms | 16792 ms | 11499 ms | ~9× | **~14×** |
+| **ModernBERT-large** | 128 tokens | 814 ms | 287.3 ms | 2590 ms | 1249.8 ms | ~3.2× | **~4.3×** |
+| **ModernBERT-large** | 256 tokens | 1164 ms | 504.0 ms | 4853 ms | 1922.4 ms | ~4.2× | **~3.8×** |
 
-*Recorded 2026-09-01 — Intel Core Ultra 7 255H, 16 logical processors, Nivara .NET 11.0.0, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass (3 warmup + 10 timed), except SmolLM which is one 32-token greedy generation (median of 3 runs, both sides same-dtype CPU). SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).*
+*Prev* = 2026-09-01, **on battery**, except the two ModernBERT rows (2026-09-27, also on
+battery). *Cur* = 2026-09-27 on **AC power**, both frameworks in one session, same machine,
+Nivara .NET 11.0.0 Release, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass
+(3 warmup + 10 timed); SmolLM and ModernBERT report the median of 3 runs (both sides
+same-dtype CPU). SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 =
+BF16-native on disk (256.6 MB).
 
-*The two ModernBERT rows were recorded **2026-09-27** in a separate same-session run (same machine,
-Nivara Release, PyTorch 2.13.0+cpu `sdpa`, F32 on both sides) with 3 warmup + 3 timed passes at
-seq 128 and seq 256, reporting the median — so their ratio is same-session, but the other rows'
-ratios are not comparable against them. The two rows also disagree in a way that is the whole
-point of the model: doubling the padded length costs Nivara **1.87×** but PyTorch only **1.43×**.
-PyTorch's sliding-window SDPA skips out-of-band blocks, so 18 of its 28 layers get *cheaper* per
-token; Nivara builds a dense `[L, L]` mask and does the full product regardless, so its cost tracks
-`L²`. That is the banded-kernel follow-up, quantified. Nivara: 10.0 tok/s at seq 128, 5.4 tok/s at
-seq 256, ~92 and ~173 ms/layer; safetensors parse ~2.7 s and weight load ~10.7 s (excluded from the
-timed passes but ~2× a seq-128 forward in a cold run).*
+**The `prev` absolute times were all taken on battery and should be treated as superseded.**
+The `cur` column is the reference going forward. The movement is not a regression:
+
+- **Generation-scale workloads got much faster on *both* frameworks** — SmolLM F32
+  −32% (Nivara) / −46% (PyTorch), SmolLM BF16 −32% / −55%, ModernBERT@128 −52% / −65%,
+  ModernBERT@256 −60% / −57%. PyTorch improving as much as Nivara rules out a library change
+  and points at the power state, which throttled sustained CPU-bound loops.
+- **Short single-forward rows are flat or slightly worse** — ResNet-18 −0.6%, MobileNetV2
+  +10%, MiniLM +11%, DistilBERT +13%. A 20–200 ms forward is not long enough to be throttled
+  the way a multi-second decode loop is.
+- **The iGPU rows are the control.** They were already AC-only (battery throttles the iGPU
+  badly enough to invalidate them), and they reproduce to within 1% across sessions:
+  MiniLM 24.3 → 24.1 ms, DistilBERT 63.1 → 63.3 ms, SST-2 63.7 → 63.8 ms. A row that was
+  already on AC barely moved; the rows that were on battery moved 2–3×. That is consistent
+  with throttling and hard to explain any other way.
+- **Consequence for the ratios.** The transformer gap widened from ~5–6× to ~6.1–6.5×, the
+  vision gap from ~30× to ~33×, and the SmolLM rows from ~6×/~9× to ~7.8×/~14×. The old
+  numbers flattered Nivara, because they flattered PyTorch by the same factor or more.
+
+*The two ModernBERT rows are same-session (same machine, Nivara Release, PyTorch 2.13.0+cpu
+`sdpa`, F32 on both sides) with 3 warmup + 3 timed passes at seq 128 and seq 256, reporting the
+median. Nivara: 20.8 tok/s at seq 128, 13.5 tok/s at seq 256, ~44.6 and ~68.7 ms/layer; safetensors
+parse 1.85 s + weight load 4.85 s (excluded from the timed passes, but ~5.4× a seq-128 forward in
+a cold run).*
+
+> **The padding-scaling finding from the 2026-09-27 battery session is superseded and must not be
+> used to justify #447.** That session measured doubling the padded length as costing Nivara
+> **1.87×** against PyTorch's **1.43×**, and concluded that Nivara's dense `[L, L]` product made
+> its cost track `L²`. Re-measured on AC, both sides scale *worse* in the opposite direction:
+> **Nivara 1.54×** (1249.8 → 1922.4 ms) and **PyTorch 1.75×** (287.3 → 504.0 ms). Nivara now
+> scales *better* than PyTorch, which is the opposite of the earlier claim and is not explained by
+> any shortcut in the kernel — `GradKernels` has no banded or fully-masked-row fast path (the
+> `-inf` clamp at `GradKernels.cs:487` zeroes the row *after* the full product is computed), so
+> the `[L, L]` work still happens for every query. The `1.54×` therefore does not demonstrate
+> that dense masking is cheap, and the `L²` argument for the banded kernel in #447 needs
+> re-measuring before it is relied on. The reason dense masking is still worth doing is unchanged
+> and does not depend on this ratio: the 2048-token cap (#447) and the 67M-element / 268 MB
+> dense mask at ModernBERT's 8192-token context.
 
 **GPU (iGPU, `--gpu`)** — same machine, Arc 140T-class iGPU (Intel Graphics) via
-ILGPU 1.5.3 (OpenCL), 3-pass warmup + 10 timed, F32 only. GPU and CPU-Nivara
-columns below were recorded in the **same session** (2026-09-19); the PyTorch
-(CPU) column is the recorded CPU baseline from the table above (2026-09-01) —
-only same-row GPU↔CPU-Nivara ratios are same-session:
+ILGPU 1.5.3 (OpenCL), 3-pass warmup + 10 timed, F32 only. Re-measured **2026-09-27 on AC
+power**, in the same session as the `cur` CPU column above, so the PyTorch column is the
+`cur` same-session value rather than a carried-over baseline:
 
-| Model | Input | GPU Nivara (iGPU) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU Nivara | vs PyTorch |
-|-------|-------|-------------------|---------------------------|---------------|---------------|------------|
-| **MiniLM** | 128 tokens | 24.3 ms (23–25) | 76.3 ms (49–102) | 11 ms | **~3.1× faster** | **~2.2× slower** |
-| **DistilBERT** | 128 tokens | 63.1 ms (61–67) | 194.7 ms (152–232) | 35 ms | **~3.1× faster** | **~1.8× slower** |
-| **DistilBERT SST-2** | 128 tokens | 63.7 ms (62–67) | 166.4 ms (134–208) | 35 ms | **~2.6× faster** | **~1.8× slower** |
+| Model | Input | GPU Nivara (iGPU) | prev (2026-09-19) | CPU Nivara (same session) | PyTorch (CPU) | vs CPU Nivara | vs PyTorch |
+|-------|-------|-------------------|--------------------|---------------------------|---------------|---------------|------------|
+| **MiniLM** | 128 tokens | 24.1 ms (23–26) | 24.3 ms | 71.2 ms | 10.9 ms | **~3.0× faster** | **~2.2× slower** |
+| **DistilBERT** | 128 tokens | 63.3 ms (61–68) | 63.1 ms | 209.7 ms | 32.8 ms | **~3.3× faster** | **~1.9× slower** |
+| **DistilBERT SST-2** | 128 tokens | 63.8 ms (62–68) | 63.7 ms | 199.9 ms | 32.8 ms | **~3.1× faster** | **~1.9× slower** |
 
-The GPU forward is ~3.1×/~2.6×/~3.1× **faster than Nivara CPU** — but still
-~1.8×/~1.8×/~2.2× **slower than PyTorch CPU**: PyTorch starts far ahead of
-Nivara-CPU (~5.6× on the distilbert row), so the iGPU closes most of that gap
-without fully beating it. Same-row GPU↔CPU-Nivara ratios are same-session; the
-PyTorch column is the recorded 2026-09-01 baseline from the CPU table above
-(same architecture for the distilbert rows; MiniLM reuses its 11 ms CPU-table row).
+**These are the most trustworthy numbers in this document.** The iGPU rows were the only
+ones already measured on AC (battery throttles the iGPU hard enough to invalidate them), and
+they reproduce to within 1% across two sessions 8 days apart — 24.3 → 24.1, 63.1 → 63.3,
+63.7 → 63.8 — while the CPU rows recorded on battery moved 2–3×. That contrast is the best
+available evidence for the power-state explanation above, and it doubles as a regression
+check: #437's fusion work has not drifted.
+
+The GPU forward is ~3.0×/~3.3×/~3.1× **faster than Nivara CPU** — but still
+~2.2×/~1.9×/~1.9× **slower than PyTorch CPU**. PyTorch starts ~6.4× ahead of Nivara-CPU on
+the distilbert row, so the iGPU closes most of that gap without beating it. The remaining
+lever is GEMM throughput, tracked as **#440**; see `docs/BERT-GPU.md` §1/§5.
 
 The GPU path is sample-scoped (`--gpu` on `distilbert` / `distilbert_sst` / `minilm`
 only). **M2 kernel fusion (issue #437, 2026-09-19)** folded bias + GELU/ReLU into
@@ -988,7 +1026,8 @@ The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
 weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).
 PyTorch vision is multi-threaded MKL; Nivara's conv kernels are single-threaded
 naive loops, which widens the vision gap on this low-power 4-core CPU — the
-transformer gap (~6×) is the more representative figure on this machine.
+transformer gap (~6.4×) is the more representative figure on this machine. The vision gap
+is now tracked as issue **#457** (SIMD + row parallelism for the grouped/depthwise conv path).
 
 The **SmolLM rows** report one full 32-token greedy generation (not a single forward
 pass) on both sides on CPU, as a **median of 3 runs** in the same session. PyTorch's
@@ -1001,37 +1040,95 @@ the same ~6× family as the MiniLM/DistilBERT rows.
 
 **Memory vs performance (SmolLM F32 vs BF16, both Nivara, same 32-token generation):**
 
-| Precision | Weights | Nivara | vs F32 |
-|---|---|---|---|
-| F32 (widened) | 513.1 MB | 10976 ms | — |
-| BF16 (native on disk) | 256.6 MB | 16792 ms | **~1.5× slower** |
+| Precision | Weights | Nivara prev (battery) | Nivara cur (AC) | vs F32 |
+|---|---|---|---|---|
+| F32 (widened) | 513.1 MB | 10976 ms | 7404 ms | — |
+| BF16 (native on disk) | 256.6 MB | 16792 ms | 11499 ms | **~1.55× slower** |
 
 BF16 halves the weight memory (256.6 MB vs 513.1 MB), but on CPU it is **not** faster —
 the F32 path runs fully-optimized native `float` SIMD kernels while BF16 still pays the
-widen/widen-back overhead, so F32 is actually ~1.5× *faster* for generation here. The
+widen/widen-back overhead, so F32 is ~1.55× *faster* for generation here. The ratio is
+strikingly stable across power states (1.53× on battery, 1.55× on AC), because it is a
+same-session Nivara-internal comparison and therefore never crosses frameworks. The
 takeaway: on CPU, use BF16 only when you need the halved memory footprint; if you have the
 ~513 MB headroom, F32 gives both faster generation and better numerical fidelity. (The
 BF16 native load also skips the F32→BF16 truncation the other models' narrow modes do —
-on disk SmolLM is already BF16.)
+on disk SmolLM is already BF16.) Tracked as **#363** / **#391**.
 
-**BF16 scalar-fallback vs widen SIMD A/B (`smollm --precision bf16 ab`, 2026-09-01, same machine):**
+**BF16 scalar-fallback vs widen SIMD A/B (`smollm --precision bf16 ab`, re-measured 2026-09-27 on
+AC, same machine):**
 
-| Mode | ms/token | Full gen (32 tokens) | vs |
-|---|---|---|---|
-| BF16 scalar fallback (`UseWidenSimd = off`) | 7,032 | 225,037 ms | — |
-| BF16 widen (`UseWidenSimd = on`, default for narrow) | 705 | 22,591 ms | **~10× faster** |
-| F32 native (control) | 333 | 10,660–10,926 ms | widen transparent |
+| Mode | ms/token prev | ms/token cur | Full gen prev | Full gen cur | vs (cur) |
+|---|---|---|---|---|---|
+| BF16 scalar fallback (`UseWidenSimd = off`) | 7,032 | 2,667 | 225,037 ms | 85,368 ms | — |
+| BF16 widen (`UseWidenSimd = on`, default for narrow) | 705 | 374 | 22,591 ms | 11,972 ms | **7.13× faster** |
+| F32 native (control) | 333 | 231 | 10,660–10,926 ms | 7,404 ms | widen transparent |
 
 The `--simd-widen` flag toggles the widen path from the CLI; for narrow models it is enabled
-by default (without it, BF16 matmul falls back to the ~26–100×-slower scalar dot). The F32
+by default (without it, BF16 matmul falls back to the scalar dot). The F32
 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading
-the table together with the memory-vs-performance table above: BF16 **widen** is ~10× faster
-than BF16 **scalar** and roughly **1.5–2× slower than F32 native** (the exact F32-vs-BF16
-ratio varies with machine load — ~1.5× in the memory-vs-performance table above, captured
-at a cooler baseline, ~2× under sustained load) — the widen path restores usable BF16
-performance (memory-halving convenience) while remaining slower than native F32 compute.
+the table together with the memory-vs-performance table above: BF16 **widen** is 7.1× faster
+than BF16 **scalar** and ~1.6× slower than F32 native.
+
+Two things changed on AC and are worth recording rather than smoothing over:
+
+- **The scalar path gained the most (2.6×) and the widen path the least (1.9×)**, so the widen
+  advantage narrowed from ~10× to **7.13×**. The absolute win is unchanged in character — the
+  scalar fallback is still unusable — but "~10×" is no longer the right headline number. The
+  earlier figure was inflated by a power state that penalised the scalar path's long serial
+  dependency chain harder than the widen path's vectorizable work.
+- **The F32-vs-BF16 ratio is ~1.6× here and ~1.55× in the memory table above**, so that
+  conclusion held across power states. It is a Nivara-internal comparison and never crosses
+  frameworks, which is why it is stable where the cross-framework rows were not.
 
 AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor closed most of the gap: on the 2026-08-04 machine it cut vision inference ~4× (MobileNetV2 ~2,254 ms → ~563 ms, ResNet-18 ~641 ms → ~263 ms) and transformers ~1.5× (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~508 ms on this laptop.
+
+### Core library improvements (surfaced by the 2026-09-27 retake)
+
+Each item below is an observation from the measurements above plus a code check in
+`src/Nivara` — not a guess. Where a cause is not yet isolated, that is said explicitly.
+
+**1. The AutoDiff transformer GEMM is single-threaded, and a row-parallel matmul already
+exists in the codebase.** `Linear` → `ReverseGradOperations.MatMulTransposedB` →
+`GradKernels.MatMulTransposedB`, a SIMD row kernel with no `Parallel.For`. The only
+`Parallel.For` in the AutoDiff op path is the *batch* dimension of attention
+(`ReverseGradOperations.cs:779`), and every benchmark here runs batch 1, so that is one
+iteration. By contrast `TensorsHelper.MatMul` (`TensorsHelper.cs:191`) parallelizes over rows,
+gated by `ShouldParallelize` (`aRows >= 4 && rows*cols*inner >= 2 Mi` elements,
+`TensorsHelper.cs:158`). ModernBERT's per-layer GEMMs are 128×1024×2624 and 128×1024×1024 —
+far above that gate. Porting the existing pattern onto the AutoDiff path is small and
+well-scoped, and it is the most concrete lever for the ~6.1–6.5× transformer gap.
+
+*Not yet isolated:* pinning the .NET processor count to 1 (`DOTNET_PROCESSOR_COUNT=1`) made
+ModernBERT@128 **1.62× slower** (1249.8 → 2026.6 ms, with non-overlapping min/median
+spreads), so the process is not purely serial — something already spreads across threads. The
+candidates are the attention `Parallel.For` and GC, and this measurement does not distinguish
+them. Read the 1.62× as evidence that thread headroom exists, **not** as a measured kernel
+speedup.
+
+**2. Convolution kernels are naive nested loops with no SIMD and no parallelism** — the
+largest single gap in the table. MobileNetV2 ~33× and ResNet-18 ~18×, against ~6.4× for the
+transformer rows. The grouped/depthwise path in `Conv2d.cs` is a 7-deep nested loop
+(`n → ic → oc → oh → ow → kh → kw`, lines 625–655) with no `Vector<>` and no `Parallel.For`.
+MobileNetV2 is depthwise-dominated, which is also why ResNet-18's gap is much smaller. This
+confirms the pre-existing note that vision runs single-threaded naive loops, now quantified
+on AC.
+
+**3. The benchmark harness reports a mean where the spread makes the mean meaningless.**
+MobileNetV2's 10 passes span **552.5–1032.9 ms (1.9×)** and DistilBERT's span 179–306 ms, yet
+the vision/transformer rows print `Average` while the SmolLM/ModernBERT rows correctly print
+a median. The PyTorch re-run in this session also drifted 287.3 → 252.8 ms (~12%) with no code
+change, so the mean of a 10-pass distribution with a 1.9× tail is not a reproducible
+statistic. Report the median everywhere.
+
+**4. Cold weight load is ~5.4× a ModernBERT forward pass.** safetensors parse 1.85 s + load
+4.85 s = 6.7 s, versus a 1.25 s seq-128 forward. Excluded from the timed passes, but it
+dominates any short-lived process.
+
+**Already tracked — do not duplicate:** #440 (iGPU GEMM throughput; the iGPU is still
+1.9–2.2× slower than PyTorch *CPU*), #363 / #391 (BF16 slower than F32 on CPU — reconfirmed
+on AC at 1.55× and 1.6×), #447 (banded attention — see the superseded padding-scaling
+caveat above before using its numbers), #448 (attention mask applied as an add, not a select).
 
 ## Sample data
 
