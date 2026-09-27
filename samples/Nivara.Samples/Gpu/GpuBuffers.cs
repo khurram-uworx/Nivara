@@ -32,6 +32,13 @@ internal static class GpuBuffers
     public const int MaxHeadDim = 64;
 
     /// <summary>
+    /// Band value meaning "attend to every non-suppressed key", the sentinel
+    /// <see cref="AttentionKernels"/> reads as global attention. Matches the CPU's own
+    /// <c>band &lt; 0</c> convention in <c>ModernBertMasks.Build</c>.
+    /// </summary>
+    public const int GlobalAttentionBand = -1;
+
+    /// <summary>
     /// Fails unless the fused attention kernel's local-memory tile fits the device: the
     /// per-thread tile must be within <see cref="MaxHeadDim"/>, a whole group of
     /// <see cref="AttentionGroupSize"/> work items must fit the accelerator's reported shared
@@ -93,10 +100,17 @@ internal static class GpuBuffers
     public static MemoryBuffer1D<int, Stride1D.Dense> AllocInt(Accelerator accelerator, int length)
         => accelerator.Allocate1D<int>(length);
 
-    /// <summary>Grows <paramref name="buffer"/> in place when it is smaller than <paramref name="length"/>.</summary>
+    /// <summary>
+    /// Grows <paramref name="buffer"/> in place when it is smaller than <paramref name="length"/>,
+    /// allocating it on first use. Tolerates a null buffer so a runner can declare its workspace
+    /// as <c>null!</c> and let the first forward size it, instead of having to pre-allocate
+    /// against a sequence length the caller has not chosen yet.
+    /// </summary>
     public static void Ensure(ref MemoryBuffer1D<float, Stride1D.Dense> buffer, int length, Accelerator accelerator)
     {
-        if (buffer.Length < length)
+        if (buffer is null)
+            buffer = accelerator.Allocate1D<float>(length);
+        else if (buffer.Length < length)
         {
             buffer.Dispose();
             buffer = accelerator.Allocate1D<float>(length);
@@ -106,7 +120,9 @@ internal static class GpuBuffers
     /// <summary>Grows <paramref name="buffer"/> in place when it is smaller than <paramref name="length"/>.</summary>
     public static void Ensure(ref MemoryBuffer1D<int, Stride1D.Dense> buffer, int length, Accelerator accelerator)
     {
-        if (buffer.Length < length)
+        if (buffer is null)
+            buffer = accelerator.Allocate1D<int>(length);
+        else if (buffer.Length < length)
         {
             buffer.Dispose();
             buffer = accelerator.Allocate1D<int>(length);

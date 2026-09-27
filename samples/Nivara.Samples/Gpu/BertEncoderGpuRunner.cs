@@ -136,7 +136,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> embeddingSum;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNormResidual;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, int, float> attention;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmBias;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmGelu;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmRelu;
@@ -218,7 +218,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             ElementwiseKernels.LayerNormResidual1D);
         attention = acc.LoadKernel<
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
-            ArrayView<float>, int, int, int, int, float>(
+            ArrayView<float>, int, int, int, int, int, float>(
             AttentionKernels.BatchedAttention);
         gemmBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
             GemmKernels.TiledGemmKernelRow4Bias);
@@ -363,7 +363,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
         ArrayView<float> mask, ArrayView<float> attnOut,
         int batch, int seqLen)
         => attention(runtime.Stream, GpuBuffers.Cfg1D(batch * numHeads * seqLen, GpuBuffers.AttentionGroupSize),
-            q, k, v, mask, attnOut, batch, seqLen, numHeads, headDim, scale);
+            q, k, v, mask, attnOut, batch, seqLen, numHeads, headDim, GpuBuffers.GlobalAttentionBand, scale);
 
     void GemmQkv(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, ArrayView<float> bias, int aRows, int aCols, int bCols, int blockWidth)
     {

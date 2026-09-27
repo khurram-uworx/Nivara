@@ -33,6 +33,30 @@ internal static class ElementwiseKernels
         y[idx] = x[idx] + bias[idx % cols];
     }
 
+    /// <summary>
+    /// Copies one column block out of a fused row-major <c>[rows, parts * blockCols]</c>
+    /// projection into a dense <c>[rows, blockCols]</c> buffer:
+    /// <c>dst[r, c] = src[r, part * blockCols + c]</c>. Launched <c>parts</c> times, once per
+    /// block.
+    /// </summary>
+    /// <remarks>
+    /// ModernBERT ships its QKV and gate/up projections pre-fused, and a row-major GEMM lays
+    /// them down interleaved <em>per row</em> — row <c>r</c> holds <c>[q(r) | k(r) | v(r)]</c>,
+    /// not all of q followed by all of k. Slicing the blocks with contiguous sub-views
+    /// therefore reads the right values for row 0 and the wrong values for every row after it,
+    /// so the split has to walk rows. The gate/up pair needs no split because
+    /// <see cref="GeGlu"/> indexes the fused buffer directly.
+    /// </remarks>
+    public static void SplitColumns(
+        ArrayView<float> src, ArrayView<float> dst, int rows, int blockCols, int parts, int part)
+    {
+        int idx = Grid.GlobalIndex.X;
+        if (idx >= rows * blockCols) return;
+        int row = idx / blockCols;
+        int col = idx - row * blockCols;
+        dst[idx] = src[row * blockCols * parts + part * blockCols + col];
+    }
+
     /// <summary>y[i] = a[i] + b[i].</summary>
     public static void Add(ArrayView<float> a, ArrayView<float> b, ArrayView<float> y)
     {

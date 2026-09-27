@@ -5,19 +5,21 @@ using ILGPU.Runtime;
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// Fused batched multi-head attention forward for the DistilBERT GPU scenario
+/// Fused batched multi-head attention forward for the GPU encoder scenarios
 /// (docs/BERT-GPU.md §3), mirroring the CPU AutoDiff BatchedMultiHeadAttention
 /// exactly. Q/K/V live as head-interleaved [batch*seqLen, D] views (D = numHeads*headDim,
 /// output of the q/k/v projections). One work item per (b, h, q):
 ///   score[b,h,q,j] = dot(Q[b,q,hd], K[b,j,hd]) over the head's headDim columns
-///                  * scale; -inf where the padding mask is 0 (mask[j] &lt; 0.5)
+///                  * scale; -inf where the key is suppressed
 ///   row softmax (max-subtract, exp, /sum) — same numerics as the CPU SoftmaxSingle
 ///   attnOut[b,q,h*headDim+d] = sum_j p_j * V[b,j,h*headDim+d]
+/// A key is suppressed when the padding mask is 0 (mask[j] &lt; 0.5) or it falls outside the
+/// sliding window: see <c>Keep</c> for the band convention (negative = global).
 /// A row whose keys are all suppressed writes zeros rather than NaN, mirroring the CPU
 /// safe-softmax clamp; such a row is an artifact of the mask constant and never reaches a
 /// valid position, because a valid query never reads a padding key.
 /// The score row is recomputed per pass (no per-work-item array), and the third pass
-/// accumulates the probability-weighted V rows in a local-memory tile instead of spilling
+/// accumulates the probability-weighted V rows in a shared-memory tile instead of spilling
 /// the p_j row to global scratch: [B, H, S, S] would be 268 MB at S=2048 and 4.3 GB at
 /// S=8192, and only the per-(b,h,q) accumulator needs to be live. Each output element's
 /// j loop stays sequential and ascending, so the accumulation order and precision shape
@@ -35,6 +37,7 @@ internal static class AttentionKernels
         int seqLen,
         int numHeads,
         int headDim,
+        int band,
         float scale)
     {
         int total = batch * numHeads * seqLen;
@@ -56,7 +59,7 @@ internal static class AttentionKernels
         for (int j = 0; j < seqLen; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
-            if (mask[maskBase + j] < 0.5f) s = float.NegativeInfinity;
+            if (!Keep(mask, maskBase, qPos, j, band)) s = float.NegativeInfinity;
             if (s > max) max = s;
         }
 
@@ -76,7 +79,7 @@ internal static class AttentionKernels
         for (int j = 0; j < seqLen; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
-            if (mask[maskBase + j] < 0.5f) s = float.NegativeInfinity;
+            if (!Keep(mask, maskBase, qPos, j, band)) s = float.NegativeInfinity;
             sum += XMath.Exp(s - max);
         }
 
@@ -98,7 +101,7 @@ internal static class AttentionKernels
         for (int j = 0; j < seqLen; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
-            if (mask[maskBase + j] < 0.5f) s = float.NegativeInfinity;
+            if (!Keep(mask, maskBase, qPos, j, band)) s = float.NegativeInfinity;
             float p = XMath.Exp(s - max) / sum;
             int vBase = (b * seqLen + j) * D + dOffset;
             for (int d = 0; d < headDim; d++)
@@ -108,6 +111,21 @@ internal static class AttentionKernels
         for (int d = 0; d < headDim; d++)
             attnOut[outBase + dOffset + d] = acc[d, lane];
     }
+
+    /// <summary>
+    /// Whether query <paramref name="qPos"/> may attend to key <paramref name="j"/>: the
+    /// padding mask must be set, and when <paramref name="band"/> is non-negative the pair must
+    /// also be within that many positions of each other.
+    /// </summary>
+    /// <remarks>
+    /// A negative <paramref name="band"/> means global attention, matching the CPU's convention
+    /// (<c>ModernBertMasks.Build</c> treats <c>band &lt; 0</c> as unbounded). The half-width
+    /// window <c>|qPos - j| &lt;= band</c> is what the CPU's
+    /// <c>firstAllowed = max(0, i - band)</c> / <c>lastAllowed = min(validLength - 1, i + band)</c>
+    /// describe once the padding mask is applied on top.
+    /// </remarks>
+    static bool Keep(ArrayView<float> mask, int maskBase, int qPos, int j, int band)
+        => mask[maskBase + j] >= 0.5f && (band < 0 || XMath.Abs(qPos - j) <= band);
 
     static float RowScore(
         ArrayView<float> q,
