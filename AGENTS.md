@@ -64,6 +64,10 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 - `NivaraColumn.TryGetSpan` returns `ReadOnlySpan<T>` (immutable), diverging from BCL's `Tensor<T>.TryGetSpan` which returns `Span<T>` (mutable). This is deliberate — Nivara columns are immutable. Use `CopyTo(Span<T>, T)` for the explicit-fill path.
 - `DataFrameOperation` no longer has strategy-switch dispatch or `Strategy` property — it was simplified to a single `Execute()` abstract method. Strategy dispatch is the `ExecutionEngine`'s responsibility via `IExecutionStrategy`.
 
+## Engineering Guidelines
+
+See [docs/GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null semantics, lazy execution, zero-copy, testing strategy, etc.).
+
 ## Code Style
 
 - `.editorconfig` at repo root is authoritative; follow it over any convention below.
@@ -89,7 +93,7 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 - Avoid `[TestCase]` with null arrays; use regular `[Test]` with inline arrays.
 - Reflection cannot pass `Span<T>` via `MethodInfo.Invoke` — convert to array first.
 - Test for key phrases in error messages rather than exact message strings.
-- Property-like tests: implement with parameterized NUnit test suites rather than full FsCheck. FsCheck has limited visibility in mainstream C#; AI agents struggle to produce correct FsCheck code in C#.
+- Property-like tests: implement with parameterized NUnit test suites rather than full FsCheck (see [docs/GUIDELINES.md](GUIDELINES.md) for rationale).
 - Native integer types (`nint`): use `nint` for test assertions when comparing tensor dimensions.
 - Resource-management tests that depend on weak-reference cleanup may force multiple GC cycles; avoid GC forcing in normal code paths.
 - Code examples: see [docs/AGENT-CODE-EXAMPLES.md](docs/AGENT-CODE-EXAMPLES.md).

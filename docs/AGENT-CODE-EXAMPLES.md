@@ -40,17 +40,4 @@ public void NullMaskMaintenance_ArithmeticOperations_PreservesNullPositions()
 }
 ```
 
-## Property-based test pattern
 
-```csharp
-[Test]
-[Category("Feature: nivara-frame, Property 13: Type compatibility validation")]
-public void Property_ArithmeticCompatibility_ValidatesCorrectly()
-{
-    foreach (var (leftType, rightType) in compatiblePairs)
-    {
-        Assert.DoesNotThrow(() =>
-            TypeCompatibilityValidator.ValidateArithmeticCompatibility(leftType, rightType, "test"));
-    }
-}
-```
