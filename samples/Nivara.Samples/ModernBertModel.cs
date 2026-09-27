@@ -294,8 +294,8 @@ public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloati
 /// side and HuggingFace names them <c>input, gate = Wi(x).chunk(2, dim=-1)</c> — but it is the
 /// <em>first</em> half, <c>input</c>, that carries the exact-erf GELU, and the product is
 /// <c>act(input) * gate</c>. So the activated half is rows <c>[0, intermediate)</c> and the linear
-/// "gate" is rows <c>[intermediate, 2 * intermediate)</c>, which is why the loader hands the upper row
-/// block to <see cref="inputProj"/>.
+/// "gate" is rows <c>[intermediate, 2 * intermediate)</c>, which is why the loader hands the
+/// <em>first</em> row block to <see cref="inputProj"/> and the second to <see cref="gateProj"/>.
 /// </summary>
 public sealed class ModernBertMlp<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {

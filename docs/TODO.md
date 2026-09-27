@@ -56,9 +56,10 @@ softmax (see the bug list below).
   So rows `[0:2624]` carry the exact-erf GELU and rows `[2624:5248]` are the *unactivated*
   "gate". This plan originally recorded the opposite, because the HF variable named `gate` is the
   one that is **not** activated. Building it the recorded way gave cosine 0.82 at layer 0 and was
-  the single hardest bug in Phase 1. Note the loader hands the **upper** row block to `inputProj`.
-- **Sliding window is symmetric and inclusive**: `abs(i - j) <= local_attention / 2` (band 129).
-  `config.sliding_window` is the half-window (64). The `+1` in
+  the single hardest bug in Phase 1. Note the loader hands the **first** row block (`[0, 2624]`) to
+  `inputProj` and the second to `gateProj`.
+- **Sliding window is symmetric and inclusive**: `abs(i - j) <= local_attention / 2`. The half-width
+  is 64, so a query sees 129 keys. `config.sliding_window` is the half-window (64). The `+1` in
   `ModernBertAttention.__init__` (`self.sliding_window = config.sliding_window + 1`) is
   flash-attention **window-size** semantics; the sdpa path goes through
   `create_bidirectional_sliding_window_mask`, which reads `getattr(config, "sliding_window")`
@@ -156,7 +157,7 @@ just the missing LayerNorm.
 ### 1.1 Data + gitignore
 
 - [x] `.gitignore`: `samples/data/modernbert/` and `samples/data/laya/` added.
-- [ ] Document the download in `samples/NivaraInference/README.md` (moved to 1.8).
+- [x] Document the download in `samples/NivaraInference/README.md` (moved to 1.8).
 - [x] Downloaded: `model.safetensors` 1510 MB, `config.json`, `tokenizer.json`, `tokenizer_config.json`,
       `special_tokens_map.json`.
 
@@ -249,15 +250,19 @@ just the missing LayerNorm.
       throw, malformed-JSON throw); NFC on/off; and four added-token parity tests including the
       25-space case that proves leftmost-longest raw-text matching.
 - [x] Test project builds clean, 0 warnings.
-- [ ] **Ask before** `dotnet test`; then the four fixtures, then the AutoDiff suite as the
+- [x] **Asked before** `dotnet test`; then the four fixtures, then the AutoDiff suite as the
       regression guardrail (the softmax fix and the shared-tokenizer change are why this matters).
+      **126 passed / 0 failed** on the new fixtures; full suite **3516 passed / 1 failed** (a
+      load-sensitive performance probe that passes in isolation — see verification step 8).
 
 ### 1.8 Docs
 
-- [ ] `samples/NivaraInference/README.md` — `modernbert` row, quick-start commands, architecture
+- [x] `samples/NivaraInference/README.md` — `modernbert` row, quick-start commands, architecture
       section (including the corrections, since a reader will assume layer scale), the
-      PyTorch-vs-Nivara benchmark row, the `hf download` command, the ~1.7 GB load, the dense-mask
-      cap, and the tokenizer whitespace-token divergence.
+      PyTorch-vs-Nivara benchmark row, the `hf download` command, the load footprint (1510.2 MB of
+      F32 weights, 2.5–3 GB peak managed heap), the dense-mask cap, and the added-token matching
+      behaviour. The originally-scoped "tokenizer whitespace-token divergence" is **deliberately
+      absent** — it was measured false (see 1.4) and must not be reintroduced as a caveat.
 
 
 ## Phase 2 — Laya head (after Phase 1's gate passes)
