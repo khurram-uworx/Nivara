@@ -1,6 +1,8 @@
 # Laya decision head — implementation reflection
 
 Status: **Implemented and gated** (2026-09-27, issue #460, branch `khurram/laya`).
+Phase 2 is complete. The GPU head — what remained of Phase 3 — is unblocked
+and not wired; that follow-up is #462.
 This is a reflection of what we built and what we learned while porting Laya's
 typed decision head onto the ModernBERT encoder that #449 already runs. It is
 *not* a usage guide (that lives in
@@ -306,9 +308,10 @@ both, and says which is which.
    term that is ~99.9% of the work. The GPU number in the probe is the
    conservative one: that harness reads the iGPU at roughly half the
    idle-machine rate, and #440 is still unclaimed.
-2. **Wire the head onto `ModernBertGpuRunner`.** Zero new kernels. Gate it
-   GPU-vs-CPU against this head, the same way `modernbert --gpu compare` gates
-   the encoder. Not started. `--gpu` on `laya` says so and exits 1.
+2. **#462 — wire the head onto `ModernBertGpuRunner`.** Unblocked by this
+   work, not started. Zero new kernels. Gate it GPU-vs-CPU against this head,
+   the same way `modernbert --gpu compare` gates the encoder. `--gpu` on
+   `laya` says so and exits 1. Lower value than #440.
 3. **#448 — mask-as-select.** The fully-masked-row `NaN` hazard. The GPU
    encoder's `max == -inf → zeros` clamp is the prerequisite #449 landed, not
    the structural fix. The head's CPU path uses the same additive `-inf` mask
