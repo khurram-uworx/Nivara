@@ -226,8 +226,8 @@ dotnet run --project samples/NivaraInference -c Release -- laya
 python samples/NivaraInference/Python/laya_compare.py
 dotnet run --project samples/NivaraInference -c Release -- laya compare
 
-# Timed at the config's max_len (512), 1 warmup + 3 timed, median. Not a
-# deployment number — see the probe section below, and run it on AC power.
+# Timed at max_len 512 (padded), 1 encoder warmup + 3 timed, median.
+# AC-power reading: 3.9–4.2 s. Not a deployment number — see the probe section.
 dotnet run --project samples/NivaraInference -c Release -- laya benchmark
 ```
 
@@ -841,7 +841,10 @@ under the `encoder.` prefix — plus a typed decision head. The checkpoint is
 load, so the resident set is about 1.7 GB. The CPU mode is a **reference for
 the parity gate**, not a deployment path: the 2026-09-27 probe measured GEMM
 at ~99.9% of the arithmetic and projected a GPU forward at ~920 ms against a
-CPU GEMM of ~2414 ms. Those numbers were not re-taken for this write-up. Full
+CPU GEMM of ~2414 ms. Those GEMM rates were not re-taken. An AC-power
+`laya benchmark` (padded to 512, 1 encoder warmup + 3 timed encoder-plus-head
+passes, median) measured **3.9–4.2 s** per question. The difference is
+non-GEMM latency, not a disagreement about the arithmetic. Full
 reflection in [docs/LAYA.md](../../docs/LAYA.md).
 
 The head, ported from `laya/common.py` in the `laya==0.3.20` wheel:

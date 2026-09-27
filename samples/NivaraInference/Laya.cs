@@ -198,7 +198,7 @@ public static class Laya
         // padding a no-op numerically, which is also what makes the timing honest.
         Console.WriteLine($"1 warmup + 3 timed passes at max_len {agent.MaxLen}, median reported.");
         Console.WriteLine();
-        Console.WriteLine($"  {"question",-10} {"tok",5} {"markers",7} {"median",10} {"min",8} {"max",8}");
+        Console.WriteLine($"  {"question",-10} {"valid",5} {"markers",7} {"median",10} {"min",8} {"max",8}");
 
         foreach (var question in FixtureQuestions)
         {

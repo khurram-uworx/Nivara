@@ -13,10 +13,9 @@ Related: the encoder's GPU reflection in [docs/BERT-GPU.md](BERT-GPU.md) §1b,
 the backend probe in the inference sample's README (the 2026-09-27 GEMM
 numbers below are that probe, not a new session).
 
-No end-to-end wall-clock was taken for this write-up. The machine was not on
-AC power, and a battery reading of this model is not a number worth keeping
-(see BERT-GPU.md lesson 8). The correctness gate below does not depend on
-power state. A fresh `laya benchmark` belongs on AC, and has not been run.
+The end-to-end wall-clock below was taken on AC power. A battery reading of
+this model is not a number worth keeping (see BERT-GPU.md lesson 8). The
+correctness gate does not depend on power state; the timing does.
 
 ## 1. Result — gated
 
@@ -34,6 +33,29 @@ ModernBERT gate uses:
 | Typed decision | match, including the option **key** (not the rendered description) |
 | Temperature bucket | match, including `choice:11+` **0.1006 → 0.5** |
 | `act_head` class-0 probability | 1.0 on both sides |
+
+`laya benchmark`, AC power, Release, F32, .NET 11. Padded to
+`max_len` 512 so the four questions are the same forward; the valid-token
+counts are how long the prompt actually is, not how long the forward was.
+Protocol is the mode's own: one untimed encoder pass, then three timed
+encoder-plus-head passes, median reported. The head's first call falls inside
+the timed loop, which is the likely source of the high sample on `noul`.
+
+| question | valid | markers | median | min | max |
+|---|---|---|---|---|---|
+| choice2 | 40 | 2 | **4187 ms** | 4001 | 4715 |
+| choice13 | 119 | 13 | **4207 ms** | 3770 | 4772 |
+| score4 | 48 | 4 | **3910 ms** | 3870 | 4492 |
+| noul | 39 | 2 | **4243 ms** | 3770 | 5697 |
+
+Weight bind was 6.6 s on top of a 1.1 s safetensors parse, so a cold run is
+load plus about four seconds of forward. This is a reference timing, not a
+deployment claim. The 2026-09-27 probe projected the CPU GEMM alone at
+**2414 ms**. The measured forward is about **4.1 s**. The gap is real and it
+is not a contradiction: GEMM is ~99.9% of the *arithmetic* and a much smaller
+share of the *time*, because norms, the dense `[512, 512]` mask, attention,
+and per-op dispatch are latency. #440 still targets the arithmetic. It will
+not turn 4.1 s into 0.9 s by itself.
 
 The `act_head` row is a weak signal and the gate says so. The shipped head
 saturates near 1.0 regardless of input (upstream
@@ -133,7 +155,8 @@ defaults disagree, and the checkpoint shapes do not disambiguate.
   0.13%), the GPU GEMM projects **~920 ms** against a CPU GEMM of **~2414 ms**
   (2.6×), and #440's tile-32 / 2×2 is still unclaimed on the GPU side. Those
   numbers are that probe, reproduced in the sample README. They were not
-  re-measured for this write-up.
+  re-measured here. The AC-power wall-clock in §1 is a different quantity:
+  about 4.1 s end to end against that 2414 ms GEMM projection.
 - **One question at a time.** Each question has its own length. `k` is the
   marker count, so the wheel's `masked_fill(~marker_mask, -1e4)` has no padding
   slot here. It is documented as a no-op, not reimplemented. The
