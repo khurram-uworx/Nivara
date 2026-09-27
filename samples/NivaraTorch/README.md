@@ -358,7 +358,7 @@ Formal A/B validation of every NN layer type in Nivara's AutoDiff engine. PyTorc
 
 ### Fixture data
 
-All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 68 test cases covering:
+All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 73 test cases covering:
 
 | Layer type | Configs | Notes |
 |---|---|---|
@@ -394,6 +394,52 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 | CrossEntropyLoss | 2 | Mean and none reduction, integer targets |
 | MSELoss | 3 | Sum, mean, and none reduction |
 | L1Loss | 2 | Sum and none reduction |
+| Banded bidirectional attention | 3 | `attn_band_padding`, `attn_band_padding_minfill`, `attn_mask_nonfinite` — see below |
+
+#### Banded bidirectional + padding attention (`attn_band_*`)
+
+The three cases added with ModernBERT-large cover the additive-mask shape a plain causal
+mask cannot express, plus the safe-softmax behaviour that shape forces:
+
+- **Geometry** — inclusive band `abs(i-j) <= 1` intersected with right padding over the last two
+  positions, i.e. `ModernBertMasks.Build(seqLen: 8, band: 1, validLength: 6)`, giving
+  `[2,3,3,3,3,2,1,0]` visible keys per query row. Row 7 is **fully masked**, which is the
+  degenerate case the whole point of the case set.
+- **The reference is `F.scaled_dot_product_attention`, not `torch.softmax`.** SDPA is the path
+  that runs torch's internal `_safe_softmax`, and the two differ exactly here: when every key in
+  a row is suppressed the row max is `-inf`, where plain softmax yields NaN and `_safe_softmax`
+  yields zeros. `GradKernels.SoftmaxSingle` clamps to zeros, so only SDPA is a valid reference.
+  The pre-existing `softmax` and `attn_*` fixtures use benign inputs where the two coincide,
+  which is why no earlier fixture ever covered a fully-masked row.
+- **`attn_band_padding`** (`-inf`, Nivara's own convention) — full forward **and** backward
+  parity including the fully-masked row, where both sides produce exact zeros. The C# side builds
+  the mask with `ModernBertMasks.Build` rather than loading it, so the mask construction itself
+  is under test.
+- **`attn_band_padding_minfill`** (`torch.finfo(float32).min`, HuggingFace's convention) —
+  forward parity on every row. `finfo.min + score` saturates the score away (the float32 ULP at
+  3.4e38 is ~2e31), so row 7's scores collapse to one constant and both sides reduce it to a
+  uniform average of V. The **backward deliberately is not asserted**: `dk`/`dv` aggregate over
+  every query row and so inherit that saturated row, and Nivara and PyTorch disagree there
+  (Nivara's `dq[7]` is exactly `1/seqLen` of PyTorch's, on every component, while a hand-derived
+  float64 reference matches neither). The test records the divergence instead of pinning a
+  factor that is not understood.
+- **`attn_mask_nonfinite`** — a `+inf` and a `NaN` cell in the additive mask. Both poison
+  exactly their own row to all-NaN, which is what `GradKernels` narrowing its clamp to
+  `max == -inf` (rather than `!IsFinite`) is for.
+
+The two mask conventions agree **bit-exactly** on every row that has at least one visible key,
+and differ only on the fully-masked row (`-inf` → zeros, `finfo.min` → uniform average of V).
+Both are finite and neither is meaningful, which is why the ModernBERT parity gate compares valid
+positions only.
+
+#### Comparing tensors that contain NaN
+
+These cases need `TestHelpers.AssertTensorClose`, not `AssertTensorEqual`. The latter compares
+with `diff > threshold`, and `NaN > x` is false, so a NaN reference matched against a finite
+result passes silently — which would make "clamp to zeros vs propagate NaN" unverifiable.
+`AssertTensorClose` asserts non-finite *positions* first, then compares the finite ones;
+`AssertTensorClose_DetectsNonFiniteMismatch_ThatAssertTensorEqualCannot` guards that gap so it
+cannot be reintroduced unnoticed.
 
 ### Layout notes
 
@@ -415,3 +461,21 @@ Requires Python with PyTorch:
 ```bash
 python samples/NivaraTorch/gen_reference.py
 ```
+
+**Regeneration is not currently byte-reproducible against the committed tree.** Re-running the
+generator on this machine rewrites 35 of the 308 pre-existing `.bin` files (outputs and gradients
+of the conv/linear/attention/transformer cases) even with an unmodified script, and pinning
+`OMP_NUM_THREADS=1` / `MKL_NUM_THREADS=1` does not change that. Two consecutive runs *on the same
+machine* are byte-identical, so this is torch-build or microarchitecture drift between the
+environment that produced the committed tree and the current one — not flakiness. The values
+differ only in the last bits and every parity test passes against either, so when adding a case,
+**restore the untouched fixtures rather than committing the churn**:
+
+```bash
+# after regenerating, keep only your new files + manifest.json
+git checkout -- samples/data/torch-comparison/<pre-existing>.bin
+```
+
+Append new cases at the **end** of `run()` and draw from a **dedicated** `torch.Generator` rather
+than the shared `attn_rng` stream, so no existing fixture is perturbed. The three `attn_band_*`
+cases follow this and were verified to leave all 305 pre-existing `.bin` files untouched.

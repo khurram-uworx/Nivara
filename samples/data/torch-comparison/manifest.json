@@ -1620,5 +1620,109 @@
       "rms_norm_eps": 1e-05,
       "qkv_bias": true
     }
+  },
+  "attn_band_padding": {
+    "layer": "MultiHeadAttention",
+    "attention": "banded_bidirectional_with_padding",
+    "reference": "F.scaled_dot_product_attention",
+    "q_shape": [
+      8,
+      16
+    ],
+    "k_shape": [
+      8,
+      16
+    ],
+    "v_shape": [
+      8,
+      16
+    ],
+    "mask_shape": [
+      8,
+      8
+    ],
+    "num_heads": 4,
+    "head_dim": 4,
+    "scale": 0.5,
+    "band": 1,
+    "valid_length": 6,
+    "mask_fill": "neg_inf",
+    "fully_masked_rows": [
+      7
+    ],
+    "output_shape": [
+      8,
+      16
+    ],
+    "grads": true,
+    "grads_finite": true
+  },
+  "attn_band_padding_minfill": {
+    "layer": "MultiHeadAttention",
+    "attention": "banded_bidirectional_with_padding",
+    "reference": "F.scaled_dot_product_attention",
+    "q_shape": [
+      8,
+      16
+    ],
+    "k_shape": [
+      8,
+      16
+    ],
+    "v_shape": [
+      8,
+      16
+    ],
+    "mask_shape": [
+      8,
+      8
+    ],
+    "num_heads": 4,
+    "head_dim": 4,
+    "scale": 0.5,
+    "band": 1,
+    "valid_length": 6,
+    "mask_fill": "finfo_min",
+    "fully_masked_rows": [
+      7
+    ],
+    "output_shape": [
+      8,
+      16
+    ],
+    "grads": true,
+    "grads_finite": true
+  },
+  "attn_mask_nonfinite": {
+    "layer": "MultiHeadAttention",
+    "attention": "banded_bidirectional_with_padding",
+    "reference": "F.scaled_dot_product_attention",
+    "q_shape": [
+      8,
+      16
+    ],
+    "k_shape": [
+      8,
+      16
+    ],
+    "v_shape": [
+      8,
+      16
+    ],
+    "mask_shape": [
+      8,
+      8
+    ],
+    "num_heads": 4,
+    "head_dim": 4,
+    "scale": 0.5,
+    "band": 1,
+    "valid_length": 6,
+    "mask_fill": "zero_with_inf_and_nan_cells",
+    "fully_masked_rows": [],
+    "output_shape": [
+      8,
+      16
+    ]
   }
 }
