@@ -54,6 +54,27 @@ Note there is **no `model.safetensors.index.json`** — one monolithic F16 file.
 
 206 tensors, all `F16` except `temperature` (`F32`).
 
+Re-verified 2026-09-27 against the downloaded `model.safetensors` (842,609,210 B; 21,536 B
+header; 842,587,666 B data; no `__metadata__`). Every shape and dtype above matches, as do the
+170/3/167 tensor counts and the 5-vs-6 split across layers 0 and 1–27. Total **421,293,830**
+parameters, partitioned:
+
+| Prefix | Tensors | Params |
+|---|---|---|
+| `encoder.*` | 170 | 394,781,696 |
+| `head.*` | 24 | 25,192,448 |
+| `scorer.*` | 6 | 1,052,673 |
+| `act_head.*` | 4 | 263,938 |
+| `type_emb.*` | 1 | 3,072 |
+| `temperature` | 1 | 3 |
+
+**Every model weight is F16 on disk, not F32.** Phase 1's parity gate compared a F32 encoder
+against HuggingFace, so Phase 2 cannot reuse its tolerance unchanged: the parity gate has to
+decide whether to compare in F16 (matching the checkpoint, and so measuring the same thing the
+checkpoint will do at inference) or widen to F32 on both sides (isolating the *port* from the
+*storage precision*). Widening is the cleaner gate — it tests the port rather than F16 rounding
+— but it must be applied identically on both sides or the comparison measures nothing.
+
 ### Encoder — ModernBERT-large, `encoder.*` prefix
 
 | Key | Shape | Notes |
@@ -306,9 +327,12 @@ on the shared legacy byte-level BPE path, so it is a per-call-site decision. Tha
 
 ---
 
-## 4. Laya's decision head (from `rl_common.py`, the authoritative spec)
+## 4. Laya's decision head (from `laya` 0.3.20, the authoritative spec)
 
-The checkpoint alone does not define the head — `rl_common.py` does. Ported semantics:
+The checkpoint alone does not define the head — the reference code does. **There are two
+published copies of that code and they are not equivalent**; see §4.1. `laya/common.py`
+from PyPI `laya` 0.3.20 is the maintained one and is what this section describes. Ported
+semantics:
 
 ```python
 QTYPES = {"choice": 0, "score": 1, "noul": 2}
@@ -328,8 +352,18 @@ def build_sequence(tok, state, q, max_len, head_max_len, ...):
 ```
 
 - **Option rendering** (`render_options`): `choice` → `"key: description"` (bare `key` when the
-  description is empty); `score` → `"level {i}: {criteria[i]}"`; `noul` → always exactly
-  `["false: …", "true: …"]` so `p[1]` *is* the noul probability.
+  description is `None` or `""`); `score` → `"level {i}: {criteria[i]}"`; `noul` → two options
+  so `p[1]` *is* the noul probability, defaulting to `["false: …", "true: …"]` but with both
+  label strings overridable per question via `q["labels"]` (`_resolve_noul_labels`). Passing
+  `labels` on a non-noul question raises. Descriptions pass through `render_criterion`.
+  **A criterion of `0` or `False` is a real value, not an absent one** — only `None`/`""` mean
+  "no description". The stale HF copy gets this wrong (§4.1).
+- **State truncation** (`truncate_left`, used for multi-turn episode prefixes): take the *last*
+  `room` tokens of the state, and take **none** when `room == 0`. The slice must be written
+  `state[max(0, len(state) - room):]`, because Python's `state[-0:]` is `state[0:]` — the whole
+  state. Getting this wrong silently injects the entire state and displaces the trailing `[SEP]`
+  (§4.1). `build_sequence` also accepts a precomputed `state_ids` so a caller can tokenize a
+  shared state once and reuse it across every question.
 - **Every option is scored at its own `[MASK]` token.** The answer space is defined at request
   time, so new schemas need no retraining. Markers are gathered from the encoder output after
   the head.
@@ -341,21 +375,81 @@ def build_sequence(tok, state, q, max_len, head_max_len, ...):
      projections biased. In eval, dropout is identity.
   3. `logits = scorer(gather(h, marker_pos)).squeeze(-1)`, `masked_fill(~marker_mask, -1e4)`.
   4. `act_head(cat([h[:, 0], feats]))` where `feats = [top1, top1-top2, normalized_entropy, k/255]`
-     computed from the **detached** softmax.
+     computed from the **detached** softmax. `k = marker_mask.sum(-1).clamp(min=2)`, so entropy
+     is normalized by `log(k)` and `k/255` saturates at 255 options. **A one-option question has
+     exactly one marker**, so `topk(2, …)` has no second element to select and raises; the
+     answer is still well defined (softmax over one logit is 1.0 whatever its value), so pad the
+     missing slot with `0.0` — that yields `top1 - top2 == 1.0`, the same "fully decided" signal
+     any unambiguous top-1-vs-rest gap produces.
 - **Calibration** (`rl_agent_config.json`): `temperature` is per-qtype
   (`choice 1.637, score 1.251, noul 1.983`), and `temperature_by_options` refines it per
   (type, option-count) bucket via `temp_bucket(qtype, k)` → `choice:2`, `choice:3-5`,
   `choice:6-10`, `choice:11+`, `score:3-5`, `noul:2`. **The bucket table wins** when present.
   The model card is explicit that the raw checkpoint is over-confident and mean ECE only drops
   0.466 → 0.081 after refitting temperatures on your own data.
+  - **But the shipped `choice:11+` bucket is out of range and must be clamped, not applied.**
+    Its value is `0.10058280825614929`, and the reference defines `TEMP_MIN = 0.5`,
+    `TEMP_MAX = 5.0` with `clamp_temperature(t)`; `laya/agent.py` clamps every bucket on load
+    and **warns about the rejected entries** rather than using them. A temperature below 1
+    *sharpens* logits, and the reference is explicit about why that is wrong here: at 0.1006
+    the logits are multiplied ~10×, "so a 0.24 top probability is published as 0.99, and a
+    caller gating on confidence is told a coin flip is a certainty." **This is the opposite of
+    calibration and it lands on exactly the high-cardinality questions that already degrade**
+    (see the 77-option limit below). Any port must reproduce the clamp, and must decide
+    explicitly whether to clamp or to honour the raw value.
 - **Budgets** (English): `max_len 512`, `head_max_len 192` → the state gets ~320 tokens.
   `max_prefixes 6` for multi-turn.
 
+### 4.1 Two copies of the reference exist, and they are not equivalent
+
+Verified 2026-09-27 by diffing the two published artifacts. Both are Apache-2.0 and both come
+from Convai Innovations, so this is a versioning problem, not a fork.
+
+| Source | Where | State |
+|---|---|---|
+| `laya/common.py` | PyPI `laya` **0.3.20** (uploaded 2026-09-24) | **maintained — use this** |
+| `rl_common.py` | HF repo `convaiinnovations/laya` | **stale — do not port from this** |
+
+`build_sequence` is 51 lines in the wheel vs 31 in the HF file; `render_options` 19 vs 10;
+`DecisionModel` 53 vs 44. Most of the delta is reformatting and added type hints, but **three
+of the differences are bug fixes to real defects in the HF copy**:
+
+1. **`truncate_left` returns the entire state when no room is left.** HF: `st = st[-room:]`.
+   Python's `st[-0:]` is `st[0:]` — the whole list — so at `room == 0` the state is included in
+   full and the trailing `[SEP]` is pushed out. The wheel uses
+   `state_ids[max(0, len(state_ids) - room):]` and comments on exactly this trap.
+2. **Falsy criteria are rendered as "no description".** HF: `[k if not v else "%s: %s" % (k, v)
+   …]`, so a criterion of `0` or `False` collapses to a bare `key` and the value is lost. The
+   wheel tests `v is None or v == ""` and routes values through `render_criterion`, noting that
+   "only None/`""` mean 'no description'; 0 and False are legitimate criterion values". This
+   bites `score` questions hardest, whose `crit` is a list of criteria.
+3. **A one-option question raises** in `p.topk(2, -1)` (see the head bullet above).
+
+The wheel also adds `TEMP_MIN`/`TEMP_MAX`/`clamp_temperature` and the warning about the shipped
+`choice:11+` bucket, and caps option tokenization with `truncation=True, max_length=48` rather
+than tokenizing the whole string and slicing `[:48]` (same output, less work).
+
+**Consequences for the port:**
+
+- Port the **wheel**. Porting `rl_common.py` verbatim would import all three defects above, and
+  two of them fail *silently* — a wrong prompt that still "runs", which is the specific failure
+  mode the byte-exact prompt gate exists to catch.
+- **The wheel is not a superset.** `encode_record` and `predict_items` are absent from
+  `laya/common.py` (they live elsewhere in the package), so keep `rl_common.py` as the reference
+  for those and for anything the wheel reorganized away.
+- `DecisionModel`'s `head_checkpointing` branch is training-only and irrelevant to inference —
+  its one difference (keyword vs positional `src_key_padding_mask` in a non-reentrant
+  `checkpoint` call) does not affect Phase 2.
+- The cheap cross-check is `pip download laya==0.3.20 --no-deps` (118 KB wheel, nothing
+  installed) — no need to `pip install` to diff the normative source.
+
 ### What the model card says is *not* worth building first
 
-- `action.act_probability` has no usable signal (AUROC 0.30, reads 1.0 almost always) —
-  the card itself says gate on answer confidence instead (AUROC 0.77). So `act_head` is
-  **optional** for a first port.
+- `action.act_probability` has no usable signal (AUROC 0.30 on 396 labelled decisions, reads
+  1.0 almost always) — the card itself says gate on answer confidence instead (AUROC 0.77 on
+  the same items). So `act_head` is **optional** for a first port. Already reported upstream at
+  [NandhaKishorM/laya#185](https://github.com/NandhaKishorM/laya/issues/185), so this is not a
+  Nivara bug to file; see §9.
 - High-cardinality choice questions degrade (77 options in a 192-token head budget ≈ 3–4
   tokens per label) — a known limit, not a porting bug.
 - The English root checkpoint is near chance on `typed-decisions` zero-shot; the
@@ -417,7 +511,20 @@ Weights live under `samples/data/`, gitignored, like every other model:
 | Path | Contents | Source |
 |---|---|---|
 | `samples/data/modernbert/` | `model.safetensors` (1510.2 MB F32, single file), `config.json`, `tokenizer.json`, `tokenizer_config.json` | `hf download answerdotai/ModernBERT-large` |
-| `samples/data/laya/` | `model.safetensors` (842.6 MB F16, single file), `encoder/config.json`, `rl_agent_config.json`, `tokenizer/tokenizer.json`, `tokenizer/tokenizer_config.json` | `hf download convaiinnovations/laya` |
+| `samples/data/laya/` | `model.safetensors` (842.6 MB F16, single file), `encoder/config.json`, `rl_agent_config.json`, `tokenizer/tokenizer.json`, `tokenizer/tokenizer_config.json`, plus `rl_common.py` and `README.md` (reference only — see §4.1) | `hf download convaiinnovations/laya` |
+
+```
+hf download convaiinnovations/laya \
+  model.safetensors encoder/config.json rl_agent_config.json \
+  tokenizer/tokenizer.json tokenizer/tokenizer_config.json \
+  rl_common.py README.md --local-dir samples/data/laya
+```
+
+`rl_common.py` is fetched even though §4.1 rules it out as the porting source: it is still the
+only published copy of `encode_record` / `predict_items`, and it is what §4's tensor map and
+tensor-count claims were first checked against. The normative source is the wheel
+(`pip download laya==0.3.20 --no-deps`), which is not vendored — it is re-fetchable on demand
+and is only needed when the prompt builder changes.
 
 Both directories are already in `.gitignore` (`.gitignore:366-367`, following the existing
 one-line-per-model pattern, e.g. `samples/data/distilbert/` at `.gitignore:360`). Reference
@@ -438,18 +545,30 @@ Phase 2 does not depend on it.
 - **Phase 2 — Laya head.** `LayaDecisionHead<T>` (2 pre-norm transformer layers, type embedding,
   marker scorer, temperature calibration), `LayaPromptBuilder` (a C# port of `build_sequence` +
   `render_options`), a `laya` mode with a PyTorch parity gate on the same fixture methodology.
-  `act_head` optional; multilingual/typed-decisions subfolders optional. The `act_head` AUROC-0.30
-  concern is **deliberately not filed as an issue yet**: it asserts a measurement about a checkpoint
-  this repo has not downloaded, and an issue that turns out to be wrong about a model nobody has run
-  is worse than no issue. Raise it once the checkpoint is loaded and the number is reproduced or
-  refuted.
-  - **Open decision — reference source.** Port `rl_common.py`'s `build_sequence` / `render_options`
-    into `Python/laya_compare.py` (self-contained, no new dependency, ~60 lines, Apache-2.0) **or**
-    `pip install laya` and diff against the real package (strongest ground truth, adds an install and
-    a version to keep in sync). Default to the port and cross-check against the install if it proves
-    cheap; the port is also the only option that keeps `laya compare` runnable on a clean checkout.
-    Byte-exact prompt parity is the gate either way, because the prompt is the API contract and a
-    silently different render still "runs".
+  `act_head` optional; multilingual/typed-decisions subfolders optional.
+  - **The `act_head` AUROC-0.30 deferral is resolved: no Nivara issue, and none should be filed.**
+    The checkpoint is now downloaded and the claim is corroborated by the model card (README
+    line 371): `action.act_probability` reads 1.0 for almost every input and its raw logits run
+    *against* correctness at AUROC 0.30 on 396 labelled decisions, while gating on `confidence`
+    reaches AUROC 0.77 on the same items. The decisive point is that this is **already tracked
+    upstream** at [NandhaKishorM/laya#185](https://github.com/NandhaKishorM/laya/issues/185) and
+    is documented by the model card itself. It is an upstream *model* limitation, not a Nivara
+    defect, so a Nivara issue would be a duplicate of a bug we cannot fix and do not own. The
+    port should still reproduce `act_head` faithfully (it is 4 tensors / 263,938 params and
+    `forward` computes it unconditionally), and the cheap partial check is whether
+    `act_probability` reads ≈1.0 for arbitrary synthetic inputs — that needs no eval data and no
+    396 labels, so it can confirm the port is faithful without reproducing the AUROC itself.
+  - **Resolved — reference source: port from the PyPI wheel, not the HF `rl_common.py`.** The
+    cross-check §4.1 records was run and it changed the answer, so this is no longer a choice
+    between two options: `laya/common.py` from `laya` 0.3.20 is the maintained reference and the
+    HF copy has three defects, two of which fail silently. Port `build_sequence` / `render_options`
+    / `render_criterion` / `_resolve_noul_labels` / `clamp_temperature` / `temp_bucket` from the
+    wheel into `Python/laya_compare.py`. That surface is pure Python plus the tokenizer, so it
+    stays self-contained with no new dependency and `laya compare` remains runnable on a clean
+    checkout — and `pip download laya==0.3.20 --no-deps` is enough to re-verify the source later
+    without installing anything. Byte-exact prompt parity is the gate, because the prompt is the
+    API contract and a silently different render still "runs"; the stale HF copy is precisely the
+    case that would pass a loose check while producing the wrong prompt.
   - Resolved earlier, recorded so they are not re-asked: `samples/data/modernbert/` and
     `samples/data/laya/encoder/` are **separate** directories, so Phase 1 stands alone; the Laya
     checkpoint is 842.6 MB on top of the 1510 MB ModernBERT download and was confirmed wanted.
