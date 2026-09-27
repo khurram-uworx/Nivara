@@ -1,7 +1,8 @@
 # BERT-family encoders on GPU — first ILGPU model: implementation reflection
 
 Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR
-#436, MiniLM via `khurram/minilm-gpu`). This is a
+#436, MiniLM via `khurram/minilm-gpu`, ModernBERT via issue #449 on
+`khurram/449`). This is a
 **reflection/documentation** of what we built and what we learned while adding
 the first end-to-end GPU model support through ILGPU — it is *not* a usage guide
 (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md))
@@ -11,7 +12,8 @@ before implementation was rewritten away; only the durable facts and lessons
 remain.
 
 Related: probe verdicts in [docs/ILGPU.md](ILGPU.md), the SmolLM GPU
-investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)).
+investigation ([docs/SMOLLM-GPU.md](SMOLLM-GPU.md)), the Laya decision-head
+investigation ([docs/LAYA.md](LAYA.md)).
 
 ## 1. Result — gated and measured
 
@@ -69,6 +71,75 @@ Correctness gates — **all PASS**:
 - `minilm --gpu compare`: hidden `maxRel 1.04e-5`, pooled-embedding `maxRel 1.5e-7`,
   **0/245760 violations**, minimum pooled-embedding cosine **1.000000**.
 - `--precision bf16|fp16` + `--gpu` → clear F32-only rejection (exit 1).
+
+### 1b. ModernBERT — the first model that is not BERT-family (issue #449)
+
+`ModernBertGpuRunner` + `modernbert --gpu`, on `khurram/449`. Same device
+(`Intel(R) Graphics`), same ILGPU 1.5.3 OpenCL path, still sample-scoped. This
+is the first runner whose architecture shares **no** structure with DistilBERT or
+MiniLM: rotary instead of learned positions, a gated feed-forward instead of a
+plain FFN, pre-norm instead of post-norm, and — the part that made it a real
+test of the kernel set — **per-layer attention geometry**. ModernBERT-large is
+hidden 1024 / 16 heads / 28 layers / intermediate 2624, with
+`global_attn_every_n_layers 3` giving **10 full + 18 sliding** layers, and a
+**different rope theta per layer type** (160000 full / 10000 sliding).
+
+The gate is GPU-vs-CPU in-process, so it needs no PyTorch fixture (Phase 1 had
+already pinned the CPU encoder to HuggingFace, so this pins the GPU runner
+transitively). Fixture seqLen 128, 26 valid positions:
+
+| region | maxAbs | maxRel | cosine | violations |
+|---|---|---|---|---|
+| valid (26 x 1024 = 26,624 values) | **2.861E-005** | 5.577E-004 | 1.0000001 | 0 |
+| padding (104,448 values) | 6.866E-004 | 4.867E-003 | — | 0 |
+
+Forward: **415–449 ms GPU vs a 7.3–7.5 s CPU reference** (the CPU figure is a
+28-layer float forward with no batching, so it is not a throughput claim — see
+"correctness, not speed" below). Benchmark rows scale with sequence length, as
+they must: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s.
+
+Those rows use **1 warmup + 3 timed passes, median reported**, not the 3 + 10
+of the §1 table — at S=4096 a single pass is ~60 s, so the full protocol would
+cost minutes per row. They are therefore not comparable to the §1 numbers, which
+is why they are not in that table. The mode prints this caveat itself.
+
+**Three kernel changes and one shared-kernel fix:**
+- `BatchedAttention` grew a **`band` parameter** (negative = global, the CPU's
+  own `ModernBertMasks.Build` convention) folded into one `Keep` predicate at
+  the three sites the padding mask was already applied at.
+- **`max == -inf → zeros` clamp**, mirroring `GradKernels.cs:487`. Not
+  theoretical: the band intersects padding, so query rows past
+  `valid_length + band` have *no* visible key, and without the clamp `s - max`
+  is `NaN` and the whole residual stream below that row is poisoned. This is
+  the hazard **#448** documents and `docs/LAYA.md` already flagged as live.
+  `BertEncoderGpuRunner` passes `GlobalAttentionBand = -1`, so DistilBERT /
+  SST / MiniLM are untouched and their gates came back **identical to the
+  digit**.
+- **The `[B, H, S, S]` score spill is gone.** `headDim` probability-weighted V
+  rows accumulate in a shared-memory tile and `attnOut` is written once. Same
+  three score recomputes and the same ascending per-`d` `j` loop, so it is
+  **bit-identical** while removing 16.8 MB at S=512, 268 MB at S=2048 and
+  4.3 GB at S=8192. That last number is the one that matters: it is what makes
+  the 4096 benchmark row above possible at all.
+- New: `ElementwiseKernels.Rotary`, `ElementwiseKernels.GeGlu`,
+  `ElementwiseKernels.SplitColumns`; the duplicated A–S 7.1.26 GELU polynomial
+  promoted to one scalar `ElementwiseKernels.GeluExact` (AGENTS.md rule 8).
+
+**This issue buys correctness, not speed — and the issue's premise was stale.**
+#449 expected attention to become the bottleneck. `docs/LAYA.md` (merged in PR
+#459, four hours after the issue was filed) had already measured GEMM at
+**~99.9% of the arithmetic** with attention at 0.13% at S=512, and names
+**#440** (tile-32 / 2x2 GEMM) the highest-value Phase 3 item. ModernBERT has
+1.4 B parameters against DistilBERT's 66 M, so it is a GEMM-throughput problem
+exactly as DistilBERT was. The value delivered here is that the architecture is
+*portable at all* — a banded RoPE'd gated pre-norm encoder now runs on the
+accelerator and is pinned to the CPU encoder — not that it is faster.
+
+**The Laya head is out of scope** (#449's Phase 2). `LayaDecisionHead<T>` does
+not exist in the tree, so a head gate would have to run GPU-vs-PyTorch directly
+and drag in all of Phase 2's fixture apparatus. The head needs **zero** new
+kernels (pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV) and becomes a
+small follow-up once a CPU head exists. Filed as issue **#460**.
 
 ## 2. What shipped — architecture and decisions
 
@@ -153,6 +224,60 @@ These are the durable, non-obvious lessons from implementing the first model:
 12. **Same-process CPU reference beats fixture-only gating**: the compare mode
     (identical tokenization, `BertEncoder.Forward` vs the GPU runner in one
     process) caught everything the fixture couldn't (fixtures may be absent).
+13. **A pre-fused projection is interleaved per row, not block-concatenated.**
+    ModernBERT ships one `Wqkv` of `[3072, 1024]`, and a row-major GEMM lays it
+    down as row `r` = `[q(r) | k(r) | v(r)]` — *not* all of q, then all of k,
+    then all of v. Contiguous `SubView` offsets therefore return the correct
+    values for row 0 and wrong values for every row after it, which is the
+    worst possible failure shape: the first row looks perfect. `SplitColumns`
+    (`dst[r, c] = src[r, part*blockCols + c]`, one launch per block) walks
+    rows. Note the same buffer needs **no** split on the gate/up side, because
+    `GeGlu` indexes the fused buffer directly — check which of the two layouts
+    the consumer actually assumes before reaching for a split.
+14. **The RoPE tables should come from the CPU, not from device `XMath`.**
+    `RotaryEmbedding<T>.GetPositionTables` is now `public` and the runner
+    uploads *its* cos/sin. Recomputing them on the device would be one
+    `XMath.Cos` vs one host-libm ulp per entry, and that would become the
+    largest single error term in the gate — measured against DistilBERT's
+    `maxRel 3.2e-6` that is a three-order-of-magnitude regression, for a
+    difference that has nothing to do with whether the port is correct. Promote
+    the authoritative definition to an accessor rather than duplicating the
+    formula; duplicating it guarantees drift.
+15. **ILGPU's `SharedMemory` is per work *group*, not per work item**, and its
+    `Allocate` size must be **statically known**. The first shared-tile attempt
+    gave each thread its own `Allocate<float>(64)` and every thread in the
+    group raced on the same 64 floats — caught immediately as 97809 violations
+    at `maxRel 3.42`, i.e. structurally wrong rather than rounding-level. The
+    tile is 2-D (`[MaxHeadDim rows x AttentionGroupSize columns]`, column
+    `Group.IdxX`, `DenseX(MaxHeadDim)` stride) with the size over-allocated to a
+    compile-time constant because `headDim` is a runtime argument. Query
+    `Accelerator.MaxSharedMemoryPerGroup` at construction — note the property is
+    `MaxSharedMemoryPerGroup`, **not** `MaxLocalMemorySize`.
+16. **Verify a suspected kernel defect with an isolated probe before blaming
+    the runner.** `TiledGemmKernelRow4` at 128x1024x3072 was confirmed exact
+    (maxAbs 1.5e-5, 0 bad) on the same accelerator before *and* after the
+    runner constructor, and the runner's own uploaded `Wqkv` buffer was
+    confirmed bit-exact against the host transpose (0/3,145,728 mismatches).
+    Those two probes cost one run and ruled out the two most expensive
+    hypotheses. Build the reference with the *exact* layout the device buffer
+    has, every time.
+17. **Diagnostic references are code and they rot like code.** Of five "kernel
+    bugs" chased while implementing #449, **three were faults in the throwaway
+    stage diagnostic**: one concatenated block-major against a row-major
+    device buffer, one interleaved per row against a block-contiguous readback
+    (the same mistake, opposite direction, in the diagnostic written to check
+    the fix for the first), and one omitted the `GeluExact` on a gated
+    activation — which shows up as a suspiciously perfect **100% relative
+    error**, i.e. "the GPU produced ~0 where a value was expected".
+18. **The ILGPU stream is in order; do not go looking for a race.** A
+    split→rotary dependency was suspected unordered for a while.
+    `AcceleratorStreamFlags` does not exist in ILGPU 1.5.3, `Accelerator`
+    exposes only `CreateStream()` and `DefaultStream`, and the parameterless
+    `CreateStream()` is what `BertEncoderGpuRunner` and the GpuProbe ILGPU leg
+    have always used. Once the diagnostic reference was fixed the dependency
+    was never a problem. Lesson 2 above is the real ordering rule (route every
+    copy through the kernel stream); "the default stream is unordered" is not
+    one of its failure modes.
 
 ## 4. Where reality diverged from the pre-implementation estimate
 
@@ -244,6 +369,32 @@ Prioritized for the next iterations of the GPU journey (see also
    an opt-in native BLAS bridge would close the ~5.6× Nivara-CPU deficit
    (possibly beating the GPU at these shapes); options, targets, and the
    M1/M2/M3 decision gate are captured in ROADMAP-SUGGESTION.md.
+10. **Laya Phase 2 — the decision head (issue #460)**, filed while scoping
+    #449. `LayaDecisionHead<T>` + `LayaPromptBuilder` + a `laya` mode + a
+    PyTorch gate, all on the CPU side first; the GPU head then needs **zero**
+    new kernels (pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV) and
+    reuses `ModernBertGpuRunner`'s trunk. Scope the CPU head first — a GPU head
+    with no CPU head to gate against would have to be pinned to PyTorch
+    directly.
+11. **Mask-as-select (issue #448)** — the local `max == -inf → zeros` clamp in
+    `BatchedAttention` is the *prerequisite* #449 landed and is not the same
+    thing. #448 is the structural version (suppress via selection rather than
+    via `-inf` arithmetic), which would also remove the fully-masked-row
+    question entirely. Same class, should be closed by the same reasoning.
+12. **Banded/sparse attention (issue #447)** — the GPU kernel now carries the
+    band internally, which is why `modernbert --gpu benchmark` runs at 4096
+    while the CPU path stops at `ModernBertMasks.MaxDenseLength` = 2048 (it
+    materialises a dense `[L, L]` mask; the GPU has no such allocation). The
+    CPU side still needs the equivalent to lift its own cap, and
+    `BertEncoderGpuRunner` keeps its `batch<=8, seqLen<=128` limit for the same
+    reason.
+13. **GEMM headroom is the real ModernBERT lever, and it is #440 again.**
+    1.4 B parameters at batch 1, ~99.9% of the arithmetic in the GEMM, and
+    `maxRel 5.577E-004` against the CPU where DistilBERT sits at `3.238E-006` —
+    that gap is depth (28 layers of F32 reduction-order drift accumulating),
+    not a kernel defect. A 2x2 or tile-32 register block is the only realistic
+    path to moving the ModernBERT numbers, and it is already filed as **#440**.
+
 
 ## 6. References
 
@@ -260,4 +411,7 @@ Prioritized for the next iterations of the GPU journey (see also
 - [`tests/Nivara.GpuProbe/README.md`](../tests/Nivara.GpuProbe/README.md) —
   seven-way backend comparison, `kernels` correctness gate
 - Issues: **#435** (tiled-GEMM regression gate, open) · **PR #436** (this
-  scenario)
+  scenario) · **#437** (kernel fusion, done) · **#440** (tile-32/2x2 GEMM, the
+  leading GPU throughput item) · **#447** (banded/sparse attention on the CPU
+  side) · **#448** (mask-as-select) · **#449** (ModernBERT GPU path) ·
+  **#460** (Laya Phase 2 decision head)

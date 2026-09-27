@@ -268,6 +268,17 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "modernbert":
+                if (useGpu)
+                {
+                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir);
+                    if (compare) return ModernBert.CompareGpu(tensors, modelDir);
+                    if (compareDiag)
+                    {
+                        Console.Error.WriteLine("--gpu does not support 'compare_diag' for modernbert: the per-stage diff reads named CPU intermediates, and the GPU runner has no per-stage hook. 'modernbert --gpu compare' gates the final hidden state instead (supported: default, benchmark, compare).");
+                        return 1;
+                    }
+                    return ModernBert.RunGpu(tensors, modelDir);
+                }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                 if (compare) return ModernBert.Compare(tensors, modelDir);
                 if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");

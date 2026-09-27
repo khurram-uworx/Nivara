@@ -126,7 +126,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
     MemoryBuffer1D<float, Stride1D.Dense> f1 = null!;
     MemoryBuffer1D<float, Stride1D.Dense> clsOut = null!;
     MemoryBuffer1D<float, Stride1D.Dense> logits = null!;
-    MemoryBuffer1D<float, Stride1D.Dense> scores = null!;
     MemoryBuffer1D<float, Stride1D.Dense> maskBuf = null!;
     MemoryBuffer1D<int, Stride1D.Dense> idsBuf = null!;
     MemoryBuffer1D<int, Stride1D.Dense> posIdsBuf = null!;
@@ -137,7 +136,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> embeddingSum;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNorm;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> layerNormResidual;
-    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, float> attention;
+    readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int, int, float> attention;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmBias;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmGelu;
     readonly Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> gemmRelu;
@@ -164,23 +163,24 @@ public sealed class BertEncoderGpuRunner : IDisposable
         scale = (float)(1.0 / Math.Sqrt(headDim));
 
         var acc = runtime.Accelerator;
+        GpuBuffers.ValidateAttentionLocalMemory(acc, headDim);
         var emb = BertGpuKeys.Embeddings(naming);
 
-        var wordEmbT = Req(tensors, $"{emb}.word_embeddings.weight");
-        wordEmb = Alloc(acc, wordEmbT.Data.Length);
+        var wordEmbT = GpuBuffers.Req(tensors, $"{emb}.word_embeddings.weight");
+        wordEmb = GpuBuffers.Alloc(acc, wordEmbT.Data.Length);
         wordEmb.CopyFromCPU(wordEmbT.Data);
-        var posEmbT = Req(tensors, $"{emb}.position_embeddings.weight");
-        posEmb = Alloc(acc, posEmbT.Data.Length);
+        var posEmbT = GpuBuffers.Req(tensors, $"{emb}.position_embeddings.weight");
+        posEmb = GpuBuffers.Alloc(acc, posEmbT.Data.Length);
         posEmb.CopyFromCPU(posEmbT.Data);
-        embLnW = Alloc(acc, hiddenDim);
-        embLnW.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.weight").Data);
-        embLnB = Alloc(acc, hiddenDim);
-        embLnB.CopyFromCPU(Req(tensors, $"{emb}.LayerNorm.bias").Data);
+        embLnW = GpuBuffers.Alloc(acc, hiddenDim);
+        embLnW.CopyFromCPU(GpuBuffers.Req(tensors, $"{emb}.LayerNorm.weight").Data);
+        embLnB = GpuBuffers.Alloc(acc, hiddenDim);
+        embLnB.CopyFromCPU(GpuBuffers.Req(tensors, $"{emb}.LayerNorm.bias").Data);
 
         hasTokenType = tensors.ContainsKey($"{emb}.token_type_embeddings.weight");
-        tokenTypeEmb = Alloc(acc, 2 * hiddenDim);
+        tokenTypeEmb = GpuBuffers.Alloc(acc, 2 * hiddenDim);
         if (hasTokenType)
-            tokenTypeEmb.CopyFromCPU(Req(tensors, $"{emb}.token_type_embeddings.weight").Data);
+            tokenTypeEmb.CopyFromCPU(GpuBuffers.Req(tensors, $"{emb}.token_type_embeddings.weight").Data);
 
         layers = new LayerGpuWeights[numLayers];
         for (int i = 0; i < numLayers; i++)
@@ -189,27 +189,26 @@ public sealed class BertEncoderGpuRunner : IDisposable
         hasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
         if (hasHead)
         {
-            preW = UploadTransposed(acc, tensors, PreWKey);
-            preB = UploadPlain(acc, tensors, PreBKey);
-            clsW = UploadTransposed(acc, tensors, ClsWKey);
-            clsB = UploadPlain(acc, tensors, ClsBKey);
+            preW = GpuBuffers.UploadTransposed(acc, tensors, PreWKey);
+            preB = GpuBuffers.UploadPlain(acc, tensors, PreBKey);
+            clsW = GpuBuffers.UploadTransposed(acc, tensors, ClsWKey);
+            clsB = GpuBuffers.UploadPlain(acc, tensors, ClsBKey);
         }
 
         // Persistent activation workspace (caps: batch <= 8, seqLen <= 128 — the
         // scenario's actual maxima; per-call payload buffers grow on demand).
         int rowsCap = 8 * 128;
-        x = Alloc(acc, rowsCap * hiddenDim);
-        qkv = Alloc(acc, rowsCap * 3 * hiddenDim);
-        attn = Alloc(acc, rowsCap * hiddenDim);
-        h = Alloc(acc, rowsCap * hiddenDim);
-        f1 = Alloc(acc, rowsCap * intermediateDim);
-        clsOut = Alloc(acc, 8 * hiddenDim);
-        logits = Alloc(acc, 8 * 2);
-        scores = Alloc(acc, 8 * numHeads * 128 * 128);
-        maskBuf = Alloc(acc, rowsCap);
-        idsBuf = AllocInt(acc, rowsCap);
-        posIdsBuf = AllocInt(acc, rowsCap);
-        clsIdsBuf = AllocInt(acc, 8);
+        x = GpuBuffers.Alloc(acc, rowsCap * hiddenDim);
+        qkv = GpuBuffers.Alloc(acc, rowsCap * 3 * hiddenDim);
+        attn = GpuBuffers.Alloc(acc, rowsCap * hiddenDim);
+        h = GpuBuffers.Alloc(acc, rowsCap * hiddenDim);
+        f1 = GpuBuffers.Alloc(acc, rowsCap * intermediateDim);
+        clsOut = GpuBuffers.Alloc(acc, 8 * hiddenDim);
+        logits = GpuBuffers.Alloc(acc, 8 * 2);
+        maskBuf = GpuBuffers.Alloc(acc, rowsCap);
+        idsBuf = GpuBuffers.AllocInt(acc, rowsCap);
+        posIdsBuf = GpuBuffers.AllocInt(acc, rowsCap);
+        clsIdsBuf = GpuBuffers.AllocInt(acc, 8);
 
         gather = acc.LoadKernel<ArrayView<float>, ArrayView<int>, ArrayView<float>, int>(ElementwiseKernels.Gather);
         embeddingSum = acc.LoadKernel<ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(
@@ -219,7 +218,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             ElementwiseKernels.LayerNormResidual1D);
         attention = acc.LoadKernel<
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>,
-            ArrayView<float>, ArrayView<float>, int, int, int, int, float>(
+            ArrayView<float>, int, int, int, int, int, float>(
             AttentionKernels.BatchedAttention);
         gemmBias = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
             GemmKernels.TiledGemmKernelRow4Bias);
@@ -256,9 +255,9 @@ public sealed class BertEncoderGpuRunner : IDisposable
             throw new ArgumentOutOfRangeException(nameof(batch),
                 $"The BertEncoderGpuRunner workspace caps at batch<=8, seqLen<=128 (scenario's actual maxima: batch 1, seqLen 128); got batch={batch}, seqLen={seqLen}.");
 
-        Ensure(ref maskBuf, rows);
+        GpuBuffers.Ensure(ref maskBuf, rows, runtime.Accelerator);
         maskBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, attentionMask);
-        Ensure(ref idsBuf, rows);
+        GpuBuffers.Ensure(ref idsBuf, rows, runtime.Accelerator);
         idsBuf.View.SubView(0, rows).CopyFromCPU(runtime.Stream, tokenIds);
 
         // posIds are seqLen-deterministic (row % seqLen): rebuild + re-upload only when
@@ -267,7 +266,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
         int posRows = batch * seqLen;
         if (cachedPosSeqLen != seqLen || posIdsBuf.Length < posRows)
         {
-            Ensure(ref posIdsBuf, posRows);
+            GpuBuffers.Ensure(ref posIdsBuf, posRows, runtime.Accelerator);
             var posIds = new int[posRows];
             for (int i = 0; i < posRows; i++)
                 posIds[i] = i % seqLen;
@@ -293,7 +292,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             var kView = qkv.View.SubView(rows * (long)hiddenDim, rows * (long)hiddenDim);
             var vView = qkv.View.SubView(2 * rows * (long)hiddenDim, rows * (long)hiddenDim);
 
-            Attention1D(qView, kView, vView, maskBuf.View, attn.View, scores.View, batch, seqLen);
+            Attention1D(qView, kView, vView, maskBuf.View, attn.View, batch, seqLen);
             GemmBias(attn.View, w.O.View, h.View, w.Bo.View, rows, hiddenDim, hiddenDim);
             LayerNormResidual1D(h.View, x.View, w.Ln1W.View, w.Ln1B.View, h.View, rows, hiddenDim);
 
@@ -309,7 +308,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             var clsIds = new int[batch];
             for (int b = 0; b < batch; b++)
                 clsIds[b] = b * seqLen;
-            Ensure(ref clsIdsBuf, batch);
+            GpuBuffers.Ensure(ref clsIdsBuf, batch, runtime.Accelerator);
             clsIdsBuf.View.SubView(0, batch).CopyFromCPU(runtime.Stream, clsIds);
 
             Gather1D(x.View, clsIdsBuf.View, clsOut.View, hiddenDim, batch * hiddenDim);
@@ -317,11 +316,11 @@ public sealed class BertEncoderGpuRunner : IDisposable
             GemmBias(h.View, clsW!.View, logits.View, clsB!.View, batch, hiddenDim, 2);
 
             runtime.Synchronize();
-            logitsArr = Readback(logits, batch * 2);
+            logitsArr = GpuBuffers.Readback(logits, batch * 2);
         }
 
         runtime.Synchronize();
-        var hidden = Readback(x, rows * hiddenDim);
+        var hidden = GpuBuffers.Readback(x, rows * hiddenDim);
         return new BertEncoderGpuResult(hidden, logitsArr);
     }
 
@@ -339,115 +338,51 @@ public sealed class BertEncoderGpuRunner : IDisposable
         clsB?.Dispose();
         x.Dispose(); qkv.Dispose();
         attn.Dispose(); h.Dispose(); f1.Dispose(); clsOut.Dispose(); logits.Dispose();
-        scores.Dispose(); maskBuf.Dispose(); idsBuf.Dispose(); posIdsBuf.Dispose(); clsIdsBuf.Dispose();
+        maskBuf.Dispose(); idsBuf.Dispose(); posIdsBuf.Dispose(); clsIdsBuf.Dispose();
     }
 
     // ── launch helpers ────────────────────────────────────────────
 
     void Gather1D(ArrayView<float> table, ArrayView<int> ids, ArrayView<float> output, int hidden, int total)
-        => gather(runtime.Stream, (Cfg(total), 256), table, ids, output, hidden);
+        => gather(runtime.Stream, GpuBuffers.Cfg1D(total), table, ids, output, hidden);
 
     void EmbeddingSum1D(
         ArrayView<int> ids, ArrayView<int> posIds,
         ArrayView<float> wordEmb, ArrayView<float> posEmb, ArrayView<float> tokenType, ArrayView<float> y,
         int hidden, int total, int includeTt)
-        => embeddingSum(runtime.Stream, (Cfg(total), 256), ids, posIds, wordEmb, posEmb, tokenType, y, hidden, includeTt);
+        => embeddingSum(runtime.Stream, GpuBuffers.Cfg1D(total), ids, posIds, wordEmb, posEmb, tokenType, y, hidden, includeTt);
 
     void LayerNormResidual1D(ArrayView<float> a, ArrayView<float> b, ArrayView<float> gamma, ArrayView<float> beta, ArrayView<float> y, int rows, int cols)
-        => layerNormResidual(runtime.Stream, (Cfg(rows), 256), a, b, gamma, beta, y, rows, cols, eps);
+        => layerNormResidual(runtime.Stream, GpuBuffers.Cfg1D(rows), a, b, gamma, beta, y, rows, cols, eps);
 
     void LayerNorm1D(ArrayView<float> x, ArrayView<float> gamma, ArrayView<float> beta, ArrayView<float> y, int rows, int cols)
-        => layerNorm(runtime.Stream, (Cfg(rows), 256), x, gamma, beta, y, rows, cols, eps);
+        => layerNorm(runtime.Stream, GpuBuffers.Cfg1D(rows), x, gamma, beta, y, rows, cols, eps);
 
     void Attention1D(
         ArrayView<float> q, ArrayView<float> k, ArrayView<float> v,
-        ArrayView<float> mask, ArrayView<float> attnOut, ArrayView<float> scores,
+        ArrayView<float> mask, ArrayView<float> attnOut,
         int batch, int seqLen)
-        => attention(runtime.Stream, (Cfg(batch * numHeads * seqLen), 256),
-            q, k, v, mask, attnOut, scores, batch, seqLen, numHeads, headDim, scale);
+        => attention(runtime.Stream, GpuBuffers.Cfg1D(batch * numHeads * seqLen, GpuBuffers.AttentionGroupSize),
+            q, k, v, mask, attnOut, batch, seqLen, numHeads, headDim, GpuBuffers.GlobalAttentionBand, scale);
 
     void GemmQkv(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, ArrayView<float> bias, int aRows, int aCols, int bCols, int blockWidth)
     {
-        int blockCols = GemmKernels.TileSize * GemmKernels.BlockCols;
-        var numGroups = new Index2D((aRows + GemmKernels.TileSize - 1) / GemmKernels.TileSize, (bCols + blockCols - 1) / blockCols);
-        var groupSize = new Index2D(GemmKernels.TileSize, GemmKernels.TileSize);
-        gemmQkv(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols, blockWidth);
+        gemmQkv(runtime.Stream, GpuBuffers.GemmCfg(aRows, bCols), a, bt, c, bias, aRows, aCols, bCols, blockWidth);
     }
 
     void GemmBias(ArrayView<float> a, ArrayView<float> bt, ArrayView<float> c, ArrayView<float> bias, int aRows, int aCols, int bCols, int activation = 0)
     {
-        int blockCols = GemmKernels.TileSize * GemmKernels.BlockCols;
-        var numGroups = new Index2D((aRows + GemmKernels.TileSize - 1) / GemmKernels.TileSize, (bCols + blockCols - 1) / blockCols);
-        var groupSize = new Index2D(GemmKernels.TileSize, GemmKernels.TileSize);
+        var cfg = GpuBuffers.GemmCfg(aRows, bCols);
         switch (activation)
         {
             // Each epilogue form is its own lean kernel (no dead-path code on hot launches).
-            case 1: gemmGelu(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols); break;
-            case 2: gemmRelu(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols); break;
-            default: gemmBias(runtime.Stream, (numGroups, groupSize), a, bt, c, bias, aRows, aCols, bCols); break;
-        }
-    }
-
-    static int Cfg(int total) => total <= 0 ? 1 : (total + 255) / 256;
-
-    static float[] Readback(MemoryBuffer1D<float, Stride1D.Dense> buffer, int length)
-    {
-        var arr = buffer.AsContiguous().GetAsArray();
-        if (arr.Length < length)
-            throw new InvalidOperationException("GPU readback returned a shorter buffer than requested.");
-        var result = new float[length];
-        Array.Copy(arr, result, length);
-        return result;
-    }
-
-    void Ensure(ref MemoryBuffer1D<float, Stride1D.Dense> buffer, int length)
-    {
-        if (buffer.Length < length)
-        {
-            var acc = runtime.Accelerator;
-            buffer.Dispose();
-            buffer = acc.Allocate1D<float>(length);
-        }
-    }
-
-    void Ensure(ref MemoryBuffer1D<int, Stride1D.Dense> buffer, int length)
-    {
-        if (buffer.Length < length)
-        {
-            var acc = runtime.Accelerator;
-            buffer.Dispose();
-            buffer = acc.Allocate1D<int>(length);
+            case 1: gemmGelu(runtime.Stream, cfg, a, bt, c, bias, aRows, aCols, bCols); break;
+            case 2: gemmRelu(runtime.Stream, cfg, a, bt, c, bias, aRows, aCols, bCols); break;
+            default: gemmBias(runtime.Stream, cfg, a, bt, c, bias, aRows, aCols, bCols); break;
         }
     }
 
     // ── weight upload helpers ──────────────────────────────────────
-
-    static MemoryBuffer1D<float, Stride1D.Dense> UploadTransposed(
-        ILGPU.Runtime.Accelerator acc,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        string key)
-    {
-        var t = Req(tensors, key);
-        int outDim = t.Shape[0];
-        int inDim = t.Shape[1];
-        var bt = new float[outDim * inDim];
-        for (int r = 0; r < outDim; r++)
-            for (int c = 0; c < inDim; c++)
-                bt[c * outDim + r] = t.Data[r * inDim + c];
-        var buf = Alloc(acc, bt.Length);
-        buf.CopyFromCPU(bt);
-        return buf;
-    }
-
-    static MemoryBuffer1D<float, Stride1D.Dense> UploadPlain(
-        ILGPU.Runtime.Accelerator acc,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        string key)
-    {
-        var buf = Alloc(acc, Req(tensors, key).Data.Length);
-        buf.CopyFromCPU(Req(tensors, key).Data);
-        return buf;
-    }
 
     /// <summary>
     /// Builds the packed q/k/v projection: one pre-transposed [in × 3·out] Bt buffer
@@ -462,7 +397,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
         string kKey,
         string vKey)
     {
-        var weights = new (float[] Data, int[] Shape)[] { Req(tensors, $"{qKey}.weight"), Req(tensors, $"{kKey}.weight"), Req(tensors, $"{vKey}.weight") };
+        var weights = new (float[] Data, int[] Shape)[] { GpuBuffers.Req(tensors, $"{qKey}.weight"), GpuBuffers.Req(tensors, $"{kKey}.weight"), GpuBuffers.Req(tensors, $"{vKey}.weight") };
         int outDim = weights[0].Shape[0];
         int inDim = weights[0].Shape[1];
         int concat = 3 * outDim;
@@ -471,29 +406,17 @@ public sealed class BertEncoderGpuRunner : IDisposable
             for (int r = 0; r < outDim; r++)
                 for (int c = 0; c < inDim; c++)
                     bt[c * concat + block * outDim + r] = weights[block].Data[r * inDim + c];
-        var wBuf = Alloc(acc, bt.Length);
+        var wBuf = GpuBuffers.Alloc(acc, bt.Length);
         wBuf.CopyFromCPU(bt);
 
         var bias = new float[concat];
-        Array.Copy(Req(tensors, $"{qKey}.bias").Data, bias, outDim);
-        Array.Copy(Req(tensors, $"{kKey}.bias").Data, 0, bias, outDim, outDim);
-        Array.Copy(Req(tensors, $"{vKey}.bias").Data, 0, bias, 2 * outDim, outDim);
-        var bBuf = Alloc(acc, bias.Length);
+        Array.Copy(GpuBuffers.Req(tensors, $"{qKey}.bias").Data, bias, outDim);
+        Array.Copy(GpuBuffers.Req(tensors, $"{kKey}.bias").Data, 0, bias, outDim, outDim);
+        Array.Copy(GpuBuffers.Req(tensors, $"{vKey}.bias").Data, 0, bias, 2 * outDim, outDim);
+        var bBuf = GpuBuffers.Alloc(acc, bias.Length);
         bBuf.CopyFromCPU(bias);
         return (wBuf, bBuf);
     }
-
-    static (float[] Data, int[] Shape) Req(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => tensors.TryGetValue(key, out var t)
-            ? t
-            : throw new InvalidOperationException($"Missing weight key '{key}' for the --gpu forward.");
-
-    static MemoryBuffer1D<float, Stride1D.Dense> Alloc(ILGPU.Runtime.Accelerator acc, int length)
-        => acc.Allocate1D<float>(length);
-
-    static MemoryBuffer1D<int, Stride1D.Dense> AllocInt(ILGPU.Runtime.Accelerator acc, int length)
-        => acc.Allocate1D<int>(length);
 
     sealed class LayerGpuWeights : IDisposable
     {
@@ -515,18 +438,18 @@ public sealed class BertEncoderGpuRunner : IDisposable
                 BertGpuKeys.Attention(naming, index, 'v'));
             Wqkv = wqkv;
             Bqkv = bqkv;
-            O = UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.weight");
-            W1 = UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.weight");
-            W2 = UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.weight");
+            O = GpuBuffers.UploadTransposed(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.weight");
+            W1 = GpuBuffers.UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.weight");
+            W2 = GpuBuffers.UploadTransposed(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.weight");
 
-            Bo = UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.bias");
-            B1 = UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.bias");
-            B2 = UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.bias");
+            Bo = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.Attention(naming, index, 'o')}.bias");
+            B1 = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 1)}.bias");
+            B2 = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.Ffn(naming, index, 2)}.bias");
 
-            Ln1W = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.weight");
-            Ln1B = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.bias");
-            Ln2W = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.weight");
-            Ln2B = UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.bias");
+            Ln1W = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.weight");
+            Ln1B = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 1)}.bias");
+            Ln2W = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.weight");
+            Ln2B = GpuBuffers.UploadPlain(acc, tensors, $"{BertGpuKeys.LayerNorm(naming, index, 2)}.bias");
         }
 
         public void Dispose()
