@@ -32,6 +32,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0-rc.1.26425.128" />
     <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.10.0" />
     <PackageReference Include="OllamaSharp" Version="5.4.30" />
+    <PackageReference Include="TypeSafeAI" Version="0.2.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -82,6 +82,9 @@ if (args.Length > 0)
         case "--qwen":
             await QwenMode.Run(args.Skip(1).ToArray());
             break;
+        case "--typesafe":
+            await TypesafeMode.Run(ctx);
+            break;
         default:
             PrintUsage();
             break;
@@ -175,6 +178,7 @@ void PrintUsage()
     Console.WriteLine("  --tinyshakespeare    TinyShakespeare: train/serve a batched transformer as IChatClient (see --tinyshakespeare --help)");
     Console.WriteLine("  --smollm             SmolLM: serve the pretrained SmolLM-135M-Instruct causal LM as IChatClient (see --smollm --help)");
     Console.WriteLine("  --qwen               Qwen: native function calling with Qwen2.5-0.5B-Instruct (see --qwen --help)");
+    Console.WriteLine("  --typesafe           TypeSafeAI news assessment via Ollaya (laya:en decision model)");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
