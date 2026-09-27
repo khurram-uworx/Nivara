@@ -155,7 +155,15 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
     /// <see cref="Forward(ReverseGradTensor{T}, int)"/>'s slice of the same caches so the
     /// rotation math is bit-identical.
     /// </summary>
-    internal void GetPositionTables(int startPosition, int count, out ReadOnlySpan<T> cos, out ReadOnlySpan<T> sin)
+    /// <remarks>
+    /// The returned spans alias the instance's cache and are invalidated by a later call that
+    /// regrows it, so a caller that keeps them (an accelerator upload, say) must copy them out.
+    /// Public because the tables are the reproducible definition of the rotation: an
+    /// off-accelerator consumer such as the sample GPU encoder runner can hand the *same* values
+    /// to its own kernel instead of recomputing them with a device math library, which would
+    /// put a cos/sin divergence into an otherwise bit-identical forward.
+    /// </remarks>
+    public void GetPositionTables(int startPosition, int count, out ReadOnlySpan<T> cos, out ReadOnlySpan<T> sin)
     {
         if (startPosition < 0) throw new ArgumentOutOfRangeException(nameof(startPosition));
         if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
