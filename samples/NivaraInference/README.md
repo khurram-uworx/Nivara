@@ -59,6 +59,9 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu comp
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu          # 8-sentence sentiment table
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu compare  # logits + argmax 8/8 gate
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu              # 10-sentence table; rotary + gated FFN + banded attention
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu benchmark    # seqLen 128 / 512 / 2048 / 4096
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu compare      # in-process GPU-vs-CPU gate (no PyTorch fixture needed)
 
 # Narrow-precision inference (half weight memory; see "Narrow-precision inference" below)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
@@ -178,7 +181,26 @@ dotnet run --project samples/NivaraInference -- modernbert compare_diag
 # Benchmark (3 warmup + 10 timed passes); --seq 256 doubles the padded length
 dotnet run --project samples/NivaraInference -- modernbert benchmark
 dotnet run --project samples/NivaraInference -- modernbert benchmark --seq 256
+
+# On the OpenCL iGPU (ILGPU 1.5.3, F32 only)
+dotnet run --project samples/NivaraInference -- modernbert --gpu
+dotnet run --project samples/NivaraInference -- modernbert --gpu benchmark
+dotnet run --project samples/NivaraInference -- modernbert --gpu compare
 ```
+
+The GPU path is the first encoder runner that shares no structure with DistilBERT or
+MiniLM: rotary position embeddings instead of learned ones, a gated feed-forward
+(`gelu(Wi[0:I]) * Wi[I:2I]`) instead of a plain FFN, pre-norm instead of post-norm,
+and per-layer attention geometry — ModernBERT-large alternates 10 full-attention
+layers with 18 sliding-window layers (inclusive band 64) and uses a different rope
+theta per layer type (160000 full / 10000 sliding). `modernbert --gpu compare` gates
+GPU against the **in-process CPU encoder**, so unlike `modernbert compare` it needs
+no PyTorch fixture: Phase 1 already pinned that CPU encoder to HuggingFace, so the
+GPU runner is pinned transitively. It reports the valid prefix and the padding region
+separately — past `validLength + band` every key is suppressed, so both sides take
+the safe-softmax clamp, and agreement there is the check that the GPU's `max == -inf`
+clamp is wired up. See [docs/BERT-GPU.md §1b](../../docs/BERT-GPU.md) for the
+measured numbers and [§3](../../docs/BERT-GPU.md) for the layout and ILGPU lessons.
 
 ### Python (PyTorch reference)
 
@@ -733,6 +755,49 @@ Nivara modules used: `ModernBertEncoder<T>` / `ModernBertLayer<T>` / `ModernBert
 > both to `NaN`, and zeroing them would delete the most useful diagnostic a diverging run produces.
 > The residual gap — a `NaN` already present in q/k/v is still not suppressed, because
 > `NaN + (-inf) = NaN` — is filed as #448.
+
+**GPU path** (`modernbert --gpu`, issue #449, `ModernBertGpuRunner`): the first GPU runner
+that shares no structure with the BERT-family ones. It mirrors
+`ModernBertEncoder<T>.Forward(int[], int)` operation for operation and is gated GPU-vs-CPU
+in-process — `modernbert --gpu compare` needs no PyTorch fixture, because Phase 1 already
+pinned the CPU encoder to HuggingFace. Measured on `Intel(R) Graphics`, fixture seqLen 128 /
+26 valid: valid region `maxAbs 2.861E-005`, `maxRel 5.577E-004`, cosine `1.0000001`, 0
+violations; padding region `maxAbs 6.866E-004`, also 0 violations and 0 non-finite on either
+side. The padding region is gated rather than dismissed — a fully-masked row produces a zero
+*attention output*, and the row's final value is that folded into 28 layers of residual adds,
+so both sides are deterministic there and there is nothing to explain away.
+
+Three things a plausible-looking port gets wrong, all three covered by the gate:
+
+- **The fused QKV projection is row-major, so `[q | k | v]` are interleaved *per row*.** The
+  CPU splits the host matrix into three `Linear` modules, which hides this; on the device a row
+  of the output buffer is `[q(r) | k(r) | v(r)]`, so contiguous `SubView` offsets give the
+  right values for row 0 and wrong values for every row after it. `ElementwiseKernels
+  .SplitColumns` walks rows instead. The gate/up pair needs no split — `GeGlu` indexes the
+  fused buffer directly.
+- **The embedding norm's output is the residual stream**, not a separate buffer, so it runs
+  in place; writing it to a scratch buffer leaves the raw embedding in the stream that layer 0
+  and the final norm both read.
+- **Per-layer geometry has to reach the kernel.** `BatchedAttention` grew a `band` parameter
+  (negative = global, the CPU's own `ModernBertMasks.Build` convention) and a `max == -inf →
+  zeros` clamp, mirroring the CPU fix above. `BertEncoderGpuRunner` passes
+  `GlobalAttentionBand = -1`, so DistilBERT / SST-2 / MiniLM are untouched and their gates came
+  back identical to the digit. The clamp is #449's half of #448.
+
+The `[B, H, S, S]` score spill is gone — `headDim` probability-weighted V rows accumulate in a
+shared-memory tile — which is bit-identical and is what lets `modernbert --gpu benchmark` run
+at seqLen 4096, past the CPU's `ModernBertMasks.MaxDenseLength` of 2048 (the CPU caps out
+because it materialises a dense `[L, L]` mask; the GPU has no such allocation). RoPE tables are
+uploaded from the CPU's `RotaryEmbedding<T>` rather than recomputed with device `XMath.Cos`, so
+cos/sin are bit-identical instead of one ulp apart per entry.
+
+Performance context: this buys **correctness, not speed**. `docs/LAYA.md` measured GEMM at
+~99.9% of the arithmetic for this model (attention 0.13% at S=512), and ModernBERT-large's
+395M encoder parameters are a GEMM-throughput problem exactly as DistilBERT's 66M were — the
+leading fix is issue #440 (tile-32 / 2×2 GEMM), not attention. The full reflection, including
+the ILGPU shared-memory and kernel-layout lessons, is in
+[docs/BERT-GPU.md §1b and §3](../../docs/BERT-GPU.md). The Laya decision head is out of scope
+here and filed as issue #460.
 
 ### Weight loading
 
@@ -1391,6 +1456,12 @@ caveat above before using its numbers), #448 (attention mask applied as an add, 
 | `Gpt2BpeTokenizer.LoadFromTokenizerJson` + opt-in NFC | Checkpoint ships only `tokenizer.json`; 128/128 token ids match the HF fixture |
 | `GradKernels` safe-softmax clamp | Fully-masked sliding-window rows return zeros instead of `NaN` (regression-tested) |
 | `compare` / `compare_diag` gates | `maxAbs 1.62e-5` vs PyTorch; per-stage bisection over 29 stages |
+| `ModernBertGpuRunner` (`modernbert --gpu`) | #449; the whole 28-layer trunk on the OpenCL iGPU, gated GPU-vs-CPU in-process at `maxRel 5.577E-004` |
+| `ElementwiseKernels.Rotary` | Q/K rotary on the device, fed the CPU's own cos/sin tables (bit-identical, not `XMath.Cos`) |
+| `ElementwiseKernels.GeGlu` | Gated FFN indexing the fused `Wi` buffer directly — no split needed |
+| `ElementwiseKernels.SplitColumns` | De-interleaves the row-major fused `Wqkv` output into dense q/k/v blocks |
+| `AttentionKernels.BatchedAttention` `band` + `max == -inf → zeros` clamp | 10 global (`band = -1`) and 18 sliding (`band = 64`) layers; the clamp is #449's half of #448 |
+| Shared-memory V-accumulation tile (no `[B,H,S,S]` spill) | Bit-identical to the spill version; 268 MB → 0 at S=2048, 4.3 GB → 0 at S=8192 |
 
 ## Release Benchmark
 

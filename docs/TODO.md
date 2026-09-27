@@ -192,8 +192,9 @@ Per forward:
   position-embedding and **no** token-type tensor (positions come purely from RoPE).
 - `LayerNorm1D(x, embedNorm.gamma, ZERO, x)`.
 - 28 layers, each: `LN(attnNorm)` (skipped for layer 0 — identity, no weights) →
-  `TiledGemmKernelRow4(Wqkv)` → `Rotary(q)`,`Rotary(k)` → `BatchedAttention(band)` →
-  `Gemm(Wo)` → `Add` → `LN(mlpNorm)` → `Gemm(Wi)` → `GeGlu` → `Gemm(Wo)` → `Add`.
+  `TiledGemmKernelRow4(Wqkv)` → `SplitColumns` x3 → `Rotary(q)`,`Rotary(k)` →
+  `BatchedAttention(band)` → `Gemm(Wo)` → `Add` → `LN(mlpNorm)` → `Gemm(Wi)` →
+  `GeGlu` → `Gemm(Wo)` → `Add`.
 - `LayerNorm1D(x, finalNorm.gamma, ZERO, x)`.
 
 Bias-free norms pass a **shared zero-filled beta view** (ILGPU views cannot be
@@ -205,14 +206,42 @@ change like the existing `cachedPosSeqLen`. 16 KB each at S=128; 1 MB at S=8192.
 
 Device footprint ~1.7 GB, consistent with the 1.685 GB measured by `--gpu-alloc`.
 
+**Two things the plan missed, both found by running the gate and neither visible
+by reading the CPU encoder:**
+
+1. **The fused QKV projection is row-major, so `[q | k | v]` are interleaved per
+   row.** The plan assumed contiguous sub-views into the fused buffer would
+   isolate the three blocks. They do not: row `r` of the device buffer is
+   `[q(r) | k(r) | v(r)]`, so a contiguous sub-view returns the right values for
+   row 0 and the wrong values for every row after it. `ElementwiseKernels.SplitColumns`
+   (`dst[r, c] = src[r, part*blockCols + c]`, launched three times) walks rows
+   instead, into a `qkvSplit` buffer holding three dense `[rows, hidden]` blocks.
+   `GeGlu` needed no equivalent: it indexes the fused gate/up buffer directly, so
+   its interleave was already handled.
+2. **The embedding norm's output is the residual stream.** The first draft wrote
+   it to `normed` and left the raw embedding in `x`, so layer 0's QKV and the
+   final norm both read pre-norm values. It runs **in place** now. Safe because
+   `LayerNorm1D` owns a whole row across both reduction passes before writing any
+   of it, so a work item never reads an element another has already overwritten.
+
 ### 8. Dispatch + gate
 
 `modernbert` `--gpu` branch at `Program.cs:270` and a GPU-vs-CPU compare mode
 modeled on `RunMiniLmGpuCompare` (`Program.cs:1121`) — in-process, identical
 tokenization, so it runs without the PyTorch fixtures. Bound `GateRelTol = 1e-3`.
-Diff **valid positions only** (a fully-masked row is a mask-constant artifact, as
-`ModernBert.cs:12-17` already documents). Reuse `ModernBert.LoadConfig` /
-`LoadTokenizer` / `PadTo` so both sides tokenize identically.
+Reuse `ModernBert.LoadConfig` / `LoadTokenizer` / `PadTo` so both sides tokenize
+identically.
+
+**Correction — diff the whole buffer, not the valid prefix only.** The plan
+followed `ModernBert.cs:12-17` and dismissed the padding region. That reasoning
+is right against PyTorch and wrong against the CPU encoder. A fully-masked row
+produces a zero *attention output*, but the row's final value is that folded
+into 28 layers of residual adds, so the region is neither zeros nor an
+implementation-defined constant — it is deterministic on both sides and there is
+nothing to dismiss. The region is now gated separately and reports
+maxAbs 6.866E-004. Finiteness is the load-bearing half of that gate: a missing
+`-inf` clamp shows up as `NaN`, not as a wrong number.
+
 
 ### 9. Docs
 
@@ -267,20 +296,82 @@ Both PASS. Because the spill removal is claimed to be bit-identical, these must 
 ## Verification
 
 1. ~~Pre-flight baseline~~ **done** — see Grounding (G1) above.
-2. `dotnet build Nivara.slnx` clean, no new warnings.
-3. `ElementwiseGernels` GELU promotion is a no-op: the distilbert/minilm gates from
-   (1) are unchanged to the digit.
-4. **Post-change regression:** `distilbert --gpu compare` and `minilm --gpu compare`
-   unchanged — this is the check that the spill removal and the group-size change
-   are truly bit-identical, since both models share the kernel.
-5. New NUnit test: the promoted `GeluExact` scalar equals CPU
-   `GradKernels.GeluExact` (both assemblies grant `InternalsVisibleTo` to
-   `Nivara.Tests`, so the cross-check is reachable).
-6. `modernbert --gpu compare`: GPU vs CPU within `1e-3` on valid positions.
-7. `modernbert --gpu` default + `benchmark` modes run.
-8. Long-sequence check: the kernel's `-inf` clamp is exercised by comparing valid
-   positions only, and a fully-masked row yields zeros rather than NaN.
-9. Ask before running the full `dotnet test` suite.
+2. ~~`dotnet build Nivara.slnx` clean, no new warnings.~~ **done** — 0 warnings, 0 errors.
+3. ~~`ElementwiseGernels` GELU promotion is a no-op.~~ **done** — distilbert/minilm
+   gates below are unchanged **to the digit**, which is the whole check.
+4. ~~Post-change regression.~~ **done**:
+
+   | Gate | maxAbs | maxRel | violations | vs baseline |
+   |---|---|---|---|---|
+   | `distilbert --gpu compare` (seqLen 128) | 1.526E-005 | 3.238E-006 | 0/98304 | identical |
+   | `minilm --gpu compare` hidden | 1.872E-005 | 1.037E-005 | 0/245760 | identical |
+   | `minilm --gpu compare` pooled | 1.788E-007 | 1.471E-007 | 0/1920 | identical |
+
+   The spill removal, the group-size change and the `band` parameter are all
+   reached through the one `LoadKernel` delegate in `BertEncoderGpuRunner`, which
+   passes `GlobalAttentionBand = -1`, so bit-identity is the expected outcome and
+   it held.
+5. ~~New NUnit test: the promoted `GeluExact` scalar equals CPU
+   `GradKernels.GeluExact`.~~ **done** — `GpuElementwiseParityTests` has two:
+   `GeluExact_GpuScalar_AgreesWithCpuKernel` (asserts `1e-6` *relative*, not
+   equality — see the FMA correction above) and
+   `GeluExact_GpuScalar_OddPartRecoversTheInput` (the `gelu(v) - gelu(-v) = v`
+   identity, which needs no CPU reference at all).
+6. ~~`modernbert --gpu compare`.~~ **done — PASS.** Fixture seqLen 128, 26 valid:
+
+   | Region | maxAbs | maxRel | cosine |
+   |---|---|---|---|
+   | valid (26 x 1024 = 26,624 values) | 2.861E-005 | 5.577E-004 | 1.0000001 |
+   | padding (104,448 values) | 6.866E-004 | 4.867E-003 | — |
+
+   0 values beyond `1e-3·(1+|cpu|)` in either region; 0 non-finite on either side.
+   GPU forward 415–449 ms against a 7.3–7.5 s CPU reference forward.
+7. ~~`modernbert --gpu` default + `benchmark`.~~ **done.** 10 sample sentences,
+   89–160 ms each. Benchmark rows: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s,
+   4096 → 63.0 s. The 4096 row is past the CPU's `MaxDenseLength` of 2048 on
+   purpose — see §8.
+8. ~~Long-sequence / `-inf` clamp check.~~ **done, and stronger than planned.** The
+   fixture's `validLength = 26` with band 64 leaves query rows 90..127 with no
+   visible key, so 38 of 128 rows take the clamp; the gate reports 0 non-finite
+   values in that region and diffs it against the CPU rather than asserting a
+   constant (see the §8 correction).
+9. ~~Ask before running the full `dotnet test` suite.~~ **pending** — not yet asked.
+
+## What the gate found that reading did not
+
+Recorded because the shape of it is the reusable lesson, not the individual bugs.
+
+**Three of the five "bugs" chased during implementation were faults in the
+throwaway stage diagnostic, not in the GPU.** In order:
+
+1. The `qkv` stage reference concatenated CPU q/k/v **block-major** while the
+   device buffer is row-major. Row 0 matched, everything after it did not.
+2. The `rope` stage reference interleaved q and k **per row** while the
+   post-`SplitColumns` readback is **block-contiguous** — the same class of
+   mistake, opposite direction, in the diagnostic written to check the fix for #1.
+3. `geglu` read as a perfect 100% relative error, which is the signature of a
+   missing activation rather than a kernel fault: the reference computed
+   `inputProj(x) * gateProj(x)` and omitted the `GeluExact` on the first half.
+
+The two genuine defects were the row-interleave `SubView` (now `SplitColumns`) and
+the non-in-place embedding norm, both listed in §7.
+
+**Method that worked:** build the reference with the *exact* layout the device
+buffer has, and verify a suspected kernel defect with an isolated probe before
+blaming the runner. `TiledGemmKernelRow4` at 128x1024x3072 was confirmed exact
+(maxAbs 1.5e-5, 0 bad) on the same accelerator, before and after the runner
+constructor, and the runner's own `Wqkv` device buffer was confirmed bit-exact
+against the host transpose (0/3,145,728 mismatches) — which is what ruled the
+kernel and the upload out and pointed at the reference.
+
+**One red herring, recorded so it is not re-investigated:** the split→rotary
+dependency was suspected to be unordered. `AcceleratorStreamFlags` does not exist
+in ILGPU 1.5.3, `Accelerator` exposes only `CreateStream()` and `DefaultStream`
+with no ordered-stream option, and `accelerator.CreateStream()` is what
+`BertEncoderGpuRunner` and the GpuProbe ILGPU leg both already use. Once the
+diagnostic reference was corrected the dependency was never a problem. **The
+stream is in order; do not go looking for an ordering bug here.**
+
 
 ## Blast radius
 
@@ -288,7 +379,7 @@ Both PASS. Because the spill removal is claimed to be bit-identical, these must 
 |---|---|---|---|
 | `BatchedAttention` signature + `band` + clamp + spill removal | `Gpu/AttentionKernels.cs` | `BertEncoderGpuRunner` **only** (reached via one `LoadKernel` delegate, `BertEncoderGpuRunner.cs:220`) → distilbert, distilbert_sst, minilm GPU scenarios | none (no NUnit tests exist for GPU kernels); CLI compare modes are the gate |
 | `GeluExact` promotion | `Gpu/ElementwiseKernels.cs`, `Gpu/GemmKernels.cs` | every GEMM epilogue + GeGlu | new NUnit cross-check vs CPU |
-| `Rotary`, `GeGlu` (new) | `Gpu/ElementwiseKernels.cs` | `ModernBertGpuRunner` only | new code, gated by compare mode |
+| `Rotary`, `GeGlu`, `SplitColumns` (new) | `Gpu/ElementwiseKernels.cs` | `ModernBertGpuRunner` only | new code, gated by compare mode |
 | `GetPositionTables` → public | `src/Nivara/AutoDiff/Nn/RotaryEmbedding.cs` | **widens core's public API** | existing `RotaryEmbeddingTests` (2 suites) |
 | `BertEncoderGpuRunner` update | `Gpu/BertEncoderGpuRunner.cs` | distilbert, distilbert_sst, minilm GPU | CLI compare modes |
 | `ModernBertGpuRunner` (new) | `Gpu/ModernBertGpuRunner.cs` | nothing existing | new |
@@ -300,20 +391,21 @@ numerics live in `samples/Nivara.Samples` and the sample CLI.
 
 ## Planned commits
 
-1. `docs: plan #449 ModernBERT GPU path in TODO.md`
-2. `refactor: extract the shared GPU upload/launch helpers into GpuBuffers`
-3. `refactor: promote the duplicated GPU GELU polynomial to one scalar helper`
-4. `fix: clamp a fully-masked attention row to zeros on the GPU path`
-5. `perf: drop the [B,H,S,S] score spill from the fused GPU attention kernel`
-6. `feat: add the RoPE and GeGLU elementwise kernels for the GPU path`
-7. `feat: make the RoPE position tables reachable from a GPU runner`
-8. `feat: add ModernBertGpuRunner with per-layer band and rope theta`
-9. `feat: wire modernbert --gpu and add the GPU-vs-CPU compare gate`
-10. `docs: record the ModernBERT GPU path in BERT-GPU.md and the sample README`
+1. `docs: plan #449 ModernBERT GPU path in TODO.md` — `97885a0`
+2. `refactor: extract the shared GPU upload/launch helpers into GpuBuffers` — `037fa79`
+3. `refactor: promote the duplicated GPU GELU polynomial to one scalar helper` — `88e5c39`
+4. `fix: clamp a fully-masked attention row to zeros on the GPU path` — `3a4c0de`
+5. `perf: drop the [B,H,S,S] score spill from the fused GPU attention kernel` — `41aa867`
+6. `feat: add the RoPE and GeGLU elementwise kernels for the GPU path` — `d9b5580`
+7. `feat: make the RoPE position tables reachable from a GPU runner` — `94193d2`
+8. `feat: add ModernBertGpuRunner with per-layer band and rope theta` — `863d29b`
+9. `feat: wire modernbert --gpu and add the GPU-vs-CPU compare gate` — `a33e053`
+10. `docs: record the ModernBERT GPU path in BERT-GPU.md and the sample README` — pending
 
 Commits 4 and 5 are separate on purpose: the clamp is a correctness fix that stands
 alone, and the spill removal is the perf/memory change. Both touch the same kernel, so they
 may land as one if the intermediate state does not build.
+
 
 ## GitHub issues log
 
