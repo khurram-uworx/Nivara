@@ -69,6 +69,7 @@ public sealed class ModernBertGpuRunner : IDisposable
 
     int[]? posIdHost;
     float[]? maskHost;
+    int hiddenRows;
 
     MemoryBuffer1D<float, Stride1D.Dense> x = null!;
     MemoryBuffer1D<float, Stride1D.Dense> normed = null!;
@@ -142,6 +143,18 @@ public sealed class ModernBertGpuRunner : IDisposable
     }
 
     /// <summary>
+    /// The final-normed hidden state of the most recent forward, still on device as
+    /// <c>[HiddenRows, hidden]</c> row-major. Lets a caller hang its own head off the trunk
+    /// without a host round trip — see <see cref="LayaHeadGpuRunner"/>, which is gated against
+    /// the CPU head this runner is itself gated against. Valid only until the next
+    /// <see cref="ForwardOnDevice(int[], int)"/> call, which may reallocate the workspace.
+    /// </summary>
+    public MemoryBuffer1D<float, Stride1D.Dense> HiddenOnDevice => projected;
+
+    /// <summary>Row count of <see cref="HiddenOnDevice"/>, set by the last forward.</summary>
+    public int HiddenRows => hiddenRows;
+
+    /// <summary>
     /// Encodes <paramref name="tokenIds"/> and returns the last hidden state as
     /// <c>[seqLen, hidden]</c> row-major. <paramref name="validLength"/> is the number of leading
     /// positions that are real tokens; the rest are padding, masked out of every attention. Same
@@ -149,6 +162,19 @@ public sealed class ModernBertGpuRunner : IDisposable
     /// comparable and the gate compares them position for position.
     /// </summary>
     public float[] Forward(int[] tokenIds, int validLength)
+    {
+        ForwardOnDevice(tokenIds, validLength);
+        runtime.Synchronize();
+        return GpuBuffers.Readback(projected, hiddenRows * hiddenDim);
+    }
+
+    /// <summary>
+    /// As <see cref="Forward(int[], int)"/>, but leaves the final hidden state on the device for
+    /// <see cref="HiddenOnDevice"/> instead of reading it back. Both entry points launch on
+    /// <see cref="IlgpuRuntime.Stream"/>, so a head that also uses that stream observes the
+    /// encoder's writes in launch order without an explicit synchronise of its own.
+    /// </summary>
+    public void ForwardOnDevice(int[] tokenIds, int validLength)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);
 
@@ -257,8 +283,7 @@ public sealed class ModernBertGpuRunner : IDisposable
         }
 
         layerNorm(runtime.Stream, GpuBuffers.Cfg1D(rows), xView, finalNormW.View, zeroBeta.View, projectedView, rows, hiddenDim, eps);
-        runtime.Synchronize();
-        return GpuBuffers.Readback(projected, rows * hiddenDim);
+        hiddenRows = rows;
     }
 
     /// <summary>
