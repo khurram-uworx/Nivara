@@ -146,9 +146,14 @@ public sealed class ModernBertGpuRunner : IDisposable
     /// The final-normed hidden state of the most recent forward, still on device as
     /// <c>[HiddenRows, hidden]</c> row-major. Lets a caller hang its own head off the trunk
     /// without a host round trip — see <see cref="LayaHeadGpuRunner"/>, which is gated against
-    /// the CPU head this runner is itself gated against. Valid only until the next
-    /// <see cref="ForwardOnDevice(int[], int)"/> call, which may reallocate the workspace.
+    /// the CPU head this runner is itself gated against.
     /// </summary>
+    /// <remarks>
+    /// The buffer is the runner's, not a copy: a head is expected to run in place, so
+    /// <c>Forward</c> must not be called again until the head has returned. It is also grown, never
+    /// shrunk, so a later shorter sequence leaves a longer buffer whose first
+    /// <c>HiddenRows * hidden</c> elements are the current one.
+    /// </remarks>
     public MemoryBuffer1D<float, Stride1D.Dense> HiddenOnDevice => projected;
 
     /// <summary>Row count of <see cref="HiddenOnDevice"/>, set by the last forward.</summary>
