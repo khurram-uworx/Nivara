@@ -141,6 +141,7 @@ python distilbert_benchmark.py
 python modernbert_compare.py
 python modernbert_benchmark.py
 python laya_compare.py
+python laya_benchmark.py
 python generate_input.py
 ```
 

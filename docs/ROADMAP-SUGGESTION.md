@@ -24,6 +24,10 @@ PyTorch = recorded 2026-09-01 CPU baseline, aligned architecture):
 - vs Nivara CPU: **~3.0× / ~2.6× faster** (GPU wins).
 - vs PyTorch CPU: **~1.9× / ~1.8× slower** (GPU loses) — PyTorch starts ~5.6×
   ahead of Nivara-CPU; the iGPU closes most of that gap without fully catching up.
+  This is a **128-token / 66 M-parameter** result and it does not generalise: at
+  Laya's 512 tokens / 1.4 B the same iGPU **ties** PyTorch (3.00 s vs 2.97 s), and
+  the Nivara-CPU gap narrows from ~5.6× to ~2.86×. Both deficits shrink as `M`
+  grows. Measure at the shape you ship — see [LAYA.md](LAYA.md).
 - Battery note: iGPU throttles to ~150–160 GMAC/s (all shapes); GPU timings only
   meaningful on AC (~110–135 ms/forward on battery vs 62–73 ms on AC).
 

@@ -1,6 +1,6 @@
 # Laya (convaiinnovations/laya) — decision head on ModernBERT-large
 
-Status: **Implemented and gated** (2026-09-27, issue #460, branch `khurram/laya`). Phase 2 is complete. Phase 3 is complete too: the GPU head is wired and gated (2026-09-29, issue #462, branch `khurram/462`) — see [GPU path](#gpu-path) and `laya --gpu compare`.
+Status: **Implemented and gated on both CPU and GPU.** The decision head runs on both backends, and each is gated against something stronger than itself: `laya compare` pins the CPU path to the `laya==0.3.20` wheel, and `laya --gpu compare` pins the GPU path to that already-pinned CPU head. Landed as two issues — #460 (CPU, 2026-09-27, `khurram/laya`) and #462 (GPU, 2026-09-29, `khurram/462`) — but read this as one implementation and one reflection, not as stages. See [GPU path](#gpu-path) for the accelerator half.
 
 This is a reflection of what we built and what we learned while porting Laya's typed decision head onto the ModernBERT encoder that #449 already runs. It is *not* a usage guide (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md)) and *not* a roadmap.
 
@@ -238,6 +238,82 @@ dotnet run --project samples/NivaraInference -c Release -- laya --gpu compare
 ```
 
 `--gpu` remains F32-only; `--gpu --precision bf16|fp16` is rejected, as it is for every other model.
+
+### Measured: iGPU vs Nivara CPU vs PyTorch CPU (#462, 2026-09-29)
+
+`laya --gpu benchmark` against `laya benchmark`, same session, AC power, F32 all three, whole model
+(encoder **and** head) per pass, at `max_len` 512. 1 warmup + 3 timed, median of the three. The
+PyTorch column is `python samples/NivaraInference/Python/laya_benchmark.py` — the same wheel, the
+same four questions, the same 512-token padding and the same pass structure, run separately.
+
+| question | valid | markers | Nivara CPU (min–max) | Nivara GPU (min–max) | PyTorch CPU | GPU vs CPU | Torch vs CPU | GPU vs Torch |
+|---|---|---|---|---|---|---|---|---|
+| choice2 | 40 | 2 | 8896 ms (8869–8974) | 3016 ms (2990–3016) | 2973 ms (2846–3059) | 2.95× | 2.99× | 1.01× |
+| choice13 | 119 | 13 | 8732 ms (8269–8879) | 2973 ms (2970–2977) | 2990 ms (2961–3073) | 2.94× | 2.92× | 0.99× |
+| score4 | 48 | 4 | 8281 ms (7978–8698) | 2932 ms (2920–3043) | 2969 ms (2877–3005) | 2.82× | 2.79× | 0.99× |
+| noul | 39 | 2 | 8018 ms (7887–8221) | 3063 ms (3010–3083) | 2950 ms (2903–2968) | 2.62× | 2.72× | 1.04× |
+| | | | **≈8.48 s** | **≈3.00 s** | **≈2.97 s** | **≈2.83×** | **≈2.86×** | **≈1.01×** |
+
+Weight setup, same machine: Nivara CPU `Load weights` **11231 ms**, Nivara GPU `GPU model build`
+**5013 ms**, PyTorch **30017 ms** (`build_model` + `load_state_dict` of the 206 tensors).
+
+Six things this table says that a bare ratio does not.
+
+1. **The iGPU and PyTorch's CPU path finish together — 1.01×, and the sign flips row to row.** The
+   iGPU is ahead on `choice2` and `score4` and behind on `choice13` and `noul`, by 1–4%, which is
+   inside the spread of three timed passes. The honest reading is a tie, not a win. This is the
+   headline because it contradicts what `docs/ACCELERATION.md` §1 concluded at 128 tokens, where the
+   same iGPU was **1.8–2.4× behind** PyTorch. The crossover happened somewhere between DistilBERT
+   (128 tokens, 66 M) and Laya (512 tokens, 1.4 B), and the most likely reason is arithmetic
+   intensity: at batch 1 and 128 tokens the GEMMs are skinny and a 128-EU iGPU is latency- and
+   bandwidth-bound while 16 CPU threads have work to fill. Doubling the sequence quadruples the
+   `M` in every GEMM, so the device finally has enough parallel work per weight load to stop being
+   the bottleneck. **One shape is one data point.** This does not revise §1's per-row figures or
+   license a claim that the iGPU beats PyTorch — it says the deficit is shape-dependent, which is
+   a reason to measure rather than to assume either way.
+2. **The Nivara-CPU deficit narrows as shapes grow — 2.86× here against ~5.6× at 128 tokens.** #458
+   tracks that gap, and the trend is the useful part: the single-threaded managed path loses less,
+   not more, as `M` grows. GEMM is where it loses, and larger GEMMs amortise per-call overhead and
+   reach a higher fraction of peak. So the 5.6× figure should be read as a *small-model* number
+   rather than a property of the CPU path in general. That narrows what #458 is worth chasing, and
+   it is an argument for measuring at the shape you actually ship.
+3. **~2.83× GPU-vs-our-own-CPU is in line with the rest of the family, not an outlier for being
+   1.4 B parameters.** §1 records ~2.6–3.0× iGPU-vs-Nivara-CPU for DistilBERT, DistilBERT-SST and
+   MiniLM; Laya is 512 tokens and lands in the same band. Expected, not a surprise: the head is a
+   few percent of the arithmetic, so it cannot erode the trunk's advantage. The head came for free
+   performance-wise as well as in kernel count.
+4. **Thread count is a confound in the PyTorch column and is deliberately not removed.** PyTorch ran
+   on all 16 cores; the Nivara CPU path is single-threaded per op. So `Torch vs CPU` 2.86× is
+   *mostly* a statement about cores, not about GEMM quality, and it should not be quoted as the
+   latter. We did not pin `OMP_NUM_THREADS=1` to get a like-for-like scalar comparison, because that
+   would disable PyTorch's matmul parallelism and hand us a several-fold "win" that measures
+   nothing. The all-cores figure is the one a user actually gets, and `laya_benchmark.py` prints its
+   thread count and warns if it is ever run pinned.
+5. **Cold start is where Nivara wins outright, and it is the largest ratio in the table.** 5013 ms
+   to build on the iGPU, 11231 ms to bind on the Nivara CPU path, 30017 ms for PyTorch — so the
+   device is 6.0× cheaper to start than PyTorch and 2.24× cheaper than our own host path. For a
+   single-shot `laya --gpu` call this is the dominant term, and it is why the uncached `laya --gpu`
+   figures in the log below (247–631 ms) are so far under the 3 s steady state. The CPU-side number
+   is dominated by weight *binding*, not by transfer, which is memcpy-class here (§1b item 10 on the
+   iGPU sharing DRAM). The three build paths are not identical work — PyTorch's figure includes
+   constructing the `nn.Module` tree — so treat the spread as "cold start on each stack", not as a
+   kernel-count comparison.
+6. **The `compare`-mode timings are not usable as a speedup, and the benchmark run proves it.**
+   `compare` reported `choice2` at 13864 ms on the CPU; the clean benchmark says 8896 ms. The ~5 s
+   difference is JIT, because `compare` runs the CPU first and pays AutoDiff kernel compilation on
+   question 1 — the same inflation appears on the GPU side. Quoting the `compare` numbers would have
+   overstated the speedup as ~3.4× and hidden that the gap is warmup, not work.
+
+**Scope, stated so the numbers are not over-read.** All three columns are whole-model figures, and
+the encoder is ~99.9% of the arithmetic, so ~2.83× is effectively the *encoder's* speedup — the
+head's own contribution is not separately measurable at this scale and is not claimed. There is no
+KV cache: cost scales with the padded sequence length, not with tokens generated, so none of these
+figures is a decode-latency claim. The PyTorch column is a separate run from the two Nivara columns,
+unlike §1's same-session pairing, so the GPU-vs-Torch ratio is the one number here with cross-run
+risk; the per-row spread (±1–4%) and the sign flips are the reason to call it a tie rather than
+narrow it further. And with `#440` still open on GEMM tiling, the tie is the state of the port
+today, not a ceiling — the honest summary is that the iGPU has caught PyTorch CPU at this shape and
+the next GEMM improvement is ours to take.
 
 ## What we learned
 
