@@ -74,6 +74,19 @@ buffer, multiplies by gamma into `output`, adds beta, then copies `diff` to `xHa
 Writing `diff*inv` straight into `xHat` is the same operands in the same order, so
 the results are identical.
 
+Scope of the exactness claim: the `TensorPrimitives` docs state that "exact results
+may differ between different operating systems or architectures" (vectorized
+implementations may call into the C runtime or use arch-specific instructions). The
+equivalence tests compare two code paths **within one process on one machine**, which
+is deterministic, so exact equality is the right assertion there. The claim is
+therefore "identical within a run, pinned by exact-equality tests on this platform" —
+*not* "bit-identical on every machine". Do not overstate it in the CHANGELOG.
+
+Grounded via microsoft-learn: `TensorPrimitives` generic overloads constrain on
+operator interfaces (`IAdditionOperators`, `IMultiplyOperators`, `IAdditiveIdentity`,
+`IMultiplicativeIdentity`), all implied by `IFloatingPointIeee754<T>`, so
+span-length-derived flags are valid for `float`/`double`/`Half`/`BFloat16` alike.
+
 Callers to drop the now-redundant `affine:` argument — all already pass empty spans,
 so the argument was already redundant before this change:
 - `TransformerBlock.cs:157, 169, 184` (`PerRowLayerNorm`)
@@ -104,8 +117,9 @@ New `tests/Nivara.Tests/AutoDiff/LayerNormTests.cs`:
 
 The two emulation tests assert **exact** equality, not a tolerance band
 (`GUIDELINES.md`, "exactness over tolerance"): the bias-free path performs strictly
-fewer operations, so the only possible divergence is signed zero, and NUnit's `==`
-treats `-0.0f == 0.0f`.
+fewer operations, so the only possible divergence is signed zero — IEEE-754 gives
+`-0.0f + (+0.0f) == +0.0f`, and .NET's `==` treats `-0.0f == 0.0f` as true, so NUnit
+equality cannot observe it.
 
 Plus: one focused test in `WeightAccessConsistencyTests` for the weight-only accessor
 contract (the shared `ModuleSpec` is keyed on `Name` with a name-based `affine:false`
