@@ -158,9 +158,11 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
 
 ## GitHub issues log
 
-- [ ] #NNN — *(pending: the LayerNorm/attention occupancy finding, if Phase 1 confirms it —
-      likely deserving of its own issue ahead of any GEMM kernel work. Created at discovery time,
-      not after the plan.)*
+- [x] **#467** — LayerNorm1D / LayerNormResidual1D are one work item per row; 2 work groups
+      cover a 512×1024 row-reduction at Laya shapes. Created during G1 grounding, not after the
+      work — `Cfg1D(512)` = `(2, 256)` confirmed at `ModernBertGpuRunner.cs:235` and
+      `BertEncoderGpuRunner.cs:355-359`, with three serial passes over 1024 floats per item.
+      Split out of #440 so it is tracked independently of #440's measured outcome.
 - [ ] #NNN — *(pending: any follow-up surfaced during Phase 2–5, created at discovery time.)*
 
 > As each task executes, if deferred work or a concern surfaces that is outside this plan, create
