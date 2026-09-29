@@ -30,7 +30,7 @@ static class Program
 
     static int Main(string[] args)
     {
-        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs) = ParseArgs(args);
 
         if (datasetTest)
         {
@@ -52,6 +52,9 @@ static class Program
 
         if (gemm)
             return GemmBenchmark.Run(args);
+
+        if (gemmLegs)
+            return GemmLegBenchmark.Run(args);
 
         if (runs > 1)
         {
@@ -1003,7 +1006,7 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool Gemm, bool GpuAlloc, bool CpuGemm) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool Gemm, bool GpuAlloc, bool CpuGemm, bool GemmLegs) ParseArgs(string[] args)
     {
         string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
@@ -1013,6 +1016,7 @@ static class Program
         bool gemm = false;
         bool gpuAlloc = false;
         bool cpuGemm = false;
+        bool gemmLegs = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1033,6 +1037,9 @@ static class Program
                 case "--cpu-gemm":
                     cpuGemm = true;
                     break;
+                case "--gemm-legs":
+                    gemmLegs = true;
+                    break;
                 case "--only" when i + 1 < args.Length:
                     only = args[++i];
                     break;
@@ -1050,13 +1057,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--gemm] [--gpu-alloc] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--gemm] [--gemm-legs] [--gpu-alloc] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)

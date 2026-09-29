@@ -43,8 +43,12 @@ residual folded into LayerNorm, embedding sums fused, posIds cached —
 dispatches ~113–119 → 44–48. Measured (AC): MiniLM 26.8 → **24.3 ms**,
 DistilBERT 65.3 → **63.1 ms**. The pre-M2 "~0.19 ms/launch" model was corrected
 by measurement to **~30 µs/dependent kernel**, so launch-count fusion is nearly
-exhausted and the >2× acceptance is honestly unmet — the real lever is GEMM
-throughput (issue **#440**; see §5.2 in docs/ACCELERATION.md).
+exhausted and the >2× acceptance is honestly unmet. The lever that was nominated next,
+GEMM throughput (issue **#440**), has since been **measured and did not pay off** — all four
+register-blocked tile geometries lost to Row4 on every shape, because on this iGPU
+shared-memory *capacity per group* dominates shared-memory *traffic per MAC*. The remaining
+GPU lever is the attention leg (**#447**), which a leg profile measures at 57% of Laya
+wall-clock against 39.2% for all GEMM together. See §5.2 in docs/ACCELERATION.md.
 
 ## 2. The gap we want to attack (CPU GEMM)
 
@@ -171,12 +175,30 @@ native bridge. Measure both and publish both in the README table.
 ## 8. Related open items
 
 - **#435** — promote tiled-GEMM correctness+perf harness into a lasting
-  regression gate (probe or sample bench) — covers the gate half of M1.
+  regression gate (probe or sample bench) — covers the gate half of M1. Partly
+  delivered by #440's work: the `--gemm` gate now asserts **byte-identity** to
+  the incumbent kernel, not just a `maxAbs` tolerance, which is what caught an
+  ILGPU OpenCL lowering bug (#468) that a tolerance-only gate would have argued
+  with.
 - **#437** — M2 GPU kernel fusion / lazy stream — **shipped 2026-09-19** (see the
   M2 block above): dispatches 44–48, MiniLM 26.8 → 24.3 ms, DistilBERT 65.3 →
   63.1 ms. The measured per-dispatch dependency latency (~30 µs) corrected the
-  launch model; **#440** files the GEMM-throughput item (tile-32/2×2) that the
-  >2× target actually needs.
+  launch model; **#440** filed the GEMM-throughput item (tile-32/2×2) that the
+  >2× target appeared to need — **measured null 2026-09-29**, so the >2× target
+  is not reachable on this iGPU by GEMM tiling. The four geometries remain in
+  `GemmKernels.cs` as a labelled negative baseline. **Note this is a device result,
+  not a verdict on register blocking**: the binding constraint measured here is
+  shared-memory *capacity per group*, and a part with more of it could invert it.
+- **#447** — banded/sparse attention. **Now the leading GPU item**, and it is a
+  CPU-side item too: the dense `[L, L]` mask is capped at 2048. A leg profile
+  (`--gemm-legs`, AC) measures `BatchedAttention` at **57% of the Laya forward**
+  and **61% of ModernBERT's** — larger than all GEMM shapes combined, in every
+  configuration measured. `BatchedAttention` already carries the band
+  internally but has three unconditional `j < seqLen` passes, and uses `band`
+  only to overwrite a score with `-inf`, so its cost is the same for a sliding
+  band and `band` currently reduces no work at all. That makes 57% an upper
+  bound on the banded cost, so the prize is larger than 57% rather than
+  smaller.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
   documented in `docs/ACCELERATION.md` §1/§5).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after

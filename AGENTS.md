@@ -66,7 +66,7 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 
 ## Engineering Guidelines
 
-See [docs/GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null semantics, lazy execution, zero-copy, testing strategy, etc.).
+See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null semantics, lazy execution, zero-copy, testing strategy) and, in its "Verification, Evidence & Claim Discipline" section, the rules that keep a passing result from meaning less than it appears to (gate coverage, one failure reason per catch, exactness over tolerance, commit scope, superseded-measurement propagation, and asserting the exit status of the process you care about).
 
 ## Code Style
 
@@ -93,7 +93,12 @@ See [docs/GUIDELINES.md](GUIDELINES.md) for transferable engineering principles 
 - Avoid `[TestCase]` with null arrays; use regular `[Test]` with inline arrays.
 - Reflection cannot pass `Span<T>` via `MethodInfo.Invoke` — convert to array first.
 - Test for key phrases in error messages rather than exact message strings.
-- Property-like tests: implement with parameterized NUnit test suites rather than full FsCheck (see [docs/GUIDELINES.md](GUIDELINES.md) for rationale).
+- Property-like tests: implement with parameterized NUnit test suites rather than full FsCheck (see [GUIDELINES.md](GUIDELINES.md) for rationale).
+- A gate must state its own coverage in every summary, and reduced coverage is a failure, not a neutral event. Keep unhostable-skip and compile-failure on separate paths, and count each verdict in a separate counter so a structural failure is never reported as a numeric one.
+- When a new implementation must reproduce a reference bit-for-bit, assert that instead of a tolerance band. A tolerance turns a structural defect into a judgement call; exactness does not.
+- One commit, one reason. Do not alter a test's inputs, thresholds or counts inside a commit about something else — it silently invalidates the baselines the next person compares against.
+- When a measurement is superseded, move every site that carries any part of it in one change, then check the arithmetic: parts of a partition should sum to the whole.
+- Capture the exit status of the process you care about, not of a filter in a pipeline — a filtered command reports the filter's status. Never report a check you have not seen fail.
 - Native integer types (`nint`): use `nint` for test assertions when comparing tensor dimensions.
 - Resource-management tests that depend on weak-reference cleanup may force multiple GC cycles; avoid GC forcing in normal code paths.
 - Code examples: see [docs/AGENT-CODE-EXAMPLES.md](docs/AGENT-CODE-EXAMPLES.md).
@@ -132,7 +137,7 @@ See [docs/GUIDELINES.md](GUIDELINES.md) for transferable engineering principles 
 - **ConvTranspose2d**: direct scatter produces zero-padded interior positions (stride > 1); test verified numerically correct but may look unexpected.
 - **BatchNorm2d**: uses generic per-element kernel (not the fused `BatchNormKernel<T>` span path); functionally correct but slightly slower than optimal.
 - **PerRowLayerNorm**: delegates to `LayerNormKernel` with per-row slicing instead of a fused multi-row kernel; functionally correct but not optimal for large row counts.
-- **GPU GEMM throughput**: at 128 tokens / 66 M params the iGPU is still 1.9–2.2× slower than PyTorch CPU, but that deficit is shape-dependent — at Laya's 512 tokens / 1.4 B it **ties** PyTorch (3.00 s vs 2.97 s). The leading GPU item is #440 (tile-32/2×2 GEMM). See [docs/ACCELERATION.md](ACCELERATION.md).
+- **GPU GEMM throughput**: at 128 tokens / 66 M params the iGPU is still 1.9–2.2× slower than PyTorch CPU, but that deficit is shape-dependent — at Laya's 512 tokens / 1.4 B it **ties** PyTorch (3.00 s vs 2.97 s). GEMM tiling (#440) was the nominated lever and is now **measured null** — every wider tile lost to Row4, because shared-memory capacity per group dominates shared-memory traffic per MAC on this iGPU. The leading GPU item is `BatchedAttention` at **57% of the Laya forward** (#447). See [docs/ACCELERATION.md](ACCELERATION.md) §5.2.
 - **Vision gap**: convolution kernels are naive nested loops with no SIMD and no parallelism; tracked as issue #457.
 - **CPU-side performance**: the ~5.6× Nivara-CPU-vs-PyTorch deficit is not a GEMM problem at Laya's shapes; tracked as #458.
 

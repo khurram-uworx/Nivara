@@ -66,6 +66,101 @@ internal static class GpuBuffers
                 $"reports only {accelerator.MaxSharedMemoryPerGroup} B. Lower GpuBuffers.AttentionGroupSize.");
     }
 
+    // ── GEMM tile geometries (#440) ───────────────────────────────
+
+    /// <summary>
+    /// One register-blocked GEMM geometry: a <c>BlockRows × BlockCols</c> output block per
+    /// work item, a <c>KTile</c>-deep K step, over a 16×16 group. The tile is therefore
+    /// <c>16·BlockRows</c> rows by <c>16·BlockCols</c> columns.
+    /// </summary>
+    /// <remarks>
+    /// The group stays 16×16 = 256 work items across every geometry so the comparison against
+    /// the incumbent <see cref="Row4Geometry"/> isolates the blocking factor rather than
+    /// confounding it with a work-group resize. <see cref="SharedLoadsPerMac"/> is the
+    /// quantity each geometry is trying to reduce: per K step a thread reads
+    /// <c>BlockRows + BlockCols</c> shared floats to do <c>BlockRows·BlockCols</c> MACs, so
+    /// widening the block cuts shared-memory traffic per MAC without changing global traffic.
+    /// </remarks>
+    public sealed record GemmGeometry(string Name, int BlockRows, int BlockCols, int KTile)
+    {
+        /// <summary>Output rows covered by one work group.</summary>
+        public int TileRows => GemmKernels.TileSize * BlockRows;
+
+        /// <summary>Output columns covered by one work group.</summary>
+        public int TileCols => GemmKernels.TileSize * BlockCols;
+
+        /// <summary>Register accumulators live per work item.</summary>
+        public int Accumulators => BlockRows * BlockCols;
+
+        /// <summary>
+        /// Shared memory the A and B tiles need per group. ILGPU allocates per work
+        /// <em>group</em>, not per work item (docs/ACCELERATION.md lesson 15), and the
+        /// allocation size must be a compile-time constant — hence the geometry constants
+        /// rather than runtime shape arguments.
+        /// </summary>
+        public int SharedBytes => (TileRows * KTile + KTile * TileCols) * sizeof(float);
+
+        /// <summary>Shared-memory float reads per multiply-add, the blocking-factor payoff.</summary>
+        public float SharedLoadsPerMac => (BlockRows + BlockCols) / (float)Accumulators;
+    }
+
+    /// <summary>
+    /// The incumbent 1×4 @ K16 geometry (<see cref="GemmKernels.TiledGemmKernelRow4"/> and its
+    /// fused siblings), kept as the baseline the #440 variants are measured against.
+    /// </summary>
+    /// <remarks>
+    /// The blocking factor is taken from <see cref="GemmKernels.BlockCols"/> rather than spelled
+    /// as a literal, so this cannot drift from <c>TiledGemmKernelRow4</c> — the gate measures
+    /// every cell against this, and a silent mismatch would mean measuring the wrong tile while
+    /// still reporting plausible GMAC/s.
+    /// </remarks>
+    public static readonly GemmGeometry Row4Geometry = new("1x4@KT16", 1, GemmKernels.BlockCols, GemmKernels.TileSize);
+
+    /// <summary>
+    /// The 1×1 @ K16 baseline (<see cref="GemmKernels.TiledGemmKernel"/>). One output
+    /// element per work item over the same 16×16 group, so it shares the group's shape with
+    /// every other geometry and the ladder stays one axis at a time.
+    /// </summary>
+    public static readonly GemmGeometry OneToOneGeometry = new("1x1@KT16", 1, 1, GemmKernels.TileSize);
+
+    /// <summary>
+    /// The four geometries added by #440. The K-tile is varied independently of the blocking
+    /// factor (2×2 at both K16 and K32) so a win or loss can be attributed to one or the other
+    /// rather than to "the new kernel" as a bundle. All four are plain — the fused
+    /// Bias/GELU/ReLU/Qkv epilogues are ported for the winner only, since the epilogue is one
+    /// extra register add over the same accumulators in the same ascending-K order and so is
+    /// orthogonal to the blocking factor.
+    /// </summary>
+    public static readonly GemmGeometry[] GemmGeometries =
+    [
+        new("2x2@KT16", 2, 2, 16),
+        new("2x2@KT32", 2, 2, 32),
+        new("4x2@KT32", 4, 2, 32),
+        new("1x8@KT16", 1, 8, 16),
+    ];
+
+    /// <summary>
+    /// Fails unless <paramref name="geometry"/>'s shared-memory tile and group size fit the
+    /// device, mirroring <see cref="ValidateAttentionLocalMemory"/>. Queried rather than
+    /// assumed: #440 widens the GEMM tile from ~5 KB to up to 12 KB per group, and occupancy
+    /// depends on how many groups the driver can co-resident, so the footprint is checked
+    /// against what the device actually reports.
+    /// </summary>
+    public static void ValidateGemmSharedMemory(Accelerator accelerator, GemmGeometry geometry)
+    {
+        int groupSize = GemmKernels.TileSize * GemmKernels.TileSize;
+        if (groupSize > accelerator.MaxNumThreadsPerGroup)
+            throw new InvalidOperationException(
+                $"GEMM geometry {geometry.Name} launches groups of {groupSize}, but " +
+                $"{accelerator.Name} allows at most {accelerator.MaxNumThreadsPerGroup} threads per group.");
+
+        if (geometry.SharedBytes > accelerator.MaxSharedMemoryPerGroup)
+            throw new InvalidOperationException(
+                $"GEMM geometry {geometry.Name} needs {geometry.SharedBytes} B of shared memory per group, " +
+                $"but {accelerator.Name} reports only {accelerator.MaxSharedMemoryPerGroup} B. " +
+                "Reduce the K tile or the blocking factor.");
+    }
+
     // ── launch configuration ──────────────────────────────────────
 
     /// <summary>One-dimensional launch covering <paramref name="total"/> items.</summary>
@@ -83,12 +178,20 @@ internal static class GpuBuffers
     /// Tiled-GEMM launch: a <c>(ceil(aRows/16), ceil(bCols/64))</c> grid of 16x16 groups,
     /// matching <see cref="GemmKernels.TiledGemmKernelRow4"/>'s 1x4 register block.
     /// </summary>
-    public static KernelConfig GemmCfg(int aRows, int bCols)
+    public static KernelConfig GemmCfg(int aRows, int bCols) => GemmCfg(aRows, bCols, Row4Geometry);
+
+    /// <summary>
+    /// Tiled-GEMM launch for an arbitrary #440 geometry: a
+    /// <c>(ceil(aRows/tileRows), ceil(bCols/tileCols))</c> grid of 16x16 groups, where the tile
+    /// is the geometry's <see cref="GemmGeometry.TileRows"/> x
+    /// <see cref="GemmGeometry.TileCols"/> output block. The group is 16x16 for every geometry
+    /// so a measurement difference is attributable to the blocking factor alone.
+    /// </summary>
+    public static KernelConfig GemmCfg(int aRows, int bCols, GemmGeometry geometry)
     {
-        int blockCols = GemmKernels.TileSize * GemmKernels.BlockCols;
         var numGroups = new Index2D(
-            (aRows + GemmKernels.TileSize - 1) / GemmKernels.TileSize,
-            (bCols + blockCols - 1) / blockCols);
+            (aRows + geometry.TileRows - 1) / geometry.TileRows,
+            (bCols + geometry.TileCols - 1) / geometry.TileCols);
         return new KernelConfig(numGroups, new Index2D(GemmKernels.TileSize, GemmKernels.TileSize));
     }
 
