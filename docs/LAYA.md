@@ -1,6 +1,6 @@
 # Laya (convaiinnovations/laya) — decision head on ModernBERT-large
 
-Status: **Implemented and gated** (2026-09-27, issue #460, branch `khurram/laya`). Phase 2 is complete. The GPU head — what remained of Phase 3 — is unblocked and not wired; that follow-up is #462.
+Status: **Implemented and gated** (2026-09-27, issue #460, branch `khurram/laya`). Phase 2 is complete. Phase 3 is complete too: the GPU head is wired and gated (2026-09-29, issue #462, branch `khurram/462`) — see [GPU path](#gpu-path) and `laya --gpu compare`.
 
 This is a reflection of what we built and what we learned while porting Laya's typed decision head onto the ModernBERT encoder that #449 already runs. It is *not* a usage guide (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md)) and *not* a roadmap.
 
@@ -186,6 +186,48 @@ Two findings worth keeping, both negative:
 
 Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV, all present. It is not wired. `--gpu` is rejected, with the supported modes named. Gate it GPU-vs-CPU against this CPU head, the same way `modernbert --gpu compare` gates the encoder.
 
+### The head on the GPU (#462, 2026-09-29)
+
+Wired, and gated. `laya --gpu` runs the encoder *and* the decision head on the accelerator, and `laya --gpu compare` gates the pair against this CPU head. The zero-new-kernel claim held: every op in the head had a kernel already, and the mapping is one-to-one.
+
+| head op | kernel |
+|---|---|
+| `h + type_emb[qtype]`, broadcast over rows | `ElementwiseKernels.AddBias` |
+| pre-norm **biased** LayerNorm | `ElementwiseKernels.LayerNorm1D` (real beta) |
+| fused **biased** QKV `[3d, d]` | `GemmKernels.TiledGemmKernelRow4Qkv` |
+| attention, no RoPE, no band | `AttentionKernels.BatchedAttention` + `GlobalAttentionBand` |
+| `out_proj` / `linear2` / `scorer.3` + bias | `TiledGemmKernelRow4Bias` |
+| residual add | `ElementwiseKernels.Add` |
+| `linear1` + bias + **ReLU** | `TiledGemmKernelRow4Relu` |
+| scorer / act hidden + exact GELU | `TiledGemmKernelRow4Gelu` |
+| marker and pooled row gather | `ElementwiseKernels.Gather` |
+
+Three things in that table are traps rather than mappings:
+
+- **The head's norms are biased; the encoder's are not.** `nn.TransformerEncoderLayer` keeps a beta, and ModernBERT's `norm_bias: false` does not. Reusing the encoder's shared zero beta would be a silent wrong answer, not a crash — the kernel has no way to object. `LayaHeadGpuRunner` therefore uploads a real beta per norm.
+- **The residual lives in the head layer, not inside the attention.** `out_proj`'s output is added by the caller. Adding it inside the attention double-counts and the result is still finite, so nothing downstream would flag it.
+- **The head's eps is `1e-5`, from `LayaDecisionHead`'s constructor default — not `config.NormEps`.** Inheriting the encoder's eps is a plausible-looking value that is not the checkpoint's.
+
+**Where the zero-new-kernel claim had to bend.** The act head's four features — top-1, the top-1/top-2 gap, normalized entropy, and `max(2,k)/255` — are a softmax over the marker logits. On device that is a softmax, a top-k and an entropy kernel: three new ones. They are instead computed on the host by `LayaHeadScoring`, which is the shared implementation the **CPU head also calls**, and the assembled `[hidden + 4]` row is uploaded. The GEMMs stay on device; only two scalars' worth of round trip separates the features from the projection they feed. Sharing the helper is what makes the four features identical *by construction* on both sides, so the gate measures device math rather than re-deriving host arithmetic twice.
+
+That is also why the seam between the two halves is additive and on-device. `ModernBertGpuRunner` grew `ForwardOnDevice` plus `HiddenOnDevice`/`HiddenRows`; the head consumes the trunk's own buffer as its residual stream, in place, and only the `k` marker logits and the `n_act` act logits ever cross to the host. The three existing `modernbert` call sites still call `Forward` and get the same array back, and its own gate still measures what it measured before.
+
+**What the gate is, and why not the wheel.** `laya --gpu compare` gates against the **in-process CPU head**, not the PyTorch fixture. `laya compare` already pinned this CPU path to `laya==0.3.20`, so pinning the GPU runner to it pins the GPU runner transitively — no second wheel run, no prompt-parity re-check, and the reference is a plain function call in the same process. The cost is that the host-side features are shared, so the gate cannot catch a feature bug; it never could have, since the features are host arithmetic in the reference too. What it does catch is every GEMM, norm, attention and gather on the device.
+
+**The bound is 1e-3, and it is tight.** `docs/ACCELERATION.md` records ModernBERT's *encoder* gate at maxRel 5.577e-4 — already over half this budget, from F32 reduction-order drift across 28 layers. The head adds two more layers plus the scorer and act head on top, making this the tightest gate in the repo. It stays a hard gate; every row prints its measured max abs and max rel, so a near-bound result reads as arithmetic drift instead of a tolerance that quietly grew. Widening the bound to make a run pass would hide a defect rather than absorb a rounding difference.
+
+Each question is padded to the config's `max_len` so the non-finite mask-clamp check has fully-masked rows to bite on. That check is the load-bearing half of the gate, not a formality: a missing `max == -inf → zeros` clamp surfaces as `NaN`, not as a wrong number, and one fully-masked row poisons the residual stream below it. Unpadded prompts would leave the check vacuous. The head inherits #448's hazard through its dense `[L, L]` mask, which is why the check is mirrored here rather than assumed.
+
+Reproduce with:
+
+```
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu benchmark
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu compare
+```
+
+`--gpu` remains F32-only; `--gpu --precision bf16|fp16` is rejected, as it is for every other model.
+
 ## What we learned
 
 1. **A plausible reading of the reference is not a verified one.** The first pass over this document produced nine candidate corrections against the wheel. Six were real. Three were wrong, and two of those would have shipped a false claim into this document while looking rigorous. Both were falsified by a two-line probe:
@@ -201,7 +243,7 @@ Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biase
 ## What's next
 
 1. **#440 — tile-32 / 2×2 GEMM.** The leading item. A 2–3× kernel win on the term that is ~99.9% of the work.
-2. **#462 — wire the head onto `ModernBertGpuRunner`.** Unblocked by this work, not started. Zero new kernels. Gate it GPU-vs-CPU against this head. Lower value than #440.
+2. **#462 — wire the head onto `ModernBertGpuRunner`.** **Done** (2026-09-29): zero new kernels held, gated GPU-vs-CPU against this CPU head at 1e-3. See [The head on the GPU](#the-head-on-the-gpu-462-2026-09-29). The bound is the tightest in the repo, because the encoder alone already spends over half of it.
 3. **#448 — mask-as-select.** The fully-masked-row `NaN` hazard. The GPU encoder's `max == -inf → zeros` clamp is the prerequisite #449 landed, not the structural fix. The head's CPU path uses the same additive `-inf` mask as the encoder, so it inherits the same hazard at sequence lengths where a query can see no key.
 4. **#447 — banded attention on the CPU.** The dense `[L, L]` mask is capped at `ModernBertMasks.MaxDenseLength` (2048) and throws past it. The GPU encoder already carries the band inside the kernel, which is why `modernbert --gpu benchmark` runs at 4096. The head builds the same dense mask and has the same cap.
 5. **Structured states, multilingual, `typed-decisions`.** Out of scope, on purpose. A structured state throws `NotSupportedException` naming the decision. The English root checkpoint is near chance on `typed-decisions` zero-shot; that subfolder is a different model.
