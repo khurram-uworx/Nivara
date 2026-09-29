@@ -1,7 +1,7 @@
+using Nivara.GpuProbe.Kernels;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
-using Nivara.GpuProbe.Kernels;
 
 namespace Nivara.GpuProbe.OpenVino;
 

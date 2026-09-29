@@ -256,11 +256,16 @@ internal static class GemmBenchmark
 
                 Action launch = variant switch
                 {
-                    GemmVariant.OneToOne => () => { plainKernel(stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
-                    GemmVariant.Row4 => () => { row4Kernel(stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
-                    GemmVariant.Row4Qkv => () => { qkvKernel(stream, cfg, aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols, shape.Bcols / 3); runtime.Synchronize(); },
-                    _ when regKernels.ContainsKey(variant) => () => { regKernels[variant](stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
-                    _ => () => { fusedKernels[variant](stream, cfg, aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
+                    GemmVariant.OneToOne => () => { plainKernel(stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); }
+                    ,
+                    GemmVariant.Row4 => () => { row4Kernel(stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); }
+                    ,
+                    GemmVariant.Row4Qkv => () => { qkvKernel(stream, cfg, aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols, shape.Bcols / 3); runtime.Synchronize(); }
+                    ,
+                    _ when regKernels.ContainsKey(variant) => () => { regKernels[variant](stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); }
+                    ,
+                    _ => () => { fusedKernels[variant](stream, cfg, aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); }
+                    ,
                 };
 
                 launch();

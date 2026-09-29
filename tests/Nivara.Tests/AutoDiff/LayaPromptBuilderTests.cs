@@ -1,7 +1,7 @@
-using System.Text;
-using System.Text.Json;
 using Nivara.Samples;
 using NUnit.Framework;
+using System.Text;
+using System.Text.Json;
 
 namespace Nivara.Tests.AutoDiff;
 

@@ -1,5 +1,4 @@
 using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
 using Nivara.Samples;

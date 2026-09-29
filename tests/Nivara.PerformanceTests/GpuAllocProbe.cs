@@ -1,6 +1,5 @@
 using ILGPU;
 using ILGPU.Runtime;
-using Nivara.Samples.Gpu;
 using System.Diagnostics;
 
 namespace Nivara.PerformanceTests;

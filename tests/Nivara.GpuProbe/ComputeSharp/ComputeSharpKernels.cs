@@ -1,6 +1,6 @@
 #if WINDOWS
-using System.Runtime.Versioning;
 using ComputeSharp;
+using System.Runtime.Versioning;
 
 namespace Nivara.GpuProbe.ComputeSharp;
 

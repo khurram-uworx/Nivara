@@ -2,8 +2,8 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using System.Numerics.Tensors;
 using NUnit.Framework;
+using System.Numerics.Tensors;
 
 namespace Nivara.Tests.AutoDiff;
 

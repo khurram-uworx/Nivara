@@ -1,8 +1,7 @@
+using Nivara.GpuProbe.Kernels;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text;
-using Nivara.GpuProbe.Kernels;
 using static Nivara.GpuProbe.D3d12Check;
 
 namespace Nivara.GpuProbe.D3d12;
@@ -473,8 +472,13 @@ internal static class D3d12Compute
         return new ComputeContext
         {
             Device = device,
-            Queue = queue, Allocator = allocator, CommandList = list,
-            Fence = fence, Event = evt, RootSignature = rootSig, DescriptorHeap = heap,
+            Queue = queue,
+            Allocator = allocator,
+            CommandList = list,
+            Fence = fence,
+            Event = evt,
+            RootSignature = rootSig,
+            DescriptorHeap = heap,
             DescriptorIncrement = increment,
             SrvCpuSlot = new CpuDescriptorHandle { Ptr = cpuStart },
             UavCpuSlot = new CpuDescriptorHandle { Ptr = cpuStart + increment },
@@ -550,7 +554,10 @@ internal static class D3d12Compute
             PRootSignature = ctx.RootSignature,
             PShaderBytecode = codePtr,
             ShaderBytecodeLength = (long)codeSize,
-            NodeMask = 0, PCachedBlob = IntPtr.Zero, CachedBlobSizeInBytes = 0, Flags = PipelineStateFlagNone
+            NodeMask = 0,
+            PCachedBlob = IntPtr.Zero,
+            CachedBlobSizeInBytes = 0,
+            Flags = PipelineStateFlagNone
         };
         Guid psoIid = IID_ID3D12PipelineState;
         hr = Vtable<CreateComputePipelineState>(ctx.Device, 11)(ctx.Device, scratch.Copy(ref psoDesc), ref psoIid, out IntPtr pso);
@@ -578,15 +585,25 @@ internal static class D3d12Compute
 
         var srvDesc = new ShaderResourceViewDesc
         {
-            Format = FormatUnknown, ViewDimension = SrvDimensionBuffer, Shader4ComponentMapping = DefaultShader4ComponentMapping,
-            FirstElement = 0, NumElements = input.Length, StructureByteStride = 4, Flags = 0
+            Format = FormatUnknown,
+            ViewDimension = SrvDimensionBuffer,
+            Shader4ComponentMapping = DefaultShader4ComponentMapping,
+            FirstElement = 0,
+            NumElements = input.Length,
+            StructureByteStride = 4,
+            Flags = 0
         };
         Vtable<CreateShaderResourceView>(ctx.Device, 18)(ctx.Device, inputBuf, scratch.Copy(ref srvDesc), ctx.SrvCpuSlot);
 
         var uavDesc = new UnorderedAccessViewDesc
         {
-            Format = FormatUnknown, ViewDimension = UavDimensionBuffer,
-            FirstElement = 0, NumElements = outCount, StructureByteStride = 4, CounterOffsetInBytes = 0, Flags = 0
+            Format = FormatUnknown,
+            ViewDimension = UavDimensionBuffer,
+            FirstElement = 0,
+            NumElements = outCount,
+            StructureByteStride = 4,
+            CounterOffsetInBytes = 0,
+            Flags = 0
         };
         Vtable<CreateUnorderedAccessView>(ctx.Device, 19)(ctx.Device, outputBuf, IntPtr.Zero, scratch.Copy(ref uavDesc), ctx.UavCpuSlot);
 

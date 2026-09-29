@@ -1,7 +1,7 @@
+using Nivara.GpuProbe.Kernels;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Nivara.GpuProbe.Kernels;
 
 namespace Nivara.GpuProbe.LevelZero;
 

@@ -1,6 +1,6 @@
+using Nivara.GpuProbe.LevelZero;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using Nivara.GpuProbe.LevelZero;
 
 namespace Nivara.GpuProbe;
 

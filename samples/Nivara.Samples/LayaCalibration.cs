@@ -267,49 +267,49 @@ public sealed class LayaCalibration
         switch (question.Type)
         {
             case LayaQuestionType.Choice:
-            {
-                int best = 0;
-                for (int i = 1; i < p.Length; i++)
-                    if (p[i] > p[best])
-                        best = i;
-                // The key, not the rendered "key: description". The rendered text is prompt
-                // content; the wheel's agent reports crit.keys()[argmax], and that is the answer
-                // a caller acts on. They coincide only when the option has no description.
-                return decision with
                 {
-                    Choice = question.Options[best].Key,
-                    Probabilities = [.. p.Select(v => Round(v, roundTo))],
-                    Confidence = Round(ConfidenceFromProbs(p, k), roundTo)
-                };
-            }
+                    int best = 0;
+                    for (int i = 1; i < p.Length; i++)
+                        if (p[i] > p[best])
+                            best = i;
+                    // The key, not the rendered "key: description". The rendered text is prompt
+                    // content; the wheel's agent reports crit.keys()[argmax], and that is the answer
+                    // a caller acts on. They coincide only when the option has no description.
+                    return decision with
+                    {
+                        Choice = question.Options[best].Key,
+                        Probabilities = [.. p.Select(v => Round(v, roundTo))],
+                        Confidence = Round(ConfidenceFromProbs(p, k), roundTo)
+                    };
+                }
 
             case LayaQuestionType.Score:
-            {
-                double expected = 0.0;
-                for (int i = 0; i < p.Length; i++)
-                    expected += i * p[i];
-                return decision with
                 {
-                    Score = Round(expected, roundTo),
-                    Probabilities = [.. p.Select(v => Round(v, roundTo))],
-                    Confidence = Round(ConfidenceFromProbs(p, k), roundTo)
-                };
-            }
+                    double expected = 0.0;
+                    for (int i = 0; i < p.Length; i++)
+                        expected += i * p[i];
+                    return decision with
+                    {
+                        Score = Round(expected, roundTo),
+                        Probabilities = [.. p.Select(v => Round(v, roundTo))],
+                        Confidence = Round(ConfidenceFromProbs(p, k), roundTo)
+                    };
+                }
 
             case LayaQuestionType.Noul:
-            {
-                // Two options by construction, so p[1] is P(true) and the semantic order is fixed.
-                double noul = p.Length > 1 ? p[1] : 0.0;
-                return decision with
                 {
-                    NoulProbability = Round(noul, roundTo),
+                    // Two options by construction, so p[1] is P(true) and the semantic order is fixed.
+                    double noul = p.Length > 1 ? p[1] : 0.0;
+                    return decision with
+                    {
+                        NoulProbability = Round(noul, roundTo),
 
-                    // Over two options max(p, 1-p) is max(p), so this equals the answer
-                    // confidence; the reference reports both to avoid changing one underneath
-                    // existing callers.
-                    Confidence = Round(Math.Max(noul, 1.0 - noul), roundTo)
-                };
-            }
+                        // Over two options max(p, 1-p) is max(p), so this equals the answer
+                        // confidence; the reference reports both to avoid changing one underneath
+                        // existing callers.
+                        Confidence = Round(Math.Max(noul, 1.0 - noul), roundTo)
+                    };
+                }
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(question), question.Type, null);

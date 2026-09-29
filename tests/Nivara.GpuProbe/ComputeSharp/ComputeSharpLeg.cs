@@ -1,10 +1,10 @@
 #if WINDOWS
-using System.Diagnostics;
-using System.Numerics;
-using System.Runtime.Versioning;
 using ComputeSharp;
 using Nivara.GpuProbe.D3d12;
 using Nivara.GpuProbe.Kernels;
+using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.Versioning;
 
 namespace Nivara.GpuProbe.ComputeSharp;
 

@@ -1,6 +1,5 @@
 using ILGPU;
 using ILGPU.Runtime;
-using Nivara.AutoDiff.Nn;
 
 namespace Nivara.Samples.Gpu;
 

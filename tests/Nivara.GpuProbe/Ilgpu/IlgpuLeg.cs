@@ -1,11 +1,10 @@
-using System.Diagnostics;
-using System.Numerics;
 using ILGPU;
-using ILGPU.Algorithms;
 using ILGPU.Runtime;
 using ILGPU.Runtime.OpenCL;
 using Nivara.GpuProbe.D3d12;
 using Nivara.GpuProbe.Kernels;
+using System.Diagnostics;
+using System.Numerics;
 
 namespace Nivara.GpuProbe.Ilgpu;
 
