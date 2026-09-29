@@ -120,6 +120,333 @@ internal static class GemmKernels
         }
     }
 
+    // ── #440 register-blocked geometries ───────────────────────────────────────
+    //
+    // Four plain variants that widen the per-thread output block beyond Row4's 1x4, so that a
+    // K step reads fewer shared floats per multiply-add (GpuBuffers.GemmGeometry.
+    // SharedLoadsPerMac). All four keep the incumbent's 16x16 group, K-tile staging and
+    // strictly ascending-K accumulation, so each is *bit-identical* to Row4 on every shape,
+    // not merely close: the same f32 values are added to the same accumulator in the same
+    // order. The --gemm gate asserts that byte-identity alongside its existing double-precision
+    // truth check, which makes it a design regression detector rather than a tolerance test.
+    //
+    // The K tile is a separate axis from the blocking factor: 2x2 appears at both K16 and K32 so
+    // the two effects can be attributed independently. The body is duplicated per geometry
+    // rather than shared through a multi-accumulator helper, because the epilogue and the
+    // unrolled inner loop are exactly the parts a helper cannot express without reintroducing
+    // the local-memory spill that register blocking exists to avoid.
+
+    /// <summary>2x2 @ K16: 32x32 output tile, 16x16 group. 4 accumulators, 1.0 shared reads/MAC.</summary>
+    internal static void TiledGemmKernelReg2x2K16(
+        ArrayView<float> a,
+        ArrayView<float> b,
+        ArrayView<float> c,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        const int BR = 2, BC = 2, KT = 16;
+        const int TileRows = TileSize * BR, TileCols = TileSize * BC;
+        var global = Grid.GlobalIndex.XY;
+        int x = Group.IdxX;
+        int y = Group.IdxY;
+
+        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
+        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+
+        int rowBase = global.X * TileRows;
+        int colBase = global.Y * TileCols;
+        float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
+
+        for (int k0 = 0; k0 < aCols; k0 += KT)
+        {
+            // One 256-thread group stages TileRows*KT A values and KT*TileCols B values. Each
+            // work item loads its own strided slice; the 2D bounds test zeroes the halo so
+            // partial tiles contribute no spurious products, matching Row4's edge handling.
+            for (int r = 0; r < TileRows; r += TileSize)
+                for (int kk = 0; kk < KT; kk += TileSize)
+                {
+                    int srcRow = rowBase + r + x;
+                    int srcCol = k0 + kk + y;
+                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                        ? a[srcRow * aCols + srcCol] : 0f;
+                }
+            for (int kk = 0; kk < KT; kk += TileSize)
+                for (int cc = 0; cc < TileCols; cc += TileSize)
+                {
+                    int srcRow = k0 + kk + x;
+                    int srcCol = colBase + cc + y;
+                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                        ? b[srcRow * bCols + srcCol] : 0f;
+                }
+            Group.Barrier();
+
+            for (int k = 0; k < KT; k++)
+            {
+                float a0 = aTile[x * BR + 0, k];
+                float a1 = aTile[x * BR + 1, k];
+                int cb = y * BC;
+                acc00 += a0 * bTile[k, cb + 0];
+                acc01 += a0 * bTile[k, cb + 1];
+                acc10 += a1 * bTile[k, cb + 0];
+                acc11 += a1 * bTile[k, cb + 1];
+            }
+            Group.Barrier();
+        }
+
+        int row0 = rowBase + x * BR + 0;
+        if (row0 < aRows)
+        {
+            int dst = row0 * bCols + colBase + y * BC;
+            if (colBase + y * BC + 0 < bCols) c[dst + 0] = acc00;
+            if (colBase + y * BC + 1 < bCols) c[dst + 1] = acc01;
+        }
+        int row1 = rowBase + x * BR + 1;
+        if (row1 < aRows)
+        {
+            int dst = row1 * bCols + colBase + y * BC;
+            if (colBase + y * BC + 0 < bCols) c[dst + 0] = acc10;
+            if (colBase + y * BC + 1 < bCols) c[dst + 1] = acc11;
+        }
+    }
+
+    /// <summary>2x2 @ K32: 32x32 output tile, 16x16 group, double the K step. 4 accumulators.</summary>
+    internal static void TiledGemmKernelReg2x2K32(
+        ArrayView<float> a,
+        ArrayView<float> b,
+        ArrayView<float> c,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        const int BR = 2, BC = 2, KT = 32;
+        const int TileRows = TileSize * BR, TileCols = TileSize * BC;
+        var global = Grid.GlobalIndex.XY;
+        int x = Group.IdxX;
+        int y = Group.IdxY;
+
+        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
+        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+
+        int rowBase = global.X * TileRows;
+        int colBase = global.Y * TileCols;
+        float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
+
+        for (int k0 = 0; k0 < aCols; k0 += KT)
+        {
+            for (int r = 0; r < TileRows; r += TileSize)
+                for (int kk = 0; kk < KT; kk += TileSize)
+                {
+                    int srcRow = rowBase + r + x;
+                    int srcCol = k0 + kk + y;
+                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                        ? a[srcRow * aCols + srcCol] : 0f;
+                }
+            for (int kk = 0; kk < KT; kk += TileSize)
+                for (int cc = 0; cc < TileCols; cc += TileSize)
+                {
+                    int srcRow = k0 + kk + x;
+                    int srcCol = colBase + cc + y;
+                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                        ? b[srcRow * bCols + srcCol] : 0f;
+                }
+            Group.Barrier();
+
+            for (int k = 0; k < KT; k++)
+            {
+                float a0 = aTile[x * BR + 0, k];
+                float a1 = aTile[x * BR + 1, k];
+                int cb = y * BC;
+                acc00 += a0 * bTile[k, cb + 0];
+                acc01 += a0 * bTile[k, cb + 1];
+                acc10 += a1 * bTile[k, cb + 0];
+                acc11 += a1 * bTile[k, cb + 1];
+            }
+            Group.Barrier();
+        }
+
+        for (int r = 0; r < BR; r++)
+        {
+            int outRow = rowBase + x * BR + r;
+            if (outRow >= aRows) continue;
+            int dst = outRow * bCols + colBase + y * BC;
+            if (colBase + y * BC + 0 < bCols) c[dst + 0] = r == 0 ? acc00 : acc10;
+            if (colBase + y * BC + 1 < bCols) c[dst + 1] = r == 0 ? acc01 : acc11;
+        }
+    }
+
+    /// <summary>4x2 @ K32: 64x32 output tile, 16x16 group. 8 accumulators, 0.75 shared reads/MAC.</summary>
+    internal static void TiledGemmKernelReg4x2K32(
+        ArrayView<float> a,
+        ArrayView<float> b,
+        ArrayView<float> c,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        const int BR = 4, BC = 2, KT = 32;
+        const int TileRows = TileSize * BR, TileCols = TileSize * BC;
+        var global = Grid.GlobalIndex.XY;
+        int x = Group.IdxX;
+        int y = Group.IdxY;
+
+        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
+        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+
+        int rowBase = global.X * TileRows;
+        int colBase = global.Y * TileCols;
+        float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
+        float acc20 = 0f, acc21 = 0f, acc30 = 0f, acc31 = 0f;
+
+        for (int k0 = 0; k0 < aCols; k0 += KT)
+        {
+            for (int r = 0; r < TileRows; r += TileSize)
+                for (int kk = 0; kk < KT; kk += TileSize)
+                {
+                    int srcRow = rowBase + r + x;
+                    int srcCol = k0 + kk + y;
+                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                        ? a[srcRow * aCols + srcCol] : 0f;
+                }
+            for (int kk = 0; kk < KT; kk += TileSize)
+                for (int cc = 0; cc < TileCols; cc += TileSize)
+                {
+                    int srcRow = k0 + kk + x;
+                    int srcCol = colBase + cc + y;
+                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                        ? b[srcRow * bCols + srcCol] : 0f;
+                }
+            Group.Barrier();
+
+            for (int k = 0; k < KT; k++)
+            {
+                int cb = y * BC;
+                float a0 = aTile[x * BR + 0, k];
+                acc00 += a0 * bTile[k, cb + 0];
+                acc01 += a0 * bTile[k, cb + 1];
+                float a1 = aTile[x * BR + 1, k];
+                acc10 += a1 * bTile[k, cb + 0];
+                acc11 += a1 * bTile[k, cb + 1];
+                float a2 = aTile[x * BR + 2, k];
+                acc20 += a2 * bTile[k, cb + 0];
+                acc21 += a2 * bTile[k, cb + 1];
+                float a3 = aTile[x * BR + 3, k];
+                acc30 += a3 * bTile[k, cb + 0];
+                acc31 += a3 * bTile[k, cb + 1];
+            }
+            Group.Barrier();
+        }
+
+        int d = colBase + y * BC;
+        int rowBase0 = rowBase + x * BR;
+        if (rowBase0 < aRows)
+        {
+            int dst = rowBase0 * bCols + d;
+            if (d + 0 < bCols) c[dst + 0] = acc00;
+            if (d + 1 < bCols) c[dst + 1] = acc01;
+        }
+        if (rowBase0 + 1 < aRows)
+        {
+            int dst = (rowBase0 + 1) * bCols + d;
+            if (d + 0 < bCols) c[dst + 0] = acc10;
+            if (d + 1 < bCols) c[dst + 1] = acc11;
+        }
+        if (rowBase0 + 2 < aRows)
+        {
+            int dst = (rowBase0 + 2) * bCols + d;
+            if (d + 0 < bCols) c[dst + 0] = acc20;
+            if (d + 1 < bCols) c[dst + 1] = acc21;
+        }
+        if (rowBase0 + 3 < aRows)
+        {
+            int dst = (rowBase0 + 3) * bCols + d;
+            if (d + 0 < bCols) c[dst + 0] = acc30;
+            if (d + 1 < bCols) c[dst + 1] = acc31;
+        }
+    }
+
+    /// <summary>1x8 @ K16: 16x128 output tile, 16x16 group. 8 accumulators.</summary>
+    internal static void TiledGemmKernelReg1x8K16(
+        ArrayView<float> a,
+        ArrayView<float> b,
+        ArrayView<float> c,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        const int BR = 1, BC = 8, KT = 16;
+        const int TileRows = TileSize * BR, TileCols = TileSize * BC;
+        var global = Grid.GlobalIndex.XY;
+        int x = Group.IdxX;
+        int y = Group.IdxY;
+
+        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
+        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+
+        int rowBase = global.X * TileRows;
+        int colBase = global.Y * TileCols;
+        float acc0 = 0f, acc1 = 0f, acc2 = 0f, acc3 = 0f;
+        float acc4 = 0f, acc5 = 0f, acc6 = 0f, acc7 = 0f;
+
+        for (int k0 = 0; k0 < aCols; k0 += KT)
+        {
+            for (int r = 0; r < TileRows; r += TileSize)
+                for (int kk = 0; kk < KT; kk += TileSize)
+                {
+                    int srcRow = rowBase + r + x;
+                    int srcCol = k0 + kk + y;
+                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                        ? a[srcRow * aCols + srcCol] : 0f;
+                }
+            for (int kk = 0; kk < KT; kk += TileSize)
+                for (int cc = 0; cc < TileCols; cc += TileSize)
+                {
+                    int srcRow = k0 + kk + x;
+                    int srcCol = colBase + cc + y;
+                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                        ? b[srcRow * bCols + srcCol] : 0f;
+                }
+            Group.Barrier();
+
+            for (int k = 0; k < KT; k++)
+            {
+                float aVal = aTile[x * BR, k];
+                int cb = y * BC;
+                acc0 += aVal * bTile[k, cb + 0];
+                acc1 += aVal * bTile[k, cb + 1];
+                acc2 += aVal * bTile[k, cb + 2];
+                acc3 += aVal * bTile[k, cb + 3];
+                acc4 += aVal * bTile[k, cb + 4];
+                acc5 += aVal * bTile[k, cb + 5];
+                acc6 += aVal * bTile[k, cb + 6];
+                acc7 += aVal * bTile[k, cb + 7];
+            }
+            Group.Barrier();
+        }
+
+        int outRow = rowBase + x;
+        if (outRow < aRows)
+        {
+            int dst = outRow * bCols + colBase + y * BC;
+            if (colBase + y * BC + 0 < bCols) c[dst + 0] = acc0;
+            if (colBase + y * BC + 1 < bCols) c[dst + 1] = acc1;
+            if (colBase + y * BC + 2 < bCols) c[dst + 2] = acc2;
+            if (colBase + y * BC + 3 < bCols) c[dst + 3] = acc3;
+            if (colBase + y * BC + 4 < bCols) c[dst + 4] = acc4;
+            if (colBase + y * BC + 5 < bCols) c[dst + 5] = acc5;
+            if (colBase + y * BC + 6 < bCols) c[dst + 6] = acc6;
+            if (colBase + y * BC + 7 < bCols) c[dst + 7] = acc7;
+        }
+    }
+
     /// <summary>
     /// Register-blocked 1×4 GEMM with a fused bias epilogue: y = A·Bt + bias. Same tile
     /// geometry as <see cref="TiledGemmKernelRow4"/>; the bias row is read per output

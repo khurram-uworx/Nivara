@@ -23,7 +23,27 @@ internal static class GemmBenchmark
     const double GateMaxAbs = 1e-3;
     const int ExitUnbuilt = 10;
 
-    enum GemmVariant { OneToOne, Row4, Row4Bias, Row4Gelu, Row4Relu, Row4Qkv }
+    enum GemmVariant { OneToOne, Row4, Row4Bias, Row4Gelu, Row4Relu, Row4Qkv, Reg2x2K16, Reg2x2K32, Reg4x2K32, Reg1x8K16 }
+
+    /// <summary>
+    /// The #440 register-blocked geometries under test, in attribution order. The 2x2 factor
+    /// appears at both K-tile widths so the blocking effect and the K-tile effect can be told
+    /// apart rather than bundled into "the new kernel".
+    /// </summary>
+    static readonly GemmVariant[] s_regVariants =
+    [
+        GemmVariant.Reg2x2K16, GemmVariant.Reg2x2K32, GemmVariant.Reg4x2K32, GemmVariant.Reg1x8K16,
+    ];
+
+    /// <summary>The tile geometry a #440 variant implements (GpuBuffers is the single authority).</summary>
+    static GpuBuffers.GemmGeometry GeometryFor(GemmVariant variant) => variant switch
+    {
+        GemmVariant.Reg2x2K16 => GpuBuffers.GemmGeometries[0],
+        GemmVariant.Reg2x2K32 => GpuBuffers.GemmGeometries[1],
+        GemmVariant.Reg4x2K32 => GpuBuffers.GemmGeometries[2],
+        GemmVariant.Reg1x8K16 => GpuBuffers.GemmGeometries[3],
+        _ => GpuBuffers.Row4Geometry,
+    };
 
     internal readonly record struct GemmShape(string Name, int Arows, int Acols, int Bcols)
     {
@@ -42,6 +62,14 @@ internal static class GemmBenchmark
         new("minilm head", 128, 384, 2),
         new("edge padded rows", 100, 770, 70),
         new("edge padded K", 64, 1032, 130),
+
+        // #440 edge shapes for the wider tiles. A 32- or 64-row tile with a non-multiple row
+        // count, and a 128-column tile against a narrow N, exercise the halo guards the
+        // existing "edge padded rows" row (N=70) only half-reaches: 70 crosses a 64-column
+        // tile but not a 128-column one, and neither existing row has a K below a K-tile step.
+        new("edge 1x8 N=100", 100, 512, 100),      // 1x8 tile: N<128, A rows not a multiple of 16
+        new("edge 4x2 M=20 N=40", 20, 96, 40),     // 4x2 tile: M<64 and K<KT32, both tiles partial
+        new("edge 2x2 K=17", 64, 17, 64),          // K shorter than one K-tile step
 
         // Laya / ModernBERT-large: 28L d=1024, Wi=5248 (fused input|gate), ffn=2624.
         // The DistilBERT/MiniLM rows above are S=128 at d=768/384; Laya is d=1024 at
@@ -120,8 +148,38 @@ internal static class GemmBenchmark
             ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
             GemmKernels.TiledGemmKernelRow4Qkv);
 
+        // #440 register-blocked geometries. Plain kernels only at this stage: the epilogue is
+        // one extra register add over the same accumulators in the same ascending-K order, so
+        // it is orthogonal to the blocking factor and the winner's siblings get ported after
+        // the geometry is chosen. Loaded lazily on first use so a device that cannot host a
+        // geometry's shared tile skips it instead of failing the whole gate.
+        var regKernels = new Dictionary<GemmVariant, Action<AcceleratorStream, KernelConfig, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>>();
+        foreach (var variant in s_regVariants)
+        {
+            GpuBuffers.ValidateGemmSharedMemory(runtime.Accelerator, GeometryFor(variant));
+            regKernels[variant] = variant switch
+            {
+                GemmVariant.Reg2x2K16 => runtime.Accelerator.LoadKernel<
+                    ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+                    GemmKernels.TiledGemmKernelReg2x2K16),
+                GemmVariant.Reg2x2K32 => runtime.Accelerator.LoadKernel<
+                    ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+                    GemmKernels.TiledGemmKernelReg2x2K32),
+                GemmVariant.Reg4x2K32 => runtime.Accelerator.LoadKernel<
+                    ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+                    GemmKernels.TiledGemmKernelReg4x2K32),
+                _ => runtime.Accelerator.LoadKernel<
+                    ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+                    GemmKernels.TiledGemmKernelReg1x8K16),
+            };
+        }
+
         Console.WriteLine($"{"kernel",-9} {"shape",-20} {"maxAbs",-11} {"gate(1e-3)",-12} {"best us",-9} {"GMAC/s",-9}");
         int failures = 0;
+        int identicalFailures = 0;
+        // Row4's output per shape, kept so each #440 geometry can be compared bit-for-bit.
+        // VariantsFor always emits Row4 before the #440 variants, so the reference is populated.
+        var row4Reference = new Dictionary<string, float[]>();
         foreach (var shape in s_shapes)
         {
             uint seed = 0x9E3779B9u;
@@ -139,7 +197,7 @@ internal static class GemmBenchmark
 
             double[] core = DpCore(shape, a, bt);
 
-            foreach (var variant in VariantsFor(shape))
+            foreach (var variant in WithRegVariants(VariantsFor(shape)))
             {
                 double[] truth = ApplyEpilogue(shape, variant, core, bias);
 
@@ -151,11 +209,11 @@ internal static class GemmBenchmark
                 bBuffer.CopyFromCPU(bt);
                 biasBuffer.CopyFromCPU(bias);
 
-                int blockCols = variant == GemmVariant.OneToOne ? GemmKernels.TileSize : GemmKernels.TileSize * GemmKernels.BlockCols;
-                int groupsX = (shape.Arows + GemmKernels.TileSize - 1) / GemmKernels.TileSize;
-                int groupsY = (shape.Bcols + blockCols - 1) / blockCols;
-                var numGroups = new Index2D(groupsX, groupsY);
-                var groupSize = new Index2D(GemmKernels.TileSize, GemmKernels.TileSize);
+                // Every geometry's launch config comes from GpuBuffers, so a cell cannot
+                // silently measure a kernel with the wrong grid.
+                var cfg = variant == GemmVariant.OneToOne
+                    ? GpuBuffers.GemmCfg(shape.Arows, shape.Bcols, new GpuBuffers.GemmGeometry("1x1@KT16", 1, 1, GemmKernels.TileSize))
+                    : GpuBuffers.GemmCfg(shape.Arows, shape.Bcols, GeometryFor(variant));
                 var stream = runtime.Stream;
                 var aView = aBuffer.View;
                 var bView = bBuffer.View;
@@ -164,10 +222,11 @@ internal static class GemmBenchmark
 
                 Action launch = variant switch
                 {
-                    GemmVariant.OneToOne => () => { plainKernel(stream, (numGroups, groupSize), aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
-                    GemmVariant.Row4 => () => { row4Kernel(stream, (numGroups, groupSize), aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
-                    GemmVariant.Row4Qkv => () => { qkvKernel(stream, (numGroups, groupSize), aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols, shape.Bcols / 3); runtime.Synchronize(); },
-                    _ => () => { fusedKernels[variant](stream, (numGroups, groupSize), aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
+                    GemmVariant.OneToOne => () => { plainKernel(stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
+                    GemmVariant.Row4 => () => { row4Kernel(stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
+                    GemmVariant.Row4Qkv => () => { qkvKernel(stream, cfg, aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols, shape.Bcols / 3); runtime.Synchronize(); },
+                    _ when regKernels.ContainsKey(variant) => () => { regKernels[variant](stream, cfg, aView, bView, cView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
+                    _ => () => { fusedKernels[variant](stream, cfg, aView, bView, cView, biasView, shape.Arows, shape.Acols, shape.Bcols); runtime.Synchronize(); },
                 };
 
                 launch();
@@ -180,8 +239,23 @@ internal static class GemmBenchmark
 
                 bool failed = maxAbs > GateMaxAbs;
                 failures += failed ? 1 : 0;
+
+                // #440 byte-identity: the plain geometries accumulate strictly ascending k over
+                // the same f32 values as Row4, so every output element must be bit-identical.
+                // A violation means the accumulation order changed - a design bug, not rounding -
+                // so it is a separate failure from the tolerance check above.
+                bool identical = true;
+                if (variant == GemmVariant.Row4)
+                    row4Reference[shape.Name] = gpu.ToArray();
+                else if (s_regVariants.Contains(variant))
+                {
+                    identical = ByteIdentical(gpu, row4Reference[shape.Name]);
+                    if (!identical) identicalFailures++;
+                }
+
+                failures += identical ? 0 : 1;
                 double gmacPerSec = shape.Macs / (bestUs * 1000.0);
-                Console.WriteLine($"{variant,-9} {shape.Name,-20} {maxAbs,-11:E2} {(failed ? "FAIL" : "PASS"),-12} {bestUs,-9:F1} {gmacPerSec,-9:F0}");
+                Console.WriteLine($"{variant,-9} {shape.Name,-20} {maxAbs,-11:E2} {(failed ? "FAIL" : "PASS"),-12} {bestUs,-9:F1} {gmacPerSec,-9:F0}{(identical ? "" : "  BYTE-DIVERGED")}");
             }
         }
 
@@ -189,7 +263,21 @@ internal static class GemmBenchmark
         Console.WriteLine(failures == 0
             ? $"Gate PASS — all {CountCells()} (kernel, shape) cells within {GateMaxAbs} of double-precision truth."
             : $"Gate FAIL — {failures} of {CountCells()} cells exceed {GateMaxAbs}.");
+        if (s_regVariants.Length > 0)
+            Console.WriteLine(identicalFailures == 0
+                ? $"Byte-identity PASS — all #440 cells bit-identical to Row4 (ascending-K accumulation preserved)."
+                : $"Byte-identity FAIL — {identicalFailures} #440 cells diverged from Row4; accumulation order changed.");
         return failures;
+    }
+
+    /// <summary>Bit-for-bit comparison of a #440 variant's output against Row4's.</summary>
+    static bool ByteIdentical(float[] a, float[] b)
+    {
+        if (a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+            if (BitConverter.SingleToInt32Bits(a[i]) != BitConverter.SingleToInt32Bits(b[i]))
+                return false;
+        return true;
     }
 
     internal static bool TryCreateRuntime(out IlgpuRuntime runtime, out string reason)
@@ -212,7 +300,7 @@ internal static class GemmBenchmark
     {
         int count = 0;
         foreach (var shape in s_shapes)
-            count += VariantsFor(shape).Count;
+            count += WithRegVariants(VariantsFor(shape)).Count;
         return count;
     }
 
@@ -285,7 +373,9 @@ internal static class GemmBenchmark
                 double raw = core[i * bCols + j] + bias[j];
                 double v = variant switch
                 {
-                    GemmVariant.OneToOne or GemmVariant.Row4 => core[i * bCols + j],
+                    GemmVariant.OneToOne or GemmVariant.Row4
+                        or GemmVariant.Reg2x2K16 or GemmVariant.Reg2x2K32
+                        or GemmVariant.Reg4x2K32 or GemmVariant.Reg1x8K16 => core[i * bCols + j],
                     GemmVariant.Row4Gelu => GeluD(raw),
                     GemmVariant.Row4Relu => Math.Max(0.0, raw),
                     _ => raw,
@@ -333,6 +423,15 @@ internal static class GemmBenchmark
         "laya head ff2" => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias, GemmVariant.Row4Relu],
         _ => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias],
     };
+
+    /// <summary>
+    /// The four #440 geometries, appended to every shape's variant list after Row4 (which the
+    /// byte-identity check needs as its reference). Appending to the existing list rather than
+    /// replacing it keeps each shape's real epilogue rows intact, so the new kernels are
+    /// measured under exactly the shapes and neighbours the incumbent is.
+    /// </summary>
+    static IReadOnlyList<GemmVariant> WithRegVariants(IReadOnlyList<GemmVariant> baseVariants)
+        => [.. baseVariants, .. s_regVariants];
 
     /// <summary>Best-of-<paramref name="rounds"/> wall time of a synchronized launch, in µs.
     /// Shared with <see cref="GemmLegBenchmark"/> so both probes time legs identically.</summary>
