@@ -37,9 +37,14 @@ namespace Nivara.Tests.Gpu;
 /// </para>
 ///
 /// <para>
-/// Stated limitation: a kernel that moved its allocation into a helper method and called that
-/// helper twice would not be caught, because the scan sees one call in the kernel body. No such
-/// shape exists in this tree.
+/// Stated limitations, both of which are properties of <c>GetILAsByteArray</c> rather than of this
+/// scan. A kernel that moved its allocation into a helper method and called that helper twice would
+/// not be caught, because the scan sees one call in the kernel body. And the returned array covers
+/// the method's main body only — IL for <c>catch</c>/<c>finally</c>/<c>filter</c> clauses lives in
+/// <c>ExceptionHandlingClauses</c> and is not walked here, so an allocation placed in a handler
+/// would be invisible. Neither shape exists in this tree: no ILGPU kernel here has a handler, and
+/// none routes its allocation through a helper. Both are recorded rather than handled because a
+/// guard that overstates what it checks is worse than one that names its edges.
 /// </para>
 /// </remarks>
 [TestFixture]

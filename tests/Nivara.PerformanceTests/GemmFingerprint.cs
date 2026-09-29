@@ -102,21 +102,21 @@ internal static class GemmFingerprint
     }
 
     /// <summary>
-    /// Finds the committed baseline. Two candidates, both real layouts this harness runs from:
-    /// the repo root (where the README's <c>dotnet run --project tests/Nivara.PerformanceTests</c>
-    /// puts the working directory) and the project directory (reached from the build output).
+    /// Finds the committed baseline: the first of <see cref="SearchedPaths"/> that exists. Both
+    /// are real layouts this harness runs from — the repo root (where the README's
+    /// <c>dotnet run --project tests/Nivara.PerformanceTests</c> puts the working directory) and
+    /// the project directory (reached from the build output).
     /// </summary>
     public static string? Locate()
     {
-        string fromRepoRoot = Path.Combine(Environment.CurrentDirectory, "tests", "Nivara.PerformanceTests", FileName);
-        if (File.Exists(fromRepoRoot))
-            return fromRepoRoot;
-
-        string fromBuildOutput = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", FileName));
-        return File.Exists(fromBuildOutput) ? fromBuildOutput : null;
+        foreach (string candidate in SearchedPaths)
+            if (File.Exists(candidate))
+                return candidate;
+        return null;
     }
 
-    /// <summary>Where the baseline is looked for, for the failure message when it is not there.</summary>
+    /// <summary>Where the baseline is looked for, in order, and for the failure message when it is
+    /// not there. <see cref="Locate"/> searches exactly this list, so the two cannot disagree.</summary>
     public static string[] SearchedPaths =>
     [
         Path.Combine(Environment.CurrentDirectory, "tests", "Nivara.PerformanceTests", FileName),

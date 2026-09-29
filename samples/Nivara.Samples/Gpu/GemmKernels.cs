@@ -169,9 +169,9 @@ internal static class GemmKernels
     // register blocking exists to avoid.
     //
     // One implementation note that is not optional, and now applies to every kernel in this
-    // file: each stages its A and B tiles through a single SharedMemory.Allocate<float> with
-    // hand-computed 2D offsets. Two Allocate2D calls in one kernel whose extents disagree get
-    // the second tile mis-placed by ILGPU's OpenCL lowering (#468).
+    // file: each stages its A and B tiles through a *single* shared allocation. Two Allocate2D
+    // calls in one kernel whose extents disagree get the second tile mis-placed by ILGPU's
+    // OpenCL lowering (#468).
     //
     // The rule adopted is "at most one shared allocation per kernel body", not "matching
     // extents". The narrower rule is what the four #440 kernels were originally written against,
@@ -184,6 +184,14 @@ internal static class GemmKernels
     // holds is the one that needs no exemption list - an exemption list is a rot vector, since
     // the next geometry nobody checked would be exempted on the same discredited reasoning.
     // tests/Nivara.Tests/Gpu/SharedMemoryAllocationTests.cs enforces it on the compiled IL.
+    //
+    // The invariant does not prescribe a form, and the two forms are not equivalent in speed.
+    // Row4 and the 1x1 kernel use one wide Allocate2D (A in columns [0,16), B in [16, RowStride),
+    // the same 5120 B as before) and measured ~20% faster than the two-allocation form they
+    // replace. The four #440 kernels use the 1D Allocate<float> with hand-computed 2D offsets,
+    // which is lesson 15's prescribed shape and which costs 10-20% against the 2D form on this
+    // device. Leave a kernel's form alone unless it is being changed for a measured reason: the
+    // two families are on different forms today, which is a known state, not an oversight.
 
     /// <summary>2x2 @ K16: 32x32 output tile, 16x16 group. 4 accumulators, 1.0 shared reads/MAC. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg2x2K16(

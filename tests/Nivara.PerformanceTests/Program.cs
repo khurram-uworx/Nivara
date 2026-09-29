@@ -32,6 +32,14 @@ static class Program
     {
         var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline) = ParseArgs(args);
 
+        // Re-recording a fingerprint baseline silently does nothing without --gemm, which is the
+        // worst shape for this flag: the run looks successful and the reference is unchanged.
+        if (writeGemmBaseline && !gemm)
+        {
+            Console.Error.WriteLine("--write-gemm-baseline only applies to --gemm; re-run with both flags.");
+            return 2;
+        }
+
         if (datasetTest)
         {
             IncidentLabBenchmark.RunDatasetGeneratorTests(args);

@@ -391,7 +391,7 @@ internal static class GemmBenchmark
 
         if (writeBaseline)
         {
-            string path = GemmFingerprint.Locate() ?? GemmFingerprint.SearchedPaths[0];
+            string path = BaselinePathForWrite();
             GemmFingerprint.Write(path, device.Name ?? "?", toolchain, measured);
             Console.WriteLine($"Fingerprint baseline WRITTEN — {measured.Count} cells -> {path}");
             Console.WriteLine("  This is not a verdict. The cells above are the reference from here on; a later");
@@ -462,6 +462,26 @@ internal static class GemmBenchmark
             Console.WriteLine($"Fingerprint PASS — {verdict.Matched} of {baselineRows} baseline cells bit-identical{notExercised}.");
 
         return verdict.Failures;
+    }
+
+    /// <summary>
+    /// Where a deliberate re-record should land. The existing file wins; otherwise the first
+    /// searched path whose *directory* exists, so a first-time write from a working directory that
+    /// is not the repo root writes next to the assembly instead of failing on a path that was
+    /// never going to hold a file.
+    /// </summary>
+    static string BaselinePathForWrite()
+    {
+        string? existing = GemmFingerprint.Locate();
+        if (existing is not null)
+            return existing;
+
+        foreach (string candidate in GemmFingerprint.SearchedPaths)
+            if (Directory.Exists(Path.GetDirectoryName(candidate) ?? ""))
+                return candidate;
+
+        throw new InvalidOperationException(
+            $"no writable location for {GemmFingerprint.FileName}; none of these exists: {string.Join(", ", GemmFingerprint.SearchedPaths)}");
     }
 
     /// <summary>
