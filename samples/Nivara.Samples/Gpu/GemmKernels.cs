@@ -31,10 +31,12 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
+        // One shared allocation holding both tiles side by side in the same row - A in columns
+        // [0, TileSize), B in [TileSize, 2*TileSize) - so this kernel body has exactly one
+        // Allocate2D. See the section banner for why it is not two (#468).
+        const int RowStride = 2 * TileSize;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileSize, RowStride), new Stride2D.DenseX(RowStride));
 
         int outRow = global.X;
         int outCol = global.Y;
@@ -44,12 +46,12 @@ internal static class GemmKernels
         {
             int aCol = k0 + y;
             int bRow = k0 + x;
-            aTile[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
-            bTile[x, y] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
+            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
+            smem[x, TileSize + y] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             Group.Barrier();
 
             for (int k = 0; k < TileSize; k++)
-                acc += aTile[x, k] * bTile[k, y];
+                acc += smem[x, k] * smem[k, TileSize + y];
             Group.Barrier();
         }
 
@@ -76,10 +78,12 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileCols), new Stride2D.DenseX(TileCols));
+        // One shared allocation holding both tiles side by side in the same row - A in columns
+        // [0, TileSize), B in [TileSize, RowStride) - so this kernel body has exactly one
+        // Allocate2D. See the section banner for why it is not two (#468).
+        const int RowStride = TileSize + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileSize, RowStride), new Stride2D.DenseX(RowStride));
 
         int outRow = global.X;
         int colBase = Grid.IdxY * (TileSize * BlockCols);
@@ -89,22 +93,22 @@ internal static class GemmKernels
         {
             int aCol = k0 + y;
             int bRow = k0 + x;
-            aTile[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
+            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             for (int w = 0; w < BlockCols; w++)
             {
                 int outCol = colBase + y * BlockCols + w;
-                bTile[x, y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
+                smem[x, TileSize + y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             }
             Group.Barrier();
 
             for (int k = 0; k < TileSize; k++)
             {
-                float aVal = aTile[x, k];
+                float aVal = smem[x, k];
                 int bBase = y * BlockCols;
-                acc0 += aVal * bTile[k, bBase + 0];
-                acc1 += aVal * bTile[k, bBase + 1];
-                acc2 += aVal * bTile[k, bBase + 2];
-                acc3 += aVal * bTile[k, bBase + 3];
+                acc0 += aVal * smem[k, TileSize + bBase + 0];
+                acc1 += aVal * smem[k, TileSize + bBase + 1];
+                acc2 += aVal * smem[k, TileSize + bBase + 2];
+                acc3 += aVal * smem[k, TileSize + bBase + 3];
             }
             Group.Barrier();
         }
@@ -164,11 +168,22 @@ internal static class GemmKernels
     // the parts a helper cannot express without reintroducing the local-memory spill that
     // register blocking exists to avoid.
     //
-    // One implementation note that is not optional: each stages its A and B tiles through a
-    // single SharedMemory.Allocate<float> with hand-computed 2D offsets. Two Allocate2D calls
-    // in one kernel whose extents disagree get the second tile mis-placed by ILGPU's OpenCL
-    // lowering (#468) - and the incumbent Row4 escapes only because its A tile is 16x16, i.e.
-    // square, which happens to match its B tile's stride.
+    // One implementation note that is not optional, and now applies to every kernel in this
+    // file: each stages its A and B tiles through a single SharedMemory.Allocate<float> with
+    // hand-computed 2D offsets. Two Allocate2D calls in one kernel whose extents disagree get
+    // the second tile mis-placed by ILGPU's OpenCL lowering (#468).
+    //
+    // The rule adopted is "at most one shared allocation per kernel body", not "matching
+    // extents". The narrower rule is what the four #440 kernels were originally written against,
+    // on the reasoning that the incumbent Row4 escaped because its A tile is 16x16, i.e. square,
+    // which happened to match its B tile's stride. That reasoning does not survive its own
+    // evidence: the 1x8@KT16 row in #468 has a square 16x16 A tile and still failed, and the
+    // only case with evidence behind it (2x2@KT32) is correct because its two 32x32 extents are
+    // identical, not because square A is safe. So Row4's 16x16-vs-16x64 was inside the exposed
+    // class and correct only by accident of this ILGPU build and driver, and the invariant that
+    // holds is the one that needs no exemption list - an exemption list is a rot vector, since
+    // the next geometry nobody checked would be exempted on the same discredited reasoning.
+    // tests/Nivara.Tests/Gpu/SharedMemoryAllocationTests.cs enforces it on the compiled IL.
 
     /// <summary>2x2 @ K16: 32x32 output tile, 16x16 group. 4 accumulators, 1.0 shared reads/MAC. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg2x2K16(
@@ -502,10 +517,12 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileCols), new Stride2D.DenseX(TileCols));
+        // One shared allocation holding both tiles side by side in the same row - A in columns
+        // [0, TileSize), B in [TileSize, RowStride) - so this kernel body has exactly one
+        // Allocate2D. See the section banner for why it is not two (#468).
+        const int RowStride = TileSize + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileSize, RowStride), new Stride2D.DenseX(RowStride));
 
         int outRow = global.X;
         int colBase = Grid.IdxY * (TileSize * BlockCols);
@@ -515,22 +532,22 @@ internal static class GemmKernels
         {
             int aCol = k0 + y;
             int bRow = k0 + x;
-            aTile[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
+            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             for (int w = 0; w < BlockCols; w++)
             {
                 int outCol = colBase + y * BlockCols + w;
-                bTile[x, y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
+                smem[x, TileSize + y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             }
             Group.Barrier();
 
             for (int k = 0; k < TileSize; k++)
             {
-                float aVal = aTile[x, k];
+                float aVal = smem[x, k];
                 int bBase = y * BlockCols;
-                acc0 += aVal * bTile[k, bBase + 0];
-                acc1 += aVal * bTile[k, bBase + 1];
-                acc2 += aVal * bTile[k, bBase + 2];
-                acc3 += aVal * bTile[k, bBase + 3];
+                acc0 += aVal * smem[k, TileSize + bBase + 0];
+                acc1 += aVal * smem[k, TileSize + bBase + 1];
+                acc2 += aVal * smem[k, TileSize + bBase + 2];
+                acc3 += aVal * smem[k, TileSize + bBase + 3];
             }
             Group.Barrier();
         }
@@ -570,10 +587,12 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileCols), new Stride2D.DenseX(TileCols));
+        // One shared allocation holding both tiles side by side in the same row - A in columns
+        // [0, TileSize), B in [TileSize, RowStride) - so this kernel body has exactly one
+        // Allocate2D. See the section banner for why it is not two (#468).
+        const int RowStride = TileSize + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileSize, RowStride), new Stride2D.DenseX(RowStride));
 
         int outRow = global.X;
         int colBase = Grid.IdxY * (TileSize * BlockCols);
@@ -583,22 +602,22 @@ internal static class GemmKernels
         {
             int aCol = k0 + y;
             int bRow = k0 + x;
-            aTile[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
+            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             for (int w = 0; w < BlockCols; w++)
             {
                 int outCol = colBase + y * BlockCols + w;
-                bTile[x, y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
+                smem[x, TileSize + y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             }
             Group.Barrier();
 
             for (int k = 0; k < TileSize; k++)
             {
-                float aVal = aTile[x, k];
+                float aVal = smem[x, k];
                 int bBase = y * BlockCols;
-                acc0 += aVal * bTile[k, bBase + 0];
-                acc1 += aVal * bTile[k, bBase + 1];
-                acc2 += aVal * bTile[k, bBase + 2];
-                acc3 += aVal * bTile[k, bBase + 3];
+                acc0 += aVal * smem[k, TileSize + bBase + 0];
+                acc1 += aVal * smem[k, TileSize + bBase + 1];
+                acc2 += aVal * smem[k, TileSize + bBase + 2];
+                acc3 += aVal * smem[k, TileSize + bBase + 3];
             }
             Group.Barrier();
         }
@@ -638,10 +657,12 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileCols), new Stride2D.DenseX(TileCols));
+        // One shared allocation holding both tiles side by side in the same row - A in columns
+        // [0, TileSize), B in [TileSize, RowStride) - so this kernel body has exactly one
+        // Allocate2D. See the section banner for why it is not two (#468).
+        const int RowStride = TileSize + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileSize, RowStride), new Stride2D.DenseX(RowStride));
 
         int outRow = global.X;
         int colBase = Grid.IdxY * (TileSize * BlockCols);
@@ -651,22 +672,22 @@ internal static class GemmKernels
         {
             int aCol = k0 + y;
             int bRow = k0 + x;
-            aTile[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
+            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             for (int w = 0; w < BlockCols; w++)
             {
                 int outCol = colBase + y * BlockCols + w;
-                bTile[x, y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
+                smem[x, TileSize + y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             }
             Group.Barrier();
 
             for (int k = 0; k < TileSize; k++)
             {
-                float aVal = aTile[x, k];
+                float aVal = smem[x, k];
                 int bBase = y * BlockCols;
-                acc0 += aVal * bTile[k, bBase + 0];
-                acc1 += aVal * bTile[k, bBase + 1];
-                acc2 += aVal * bTile[k, bBase + 2];
-                acc3 += aVal * bTile[k, bBase + 3];
+                acc0 += aVal * smem[k, TileSize + bBase + 0];
+                acc1 += aVal * smem[k, TileSize + bBase + 1];
+                acc2 += aVal * smem[k, TileSize + bBase + 2];
+                acc3 += aVal * smem[k, TileSize + bBase + 3];
             }
             Group.Barrier();
         }
@@ -720,10 +741,12 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileSize), new Stride2D.DenseX(TileSize));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileSize, TileCols), new Stride2D.DenseX(TileCols));
+        // One shared allocation holding both tiles side by side in the same row - A in columns
+        // [0, TileSize), B in [TileSize, RowStride) - so this kernel body has exactly one
+        // Allocate2D. See the section banner for why it is not two (#468).
+        const int RowStride = TileSize + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(TileSize, RowStride), new Stride2D.DenseX(RowStride));
 
         int outRow = global.X;
         int colBase = Grid.IdxY * (TileSize * BlockCols);
@@ -733,22 +756,22 @@ internal static class GemmKernels
         {
             int aCol = k0 + y;
             int bRow = k0 + x;
-            aTile[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
+            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             for (int w = 0; w < BlockCols; w++)
             {
                 int outCol = colBase + y * BlockCols + w;
-                bTile[x, y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
+                smem[x, TileSize + y * BlockCols + w] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             }
             Group.Barrier();
 
             for (int k = 0; k < TileSize; k++)
             {
-                float aVal = aTile[x, k];
+                float aVal = smem[x, k];
                 int bBase = y * BlockCols;
-                acc0 += aVal * bTile[k, bBase + 0];
-                acc1 += aVal * bTile[k, bBase + 1];
-                acc2 += aVal * bTile[k, bBase + 2];
-                acc3 += aVal * bTile[k, bBase + 3];
+                acc0 += aVal * smem[k, TileSize + bBase + 0];
+                acc1 += aVal * smem[k, TileSize + bBase + 1];
+                acc2 += aVal * smem[k, TileSize + bBase + 2];
+                acc3 += aVal * smem[k, TileSize + bBase + 3];
             }
             Group.Barrier();
         }

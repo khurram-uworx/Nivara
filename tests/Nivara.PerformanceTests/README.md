@@ -140,6 +140,18 @@ K=4096 with N=1024 is a worse aspect ratio for the 16x16 tile than the other hea
 
 #### GEMM gate baseline (2026-09-29, #440 tile geometries — a measured negative)
 
+> **Superseded as a comparison on 2026-09-30, not re-recorded — read this before using the ratios.**
+> The denominator moved. `Row4` and its fused siblings were migrated off two `SharedMemory.Allocate2D`
+> calls onto a single wide `Allocate2D` (#468) and came out **~20% faster** on the same shapes
+> (Row4 +19.9% median over 22 shapes, per-cell run-to-run noise median 1.2%). The four `#440`
+> geometries were *not* touched and still stage their tiles through the 1D
+> `SharedMemory.Allocate<float>` form, so re-recording this table today would compare 1D addressing
+> against 2D and book the ~20% form difference as if it were a tile-geometry effect — which is the
+> one thing this table exists to isolate. The table below is therefore left exactly as measured on
+> 2026-09-29 and is kept only as the record of that experiment. Re-measuring the family with all
+> five kernels on one addressing form is outstanding work; until then, treat "no geometry wins" as
+> a statement about the 1D form the family was built in, not about the geometries.
+
 171 cells, all PASS, plus **byte-identity PASS** against Row4 on all #440 cells. Same machine,
 AC line. The four new geometries are the *plain* kernels only — the fused-epilogue siblings
 were not built, because the plain ones did not win and a sibling cannot beat its base.
