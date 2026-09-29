@@ -125,7 +125,7 @@ Prompt parity runs **first** and returns before any forward if an id or a marker
 | score4 | 48 | 4 | **3910 ms** | 3870 | 4492 |
 | noul | 39 | 2 | **4243 ms** | 3770 | 5697 |
 
-Weight bind was 6.6 s on top of a 1.1 s safetensors parse, so a cold run is load plus about four seconds of forward. This is a reference timing, not a deployment claim. The 2026-09-27 probe projected the CPU GEMM alone at **2414 ms**. The measured forward is about **4.1 s**. The gap is real and it is not a contradiction: GEMM is ~99.9% of the *arithmetic* and a much smaller share of the *time*, because norms, the dense `[512, 512]` mask, attention, and per-op dispatch are latency. #440 still targets the arithmetic. It will not turn 4.1 s into 0.9 s by itself.
+Weight bind was 6.6 s on top of a 1.1 s safetensors parse, so a cold run is load plus about four seconds of forward. This is a reference timing, not a deployment claim. The 2026-09-27 probe projected the CPU GEMM alone at **2414 ms**. The measured forward is about **4.1 s**. The gap is real and it is not a contradiction: GEMM is ~99.9% of the *arithmetic* and a much smaller share of the *time*, because norms, the dense `[512, 512]` mask, attention, and per-op dispatch are latency. #440 targeted the arithmetic and was measured: it does not pay off (see [docs/ACCELERATION.md](ACCELERATION.md) §5.2). It would not have turned 4.1 s into 0.9 s.
 
 The `act_head` row is a weak signal and the gate says so. The shipped head saturates near 1.0 regardless of input (upstream [NandhaKishorM/laya#185](https://github.com/NandhaKishorM/laya/issues/185), documented on the model card: AUROC 0.30 on 396 labelled decisions, against 0.77 for answer confidence). It is reproduced because `forward` computes it unconditionally. It is not a Nivara defect, and no Nivara issue should be filed for it.
 
@@ -173,7 +173,7 @@ Rolled up into a projected Laya forward, GEMM only (28 layers of qkv + attn out 
 | CPU, per-call B transpose (`MatMul`) | 2791 | 66 |
 | CPU, register-blocked reference (probe-local) | 2529 | 73 |
 
-**GPU is 2.6× faster on GEMM**, and the GPU figure is the conservative one: this harness reads the iGPU at roughly half the idle-machine rate (see the `--gemm` note in `tests/Nivara.PerformanceTests/README.md`), so the real margin is likely wider. The GPU side also has #440's tile-32/2×2 still unclaimed, which is a 2-3× *speedup* and can only widen the gap.
+**GPU is 2.6× faster on GEMM**, and the GPU figure is the conservative one: this harness reads the iGPU at roughly half the idle-machine rate (see the `--gemm` note in `tests/Nivara.PerformanceTests/README.md`), so the real margin is likely wider. *This paragraph originally claimed #440's tile-32/2×2 was "a 2-3× speedup still unclaimed". That is now measured and false — every geometry in the family lost to Row4 on every shape, including these Laya shapes (0.58–0.98×). See [docs/ACCELERATION.md](ACCELERATION.md) §5.2. The 2.6× stands on what was measured; it just cannot be widened by GEMM tiling any more.*
 
 Two findings worth keeping, both negative:
 
@@ -182,7 +182,7 @@ Two findings worth keeping, both negative:
 
 **3. Attention was deliberately left out of the measurement.** At S=512 it is 8.4 M MACs per layer against 6.3 G for the four GEMMs, about **0.13%** of the work, so it cannot move the decision. Its one real hazard — `AttentionKernels` computes `Exp(s - max)` with `s = max = -inf` on a fully-masked row and has no finite-check, unlike the CPU `GradKernels.SoftmaxSingle` — is filed on **#448** on the static reading instead.
 
-**Decision: GPU**, and it is the safe direction of the two. The comparison is unusually favourable because the CPU side was given its best available showing — a purpose-built register-blocked kernel — and still lost, while the GPU side was measured exactly as committed with a known 2-3× improvement (#440) still in hand. The CPU `laya` mode is a reference for the parity gate, not a deployment path.
+**Decision: GPU**, and it is the safe direction of the two. The comparison is unusually favourable because the CPU side was given its best available showing — a purpose-built register-blocked kernel — and still lost, while the GPU side was measured exactly as committed. The CPU `laya` mode is a reference for the parity gate, not a deployment path. *(This originally leaned on a "known 2-3× improvement (#440) still in hand". That improvement was measured and does not exist; the decision rests entirely on the 2.6× that was actually timed.)*
 
 Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV, all present. It is not wired. `--gpu` is rejected, with the supported modes named. Gate it GPU-vs-CPU against this CPU head, the same way `modernbert --gpu compare` gates the encoder.
 
@@ -311,9 +311,12 @@ KV cache: cost scales with the padded sequence length, not with tokens generated
 figures is a decode-latency claim. The PyTorch column is a separate run from the two Nivara columns,
 unlike §1's same-session pairing, so the GPU-vs-Torch ratio is the one number here with cross-run
 risk; the per-row spread (±1–4%) and the sign flips are the reason to call it a tie rather than
-narrow it further. And with `#440` still open on GEMM tiling, the tie is the state of the port
-today, not a ceiling — the honest summary is that the iGPU has caught PyTorch CPU at this shape and
-the next GEMM improvement is ours to take.
+narrow it further. *This originally read the tie as a ceiling with `#440` still open, "the next GEMM
+improvement is ours to take". `#440` has since been measured and it is not: the whole register-block
+family loses to Row4, because on this iGPU shared-memory capacity per group dominates
+shared-memory traffic per MAC. The honest summary now is that the iGPU has caught PyTorch CPU at
+this shape and **the tie is close to a ceiling, not a floor** — the next GPU leg to move is
+attention, at 51% of Laya's wall-clock, tracked as **#447**.*
 
 ## What we learned
 
@@ -329,7 +332,7 @@ the next GEMM improvement is ours to take.
 
 ## What's next
 
-1. **#440 — tile-32 / 2×2 GEMM.** The leading item. A 2–3× kernel win on the term that is ~99.9% of the work.
+1. ~~**#440 — tile-32 / 2×2 GEMM.**~~ **Measured, null (2026-09-29).** No longer the leading item — it was measured and it does not work on this device. The `2–3×` on the term that is ~99.9% of the *arithmetic* never materialised: all four geometries lost on every shape (0.58–0.98×, best cell 1.01× on the one already-weak shape). The arithmetic share was never the time share; a 2026-09-29 leg profile measures **`BatchedAttention` at 51.3% of Laya wall-clock** against 45.4% for all GEMM together. **Attention, not GEMM, is the next GPU leg — #447.** Full numbers in [docs/ACCELERATION.md](ACCELERATION.md) §5.2.
 2. **#462 — wire the head onto `ModernBertGpuRunner`.** **Done** (2026-09-29): zero new kernels held, gated GPU-vs-CPU against this CPU head at 1e-3, passing at **1.1% of the bound**. See [The head on the GPU](#the-head-on-the-gpu-462-2026-09-29). Worth reading for the reason it came in 90× under a budget the encoder alone spends 56% of: a gate's tightness is a property of the quantity compared, not of the depth behind it.
 3. **#448 — mask-as-select.** The fully-masked-row `NaN` hazard. The GPU encoder's `max == -inf → zeros` clamp is the prerequisite #449 landed, not the structural fix. The head's CPU path uses the same additive `-inf` mask as the encoder, so it inherits the same hazard at sequence lengths where a query can see no key.
 4. **#447 — banded attention on the CPU.** The dense `[L, L]` mask is capped at `ModernBertMasks.MaxDenseLength` (2048) and throws past it. The GPU encoder already carries the band inside the kernel, which is why `modernbert --gpu benchmark` runs at 4096. The head builds the same dense mask and has the same cap.

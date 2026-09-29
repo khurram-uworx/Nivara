@@ -56,19 +56,29 @@ a throwaway harness:
   rounds. Defaults to `samples/data/qwen2.5-0.5b-instruct/model.safetensors` when no path
   is given.
 - `--gemm` — tiled-GEMM regression gate (#435): the lasting promotion of the deleted
-  `%TEMP%\opencode\gemm-measure\` harness. Loads all six committed ILGPU GEMM kernels
-  (`samples/Nivara.Samples/Gpu/GemmKernels.cs` — `OneToOne`, `Row4`, and the M2 fused
-  siblings `Row4Bias`/`Row4Gelu`/`Row4Relu`/`Row4Qkv`) through the public `IlgpuRuntime` and
+  `%TEMP%\opencode\gemm-measure\` harness. Loads all ten ILGPU GEMM kernels
+  (`samples/Nivara.Samples/Gpu/GemmKernels.cs` — `OneToOne`, `Row4`, the M2 fused
+  siblings `Row4Bias`/`Row4Gelu`/`Row4Relu`/`Row4Qkv`, and the four #440 tile geometries
+  `Reg2x2K16`/`Reg2x2K32`/`Reg4x2K32`/`Reg1x8K16`) through the public `IlgpuRuntime` and
   runs them over the model GEMM shapes (DistilBERT 768/3072, MiniLM 384/1536, seq-len 128),
   the Laya / ModernBERT-large shapes (d=1024, fused input|gate Wi=5248, ffn=2624, seq-len
-  512, plus the 2-layer decision head and the act/scorer tail), and two padded-grid edge
-  shapes (non-multiple-of-16 rows/K/cols). Each (kernel, shape)
+  512, plus the 2-layer decision head and the act/scorer tail), and the padded-grid edge
+  shapes (non-multiple-of-16 rows/K/cols, plus non-multiple-of-32 cases for the #440 tiles).
+  Each (kernel, shape)
   cell is gated `maxAbs(gpu − double-precision truth) ≤ 1e-3` and timed best-of-25
   synchronized launches, reporting GMAC/s; exit code 0 = pass, N = failed cells,
   10 = UNBUILT (no OpenCL GPU). Runs on AC power only — the harness warns on battery
   because the iGPU throttles flat (the correctness leg still runs). Re-run after any
   driver/IGC bump and compare the GMAC/s column (docs/BERT-GPU.md). The baseline below was
   recorded on this machine's first run.
+
+  **The four #440 geometries additionally assert byte-identity to Row4**, and are kept as a
+  labelled negative baseline: they were measured 2026-09-29 and every one of them is *slower*
+  than Row4 on every shape, because on this iGPU shared-memory capacity per group dominates
+  shared-memory traffic per MAC. Nothing routes at them; they stay so the result stays
+  reproducible, and so nobody re-attempts the same geometry without reading the baseline
+  below. The byte-identity assertion is not decorative — it is what caught an ILGPU lowering
+  bug (#468) that the `maxAbs` tolerance alone would have argued with.
 
 #### GEMM gate baseline (2026-09-19)
 
@@ -124,6 +134,79 @@ they are launch- and bandwidth-bound at 59 and under 1 GMAC/s. They are in the g
 they are Laya's real decision-tail shapes, and a gate that only measures fat shapes would
 miss the tail. `laya head ff2` is the one Laya shape that does not reach 190 (155 GMAC/s):
 K=4096 with N=1024 is a worse aspect ratio for the 16x16 tile than the other head shapes.
+
+#### GEMM gate baseline (2026-09-29, #440 tile geometries — a measured negative)
+
+163 cells, all PASS, plus **byte-identity PASS** against Row4 on all #440 cells. Same machine,
+AC line. The four new geometries are the *plain* kernels only — the fused-epilogue siblings
+were not built, because the plain ones did not win and a sibling cannot beat its base.
+
+Ratio to Row4 on the same shape (GMAC/s, `1.00x` = parity, below 1 = slower):
+
+| shape | Row4 GMAC/s | 2x2@KT16 | 2x2@KT32 | 4x2@KT32 | 1x8@KT16 |
+|---|---|---|---|---|---|
+| laya qkv [512x1024x3072] | 201 | 0.74x | 0.60x | 0.76x | 0.82x |
+| laya fc1 (Wi) [512x1024x5248] | 202 | 0.71x | 0.58x | 0.73x | 0.79x |
+| laya fc2 (Wo) [512x2624x1024] | 197 | 0.75x | 0.60x | 0.77x | 0.81x |
+| laya attn out [512x1024x1024] | 203 | 0.74x | 0.59x | 0.74x | 0.84x |
+| laya head ff1 [512x1024x4096] | 204 | 0.76x | 0.58x | 0.76x | 0.82x |
+| laya head ff2 [512x4096x1024] | 155 | 0.89x | 0.67x | 0.98x | **1.01x** |
+| laya act 1 [512x1028x256] | 189 | 0.76x | 0.60x | 0.74x | 0.84x |
+| laya qkv@128 [128x1024x3072] | 193 | 0.73x | 0.58x | 0.77x | 0.78x |
+| laya scorer 1 [8x1024x1024] | 59 | 0.41x | 0.42x | 0.25x | 0.37x |
+| distilbert fc1 [128x768x3072] | 189 | 0.72x | 0.59x | 0.76x | 0.78x |
+| distilbert fc2 [128x3072x768] | 186 | 0.68x | 0.60x | 0.76x | 0.72x |
+| minilm qkv/o [128x384x384] | 135 | 0.68x | 0.62x | 0.64x | 0.64x |
+| edge padded rows [100x770x70] | 61 | 0.64x | 0.74x | 0.43x | 0.43x |
+| edge padded K [64x1032x130] | 69 | 0.61x | 0.70x | 0.42x | 0.35x |
+
+**No geometry wins.** The best cell is 1.01x on `laya head ff2` — the one shape already known
+to be weak at 155 GMAC/s — and that is a wash inside run-to-run noise. Everything else is a
+regression. The launch-bound narrow shapes (`head`, `scorer`) regress hardest, as they should:
+a wider tile means fewer groups, so fewer items to hide launch latency behind.
+
+**Why, since the family was built on a theory that did not hold.** The premise was
+*shared-memory traffic per MAC* — 2x2 needs 4 shared reads per 4 MACs against Row4's 5, a 20%
+cut. The binding constraint on this device is *shared-memory capacity per group*. The pair that
+isolates it: `2x2@KT16` and `2x2@KT32` have identical blocking factors, so identical reads per
+MAC, and differ only in footprint (4 KB vs 8 KB per group) — and the 8 KB one is consistently
+**18–25% slower**. Meanwhile `4x2@KT32` has the best traffic ratio in the family (0.75
+reads/MAC) and the worst footprint (12 KB), and it lands mid-pack. The metric that predicted
+the ordering was the footprint, not the traffic. So the issue's "occupancy headroom exists" was
+not merely unmeasured but pointing the wrong way: going 5 KB → 8–12 KB costs more co-resident
+groups than the 20–40% traffic saving returns. See [ACCELERATION.md](../../docs/ACCELERATION.md)
+§5.2.
+
+**A second finding, about the gate rather than the kernel.** All four geometries were *wrong*
+on the first run (maxAbs 20–119) and `1x8@KT16` failed to compile at all, from an ILGPU OpenCL
+lowering bug (#468): two `SharedMemory.Allocate2D` calls in one kernel whose extents disagree
+get the second tile mis-placed. `2x2@KT32` passed throughout, and the tell is that its two tiles
+happen to share a 32x32 extent, so the lowering has nothing to disagree about. Fixed with a
+single `SharedMemory.Allocate<float>` and hand-computed 2D offsets. Nothing about the failure
+was visible in the source — every extent, stride and element index was in bounds and the load
+destination equalled the read source. **The byte-identity assertion is what caught it**; the
+`maxAbs` tolerance would have been argued with.
+
+#### `--gemm-legs` - where the wall-clock actually goes
+
+`dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gemm-legs`
+
+Attributes a whole encoder layer's GPU time to individual kernel *legs* rather than to the GEMM
+as one bucket: `BatchedAttention`, all GEMM shapes, `LayerNorm1D`, `SplitColumns`, `GeGlu`,
+`Add`, `Rotary`. Profiling, not a gate — it exits 0 and asserts nothing. It exists because the
+GEMM-throughput work started from a claim that GEMM is ~99.9% of the cost, and that claim is
+about a share of *arithmetic*, not of time.
+
+The claim does not survive contact with the clock. Laya at 512 rows / d=1024 / 28 layers,
+2758.73 ms total: **BatchedAttention 1415.11 ms (51.3%)**, GEMM across four shapes 1252.45 ms
+(45.4%), `LayerNorm1D` 32.59 (1.2%), `SplitColumns` 29.38, `GeGlu` 12.10, `Add` 9.77, `Rotary`
+7.25. ModernBERT base: attention 55.8%, GEMM 40.9%, 1821.61 ms total. So attention — not GEMM —
+is the single largest leg, and the two are the same order of magnitude rather than one dwarfing
+the other. `BatchedAttention` carries the RoPE band internally but has three unconditional
+`j < seqLen` passes, so `band` currently reduces no work at all. Tracked as **#447**.
+
+Run this before optimising anything on the GPU path. It is the difference between a real 51%
+and an assumed 99.9%.
 
 #### `--gpu-alloc` - device-memory ceiling
 

@@ -308,3 +308,24 @@ review passes and the numbers look like a real dot product against the wrong ele
 byte-identity invariant is what caught it** — a `maxAbs` tolerance test alone would have been
 argued with. That is the check earning its keep on the very first shape.
 
+## Phase 5 result (2026-09-29) — all five model gates PASS, unchanged
+
+Phase 4 was cancelled, so no runner points at a new kernel. But `GpuBuffers.GemmCfg` is the
+14-call-site geometry chokepoint and its 2-arg form was changed to delegate to `Row4Geometry`, so
+the gates were re-run rather than assumed.
+
+| model | gate | maxAbs | maxRel | notes |
+|---|---|---|---|---|
+| minilm | PASS | 1.872E-005 | 1.037E-005 | 0/245760 violations; pooled cosine 1.000000 |
+| distilbert | PASS | 1.526E-005 | 3.238E-006 | 0/98304 violations |
+| distilbert_sst | PASS | 3.815E-006 | 6.677E-007 | 0/16; argmax 8/8 |
+| modernbert | PASS | 2.861E-005 | 5.577E-004 | 0 non-finite; cosine 1.0000001 |
+| laya | PASS | 1.657E-005 | — | 1.1% of the 1e-3 bound (choice2); act matched 4/4 |
+
+Every figure is **identical to the value already recorded in `docs/ACCELERATION.md` §1** —
+ModernBERT's `5.577E-004` bit for bit — which is the point: the `GemmCfg` refactor resolved to
+the same geometry, so the chokepoint change is confirmed inert rather than merely unexamined. The
+`minilm | distilbert | distilbert_sst` gate the plan names as mandatory stays PASS.
+
+`--gemm` on AC: **163 cells, GATE PASS, byte-identity PASS**, no geometry skipped.
+
