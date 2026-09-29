@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.Samples;
+using Nivara.Samples.Gpu;
 using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
@@ -228,6 +229,304 @@ public static class Laya
         Console.WriteLine("The encoder is the cost; the head is a few percent on top of it. See docs/LAYA.md");
         Console.WriteLine("for the probe numbers behind that split.");
         return 0;
+    }
+
+    /// <summary>
+    /// Uploads both the encoder trunk and the decision head, and reports the build time. The GPU
+    /// path is F32 only — every kernel is <c>ArrayView&lt;float&gt;</c> — so unlike the CPU modes
+    /// there is no <c>--bf16</c>/<c>--fp16</c> variant, and the CLI rejects those flags up front
+    /// rather than silently ignoring them.
+    /// </summary>
+    static (ModernBertGpuRunner Encoder, LayaHeadGpuRunner Head) LoadGpuModels(
+        IlgpuRuntime runtime,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        ModernBertConfig config,
+        AgentConfig agent)
+    {
+        // Laya nests the backbone under "encoder"; the stock checkpoint uses "model".
+        var encoder = new ModernBertGpuRunner(runtime, config, tensors, prefix: "encoder");
+        var head = new LayaHeadGpuRunner(runtime, tensors, agent.HeadLayers);
+        return (encoder, head);
+    }
+
+    /// <summary>
+    /// Encoder then head, entirely on the device. The head consumes the encoder's hidden state
+    /// where the trunk left it, so only the marker logits and the act logits come back.
+    /// </summary>
+    static LayaHeadOutput ForwardGpu(
+        ModernBertGpuRunner encoder,
+        LayaHeadGpuRunner head,
+        int[] ids,
+        int validLength,
+        LayaQuestionType type,
+        IReadOnlyList<int> markers)
+    {
+        encoder.ForwardOnDevice(ids, validLength);
+        return head.Forward(encoder.HiddenOnDevice, encoder.HiddenRows, type, markers, validLength);
+    }
+
+    /// <summary><c>laya --gpu</c>. Both halves of the model on the accelerator.</summary>
+    public static int RunGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    {
+        var agent = LoadAgentConfig(modelDir);
+        var config = LoadEncoderConfig(modelDir);
+        PrintSetup(config, agent);
+
+        using var runtime = new IlgpuRuntime();
+        Console.WriteLine($"=== {ModelTypeName} Inference (GPU) ===");
+        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
+        Console.WriteLine("Encoder and decision head both on the accelerator. F32 only, so there is no");
+        Console.WriteLine("--bf16/--fp16 variant; the CLI rejects those flags rather than ignoring them.");
+        Console.WriteLine();
+
+        var buildSw = Stopwatch.StartNew();
+        var (encoder, head) = LoadGpuModels(runtime, tensors, config, agent);
+        buildSw.Stop();
+        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine(ParameterLine(tensors));
+        Console.WriteLine();
+
+        var tokenizer = LoadTokenizer(modelDir);
+        var calibration = new LayaCalibration(agent.Temperature, agent.TemperatureByOptions);
+        var stateIds = tokenizer.Encode(FixtureState.Replace("[MASK]", " ", StringComparison.Ordinal));
+
+        Console.WriteLine($"State ({stateIds.Count} tokens): {Truncate(FixtureState, 72)}");
+        Console.WriteLine();
+
+        foreach (var question in FixtureQuestions)
+        {
+            var sequence = LayaPromptBuilder.BuildSequence(
+                tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
+
+            var sw = Stopwatch.StartNew();
+            var output = ForwardGpu(
+                encoder, head, sequence.Ids, sequence.Length, question.Type, sequence.Markers);
+            sw.Stop();
+
+            var decision = calibration.Decode(question, output.Logits, output.ActionProbability);
+            PrintDecision(question, sequence, decision, sw.ElapsedMilliseconds);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("The act_head reading above is reproduced faithfully and is not a signal: it reads");
+        Console.WriteLine("~1.0 on the shipped checkpoint regardless of input (upstream NandhaKishorM/laya#185,");
+        Console.WriteLine("documented on the model card). Do not gate anything on it.");
+        Console.WriteLine();
+        Console.WriteLine("Run 'laya --gpu compare' for the GPU-vs-CPU parity gate.");
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>laya --gpu benchmark</c>. Padded to the config's <c>max_len</c> exactly as the CPU
+    /// benchmark is, so the two tables are comparable question for question: the encoder is timed
+    /// and the head on the same rows the CPU head is timed on, and the head's key-padding mask makes
+    /// the padding a numeric no-op.
+    /// </summary>
+    public static int RunBenchmarkGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    {
+        var agent = LoadAgentConfig(modelDir);
+        var config = LoadEncoderConfig(modelDir);
+        PrintSetup(config, agent);
+
+        using var runtime = new IlgpuRuntime();
+        Console.WriteLine($"=== {ModelTypeName} Benchmark (GPU) ===");
+        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
+        Console.WriteLine();
+
+        var buildSw = Stopwatch.StartNew();
+        var (encoder, head) = LoadGpuModels(runtime, tensors, config, agent);
+        buildSw.Stop();
+        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var tokenizer = LoadTokenizer(modelDir);
+        var stateIds = tokenizer.Encode(FixtureState.Replace("[MASK]", " ", StringComparison.Ordinal));
+
+        Console.WriteLine($"1 warmup + 3 timed passes at max_len {agent.MaxLen}, median reported.");
+        Console.WriteLine();
+        Console.WriteLine($"  {"question",-10} {"valid",5} {"markers",7} {"median",10} {"min",8} {"max",8}");
+
+        foreach (var question in FixtureQuestions)
+        {
+            var sequence = LayaPromptBuilder.BuildSequence(
+                tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
+            var (ids, validLength) = PadTo(sequence.Ids, agent.MaxLen, config.PadTokenId);
+
+            ForwardGpu(encoder, head, ids, validLength, question.Type, sequence.Markers);
+
+            const int iterations = 3;
+            var samples = new long[iterations];
+            for (int i = 0; i < iterations; i++)
+            {
+                var sw = Stopwatch.StartNew();
+                ForwardGpu(encoder, head, ids, validLength, question.Type, sequence.Markers);
+                sw.Stop();
+                samples[i] = sw.ElapsedMilliseconds;
+            }
+
+            Array.Sort(samples);
+            Console.WriteLine(
+                $"  {question.Id,-10} {validLength,5} {sequence.Markers.Length,7} {samples[iterations / 2],8} ms {samples[0],6} ms {samples[^1],6} ms");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Encoder plus head, one pass each, no KV cache — cost scales with the padded");
+        Console.WriteLine("sequence length, not with tokens generated. Run 'laya benchmark' for the CPU table.");
+        return 0;
+    }
+
+    /// <summary>
+    /// GPU-vs-CPU parity gate (issue #462). The reference is the in-process CPU encoder and head
+    /// rather than the PyTorch fixture, which is what makes the gate cheap: <see cref="Compare"/>
+    /// already pinned the CPU path to the <c>laya==0.3.20</c> wheel, so pinning the GPU runner to it
+    /// transitively pins the GPU runner, with no second wheel run and no prompt-parity re-check.
+    /// </summary>
+    /// <remarks>
+    /// The bound is the same <see cref="GateRelTol"/> = 1e-3 the wheel gate uses, and it is a hard
+    /// gate. That is a tighter budget than the encoder alone would want: <c>docs/ACCELERATION.md</c>
+    /// records ModernBERT's encoder GPU-vs-CPU gate at maxRel 5.577e-4, already over half this
+    /// bound from F32 reduction-order drift across 28 layers, and the head stacks two more layers
+    /// plus the scorer and act head on top. Every failure therefore prints the measured maxRel next
+    /// to the bound, so a near-bound result is visibly arithmetic drift rather than a silent
+    /// tolerance that quietly grew. Widening the bound to make a run pass is not the fix.
+    ///
+    /// Each question is padded to the config's <c>max_len</c> so the mask-clamp check has fully
+    /// masked rows to bite on. That check is load-bearing rather than decorative: a missing
+    /// <c>max == -inf</c> clamp surfaces as NaN, not as a wrong number, and a single fully masked
+    /// row is enough to poison the residual stream below it (#448). Unpadded prompts would make the
+    /// check vacuous, since nothing would be fully masked.
+    /// </remarks>
+    public static int CompareGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    {
+        var agent = LoadAgentConfig(modelDir);
+        var config = LoadEncoderConfig(modelDir);
+        PrintSetup(config, agent);
+
+        var cpuBuildSw = Stopwatch.StartNew();
+        var (cpuEncoder, cpuHead, _) = LoadModels<float, float>(tensors, config, agent);
+        cpuBuildSw.Stop();
+        Console.WriteLine($"=== {ModelTypeName} GPU vs CPU Gate ===");
+        Console.WriteLine("Reference: the in-process CPU encoder + head, which 'laya compare' pins to the");
+        Console.WriteLine("laya 0.3.20 wheel. Gating against it pins the GPU path transitively.");
+        Console.WriteLine();
+        Console.WriteLine($"CPU model load: {cpuBuildSw.ElapsedMilliseconds} ms");
+
+        using var runtime = new IlgpuRuntime();
+        Console.WriteLine($"Device: {runtime.DeviceName}");
+        var buildSw = Stopwatch.StartNew();
+        var (encoder, head) = LoadGpuModels(runtime, tensors, config, agent);
+        buildSw.Stop();
+        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine(ParameterLine(tensors));
+        Console.WriteLine();
+
+        var tokenizer = LoadTokenizer(modelDir);
+        var stateIds = tokenizer.Encode(FixtureState.Replace("[MASK]", " ", StringComparison.Ordinal));
+
+        bool logitsOk = true;
+        bool clampOk = true;
+        foreach (var question in FixtureQuestions)
+        {
+            var sequence = LayaPromptBuilder.BuildSequence(
+                tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
+            var (ids, validLength) = PadTo(sequence.Ids, agent.MaxLen, config.PadTokenId);
+
+            var cpuSw = Stopwatch.StartNew();
+            var cpuHidden = cpuEncoder.Forward(ids, validLength);
+            var cpuOutput = cpuHead.Forward(cpuHidden, question.Type, sequence.Markers, validLength);
+            cpuSw.Stop();
+
+            var gpuSw = Stopwatch.StartNew();
+            var gpuOutput = ForwardGpu(encoder, head, ids, validLength, question.Type, sequence.Markers);
+            gpuSw.Stop();
+
+            var row = CompareQuestion(
+                question.Id, sequence.Markers.Length, gpuOutput, cpuOutput,
+                cpuSw.ElapsedMilliseconds, gpuSw.ElapsedMilliseconds);
+            logitsOk &= row.ValuesOk;
+            clampOk &= row.ClampOk;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Value parity:  {(logitsOk ? "PASS" : $"FAIL (see the max rel figures above; bound {GateRelTol:G} relative)")}");
+        Console.WriteLine($"Mask clamp:   {(clampOk ? "PASS" : "FAIL (a fully-masked row produced a non-finite value)")}");
+
+        if (!logitsOk || !clampOk) return 1;
+
+        Console.WriteLine();
+        Console.WriteLine("Gate passed. The Laya GPU encoder + decision head matches the CPU path, which");
+        Console.WriteLine("'laya compare' pins to the laya 0.3.20 wheel.");
+        return 0;
+    }
+
+    /// <summary>
+    /// One question's gate row: marker logits at <see cref="GateRelTol"/>, the act probability, and
+    /// the non-finite check. The measured max abs and max rel are always printed — on a failure they
+    /// are the difference between "arithmetic drift" and "a bug", and on a pass they are the only
+    /// evidence of how much headroom is left.
+    /// </summary>
+    static (bool ValuesOk, bool ClampOk) CompareQuestion(
+        string questionId,
+        int markers,
+        LayaHeadOutput gpu,
+        LayaHeadOutput cpu,
+        long cpuMs,
+        long gpuMs)
+    {
+        if (gpu.Logits.Length != cpu.Logits.Length)
+        {
+            Console.Error.WriteLine(
+                $"{questionId}: logit count mismatch, gpu {gpu.Logits.Length}, cpu {cpu.Logits.Length}.");
+            return (false, false);
+        }
+
+        int beyond = 0;
+        double maxAbs = 0.0, maxRel = 0.0;
+        const double significantFloor = 1e-2;
+        for (int i = 0; i < gpu.Logits.Length; i++)
+        {
+            double reference = cpu.Logits[i];
+            double diff = Math.Abs(gpu.Logits[i] - reference);
+            if (diff > maxAbs) maxAbs = diff;
+            if (diff > GateRelTol * (1.0 + Math.Abs(reference))) beyond++;
+            if (Math.Abs(reference) >= significantFloor) maxRel = Math.Max(maxRel, diff / Math.Abs(reference));
+        }
+
+        double actDiff = Math.Abs(gpu.ActionProbability - cpu.ActionProbability);
+        bool actOk = actDiff <= GateRelTol * (1.0 + Math.Abs(cpu.ActionProbability));
+
+        int nonFiniteGpu = CountNonFinite(gpu.Logits);
+        int nonFiniteCpu = CountNonFinite(cpu.Logits);
+        bool clampOk = nonFiniteGpu == 0 && nonFiniteCpu == 0 && double.IsFinite(gpu.ActionProbability);
+
+        Console.WriteLine(
+            $"[{questionId}] {markers,2} markers   cpu {cpuMs,6} ms   gpu {gpuMs,5} ms");
+        Console.WriteLine(
+            $"  logits: max|diff|={maxAbs:E3}  max rel (|cpu| >= {significantFloor})={maxRel:E3}  " +
+            $"{(beyond == 0 ? "match" : $"{beyond} of {gpu.Logits.Length} beyond {GateRelTol:G} relative")}");
+        Console.WriteLine($"  act:    gpu {gpu.ActionProbability:F6}  cpu {cpu.ActionProbability:F6}  " +
+                          $"diff {actDiff:E3}  {(actOk ? "match" : "BEYOND BOUND")}");
+        Console.WriteLine($"  non-finite: gpu {nonFiniteGpu} logits, cpu {nonFiniteCpu} logits" +
+                          $"{(clampOk ? "" : "  <- a fully-masked row went NaN")}");
+        Console.WriteLine();
+
+        return (beyond == 0 && actOk, clampOk);
+    }
+
+    static string ParameterLine(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        long parameters = tensors.Values.Sum(t => (long)t.Data.Length);
+        return $"Parameters: {parameters:N0} ({parameters * 4.0 / (1024.0 * 1024.0):F1} MB as F32)";
+    }
+
+    static int CountNonFinite(ReadOnlySpan<float> values)
+    {
+        int count = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (!float.IsFinite(values[i])) count++;
+        }
+        return count;
     }
 
     static (ModernBertEncoder<TModel> Encoder, LayaDecisionHead<TModel> Head, long Milliseconds)
