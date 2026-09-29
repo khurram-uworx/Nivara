@@ -270,8 +270,19 @@ class Program
             case "laya":
                 if (useGpu)
                 {
-                    Console.Error.WriteLine("--gpu is not wired for laya yet: the decision head runs on CPU, and so does 'laya compare'. The GPU path covers the encoder only (supported: default, benchmark, compare).");
-                    return 1;
+                    if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir);
+                    if (compare) return Laya.CompareGpu(tensors, modelDir);
+                    if (compareDiag)
+                    {
+                        Console.Error.WriteLine("--gpu does not support 'compare_diag' for laya: the per-stage diff reads named CPU intermediates, and the GPU runners have no per-stage hook. 'laya --gpu compare' gates the head's marker logits and act probability against the in-process CPU head instead (supported: default, benchmark, compare).");
+                        return 1;
+                    }
+                    if (mode.Length > 0)
+                    {
+                        Console.Error.WriteLine($"--gpu does not support the '{mode}' mode for laya (supported: default, benchmark, compare).");
+                        return 1;
+                    }
+                    return Laya.RunGpu(tensors, modelDir);
                 }
                 if (compareDiag)
                 {

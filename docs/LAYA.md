@@ -1,6 +1,6 @@
 # Laya (convaiinnovations/laya) — decision head on ModernBERT-large
 
-Status: **Implemented and gated** (2026-09-27, issue #460, branch `khurram/laya`). Phase 2 is complete. The GPU head — what remained of Phase 3 — is unblocked and not wired; that follow-up is #462.
+Status: **Implemented and gated on both CPU and GPU.** The decision head runs on both backends, and each is gated against something stronger than itself: `laya compare` pins the CPU path to the `laya==0.3.20` wheel, and `laya --gpu compare` pins the GPU path to that already-pinned CPU head. Landed as two issues — #460 (CPU, 2026-09-27, `khurram/laya`) and #462 (GPU, 2026-09-29, `khurram/462`) — but read this as one implementation and one reflection, not as stages. See [GPU path](#gpu-path) for the accelerator half.
 
 This is a reflection of what we built and what we learned while porting Laya's typed decision head onto the ModernBERT encoder that #449 already runs. It is *not* a usage guide (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md)) and *not* a roadmap.
 
@@ -186,6 +186,135 @@ Two findings worth keeping, both negative:
 
 Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV, all present. It is not wired. `--gpu` is rejected, with the supported modes named. Gate it GPU-vs-CPU against this CPU head, the same way `modernbert --gpu compare` gates the encoder.
 
+### The head on the GPU (#462, 2026-09-29)
+
+Wired, and gated. `laya --gpu` runs the encoder *and* the decision head on the accelerator, and `laya --gpu compare` gates the pair against this CPU head. The zero-new-kernel claim held: every op in the head had a kernel already, and the mapping is one-to-one.
+
+| head op | kernel |
+|---|---|
+| `h + type_emb[qtype]`, broadcast over rows | `ElementwiseKernels.AddBias` |
+| pre-norm **biased** LayerNorm | `ElementwiseKernels.LayerNorm1D` (real beta) |
+| fused **biased** QKV `[3d, d]` | `GemmKernels.TiledGemmKernelRow4Qkv` |
+| attention, no RoPE, no band | `AttentionKernels.BatchedAttention` + `GlobalAttentionBand` |
+| `out_proj` / `linear2` / `scorer.3` + bias | `TiledGemmKernelRow4Bias` |
+| residual add | `ElementwiseKernels.Add` |
+| `linear1` + bias + **ReLU** | `TiledGemmKernelRow4Relu` |
+| scorer / act hidden + exact GELU | `TiledGemmKernelRow4Gelu` |
+| marker and pooled row gather | `ElementwiseKernels.Gather` |
+
+Three things in that table are traps rather than mappings:
+
+- **The head's norms are biased; the encoder's are not.** `nn.TransformerEncoderLayer` keeps a beta, and ModernBERT's `norm_bias: false` does not. Reusing the encoder's shared zero beta would be a silent wrong answer, not a crash — the kernel has no way to object. `LayaHeadGpuRunner` therefore uploads a real beta per norm.
+- **The residual lives in the head layer, not inside the attention.** `out_proj`'s output is added by the caller. Adding it inside the attention double-counts and the result is still finite, so nothing downstream would flag it.
+- **The head's eps is `1e-5`, from `LayaDecisionHead`'s constructor default — not `config.NormEps`.** Inheriting the encoder's eps is a plausible-looking value that is not the checkpoint's.
+
+**Where the zero-new-kernel claim had to bend.** The act head's four features — top-1, the top-1/top-2 gap, normalized entropy, and `max(2,k)/255` — are a softmax over the marker logits. On device that is a softmax, a top-k and an entropy kernel: three new ones. They are instead computed on the host by `LayaHeadScoring`, which is the shared implementation the **CPU head also calls**, and the assembled `[hidden + 4]` row is uploaded. The GEMMs stay on device; only two scalars' worth of round trip separates the features from the projection they feed. Sharing the helper is what makes the four features identical *by construction* on both sides, so the gate measures device math rather than re-deriving host arithmetic twice.
+
+That is also why the seam between the two halves is additive and on-device. `ModernBertGpuRunner` grew `ForwardOnDevice` plus `HiddenOnDevice`/`HiddenRows`; the head consumes the trunk's own buffer as its residual stream, in place, and only the `k` marker logits and the `n_act` act logits ever cross to the host. The three existing `modernbert` call sites still call `Forward` and get the same array back, and its own gate still measures what it measured before.
+
+**What the gate is, and why not the wheel.** `laya --gpu compare` gates against the **in-process CPU head**, not the PyTorch fixture. `laya compare` already pinned this CPU path to `laya==0.3.20`, so pinning the GPU runner to it pins the GPU runner transitively — no second wheel run, no prompt-parity re-check, and the reference is a plain function call in the same process. The cost is that the host-side features are shared, so the gate cannot catch a feature bug; it never could have, since the features are host arithmetic in the reference too. What it does catch is every GEMM, norm, attention and gather on the device.
+
+**The bound is 1e-3, and it passed at 1.1% of it.** Measured over the four fixture questions, the worst marker-logit residual was `|gpu − cpu| / (1 + |cpu|) = 1.110E-005` — **1.1% of the budget**, with `max |diff|` 1.657e-5 and the act probability matching to 0.0.
+
+That is a surprise worth explaining, because the plan predicted the opposite. Going in, the reasoning was that `docs/ACCELERATION.md` records the ModernBERT *encoder* gate at maxRel 5.577e-4 — already 56% of this budget — so stacking two more layers plus the scorer and act head on top would make this the tightest gate in the repo. It is instead the loosest by a wide margin, and the reason is what the head's output *is*:
+
+- The encoder gate compares the **raw hidden state**, `[L, 1024]` F32 values at O(1) each, where 28 layers of reduction-order drift land directly on the measured quantity. Nothing averages it away.
+- The head gate compares **one scalar per marker**, produced by a `1024 → 1` projection applied *after* `scorerNorm` has re-normalized every row to zero mean and unit variance. Per-position errors of ~5e-4 that are independent across those 1024 positions average down by `sqrt(1024) = 32`, to ~1.6e-5 — and the observed 1.657e-5 is that number. The LayerNorm also removes any systematic scale offset, so what survives is variance, not bias.
+
+So the compounding worry was correct about the hidden state and simply does not transfer to an averaged, re-normalized scalar output. The lesson generalises: **a parity gate's tightness is a property of the quantity being compared, not of the depth behind it.** Comparing a hidden state and comparing a projected logit are not the same measurement, and quoting the first as a budget for the second is a category error. Every row still prints its measured figures and the percentage of bound consumed, so this stays checkable rather than asserted.
+
+There is a second reading of the same numbers that is worth more than the pass itself. `choice2` dominates both gates, and it is the one question with a single large-magnitude logit. The GPU-vs-CPU residual there is 1.657e-5, against the `1.3e-5` that [line 20](#model-overview) records for CPU-vs-wheel on the same question — the same order, and the same dominant row. So the accelerator's distance from the CPU path is comparable to the CPU path's own distance from PyTorch: **running on the iGPU costs about as much accuracy as the existing CPU-vs-PyTorch drift already accepted**, and the two are not additive in any way the decision path can see, because the head is decoded from the top probability, not from the logit's last bits. That is the claim worth having — not merely "the gate passed", but "the device path is about as trustworthy as the reference it is gated against".
+
+The bound stays a hard gate. It is now 90× under, so nothing about it is in tension — but widening it later to absorb drift would hide a defect rather than absorb a rounding difference, and the fact that it is loose *for a measured reason* is exactly why that temptation should be resisted.
+
+Each question is padded to the config's `max_len` so the non-finite mask-clamp check has fully-masked rows to bite on. That check is the load-bearing half of the gate, not a formality: a missing `max == -inf → zeros` clamp surfaces as `NaN`, not as a wrong number, and one fully-masked row poisons the residual stream below it. Unpadded prompts would leave the check vacuous. The head inherits #448's hazard through its dense `[L, L]` mask, which is why the check is mirrored here rather than assumed.
+
+Reproduce with:
+
+```
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu benchmark
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu compare
+```
+
+`--gpu` remains F32-only; `--gpu --precision bf16|fp16` is rejected, as it is for every other model.
+
+### Measured: iGPU vs Nivara CPU vs PyTorch CPU (#462, 2026-09-29)
+
+`laya --gpu benchmark` against `laya benchmark`, same session, AC power, F32 all three, whole model
+(encoder **and** head) per pass, at `max_len` 512. 1 warmup + 3 timed, median of the three. The
+PyTorch column is `python samples/NivaraInference/Python/laya_benchmark.py` — the same wheel, the
+same four questions, the same 512-token padding and the same pass structure, run separately.
+
+| question | valid | markers | Nivara CPU (min–max) | Nivara GPU (min–max) | PyTorch CPU | GPU vs CPU | Torch vs CPU | GPU vs Torch |
+|---|---|---|---|---|---|---|---|---|
+| choice2 | 40 | 2 | 8896 ms (8869–8974) | 3016 ms (2990–3016) | 2973 ms (2846–3059) | 2.95× | 2.99× | 1.01× |
+| choice13 | 119 | 13 | 8732 ms (8269–8879) | 2973 ms (2970–2977) | 2990 ms (2961–3073) | 2.94× | 2.92× | 0.99× |
+| score4 | 48 | 4 | 8281 ms (7978–8698) | 2932 ms (2920–3043) | 2969 ms (2877–3005) | 2.82× | 2.79× | 0.99× |
+| noul | 39 | 2 | 8018 ms (7887–8221) | 3063 ms (3010–3083) | 2950 ms (2903–2968) | 2.62× | 2.72× | 1.04× |
+| | | | **≈8.48 s** | **≈3.00 s** | **≈2.97 s** | **≈2.83×** | **≈2.86×** | **≈1.01×** |
+
+Weight setup, same machine: Nivara CPU `Load weights` **11231 ms**, Nivara GPU `GPU model build`
+**5013 ms**, PyTorch **30017 ms** (`build_model` + `load_state_dict` of the 206 tensors).
+
+Six things this table says that a bare ratio does not.
+
+1. **The iGPU and PyTorch's CPU path finish together — 1.01×, and the sign flips row to row.** The
+   iGPU is ahead on `choice2` and `score4` and behind on `choice13` and `noul`, by 1–4%, which is
+   inside the spread of three timed passes. The honest reading is a tie, not a win. This is the
+   headline because it contradicts what `docs/ACCELERATION.md` §1 concluded at 128 tokens, where the
+   same iGPU was **1.8–2.4× behind** PyTorch. The crossover happened somewhere between DistilBERT
+   (128 tokens, 66 M) and Laya (512 tokens, 1.4 B), and the most likely reason is arithmetic
+   intensity: at batch 1 and 128 tokens the GEMMs are skinny and a 128-EU iGPU is latency- and
+   bandwidth-bound while 16 CPU threads have work to fill. Doubling the sequence quadruples the
+   `M` in every GEMM, so the device finally has enough parallel work per weight load to stop being
+   the bottleneck. **One shape is one data point.** This does not revise §1's per-row figures or
+   license a claim that the iGPU beats PyTorch — it says the deficit is shape-dependent, which is
+   a reason to measure rather than to assume either way.
+2. **The Nivara-CPU deficit narrows as shapes grow — 2.86× here against ~5.6× at 128 tokens.** #458
+   tracks that gap, and the trend is the useful part: the single-threaded managed path loses less,
+   not more, as `M` grows. GEMM is where it loses, and larger GEMMs amortise per-call overhead and
+   reach a higher fraction of peak. So the 5.6× figure should be read as a *small-model* number
+   rather than a property of the CPU path in general. That narrows what #458 is worth chasing, and
+   it is an argument for measuring at the shape you actually ship.
+3. **~2.83× GPU-vs-our-own-CPU is in line with the rest of the family, not an outlier for being
+   1.4 B parameters.** §1 records ~2.6–3.0× iGPU-vs-Nivara-CPU for DistilBERT, DistilBERT-SST and
+   MiniLM; Laya is 512 tokens and lands in the same band. Expected, not a surprise: the head is a
+   few percent of the arithmetic, so it cannot erode the trunk's advantage. The head came for free
+   performance-wise as well as in kernel count.
+4. **Thread count is a confound in the PyTorch column and is deliberately not removed.** PyTorch ran
+   on all 16 cores; the Nivara CPU path is single-threaded per op. So `Torch vs CPU` 2.86× is
+   *mostly* a statement about cores, not about GEMM quality, and it should not be quoted as the
+   latter. We did not pin `OMP_NUM_THREADS=1` to get a like-for-like scalar comparison, because that
+   would disable PyTorch's matmul parallelism and hand us a several-fold "win" that measures
+   nothing. The all-cores figure is the one a user actually gets, and `laya_benchmark.py` prints its
+   thread count and warns if it is ever run pinned.
+5. **Cold start is where Nivara wins outright, and it is the largest ratio in the table.** 5013 ms
+   to build on the iGPU, 11231 ms to bind on the Nivara CPU path, 30017 ms for PyTorch — so the
+   device is 6.0× cheaper to start than PyTorch and 2.24× cheaper than our own host path. For a
+   single-shot `laya --gpu` call this is the dominant term, and it is why the uncached `laya --gpu`
+   figures in the log below (247–631 ms) are so far under the 3 s steady state. The CPU-side number
+   is dominated by weight *binding*, not by transfer, which is memcpy-class here (§1b item 10 on the
+   iGPU sharing DRAM). The three build paths are not identical work — PyTorch's figure includes
+   constructing the `nn.Module` tree — so treat the spread as "cold start on each stack", not as a
+   kernel-count comparison.
+6. **The `compare`-mode timings are not usable as a speedup, and the benchmark run proves it.**
+   `compare` reported `choice2` at 13864 ms on the CPU; the clean benchmark says 8896 ms. The ~5 s
+   difference is JIT, because `compare` runs the CPU first and pays AutoDiff kernel compilation on
+   question 1 — the same inflation appears on the GPU side. Quoting the `compare` numbers would have
+   overstated the speedup as ~3.4× and hidden that the gap is warmup, not work.
+
+**Scope, stated so the numbers are not over-read.** All three columns are whole-model figures, and
+the encoder is ~99.9% of the arithmetic, so ~2.83× is effectively the *encoder's* speedup — the
+head's own contribution is not separately measurable at this scale and is not claimed. There is no
+KV cache: cost scales with the padded sequence length, not with tokens generated, so none of these
+figures is a decode-latency claim. The PyTorch column is a separate run from the two Nivara columns,
+unlike §1's same-session pairing, so the GPU-vs-Torch ratio is the one number here with cross-run
+risk; the per-row spread (±1–4%) and the sign flips are the reason to call it a tie rather than
+narrow it further. And with `#440` still open on GEMM tiling, the tie is the state of the port
+today, not a ceiling — the honest summary is that the iGPU has caught PyTorch CPU at this shape and
+the next GEMM improvement is ours to take.
+
 ## What we learned
 
 1. **A plausible reading of the reference is not a verified one.** The first pass over this document produced nine candidate corrections against the wheel. Six were real. Three were wrong, and two of those would have shipped a false claim into this document while looking rigorous. Both were falsified by a two-line probe:
@@ -201,7 +330,7 @@ Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biase
 ## What's next
 
 1. **#440 — tile-32 / 2×2 GEMM.** The leading item. A 2–3× kernel win on the term that is ~99.9% of the work.
-2. **#462 — wire the head onto `ModernBertGpuRunner`.** Unblocked by this work, not started. Zero new kernels. Gate it GPU-vs-CPU against this head. Lower value than #440.
+2. **#462 — wire the head onto `ModernBertGpuRunner`.** **Done** (2026-09-29): zero new kernels held, gated GPU-vs-CPU against this CPU head at 1e-3, passing at **1.1% of the bound**. See [The head on the GPU](#the-head-on-the-gpu-462-2026-09-29). Worth reading for the reason it came in 90× under a budget the encoder alone spends 56% of: a gate's tightness is a property of the quantity compared, not of the depth behind it.
 3. **#448 — mask-as-select.** The fully-masked-row `NaN` hazard. The GPU encoder's `max == -inf → zeros` clamp is the prerequisite #449 landed, not the structural fix. The head's CPU path uses the same additive `-inf` mask as the encoder, so it inherits the same hazard at sequence lengths where a query can see no key.
 4. **#447 — banded attention on the CPU.** The dense `[L, L]` mask is capped at `ModernBertMasks.MaxDenseLength` (2048) and throws past it. The GPU encoder already carries the band inside the kernel, which is why `modernbert --gpu benchmark` runs at 4096. The head builds the same dense mask and has the same cap.
 5. **Structured states, multilingual, `typed-decisions`.** Out of scope, on purpose. A structured state throws `NotSupportedException` naming the decision. The English root checkpoint is near chance on `typed-decisions` zero-shot; that subfolder is a different model.

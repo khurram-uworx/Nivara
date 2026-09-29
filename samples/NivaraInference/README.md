@@ -52,6 +52,11 @@ dotnet run --project samples/NivaraInference -c Release -- minilm --gpu
 dotnet run --project samples/NivaraInference -c Release -- distilbert --gpu
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --gpu
 dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu            # encoder + decision head
+
+# GPU-vs-CPU parity gates (each gates the GPU runner against its in-process CPU path)
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu compare
+dotnet run --project samples/NivaraInference -c Release -- laya --gpu compare
 
 # Narrow-precision inference (half weight memory; see model docs for details)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
@@ -136,6 +141,7 @@ python distilbert_benchmark.py
 python modernbert_compare.py
 python modernbert_benchmark.py
 python laya_compare.py
+python laya_benchmark.py
 python generate_input.py
 ```
 
