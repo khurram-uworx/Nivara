@@ -140,8 +140,8 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
 | # | step | result |
 |---|---|---|
 | 1 | `dotnet build Nivara.slnx` | **clean** at every change unit, 0 warnings, 0 errors |
-| 2 | `--gemm` (AC) | **PASS** — 171 cells, byte-identity PASS, no geometry skipped |
-| 3 | `--gpu compare` × 5 | **PASS** — every figure identical to `ACCELERATION.md` §1, ModernBERT's `5.577E-004` bit for bit |
+| 2 | `--gemm` (AC) | **PASS** — 171 cells, byte-identity PASS, all 4 geometries loaded, **real exit code 0**. Re-run after the G2 fixes; the zero-coverage path was verified separately by emptying `s_regVariants`, which now exits 1 instead of printing a clean pass. |
+| 3 | `--gpu compare` × 5 | **PASS** — every figure identical to `ACCELERATION.md` §1, ModernBERT's `5.577E-004` bit for bit. Re-run a second time after the G2 fixes, which touched the `GpuBuffers` chokepoint (`Row4Geometry` now reads `GemmKernels.BlockCols` instead of a literal `4`, and a named `OneToOneGeometry` was added). All five PASS again with byte-identical figures, which is what confirms that touch was inert. |
 | 4 | `--gpu benchmark` (AC) | **not run — no delta exists to report.** Step 4 existed to measure the Phase 4 swap, and Phase 4 was cancelled, so there is no new configuration to benchmark. Running it would have re-measured the already-recorded baseline for a few minutes of machine time. |
 | 5 | `dotnet test` | put to the human, not run unattended (AGENTS.md) |
 
@@ -247,7 +247,11 @@ not a code defect — which is an argument for reviewing the reasoning and not o
       discovery, not after. Not a Nivara defect — the four #440 kernels sidestep it with a single
       `SharedMemory.Allocate<float>`, which is what lesson 15 already prescribes. Filed because any
       future Nivara kernel that widens a shared tile will hit it.
-- [ ] #NNN — *(pending: any follow-up surfaced during Phase 4–6, created at discovery time.)*
+- [x] #NNN — **none.** The G2 review surfaced eight findings and every one was either fixed
+      in-branch or already covered by an existing issue, so no new issue was warranted. The one
+      that might have been a new issue — `BatchedAttention` using `band` only to mask values, so
+      it never reduces work — is the substance of #447, and the measurement plus that finding
+      were posted there instead of opening a duplicate.
 
 > As each task executes, if deferred work or a concern surfaces that is outside this plan, create
 > the issue immediately with `gh issue create --repo khurram-uworx/Nivara` and record its number
