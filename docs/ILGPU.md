@@ -210,7 +210,7 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 | **steady state** | dot16 **11.4 µs** · silu **6.9 µs** (fastest GPU leg) · gemv **133.4 µs** |
 | **footprint** | +3.4 MB (ILGPU 1946 KB + Algorithms 1502 KB); BCL transitives inbox on net11 |
 | **risk** | JIT + ICD layer = two moving compilers (ILGPU → OpenCL C → IGC); no native BF16 today; OpenCL ICD required at runtime |
-| **gotchas (hit during the leg)** | `Index1D` naming (not `Index1`); implicit grouping pads the grid → **bounds-check every kernel**; `CLDeviceType` uses `CL_DEVICE_TYPE_*` names; `XMath.Exp` requires the Algorithms package (core has no exp); readback via `AsContiguous().GetAsArray()` (generic inference skips the implicit view conversion); device-select assert (`CL_DEVICE_TYPE_GPU`) prevents silent CPU fallback |
+| **gotchas (hit during the leg)** | `Index1D` naming (not `Index1`); implicit grouping pads the grid → **bounds-check every kernel**; `CLDeviceType` uses `CL_DEVICE_TYPE_*` names; `XMath.Exp` requires the Algorithms package (core has no exp); readback via `AsContiguous().GetAsArray()` (generic inference skips the implicit view conversion); device-select assert (`CL_DEVICE_TYPE_GPU`) prevents silent CPU fallback; **at most one `SharedMemory` allocation per kernel** — two `Allocate2D` calls with disagreeing extents get the second tile mis-placed by the OpenCL lowering (#468), and the 1-D `Allocate<float>` form costs 10–20% against one wide `Allocate2D` |
 
 ## 7. Conclusions & decision records
 
@@ -230,5 +230,14 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
   seconds via `dotnet run … -- kernels`. The IGC bug class is driver-versioned
   (see [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md)); ILGPU's OpenCL C path is equally exposed to future
   frontend changes.
+- **The `--gemm` f32 fingerprint is the thing to re-record first after a driver bump**, and its
+  baseline is keyed by device *and* toolchain (`OpenCL <version>, driver <CL_DRIVER_VERSION>`),
+  so a bump reports one `Fingerprint NOT VERIFIED` line naming both toolchains instead of 171
+  numeric failures that read like a kernel regression. Two traps found the hard way:
+  `CLDevice.DeviceVersion` is the **OpenCL** version, not the driver version — ILGPU 1.5.3
+  exposes no driver string, so it needs a `clGetDeviceInfo(CL_DEVICE_DRIVER_VERSION)` P/Invoke —
+  and re-recording the reference is a separate explicit flag, because a gate that can rewrite
+  its own reference is a gate whose green means nothing. A *missing* baseline fails the run; with
+  nothing to be exact against, the run verified nothing.
 
 **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) — the GPU-backend case-study series

@@ -77,8 +77,29 @@ a throwaway harness:
   than Row4 on every shape, because on this iGPU shared-memory capacity per group dominates
   shared-memory traffic per MAC. Nothing routes at them; they stay so the result stays
   reproducible, and so nobody re-attempts the same geometry without reading the baseline
-  below. The byte-identity assertion is not decorative — it is what caught an ILGPU lowering
+  below — but see the supersession note on that table, because Row4's denominator has since
+  moved. The byte-identity assertion is not decorative — it is what caught an ILGPU lowering
   bug (#468) that the `maxAbs` tolerance alone would have argued with.
+
+  **Every cell also asserts its f32 bits against a committed fingerprint**
+  (`gemm-f32-baseline.json`, FNV-1a 64 over `BitConverter.SingleToInt32Bits`, keyed
+  `variant|shape`, recorded pre-migration so the #468 migration could be proved a no-op).
+  Tolerance cannot catch a kernel that is *reliably* wrong inside the band, and these kernels
+  promise exactness — same f32 values, same ascending-K order — so the gate asserts the bits:
+
+  ```
+  Fingerprint PASS - 171 of 171 baseline cells bit-identical
+  ```
+
+  A normal run only ever compares. Re-recording the reference takes an explicit
+  `--gemm --write-gemm-baseline`, because a gate that can rewrite its own reference is a gate
+  whose green means nothing. A missing baseline file is a **failure**, not a pass: with nothing
+  to be exact against, the run verified nothing. The file is keyed by device *and* toolchain
+  (`OpenCL <version>, driver <CL_DRIVER_VERSION>`, read from the ICD — `CLDevice.DeviceVersion`
+  is the OpenCL version, not the driver), so a driver bump reports one `Fingerprint NOT VERIFIED`
+  line naming both toolchains instead of 171 numeric failures that read like a kernel
+  regression. Coverage is always reported as "N of M baseline cells", never as a bare count of
+  what the run happened to measure.
 
 #### GEMM gate baseline (2026-09-19)
 
