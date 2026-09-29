@@ -75,7 +75,7 @@ internal static class GpuBuffers
     /// </summary>
     /// <remarks>
     /// The group stays 16×16 = 256 work items across every geometry so the comparison against
-    /// the incumbent <see cref="GemmGeometry.Row4"/> isolates the blocking factor rather than
+    /// the incumbent <see cref="Row4Geometry"/> isolates the blocking factor rather than
     /// confounding it with a work-group resize. <see cref="SharedLoadsPerMac"/> is the
     /// quantity each geometry is trying to reduce: per K step a thread reads
     /// <c>BlockRows + BlockCols</c> shared floats to do <c>BlockRows·BlockCols</c> MACs, so
@@ -108,7 +108,20 @@ internal static class GpuBuffers
     /// The incumbent 1×4 @ K16 geometry (<see cref="GemmKernels.TiledGemmKernelRow4"/> and its
     /// fused siblings), kept as the baseline the #440 variants are measured against.
     /// </summary>
-    public static readonly GemmGeometry Row4Geometry = new("1x4@KT16", 1, 4, 16);
+    /// <remarks>
+    /// The blocking factor is taken from <see cref="GemmKernels.BlockCols"/> rather than spelled
+    /// as a literal, so this cannot drift from <c>TiledGemmKernelRow4</c> — the gate measures
+    /// every cell against this, and a silent mismatch would mean measuring the wrong tile while
+    /// still reporting plausible GMAC/s.
+    /// </remarks>
+    public static readonly GemmGeometry Row4Geometry = new("1x4@KT16", 1, GemmKernels.BlockCols, GemmKernels.TileSize);
+
+    /// <summary>
+    /// The 1×1 @ K16 baseline (<see cref="GemmKernels.TiledGemmKernel"/>). One output
+    /// element per work item over the same 16×16 group, so it shares the group's shape with
+    /// every other geometry and the ladder stays one axis at a time.
+    /// </summary>
+    public static readonly GemmGeometry OneToOneGeometry = new("1x1@KT16", 1, 1, GemmKernels.TileSize);
 
     /// <summary>
     /// The four geometries added by #440. The K-tile is varied independently of the blocking
