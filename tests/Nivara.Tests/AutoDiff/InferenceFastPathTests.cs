@@ -52,7 +52,7 @@ public class InferenceFastPathTests
     [Test]
     public void LayerNorm_AffineFalse_OutsideGrad_MatchesTrainingForward()
     {
-        using var ln = new LayerNorm<float>(6, affine: false);
+        using var ln = new LayerNorm<float>(6, affine: false, bias: false);
         var data = new float[] { 1.1f, -2.2f, 3.3f, -4.4f, 5.5f, -6.6f,
                                  0.7f, 0.8f, -0.9f, 1.2f, -1.3f, 1.4f,
                                  2.5f, -2.6f, 2.7f, -2.8f, 2.9f, -3.0f };
@@ -72,6 +72,33 @@ public class InferenceFastPathTests
 
         Assert.That(actual.IsLeaf, Is.True);
         Assert.That(Values(actual), Is.EqualTo(expected).Within(1e-5f));
+    }
+
+    [Test]
+    public void LayerNorm_BiasFalse_OutsideGrad_MatchesTrainingForward()
+    {
+        using var ln = new LayerNorm<float>(6, bias: false);
+        var gamma = new float[] { 1.5f, -0.75f, 2.25f, 0.5f, -1.25f, 3f };
+        ln.Weight!.Tensor = ReverseGradTensor<float>.FromArray(gamma, requiresGrad: true);
+        var data = new float[] { 1.1f, -2.2f, 3.3f, -4.4f, 5.5f, -6.6f,
+                                 0.7f, 0.8f, -0.9f, 1.2f, -1.3f, 1.4f,
+                                 2.5f, -2.6f, 2.7f, -2.8f, 2.9f, -3.0f };
+
+        var trainInput = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: true);
+        trainInput.Reshape(3, 6);
+
+        float[] expected;
+        using (GradientUtils.Grad())
+        {
+            expected = Values(ln.Forward(trainInput));
+        }
+
+        var inferenceInput = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: false);
+        inferenceInput.Reshape(3, 6);
+        var actual = ln.Forward(inferenceInput);
+
+        Assert.That(actual.IsLeaf, Is.True);
+        Assert.That(Values(actual), Is.EqualTo(expected));
     }
 
     [Test]

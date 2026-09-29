@@ -40,7 +40,7 @@ public class WeightAccessConsistencyTests
             () => new BatchNorm2d<float>(8, affine: false)),
         new(nameof(LayerNorm<float>), typeof(LayerNorm<float>),
             () => new LayerNorm<float>(8),
-            () => new LayerNorm<float>(8, affine: false)),
+            () => new LayerNorm<float>(8, affine: false, bias: false)),
         new(nameof(Embedding<float>), typeof(Embedding<float>),
             () => new Embedding<float>(10, 8),
             () => new Embedding<float>(10, 8)),
@@ -130,5 +130,24 @@ public class WeightAccessConsistencyTests
                     $"{spec.Name} with bias:false must expose null Bias");
             }
         }
+    }
+
+    [Test]
+    public void WeightAccess_LayerNormWeightOnly_ExposesWeightAndNullBias()
+    {
+        // The shared spec above can only express "all optional parameters off" (it keys on the
+        // type name), so the weight-only mode LayerNorm gained in #446 gets its own check: the
+        // accessors and the registered-parameter list must agree about which parameters exist.
+        using var norm = new LayerNorm<float>(8, bias: false);
+
+        var weight = GetAccessor(norm, "Weight");
+        Assert.That(weight, Is.Not.Null, "bias: false keeps the learnable gamma");
+        Assert.That(norm.GetParameters()["Weight"].Tensor, Is.SameAs(weight!.Tensor),
+            "LayerNorm.Weight accessor must expose the registered tensor");
+
+        Assert.That(GetAccessor(norm, "Bias"), Is.Null,
+            "bias: false must expose a null Bias");
+        Assert.That(norm.GetParameters().ContainsKey("Bias"), Is.False,
+            "a bias-free norm must not register a Bias for an optimizer to pick up");
     }
 }
