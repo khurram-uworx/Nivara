@@ -147,17 +147,20 @@ internal static class GemmKernels
     {
         const int BR = 2, BC = 2, KT = 16;
         const int TileRows = TileSize * BR, TileCols = TileSize * BC;
-        var global = Grid.GlobalIndex.XY;
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
+        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
+        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
+        // staged data and returns plausible-looking garbage. Verified against the passing
+        // case, where the two extents happen to agree. A single Allocate with explicit
+        // offsets has no stride to disagree about.
+        const int ASz = TileRows * KT;
+        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
-        int rowBase = global.X * TileRows;
-        int colBase = global.Y * TileCols;
+        int rowBase = Grid.IdxX * TileRows;
+        int colBase = Grid.IdxY * TileCols;
         float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
 
         for (int k0 = 0; k0 < aCols; k0 += KT)
@@ -170,7 +173,7 @@ internal static class GemmKernels
                 {
                     int srcRow = rowBase + r + x;
                     int srcCol = k0 + kk + y;
-                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
                         ? a[srcRow * aCols + srcCol] : 0f;
                 }
             for (int kk = 0; kk < KT; kk += TileSize)
@@ -178,20 +181,20 @@ internal static class GemmKernels
                 {
                     int srcRow = k0 + kk + x;
                     int srcCol = colBase + cc + y;
-                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
                         ? b[srcRow * bCols + srcCol] : 0f;
                 }
             Group.Barrier();
 
             for (int k = 0; k < KT; k++)
             {
-                float a0 = aTile[x * BR + 0, k];
-                float a1 = aTile[x * BR + 1, k];
+                float a0 = smem[(x * BR + 0) * KT + k];
+                float a1 = smem[(x * BR + 1) * KT + k];
                 int cb = y * BC;
-                acc00 += a0 * bTile[k, cb + 0];
-                acc01 += a0 * bTile[k, cb + 1];
-                acc10 += a1 * bTile[k, cb + 0];
-                acc11 += a1 * bTile[k, cb + 1];
+                acc00 += a0 * smem[ASz + k * TileCols + (cb + 0)];
+                acc01 += a0 * smem[ASz + k * TileCols + (cb + 1)];
+                acc10 += a1 * smem[ASz + k * TileCols + (cb + 0)];
+                acc11 += a1 * smem[ASz + k * TileCols + (cb + 1)];
             }
             Group.Barrier();
         }
@@ -223,17 +226,20 @@ internal static class GemmKernels
     {
         const int BR = 2, BC = 2, KT = 32;
         const int TileRows = TileSize * BR, TileCols = TileSize * BC;
-        var global = Grid.GlobalIndex.XY;
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
+        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
+        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
+        // staged data and returns plausible-looking garbage. Verified against the passing
+        // case, where the two extents happen to agree. A single Allocate with explicit
+        // offsets has no stride to disagree about.
+        const int ASz = TileRows * KT;
+        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
-        int rowBase = global.X * TileRows;
-        int colBase = global.Y * TileCols;
+        int rowBase = Grid.IdxX * TileRows;
+        int colBase = Grid.IdxY * TileCols;
         float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
 
         for (int k0 = 0; k0 < aCols; k0 += KT)
@@ -243,7 +249,7 @@ internal static class GemmKernels
                 {
                     int srcRow = rowBase + r + x;
                     int srcCol = k0 + kk + y;
-                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
                         ? a[srcRow * aCols + srcCol] : 0f;
                 }
             for (int kk = 0; kk < KT; kk += TileSize)
@@ -251,20 +257,20 @@ internal static class GemmKernels
                 {
                     int srcRow = k0 + kk + x;
                     int srcCol = colBase + cc + y;
-                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
                         ? b[srcRow * bCols + srcCol] : 0f;
                 }
             Group.Barrier();
 
             for (int k = 0; k < KT; k++)
             {
-                float a0 = aTile[x * BR + 0, k];
-                float a1 = aTile[x * BR + 1, k];
+                float a0 = smem[(x * BR + 0) * KT + k];
+                float a1 = smem[(x * BR + 1) * KT + k];
                 int cb = y * BC;
-                acc00 += a0 * bTile[k, cb + 0];
-                acc01 += a0 * bTile[k, cb + 1];
-                acc10 += a1 * bTile[k, cb + 0];
-                acc11 += a1 * bTile[k, cb + 1];
+                acc00 += a0 * smem[ASz + k * TileCols + (cb + 0)];
+                acc01 += a0 * smem[ASz + k * TileCols + (cb + 1)];
+                acc10 += a1 * smem[ASz + k * TileCols + (cb + 0)];
+                acc11 += a1 * smem[ASz + k * TileCols + (cb + 1)];
             }
             Group.Barrier();
         }
@@ -290,17 +296,20 @@ internal static class GemmKernels
     {
         const int BR = 4, BC = 2, KT = 32;
         const int TileRows = TileSize * BR, TileCols = TileSize * BC;
-        var global = Grid.GlobalIndex.XY;
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
+        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
+        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
+        // staged data and returns plausible-looking garbage. Verified against the passing
+        // case, where the two extents happen to agree. A single Allocate with explicit
+        // offsets has no stride to disagree about.
+        const int ASz = TileRows * KT;
+        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
-        int rowBase = global.X * TileRows;
-        int colBase = global.Y * TileCols;
+        int rowBase = Grid.IdxX * TileRows;
+        int colBase = Grid.IdxY * TileCols;
         float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
         float acc20 = 0f, acc21 = 0f, acc30 = 0f, acc31 = 0f;
 
@@ -311,7 +320,7 @@ internal static class GemmKernels
                 {
                     int srcRow = rowBase + r + x;
                     int srcCol = k0 + kk + y;
-                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
                         ? a[srcRow * aCols + srcCol] : 0f;
                 }
             for (int kk = 0; kk < KT; kk += TileSize)
@@ -319,7 +328,7 @@ internal static class GemmKernels
                 {
                     int srcRow = k0 + kk + x;
                     int srcCol = colBase + cc + y;
-                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
                         ? b[srcRow * bCols + srcCol] : 0f;
                 }
             Group.Barrier();
@@ -327,18 +336,18 @@ internal static class GemmKernels
             for (int k = 0; k < KT; k++)
             {
                 int cb = y * BC;
-                float a0 = aTile[x * BR + 0, k];
-                acc00 += a0 * bTile[k, cb + 0];
-                acc01 += a0 * bTile[k, cb + 1];
-                float a1 = aTile[x * BR + 1, k];
-                acc10 += a1 * bTile[k, cb + 0];
-                acc11 += a1 * bTile[k, cb + 1];
-                float a2 = aTile[x * BR + 2, k];
-                acc20 += a2 * bTile[k, cb + 0];
-                acc21 += a2 * bTile[k, cb + 1];
-                float a3 = aTile[x * BR + 3, k];
-                acc30 += a3 * bTile[k, cb + 0];
-                acc31 += a3 * bTile[k, cb + 1];
+                float a0 = smem[(x * BR + 0) * KT + k];
+                acc00 += a0 * smem[ASz + k * TileCols + (cb + 0)];
+                acc01 += a0 * smem[ASz + k * TileCols + (cb + 1)];
+                float a1 = smem[(x * BR + 1) * KT + k];
+                acc10 += a1 * smem[ASz + k * TileCols + (cb + 0)];
+                acc11 += a1 * smem[ASz + k * TileCols + (cb + 1)];
+                float a2 = smem[(x * BR + 2) * KT + k];
+                acc20 += a2 * smem[ASz + k * TileCols + (cb + 0)];
+                acc21 += a2 * smem[ASz + k * TileCols + (cb + 1)];
+                float a3 = smem[(x * BR + 3) * KT + k];
+                acc30 += a3 * smem[ASz + k * TileCols + (cb + 0)];
+                acc31 += a3 * smem[ASz + k * TileCols + (cb + 1)];
             }
             Group.Barrier();
         }
@@ -382,17 +391,20 @@ internal static class GemmKernels
     {
         const int BR = 1, BC = 8, KT = 16;
         const int TileRows = TileSize * BR, TileCols = TileSize * BC;
-        var global = Grid.GlobalIndex.XY;
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        var aTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(TileRows, KT), new Stride2D.DenseX(KT));
-        var bTile = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
-            new Index2D(KT, TileCols), new Stride2D.DenseX(TileCols));
+        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
+        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
+        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
+        // staged data and returns plausible-looking garbage. Verified against the passing
+        // case, where the two extents happen to agree. A single Allocate with explicit
+        // offsets has no stride to disagree about.
+        const int ASz = TileRows * KT;
+        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
-        int rowBase = global.X * TileRows;
-        int colBase = global.Y * TileCols;
+        int rowBase = Grid.IdxX * TileRows;
+        int colBase = Grid.IdxY * TileCols;
         float acc0 = 0f, acc1 = 0f, acc2 = 0f, acc3 = 0f;
         float acc4 = 0f, acc5 = 0f, acc6 = 0f, acc7 = 0f;
 
@@ -403,7 +415,7 @@ internal static class GemmKernels
                 {
                     int srcRow = rowBase + r + x;
                     int srcCol = k0 + kk + y;
-                    aTile[r + x, kk + y] = (srcRow < aRows && srcCol < aCols)
+                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
                         ? a[srcRow * aCols + srcCol] : 0f;
                 }
             for (int kk = 0; kk < KT; kk += TileSize)
@@ -411,23 +423,23 @@ internal static class GemmKernels
                 {
                     int srcRow = k0 + kk + x;
                     int srcCol = colBase + cc + y;
-                    bTile[kk + x, cc + y] = (srcRow < aCols && srcCol < bCols)
+                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
                         ? b[srcRow * bCols + srcCol] : 0f;
                 }
             Group.Barrier();
 
             for (int k = 0; k < KT; k++)
             {
-                float aVal = aTile[x * BR, k];
+                float aVal = smem[(x * BR) * KT + k];
                 int cb = y * BC;
-                acc0 += aVal * bTile[k, cb + 0];
-                acc1 += aVal * bTile[k, cb + 1];
-                acc2 += aVal * bTile[k, cb + 2];
-                acc3 += aVal * bTile[k, cb + 3];
-                acc4 += aVal * bTile[k, cb + 4];
-                acc5 += aVal * bTile[k, cb + 5];
-                acc6 += aVal * bTile[k, cb + 6];
-                acc7 += aVal * bTile[k, cb + 7];
+                acc0 += aVal * smem[ASz + k * TileCols + (cb + 0)];
+                acc1 += aVal * smem[ASz + k * TileCols + (cb + 1)];
+                acc2 += aVal * smem[ASz + k * TileCols + (cb + 2)];
+                acc3 += aVal * smem[ASz + k * TileCols + (cb + 3)];
+                acc4 += aVal * smem[ASz + k * TileCols + (cb + 4)];
+                acc5 += aVal * smem[ASz + k * TileCols + (cb + 5)];
+                acc6 += aVal * smem[ASz + k * TileCols + (cb + 6)];
+                acc7 += aVal * smem[ASz + k * TileCols + (cb + 7)];
             }
             Group.Barrier();
         }
