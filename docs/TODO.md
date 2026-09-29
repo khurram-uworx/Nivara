@@ -207,10 +207,24 @@ closing argument is the numbers rather than the reasoning about the delegation.*
 
 Steps 3 and 4 landed as one commit, which the plan's own Phase 2 heading already merged them
 into. Step 5 was conditional on a winner and there is none, so the branch ends with a recorded
-negative result rather than a repointed runner. Two commits exist that the plan did not
-anticipate: `05fc6bb` (a real defect found by the byte-identity check, not a planned unit) and
-`b74ce26` (labelling the negative baseline in the source so the finding is legible at the point
-of use).
+negative result rather than a repointed runner. Four commits exist that the plan did not
+anticipate:
+
+- `05fc6bb` — a real defect found by the byte-identity check, not a planned unit.
+- `b74ce26` — labelling the negative baseline in the source so the finding is legible at the
+  point of use.
+- `1245cf7` — re-measuring the leg profile on AC, because the Phase 1 absolutes were battery
+  figures that had by then propagated into three documents.
+- `3eb9abf` / `07a7b1d` — the G2 review. `3eb9abf` fixed four gate defects, two of which could
+  hide a failure outright; `07a7b1d` corrected the null-result write-up, which the review found
+  overstated the evidence it rested on.
+
+**The G2 review found more than the review of the branch was looking for.** It was commissioned
+to check the code, and its most valuable finding was about a *claim*: the isolating pair behind
+the whole null-result explanation held on 9 of 15 shapes and inverted on 3. That claim had been
+published in the source banner, `ACCELERATION.md`, the bench README and this file, each time as
+the reason the family lost. It is the single most useful thing the review produced, and it was
+not a code defect — which is an argument for reviewing the reasoning and not only the diff.
 
 ## GitHub issues log
 
