@@ -163,6 +163,16 @@ first question pays JIT (choice2 at 13864 ms vs ~8700 ms for the rest). Only
 `laya --gpu benchmark` (1 warmup + 3 timed, median) produces a clean row, and it was not run. No
 speedup claim is made anywhere in the docs.
 
+`laya --gpu` (default mode) was also run: all four questions decode to the expected answers
+(choice2 -> "reset" @ 0.7556, choice13 -> "opt1" @ 0.4706, noul -> 0.3898, score4 -> 1.0657), GPU
+build 4809 ms, per-question 247-631 ms. `laya --gpu benchmark` remains **unrun** — its forward is the
+same `ForwardGpu` the gate exercised 4x on device, so only the timing loop is unexercised.
+
+Second reading worth keeping: choice2 dominates both gates (single large-magnitude logit). GPU-vs-CPU
+there is 1.657e-5 against the 1.3e-5 CPU-vs-wheel on the same question — same order, same dominant
+row. The accelerator's distance from the CPU path is comparable to the CPU path's own distance from
+PyTorch, which is a stronger claim than "the gate passed".
+
 ## Deviations from the plan above (recorded at G2, 2026-09-29)
 
 1. **Added `samples/Nivara.Samples/LayaHeadScoring.cs`** (new, not planned). `LayaDecisionHead`
