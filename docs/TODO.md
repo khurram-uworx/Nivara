@@ -124,6 +124,71 @@ device-free scalar. The existing CPU head tests are the reference and stay unmod
 5. `Wire laya --gpu through the CLI dispatch`
 6. `docs: record the Laya GPU head in LAYA.md, ACCELERATION.md, and the sample README`
 
+## Gate result (2026-09-29) — PASS, and the plan's prediction was wrong
+
+`laya --gpu compare`, 4 fixture questions, padded to `max_len` 512:
+
+| question | markers | cpu | gpu | max abs | max scaled | % of 1e-3 bound |
+|---|---|---|---|---|---|---|
+| choice2 | 2 | 13864 ms | 4052 ms | 1.657E-005 | 1.110E-005 | 1.1% |
+| choice13 | 13 | 8644 ms | 3042 ms | 4.649E-006 | 1.927E-006 | 0.2% |
+| score4 | 4 | 8850 ms | 3228 ms | 5.841E-006 | 2.397E-006 | 0.2% |
+| noul | 2 | 8705 ms | 3036 ms | 2.146E-006 | 1.399E-006 | 0.1% |
+
+Act probability exact on all four (both sides 1.000000, diff 0.0). Mask-clamp check PASS: 0 non-finite
+on both sides, with fully-masked rows present by construction (512-padded, `validLength` real). Device
+`Intel(R) Graphics`, CPU load 7925 ms, GPU build 11917 ms, 421,293,830 params (1607.1 MB F32).
+
+**The plan got the tightness prediction backwards, and the correction is the interesting part.**
+Decision 2 above reasoned that the encoder alone already spends 56% of the 1e-3 budget
+(`maxRel 5.577E-004`) and that stacking two more layers plus scorer and act "makes the combined gate
+the tightest in the repo." It came in at **1.1%** — the loosest in the repo by a wide margin.
+
+The mechanism, and it is quantitative rather than hand-waving:
+
+- The encoder gate compares the **raw hidden state**, `[L, 1024]` F32 at O(1). 28 layers of
+  reduction-order drift land directly on the compared quantity; nothing averages them away.
+- This gate compares **one scalar per marker**, from a `1024 → 1` projection applied *after*
+  `scorerNorm` has re-normalized each row to zero mean / unit variance. Per-position errors of ~5e-4
+  that are independent across those 1024 positions average down by `sqrt(1024) = 32` → ~1.6e-5, and
+  the LayerNorm removes the systematic scale/bias term. Observed 1.657e-5.
+
+So a gate's tightness is a property of **the quantity compared, not the depth behind it**, and
+carrying the encoder's hidden-state budget over to a projected logit is a category error. This is now
+written into `docs/LAYA.md`, `docs/ACCELERATION.md` item 11, and `CompareGpu`'s own remarks, all three
+of which had asserted the falsified prediction. The bound stays hard at 1e-3.
+
+Timings in the table are **not** benchmark figures: `compare` runs both models in one process and the
+first question pays JIT (choice2 at 13864 ms vs ~8700 ms for the rest). Only
+`laya --gpu benchmark` (1 warmup + 3 timed, median) produces a clean row, and it was not run. No
+speedup claim is made anywhere in the docs.
+
+## Deviations from the plan above (recorded at G2, 2026-09-29)
+
+1. **Added `samples/Nivara.Samples/LayaHeadScoring.cs`** (new, not planned). `LayaDecisionHead`
+   delegates to it for `PrefixMask`, `Softmax` and `BuildFeatures`, and so does
+   `LayaHeadGpuRunner`. Rationale: the act head's four features are *host* arithmetic in the
+   reference too, so sharing the helper is what makes them identical by construction across
+   backends — and therefore what makes the gate measure device math instead of re-deriving host
+   arithmetic twice. It also removes the reason the head would otherwise need its own softmax. The
+   extraction is behaviour-preserving: `LayaDecisionHeadTests` stayed 18/18 green unmodified, and
+   it is the only commit that touched the CPU head.
+2. **Seam landed before the head runner** (planned commits 2 and 3 swapped). `ForwardOnDevice` and
+   `HiddenOnDevice` are useful on their own and compile-test the seam before anything depends on it.
+3. **`RunBenchmarkGpu`, not `BenchmarkGpu`.** Matches the existing `RunBenchmark` in the same file;
+   `Laya` has no `Benchmark` prefix convention to match otherwise.
+4. **`Program.cs` dispatch folded into the modes commit** rather than landing as its own commit. It
+   is 15 lines and is not independently reviewable.
+5. **`CompareGpu` pads each question to `max_len`.** Not in the plan, and load-bearing: the
+   non-finite mask-clamp check the plan did call for is only meaningful if some row is fully masked,
+   and unpadded prompts leave it vacuous.
+6. **Two defects found in the G2 review of the branch and fixed** (`7cc9a22`): the act-row readback
+   asked `GpuBuffers.Readback` for `hiddenDim` and then indexed to `hiddenDim + 4`, which would have
+   thrown on every `laya --gpu` run; and `LoadGpuModels` returned a tuple, which cannot be disposed,
+   so all three modes leaked both runners. The second is a consequence of deviation 4 being
+   collapsed into one commit — the three call sites changed together, which is also when a single
+   `GpuModels` owner became the obvious shape.
+
 ## GitHub issues log
 
 - [ ] #NNN — placeholder; created at discovery time as work proceeds.

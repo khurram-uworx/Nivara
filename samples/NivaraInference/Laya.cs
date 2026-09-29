@@ -409,12 +409,23 @@ public static class Laya
     /// </summary>
     /// <remarks>
     /// The bound is the same <see cref="GateRelTol"/> = 1e-3 the wheel gate uses, and it is a hard
-    /// gate. That is a tighter budget than the encoder alone would want: <c>docs/ACCELERATION.md</c>
-    /// records ModernBERT's encoder GPU-vs-CPU gate at maxRel 5.577e-4, already over half this
-    /// bound from F32 reduction-order drift across 28 layers, and the head stacks two more layers
-    /// plus the scorer and act head on top. Every failure therefore prints the measured maxRel next
-    /// to the bound, so a near-bound result is visibly arithmetic drift rather than a silent
-    /// tolerance that quietly grew. Widening the bound to make a run pass is not the fix.
+    /// gate. It passed on 2026-09-29 at <b>1.1% of it</b> — worst scaled residual 1.110e-5 over the
+    /// four fixture questions, max |diff| 1.657e-5, act probability exact.
+    ///
+    /// That is worth the space because it came in 90× under a budget the encoder alone spends 56% of,
+    /// and the reason is not luck. <c>docs/ACCELERATION.md</c> records the encoder gate at maxRel
+    /// 5.577e-4, which measures the raw <c>[L, 1024]</c> hidden state — 28 layers of F32
+    /// reduction-order drift landing undiluted on the compared quantity. This gate compares one
+    /// scalar per marker, from a <c>1024 → 1</c> projection taken <em>after</em> the scorer's
+    /// LayerNorm has re-normalized each row. Independent per-position errors average down by
+    /// <c>sqrt(1024) = 32</c>, to ~1.6e-5, and the normalization removes the bias term; the observed
+    /// 1.657e-5 is that number. A gate's tightness is a property of what it compares, not of the
+    /// depth behind it, so the encoder's hidden-state budget does not transfer here.
+    ///
+    /// Every row still prints its measured figures and the percentage of the bound consumed, so a
+    /// regression reads as a number rather than as a verdict. A bound that is loose for a measured
+    /// reason is precisely the one most tempting to widen later; widening it would hide a defect
+    /// rather than absorb a rounding difference.
     ///
     /// Each question is padded to the config's <c>max_len</c> so the mask-clamp check has fully
     /// masked rows to bite on. That check is load-bearing rather than decorative: a missing
