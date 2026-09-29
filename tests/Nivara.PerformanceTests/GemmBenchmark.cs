@@ -204,8 +204,9 @@ internal static class GemmBenchmark
             }
             catch (Exception ex)
             {
-                loadFailures.Add($"  {geometry.Name}: {ex.GetType().Name}: {ex.Message}");
-                Console.WriteLine($"LOAD-FAIL  {geometry.Name} — kernel did not compile: {ex.GetType().Name}: {ex.Message}");
+                string described = Describe(ex);
+                loadFailures.Add($"  {geometry.Name}: {described}");
+                Console.WriteLine($"LOAD-FAIL  {geometry.Name} — kernel did not compile: {described}");
             }
         }
         if (unavailable.Count > 0)
@@ -462,6 +463,19 @@ internal static class GemmBenchmark
 
         return verdict.Failures;
     }
+
+    /// <summary>
+    /// One line describing a kernel-load failure. A <see cref="CLException"/> carries the OpenCL
+    /// error code in a public <c>Error</c> property, and formatting it as
+    /// <c>ex.GetType().Name: ex.Message</c> throws that number away. #468's 1x8@KT16 geometry
+    /// failed at kernel creation in 05fc6bb and was reported as a bare <c>CLException</c> with no
+    /// code at all, which is part of why it took a bisect across four geometries to attribute; the
+    /// code is the first thing to look at, and the number an upstream report needs.
+    /// </summary>
+    static string Describe(Exception ex) =>
+        ex is CLException cl
+            ? $"{cl.GetType().Name} (CLError {cl.Error}): {cl.Message}"
+            : $"{ex.GetType().Name}: {ex.Message}";
 
     /// <summary>Bit-for-bit comparison of a #440 variant's output against Row4's.</summary>
     static bool ByteIdentical(float[] a, float[] b)
