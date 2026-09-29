@@ -175,14 +175,27 @@ native bridge. Measure both and publish both in the README table.
 ## 8. Related open items
 
 - **#435** — promote tiled-GEMM correctness+perf harness into a lasting
-  regression gate (probe or sample bench) — covers the gate half of M1.
+  regression gate (probe or sample bench) — covers the gate half of M1. Partly
+  delivered by #440's work: the `--gemm` gate now asserts **byte-identity** to
+  the incumbent kernel, not just a `maxAbs` tolerance, which is what caught an
+  ILGPU OpenCL lowering bug (#468) that a tolerance-only gate would have argued
+  with.
 - **#437** — M2 GPU kernel fusion / lazy stream — **shipped 2026-09-19** (see the
   M2 block above): dispatches 44–48, MiniLM 26.8 → 24.3 ms, DistilBERT 65.3 →
   63.1 ms. The measured per-dispatch dependency latency (~30 µs) corrected the
   launch model; **#440** filed the GEMM-throughput item (tile-32/2×2) that the
   >2× target appeared to need — **measured null 2026-09-29**, so the >2× target
   is not reachable on this iGPU by GEMM tiling. The four geometries remain in
-  `GemmKernels.cs` as a labelled negative baseline.
+  `GemmKernels.cs` as a labelled negative baseline. **Note this is a device result,
+  not a verdict on register blocking**: the binding constraint measured here is
+  shared-memory *capacity per group*, and a part with more of it could invert it.
+- **#447** — banded/sparse attention. **Now the leading GPU item**, and it is a
+  CPU-side item too: the dense `[L, L]` mask is capped at 2048. A leg profile
+  (`--gemm-legs`, AC) measures `BatchedAttention` at **57% of the Laya forward**
+  and **61% of ModernBERT's** — larger than all GEMM shapes combined, in every
+  configuration measured. `BatchedAttention` already carries the RoPE band
+  internally but has three unconditional `j < seqLen` passes, so `band`
+  currently reduces no work at all.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
   documented in `docs/ACCELERATION.md` §1/§5).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after
