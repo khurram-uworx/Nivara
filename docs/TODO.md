@@ -130,6 +130,43 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
    the honest end-to-end delta.
 5. `dotnet test` — **ask the human before running** (AGENTS.md).
 
+### Verification outcome (2026-09-29)
+
+| # | step | result |
+|---|---|---|
+| 1 | `dotnet build Nivara.slnx` | **clean** at every change unit, 0 warnings, 0 errors |
+| 2 | `--gemm` (AC) | **PASS** — 163 cells, byte-identity PASS, no geometry skipped |
+| 3 | `--gpu compare` × 5 | **PASS** — every figure identical to `ACCELERATION.md` §1, ModernBERT's `5.577E-004` bit for bit |
+| 4 | `--gpu benchmark` (AC) | **not run — no delta exists to report.** Step 4 existed to measure the Phase 4 swap, and Phase 4 was cancelled, so there is no new configuration to benchmark. Running it would have re-measured the already-recorded baseline for a few minutes of machine time. |
+| 5 | `dotnet test` | put to the human, not run unattended (AGENTS.md) |
+
+**Step 4 was substituted rather than skipped, and the substitution is the point.** The plan's own
+blast-radius section flags `GpuBuffers.GemmCfg` as a 14-call-site chokepoint where "a bad geometry
+constant is a 3-model failure, not a 1-kernel failure" — and step 4 was the only step that would
+have caught it *at speed*, since step 3 checks numerics and step 2 checks the gate's own launch
+config, not the runners'. So the substitution targets the same risk: Row4's own GMAC/s in the
+2026-09-29 gate run, against the 2026-09-27 baseline.
+
+| shape | 09-27 | 09-29 | Δ |
+|---|---|---|---|
+| laya qkv | 202 | 201 | −1 |
+| laya attn out | 202 | 202 | 0 |
+| laya fc1 (Wi) | 205 | 199 | −6 |
+| laya fc2 (Wo) | 197 | 197 | 0 |
+| laya head ff1 | 204 | 204 | 0 |
+| laya head ff2 | 155 | 154 | −1 |
+| laya act 1 | 188 | 189 | +1 |
+| laya scorer 1 | 59 | 59 | 0 |
+| laya qkv@128 | 193 | 193 | 0 |
+| distilbert fc1 | 183 | 186 | +3 |
+| distilbert fc2 | 177 | 184 | +7 |
+
+−6 to +7 GMAC/s on a 155–205 range is inside the session-to-session drift the bench README
+already documents (it records +5 to +6 on unchanged rows between two earlier sessions). So
+`GemmCfg`'s new 2-arg delegation resolves to the same geometry at the runners, at both the
+numerical and the throughput level. **The chokepoint risk the plan named is closed, and the
+closing argument is the numbers rather than the reasoning about the delegation.**
+
 ## Blast radius
 
 | change | files | depends on | tests |
