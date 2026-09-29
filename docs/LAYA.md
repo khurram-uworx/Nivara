@@ -316,7 +316,7 @@ improvement is ours to take". `#440` has since been measured and it is not: the 
 family loses to Row4, because on this iGPU shared-memory capacity per group dominates
 shared-memory traffic per MAC. The honest summary now is that the iGPU has caught PyTorch CPU at
 this shape and **the tie is close to a ceiling, not a floor** — the next GPU leg to move is
-attention, at 51% of Laya's wall-clock, tracked as **#447**.*
+attention, at 57% of Laya's wall-clock, tracked as **#447**.*
 
 ## What we learned
 

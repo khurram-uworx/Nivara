@@ -132,7 +132,7 @@ See [docs/GUIDELINES.md](GUIDELINES.md) for transferable engineering principles 
 - **ConvTranspose2d**: direct scatter produces zero-padded interior positions (stride > 1); test verified numerically correct but may look unexpected.
 - **BatchNorm2d**: uses generic per-element kernel (not the fused `BatchNormKernel<T>` span path); functionally correct but slightly slower than optimal.
 - **PerRowLayerNorm**: delegates to `LayerNormKernel` with per-row slicing instead of a fused multi-row kernel; functionally correct but not optimal for large row counts.
-- **GPU GEMM throughput**: at 128 tokens / 66 M params the iGPU is still 1.9–2.2× slower than PyTorch CPU, but that deficit is shape-dependent — at Laya's 512 tokens / 1.4 B it **ties** PyTorch (3.00 s vs 2.97 s). The leading GPU item is #440 (tile-32/2×2 GEMM). See [docs/ACCELERATION.md](ACCELERATION.md).
+- **GPU GEMM throughput**: at 128 tokens / 66 M params the iGPU is still 1.9–2.2× slower than PyTorch CPU, but that deficit is shape-dependent — at Laya's 512 tokens / 1.4 B it **ties** PyTorch (3.00 s vs 2.97 s). GEMM tiling (#440) was the nominated lever and is now **measured null** — every wider tile lost to Row4, because shared-memory capacity per group dominates shared-memory traffic per MAC on this iGPU. The leading GPU item is `BatchedAttention` at **57% of the Laya forward** (#447). See [docs/ACCELERATION.md](ACCELERATION.md) §5.2.
 - **Vision gap**: convolution kernels are naive nested loops with no SIMD and no parallelism; tracked as issue #457.
 - **CPU-side performance**: the ~5.6× Nivara-CPU-vs-PyTorch deficit is not a GEMM problem at Laya's shapes; tracked as #458.
 
