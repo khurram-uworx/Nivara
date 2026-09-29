@@ -173,7 +173,14 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
       measured `BatchedAttention` at **51.3%** of the Laya forward, the single largest leg and
       larger than all four GEMMs combined. This is where the remaining GPU time actually is, and
       #440 should not absorb it.
-- [ ] #NNN — *(pending: any follow-up surfaced during Phase 2–5, created at discovery time.)*
+- [x] **#468** — ILGPU 1.5.3 OpenCL: two `SharedMemory.Allocate2D` calls in one kernel whose
+      extents disagree (KT-wide A tile vs TileCols-wide B tile) get the second tile mis-placed by
+      the lowering. The kernel reads a neighbour's staged data and returns plausible garbage;
+      `1x8@KT16` failed at `LoadKernel` with a bare `CLException`. Created during Phase 2 at
+      discovery, not after. Not a Nivara defect — the four #440 kernels sidestep it with a single
+      `SharedMemory.Allocate<float>`, which is what lesson 15 already prescribes. Filed because any
+      future Nivara kernel that widens a shared tile will hit it.
+- [ ] #NNN — *(pending: any follow-up surfaced during Phase 4–6, created at discovery time.)*
 
 > As each task executes, if deferred work or a concern surfaces that is outside this plan, create
 > the issue immediately with `gh issue create --repo khurram-uworx/Nivara` and record its number
@@ -237,3 +244,67 @@ the plan was amended by evidence, not silently.
   plus `docs/ACCELERATION.md` lesson 15 — `MaxSharedMemoryPerGroup`, not `MaxLocalMemorySize`,
   and per-*group* not per-work-item shared memory. The device reports 1024 threads/group and
   65536 B shared/group, so none of the four planned geometries is at a limit.
+
+## Phase 2–3 result (2026-09-29) — a null result, and the reason is legible
+
+Four geometries built, gated, and measured on **AC power** (Intel Arc iGPU). All four are
+byte-identical to Row4, so the numerics are settled and only throughput is in question.
+
+Ratio to Row4 (GMAC/s, higher is better). Row4 is the `1x4@KT16` incumbent at 5 KB shared/group.
+
+| shape | Row4 GMAC/s | 2x2@KT16 | 2x2@KT32 | 4x2@KT32 | 1x8@KT16 |
+|---|---|---|---|---|---|
+| laya qkv | 201 | 0.74x | 0.60x | 0.76x | 0.82x |
+| laya fc1 (Wi) | 202 | 0.71x | 0.58x | 0.73x | 0.79x |
+| laya fc2 (Wo) | 197 | 0.75x | 0.60x | 0.77x | 0.81x |
+| laya attn out | 203 | 0.74x | 0.59x | 0.74x | 0.84x |
+| laya head ff1 | 204 | 0.76x | 0.58x | 0.76x | 0.82x |
+| **laya head ff2** | **155** | 0.89x | 0.67x | **0.98x** | **1.01x** |
+| laya qkv@128 | 193 | 0.73x | 0.58x | 0.77x | 0.78x |
+| distilbert fc1 | 189 | 0.72x | 0.59x | 0.76x | 0.78x |
+| minilm qkv/o | 135 | 0.68x | 0.62x | 0.64x | 0.64x |
+| edge padded rows | 61 | 0.64x | 0.74x | 0.43x | 0.43x |
+| laya scorer 1 | 59 | 0.41x | 0.42x | 0.25x | 0.37x |
+
+**No geometry wins. The best cell is 1.01x** — `1x8@KT16` on `laya head ff2`, the one shape
+already known to be weak at 155 GMAC/s, and that is a wash inside run-to-run noise. Every other
+cell is a regression, typically 0.6–0.85x. The narrow, launch-bound shapes (`head`, `scorer`)
+regress hardest, as expected: a wider tile means fewer groups, so fewer items to hide launch
+latency behind.
+
+**Phase 4 is therefore cancelled — there is no winner to route the runners at** — and Phase 2b
+(fusing the winner's Bias/Gelu/Relu/Qkv siblings) is cancelled with it. The plan's own null-result
+clause applies: recorded, not dropped.
+
+### Why, which is the part worth keeping
+
+The theory the family was built on is *shared-memory traffic per MAC*: 2×2 is 4 shared reads per 4
+MACs against Row4's 5, a 20% cut. The measurement says the binding constraint is not traffic, it
+is **shared-memory capacity per group**.
+
+The cleanest evidence is the pair that isolates it. `2x2@KT16` and `2x2@KT32` have *identical*
+blocking factors, so identical shared reads per MAC, and differ only in shared memory per group
+(4 KB vs 8 KB). `2x2@KT32` is consistently ~18–25% slower than `2x2@KT16` — and both are slower
+than Row4, which holds 5 KB. Going the other way, `4x2@KT32` has the *best* traffic ratio in the
+family (0.75 shared reads/MAC) and the *worst* footprint (12 KB), and it lands mid-pack. The
+metric that predicted the ordering was the footprint, not the traffic.
+
+So on this device the two effects roughly cancel and the occupancy loss wins: a 5 KB → 8–12 KB
+tile cuts co-resident groups by more than the 20–40% traffic saving returns. That is the opposite
+of the issue's "occupancy headroom exists" — not merely unmeasured, but pointing the wrong way.
+
+### Bug found en route (#468)
+
+All four kernels were initially wrong (maxAbs 20–119) and `1x8@KT16` would not compile at all.
+Root cause is an ILGPU OpenCL lowering bug, not a kernel bug: two `SharedMemory.Allocate2D` calls
+in one kernel whose extents disagree get the second tile mis-placed. `2x2@KT32` passed throughout
+and the reason is the tell — its two tiles happen to share an extent of 32×32, so the lowering has
+nothing to disagree about. Fixed by a single `SharedMemory.Allocate<float>` with hand-computed
+offsets. Filed upstream as **#468**.
+
+Worth noting for the byte-identity check: neither the failure nor the crash is visible from the
+source. Every extent, stride and element index is in bounds and the kernel is self-consistent, so
+review passes and the numbers look like a real dot product against the wrong elements. **The
+byte-identity invariant is what caught it** — a `maxAbs` tolerance test alone would have been
+argued with. That is the check earning its keep on the very first shape.
+
