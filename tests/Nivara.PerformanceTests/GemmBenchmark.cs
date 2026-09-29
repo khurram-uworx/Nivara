@@ -1,5 +1,6 @@
 using ILGPU;
 using ILGPU.Runtime;
+using ILGPU.Runtime.OpenCL;
 using Nivara.Samples.Gpu;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -103,7 +104,7 @@ internal static class GemmBenchmark
     [DllImport("kernel32.dll")]
     static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
 
-    public static int Run(string[] args)
+    public static int Run(string[] args, bool writeFingerprintBaseline = false)
     {
         PrintPowerState();
         Console.WriteLine("Tiled GEMM regression gate (#435): ten ILGPU kernels vs double-precision truth");
@@ -117,12 +118,14 @@ internal static class GemmBenchmark
         }
 
         using (runtime)
-            return RunGate(runtime);
+            return RunGate(runtime, writeFingerprintBaseline);
     }
 
-    static int RunGate(IlgpuRuntime runtime)
+    static int RunGate(IlgpuRuntime runtime, bool writeFingerprintBaseline)
     {
+        CLDevice device = runtime.Device;
         Console.WriteLine($"  Device: {runtime.DeviceName}");
+        Console.WriteLine($"  OpenCL: {ToolchainKey(device)}");
         Console.WriteLine($"  Gate  : maxAbs(gpu - dp-truth) <= {GateMaxAbs} (f32-vs-DP floor is 4.4e-5..1.6e-4 at K=768..3072; real kernel bugs land ~40-77)");
         Console.WriteLine($"  Timing: 1 JIT + {Warmups} warmup + best-of-{TimedRounds} synchronized launches");
         Console.WriteLine();
@@ -211,6 +214,9 @@ internal static class GemmBenchmark
         Console.WriteLine($"{"kernel",-9} {"shape",-20} {"maxAbs",-11} {"gate(1e-3)",-12} {"best us",-9} {"GMAC/s",-9}");
         int failures = 0;
         int identicalFailures = 0;
+        // Every cell's bit-exact result, compared against the committed baseline after the loop.
+        // A SortedDictionary so the written file is ordered by key and diffs cleanly.
+        var fingerprints = new SortedDictionary<string, GemmFingerprint.Cell>(StringComparer.Ordinal);
         // Row4's output per shape, kept so each #440 geometry can be compared bit-for-bit.
         // VariantsFor always emits Row4 before the #440 variants, so the reference is populated.
         var row4Reference = new Dictionary<string, float[]>();
@@ -279,6 +285,12 @@ internal static class GemmBenchmark
                 bool failed = maxAbs > GateMaxAbs;
                 failures += failed ? 1 : 0;
 
+                // Captured for every cell regardless of its tolerance verdict: the fingerprint
+                // answers a different question ("are the bits the same as the ones we committed,
+                // when nothing was supposed to change them?") and a cell can be inside tolerance
+                // and still not be the result this kernel is contracted to produce.
+                fingerprints[GemmFingerprint.Key(variant.ToString(), shape.Name)] = GemmFingerprint.Of(gpu);
+
                 // #440 byte-identity: the plain geometries accumulate strictly ascending k over
                 // the same f32 values as Row4, so every output element must be bit-identical.
                 // A violation means the accumulation order changed - a design bug, not rounding -
@@ -334,10 +346,121 @@ internal static class GemmBenchmark
         if (regKernels.Count > 0 && identicalFailures == 0)
             Console.WriteLine("Byte-identity PASS — all #440 cells bit-identical to Row4 (ascending-K accumulation preserved).");
 
+        int fingerprintFailures = ReportFingerprints(device, fingerprints, writeFingerprintBaseline);
+
         // Every distinct way this gate can fail contributes to the exit code: a cell outside
-        // tolerance, a cell that is not bit-identical, a kernel that would not compile, and
-        // #440 coverage that quietly dropped to zero.
-        return failures + identicalFailures + loadFailures.Count + (regKernels.Count == 0 ? 1 : 0);
+        // tolerance, a cell that is not bit-identical, a kernel that would not compile, #440
+        // coverage that quietly dropped to zero, and a cell whose f32 bits are not the ones the
+        // committed baseline recorded.
+        return failures + identicalFailures + loadFailures.Count + (regKernels.Count == 0 ? 1 : 0) + fingerprintFailures;
+    }
+
+    /// <summary>
+    /// What the f32 results of this run were produced by, in the one string the baseline is keyed
+    /// on. The driver version is the part that matters and the part ILGPU does not expose, so it
+    /// is read from the ICD; when that fails the key says so rather than quietly degrading to the
+    /// OpenCL version, which a driver bump does not change.
+    /// </summary>
+    static string ToolchainKey(CLDevice device)
+    {
+        string? driver = ClDriverVersion.TryGet(device);
+        return driver is null
+            ? $"OpenCL {device.DeviceVersion}, driver version UNREADABLE — this key cannot see a driver bump"
+            : $"OpenCL {device.DeviceVersion}, driver {driver}";
+    }
+
+    /// <summary>
+    /// Records or checks every cell's bit-exact result against the committed baseline, and
+    /// returns how many distinct failure reasons that produced.
+    /// </summary>
+    /// <remarks>
+    /// A normal run only ever compares. Regenerating is behind an explicit flag, because a gate
+    /// that can rewrite its own reference is a gate whose green means nothing — the exact defect
+    /// the exactness assertion exists to prevent. An absent baseline is a failure rather than a
+    /// pass for the same reason: with nothing to be exact against, the run verified nothing.
+    /// </remarks>
+    static int ReportFingerprints(
+        CLDevice device,
+        SortedDictionary<string, GemmFingerprint.Cell> measured,
+        bool writeBaseline)
+    {
+        Console.WriteLine();
+
+        string toolchain = ToolchainKey(device);
+
+        if (writeBaseline)
+        {
+            string path = GemmFingerprint.Locate() ?? GemmFingerprint.SearchedPaths[0];
+            GemmFingerprint.Write(path, device.Name ?? "?", toolchain, measured);
+            Console.WriteLine($"Fingerprint baseline WRITTEN — {measured.Count} cells -> {path}");
+            Console.WriteLine("  This is not a verdict. The cells above are the reference from here on; a later");
+            Console.WriteLine("  run that disagrees with this file fails.");
+            return 0;
+        }
+
+        string? located = GemmFingerprint.Locate();
+        GemmFingerprint.Baseline? baseline = null;
+        if (located is not null)
+        {
+            try
+            {
+                baseline = GemmFingerprint.Read(located);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Fingerprint FAIL — cannot read baseline {located}: {ex.GetType().Name}: {ex.Message}");
+                return 1;
+            }
+        }
+
+        var verdict = GemmFingerprint.Compare(baseline, measured, device.Name ?? "?", toolchain);
+
+        if (verdict.BaselineAbsent)
+        {
+            Console.WriteLine($"Fingerprint FAIL — no committed baseline ({GemmFingerprint.FileName}) in any of:");
+            foreach (string path in GemmFingerprint.SearchedPaths)
+                Console.WriteLine($"  {path}");
+            Console.WriteLine($"  Nothing to be exact against, so the {measured.Count} cells this run measured are");
+            Console.WriteLine($"  unverified. Record the reference deliberately with --gemm {GemmFingerprint.WriteFlag}.");
+            return verdict.Failures;
+        }
+
+        // Coverage is stated as "matched of baseline rows", never as a bare count of what this
+        // run happened to measure: a geometry the device cannot host shrinks the denominator, and
+        // a shrunken run that reads like a full one is the same defect as a silent skip.
+        int baselineRows = baseline!.Cells.Count;
+        string notExercised = verdict.NotExercised.Count == 0
+            ? ""
+            : $", {verdict.NotExercised.Count} baseline rows not exercised this run ({string.Join(", ", verdict.NotExercised)})";
+
+        if (verdict.ToolchainDifference is not null)
+        {
+            Console.WriteLine($"Fingerprint NOT VERIFIED — {verdict.ToolchainDifference}.");
+            Console.WriteLine("  f32 results can legitimately differ across drivers (FMA contraction in the generated");
+            Console.WriteLine("  OpenCL C changes the rounding with no change to the kernel), so this run's bits are");
+            Console.WriteLine("  compared against a reference from a different toolchain. Per-cell differences below are");
+            Console.WriteLine("  reported, not judged. Re-record deliberately with --gemm " + GemmFingerprint.WriteFlag + ".");
+        }
+
+        if (verdict.Mismatched.Count > 0)
+        {
+            Console.WriteLine($"Fingerprint FAIL — {verdict.Mismatched.Count} of {baselineRows} baseline cells are not bit-identical:");
+            foreach (string row in verdict.Mismatched)
+                Console.WriteLine($"  {row}");
+        }
+
+        if (verdict.Missing.Count > 0)
+        {
+            Console.WriteLine($"Fingerprint FAIL — {verdict.Missing.Count} measured cells have no baseline row:");
+            foreach (string key in verdict.Missing)
+                Console.WriteLine($"  {key}");
+            Console.WriteLine($"  A cell with no reference cannot be exact about anything. Re-record deliberately with --gemm {GemmFingerprint.WriteFlag}.");
+        }
+
+        if (verdict.Mismatched.Count == 0 && verdict.Missing.Count == 0 && verdict.ToolchainDifference is null)
+            Console.WriteLine($"Fingerprint PASS — {verdict.Matched} of {baselineRows} baseline cells bit-identical{notExercised}.");
+
+        return verdict.Failures;
     }
 
     /// <summary>Bit-for-bit comparison of a #440 variant's output against Row4's.</summary>

@@ -63,7 +63,11 @@ geometry that happens to work. Migrating it is the plan (an exemption list is a 
   banner, whose "the incumbent Row4 escapes only because its A tile is 16x16" comment becomes false
   reasoning and must go.
 - `tests/Nivara.PerformanceTests/GemmBenchmark.cs` — fingerprint capture/compare, load-failure
-  diagnostics, one extra failure reason in the exit code, `CLDevice.DeviceVersion` in the header.
+  diagnostics, one extra failure reason in the exit code, the OpenCL version + driver version in
+  the header.
+- `tests/Nivara.PerformanceTests/ClDriverVersion.cs` — new, `clGetDeviceInfo(CL_DEVICE_DRIVER_VERSION)`.
+- `samples/Nivara.Samples/Gpu/IlgpuRuntime.cs` — exposes the `CLDevice` (`DeviceId`, `Name`, version)
+  that the two above read; one property, no behaviour change.
 - `tests/Nivara.PerformanceTests/gemm-f32-baseline.json` — new, generated pre-migration.
 - `tests/Nivara.Tests/Gpu/SharedMemoryAllocationTests.cs` — new guard.
 - `docs/ACCELERATION.md` (lesson 19), `tests/Nivara.PerformanceTests/README.md`,
@@ -109,6 +113,17 @@ Mismatches join the exit code beside the existing four reasons.
 Generated from **unmodified** kernels, so it is true by construction, and it is what makes the
 migration in step 2 falsifiable.
 
+**Amendment 1 (from the G1 gate) — the baseline is keyed by toolchain, and the key had to be
+built.** A driver bump may legitimately change f32 rounding (FMA contraction in the generated
+OpenCL C), which would otherwise arrive as 171 numeric failures that read like a kernel
+regression. The plan originally named `CLDevice.DeviceVersion` for this; reflection over ILGPU
+1.5.3 shows that is a `CLDeviceVersion` (Major/Minor) holding the **OpenCL version the device
+supports**, which a driver bump does *not* change, and the class exposes no driver version at all.
+So the key is composed as `OpenCL {version}, driver {CL_DRIVER_VERSION}` with the driver part read
+from the ICD by a ~40-line `clGetDeviceInfo` P/Invoke, falling back to a key that visibly says
+`UNREADABLE` rather than to one that looks equally identifying. A key mismatch is reported as
+`Fingerprint NOT VERIFIED` with the two toolchains named — one precondition, not 171 numbers.
+
 ### 2. Stage every GEMM tile pair through one allocation
 
 For the Row4 family (`KT = TileSize = 16`, `TileCols = TileSize * BlockCols = 64`):
@@ -136,8 +151,10 @@ If any GMAC/s cell moves outside run-to-run noise, the 2026-09-29 ratio table in
 ### 3. Stop dropping the OpenCL error code on a kernel-load failure
 
 One `Describe(Exception)` helper that appends `CLError` for `CLException`, used by the LOAD-FAIL
-line (`GemmBenchmark.cs:205`) and the `loadFailures` list (`:204`). Add `CLDevice.DeviceVersion` to
-the gate header so a load failure is attributable to a driver version. Diagnostics only.
+line (`GemmBenchmark.cs:205`) and the `loadFailures` list (`:204`). A kernel-load failure is the
+*symptom* of #468 on an unfixed geometry, so the number that identifies it is the one we were
+discarding. The driver version now in the header (step 1) is what makes a load failure
+attributable. Diagnostics only.
 
 ### 4. Guard: at most one shared allocation per kernel method
 
@@ -152,6 +169,14 @@ the offending call count, and cites #468 + lesson 19.
 
 Stated limitation, in the test's doc comment: a kernel that moved its allocation into a helper
 called twice from one kernel would not be caught. No such shape exists in this tree.
+
+**Amendment 2 (from the G1 gate) — an unresolvable IL token is its own verdict.** `Module.ResolveMethod`
+can fail on a token whose type lives in an assembly the test cannot load, and Microsoft Learn's own
+IL-inspection guidance pairs `GetILAsByteArray` with `ResolveMethod(token, null, null)` while
+warning that generic `MethodSpec`/varargs contexts need the declaring type and generic arguments.
+Rather than swallowing either case, the scanner counts an unresolvable token as `unknown` on a
+separate failure path: never a pass, and never folded into the "two or more allocations" count,
+because a method whose allocation count could not be established has not been shown to comply.
 
 ### 5. Records, and one correction
 

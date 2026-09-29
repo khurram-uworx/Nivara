@@ -15,6 +15,7 @@ namespace Nivara.Samples.Gpu;
 public sealed class IlgpuRuntime : IDisposable
 {
     private readonly Context context;
+    private readonly CLDevice device;
     private readonly CLAccelerator accelerator;
     private readonly AcceleratorStream stream;
 
@@ -22,15 +23,25 @@ public sealed class IlgpuRuntime : IDisposable
     public AcceleratorStream Stream => stream;
     public string DeviceName => $"{accelerator.Name} ({accelerator.VendorName})";
 
+    /// <summary>The selected device, for callers that need a property only it carries — chiefly
+    /// <c>DeviceId</c>, the native <c>cl_device_id</c> handle that the OpenCL ICD needs.
+    /// Note what <c>DeviceVersion</c> is: a <c>CLDeviceVersion</c> (Major/Minor), i.e. the OpenCL
+    /// version the device supports — <b>not</b> the <c>CL_DRIVER_VERSION</c> string, which
+    /// ILGPU 1.5.3's <c>CLDevice</c> does not expose. A caller that needs the driver version has
+    /// to ask the ICD through <c>DeviceId</c> (see tests/Nivara.PerformanceTests/ClDriverVersion.cs).</summary>
+    public CLDevice Device => device;
+
     public IlgpuRuntime()
     {
         context = Context.Create(builder => builder.OpenCL().Optimize(OptimizationLevel.O2));
-        CLDevice? device = SelectGpu(context);
-        if (device is null)
+        CLDevice? found = SelectGpu(context);
+        if (found is null)
         {
             throw new InvalidOperationException(
                 "--gpu requires an OpenCL GPU device (the in-box OpenCL.dll + Intel driver exposing the Arc iGPU); none was found.");
         }
+
+        device = found;
 
         accelerator = device.CreateCLAccelerator(context);
         if (accelerator.DeviceType != CLDeviceType.CL_DEVICE_TYPE_GPU)
