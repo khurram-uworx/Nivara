@@ -22,9 +22,11 @@ pre-norm LayerNorm is common across modern architectures, not just ModernBERT.
 
 ### 1. `src/Nivara/AutoDiff/Nn/LayerNorm.cs` — the `bias` flag
 
-Add `bool bias = true` after `affine` in the constructor. All 27 existing call sites
-pass at most `(normalizedShape, eps)` or `(normalizedShape, eps, affine)`, so this is
-source-compatible.
+Add `bool bias = true` after `affine` in the constructor. Backward compatibility is
+not a concern: `bias` defaults to `true`, so plain `affine: false` is the contradiction
+and throws. The four in-repo callers that used plain `affine: false`
+(`NnTests` ×2, `InferenceFastPathTests`, `WeightAccessConsistencyTests`) pass
+`bias: false` explicitly. A `bool?` defaulting to null was considered and rejected.
 
 ```csharp
 public LayerNorm(int normalizedShape, float eps = 1e-5f, bool affine = true, bool bias = true)
@@ -142,8 +144,10 @@ zero-initialised Beta" comment at `ModernBertGpuRunner.cs:32`, `CHANGELOG.md`.
 - **Kernel signature change** — 5 call sites: `LayerNorm.cs` ×3, `TransformerBlock.cs`
   ×3 (both in `PerRowLayerNorm`), `NnTests.cs` ×2. All are `internal`, so no public
   API breaks.
-- **Public API addition**: one optional trailing constructor parameter. Binary- and
-  source-compatible for all 27 existing `new LayerNorm<...>` call sites.
+- **Public API addition**: one optional trailing constructor parameter, default `true`.
+  Not source-compatible for `affine: false` without an explicit `bias: false` — that
+  combination throws. Backward compatibility is not a concern; the four in-repo callers
+  are updated. Every other existing `new LayerNorm<...>` call site is unchanged.
 - **Behavior change**: `LayerNorm` with `bias: false` has no `Bias` key in
   `StateDict()`/`GetParameters()`. Anyone who round-tripped a *biased* norm through
   `StateDict()`→`LoadStateDict(strict: true)` is unaffected (they keep the default
@@ -191,3 +195,4 @@ it.
 ## GitHub issues log
 
 - [ ] #446 — LayerNorm<T> has no bias-free mode (the work of this plan)
+- GPU `ModernBertGpuRunner` still uploads a shared zero beta (its own ILGPU kernel, not `LayerNorm<T>`). Out of scope here; the stale comment is corrected in the docs commit. No new issue — the runner has no optimizer, so the drift bug #446 describes cannot occur there.
