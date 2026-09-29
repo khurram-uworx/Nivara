@@ -342,8 +342,8 @@ public sealed class ModernBertMlp<T> : Module<T> where T : struct, IFloatingPoin
 /// <summary>
 /// One pre-norm ModernBERT encoder layer: a residual add around attention, then a residual add
 /// around the gated MLP. The norms are bias-free LayerNorms — HuggingFace's <c>norm_bias: false</c>
-/// — emulated by leaving the Beta at its zero initialization, which is exact for inference. The
-/// first layer's attention norm is an identity and so has no weights in the checkpoint.
+/// — so they are constructed with <c>bias: false</c> and register no beta for an optimizer to
+/// drift. The first layer's attention norm is an identity and so has no weights in the checkpoint.
 /// </summary>
 public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
@@ -355,9 +355,9 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
     public ModernBertLayer(ModernBertConfig config, int layerIndex)
     {
         if (layerIndex != 0)
-            attnNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps);
+            attnNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
         attn = new ModernBertAttention<T>(config, config.RopeTheta(layerIndex));
-        mlpNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps);
+        mlpNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
         mlp = new ModernBertMlp<T>(config);
 
         if (attnNorm != null)
@@ -378,9 +378,9 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
 }
 
 /// <summary>
-/// A ModernBERT encoder: token embeddings, a bias-free embedding norm, the pre-norm layer stack,
-/// and a final bias-free norm. There are no position or token-type embeddings — positions come
-/// entirely from rotary embeddings.
+/// A ModernBERT encoder: token embeddings, a bias-free embedding norm (<c>bias: false</c>), the
+/// pre-norm layer stack, and a final bias-free norm. There are no position or token-type
+/// embeddings — positions come entirely from rotary embeddings.
 /// </summary>
 public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
@@ -396,11 +396,11 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
 
         this.config = config;
         tokenEmbedding = new Embedding<T>(config.VocabSize, config.HiddenSize);
-        embedNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps);
+        embedNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
         layers = new ModernBertLayer<T>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
             layers[i] = new ModernBertLayer<T>(config, i);
-        finalNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps);
+        finalNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
 
         RegisterModules(tokenEmbedding, embedNorm, finalNorm);
         foreach (var layer in layers)
