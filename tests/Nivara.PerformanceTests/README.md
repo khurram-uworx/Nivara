@@ -198,12 +198,18 @@ GEMM-throughput work started from a claim that GEMM is ~99.9% of the cost, and t
 about a share of *arithmetic*, not of time.
 
 The claim does not survive contact with the clock. Laya at 512 rows / d=1024 / 28 layers,
-2758.73 ms total: **BatchedAttention 1415.11 ms (51.3%)**, GEMM across four shapes 1252.45 ms
-(45.4%), `LayerNorm1D` 32.59 (1.2%), `SplitColumns` 29.38, `GeGlu` 12.10, `Add` 9.77, `Rotary`
-7.25. ModernBERT base: attention 55.8%, GEMM 40.9%, 1821.61 ms total. So attention — not GEMM —
-is the single largest leg, and the two are the same order of magnitude rather than one dwarfing
-the other. `BatchedAttention` carries the RoPE band internally but has three unconditional
-`j < seqLen` passes, so `band` currently reduces no work at all. Tracked as **#447**.
+2221.12 ms total: **BatchedAttention 1266.87 ms (57.0%)**, GEMM across four shapes 870.84 ms
+(39.2%), `LayerNorm1D` 28.15 (1.3%), `SplitColumns` 27.86 (1.3%), `GeGlu` 11.77, `Add` 9.06,
+`Rotary` 6.49. ModernBERT base, 1536.53 ms total: **BatchedAttention 939.22 ms (61.1%)**, GEMM
+35.3%. So attention — not GEMM — is the single largest leg, and the two are the same order of
+magnitude rather than one dwarfing the other. `BatchedAttention` carries the RoPE band
+internally but has three unconditional `j < seqLen` passes, so `band` currently reduces no work
+at all. Tracked as **#447**.
+
+An earlier run of this probe on **battery** gave attention 51.3% / GEMM 45.4% on Laya. Battery
+compressed the gap rather than inventing it — the AC run shifts attention *up* to 57.0% — so
+the conclusion strengthened. Worth knowing that the ratio moved ~6 points between power states,
+if you ever have to compare a battery figure against an AC one.
 
 Run this before optimising anything on the GPU path. It is the difference between a real 51%
 and an assumed 99.9%.

@@ -152,13 +152,23 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
 
 ## Planned commits
 
-1. `docs: plan #440 GEMM throughput work in TODO.md`
-2. `Add a leg-timing pass to the --gemm gate for the non-GEMM kernels`
-3. `Add the tile-32 / 2x2 register-blocked GEMM family to GemmKernels`
-4. `Wire the new GEMM variants into the --gemm gate with a byte-identity check`
-5. `Route the runners at the winning GEMM variant` *(only if Phase 4 has a winner)*
+1. `docs: plan #440 GEMM throughput work in TODO.md` — `46efa73`
+2. `Add a leg-timing pass to the --gemm gate for the non-GEMM kernels` — `f54dbad` (the
+   `--gemm-legs` probe, split from the measurement so the probe and its result are separate
+   commits), and `57116a9` for the measurement itself
+3. `Add the tile-32 / 2x2 register-blocked GEMM family to GemmKernels` — `d06b8c8`, then
+   `05fc6bb` for the #468 fix that commit's kernels turned out to need
+4. `Wire the new GEMM variants into the --gemm gate with a byte-identity check` — `d06b8c8`
+5. ~~`Route the runners at the winning GEMM variant`~~ — **cancelled, no winner exists**
 6. `Record #440's measured outcome in ACCELERATION.md, LAYA.md, ROADMAP-SUGGESTION.md, and the
-   performance-tests README`
+   performance-tests README` — `90f2b56` (finding), `e4f0e96` (docs), `b74ce26` (source labels)
+
+Steps 3 and 4 landed as one commit, which the plan's own Phase 2 heading already merged them
+into. Step 5 was conditional on a winner and there is none, so the branch ends with a recorded
+negative result rather than a repointed runner. Two commits exist that the plan did not
+anticipate: `05fc6bb` (a real defect found by the byte-identity check, not a planned unit) and
+`b74ce26` (labelling the negative baseline in the source so the finding is legible at the point
+of use).
 
 ## GitHub issues log
 
@@ -170,7 +180,8 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
       **Phase 1 measured it at 1.2% of the Laya forward — a minor cleanup, not a lever. The
       occupancy argument holds; the magnitude in the original writeup was wrong.**
 - [x] **#447** *(pre-existing, not created here)* — banded/sparse attention kernel. Phase 1
-      measured `BatchedAttention` at **51.3%** of the Laya forward, the single largest leg and
+      measured `BatchedAttention` at **57.0%** of the Laya forward (1266.87 of 2221.12 ms, AC),
+      the single largest leg and
       larger than all four GEMMs combined. This is where the remaining GPU time actually is, and
       #440 should not absorb it.
 - [x] **#468** — ILGPU 1.5.3 OpenCL: two `SharedMemory.Allocate2D` calls in one kernel whose
@@ -188,32 +199,39 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
 
 ## Phase 1 result (2026-09-29) — the issue's premise is inverted
 
-`--gemm-legs` measurement, Intel Arc iGPU. **Captured on battery**, so the absolute µs are
-throttled and invalid as throughput; the *ratio* is what this probe exists for, and both sides
-were timed in one session on one device, so the split stands. Re-run on AC to fix the absolutes.
+`--gemm-legs` measurement, Intel Arc iGPU, **AC line**. An earlier battery run gave
+attention 51.3% / GEMM 45.4% on Laya; the clean AC run shifts it to 57.0% / 39.2%, so
+battery was compressing the gap rather than inventing it. The conclusion got *stronger*,
+not weaker, so nothing downstream of it needed revisiting.
 
-| leg | laya large | share |
-|---|---|---|
-| **BatchedAttention** | 1415.11 ms | **51.3%** |
-| GEMM (4 shapes) | 1252.45 ms | 45.4% |
-| LayerNorm1D | 32.59 ms | 1.2% |
-| SplitColumns | 29.38 ms | 1.1% |
-| GeGlu | 12.10 ms | 0.4% |
-| Add | 9.77 ms | 0.4% |
-| Rotary | 7.25 ms | 0.3% |
-| **total** | **2758.73 ms** | |
+Laya large (rows=512, hidden=1024, heads=16, ffn=2624, layers=28), 2221.12 ms/forward:
 
-ModernBERT base (d=768, 22L) is the same story: attention 55.8%, GEMM 40.9%, total 1821.61 ms.
+| leg | shape | ms/fwd | share |
+|---|---|---|---|
+| **BatchedAttention** | [16x512x512x64] | **1266.87** | **57.0%** |
+| GEMM Wi | [512x1024x5248] | 378.06 | 17.0% |
+| GEMM qkv | [512x1024x3072] | 223.25 | 10.1% |
+| GEMM WoMlp | [512x2624x1024] | 195.02 | 8.8% |
+| GEMM attn out | [512x1024x1024] | 74.51 | 3.4% |
+| LayerNorm1D | [512x1024] | 28.15 | 1.3% |
+| SplitColumns | [512x1024] | 27.86 | 1.3% |
+| GeGlu | [512x2624] | 11.77 | 0.5% |
+| Add | [512x1024] | 9.06 | 0.4% |
+| Rotary | [512x16x64] | 6.49 | 0.3% |
+| **total** | | **2221.12** | 39.2% GEMM / 60.8% non-GEMM |
+
+ModernBERT base (d=768, 22L), 1536.53 ms/forward: **BatchedAttention 939.22 ms = 61.1%**,
+GEMM 35.3%, LayerNorm1D 1.1%, SplitColumns 1.1%.
 
 **Two findings, both against the plan:**
 
-1. **GEMM is ~45% of wall-clock, not the ~99.9% of arithmetic the issue comment claims.** The
+1. **GEMM is ~39% of wall-clock, not the ~99.9% of arithmetic the issue comment claims.** The
    arithmetic-vs-time distinction flagged in planning is real, but even the corrected 30%
-   estimate was low — the four GEMM shapes sum to 1252 ms of a 2758 ms forward. The
+   estimate was low — the four GEMM shapes sum to 870.84 ms of a 2221 ms forward. The
    `175.7 G MAC / ~200 GMAC/s ≈ 0.88 s` derivation under-counted because the gate's GMAC/s was
    itself taken on a differently-loaded session; the direct timing here is the better number.
 
-2. **`BatchedAttention` is the single largest leg at 51.3%** — larger than all four GEMMs
+2. **`BatchedAttention` is the single largest leg at 57.0%** — larger than all four GEMMs
    combined. One work item per (b,h,q) = 8192 items for Laya, each serially sweeping `seqLen`
    three times with a `headDim`-wide inner loop and a shared-memory accumulator tile. That is
    the same latency-bound shape as the LayerNorm suspect, but an order of magnitude more
@@ -225,9 +243,10 @@ cleanup; the occupancy argument is sound, the magnitude was wrong.
 
 ## Consequence for the remaining phases
 
-Phase 2 (four GEMM geometries) attacks a 45% term. Halving the best-case 20% register-blocking
-gain would move the Laya forward by ~9% end-to-end. The 51% attention term is the larger prize
-and is already tracked at #447.
+Phase 2 (four GEMM geometries) attacks a 39% term. Even the best case the theory allowed — a
+full 20% register-blocking gain, which the measurement showed is not achievable — would have
+moved the Laya forward by ~8% end-to-end. The 57% attention term is the larger prize by a
+factor of seven and is already tracked at #447.
 
 **Decision escalated to the human before Phase 2 was started** — proceed with the GEMM family as
 scoped, or re-scope #440 against the measurement. Recorded because G2 must be able to see that

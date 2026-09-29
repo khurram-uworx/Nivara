@@ -47,7 +47,7 @@ exhausted and the >2× acceptance is honestly unmet. The lever that was nominate
 GEMM throughput (issue **#440**), has since been **measured and did not pay off** — all four
 register-blocked tile geometries lost to Row4 on every shape, because on this iGPU
 shared-memory *capacity per group* dominates shared-memory *traffic per MAC*. The remaining
-GPU lever is the attention leg (**#447**), which a leg profile measures at 51% of Laya
+GPU lever is the attention leg (**#447**), which a leg profile measures at 57% of Laya
 wall-clock against 45% for all GEMM together. See §5.2 in docs/ACCELERATION.md.
 
 ## 2. The gap we want to attack (CPU GEMM)
