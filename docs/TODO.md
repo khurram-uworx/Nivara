@@ -2,6 +2,10 @@
 
 Plan for [issue #440](https://github.com/khurram-uworx/Nivara/issues/440), branch `khurram/440` off `main`.
 
+> **Phase 1 result (2026-09-29) — see the "Phase 1 result" section at the end. It partially
+> invalidates the premise below and escalated a re-scope decision to the human before Phase 2
+> was started.** The arithmetic in "Problem" was a derivation; the measurement is the number.
+
 ## Problem
 
 After M2 fusion (#437) the launch-count lever is exhausted (~44–48 dispatches/forward, ~30 µs
@@ -163,8 +167,73 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
       work — `Cfg1D(512)` = `(2, 256)` confirmed at `ModernBertGpuRunner.cs:235` and
       `BertEncoderGpuRunner.cs:355-359`, with three serial passes over 1024 floats per item.
       Split out of #440 so it is tracked independently of #440's measured outcome.
+      **Phase 1 measured it at 1.2% of the Laya forward — a minor cleanup, not a lever. The
+      occupancy argument holds; the magnitude in the original writeup was wrong.**
+- [x] **#447** *(pre-existing, not created here)* — banded/sparse attention kernel. Phase 1
+      measured `BatchedAttention` at **51.3%** of the Laya forward, the single largest leg and
+      larger than all four GEMMs combined. This is where the remaining GPU time actually is, and
+      #440 should not absorb it.
 - [ ] #NNN — *(pending: any follow-up surfaced during Phase 2–5, created at discovery time.)*
 
 > As each task executes, if deferred work or a concern surfaces that is outside this plan, create
 > the issue immediately with `gh issue create --repo khurram-uworx/Nivara` and record its number
 > above. Do not rely on memory — compaction during execution can lose it.
+
+## Phase 1 result (2026-09-29) — the issue's premise is inverted
+
+`--gemm-legs` measurement, Intel Arc iGPU. **Captured on battery**, so the absolute µs are
+throttled and invalid as throughput; the *ratio* is what this probe exists for, and both sides
+were timed in one session on one device, so the split stands. Re-run on AC to fix the absolutes.
+
+| leg | laya large | share |
+|---|---|---|
+| **BatchedAttention** | 1415.11 ms | **51.3%** |
+| GEMM (4 shapes) | 1252.45 ms | 45.4% |
+| LayerNorm1D | 32.59 ms | 1.2% |
+| SplitColumns | 29.38 ms | 1.1% |
+| GeGlu | 12.10 ms | 0.4% |
+| Add | 9.77 ms | 0.4% |
+| Rotary | 7.25 ms | 0.3% |
+| **total** | **2758.73 ms** | |
+
+ModernBERT base (d=768, 22L) is the same story: attention 55.8%, GEMM 40.9%, total 1821.61 ms.
+
+**Two findings, both against the plan:**
+
+1. **GEMM is ~45% of wall-clock, not the ~99.9% of arithmetic the issue comment claims.** The
+   arithmetic-vs-time distinction flagged in planning is real, but even the corrected 30%
+   estimate was low — the four GEMM shapes sum to 1252 ms of a 2758 ms forward. The
+   `175.7 G MAC / ~200 GMAC/s ≈ 0.88 s` derivation under-counted because the gate's GMAC/s was
+   itself taken on a differently-loaded session; the direct timing here is the better number.
+
+2. **`BatchedAttention` is the single largest leg at 51.3%** — larger than all four GEMMs
+   combined. One work item per (b,h,q) = 8192 items for Laya, each serially sweeping `seqLen`
+   three times with a `headDim`-wide inner loop and a shared-memory accumulator tile. That is
+   the same latency-bound shape as the LayerNorm suspect, but an order of magnitude more
+   expensive. Already tracked as **#447**, so #440 should not absorb it.
+
+**LayerNorm correction.** The G1 writeup above ranked LayerNorm a strong structural suspect and
+filed #467 on that basis. It measures at 1.2% — real, but not a lever. #467 stays open as a minor
+cleanup; the occupancy argument is sound, the magnitude was wrong.
+
+## Consequence for the remaining phases
+
+Phase 2 (four GEMM geometries) attacks a 45% term. Halving the best-case 20% register-blocking
+gain would move the Laya forward by ~9% end-to-end. The 51% attention term is the larger prize
+and is already tracked at #447.
+
+**Decision escalated to the human before Phase 2 was started** — proceed with the GEMM family as
+scoped, or re-scope #440 against the measurement. Recorded because G2 must be able to see that
+the plan was amended by evidence, not silently.
+
+## Also decided during execution
+
+- **Variant matrix narrowed** (human call, 2026-09-29): 4 geometries as *plain* kernels to run
+  the attribution, then fuse the winner's Bias/Gelu/Relu/Qkv siblings — 8 bodies, not 20. The
+  epilogue is one extra register add over the same accumulators in the same ascending-`k` order,
+  so it is orthogonal to tile geometry and a geometry win transfers.
+- **G1 grounding result**: the microsoft-learn MCP has no coverage for ILGPU/OpenCL (its only
+  OpenCL hit is a stub pointing at khronos.org). Real grounding came from code-memory navigation
+  plus `docs/ACCELERATION.md` lesson 15 — `MaxSharedMemoryPerGroup`, not `MaxLocalMemorySize`,
+  and per-*group* not per-work-item shared memory. The device reports 1024 threads/group and
+  65536 B shared/group, so none of the four planned geometries is at a limit.
