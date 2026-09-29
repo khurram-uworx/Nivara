@@ -29,8 +29,9 @@ namespace Nivara.Samples.Gpu;
 /// apart — which would otherwise become the largest single error term in the gate.</item>
 /// </list>
 ///
-/// The bias-free norms take a shared zero-filled Beta, matching the CPU's zero-initialised
-/// Beta. An ILGPU view cannot be null, so the zero buffer is passed instead of a nullable.
+/// The bias-free norms take a shared zero-filled Beta. The CPU encoder now constructs
+/// <c>LayerNorm&lt;T&gt;</c> with <c>bias: false</c> and has no beta parameter; an ILGPU view
+/// cannot be null, so this runner still passes a zero buffer instead of skipping the term.
 /// </summary>
 public sealed class ModernBertGpuRunner : IDisposable
 {
@@ -128,9 +129,9 @@ public sealed class ModernBertGpuRunner : IDisposable
         embedNormW = GpuBuffers.UploadPlain(acc, tensors, $"{prefix}.embeddings.norm.weight");
         finalNormW = GpuBuffers.UploadPlain(acc, tensors, $"{prefix}.final_norm.weight");
 
-        // Every norm in this architecture is bias-free (HF's norm_bias: false), which the CPU
-        // emulates with a zero-initialised Beta. ILGPU views cannot be null, so the same value
-        // is passed as a shared read-only buffer rather than skipped.
+        // Every norm in this architecture is bias-free (HF's norm_bias: false). The CPU encoder
+        // constructs LayerNorm with bias: false and has no beta parameter. ILGPU views cannot
+        // be null, so the same zero value is passed as a shared read-only buffer rather than skipped.
         zeroBeta = GpuBuffers.Alloc(acc, hiddenDim);
         zeroBeta.CopyFromCPU(new float[hiddenDim]);
 

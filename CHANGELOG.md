@@ -6,6 +6,16 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Bias-free `LayerNorm<T>` (#446)** — `LayerNorm<T>` gained a `bool bias = true`
+  constructor parameter. `bias: false` keeps the learnable gamma and does not register
+  beta, so `StateDict()`, `GetParameters()`, and an optimizer never see it. `affine: false`
+  still removes both parameters; pairing it with the default `bias: true` throws
+  `ArgumentException` rather than silently dropping beta. The kernel derives gamma and
+  beta from span length, so gamma-only is expressible. `ModernBertEncoder` constructs
+  its norms with `bias: false` instead of leaving an unloaded zero beta. `Affine` means
+  gamma is applied, so `affine: true, bias: false` reports `Affine == true` with
+  `Bias == null`; test `Weight != null` for "has parameters".
+
 - **Optional QKV bias on Llama attention for Qwen2-family checkpoints (#384)** —
   `LlamaCausalAttention<T>` and `LlamaDecoderBlock<T>` gained a `bool qkvBias = false`
   constructor option. Qwen2-style models attach a bias to the self-attention

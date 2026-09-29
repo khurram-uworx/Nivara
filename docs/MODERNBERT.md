@@ -10,7 +10,7 @@ The **first encoder that is not BERT-shaped**: 28 layers, 1024 hidden, 16 heads 
 
 - **Pre-norm, not Post-LN**: every sub-layer is `x = x + f(LayerNorm(x))`. Layer 0's `attn_norm` is an `Identity` in HF and has **no checkpoint entry**, so the loader leaves it null.
 - **No QK-norm and no layer scale.** The checkpoint has 6 tensors per layer (5 at layer 0) and 170 encoder tensors total — no per-head learnable scale, unlike Gemma-style models. `decoder.weight` is tied to the token embedding.
-- **Bias-free LayerNorm and MLP/attention projections** (`norm_bias`, `mlp_bias`, `attention_bias` all false), so bias is emulated with a zero Beta — exact for inference.
+- **Bias-free LayerNorm and MLP/attention projections** (`norm_bias`, `mlp_bias`, `attention_bias` all false). The norms are constructed with `LayerNorm<T>(..., bias: false)`, so no beta is registered and an optimizer cannot drift one off zero. The projections use `Linear<T>(..., bias: false)`.
 - **Fused QKV**: `Wqkv` is one `[3072, 1024]` matrix split into three **contiguous** row blocks (q, k, v) by `StateDictLoader.LoadLinearSlice`.
 - **GeGLU with the halves the *other way round* from the names.** `modeling_modernbert.py:89-91` is `input, gate = Wi(x).chunk(2, dim=-1)` then `act(input) * gate`. The **first** row block gets the GELU (`mlp.inputProj`) and the second stays linear (`mlp.gateProj`) — the opposite of what HF's variable naming suggests. Building it the other way is the single hardest bug in this port: it produces a plausible forward pass at **cosine 0.82** at layer 0.
 - **Per-layer-type RoPE**: `global_rope_theta = 160000` on full layers, `local_rope_theta = 10000` on sliding ones, applied as HF's `rotate_half` (interleaved-half split, not the GPT-NeoX permute-and-halve variant). Newer checkpoints that ship `rope_parameters` per layer type are also read.
@@ -50,6 +50,8 @@ Two pre-existing core bugs were found and fixed, both now regression-tested:
 ## Verification
 
 `compare` PASSED against HuggingFace 5.14.1 (`attn_implementation: "sdpa"`), 128 padded positions / 26 valid: **128/128 token ids identical**, `maxAbs 1.62e-5`, `meanAbs 9.22e-7`, `maxRel 6.09e-4`, **cosine 1.0000000000**, 0 non-finite values on either side in both the valid and padding regions (gate bound `|diff| <= 1e-3·(1 + |ref|)`).
+
+Re-run after the encoder norms switched from an unloaded zero Beta to `LayerNorm<T>(..., bias: false)`. The gate reproduced that baseline at the reported precision: printed max abs diff `0.00001621`, mean abs diff `0.0000009215`, max rel diff `0.00060944`, cosine `1.0000000000`. The zero-Beta emulation and the real bias-free norm agree.
 
 `compare_diag` matches at every stage from embeddings through layer 26 (cosine 1.000000, max|diff| ≤ 5.9e-3); the raw layer-27 output is absmax 25730.7 vs HF 25741.3 (0.04%), and the final norm is back to `max|diff| 1.6e-5`.
 

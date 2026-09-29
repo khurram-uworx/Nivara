@@ -475,7 +475,7 @@ To use nullable DataFrame columns with AutoDiff, resolve nulls at the boundary f
 
 All leaf modules that own learnable weights expose them through a **single uniform
 contract**: `Weight` / `Bias` of type `Parameter<T>?`, where `null` means the
-parameter was omitted (`bias: false` / `affine: false`). There are no
+parameter was omitted (`bias: false` on `Linear`/`LayerNorm`, or `affine: false`). There are no
 `WeightParam` / `BiasParam` accessors and no tensor-typed `Weight` members;
 consumers reach the underlying tensor via `Weight!.Tensor` / `Bias!.Tensor`.
 This matches PyTorch's `module.weight` / `module.bias` mental model.
@@ -619,11 +619,11 @@ Pre-norm transformer block with configurable normalization:
 ```
 NormType { RMSNorm, LayerNorm }
 PerRowRMSNorm(x) → TensorPrimitives-backed per-row normalization (no mean centering)
-PerRowLayerNorm(x) → LayerNormKernel.Forward with affine=false (mean + variance normalization)
+PerRowLayerNorm(x) → LayerNormKernel.Forward with empty gamma/beta spans (mean + variance normalization)
 ```
 
 - Multi-head self-attention (Q/K/V/O projections, scaled dot-product, output projection)
-- Configurable normalization: `RMSNorm` (default, fused per-row `TensorPrimitives.Dot`) or `LayerNorm` (delegates to `LayerNormKernel<T>` with affine=false)
+- Configurable normalization: `RMSNorm` (default, fused per-row `TensorPrimitives.Dot`) or `LayerNorm` (delegates to `LayerNormKernel<T>` with empty gamma/beta spans)
 - GELU FFN (fc1 → GELU → fc2)
 - Residual connections with optional attention and residual dropout
 - `embedDim` must be divisible by `numHeads`
@@ -719,16 +719,21 @@ BatchNormKernel<T>
 
 ```csharp
 public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new LayerNorm<T>(normalizedShape, eps: 1e-5, affine: true)
+// new LayerNorm<T>(normalizedShape, eps: 1e-5, affine: true, bias: true)
+// new LayerNorm<T>(normalizedShape, eps: 1e-5, bias: false)   // gamma, no beta
 ```
 
 Span-based kernel with `TensorPrimitives`. Normalizes over the last dimension per instance (no running stats, unlike BatchNorm). Uses `TensorPrimitives.Dot` for SIMD-accelerated sum-of-squares computation.
 
+`bias` defaults to `true`. `bias: false` keeps the learnable gamma and does not register beta, so the parameter is absent from `StateDict()` and from an optimizer's parameter list — the shape HuggingFace's `norm_bias: false` needs. `affine: false` removes both parameters and requires `bias: false`; the default `bias: true` with `affine: false` throws `ArgumentException`. `Affine` means gamma is applied, so `affine: true, bias: false` reports `Affine == true` with `Bias == null`. Test `Weight != null` for "has parameters".
+
+Gamma and beta are independently optional in the kernel: an empty span skips that term. Equivalence of `bias: false` to a zero-initialised beta is pinned by exact equality within one process. `TensorPrimitives` may differ across operating systems and architectures, so that equality is not a cross-machine bit-identity claim.
+
 ```
 LayerNormKernel<T>
-├── Forward(input, rows, normalizedShape, gamma, beta, eps, affine) → (Output, Mean, InvStd, XHat)
-│   └── Uses TensorPrimitives.Dot for sum-of-squares (SIMD-accelerated)
-├── BackwardInput(gradOut, xHat, gamma, invStd, rows, normalizedShape, affine) → gradInput
+├── Forward(input, rows, normalizedShape, gamma, beta, eps) → (Output, Mean, InvStd, XHat)
+│   └── Empty gamma/beta spans skip that term; TensorPrimitives.Dot for sum-of-squares
+├── BackwardInput(gradOut, xHat, gamma, invStd, rows, normalizedShape) → gradInput
 ├── BackwardWeight(gradOut, xHat, rows, normalizedShape) → gradGamma
 └── BackwardBias(gradOut, rows, normalizedShape) → gradBeta
 ```

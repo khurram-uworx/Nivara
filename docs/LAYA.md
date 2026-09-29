@@ -204,7 +204,7 @@ Wired, and gated. `laya --gpu` runs the encoder *and* the decision head on the a
 
 Three things in that table are traps rather than mappings:
 
-- **The head's norms are biased; the encoder's are not.** `nn.TransformerEncoderLayer` keeps a beta, and ModernBERT's `norm_bias: false` does not. Reusing the encoder's shared zero beta would be a silent wrong answer, not a crash — the kernel has no way to object. `LayaHeadGpuRunner` therefore uploads a real beta per norm.
+- **The head's norms are biased; the encoder's are not.** `nn.TransformerEncoderLayer` keeps a beta, and ModernBERT's `norm_bias: false` does not. The CPU encoder constructs `LayerNorm<T>` with `bias: false` and has no beta parameter. The GPU runner still passes a shared zero buffer, because an ILGPU view cannot be null — reusing that buffer for the head would be a silent wrong answer, not a crash. `LayaHeadGpuRunner` therefore uploads a real beta per norm.
 - **The residual lives in the head layer, not inside the attention.** `out_proj`'s output is added by the caller. Adding it inside the attention double-counts and the result is still finite, so nothing downstream would flag it.
 - **The head's eps is `1e-5`, from `LayaDecisionHead`'s constructor default — not `config.NormEps`.** Inheriting the encoder's eps is a plausible-looking value that is not the checkpoint's.
 
