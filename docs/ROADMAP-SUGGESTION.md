@@ -48,7 +48,7 @@ GEMM throughput (issue **#440**), has since been **measured and did not pay off*
 register-blocked tile geometries lost to Row4 on every shape, because on this iGPU
 shared-memory *capacity per group* dominates shared-memory *traffic per MAC*. The remaining
 GPU lever is the attention leg (**#447**), which a leg profile measures at 57% of Laya
-wall-clock against 45% for all GEMM together. See §5.2 in docs/ACCELERATION.md.
+wall-clock against 39.2% for all GEMM together. See §5.2 in docs/ACCELERATION.md.
 
 ## 2. The gap we want to attack (CPU GEMM)
 
@@ -193,9 +193,12 @@ native bridge. Measure both and publish both in the README table.
   CPU-side item too: the dense `[L, L]` mask is capped at 2048. A leg profile
   (`--gemm-legs`, AC) measures `BatchedAttention` at **57% of the Laya forward**
   and **61% of ModernBERT's** — larger than all GEMM shapes combined, in every
-  configuration measured. `BatchedAttention` already carries the RoPE band
-  internally but has three unconditional `j < seqLen` passes, so `band`
-  currently reduces no work at all.
+  configuration measured. `BatchedAttention` already carries the band
+  internally but has three unconditional `j < seqLen` passes, and uses `band`
+  only to overwrite a score with `-inf`, so its cost is the same for a sliding
+  band and `band` currently reduces no work at all. That makes 57% an upper
+  bound on the banded cost, so the prize is larger than 57% rather than
+  smaller.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
   documented in `docs/ACCELERATION.md` §1/§5).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after

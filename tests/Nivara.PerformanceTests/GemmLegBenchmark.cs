@@ -12,6 +12,14 @@ namespace Nivara.PerformanceTests;
 /// 2 LayerNorm, 3 SplitColumns, 2 Rotary, 1 attention, 1 GeGlu, 2 Add, plus 3 once-per-forward).
 ///
 /// <para>
+/// Of those 3 once-per-forward launches only <c>gather</c> is timed. The other two are
+/// <c>LayerNorm1D</c> (the embedding projection and the final norm), so they are folded into
+/// the per-layer LayerNorm count rather than listed separately. That is deliberate and not
+/// worth a separate leg: the LayerNorm leg totals ~28 ms of a ~2221 ms Laya forward, so the
+/// omission moves every published share by less than 0.05%.
+/// </para>
+///
+/// <para>
 /// Why this exists: the #440 issue comment argues that GEMM is ~99.9% of Laya's *arithmetic*,
 /// so kernel throughput is essentially the whole cost. That is a share of arithmetic, not of
 /// time. This probe turns the arithmetic share into a measured time share, which is what
@@ -21,9 +29,15 @@ namespace Nivara.PerformanceTests;
 /// <para>
 /// This is a measurement, not a gate — nothing here asserts a bound and a healthy run returns
 /// 0. Both sides of the split (GEMM and non-GEMM) are timed in the same session on the same
-/// device, so the ratio carries no cross-run load contamination. Compare the totals against
-/// <c>modernbert --gpu benchmark</c> / <c>laya --gpu benchmark</c> from the same AC session:
-/// the gap between the two is dispatch and readback, not unattributed kernel time.
+/// device, so the ratio carries no cross-run load contamination.
+/// </para>
+///
+/// <para>
+/// The totals are comparable to <c>modernbert --gpu benchmark</c> but **not** to
+/// <c>laya --gpu benchmark</c>: this probe times the <em>encoder</em> only, while the laya
+/// benchmark figure covers the whole model including the decision head. For laya the residual
+/// against that benchmark is dispatch, readback <em>and</em> the head, so do not read it as
+/// unattributed kernel time. <c>modernbert --gpu benchmark</c> is encoder-only and does line up.
 /// </para>
 ///
 /// <para>

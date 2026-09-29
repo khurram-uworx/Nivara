@@ -107,9 +107,12 @@ the correctness gate is the primary contract; compare GMAC/s moves, not absolute
 
 #### GEMM gate baseline (2026-09-27, Laya shapes extended)
 
-70 cells, all PASS. The ten pre-existing shapes reproduce the 2026-09-19 rows above; these
+70 cells, all PASS. The nine pre-existing shapes reproduce the 2026-09-19 rows above; these
 are the ten Laya shapes, which is what the Laya backend decision (#449) turns on. Gate
-runtime 94 s on AC.
+runtime 94 s on AC. *(A tenth pre-existing shape, `distilbert qkv/o [128x768x768]`, was
+accidentally dropped by commit `05fc6bb` on 2026-09-29 and restored later the same day,
+so this row count reads nine where it read ten at the time. Its 2026-09-27 figures were
+Row4 182 GMAC/s, maxAbs 4.00e-5.)*
 
 | shape | maxAbs (worst kernel) | GMAC/s (best kernel) |
 |---|---|---|
@@ -137,7 +140,7 @@ K=4096 with N=1024 is a worse aspect ratio for the 16x16 tile than the other hea
 
 #### GEMM gate baseline (2026-09-29, #440 tile geometries — a measured negative)
 
-163 cells, all PASS, plus **byte-identity PASS** against Row4 on all #440 cells. Same machine,
+171 cells, all PASS, plus **byte-identity PASS** against Row4 on all #440 cells. Same machine,
 AC line. The four new geometries are the *plain* kernels only — the fused-epilogue siblings
 were not built, because the plain ones did not win and a sibling cannot beat its base.
 
@@ -154,11 +157,17 @@ Ratio to Row4 on the same shape (GMAC/s, `1.00x` = parity, below 1 = slower):
 | laya act 1 [512x1028x256] | 189 | 0.76x | 0.60x | 0.74x | 0.84x |
 | laya qkv@128 [128x1024x3072] | 193 | 0.73x | 0.58x | 0.77x | 0.78x |
 | laya scorer 1 [8x1024x1024] | 59 | 0.41x | 0.42x | 0.25x | 0.37x |
+| distilbert qkv/o [128x768x768] | 182 | 0.69x | 0.60x | 0.74x | 0.73x |
 | distilbert fc1 [128x768x3072] | 189 | 0.72x | 0.59x | 0.76x | 0.78x |
 | distilbert fc2 [128x3072x768] | 186 | 0.68x | 0.60x | 0.76x | 0.72x |
 | minilm qkv/o [128x384x384] | 135 | 0.68x | 0.62x | 0.64x | 0.64x |
 | edge padded rows [100x770x70] | 61 | 0.64x | 0.74x | 0.43x | 0.43x |
 | edge padded K [64x1032x130] | 69 | 0.61x | 0.70x | 0.42x | 0.35x |
+
+The three `#440`-only edge shapes (`edge 1x8 N=100`, `edge 4x2 M=20 N=40`, `edge 2x2 K=17`)
+are gated for correctness — byte-identity and halo handling — but are left out of this table
+because their absolute rates are so low that the ratio is mostly launch overhead in both
+numerator and denominator. Read their rows from the run output when you need them.
 
 **No geometry wins.** The best cell is 1.01x on `laya head ff2` — the one shape already known
 to be weak at 155 GMAC/s — and that is a wash inside run-to-run noise. Everything else is a
@@ -169,13 +178,20 @@ a wider tile means fewer groups, so fewer items to hide launch latency behind.
 *shared-memory traffic per MAC* — 2x2 needs 4 shared reads per 4 MACs against Row4's 5, a 20%
 cut. The binding constraint on this device is *shared-memory capacity per group*. The pair that
 isolates it: `2x2@KT16` and `2x2@KT32` have identical blocking factors, so identical reads per
-MAC, and differ only in footprint (4 KB vs 8 KB per group) — and the 8 KB one is consistently
-**18–25% slower**. Meanwhile `4x2@KT32` has the best traffic ratio in the family (0.75
-reads/MAC) and the worst footprint (12 KB), and it lands mid-pack. The metric that predicted
-the ordering was the footprint, not the traffic. So the issue's "occupancy headroom exists" was
-not merely unmeasured but pointing the wrong way: going 5 KB → 8–12 KB costs more co-resident
-groups than the 20–40% traffic saving returns. See [ACCELERATION.md](../../docs/ACCELERATION.md)
-§5.2.
+MAC, and differ only in footprint (4 KB vs 8 KB per group).
+
+**Scope that claim honestly, because the unscoped version is false on 6 of 15 shapes.** On the
+nine largest shapes — the ones that carry the throughput — 2x2@KT32 is **18–25% slower than
+2x2@KT16, every one of them**. It weakens to 8–13% on mid shapes, and it *inverts* on the three
+launch-bound ones, where 2x2@KT32 comes out 2–16% **faster** (`laya scorer 1`, `edge padded
+rows`, `edge padded K`). Footprint dominates where the device is saturated with work and is not
+a predictor at all where there are too few work groups to saturate it — at which point group
+count dominates instead.
+
+`4x2@KT32` is consistent with that mechanism rather than with the traffic metric: it has the
+best traffic ratio in the family (0.75 reads/MAC) and the worst footprint (12 KB), and it lands
+mid-pack. So going from Row4's 5 KB to 8–12 KB costs more co-resident work groups than the
+20–40% traffic saving returns. See [ACCELERATION.md](../../docs/ACCELERATION.md) §5.2.
 
 **A second finding, about the gate rather than the kernel.** All four geometries were *wrong*
 on the first run (maxAbs 20–119) and `1x8@KT16` failed to compile at all, from an ILGPU OpenCL
@@ -210,6 +226,19 @@ An earlier run of this probe on **battery** gave attention 51.3% / GEMM 45.4% on
 compressed the gap rather than inventing it — the AC run shifts attention *up* to 57.0% — so
 the conclusion strengthened. Worth knowing that the ratio moved ~6 points between power states,
 if you ever have to compare a battery figure against an AC one.
+
+**On the `band` parameter, because it is easy to misread 57% as optimistic or pessimistic when
+it is neither.** The probe passes `GlobalAttentionBand` for every layer, and ModernBERT-large
+is a 3:1 global:sliding mix with `SlidingWindow = 256`, so the natural worry is that this
+overstates the real cost. It does not: `BatchedAttention` sweeps `for (int j = 0; j < seqLen;
+j++)` three times unconditionally and uses `band` only to decide whether to overwrite a score
+with `-inf`. Its cost is therefore **identical for a sliding band**, so no choice of band in
+this probe could have changed the number. 57% is what the kernel actually costs today.
+
+The useful corollary is the opposite of the worry: 57% is an upper bound on what attention
+*would* cost once the band is made to reduce work rather than only mask it, which is exactly
+what #447 would do. **The prize is larger than 57%, not smaller** — and that gap between the
+current cost and the banded cost is the size of the opportunity.
 
 Run this before optimising anything on the GPU path. It is the difference between a real 51%
 and an assumed 99.9%.

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document captures **transferable engineering lessons** discovered while building data-intensive, lazy-execution systems. It is intentionally **not project-specific** and avoids recording historical implementation details.
+This document captures **transferable engineering lessons** discovered while building data-intensive, lazy-execution systems — and, in the last major section, while establishing whether such systems actually work. It is intentionally **not project-specific** and avoids recording historical implementation details.
 
 Its primary audience is:
 - Future humans working on similar systems
@@ -11,6 +11,8 @@ Its primary audience is:
 The goal is to **prevent repeated exploration of known dead ends** and to encode patterns that reliably worked under real constraints.
 
 > Focus on **why certain approaches failed or succeeded**, not on *what* was implemented in a specific codebase.
+
+The most expensive mistakes are not in code that is wrong. They are in code that is wrong **and reported as passing**, and in conclusions drawn from results that were real but narrower than claimed. That is why [Verification, Evidence & Claim Discipline](#verification-evidence--claim-discipline) is a section in its own right rather than a footnote.
 
 ---
 
@@ -450,6 +452,245 @@ High confidence in correctness across all supported scenarios, with clear test o
 
 ---
 
+## Verification, Evidence & Claim Discipline
+
+The sections above are about systems. This one is about the evidence used to decide whether a
+system works, which is where the expensive mistakes live: not in the code that is wrong, but in
+the code that is wrong *and reported as passing*, and in the conclusions drawn from results
+that were real but narrower than claimed.
+
+### Scope Every Claim to the Data That Survives It
+
+**Problem**
+A result measured across many cases gets compressed into one sentence, written from the cases
+that agreed.
+
+**Constraint**
+*Consistently*, *always*, *every* and *never* are quantified universals, and they get checked
+against the average rather than the worst row. The average hides the rows that inverted. A claim
+holding on 9 of 15 cases and reversing on 3 is not a claim with a caveat — it is two claims, and
+the second usually carries the real mechanism, because the regime boundary is the interesting
+finding.
+
+**Pattern That Worked**
+Compute the claim against every row of the table it summarizes before publishing it, not a
+representative subset. When the effect turns out to be regime-dependent, promote the regime into
+the claim: *"the effect dominates when the device is saturated and does not predict at all when
+it is not."* That is more useful than the false universal, because it tells a reader whether the
+result applies to their case.
+
+**Negative Rule**
+Do not write *consistently* unless you checked it against the row that broke it. If a mechanism
+is conditional, publish the condition.
+
+**Outcome**
+Readers can apply the finding to their own situation, and the next person does not re-run the
+experiment to discover where the claim stops holding.
+
+---
+
+### A Gate Must State Its Own Coverage
+
+**Problem**
+A verification step contributes no cases — nothing loads, everything is filtered out, the set
+under test comes out empty — and the summary it prints is unchanged.
+
+**Constraint**
+Coverage loss is silent. Pass/fail is computed over whatever actually ran, so a gate that tested
+three quarters of what it claims reports a quarter's result with the same confidence. The
+failure mode is not a wrong number passing; it is a correct number answering a smaller question
+than the one being asked.
+
+**Pattern That Worked**
+Make the summary state coverage every time — *N of M loaded*, with a reason per omission — and
+make reduced coverage an explicit failure rather than a neutral event. Keep "cannot run here" and
+"ran and passed" distinguishable: a unit the current device or environment cannot host is
+reported as skipped with the reason, never silently dropped.
+
+**Negative Rule**
+Never let a summary read identically before and after a coverage change. If new work contributes
+nothing, the gate should say so and fail.
+
+**Outcome**
+A green gate always means the same amount of testing as last time, and a summary cannot be
+mistaken for a smaller result.
+
+---
+
+### One Failure Reason Per Catch, Per Counter, Per Message
+
+**Problem**
+One mechanism absorbs several unrelated failure modes: a single `catch` around a block that can
+fail for two distinct reasons, or a single counter behind two different verdicts.
+
+**Constraint**
+The second reason is always the more serious one, and it is absorbed without comment. A catch
+justified by *"the environment might not support this"* also catches *"this does not compile"*,
+which is a defect in the code, and reports it as an environment limitation. One counter behind
+two verdicts produces a message that is wrong at exactly the moment it is read, because the
+counts get summed and the summary then claims a numeric bound was exceeded when the real failure
+was structural.
+
+**Pattern That Worked**
+Classify at the point of detection and keep the classes separate all the way to the exit code:
+distinct catch blocks for distinct reasons, a distinct counter per verdict, and a message per
+verdict naming the verdict it belongs to. Aggregate only at the end, by summing counts and never
+by merging labels.
+
+**Negative Rule**
+Do not widen a catch or a counter to cover a neighbouring failure. If a second reason can occur
+in that block, give it its own path.
+
+**Outcome**
+The reported failure always matches the actual failure, and *"the environment could not run
+this"* can never be confused with *"this is broken"*.
+
+---
+
+### Assert Exactness When Exactness Is Available
+
+**Problem**
+A new implementation is required to reproduce a reference — same operation order, same rounding —
+and is gated on a numeric tolerance instead.
+
+**Constraint**
+A tolerance converts a structural defect into a judgement call, and arguing with a judgement
+call is the path of least resistance, so tolerance gates drift to whatever the current result
+happens to be. An exactness assertion cannot be argued with: either the ordering changed or it
+did not, and the failure names the cells involved. It also catches classes of bug a tolerance
+cannot see — a mis-placed staging buffer returning the right order of magnitude against the
+wrong elements, or a compilation failure that a skipped case would have hidden entirely.
+
+**Pattern That Worked**
+When the contract is "reproduce this reference exactly", assert that first and keep the
+tolerance as a second, independent assertion rather than a replacement. Note in the gate why
+the exactness check exists, so a future reader does not "simplify" it away.
+
+**Negative Rule**
+Do not substitute a tolerance for an exactness requirement the implementation is designed to
+meet — and equally, do not bolt exactness onto code that genuinely cannot provide it. Assert it
+where the design promises it.
+
+**Outcome**
+Structural defects surface on the first case rather than after a tolerance argument, and the
+check doubles as a design-regression detector.
+
+---
+
+### One Commit, One Reason
+
+**Problem**
+An unrelated change rides along in a commit whose subject is about something else — a rename, a
+formatting pass, a duplicate removed while tidying nearby lines.
+
+**Constraint**
+The reader of the fix is not looking for it, so it is never reviewed, and it does not appear in
+the message because it was not intentional. If it touches a test's input set it also invalidates
+the historical baselines the next person compares against, and they will compare against numbers
+that no longer describe the code.
+
+**Pattern That Worked**
+Keep the commit to its stated reason. When a drive-by change is genuinely correct, land it
+separately with its own message, so the fix stays reviewable on its own terms and the baseline
+change is visible as a change.
+
+**Negative Rule**
+Do not let a commit alter the inputs, thresholds, or counts of a test it is not about. If it
+does, it belongs in its own commit.
+
+**Outcome**
+Every commit is reviewable against its own stated reason, and a historical number always
+describes a code state that existed.
+
+---
+
+### Superseded Measurements Move Together
+
+**Problem**
+A measurement is corrected, and the correction is applied to the places the old value happens
+to appear in the files currently open.
+
+**Constraint**
+Partially updated figures are worse than uniformly stale ones, because they are internally
+inconsistent in a way that reads as intentional. A share re-quoted next to its complement now
+sums past 100%, and nobody notices, because each number is individually plausible and the two
+live in different files.
+
+**Pattern That Worked**
+When a measurement is superseded, find every site carrying any part of it and move them all in
+one change — including the numbers in a partition, which are separate claims about the same
+run. Then check the arithmetic: parts of a partition should sum to the whole, and two figures
+describing the same measurement should agree. Those two free checks catch nearly every partial
+propagation.
+
+**Negative Rule**
+Do not update a measurement only at the sites you happen to be editing, and never leave a
+corrected value next to an uncorrected one from the same run.
+
+**Outcome**
+No document states two values for the same measurement, and a partition that does not sum to its
+total fails loudly.
+
+---
+
+### Measure the Share in the Denominator You Will Optimize
+
+**Problem**
+A component's share of total *work* is used to argue that it dominates total *cost*.
+
+**Constraint**
+The two denominators disagree, sometimes by an order of magnitude. Work share is dominated by
+whichever term has the most operations; cost share is dominated by whichever term is
+latency-bound, launch-bound, or cache-bound. A term can be a rounding error in work and the
+single largest cost in wall-clock — and computing the first number precisely only makes you
+more confident about optimizing the wrong thing.
+
+**Pattern That Worked**
+Time each component in isolation, at the configuration it is really launched with, and multiply
+by its actual per-forward count. Do this *before* designing the optimization, not to validate it
+afterwards: a probe whose job includes being able to say "the premise is wrong" is worth ten
+times more before the work than after. Attribute to components rather than buckets — "the
+matrix multiply" hides more than it explains, and splitting it is what surfaces the real term.
+
+**Negative Rule**
+Do not scope a performance effort from a share of work, a share of operations, or a share of
+parameters. Measure time.
+
+**Outcome**
+Effort goes to the term that actually costs the time, and a proposal whose premise fails
+measurement dies in a day rather than after a kernel family is built.
+
+---
+
+### Verify the Process You Care About
+
+**Problem**
+A verification step passes its output filter, and the exit status of the process under test is
+never observed.
+
+**Constraint**
+A pipeline reports the last stage's status, so a filtered command reports the *filter's* status
+— always zero, when the filter matched. And a check that only inspects output text cannot
+distinguish "ran and passed" from "never ran", because the most common way a check silently
+stops testing anything produces no output at all. A check written by whoever wrote the thing it
+checks shares that person's assumptions, which is exactly where the defect lives.
+
+**Pattern That Worked**
+Capture the exit status from the process under test — not from anything downstream of it — and
+assert on it separately from the output. Where a check can go vacuous, break it deliberately and
+confirm it fails: a gate never observed failing is not known to work. Have the review done by
+someone who did not write the code.
+
+**Negative Rule**
+Do not treat a printed success message as a passing exit status. Do not accept a verification
+step you have not seen fail. Do not rely solely on your own review of your own assumptions.
+
+**Outcome**
+Green means the process succeeded, red means it failed, and the checks are known to tell the
+two apart because they have been seen doing it.
+
+---
+
 ## What Didn't Work (High-Value Failures)
 
 ### Reflection-Heavy Designs
@@ -484,6 +725,28 @@ High confidence in correctness across all supported scenarios, with clear test o
 - Start with correctness
 - Choose explicit designs
 - Avoid cleverness unless justified
+- Measure before optimizing, and be willing to report that the premise was wrong
+  ([Measure the Share in the Denominator You Will Optimize](#measure-the-share-in-the-denominator-you-will-optimize))
+- Assert the exit status of the process under test, not of a filter in a pipeline, and never
+  report a check you have not seen fail
+  ([Verify the Process You Care About](#verify-the-process-you-care-about))
+- Scope a claim to the rows that survive it, and say when a mechanism is regime-dependent
+  ([Scope Every Claim to the Data That Survives It](#scope-every-claim-to-the-data-that-survives-it))
+- Do not merge an unrelated change into a fix commit
+  ([One Commit, One Reason](#one-commit-one-reason))
+- When superseded figures appear in several files, update all of them in one change, then check
+  the arithmetic
+  ([Superseded Measurements Move Together](#superseded-measurements-move-together))
+
+### Self-Review Is Not Verification
+
+An agent reviewing its own work is checking its output against its own assumptions, so it
+structurally cannot find a defect that comes from a shared assumption. The two most common
+instances: a gate reports success while testing less than it claims, and a claim is stated more
+broadly than the data supports — both invisible to the author because both follow from
+assumptions the author also holds. When a check can pass vacuously, break it deliberately and
+confirm it fails. When a result is load-bearing for a decision, have someone who did not write
+it re-derive the conclusion from the raw data.
 
 ---
 

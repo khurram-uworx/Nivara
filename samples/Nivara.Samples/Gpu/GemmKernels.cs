@@ -135,11 +135,19 @@ internal static class GemmKernels
     // Row4's 1x4 so a K step reads fewer shared floats per multiply-add
     // (GpuBuffers.GemmGeometry.SharedLoadsPerMac) - a 20-40% cut on paper. The binding
     // constraint on this iGPU is shared-memory *capacity per group*, not shared-memory
-    // *traffic*. The isolating evidence: 2x2@K16 and 2x2@K32 have identical blocking factors,
-    // so identical reads per MAC, and differ only in footprint (4 KB vs 8 KB per group), and
-    // the 8 KB one is consistently 18-25% slower. 4x2@K32 has the best traffic ratio in the
-    // family (0.75 reads/MAC), the worst footprint (12 KB), and lands mid-pack. Footprint
-    // predicted the ordering; traffic did not.
+    // *traffic*. The isolating pair: 2x2@K16 and 2x2@K32 have identical blocking factors,
+    // so identical reads per MAC, and differ only in footprint (4 KB vs 8 KB per group).
+    //
+    // The effect is strong and consistent where the device is actually saturated - on the nine
+    // largest shapes, which are the ones that carry the throughput, 2x2@K32 is 18-25% slower
+    // than 2x2@K16, every one of them. It weakens to 8-13% on mid shapes, and it *inverts* on
+    // the three launch-bound ones (2x2@K32 is 2-16% FASTER there). So footprint is the dominant
+    // term at throughput-relevant shapes and not a predictor at all where there are too few work
+    // groups to saturate the device - at which point group count dominates instead. 4x2@K32 is
+    // consistent with the mechanism rather than with the traffic metric: it has the best traffic
+    // ratio in the family (0.75 reads/MAC) and the worst footprint (12 KB), and it lands
+    // mid-pack. The claim to repeat is the scoped one - "footprint dominates at saturation" -
+    // not "footprint predicted the ordering", which is only true of the fat rows.
     //
     // What they do still earn their keep: all four keep the incumbent's 16x16 group, K-tile
     // staging and strictly ascending-K accumulation, so each is *bit-identical* to Row4 on

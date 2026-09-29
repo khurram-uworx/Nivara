@@ -68,13 +68,18 @@ kernel loses, we can tell whether the register block or the shared-memory footpr
 
 | variant | thread tile | shared/group | isolates |
 |---|---|---|---|
-| `2x2` @ KTile16 | 32×32 | ~5 KB | register-blocking effect alone |
-| `2x2` @ KTile32 | 32×32 | ~8 KB | + barrier halving, occupancy cost |
-| `4x2` @ KTile32 | 32×64 | ~12 KB | asymmetric vs K-heavy shapes |
-| `1x8` @ KTile16 | 16×128 | ~9 KB | the N-heavy extreme |
+| `2x2` @ KTile16 | 32×32 | 4 KB | register-blocking effect alone |
+| `2x2` @ KTile32 | 32×32 | 8 KB | + barrier halving, occupancy cost |
+| `4x2` @ KTile32 | 64×32 | 12 KB | asymmetric vs K-heavy shapes |
+| `1x8` @ KTile16 | 16×128 | 9 KB | the N-heavy extreme |
+
+*(Corrected 2026-09-29 during the G2 review: `4x2` was transcribed as 32×64 and `2x2@K16`'s
+footprint as ~5 KB. The built kernels are `BlockRows=4, BlockCols=2` — a **tall** 64×32 tile, not
+a wide one, which inverts the "asymmetric vs K-heavy" rationale as written — and 4 KB, per
+`GpuBuffers.GemmGeometry.SharedBytes`.)*
 
 Each gets the lean per-epilogue sibling set (plain / Bias / Gelu / Relu / Qkv) — no runtime
-activation byte, per the existing design note at `GemmKernels.cs:123-133` (a single kernel with a
+activation byte, per the existing design note at `GemmKernels.cs:473-483` (a single kernel with a
 runtime byte would inline all three activation paths and bloat registers on the hot lean launches).
 
 Geometry constants live in `GpuBuffers` so `GpuBuffers.GemmCfg` stays the single authority for
@@ -135,7 +140,7 @@ intermediate battery session in #437's history produced contaminated 25.6–33 m
 | # | step | result |
 |---|---|---|
 | 1 | `dotnet build Nivara.slnx` | **clean** at every change unit, 0 warnings, 0 errors |
-| 2 | `--gemm` (AC) | **PASS** — 163 cells, byte-identity PASS, no geometry skipped |
+| 2 | `--gemm` (AC) | **PASS** — 171 cells, byte-identity PASS, no geometry skipped |
 | 3 | `--gpu compare` × 5 | **PASS** — every figure identical to `ACCELERATION.md` §1, ModernBERT's `5.577E-004` bit for bit |
 | 4 | `--gpu benchmark` (AC) | **not run — no delta exists to report.** Step 4 existed to measure the Phase 4 swap, and Phase 4 was cancelled, so there is no new configuration to benchmark. Running it would have re-measured the already-recorded baseline for a few minutes of machine time. |
 | 5 | `dotnet test` | put to the human, not run unattended (AGENTS.md) |
@@ -192,7 +197,7 @@ closing argument is the numbers rather than the reasoning about the delegation.*
 1. `docs: plan #440 GEMM throughput work in TODO.md` — `46efa73`
 2. `Add a leg-timing pass to the --gemm gate for the non-GEMM kernels` — `f54dbad` (the
    `--gemm-legs` probe, split from the measurement so the probe and its result are separate
-   commits), and `57116a9` for the measurement itself
+   commits), and `57126a9` for the measurement itself
 3. `Add the tile-32 / 2x2 register-blocked GEMM family to GemmKernels` — `d06b8c8`, then
    `05fc6bb` for the #468 fix that commit's kernels turned out to need
 4. `Wire the new GEMM variants into the --gemm gate with a byte-identity check` — `d06b8c8`
@@ -275,7 +280,7 @@ GEMM 35.3%, LayerNorm1D 1.1%, SplitColumns 1.1%.
    expensive. Already tracked as **#447**, so #440 should not absorb it.
 
 **LayerNorm correction.** The G1 writeup above ranked LayerNorm a strong structural suspect and
-filed #467 on that basis. It measures at 1.2% — real, but not a lever. #467 stays open as a minor
+filed #467 on that basis. It measures at 1.3% — real, but not a lever. #467 stays open as a minor
 cleanup; the occupancy argument is sound, the magnitude was wrong.
 
 ## Consequence for the remaining phases
@@ -340,14 +345,23 @@ is **shared-memory capacity per group**.
 
 The cleanest evidence is the pair that isolates it. `2x2@KT16` and `2x2@KT32` have *identical*
 blocking factors, so identical shared reads per MAC, and differ only in shared memory per group
-(4 KB vs 8 KB). `2x2@KT32` is consistently ~18–25% slower than `2x2@KT16` — and both are slower
-than Row4, which holds 5 KB. Going the other way, `4x2@KT32` has the *best* traffic ratio in the
-family (0.75 shared reads/MAC) and the *worst* footprint (12 KB), and it lands mid-pack. The
-metric that predicted the ordering was the footprint, not the traffic.
+(4 KB vs 8 KB). On the nine largest shapes — the ones that carry the throughput — `2x2@KT32` is
+**18–25% slower than `2x2@KT16`, every one of them** — and both are slower than Row4, which holds
+5 KB. Going the other way, `4x2@KT32` has the *best* traffic ratio in the family (0.75 shared
+reads/MAC) and the *worst* footprint (12 KB), and it lands mid-pack.
 
-So on this device the two effects roughly cancel and the occupancy loss wins: a 5 KB → 8–12 KB
-tile cuts co-resident groups by more than the 20–40% traffic saving returns. That is the opposite
-of the issue's "occupancy headroom exists" — not merely unmeasured, but pointing the wrong way.
+**Scope that evidence, because the unscoped version is false on 6 of 15 shapes** (caught in the
+G2 review, and it had been published four times by then). The effect weakens to 8–13% on mid
+shapes and **inverts** on the three launch-bound ones — `laya scorer 1`, `edge padded rows`,
+`edge padded K` — where `2x2@KT32` is 2–16% *faster*. So footprint dominates where the device is
+saturated with work and is not a predictor at all where there are too few work groups to saturate
+it, at which point group count dominates instead. The defensible claim is "footprint dominates at
+saturation", not "footprint predicted the ordering".
+
+So on this device the two effects roughly cancel at saturation and the occupancy loss wins: a
+5 KB → 8–12 KB tile cuts co-resident groups by more than the 20–40% traffic saving returns. That
+is the opposite of the issue's "occupancy headroom exists" — not merely unmeasured, but pointing
+the wrong way.
 
 ### Bug found en route (#468)
 
@@ -383,5 +397,5 @@ ModernBERT's `5.577E-004` bit for bit — which is the point: the `GemmCfg` refa
 the same geometry, so the chokepoint change is confirmed inert rather than merely unexamined. The
 `minilm | distilbert | distilbert_sst` gate the plan names as mandatory stays PASS.
 
-`--gemm` on AC: **163 cells, GATE PASS, byte-identity PASS**, no geometry skipped.
+`--gemm` on AC: **171 cells, GATE PASS, byte-identity PASS**, no geometry skipped.
 
