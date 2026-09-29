@@ -120,23 +120,50 @@ internal static class GemmKernels
         }
     }
 
-    // ── #440 register-blocked geometries ───────────────────────────────────────
+    // ── #440 register-blocked geometries — MEASURED, NOT ADOPTED ───────────────
     //
-    // Four plain variants that widen the per-thread output block beyond Row4's 1x4, so that a
-    // K step reads fewer shared floats per multiply-add (GpuBuffers.GemmGeometry.
-    // SharedLoadsPerMac). All four keep the incumbent's 16x16 group, K-tile staging and
-    // strictly ascending-K accumulation, so each is *bit-identical* to Row4 on every shape,
-    // not merely close: the same f32 values are added to the same accumulator in the same
-    // order. The --gemm gate asserts that byte-identity alongside its existing double-precision
-    // truth check, which makes it a design regression detector rather than a tolerance test.
+    // Do not route a runner at anything in this section. All four were gated and measured on
+    // 2026-09-29 and every one of them is *slower* than Row4 on every shape: best cell 1.01x
+    // on `laya head ff2` (the one already-weak shape, a wash inside run-to-run noise), typical
+    // 0.6-0.85x, and the launch-bound narrow shapes (`head`, `scorer`) worst at 0.25-0.42x.
+    // They are kept, and kept in the --gemm gate, so the result is reproducible and so the
+    // next person to try a wider tile finds this instead of re-running the experiment. The
+    // full ratio table is in tests/Nivara.PerformanceTests/README.md under "GEMM gate baseline
+    // (2026-09-29)"; the analysis is docs/ACCELERATION.md section 5.2.
+    //
+    // They lose because the premise was wrong. These widen the per-thread output block beyond
+    // Row4's 1x4 so a K step reads fewer shared floats per multiply-add
+    // (GpuBuffers.GemmGeometry.SharedLoadsPerMac) - a 20-40% cut on paper. The binding
+    // constraint on this iGPU is shared-memory *capacity per group*, not shared-memory
+    // *traffic*. The isolating evidence: 2x2@K16 and 2x2@K32 have identical blocking factors,
+    // so identical reads per MAC, and differ only in footprint (4 KB vs 8 KB per group), and
+    // the 8 KB one is consistently 18-25% slower. 4x2@K32 has the best traffic ratio in the
+    // family (0.75 reads/MAC), the worst footprint (12 KB), and lands mid-pack. Footprint
+    // predicted the ordering; traffic did not.
+    //
+    // What they do still earn their keep: all four keep the incumbent's 16x16 group, K-tile
+    // staging and strictly ascending-K accumulation, so each is *bit-identical* to Row4 on
+    // every shape, not merely close - the same f32 values added to the same accumulator in
+    // the same order. The --gemm gate asserts that byte-identity alongside its existing
+    // double-precision truth check, which makes it a design regression detector rather than a
+    // tolerance test. That assertion is what caught #468, an ILGPU OpenCL lowering bug that
+    // returns plausible wrong values and cannot be seen in review: a tolerance-only gate would
+    // have argued its way past it.
     //
     // The K tile is a separate axis from the blocking factor: 2x2 appears at both K16 and K32 so
-    // the two effects can be attributed independently. The body is duplicated per geometry
-    // rather than shared through a multi-accumulator helper, because the epilogue and the
-    // unrolled inner loop are exactly the parts a helper cannot express without reintroducing
-    // the local-memory spill that register blocking exists to avoid.
+    // the two effects can be attributed independently - which is exactly how the occupancy
+    // result above was isolated. The body is duplicated per geometry rather than shared through
+    // a multi-accumulator helper, because the epilogue and the unrolled inner loop are exactly
+    // the parts a helper cannot express without reintroducing the local-memory spill that
+    // register blocking exists to avoid.
+    //
+    // One implementation note that is not optional: each stages its A and B tiles through a
+    // single SharedMemory.Allocate<float> with hand-computed 2D offsets. Two Allocate2D calls
+    // in one kernel whose extents disagree get the second tile mis-placed by ILGPU's OpenCL
+    // lowering (#468) - and the incumbent Row4 escapes only because its A tile is 16x16, i.e.
+    // square, which happens to match its B tile's stride.
 
-    /// <summary>2x2 @ K16: 32x32 output tile, 16x16 group. 4 accumulators, 1.0 shared reads/MAC.</summary>
+    /// <summary>2x2 @ K16: 32x32 output tile, 16x16 group. 4 accumulators, 1.0 shared reads/MAC. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg2x2K16(
         ArrayView<float> a,
         ArrayView<float> b,
@@ -150,12 +177,8 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
-        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
-        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
-        // staged data and returns plausible-looking garbage. Verified against the passing
-        // case, where the two extents happen to agree. A single Allocate with explicit
-        // offsets has no stride to disagree about.
+        // Single 1D shared allocation, A tile then B tile; see the section banner for why
+        // this is one Allocate and not two Allocate2D calls (#468).
         const int ASz = TileRows * KT;
         var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
@@ -215,7 +238,7 @@ internal static class GemmKernels
         }
     }
 
-    /// <summary>2x2 @ K32: 32x32 output tile, 16x16 group, double the K step. 4 accumulators.</summary>
+    /// <summary>2x2 @ K32: 32x32 output tile, 16x16 group, double the K step. 4 accumulators. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg2x2K32(
         ArrayView<float> a,
         ArrayView<float> b,
@@ -229,12 +252,8 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
-        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
-        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
-        // staged data and returns plausible-looking garbage. Verified against the passing
-        // case, where the two extents happen to agree. A single Allocate with explicit
-        // offsets has no stride to disagree about.
+        // Single 1D shared allocation, A tile then B tile; see the section banner for why
+        // this is one Allocate and not two Allocate2D calls (#468).
         const int ASz = TileRows * KT;
         var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
@@ -285,7 +304,7 @@ internal static class GemmKernels
         }
     }
 
-    /// <summary>4x2 @ K32: 64x32 output tile, 16x16 group. 8 accumulators, 0.75 shared reads/MAC.</summary>
+    /// <summary>4x2 @ K32: 64x32 output tile, 16x16 group. 8 accumulators, 0.75 shared reads/MAC. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg4x2K32(
         ArrayView<float> a,
         ArrayView<float> b,
@@ -299,12 +318,8 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
-        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
-        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
-        // staged data and returns plausible-looking garbage. Verified against the passing
-        // case, where the two extents happen to agree. A single Allocate with explicit
-        // offsets has no stride to disagree about.
+        // Single 1D shared allocation, A tile then B tile; see the section banner for why
+        // this is one Allocate and not two Allocate2D calls (#468).
         const int ASz = TileRows * KT;
         var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
@@ -380,7 +395,7 @@ internal static class GemmKernels
         }
     }
 
-    /// <summary>1x8 @ K16: 16x128 output tile, 16x16 group. 8 accumulators.</summary>
+    /// <summary>1x8 @ K16: 16x128 output tile, 16x16 group. 8 accumulators. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg1x8K16(
         ArrayView<float> a,
         ArrayView<float> b,
@@ -394,12 +409,8 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // One 1D allocation, A tile then B tile, offsets computed by hand. Two Allocate2D
-        // calls whose extents differ (KT-wide A tile, TileCols-wide B tile) get the second
-        // tile misplaced by ILGPU's OpenCL lowering: the kernel then reads a neighbour's
-        // staged data and returns plausible-looking garbage. Verified against the passing
-        // case, where the two extents happen to agree. A single Allocate with explicit
-        // offsets has no stride to disagree about.
+        // Single 1D shared allocation, A tile then B tile; see the section banner for why
+        // this is one Allocate and not two Allocate2D calls (#468).
         const int ASz = TileRows * KT;
         var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
 
