@@ -66,12 +66,14 @@ Confirmed by code-memory SQL over `SymbolRecord` / `RelationshipRecord`, not by 
    place on device and reads back only logits. `ArrayView<float>` is a ref struct, so this cannot
    be a returned view: expose the buffer + row count as properties and add a no-readback forward.
    The three existing `ModernBert.cs` call sites must keep compiling and behaving identically.
-2. **Is the 1e-3 bound a hard gate?** `docs/ACCELERATION.md:146` records the ModernBERT *encoder*
-   gate at `maxRel 5.577E-004` against CPU — already ~56% of the budget, from accumulated F32
-   reduction-order drift over 28 layers. Two more head layers plus scorer and act sit on top. If
-   the combined gate lands near 1e-3 for arithmetic reasons rather than defects, report the
-   measured numbers with a remark like `CompareGpu`'s existing 1e-3-vs-1e-5 discussion — do not
-   quietly widen the bound.
+2. **Is the 1e-3 bound a hard gate? — DECIDED: hard fail at 1e-3, print the measured `maxRel`**
+   (human, this session). `docs/ACCELERATION.md:146` records the ModernBERT *encoder* gate at
+   `maxRel 5.577E-004` — already ~56% of the budget, from accumulated F32 reduction-order drift
+   over 28 layers. Two more head layers plus scorer and act sit on top, so the combined gate is the
+   tightest in the repo. It is still a hard gate: no silent widening. The concession is that every
+   failure prints the measured `maxRel` next to the bound, so a near-bound result is visibly
+   attributable to arithmetic drift rather than silently absorbed. The encoder's 1e-3-vs-1e-5
+   discussion in `CompareGpu` is the precedent to follow in wording.
 
 ## Proposed changes
 

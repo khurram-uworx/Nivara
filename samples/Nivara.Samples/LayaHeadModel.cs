@@ -334,27 +334,8 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
         for (; idx < k; idx++)
             logits[idx] = 0.0f;
 
-        var probabilities = Softmax(logits);
-        double clampedK = Math.Max(2, k);
-        double entropy = 0.0;
-        for (int i = 0; i < k; i++)
-        {
-            double p = Math.Max(probabilities[i], 1e-9);
-            entropy -= p * Math.Log(p);
-        }
-        entropy /= Math.Log(clampedK);
-
-        // p.topk(2) raises on a one-element distribution, so the reference special-cases it by
-        // padding the missing second entry with 0.0. Softmax over one logit is 1.0 whatever the logit
-        // is, so top1 - top2 == 1.0, the same "fully decided" signal an unambiguous question gives.
-        double top1 = probabilities[0];
-        double top2 = k >= 2 ? SecondHighest(probabilities) : 0.0;
-
-        var features = new double[LayaHeadOutput.FeatureCount];
-        features[LayaHeadOutput.FeatureTop1] = top1;
-        features[LayaHeadOutput.FeatureGap] = top1 - top2;
-        features[LayaHeadOutput.FeatureEntropy] = entropy;
-        features[LayaHeadOutput.FeatureOptionCount] = clampedK / 255.0;
+        var probabilities = LayaHeadScoring.Softmax(logits);
+        var features = LayaHeadScoring.BuildFeatures(probabilities);
 
         // pooled = h[:, 0] — the post-head-row 0, i.e. the [CLS] position after the head stack.
         var pooled = ReverseGradOperations.Gather(withType, [0]);
@@ -363,7 +344,7 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
 
         // act_head: Sequential(Linear, GELU, Linear)
         var actLogits = actOut.Forward(ReverseGradOperations.GeluExact(actInput.Forward(actInputTensor)));
-        var actionProbabilities = Softmax(ToFloats(actLogits));
+        var actionProbabilities = LayaHeadScoring.Softmax(ToFloats(actLogits));
 
         return new LayaHeadOutput
         {
@@ -443,60 +424,16 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
     }
 
     /// <summary>
-    /// A 1-D key-padding mask of length <paramref name="seqLen"/>: 1 for the real tokens, 0 for the
-    /// padding. Suppressing a key is expressed as a value below 0.5, which is what the reference's
-    /// <c>~attention_mask</c> means once read as an additive mask.
+    /// <see cref="LayaHeadScoring.PrefixMask"/> at <typeparamref name="T"/>, which is the only
+    /// place the mask's shape is decided: one entry per position, not per valid token.
     /// </summary>
-    /// <remarks>
-    /// The mask must be one entry per <em>position</em>, not per valid token. A shorter mask leaves
-    /// the trailing positions unconstrained, which is not a weaker mask but the wrong one: nothing
-    /// after it gets suppressed and the padding is attended to normally.
-    /// </remarks>
     static ReverseGradTensor<T> BuildPrefixMask(int seqLen, int validLength)
     {
+        var mask = LayaHeadScoring.PrefixMask(seqLen, validLength);
         var data = new T[seqLen];
         for (int i = 0; i < seqLen; i++)
-            data[i] = i < validLength ? T.One : T.Zero;
+            data[i] = mask[i] >= 0.5f ? T.One : T.Zero;
         return ReverseGradTensor<T>.FromArray(data);
-    }
-
-    static double[] Softmax(ReadOnlySpan<float> logits)
-    {
-        var p = new double[logits.Length];
-        if (logits.Length == 0)
-            return p;
-
-        double max = double.NegativeInfinity;
-        for (int i = 0; i < logits.Length; i++)
-            max = Math.Max(max, logits[i]);
-
-        double sum = 0.0;
-        for (int i = 0; i < logits.Length; i++)
-        {
-            p[i] = Math.Exp(logits[i] - max);
-            sum += p[i];
-        }
-        for (int i = 0; i < logits.Length; i++)
-            p[i] /= sum;
-        return p;
-    }
-
-    static double SecondHighest(double[] values)
-    {
-        double top = double.NegativeInfinity, second = double.NegativeInfinity;
-        for (int i = 0; i < values.Length; i++)
-        {
-            if (values[i] > top)
-            {
-                second = top;
-                top = values[i];
-            }
-            else if (values[i] > second)
-            {
-                second = values[i];
-            }
-        }
-        return second;
     }
 
     static T[] ToTensor(double[] values)
