@@ -237,7 +237,7 @@ public static class Laya
     /// there is no <c>--bf16</c>/<c>--fp16</c> variant, and the CLI rejects those flags up front
     /// rather than silently ignoring them.
     /// </summary>
-    static (ModernBertGpuRunner Encoder, LayaHeadGpuRunner Head) LoadGpuModels(
+    static GpuModels LoadGpuModels(
         IlgpuRuntime runtime,
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         ModernBertConfig config,
@@ -245,8 +245,18 @@ public static class Laya
     {
         // Laya nests the backbone under "encoder"; the stock checkpoint uses "model".
         var encoder = new ModernBertGpuRunner(runtime, config, tensors, prefix: "encoder");
-        var head = new LayaHeadGpuRunner(runtime, tensors, agent.HeadLayers);
-        return (encoder, head);
+        try
+        {
+            return new GpuModels(encoder, new LayaHeadGpuRunner(runtime, tensors, agent.HeadLayers));
+        }
+        catch
+        {
+            // A head that fails to upload is the common case here — a stock encoder checkpoint has
+            // no type_emb — and leaking the trunk's 1.7 GB of weights on that path would be a poor
+            // way to report it.
+            encoder.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -254,15 +264,31 @@ public static class Laya
     /// where the trunk left it, so only the marker logits and the act logits come back.
     /// </summary>
     static LayaHeadOutput ForwardGpu(
-        ModernBertGpuRunner encoder,
-        LayaHeadGpuRunner head,
+        GpuModels models,
         int[] ids,
         int validLength,
         LayaQuestionType type,
         IReadOnlyList<int> markers)
     {
-        encoder.ForwardOnDevice(ids, validLength);
-        return head.Forward(encoder.HiddenOnDevice, encoder.HiddenRows, type, markers, validLength);
+        models.Encoder.ForwardOnDevice(ids, validLength);
+        return models.Head.Forward(
+            models.Encoder.HiddenOnDevice, models.Encoder.HiddenRows, type, markers, validLength);
+    }
+
+    /// <summary>
+    /// The two GPU halves, owned together. Both hold a large share of the model's weights, and a
+    /// tuple return has no way to be disposed — which leaks both, on every mode.
+    /// </summary>
+    sealed class GpuModels(ModernBertGpuRunner encoder, LayaHeadGpuRunner head) : IDisposable
+    {
+        public ModernBertGpuRunner Encoder { get; } = encoder;
+        public LayaHeadGpuRunner Head { get; } = head;
+
+        public void Dispose()
+        {
+            Encoder.Dispose();
+            Head.Dispose();
+        }
     }
 
     /// <summary><c>laya --gpu</c>. Both halves of the model on the accelerator.</summary>
@@ -270,17 +296,18 @@ public static class Laya
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
-        PrintSetup(config, agent);
 
-        using var runtime = new IlgpuRuntime();
         Console.WriteLine($"=== {ModelTypeName} Inference (GPU) ===");
-        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
         Console.WriteLine("Encoder and decision head both on the accelerator. F32 only, so there is no");
         Console.WriteLine("--bf16/--fp16 variant; the CLI rejects those flags rather than ignoring them.");
         Console.WriteLine();
+        PrintSetup(config, agent);
+
+        using var runtime = new IlgpuRuntime();
+        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
 
         var buildSw = Stopwatch.StartNew();
-        var (encoder, head) = LoadGpuModels(runtime, tensors, config, agent);
+        using var models = LoadGpuModels(runtime, tensors, config, agent);
         buildSw.Stop();
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine(ParameterLine(tensors));
@@ -299,8 +326,7 @@ public static class Laya
                 tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
 
             var sw = Stopwatch.StartNew();
-            var output = ForwardGpu(
-                encoder, head, sequence.Ids, sequence.Length, question.Type, sequence.Markers);
+            var output = ForwardGpu(models, sequence.Ids, sequence.Length, question.Type, sequence.Markers);
             sw.Stop();
 
             var decision = calibration.Decode(question, output.Logits, output.ActionProbability);
@@ -326,15 +352,15 @@ public static class Laya
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
+
+        Console.WriteLine($"=== {ModelTypeName} Benchmark (GPU) ===");
         PrintSetup(config, agent);
 
         using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"=== {ModelTypeName} Benchmark (GPU) ===");
         Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
-        Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        var (encoder, head) = LoadGpuModels(runtime, tensors, config, agent);
+        using var models = LoadGpuModels(runtime, tensors, config, agent);
         buildSw.Stop();
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
@@ -352,14 +378,14 @@ public static class Laya
                 tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
             var (ids, validLength) = PadTo(sequence.Ids, agent.MaxLen, config.PadTokenId);
 
-            ForwardGpu(encoder, head, ids, validLength, question.Type, sequence.Markers);
+            ForwardGpu(models, ids, validLength, question.Type, sequence.Markers);
 
             const int iterations = 3;
             var samples = new long[iterations];
             for (int i = 0; i < iterations; i++)
             {
                 var sw = Stopwatch.StartNew();
-                ForwardGpu(encoder, head, ids, validLength, question.Type, sequence.Markers);
+                ForwardGpu(models, ids, validLength, question.Type, sequence.Markers);
                 sw.Stop();
                 samples[i] = sw.ElapsedMilliseconds;
             }
@@ -400,21 +426,22 @@ public static class Laya
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
+
+        Console.WriteLine($"=== {ModelTypeName} GPU vs CPU Gate ===");
+        Console.WriteLine("Reference: the in-process CPU encoder + head, which 'laya compare' pins to the");
+        Console.WriteLine("laya 0.3.20 wheel. Gating against it pins the GPU path transitively.");
+        Console.WriteLine();
         PrintSetup(config, agent);
 
         var cpuBuildSw = Stopwatch.StartNew();
         var (cpuEncoder, cpuHead, _) = LoadModels<float, float>(tensors, config, agent);
         cpuBuildSw.Stop();
-        Console.WriteLine($"=== {ModelTypeName} GPU vs CPU Gate ===");
-        Console.WriteLine("Reference: the in-process CPU encoder + head, which 'laya compare' pins to the");
-        Console.WriteLine("laya 0.3.20 wheel. Gating against it pins the GPU path transitively.");
-        Console.WriteLine();
         Console.WriteLine($"CPU model load: {cpuBuildSw.ElapsedMilliseconds} ms");
 
         using var runtime = new IlgpuRuntime();
         Console.WriteLine($"Device: {runtime.DeviceName}");
         var buildSw = Stopwatch.StartNew();
-        var (encoder, head) = LoadGpuModels(runtime, tensors, config, agent);
+        using var models = LoadGpuModels(runtime, tensors, config, agent);
         buildSw.Stop();
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine(ParameterLine(tensors));
@@ -425,6 +452,8 @@ public static class Laya
 
         bool logitsOk = true;
         bool clampOk = true;
+        double worstScaled = 0.0;
+        string worstQuestion = "-";
         foreach (var question in FixtureQuestions)
         {
             var sequence = LayaPromptBuilder.BuildSequence(
@@ -437,7 +466,7 @@ public static class Laya
             cpuSw.Stop();
 
             var gpuSw = Stopwatch.StartNew();
-            var gpuOutput = ForwardGpu(encoder, head, ids, validLength, question.Type, sequence.Markers);
+            var gpuOutput = ForwardGpu(models, ids, validLength, question.Type, sequence.Markers);
             gpuSw.Stop();
 
             var row = CompareQuestion(
@@ -445,10 +474,17 @@ public static class Laya
                 cpuSw.ElapsedMilliseconds, gpuSw.ElapsedMilliseconds);
             logitsOk &= row.ValuesOk;
             clampOk &= row.ClampOk;
+            if (row.Scaled > worstScaled)
+            {
+                worstScaled = row.Scaled;
+                worstQuestion = question.Id;
+            }
         }
 
         Console.WriteLine();
-        Console.WriteLine($"Value parity:  {(logitsOk ? "PASS" : $"FAIL (see the max rel figures above; bound {GateRelTol:G} relative)")}");
+        Console.WriteLine($"Value parity:  {(logitsOk ? "PASS" : "FAIL")}   " +
+                          $"worst {worstScaled:E3} of the {GateRelTol:G} bound " +
+                          $"({100.0 * worstScaled / GateRelTol:F1}% used, on {worstQuestion})");
         Console.WriteLine($"Mask clamp:   {(clampOk ? "PASS" : "FAIL (a fully-masked row produced a non-finite value)")}");
 
         if (!logitsOk || !clampOk) return 1;
@@ -461,11 +497,22 @@ public static class Laya
 
     /// <summary>
     /// One question's gate row: marker logits at <see cref="GateRelTol"/>, the act probability, and
-    /// the non-finite check. The measured max abs and max rel are always printed — on a failure they
-    /// are the difference between "arithmetic drift" and "a bug", and on a pass they are the only
-    /// evidence of how much headroom is left.
+    /// the non-finite check. The measured figures are always printed, because on a failure they are
+    /// the difference between "arithmetic drift" and "a bug", and on a pass they are the only
+    /// evidence of how much of the bound is left.
     /// </summary>
-    static (bool ValuesOk, bool ClampOk) CompareQuestion(
+    /// <remarks>
+    /// The reported residual is <c>|gpu − cpu| / (1 + |cpu|)</c> — the same scaled quantity the
+    /// bound applies, not a bare ratio. A bare ratio is the wrong number here twice over: near zero
+    /// it explodes on values whose absolute error is irrelevant, and it can exceed 1e-3 on a row
+    /// that passes, which reads as a failure that is not one. Dividing by <c>1 + |cpu|</c> also
+    /// makes the bound's absolute floor visible instead of leaving it implicit. The fraction of
+    /// bound consumed is printed alongside it, so a run landing at 99% of the bound is legible as
+    /// such rather than as a surprise, and the worst figure across questions is repeated in the
+    /// summary so a failure does not have to be located by eye.
+    /// </remarks>
+    /// <returns>The pass flags, plus the worst scaled residual in this row for the summary.</returns>
+    static (bool ValuesOk, bool ClampOk, double Scaled) CompareQuestion(
         string questionId,
         int markers,
         LayaHeadOutput gpu,
@@ -477,23 +524,24 @@ public static class Laya
         {
             Console.Error.WriteLine(
                 $"{questionId}: logit count mismatch, gpu {gpu.Logits.Length}, cpu {cpu.Logits.Length}.");
-            return (false, false);
+            return (false, false, double.PositiveInfinity);
         }
 
         int beyond = 0;
-        double maxAbs = 0.0, maxRel = 0.0;
-        const double significantFloor = 1e-2;
+        double maxAbs = 0.0, maxScaled = 0.0;
         for (int i = 0; i < gpu.Logits.Length; i++)
         {
             double reference = cpu.Logits[i];
             double diff = Math.Abs(gpu.Logits[i] - reference);
             if (diff > maxAbs) maxAbs = diff;
-            if (diff > GateRelTol * (1.0 + Math.Abs(reference))) beyond++;
-            if (Math.Abs(reference) >= significantFloor) maxRel = Math.Max(maxRel, diff / Math.Abs(reference));
+            double scaled = diff / (1.0 + Math.Abs(reference));
+            if (scaled > GateRelTol) beyond++;
+            if (scaled > maxScaled) maxScaled = scaled;
         }
 
         double actDiff = Math.Abs(gpu.ActionProbability - cpu.ActionProbability);
-        bool actOk = actDiff <= GateRelTol * (1.0 + Math.Abs(cpu.ActionProbability));
+        double actScaled = actDiff / (1.0 + Math.Abs(cpu.ActionProbability));
+        bool actOk = actScaled <= GateRelTol;
 
         int nonFiniteGpu = CountNonFinite(gpu.Logits);
         int nonFiniteCpu = CountNonFinite(cpu.Logits);
@@ -502,15 +550,16 @@ public static class Laya
         Console.WriteLine(
             $"[{questionId}] {markers,2} markers   cpu {cpuMs,6} ms   gpu {gpuMs,5} ms");
         Console.WriteLine(
-            $"  logits: max|diff|={maxAbs:E3}  max rel (|cpu| >= {significantFloor})={maxRel:E3}  " +
-            $"{(beyond == 0 ? "match" : $"{beyond} of {gpu.Logits.Length} beyond {GateRelTol:G} relative")}");
+            $"  logits: max|diff|={maxAbs:E3}  max {maxScaled:E3} of the {GateRelTol:G} bound " +
+            $"({100.0 * maxScaled / GateRelTol,5:F1}% used)" +
+            $"{(beyond == 0 ? "" : $"  <- {beyond} of {gpu.Logits.Length} BEYOND BOUND")}");
         Console.WriteLine($"  act:    gpu {gpu.ActionProbability:F6}  cpu {cpu.ActionProbability:F6}  " +
-                          $"diff {actDiff:E3}  {(actOk ? "match" : "BEYOND BOUND")}");
+                          $"{actScaled:E3} of bound ({(actOk ? "match" : "BEYOND BOUND")})");
         Console.WriteLine($"  non-finite: gpu {nonFiniteGpu} logits, cpu {nonFiniteCpu} logits" +
                           $"{(clampOk ? "" : "  <- a fully-masked row went NaN")}");
         Console.WriteLine();
 
-        return (beyond == 0 && actOk, clampOk);
+        return (beyond == 0 && actOk, clampOk, Math.Max(maxScaled, actScaled));
     }
 
     static string ParameterLine(Dictionary<string, (float[] Data, int[] Shape)> tensors)

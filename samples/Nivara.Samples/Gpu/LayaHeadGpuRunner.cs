@@ -306,12 +306,14 @@ public sealed class LayaHeadGpuRunner : IDisposable
 
         // act_head = Sequential(Linear, GELU, Linear) over cat([h[0], feats]). The pooled row is
         // gathered on device, but the features are host values, so the assembled row is uploaded.
+        // Gather only writes the first `hiddenDim` elements, so the trailing feature slots read back
+        // as whatever the previous call left there; all four are overwritten on the next line.
         gather(runtime.Stream, GpuBuffers.Cfg1D(hiddenDim), xView, pooledIds.View, actRow.View, hiddenDim);
         runtime.Synchronize();
-        var pooledHost = GpuBuffers.Readback(actRow, hiddenDim);
+        var actRowHost = GpuBuffers.Readback(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
         for (int i = 0; i < features.Length; i++)
-            pooledHost[hiddenDim + i] = (float)features[i];
-        actRow.View.CopyFromCPU(runtime.Stream, pooledHost);
+            actRowHost[hiddenDim + i] = (float)features[i];
+        actRow.View.CopyFromCPU(runtime.Stream, actRowHost);
 
         gemmGelu(runtime.Stream, GpuBuffers.GemmCfg(1, actHidden),
             actRow.View, actInW.View, actHiddenBuf.View, actInB.View, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden);
