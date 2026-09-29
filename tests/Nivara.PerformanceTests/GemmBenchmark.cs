@@ -239,7 +239,7 @@ internal static class GemmBenchmark
         }
     }
 
-    static float NextUniformF(ref uint state)
+    internal static float NextUniformF(ref uint state)
     {
         state ^= state << 13;
         state ^= state >> 17;
@@ -334,7 +334,9 @@ internal static class GemmBenchmark
         _ => [GemmVariant.OneToOne, GemmVariant.Row4, GemmVariant.Row4Bias],
     };
 
-    static double TimeBest(Action launch, int warmups, int rounds)
+    /// <summary>Best-of-<paramref name="rounds"/> wall time of a synchronized launch, in µs.
+    /// Shared with <see cref="GemmLegBenchmark"/> so both probes time legs identically.</summary>
+    internal static double TimeBest(Action launch, int warmups, int rounds)
     {
         for (int w = 0; w < warmups; w++)
             launch();
