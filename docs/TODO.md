@@ -82,7 +82,17 @@ DistilBERT/MiniLM GPU tables use, which is the comparison the note is for.
 - Thread the parsed values into `ModernBert.BenchmarkGpu` and `ModernBert.Run`.
 - New help block "ModernBERT benchmark options:", deliberately **not** inside the existing
   GPU block (`:111-114`), whose "(distilbert / distilbert_sst / minilm only, this phase)" line
-  is already stale now that laya and modernbert have GPU paths. That line is not fixed here.
+  is already stale now that laya and modernbert have GPU paths. That line is not fixed here
+  (**#478**).
+
+**Placement correction, made while implementing.** The plan put this validation block "beside the
+existing rejects (`:174-178`), i.e. before the safetensors load at `:182`". That is necessary but
+not sufficient: the **model-existence check at `:170` sits above `:182`**, so with no weights in
+the checkout every rejection would have been masked by `Model file not found … exit 1` — the exit
+code would still be 1, so the planned gate would have "passed" while proving nothing. The block
+therefore went **above `string modelDir = …`**, before anything touches the disk. This is the
+concrete form of "capture the exit status of the process you care about": the first version of
+that gate could not distinguish a correct rejection from the wrong one.
 
 ### `samples/NivaraInference/ModernBert.cs`
 
@@ -106,6 +116,22 @@ DistilBERT/MiniLM GPU tables use, which is the comparison the note is for.
   the only change to default output: the rows stay byte-identical, and the header makes
   README:48's iteration claim checkable from a run.
 
+**Two additions the plan did not call for, both from reading the neighbours while editing them.**
+
+1. The CPU path warns when `warmup != 3`, because the README's CPU table is a **same-row
+   PyTorch-vs-Nivara ratio** and `Python/modernbert_benchmark.py` runs `WARMUP_PASSES = 3`. Without
+   the warning, `--warmup 1` would silently produce a row that looks comparable to the published
+   ones and is not. (The GPU side's equivalent caution is the conditional sentence the plan already
+   specified, but for 3 + 10 rather than for the statistic.)
+2. The CPU loop gets the same over-length backstop the GPU one has. The plan treated the GPU's
+   `continue` as the only silent skip, but `ModernBertMasks.Build` **throws** past 2048 — so a
+   direct `ModernBert.Run(…, seqLengths: [4096])` call, bypassing the CLI, would crash after the
+   1.5 GB load rather than skipping. Cheap, and it keeps the two paths symmetric.
+
+Both print a visible line naming the row and the limit. Note the asymmetry they encode: the GPU
+limit is `config.MaxPositionEmbeddings` (data-dependent, and it skips), the CPU limit is a hard
+constant (and it throws, hence the guard).
+
 ### Docs
 
 - `samples/NivaraInference/README.md:48` — the flags plus the *true* counts (1 + 3); `:228`
@@ -117,6 +143,22 @@ DistilBERT/MiniLM GPU tables use, which is the comparison the note is for.
   mode name in that clause (`modernbert benchmark` -> `modernbert --gpu benchmark`).
 - `docs/MODERNBERT.md` — one line in the benchmark section.
 - `CHANGELOG.md` `[Unreleased] -> Added`, following the `--simd-widen` precedent (`:205`).
+
+**Three doc items the plan missed, found while editing the ones it named.**
+
+- `samples/NivaraInference/README.md:188` — the GPU table above lists MiniLM / DistilBERT /
+  DistilBERT SST-2 and then claims nothing about why ModernBERT's GPU rows are absent from it. Those
+  three run 3 + 10 and report an **average** (`Program.cs:1405`, `:1786`); ModernBERT reports a
+  median of 3. Now stated in the README, so the new run-time sentence is not the only place a
+  reader learns it.
+- `samples/NivaraInference/Python/modernbert_benchmark.py:1-6` — its docstring says it "mirrors
+  `ModernBert.RunBenchmark` deliberately … one untimed pass", which is **false**:
+  `WARMUP_PASSES = 3` is the constant two lines below. This is the file that produces the PyTorch
+  half of the CPU comparison, so the wrong claim is on the comparison itself, not on a side note.
+  Corrected in place, and it is where the README's warmup caveat comes from.
+- `CHANGELOG.md` — `[Unreleased]` had `Added` and `Changed` but no `Documentation` heading, while
+  1.3.0 and 1.1.0 both use one. The claim corrections are not a feature and not a behaviour change,
+  so they went under a new `### Documentation` rather than being folded into `Added`.
 
 ## Blast radius
 
@@ -136,33 +178,68 @@ DistilBERT/MiniLM GPU tables use, which is the comparison the note is for.
 - Published numbers: unchanged at default. The CPU benchmark gains one header line; no row is
   recomputed or restated.
 
-## Verification
+## Verification — results
 
-Runnable in this checkout (no weights, no GPU needed) — each must print its message and
-**exit 1**; the process exit status is what gets asserted, not a pipeline filter's:
+**Build.** `dotnet build Nivara.slnx -c Release` — succeeded, **0 Warning(s), 0 Error(s)**.
+(The human gave the OK for this build.)
 
-- `modernbert benchmark --seq abc` — non-integer token
-- `modernbert benchmark --seq 0` — non-positive
-- `modernbert benchmark --seq 4096` — CPU dense-mask cap
-- `modernbert benchmark --seq` — missing value
-- `modernbert benchmark --iters 0` — non-positive iterations
-- `minilm benchmark --seq 128` — wrong model
-- `modernbert --seq 128` — wrong mode
+**Rejection paths (G).** All 11 exit **1** with the intended message, asserted against
+`$LASTEXITCODE` of the process itself rather than a pipeline filter's status. The planned list was
+7; four more were added while running them, because each of these was a shape the plan did not
+name:
 
-Needs the human's OK to run: `dotnet build samples/NivaraInference -c Release`;
-`dotnet test` if wanted.
+| invocation | exit | message |
+|---|---|---|
+| `modernbert benchmark --seq abc` | 1 | non-integer token named |
+| `modernbert benchmark --seq 0` | 1 | non-positive |
+| `modernbert benchmark --seq -4` | 1 | negative |
+| `modernbert benchmark --seq 1,000` | 1 | `000` is not a length (comma = list separator) |
+| `modernbert benchmark --seq 4096` | 1 | names the 2048 cap, `modernbert --gpu benchmark`, #473 |
+| `modernbert benchmark --seq` | 1 | needs a value |
+| `modernbert benchmark --iters 0` | 1 | non-positive iterations |
+| `modernbert benchmark --warmup x` | 1 | non-integer warmup |
+| `minilm benchmark --seq 128` | 1 | the flag is modernbert's only |
+| `modernbert --seq 128` | 1 | needs the benchmark mode |
+| `modernbert compare --seq 128` | 1 | `compare` is not `benchmark` |
 
-**Not verifiable in this checkout:** `samples/data/` is gitignored and absent and there is no
-OpenCL device, so no measured row (CPU or GPU) can be produced. The happy path will not be
-claimed as verified; either the human runs
-`dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu benchmark --seq 4096`
-and pastes the row, or the PR states the gap.
+`--seq -4` is worth its row: it is the one input where consuming the next token unconditionally
+matters, because a naive `else if (mode.Length == 0) mode = args[i]` catch-all would otherwise
+swallow it as a mode name.
 
-## Commits
+**Reflection probe (P).** A throwaway project in temp (`opencode/seqprobe`) calls the shipped
+private `TryParseSeqLengths`, `TryParseCount` and `ModernBert.Summarize` by reflection, because
+the behaviours below are unreachable through any CLI path without the weights. **21/21 checks,
+exit 0.** This covers what the rejection paths cannot:
 
-1. `docs: plan the #474 selectable modernbert benchmark in TODO.md`
-2. `perf(samples): make the modernbert benchmark sequence lengths and iteration counts selectable`
-3. `docs: record the modernbert benchmark flags and correct its iteration claims`
+- ascending order regardless of input order, de-duplication, whitespace around a comma
+  (`"128, 256"`), and `128,,256` empty elements;
+- `--seq 2048` on CPU **accepted** — the cap is inclusive, since `MaxDenseLength` is the largest
+  legal length, not the first illegal one;
+- `--gpu` accepts 4096, which is the whole point of the 4096 row;
+- empty string and a bare comma both rejected as "needs at least one length", distinct from the
+  per-token message;
+- `Summarize` on 1, 3 and 4 samples — odd takes the middle element, even is the true median.
+
+**Not verified, and not claimed:** no measured row. `samples/data/` is gitignored and absent and
+there is no OpenCL device here, so **neither** the CPU nor the GPU happy path was timed, and the
+added protocol line was not seen in output. If the human wants that evidence,
+`modernbert --gpu benchmark --seq 4096 --iters 10 --warmup 3` on the Iris Xe would also settle the
+4096-row variance anomaly in ACCELERATION.md §1b item 12, which this change makes cheap but does
+not resolve.
+
+**Not run:** `dotnet test`. No test project references `NivaraInference`, so there is nothing for it
+to cover here; the sample CLI's own gates are above.
+
+## Commits — as landed
+
+1. `94f786e` `docs: plan the #474 selectable modernbert benchmark in TODO.md`
+2. `33b4034` `docs: record the #474 grounding pass in TODO.md`
+3. `39a8717` `feat(modernbert): --seq / --warmup / --iters for the benchmark paths`
+4. `40283b6` `docs: record the #474 probe correction and deferred issues in TODO.md`
+5. `0bd8638` `docs: record the modernbert benchmark flags and correct its iteration claims`
+
+The planned 3 became 5: the probe falsified a G1 claim that had already been written into a commit
+message, and correcting a stated justification is its own reason. Nothing was pushed.
 
 ## Grounding (G1)
 
