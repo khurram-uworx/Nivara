@@ -185,6 +185,24 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **Attention ops declared the mask as an `OpNode` input but never differentiated
+  it (#481)** — `ReverseGradOperations.MultiHeadAttention` and
+  `BatchedMultiHeadAttention` passed the optional mask into the node's input list
+  while their backward functions accumulated only dQ/dK/dV, so the op advertised a
+  dependency it did not honour and `mask.Grad` stayed `null` after `Backward`. The
+  mask is now documented and enforced as a non-differentiable constant: it is removed
+  from the input list, and a mask with `RequiresGrad == true` throws
+  `ArgumentException` instead of silently producing nothing. Propagating a gradient
+  was rejected: since #448, `ApplyMask` *assigns* `-inf` to a suppressed cell rather
+  than adding to it, so `d(scores)/d(mask)` is 0 on suppressed cells and 1 on kept
+  cells — a piecewise derivative that a partial gradient would misrepresent. PyTorch's
+  documented SDPA is likewise a pure add with no mask-gradient contract, and
+  [pytorch#148476](https://github.com/pytorch/pytorch/issues/148476) faults outright
+  when a float `attn_mask` requires grad while q/k/v do not. This also reconciles the
+  reverse-mode ops with their forward-mode twins, which already documented the mask as
+  a non-differentiable constant. No in-tree mask builder passes `requiresGrad: true`,
+  so no existing caller changes behaviour; q/k/v gradients are untouched.
+
 - **Flaky timing gates in `TensorsHelperTests` (#482)** —
   `Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization` failed 3 of 5 runs
   on a clean tree, once on a 0.2% margin. Root cause was build configuration, not the
