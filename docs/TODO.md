@@ -222,15 +222,50 @@ exit 0.** This covers what the rejection paths cannot:
   per-token message;
 - `Summarize` on 1, 3 and 4 samples — odd takes the middle element, even is the true median.
 
-**Not verified, and not claimed:** no measured row. `samples/data/` is gitignored and absent and
-there is no OpenCL device here, so **neither** the CPU nor the GPU happy path was timed, and the
-added protocol line was not seen in output. If the human wants that evidence,
-`modernbert --gpu benchmark --seq 4096 --iters 10 --warmup 3` on the Iris Xe would also settle the
-4096-row variance anomaly in ACCELERATION.md §1b item 12, which this change makes cheap but does
-not resolve.
+**Happy paths (H) — measured, after a false negative.** An earlier version of this section
+claimed the happy path was "not verifiable in this checkout" because `samples/data/` is gitignored
+and absent and there is no OpenCL device. **Both halves of that were wrong.**
+`samples/data/modernbert/` is gitignored (`.gitignore:366`) but *present* on this machine at 1.47 GB,
+364 files under `samples/data/` are tracked, and the device is an **Intel Iris Xe**. Both paths
+were then timed:
 
-**Not run:** `dotnet test`. No test project references `NivaraInference`, so there is nothing for it
-to cover here; the sample CLI's own gates are above.
+| path | invocation | median | min | tok/s | ms/layer |
+|---|---|---|---|---|---|
+| CPU | defaults (1 + 3) | 2248.6 ms (S=128) | 2165.6 ms | 11.6 | ~80.31 |
+| CPU | defaults (1 + 3) | 4191.3 ms (S=256) | 4137.0 ms | 6.2 | ~149.69 |
+| GPU | `--seq 128` | 1495.1 ms | 1484.7 ms | 17.4 | ~53.40 |
+
+What this does and does not establish:
+
+- The default invocation prints the same two lengths, the same protocol header and the same column
+  layout as before — the added header line is visible and the rows are otherwise unchanged in shape.
+- The GPU run printed the new conditional comparability sentence, as intended, at the default 1 + 3.
+- The CPU rows are **~1.7x slower** than the README's published 1249.8 / 1922.4 ms. That is a
+  property of this session's machine load, not of the change, and it is reported as a measurement
+  rather than a restatement. **The published rows are not replaced, and no figure in the README,
+  `docs/MODERNBERT.md`, or `docs/ACCELERATION.md` was edited to match these.**
+- The GPU S=128 row (1495.1 ms) lands within 0.2% of ACCELERATION.md's dense-sweep 1497.8 ms for
+  the same row, which is a useful independent check that the GPU path still behaves.
+
+**Deliberately not measured: the GPU 3 + 10 sweep at 512 / 2048 / 4096.** It was started
+(`--seq 512,2048,4096 --iters 10 --warmup 3`), then stopped at 16 min with no rows emitted, on the
+reasoning that it answers a *different* question:
+
+- Those rows exist to settle the 4096-row variance anomaly in ACCELERATION.md §1b item 12 — a
+  question about the **#447 band**, not about whether these flags work. The docs commit already
+  states the flag makes that row cheap to re-measure and does **not** resolve the anomaly.
+- The flag's function is already demonstrated by `--seq 128` producing a real GPU row through the
+  same loop, the same skip guard and the same `Summarize` call as 512/2048/4096 would use. Length
+  is a loop variable; nothing about the sweep is length-specific.
+- `ModernBert` is 1.4 B parameters. The published 4096 row is 176 s **per pass**, so 3 + 10 is
+  ~38 min for that row alone, ~50 min for the three — on a laptop iGPU that would also thermally
+  throttle, making the result a worse measurement than none.
+
+Anyone with a desktop and AC power can now run it in one command. Until then the 4096 anomaly stays
+open and is documented as such; no claim here depends on those rows.
+
+**Still not run:** `dotnet test`. No test project references `NivaraInference`, so there is nothing
+for it to cover here; the sample CLI's own gates are above.
 
 ## Commits — as landed
 
