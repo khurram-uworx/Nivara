@@ -52,6 +52,27 @@ landed the guard at `samples/Nivara.Samples/Gpu/AttentionKernels.cs:86`, covered
 (`scores[rowStart + j] = T.NegativeInfinity`) and is therefore already immune — it is the in-tree
 precedent for this fix.
 
+## Grounding (G1)
+
+Via the microsoft-learn MCP server and code-memory MCP:
+
+| Dependency | Grounded in | Verdict |
+|---|---|---|
+| `T.NegativeInfinity` on `T : IFloatingPointIeee754<T>` | `IFloatingPointIeee754<T>.NegativeInfinity` is a `static abstract` member, reachable as `T.NegativeInfinity` through the constraint | works; already the form `GradKernels.cs:487,612` uses |
+| `NaN == -inf` is false, so a NaN mask cell stays additive | IEEE 754: "comparisons EQ… when either or both operands is NaN return **FALSE**" | the linchpin holds |
+| `NaN + (-inf) = NaN` (the bug) | IEEE 754: "NaN (any OP) any-value = NaN", "INF - INF = NaN" | confirmed |
+| `0 x NaN = NaN` (kills the issue's post-multiply) | IEEE 754: "(+/-)INF * 0 = NaN" | the issue's cheaper variant is confirmed inert |
+| A vectorised select *is* available | `Vector128/256/512.ConditionalSelect<T>` | **not taken, by repo convention** |
+
+`TensorsHelper.cs:107` states the repo deliberately takes the "BCL path instead of a hand-rolled
+`Vector{T}` SIMD kernel", and `ConditionalSelect<T>` would not cover `Half`/`BFloat16` under the
+`IFloatingPointIeee754<T>` constraint anyway. So `ApplyMask` is a scalar loop, consistent with
+existing style. The vectorised option is filed as a follow-up to be revisited only if measured.
+
+**Blast radius addition found during grounding:** `TransformerBlock.CausalMaskSlice`
+(`Nn/TransformerBlock.cs:84`) is a fifth mask source — a sub-slice of `CreateCausalMask`, therefore
+still `{0, -inf}`, no delta.
+
 ## Proposed change
 
 Promote the mask application to one authoritative helper (AGENTS.md rule 8 — it is copied four
