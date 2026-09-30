@@ -103,9 +103,18 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// A scalar loop rather than a <c>TensorPrimitives</c> call, because BCL has no select/blend
     /// primitive and this mask cannot be expressed as arithmetic. Tracked as #480.
     /// </para>
+    /// <para>
+    /// The lengths must match exactly. <c>TensorPrimitives.Add</c>, which this replaces, enforced
+    /// that; the loop on its own would only fault on a short mask and silently truncate a long
+    /// one, so a mis-shaped mask would become a wrong answer instead of an exception.
+    /// </para>
     /// </remarks>
     public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask)
     {
+        if (mask.Length != scores.Length)
+            throw new ArgumentException(
+                $"Mask length {mask.Length} does not match score length {scores.Length}.", nameof(mask));
+
         for (int i = 0; i < scores.Length; i++)
         {
             T m = mask[i];

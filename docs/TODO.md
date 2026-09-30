@@ -219,6 +219,7 @@ The issue reply is posted via `gh`, not committed.
 - [x] #448 — mask-as-select (this branch)
 - [x] #480 — measure `ApplyMask`'s scalar cost against the `TensorPrimitives.Add` it replaced
 - [x] #481 — `mask` is an `OpNode` input but never receives a gradient
+- [x] #482 — the `Transpose` perf probe is flaky on `main` (3/5 failures on a 0.2% margin)
 
 > As each task executes, if you find deferred work or a concern outside this plan, create a tracked
 > issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its number in the log

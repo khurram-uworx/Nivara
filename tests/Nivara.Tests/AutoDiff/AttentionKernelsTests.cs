@@ -240,6 +240,29 @@ public class AttentionKernelsTests
         AssertSuppressesNaN(BFloat16.NaN, BFloat16.NegativeInfinity);
     }
 
+    [Test]
+    public void ApplyMask_LongerMask_ThrowsRatherThanSilentlyTruncating()
+    {
+        // TensorPrimitives.Add required exact length equality. The bare loop would fault on a short
+        // mask but silently truncate a long one, turning a mis-shaped mask into a wrong answer
+        // rather than an exception.
+        var scores = new[] { 1.0f, 2.0f };
+        var tooLong = new[] { 0.0f, 0.0f, NegInf, NegInf };
+
+        var ex = Assert.Throws<ArgumentException>(() => AttentionKernels<float>.ApplyMask(scores, tooLong));
+        Assert.That(ex!.Message, Does.Contain("does not match"));
+    }
+
+    [Test]
+    public void ApplyMask_ShorterMask_ThrowsRatherThanIndexingOutOfRange()
+    {
+        var scores = new[] { 1.0f, 2.0f, 3.0f };
+        var tooShort = new[] { 0.0f, NegInf };
+
+        var ex = Assert.Throws<ArgumentException>(() => AttentionKernels<float>.ApplyMask(scores, tooShort));
+        Assert.That(ex!.Message, Does.Contain("does not match"));
+    }
+
     static void AssertSuppressesNaN<T>(T nan, T negInf)
         where T : struct, IFloatingPointIeee754<T>
     {
