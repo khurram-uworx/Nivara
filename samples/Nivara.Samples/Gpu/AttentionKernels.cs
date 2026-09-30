@@ -138,6 +138,16 @@ internal static class AttentionKernels
     /// window <c>|qPos - j| &lt;= band</c> is what the CPU's
     /// <c>firstAllowed = max(0, i - band)</c> / <c>lastAllowed = min(validLength - 1, i + band)</c>
     /// describe once the padding mask is applied on top.
+    ///
+    /// <para>
+    /// Since #447 narrowed the caller's loop to <c>[qPos - band, qPos + band]</c>, this band test
+    /// is no longer decisive: inside that range it always holds, and a negative band short-circuits
+    /// it to true. It is kept anyway, deliberately, as the <em>authority</em> on the window. The
+    /// loop bounds are the optimisation and this is the contract, and the cost is one integer
+    /// comparison against a <c>headDim</c>-long float dot product. Collapsing the test into the
+    /// bounds would make the kernel silently wrong - keeping a key it should drop - the first time
+    /// someone widened a bound without thinking about it.
+    /// </para>
     /// </remarks>
     static bool Keep(ArrayView<float> mask, int maskBase, int qPos, int j, int band)
         => mask[maskBase + j] >= 0.5f && (band < 0 || XMath.Abs(qPos - j) <= band);
