@@ -28,6 +28,7 @@ dotnet run -c Release --project tests/Nivara.SimdProbe -- support       # print 
 dotnet run -c Release --project tests/Nivara.SimdProbe -- correctness   # validate SIMD vs scalar
 dotnet run -c Release --project tests/Nivara.SimdProbe -- benchmark     # timed scalar vs SIMD
 dotnet run -c Release --project tests/Nivara.SimdProbe -- scalar       # Qwen decode scalar hot-path: RoPE + attention V-phase (AVX-512 probe)
+dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose    # #136 transpose A/B: tiled kernel vs BCL view+flatten
 dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
@@ -211,6 +212,65 @@ recovering ~2–3% of decode time. This is the one branch worth promoting into
 existing scalar loop (non-float `T` / unaccelerated runtimes). Verified by
 existing attention/KV-cache/prefill/PyTorch-parity tests.
 
+## Transpose route A/B (`transpose` mode) — issue #482
+
+Question: `Tensor.Transpose<T>` ships in .NET 11 but returns a zero-copy strided
+**view**, so the #136 swap route must pay `Tensor` construction + `FlattenTo`
+materialization per call. Does that still cost more than the handwritten
+cache-tiled kernel in `TensorsHelper.Transpose`?
+
+**Always run this mode with `-c Release`** — see the build-configuration note below.
+
+Design: the unit-test version of this gate was flaky (3/5 failures on a clean
+tree, once on a 0.2% margin), so the probe fixes the *measurement*, not the
+threshold — warm up both routes, interleave A/B rounds, alternate which route goes
+first so first-measured drift cancels, and report a per-shape distribution
+(median ratio + win rate) over five shapes instead of one point estimate. It also
+reprints the old best-of-5 methodology per shape for contrast.
+
+### Results (Release, X64, .NET 11, Core Ultra 7 255H)
+
+| shape | tiled median | bcl median | median ratio | tiled win rate |
+|-------|--------------|------------|--------------|----------------|
+| 1024x1024 (the #482 gate shape) | 3.5–4.1 ms | 9.0–9.2 ms | ~0.38 | 30/30 |
+| 512x512 | 0.67 ms | 1.12 ms | ~0.59 | 29–30/30 |
+| 2048x1024 | 6.0 ms | 21.0 ms | ~0.29 | 30/30 |
+| 1024x2048 | 7.5 ms | 41.5 ms | ~0.25 | 30/30 |
+| 129x257 (tail handling) | 0.05 ms | 0.41 ms | ~0.12 | 30/30 |
+
+**All shapes: tiled wins ~99–100% of rounds, median ratio ~0.30 — a 2.2–3.4× win.**
+The tiled kernel is earning its keep; the #136 swap stays parked.
+
+### Build configuration is the #482 root cause
+
+The gate failed because it was normally run in **Debug** (`CONTRIBUTING.md`
+documents plain `dotnet test`, which defaults to Debug). This probe's code is
+compiled with whatever configuration it runs in — but `Tensor.Transpose` and
+`FlattenTo` ship **ReadyToRun** and stay optimized regardless. In Debug that
+cancels the tiled kernel's entire advantage:
+
+| Build | tiled | bcl | ratio | outcome |
+|-------|-------|-----|-------|---------|
+| Release | 3.5 ms | 9.1 ms | **0.35–0.51** | 15/15 PASS |
+| Debug   | ~10 ms | ~10 ms | **0.80–1.24** | coin-flips across 1.0 |
+
+In Debug the two routes sit at **parity**, so a sub-1%-margin ordering assertion
+fails roughly half the time — reproducing the issue's 3/5 failures exactly. The
+kernel never regressed; the comparison was void. The probe now prints a
+build-configuration check and refuses to report a Debug "tiled lost" reading as a
+failure.
+
+### Hypotheses tested and ruled out
+
+1. **Machine contention** — under a 16-thread memory-pressure generator the
+   interleaved probe still reported tiled winning 149/150 rounds (median ratio
+   0.220). Contention *widens* the gap.
+2. **JIT tier-0 / missing warmup** — per-call timings over the first 40 calls show
+   the tier-0 penalty is ~2.1x on tiled and ~2.45x on bcl; it hits both routes, so
+   the ratio is unchanged. Warmup is still correct, but it is not the cause.
+3. **Generic-vs-concrete dispatch** — `Transpose<T> where T : struct, INumber<T>`
+   measured identical to a concrete `float` specialization (4.13 ms vs 4.11 ms).
+
 ## Findings
 
 1. **BFloat16 SIMD dot products run ~12–24× faster** than the scalar BCL fallback
@@ -259,4 +319,9 @@ ADR-001 span-ified design) are `TensorsHelper` (matmul) and `RMSNormKernel`
 - `ScalarKernelProbe.cs` (`scalar` mode) — Qwen decode scalar hot-path probe:
   RoPE + attention V-phase vs hand-rolled `Vector512`, plus TensorPrimitives GEMV
   baseline.
-- `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `scalar` / `all`).
+- `TransposeKernelProbe.cs` (`transpose` mode) — #136 A/B of the cache-tiled
+  `TensorsHelper.Transpose` kernel against the BCL view + `FlattenTo` route,
+  interleaved with alternating order, plus the build-configuration check that
+  explains the #482 flakiness. Run with `-c Release`.
+- `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `scalar` /
+  `transpose` / `all`).

@@ -63,9 +63,16 @@ internal static class TransposeKernelProbe
         Console.WriteLine($"Runtime: {Environment.Version}  Platform: {RuntimeInformation.OSArchitecture}");
         Console.WriteLine($"Interleaved design: {Rounds} A/B rounds per shape, first route alternates every round,");
         Console.WriteLine($"{Warmups} untimed warmups per route. A ratio > 1 means tiled is SLOWER.");
+        if (IsDebugBuild())
+        {
+            Console.WriteLine();
+            Console.WriteLine("  *** DEBUG BUILD — read the build-configuration check at the end before trusting");
+            Console.WriteLine("  *** anything here. This is the configuration that produced the #482 false failures.");
+        }
         Console.WriteLine();
 
         int failures = 0;
+        bool isDebug = IsDebugBuild();
         var coldStart = new List<string>();
         var allRatios = new List<double>();
         var allWins = 0;
@@ -92,7 +99,10 @@ internal static class TransposeKernelProbe
             Console.WriteLine($"          VERDICT: {verdict}");
             Console.WriteLine();
 
-            if (verdict == "TILE BOUNDARY BROKEN — tiled loses consistently")
+            // A Debug-build "tiled lost" reading is a build-config artifact, not a kernel
+            // regression (see BuildConfigurationWarning), so it must not be reported as a
+            // failure — doing so is exactly how #482 was mistaken for a flaky kernel.
+            if (verdict == "TILE BOUNDARY BROKEN — tiled loses consistently" && !isDebug)
                 failures++;
         }
 
@@ -101,15 +111,46 @@ internal static class TransposeKernelProbe
         Console.WriteLine($"  ALL SHAPES: tiled wins {allWins}/{allRounds} rounds ({winRate * 100:F1}%), " +
                           $"median ratio {medianAll:F3}");
         Console.WriteLine();
-        Console.WriteLine("  Cold-start (first call, before warmup) — the JIT asymmetry:");
+        Console.WriteLine("  Cold-start (first call, before warmup):");
         foreach (var line in coldStart)
             Console.WriteLine($"          {line}");
-        Console.WriteLine("          Tiled is JIT'd here and starts at tier 0; Tensor.Transpose/FlattenTo");
-        Console.WriteLine("          ship ReadyToRun and are already optimized. A no-warmup gate measures");
-        Console.WriteLine("          an unoptimized hand kernel against optimized framework code.");
+        Console.WriteLine();
+        Console.WriteLine(BuildConfigurationWarning());
         Console.WriteLine();
         Console.WriteLine(Describe(medianAll, winRate));
         return failures;
+    }
+
+    /// <summary>
+    /// Surfaces the #482 trap. This probe's code is compiled with whatever configuration
+    /// it runs in, but <c>Tensor.Transpose</c>/<c>FlattenTo</c> ship ReadyToRun and stay
+    /// optimized either way. In Debug that cancels the tiled kernel's whole advantage and
+    /// puts the two routes at parity — measured ratio drifts across 1.0 between runs, so a
+    /// sub-1%-margin ordering assertion coin-flips. That, not a kernel regression, is what
+    /// #482 was.
+    /// </summary>
+    static string BuildConfigurationWarning()
+    {
+        bool isDebug = IsDebugBuild();
+        return "  Build configuration check:\n"
+             + $"          Optimized: {!isDebug}"
+             + (isDebug
+                 ? "   (DEBUG BUILD — these numbers are NOT evidence about the kernel.)"
+                 : "   (Release — numbers are meaningful.)")
+             + "\n          In Debug the handwritten kernel runs unoptimized while Tensor.Transpose/\n"
+             + "          FlattenTo stay ReadyToRun-optimized, collapsing the two routes to parity\n"
+             + "          (measured ratio drifts across 1.0 run to run). The kernel is not regressing;\n"
+             + "          the comparison is void. Re-run with:\n"
+             + "          dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose";
+    }
+
+    static bool IsDebugBuild()
+    {
+#if DEBUG
+        return true;
+#else
+        return false;
+#endif
     }
 
     /// <summary>Interleaved A/B for one shape.</summary>
