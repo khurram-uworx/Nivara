@@ -171,11 +171,17 @@ and pastes the row, or the PR states the gap.
   (https://learn.microsoft.com/dotnet/standard/base-types/parsing-numeric). So `--seq 1,000`
   is a comma-list (`1`, `000`) and `000` is rejected as non-positive. Deterministic and
   visible; a silent 1000 would be the failure mode worth avoiding.
-- The parameterless `int.TryParse(string, out int)` uses the **current culture** (the docs'
-  own example shows en-US and fr-FR disagreeing on `"1 304,16"`). The new flags use
-  `int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)`. The
-  existing `--seed` / `--teacher-examples` at `Program.cs:71-80` use the culture-sensitive
-  overload and silently yield 0 on garbage — deliberately not copied, and not fixed here.
+- The parameterless `int.TryParse(string, out int)` reads the **current culture**, which the
+  grounding read as a reason to prefer the explicit overload. **A probe falsified that
+  justification and replaced it with a narrower true one.** Measured across the invariant culture
+  plus fr-FR, de-DE, ar-SA, hi-IN, fa-IR and sv-SE, and across group separators, no-break and
+  narrow no-break spaces, a decimal separator, a Unicode minus, surrounding whitespace, an
+  exponent and an Arabic-Indic digit, the two overloads disagreed in exactly two cells:
+  `"+12"` is accepted by the explicit form and **rejected** by the parameterless one under `ar-SA`
+  and `fa-IR`, whose `NumberFormatInfo.PositiveSign` is `؎+`. So the reason for the explicit
+  overload is the **leading sign**, not digit spelling — `NumberStyles.Integer` allows a sign and
+  the sign character is culture-defined. Every other input, digits included, behaved identically.
+  The `TryParseCount` doc comment now says this.
 - Splitting uses `StringSplitOptions.TrimEntries | RemoveEmptyEntries`, so `--seq "128, 256"`
   and `--seq 128,,256` both behave.
 - `code-memory` `impact_analysis` on `BenchmarkGpu` reports exactly one downstream caller,
@@ -185,11 +191,12 @@ and pastes the row, or the PR states the gap.
 
 ## GitHub issues log
 
-- [ ] As tasks execute, create any deferred work or concern immediately via
-      `gh issue create --repo khurram-uworx/Nivara` and record the number here — do not rely on
-      memory; compaction during execution loses it.
-- Known candidates already identified, to file at discovery time if not fixed here:
-  - `samples/NivaraInference/Python/modernbert_benchmark.py` hardcodes `MAX_LENGTHS = (128, 256)`
-    with no argparse — no cross-language parity for `--seq`.
-  - `Program.cs:111-114` help text still says GPU is "distilbert / distilbert_sst / minilm only,
-    this phase" although laya and modernbert have GPU paths.
+- [x] #477 — `Python/modernbert_benchmark.py` hardcodes `MAX_LENGTHS` with no `argparse`, so the
+      PyTorch half of the CPU comparison cannot be steered to one length the way `--seq` now steers
+      the C# half.
+- [x] #478 — `--help` still heads its GPU block "distilbert / distilbert_sst / minilm only, this
+      phase"; `laya` and `modernbert` have working GPU paths and published tables. (Deliberately
+      not fixed here — a different reason from #474.)
+- [x] #479 — `--seed` and `--teacher-examples` use the parameterless `int.TryParse` and discard
+      the failure, so a typo becomes `0` and the run proceeds. `#474` deliberately does not copy
+      this shape.
