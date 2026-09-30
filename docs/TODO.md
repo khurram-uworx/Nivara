@@ -89,28 +89,40 @@ option is ruled out by the gate. Banding needs no second allocation.
 
 ### 3. Tests — new `tests/Nivara.Tests/Gpu/GpuAttentionBandTests.cs`
 
-| gate | comparison | bound |
-|---|---|---|
-| regression | `band = -1`, before vs after | **exact** |
-| banding | banded vs dense, all-valid mask | **exact** |
-| CPU parity | banded GPU vs `MultiHeadAttention` + `ModernBertMasks.Build` | tolerance |
+**The planned "banded vs dense, all-valid mask, exact" gate is not expressible, and the reason
+matters.** The kernel's mask is indexed `mask[b * seqLen + j]` with no query dimension, so a
+per-query band cannot be encoded there at all — which is precisely why `band` exists as a
+parameter. So the "before" kernel is not reproducible in one build, and comparing a `band = 2`
+run against a `band = -1` run asserts something false (`band = -1` means attend to everything).
 
-Exactness is justified, not aspirational: an out-of-band term contributes
-`XMath.Exp(-inf - max) = 0` and `0 * v = ±0`, neither of which can perturb an ascending float sum,
-and the surviving terms keep their original ascending order. Per AGENTS.md, reproduce the reference
-exactly rather than with a tolerance band.
+**The stronger property, established by mutation rather than by assertion: the outputs are
+invariant under the loop-bound change.** `Keep` already suppressed every out-of-band key, so an
+out-of-band key contributed `exp(-inf - max) = 0` and then `0 * v = ±0` to an accumulator that
+starts at `+0`, and round-to-nearest leaves `+0` alone. Reverting the kernel to the pre-#447 dense
+sweep leaves every test green — there is no observable output difference to find.
 
-The CPU-parity gate needs a tolerance because `RowScore`'s scalar `acc +=` is not an FMA while
-`MatMulTransposedB` may be — the same split documented in `GpuElementwiseParityTests`
-(maxRel 3.2e-6). The two exact gates isolate the band change so a tolerance can never mask a band
-bug. Cases: empty band row (zeros, not NaN), `band = -1` byte-identical, band smaller than
-`headDim`, a band that clips at both sequence ends, and multi-head/multi-batch.
+That makes the change purely a performance change, and it dictates the gate design: the **only**
+way the new bounds can be wrong is by **under-reaching** (dropping a key that should have been
+kept), so that is what the fixture attacks. Four gates, each confirmed to fail on its own mutation:
+
+| gate | band | bound | fails when |
+|---|---|---|---|
+| `band = 0` == the V row (closed form) | 0 | **exact** | bounds under-reach by one |
+| fully-masked row is zeros, not NaN | 1 + padding | **exact** | the `max == -inf` guard is removed |
+| vs CPU `MultiHeadAttention` + `ModernBertMasks.Build` | 2, and 1 | 1e-5 | bounds under-reach |
+| `band = -1` vs a band spanning the sequence | -1 / 8 | **exact** | nothing (bound fidelity only) |
+
+The `band = 0` gate is exact because a single visible key collapses the softmax to `p = 1`, so the
+output row *is* `V[b, qPos]` — a closed form needing no reference implementation. The CPU gates
+carry a tolerance because `RowScore`'s scalar `acc +=` is not an FMA while the CPU dot product may
+be (the split `GpuElementwiseParityTests` documents). The exact gates have been shown to fail, so
+the tolerant ones are not the only thing standing between a band defect and a green run.
 
 **Gap being closed:** there is currently no automated test that runs the GPU `BatchedAttention`
 kernel. `GpuElementwiseParityTests` calls only host-side scalar helpers; `SharedMemoryAllocationTests`
 reads IL. The only real gate today is end-to-end `modernbert --gpu compare`, which needs weights and
-a GPU. This adds the first. It must skip cleanly where no OpenCL device exists, with the skip
-counted in a **separate counter** from pass/fail so an unhostable run is never reported as numeric.
+a GPU. This adds the first. It skips cleanly where no OpenCL device exists, with the skip counted
+in a **separate counter** from pass/fail so an unhostable run is never reported as numeric.
 
 ### 4. Docs
 
@@ -144,6 +156,22 @@ passes 3/3 kernel gates on the Iris Xe.
    cosine 1.0000000000, including the padding region).
 5. `--gemm-legs` on **AC** against this machine's baseline: BatchedAttention 57.8%, GEMM 40.6%,
    17110 ms/fwd. Expect the attention share to drop and the ratio (BatchedAttention / GEMM) to fall.
+
+**Correction to step 5, found while executing: `--gemm-legs` cannot measure this change.**
+`GemmLegBenchmark.cs:166-168` deliberately pins `band = GpuBuffers.GlobalAttentionBand` (-1),
+documented as "the more expensive of ModernBERT's 3:1 global:sliding layer mix, so the attention
+leg here is the pessimistic one." A global-attention leg is bit-identical before and after #447, so
+the 57.8% baseline is expected to reproduce **unchanged** and would say nothing about this work.
+Measuring the change needs the real model, which carries per-layer bands
+(`ModernBertGpuRunner.cs:408`), so the A/B is `modernbert --gpu benchmark` on this branch against
+the same build with the dense sweep restored.
+
+Arithmetic that shapes what to expect at each length (band 64 → a 129-wide window):
+
+- **S=128 must show no change at all** — 129 ≥ 128, so the band spans the whole sequence. A free
+  control row: any movement there is measurement noise, not signal.
+- S=512 → 129/512 = 25% of keys kept, so a 75% cut on the 18 sliding layers.
+- S=2048 → 129/2048 = 6.3% of keys kept, a 93.7% cut.
 
 ### Expected result, and what a miss would mean
 
@@ -180,6 +208,13 @@ the target.
 - [x] #447 — banded/sparse attention kernel (this branch)
 - [x] #450 — fused pre-norm block, explicitly blocked on #447
 - [x] #454 — fully-masked row under `finfo.min`; **not** a blocker here (the `max == -inf` guard
-      already covers the GPU path), but narrowed bands raise its reachability, so a test pins it
-- [ ] lift the CPU 2048 cap — CPU-only feasibility follow-up; needs a `band` parameter on the
-      public `MultiHeadAttention`. Filed during execution.
+      already covers the GPU path), but narrowed bands raise its reachability, so a test pins it —
+      and that test is the only one that fails when the guard is removed
+- [x] #473 — lift the CPU 2048 cap. CPU-only feasibility: attention is 2.1%/4.1% of MACs at
+      L=128/256, so a banded CPU kernel saves ~0.9%, not time. What it buys is the ability to run
+      8192-token context at all, and not allocating 537 MB of mask. Needs a `band` parameter on
+      the public `MultiHeadAttention`. Created while executing.
+- [x] #474 — `modernbert benchmark` has no `--seq` flag. Blocked the A/B in step 5: the GPU path
+      hardcodes `{128, 512, 2048, 4096}` (`ModernBert.cs:589`) and the 4096 row is ~1000x the
+      attention work of the 128 row, so one row of that table cannot be measured without paying for
+      the rest. Created while executing.
