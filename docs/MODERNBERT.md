@@ -62,7 +62,7 @@ Re-run after the encoder norms switched from an unloaded zero Beta to `LayerNorm
 | 128 tokens | 287.3 ms | 1249.8 ms | ~4.3× |
 | 256 tokens | 504.0 ms | 1922.4 ms | ~3.8× |
 
-Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates short runs — ~5.4× a seq-128 forward. Nivara: 20.8 tok/s at seq 128, 13.5 tok/s at seq 256, ~44.6 and ~68.7 ms/layer. See the [NivaraInference README](../samples/NivaraInference/README.md) for full benchmark tables.
+Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates short runs — ~5.4× a seq-128 forward. Nivara: 20.8 tok/s at seq 128, 13.5 tok/s at seq 256, ~44.6 and ~68.7 ms/layer. Each row is 1 warmup + 3 timed passes, median reported. `--seq N[,N...]` picks the lengths and `--warmup N` / `--iters N` the pass counts on both benchmark paths; the defaults are the tables above. The PyTorch side of the comparison uses 3 warmup passes, not 1 — `--warmup 3` matches it. See the [NivaraInference README](../samples/NivaraInference/README.md) for full benchmark tables.
 
 ## GPU path
 
@@ -75,4 +75,4 @@ The gate is GPU-vs-CPU in-process (no PyTorch fixture needed). Fixture seqLen 12
 | valid | **2.861E-005** | 5.577E-004 | 1.0000001 | 0 |
 | padding | 6.866E-004 | 4.867E-003 | — | 0 |
 
-Benchmark rows scale with sequence length: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s. See [docs/ACCELERATION.md](ACCELERATION.md) §1b for full details.
+Benchmark rows scale with sequence length: 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s. `modernbert --gpu benchmark` defaults to exactly those four lengths, and `--seq` times a subset — the 4096 row that the CPU path cannot reach is now one flag away rather than a source edit. See [docs/ACCELERATION.md](ACCELERATION.md) §1b for full details.

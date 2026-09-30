@@ -1,9 +1,13 @@
-"""ModernBERT-large inference benchmark (same methodology as the C# `modernbert benchmark` mode).
+"""ModernBERT-large inference benchmark (PyTorch side of the C# `modernbert benchmark` comparison).
 
 Mirrors `ModernBert.RunBenchmark` deliberately: the same fixture sentence, the same two padded
-lengths (128 and 256), one untimed pass so JIT / first-touch page faults stay out of the samples,
-then 3 timed passes reported as median and min. Only the same-row PyTorch-vs-Nivara ratio is
-meaningful, and only if both sides are run in the same session.
+lengths (128 and 256), then 3 timed passes reported as median and min. Only the same-row
+PyTorch-vs-Nivara ratio is meaningful, and only if both sides are run in the same session.
+
+The two sides do not warm up identically: this script runs 3 untimed passes (`WARMUP_PASSES`),
+the C# mode 1. The docstring here used to claim "one untimed pass ... deliberately", which
+contradicted the constant two lines below it. Pass `--warmup 3` to the C# mode to match, or run
+this with `WARMUP_PASSES = 1` to match the other way.
 
 The sentence is `SampleSentences[0]` in the C# mode and `TEXT` in `modernbert_compare.py`, so the
 26 valid tokens are identical on both sides.
