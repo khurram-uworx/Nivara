@@ -216,9 +216,9 @@ The issue reply is posted via `gh`, not committed.
 
 ## GitHub issues log
 
-- [ ] #448 — mask-as-select (this branch)
-- [ ] #NNN — measure the scalar `ApplyMask` cost against the vectorized `Add` (raised at execution)
-- [ ] #NNN — `mask` is an `OpNode` input but never receives a gradient (raised at execution)
+- [x] #448 — mask-as-select (this branch)
+- [x] #480 — measure `ApplyMask`'s scalar cost against the `TensorPrimitives.Add` it replaced
+- [x] #481 — `mask` is an `OpNode` input but never receives a gradient
 
 > As each task executes, if you find deferred work or a concern outside this plan, create a tracked
 > issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its number in the log
