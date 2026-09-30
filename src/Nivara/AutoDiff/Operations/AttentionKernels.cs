@@ -63,7 +63,17 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// before any write), so attention and the Softmax op share one kernel.
     /// </summary>
     public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols)
-        => GradKernels.SoftmaxGradient(weights, dS, dS, cols);
+        => SoftmaxBackwardRows(weights, dS, rows, cols, ReadOnlySpan<bool>.Empty);
+
+    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
+                                           ReadOnlySpan<bool> scoreIndependentRows = default)
+    {
+        if (!scoreIndependentRows.IsEmpty && scoreIndependentRows.Length != rows)
+            throw new ArgumentException(
+                $"Row flags length {scoreIndependentRows.Length} does not match rows {rows}.", nameof(scoreIndependentRows));
+
+        GradKernels.SoftmaxGradient(weights, dS, dS, cols, scoreIndependentRows);
+    }
 
     /// <summary>
     /// In-place additive attention mask over a flat [qLen, kvLen] score buffer.
@@ -111,14 +121,96 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// </remarks>
     public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask)
     {
+        ApplyMask(scores, mask, Span<bool>.Empty, 0, 0);
+    }
+
+    /// <summary>
+    /// In-place additive attention mask over a flat [qLen, kvLen] score buffer, recording
+    /// which query rows became score-independent due to saturation by the mask fill.
+    /// </summary>
+    /// <param name="scores">Flat score buffer [rows * cols].</param>
+    /// <param name="mask">Additive mask buffer [rows * cols].</param>
+    /// <param name="scoreIndependentRows">
+    /// Per-row flag where <c>true</c> means every cell in the row was annihilated
+    /// by the mask (the row's pre-softmax score no longer depends on any input after
+    /// masking). Pass <see cref="Span{Boolean}.Empty"/> to ignore.
+    /// </param>
+    /// <param name="rows">Query rows. If <paramref name="scoreIndependentRows"/> is not empty,
+    /// this must equal its length.</param>
+    /// <param name="cols">Keys per row.</param>
+    /// <remarks>
+    /// A cell is <em>dead</em> (score annihilated) if <c>mask[i] != T.Zero</c> and
+    /// <c>(scores[i] + mask[i]) == mask[i]</c>. This is the definitive test: adding the fill
+    /// does not change the stored value, so the final pre-softmax value carries no
+    /// dependence on the original score. The <c>-inf</c> branch is subsumed by this test
+    /// (adding <c>-inf</c> to a finite-or-infinite score produces <c>-inf</c> only in the
+    /// suppressed case; the equality test detects annihilation consistently). A row is
+    /// flagged when every cell in it is dead.
+    /// </remarks>
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask,
+                                 Span<bool> scoreIndependentRows, int rows, int cols)
+    {
         if (mask.Length != scores.Length)
             throw new ArgumentException(
                 $"Mask length {mask.Length} does not match score length {scores.Length}.", nameof(mask));
-
-        for (int i = 0; i < scores.Length; i++)
+        if (!scoreIndependentRows.IsEmpty)
         {
-            T m = mask[i];
-            scores[i] = m == T.NegativeInfinity ? T.NegativeInfinity : scores[i] + m;
+            if (rows < 0) throw new ArgumentOutOfRangeException(nameof(rows));
+            if (cols < 0) throw new ArgumentOutOfRangeException(nameof(cols));
+            if (scoreIndependentRows.Length != rows)
+                throw new ArgumentException(
+                    $"Row flags length {scoreIndependentRows.Length} does not match rows {rows}.", nameof(scoreIndependentRows));
+            if ((long)rows * cols != scores.Length)
+                throw new ArgumentException(
+                    $"rows*cols ({rows * cols}) must equal score length ({scores.Length}).");
+        }
+
+        if (scoreIndependentRows.IsEmpty)
+        {
+            for (int i = 0; i < scores.Length; i++)
+            {
+                T m = mask[i];
+                if (m == T.NegativeInfinity)
+                {
+                    scores[i] = T.NegativeInfinity;
+                }
+                else
+                {
+                    T s = scores[i];
+                    T t = s + m;
+                    scores[i] = t;
+                }
+            }
+            return;
+        }
+
+        scoreIndependentRows.Clear();
+        int idx = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            bool rowIndependent = true;
+            for (int c = 0; c < cols; c++, idx++)
+            {
+                T s = scores[idx];
+                T m = mask[idx];
+                T t;
+                bool dead = false;
+                if (m == T.NegativeInfinity)
+                {
+                    t = T.NegativeInfinity;
+                    dead = true;
+                }
+                else
+                {
+                    t = s + m;
+                    if (m != T.Zero && t == m)
+                        dead = true;
+                }
+                scores[idx] = t;
+                if (!dead)
+                    rowIndependent = false;
+            }
+            scoreIndependentRows[r] = rowIndependent;
         }
     }
 

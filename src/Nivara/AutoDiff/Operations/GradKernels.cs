@@ -408,18 +408,36 @@ internal static class GradKernels
 
     public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount)
         where T : struct, IFloatingPointIeee754<T>
+        => SoftmaxGradient(softmaxOutput, gradOutput, output, classCount, ReadOnlySpan<bool>.Empty);
+
+    public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount,
+                                         ReadOnlySpan<bool> independentRows)
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (softmaxOutput.Length != gradOutput.Length || output.Length < gradOutput.Length)
             throw new ArgumentException("All spans must have the same length.");
         if (classCount <= 0 || classCount >= softmaxOutput.Length)
         {
+            if (!independentRows.IsEmpty && independentRows.Length > 0 && independentRows[0])
+            {
+                output.Clear();
+                return;
+            }
             SoftmaxGradientSingle(softmaxOutput, gradOutput, output);
             return;
         }
         int rows = softmaxOutput.Length / classCount;
+        if (!independentRows.IsEmpty && independentRows.Length != rows)
+            throw new ArgumentException(
+                $"Row flags length {independentRows.Length} does not match rows {rows}.", nameof(independentRows));
         for (int r = 0; r < rows; r++)
         {
             int start = r * classCount;
+            if (!independentRows.IsEmpty && independentRows[r])
+            {
+                output.Slice(start, classCount).Clear();
+                continue;
+            }
             SoftmaxGradientSingle(softmaxOutput.Slice(start, classCount), gradOutput.Slice(start, classCount), output.Slice(start, classCount));
         }
     }
