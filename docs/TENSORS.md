@@ -177,8 +177,12 @@ Status verified against `System.Numerics.Tensors` 11.0.0-preview.7 (#136):
 - **`Tensor.Transpose<T>` ships** but returns a zero-copy strided *view* over the source array —
   it does not materialize contiguous row-major output. Nivara consumers feed contiguous spans to
   `TensorPrimitives.Dot` and friends, so `TensorsHelper.Transpose` stays as the physical
-  materializer. Parity + performance regression gates in `TensorsHelperTests` fail if the BCL
-  view-materialization route ever beats the tiled kernel, signalling a re-evaluation.
+  materializer. It is also materially faster than the view + `FlattenTo` route: measured in
+  Release at 2.2–3.4× across five shapes, winning ~99–100% of interleaved A/B rounds
+  (`dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose`). A parity test plus a
+  median-ratio performance gate in `TensorsHelperTests` signal a re-evaluation if that inverts;
+  the performance gate only runs in an optimized build, because in Debug the handwritten kernel
+  is unoptimized while the BCL tensor code stays ReadyToRun and the two collapse to parity (#482).
 - **`Tensor.MatrixMultiply<T>` does not exist** yet — open api-suggestion
   [dotnet/runtime#95863](https://github.com/dotnet/runtime/issues/95863) inside the BLAS epic
   [dotnet/runtime#93286](https://github.com/dotnet/runtime/issues/93286). The handwritten matmul

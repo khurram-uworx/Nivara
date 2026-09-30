@@ -185,6 +185,28 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **Flaky timing gates in `TensorsHelperTests` (#482)** —
+  `Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization` failed 3 of 5 runs
+  on a clean tree, once on a 0.2% margin. Root cause was build configuration, not the
+  kernel: the gate ran by default in Debug (`CONTRIBUTING.md` documented plain
+  `dotnet test`), where `Nivara.dll` is compiled **unoptimized** while
+  `System.Numerics.Tensors` ships **ReadyToRun** and stays optimized regardless. That
+  cancels the tiled kernel's entire advantage and puts both routes at parity, so a
+  sub-1%-margin ordering assertion coin-flips across 1.0 — measured Release ratios of
+  0.35–0.51 (15/15 runs, tiled 2.2–3.4× faster) against Debug ratios of 0.80–1.24.
+  Machine contention, JIT tier-0 and generic-vs-concrete dispatch were each tested and
+  ruled out; contention in fact *widens* the gap, and the tier-0 penalty hits both
+  routes about equally.
+
+  Both probes now warm up, interleave A/B rounds alternating which route is measured
+  first, and assert on the median ratio against a bound well above the noise floor,
+  instead of comparing two private best-of-5 summaries once. Both call
+  `RequireOptimizedBuildForTiming()` and carry `[Category("Performance")]`, so a Debug
+  run reports "not measured" rather than a fabricated verdict — the mask-propagation
+  probe previously had no category and so ran in CI as an un-triaged timing gate.
+  `CONTRIBUTING.md` and `AGENTS.md` now require `-c Release` for any performance run;
+  CI already built and tested Release.
+
 - **Attention mask no longer lets a non-finite score escape suppression (#448)** -
   `MultiHeadAttention` and `BatchedMultiHeadAttention` applied the mask as
   `score + mask`, so a suppressed cell was computed as `score + (-inf)`. Summing cannot

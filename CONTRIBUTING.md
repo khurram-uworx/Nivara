@@ -143,20 +143,32 @@ All contributions must include tests where applicable.
 ### Running Tests
 
 ```bash
-# All tests
-dotnet test
+# All tests (Release — see the note below, always pass -c Release)
+dotnet test -c Release
 
 # With coverage
-dotnet test --collect:"XPlat Code Coverage"
+dotnet test -c Release --collect:"XPlat Code Coverage"
 
 # Run specific test categories
-dotnet test --filter "Category=Unit"
-dotnet test --filter "Category=Integration"
-dotnet test --filter "Category=Property"
+dotnet test -c Release --filter "Category=Unit"
+dotnet test -c Release --filter "Category=Integration"
+dotnet test -c Release --filter "Category=Property"
+
+# Performance-category tests only. CI excludes these; run them locally to check
+# a kernel change: dotnet test -c Release --filter "Category=Performance"
+dotnet test -c Release --filter "Category=Performance"
 
 # Run performance benchmarks (if available)
 dotnet run --project benchmarks --configuration Release
 ```
+
+> ⚠️ **Always run tests in Release (`-c Release`).** `dotnet test` defaults to
+> Debug, which compiles `Nivara.dll` **unoptimized** while `System.Numerics.Tensors`
+> ships **ReadyToRun** and stays optimized regardless. Any timing assertion that
+> compares our kernel against a BCL tensor API is therefore measuring the build
+> configuration, not the code — this made the #482 transpose perf gate fail 3 of 5
+> runs on a clean tree. Tests that assert on wall-clock carry
+> `[Category("Performance)]` and skip themselves outside an optimized build.
 
 ---
 

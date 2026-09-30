@@ -24,6 +24,7 @@ internal class Program
             "correctness" => Correctness.RunAll(),
             "benchmark" => Benchmark.RunAll(),
             "scalar" => ScalarKernelProbe.Run(),
+            "transpose" => TransposeKernelProbe.Run(),
             "all" => CpuIdProbe.Run() + SupportReport.Run() + Correctness.RunAll() + Benchmark.RunAll(),
             _ => SupportReport.Run() + Correctness.RunAll() + Benchmark.RunAll()
         };
