@@ -148,6 +148,27 @@ mask-gradient work to a scalar loop.
   regressions). **Ask the human before running `dotnet test`.**
 - `dotnet test -c Release --filter "FullyQualifiedName~AttentionMask"`.
 
+### Results (G2 evidence)
+
+All runs in `-c Release`, exit status captured for each.
+
+| Run | Result |
+|---|---|
+| `dotnet build src/Nivara/Nivara.csproj -c Release` | succeeded, **0 warnings**, 0 errors |
+| `dotnet build tests/Nivara.Tests -c Release` | succeeded, **0 warnings**, 0 errors |
+| `AttentionMaskTests` (6 new) | **6 passed**, 0 failed, 0 skipped |
+| `BatchedMultiHeadAttentionTests` + `AttentionKernelsTests` + `GradKernelsTests` + `ForwardParityTests` + `ForwardGradOperationsTests` | **261 passed**, 0 failed, 0 skipped |
+| `NnTests` + `ModernBertMaskTests` + `MultiHeadAttentionTests` + `BatchedAttentionTests` + `BandedAttentionTests` + `LlamaCausalAttentionTests` + `GqaKvRepeatTests` | **259 passed**, 0 failed, 0 skipped |
+
+The Torch parity fixtures (`NivaraTorch/*`) reported **0 skipped**, so the
+`.bin` fixtures are present locally and that is a real parity pass, not a
+silent skip.
+
+**Not verified locally:** the full `--filter "Category!=Performance"` suite was
+still running when the human directed that CI be the authority for it. It is
+not claimed as passing here. Total local coverage is 526 tests across the runs
+above, all of which cover the touched ops and their parity fixtures.
+
 ## Planned commits
 
 1. `docs: plan #481 attention mask differentiability in TODO.md`
@@ -207,4 +228,8 @@ this plan, create it immediately with
 `gh issue create --repo khurram-uworx/Nivara` and record the number here. Do
 not rely on memory — compaction during execution can lose items.
 
-- [ ] #481 — the issue this plan closes (mask declared but never differentiated)
+- [x] #481 — the issue this plan closes (mask declared but never differentiated)
+- [ ] #487 — `OpNode.Inputs` contract is undocumented, so a future op can silently
+  exclude a requiresGrad input from `shouldTrack` the way the attention mask did;
+  covers the forward-mode twins, `SparseEmbeddingBag`'s `indices` exclusion, and the
+  `Parameter` convention. Created while grounding #481.
