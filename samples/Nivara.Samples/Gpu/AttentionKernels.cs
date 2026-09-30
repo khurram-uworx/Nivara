@@ -23,6 +23,13 @@ namespace Nivara.Samples.Gpu;
 /// S=8192, and only the per-(b,h,q) accumulator needs to be live. Each output element's
 /// j loop stays sequential and ascending, so the accumulation order and precision shape
 /// match the CPU kernel exactly.
+///
+/// <para>
+/// The band narrows the loop bounds, not just the score: all three passes iterate
+/// [qPos - band, qPos + band] clipped to the sequence, so a sliding layer's cost tracks the
+/// window rather than seqLen (#447). <c>Keep</c> still applies the padding mask inside that
+/// range, and a negative band leaves the full range untouched.
+/// </para>
 /// </summary>
 internal static class AttentionKernels
 {
@@ -54,8 +61,17 @@ internal static class AttentionKernels
         int maskBase = b * seqLen;
         int outBase = qRow * D;
 
+        // The row's key range, narrowed to the sliding band. Computing it once and reusing it in
+        // all three passes is what makes the band cost what it should: previously `band` only
+        // decided whether to overwrite an already-computed score with -inf, so every pass swept
+        // all seqLen keys and the window bought no arithmetic. band < 0 keeps the full range, so
+        // the global-attention callers (DistilBERT, MiniLM, Laya, the leg benchmark) are
+        // bit-identical to before.
+        int jFirst = band < 0 ? 0 : XMath.Max(0, qPos - band);
+        int jLast = band < 0 ? seqLen - 1 : XMath.Min(seqLen - 1, qPos + band);
+
         float max = float.NegativeInfinity;
-        for (int j = 0; j < seqLen; j++)
+        for (int j = jFirst; j <= jLast; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
             if (!Keep(mask, maskBase, qPos, j, band)) s = float.NegativeInfinity;
@@ -75,7 +91,7 @@ internal static class AttentionKernels
         }
 
         float sum = 0f;
-        for (int j = 0; j < seqLen; j++)
+        for (int j = jFirst; j <= jLast; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
             if (!Keep(mask, maskBase, qPos, j, band)) s = float.NegativeInfinity;
@@ -97,7 +113,7 @@ internal static class AttentionKernels
         for (int d = 0; d < headDim; d++)
             acc[d, lane] = 0f;
 
-        for (int j = 0; j < seqLen; j++)
+        for (int j = jFirst; j <= jLast; j++)
         {
             float s = RowScore(q, k, qRow, b * seqLen + j, dOffset, D, headDim, scale);
             if (!Keep(mask, maskBase, qPos, j, band)) s = float.NegativeInfinity;
@@ -122,6 +138,16 @@ internal static class AttentionKernels
     /// window <c>|qPos - j| &lt;= band</c> is what the CPU's
     /// <c>firstAllowed = max(0, i - band)</c> / <c>lastAllowed = min(validLength - 1, i + band)</c>
     /// describe once the padding mask is applied on top.
+    ///
+    /// <para>
+    /// Since #447 narrowed the caller's loop to <c>[qPos - band, qPos + band]</c>, this band test
+    /// is no longer decisive: inside that range it always holds, and a negative band short-circuits
+    /// it to true. It is kept anyway, deliberately, as the <em>authority</em> on the window. The
+    /// loop bounds are the optimisation and this is the contract, and the cost is one integer
+    /// comparison against a <c>headDim</c>-long float dot product. Collapsing the test into the
+    /// bounds would make the kernel silently wrong - keeping a key it should drop - the first time
+    /// someone widened a bound without thinking about it.
+    /// </para>
     /// </remarks>
     static bool Keep(ArrayView<float> mask, int maskBase, int qPos, int j, int band)
         => mask[maskBase + j] >= 0.5f && (band < 0 || XMath.Abs(qPos - j) <= band);
