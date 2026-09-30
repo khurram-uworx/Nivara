@@ -164,6 +164,25 @@ and pastes the row, or the PR states the gap.
 2. `perf(samples): make the modernbert benchmark sequence lengths and iteration counts selectable`
 3. `docs: record the modernbert benchmark flags and correct its iteration claims`
 
+## Grounding (G1)
+
+- `int.TryParse` defaults to `NumberStyles.Integer`: digits, surrounding whitespace and a
+  leading sign only — **no group separator**
+  (https://learn.microsoft.com/dotnet/standard/base-types/parsing-numeric). So `--seq 1,000`
+  is a comma-list (`1`, `000`) and `000` is rejected as non-positive. Deterministic and
+  visible; a silent 1000 would be the failure mode worth avoiding.
+- The parameterless `int.TryParse(string, out int)` uses the **current culture** (the docs'
+  own example shows en-US and fr-FR disagreeing on `"1 304,16"`). The new flags use
+  `int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)`. The
+  existing `--seed` / `--teacher-examples` at `Program.cs:71-80` use the culture-sensitive
+  overload and silently yield 0 on garbage — deliberately not copied, and not fixed here.
+- Splitting uses `StringSplitOptions.TrimEntries | RemoveEmptyEntries`, so `--seq "128, 256"`
+  and `--seq 128,,256` both behave.
+- `code-memory` `impact_analysis` on `BenchmarkGpu` reports exactly one downstream caller,
+  `Main` in `samples/NivaraInference/Program.cs`. A relationship scan plus an exhaustive grep
+  finds the ModernBERT entry points called from `Program.Main:299-312` and nowhere else, and
+  no test project references the `NivaraInference` exe. The blast radius above holds.
+
 ## GitHub issues log
 
 - [ ] As tasks execute, create any deferred work or concern immediately via
