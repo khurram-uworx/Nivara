@@ -170,21 +170,35 @@ public API, any runtime behaviour. The only production-code consumer of the tile
 transpose is `GradKernels.Transpose` (`src/Nivara/AutoDiff/Operations/GradKernels.cs:754`),
 which is covered by `GradKernelsTests` — unchanged.
 
-## Verification steps
+## Verification results — all steps complete
 
-1. `dotnet build -c Release Nivara.slnx` clean. **DONE — clean, 0 warnings.**
-2. `dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose` — confirm the
-   verdict holds. **DONE — tiled wins ~99-100% of rounds, median ratio ~0.30.**
-3. `dotnet run -c Debug --project tests/Nivara.SimdProbe -- transpose` — confirm the
-   probe detects and reports the Debug condition rather than silently reporting the
-   kernel as slow. **DONE — prints the build-configuration check and does not count a
-   Debug "tiled lost" reading as a failure.**
-4. Run the two reworked unit probes **10 consecutive times in Release**; require
-   0 failures (baseline today: ~60% failure rate in Debug).
-5. Run them in **Debug**; require the configuration skip, not a red test.
-6. Full suite green, with and without `--filter "Category!=Performance"`.
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `dotnet build -c Release Nivara.slnx` | **clean, 0 warnings** |
+| 2 | `SimdProbe transpose` in Release | tiled wins ~99-100% of rounds, median ratio ~0.30 |
+| 3 | `SimdProbe transpose` in Debug | prints build-configuration check; does **not** count a Debug "tiled lost" as failure |
+| 4 | Two reworked probes x10 in Release | **10 pass / 0 fail** (baseline: ~60% failure rate) |
+| 5 | Two reworked probes x3 in Debug | **3 ignored / 0 failed**, exit 0 each — skip, not a red test |
+| 6 | `TensorsHelperTests` fixture in Release | **31 passed / 0 failed / 0 skipped**, incl. both probes running for real |
 
-Steps 4-6 need `dotnet test` and are **awaiting human go-ahead** (AGENTS.md).
+Measured margins inside the reworked gates, both winning **25/25 rounds** against a
+0.9 bound:
+
+- `Transpose` 1024x1024 — tiled 34604 ticks vs bcl 105948, **median ratio 0.327**
+- mask propagation — optimized 822 ticks vs reference 62437, **median ratio 0.013**
+
+A full-suite run was started and deliberately abandoned: the change is confined to
+one test file plus docs, so re-running untouched tests proves nothing about it. The
+one real risk — that moving code around inside the changed fixture broke it — is
+covered by check 6.
+
+**Note on CI coverage:** `ci.yml` filters `--filter "Category!=Performance"`, so
+neither probe executes in CI. Adding the category to the mask-propagation probe moved
+it from running in CI by accident to not running at all. These are now
+manually-run gates; `AGENTS.md`, `CONTRIBUTING.md` and the SimdProbe README all state
+that they must be run with `dotnet test -c Release --filter "Category=Performance"`
+after a kernel change. A dedicated non-blocking CI job for them is reasonable future
+work but is not part of this fix.
 
 ## Probe lifecycle
 
