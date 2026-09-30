@@ -167,6 +167,31 @@ All notable changes to Nivara are documented here. Released versions are publish
   `NivaraInference`/`NivaraChat` sample READMEs are the only docs that cross-link
   QWEN; `docs/QWEN.md` stands alone.
 
+### Fixed
+
+- **Attention mask no longer lets a non-finite score escape suppression (#448)** -
+  `MultiHeadAttention` and `BatchedMultiHeadAttention` applied the mask as
+  `score + mask`, so a suppressed cell was computed as `score + (-inf)`. Summing cannot
+  suppress a non-finite score: `NaN + (-inf) = NaN` and `(+inf) + (-inf) = NaN`. A score
+  that had already diverged — a `NaN` from q/k/v, or a `+inf` from an overflow in a
+  badly-scaled layer — therefore passed straight through the mask and poisoned every query
+  row in the frame on the next layer. `AttentionKernels<T>.ApplyMask` now **assigns** `-inf`
+  to a suppressed cell instead of summing into it, so suppression is unconditional.
+
+  Only the `-inf` cell is a suppression signal; every other mask entry stays additive,
+  which keeps the in-tree fill conventions intact. A `NaN` or `+inf` **mask** cell still
+  propagates to `NaN` (`NaN == -inf` is false under IEEE 754 unordered comparison), so
+  PyTorch parity for a non-finite mask is unchanged. A finite fill keeps its magnitude and
+  still saturates, so HuggingFace's `finfo.min` convention — where a fully-masked row
+  collapses to one constant — still holds. An *unsuppressed* `NaN` score still propagates:
+  a diverged run announcing itself is more useful than a wrong-but-finite answer.
+
+  The behavioural delta is therefore confined to the two cells that were the bug, and no
+  existing fixture changed. All four call sites (both reverse-mode ops and both
+  forward-mode JVP sites) now share one authoritative implementation instead of a
+  copy-pasted pair. Fully-masked rows still clamp to zeros via the separate
+  `max == -inf` guard in `GradKernels`, which remains the second line of defence.
+
 ## [1.4.0] - 2026-08-21
 
 ### Added
