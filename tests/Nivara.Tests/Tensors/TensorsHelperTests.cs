@@ -9,6 +9,19 @@ namespace Nivara.Tests.Tensors;
 [TestFixture]
 public class TensorsHelperTests
 {
+    /// <summary>Outcome of an interleaved A/B timing comparison.</summary>
+    sealed record InterleavedResult(double FirstMedian, double SecondMedian, double MedianRatio, int FirstWins, int Rounds);
+
+    // The optimized path is O(n^2) against the reference's O(n^3) triple loop, so the
+    // margin is structural rather than marginal. The bound is loose on purpose.
+    const double MaskPropagationMaxRatio = 0.9;
+
+    // Measured Release median ratio is ~0.38 (2.2-3.4x faster across shapes, 15/15 runs).
+    // 0.9 sits far below that signal while staying clear of run-to-run drift, so this
+    // catches a genuine regression without encoding a sub-1% margin. See the
+    // `transpose` mode in tests/Nivara.SimdProbe.
+    const double TransposeMaxRatio = 0.9;
+
     [Test]
     public void PropagateNullMask_NoMasks_ClearsResultMask()
     {
@@ -117,8 +130,11 @@ public class TensorsHelperTests
     }
 
     [Test]
+    [Category("Performance")]
     public void PropagateNullMask_PerformanceProbe_IsFasterThanReferenceTripleLoopForSparseMasks()
     {
+        RequireOptimizedBuildForTiming();
+
         const int size = 160;
         var aMask = new bool[size * size];
         var bMask = new bool[size * size];
@@ -135,28 +151,17 @@ public class TensorsHelperTests
         PropagateNullMaskReference(aMask, bMask, reference, size, size, size);
         Assert.That(optimized, Is.EqualTo(reference));
 
-        var optimizedTicks = MeasureBestOfFive(() =>
-            TensorsHelper.PropagateNullMask(aMask, bMask, optimized, size, size, size));
-        var referenceTicks = MeasureBestOfFive(() =>
-            PropagateNullMaskReference(aMask, bMask, reference, size, size, size));
+        var result = MeasureInterleaved(
+            () => TensorsHelper.PropagateNullMask(aMask, bMask, optimized, size, size, size),
+            () => PropagateNullMaskReference(aMask, bMask, reference, size, size, size));
 
-        TestContext.Out.WriteLine($"MatMul mask propagation ticks: optimized={optimizedTicks}, reference={referenceTicks}");
-        Assert.That(optimizedTicks, Is.LessThan(referenceTicks));
-    }
-
-    static long MeasureBestOfFive(Action action)
-    {
-        var best = long.MaxValue;
-
-        for (int i = 0; i < 5; i++)
-        {
-            var sw = Stopwatch.StartNew();
-            action();
-            sw.Stop();
-            best = Math.Min(best, sw.ElapsedTicks);
-        }
-
-        return best;
+        TestContext.Out.WriteLine(
+            $"MatMul mask propagation: optimized={result.FirstMedian:F0} ticks, " +
+            $"reference={result.SecondMedian:F0} ticks, median ratio={result.MedianRatio:F3}, " +
+            $"first wins {result.FirstWins}/{result.Rounds} rounds");
+        Assert.That(result.MedianRatio, Is.LessThan(MaskPropagationMaxRatio),
+            $"Optimized mask propagation lost to the reference triple loop " +
+            $"(median ratio {result.MedianRatio:F3}).");
     }
 
     static void PropagateNullMaskReference(
@@ -468,19 +473,32 @@ public class TensorsHelperTests
         // #136 gate: the BCL Tensor.Transpose<T> net11 API returns a strided view,
         // so the swap route must pay Tensor construction + FlattenTo materialization
         // per call to stay comparable with the span-based tiled kernel.
+        //
+        // #482: this gate was flaky (3/5 failures on a clean tree, once on a 0.2% margin).
+        // It measured each route with a private best-of-5 and compared the two summaries
+        // once, sequentially, tiled first — so load drift always landed on tiled. It also
+        // ran by default in Debug, where this assembly is unoptimized while the BCL
+        // Tensor code stays ReadyToRun, collapsing both routes to parity. It now warms up,
+        // interleaves the routes with alternating order, and asserts on the median ratio.
+        RequireOptimizedBuildForTiming();
+
         const int rows = 1024, cols = 1024;
         var src = FillRowMajor(rows, cols, seed: 42);
         var tiled = new float[rows * cols];
-        var bcl = new float[rows * cols];
+        float[]? bcl = null;
 
-        var tiledTicks = MeasureBestOfFive(() =>
-            TensorsHelper.Transpose(src.AsSpan(), tiled.AsSpan(), rows, cols));
-        var bclTicks = MeasureBestOfFive(() => bcl = TransposeViaBcl(src, rows, cols));
+        var result = MeasureInterleaved(
+            () => TensorsHelper.Transpose(src.AsSpan(), tiled.AsSpan(), rows, cols),
+            () => bcl = TransposeViaBcl(src, rows, cols));
 
-        TestContext.Out.WriteLine($"Transpose {rows}x{cols} ticks: tiled={tiledTicks}, bclView+flatten={bclTicks}");
+        TestContext.Out.WriteLine(
+            $"Transpose {rows}x{cols} ticks: tiled={result.FirstMedian:F0}, " +
+            $"bclView+flatten={result.SecondMedian:F0}, median ratio={result.MedianRatio:F3}, " +
+            $"tiled wins {result.FirstWins}/{result.Rounds} rounds");
         Assert.That(bcl, Is.EqualTo(tiled));
-        Assert.That(tiledTicks, Is.LessThan(bclTicks),
-            "Tiled transpose lost to the BCL view-materialization route - re-evaluate the #136 kernel swap.");
+        Assert.That(result.MedianRatio, Is.LessThan(TransposeMaxRatio),
+            $"Tiled transpose lost to the BCL view-materialization route " +
+            $"(median ratio {result.MedianRatio:F3}) - re-evaluate the #136 kernel swap.");
     }
 
     static T[] TransposeViaBcl<T>(T[] src, int rows, int cols)
@@ -676,6 +694,82 @@ public class TensorsHelperTests
                 rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
                 new float[1], new bool[1], rows: 1, cols: 0),
             Throws.ArgumentException);
+    }
+
+    /// <summary>
+    /// Timing probes are only meaningful in an optimized build. This assembly is compiled
+    /// with the configuration it is tested in, but <c>System.Numerics.Tensors</c> ships
+    /// ReadyToRun and stays optimized regardless — so a Debug build compares an unoptimized
+    /// handwritten kernel against optimized framework code, collapsing both routes to parity
+    /// and reporting a false regression. See the <c>transpose</c> mode in
+    /// <c>tests/Nivara.SimdProbe</c> (#482).
+    /// </summary>
+    static void RequireOptimizedBuildForTiming()
+    {
+        bool isOptimized = typeof(TensorsHelperTests).Assembly
+            .GetCustomAttributes(typeof(DebuggableAttribute), false)
+            .Cast<DebuggableAttribute>()
+            .Any(a => !a.IsJITOptimizerDisabled);
+
+        if (!isOptimized)
+            Assert.Ignore("Timing probe skipped: this is an unoptimized (Debug) build, where the "
+                          + "comparison against ReadyToRun framework code is void. Run with -c Release.");
+    }
+
+    static long MeasureOnce(Action action)
+    {
+        var sw = Stopwatch.StartNew();
+        action();
+        sw.Stop();
+        return sw.ElapsedTicks;
+    }
+
+    /// <summary>
+    /// Compares two routes with interleaved rounds, alternating which is measured first so
+    /// frequency/load drift cannot systematically penalise the first-measured route. Both
+    /// routes are warmed before timing. Returns medians plus a per-round win count.
+    /// </summary>
+    static InterleavedResult MeasureInterleaved(Action first, Action second, int rounds = 25, int warmups = 5)
+    {
+        for (int w = 0; w < warmups; w++)
+        {
+            first();
+            second();
+        }
+
+        var firstTicks = new double[rounds];
+        var secondTicks = new double[rounds];
+
+        for (int r = 0; r < rounds; r++)
+        {
+            if (r % 2 == 0)
+            {
+                firstTicks[r] = MeasureOnce(first);
+                secondTicks[r] = MeasureOnce(second);
+            }
+            else
+            {
+                secondTicks[r] = MeasureOnce(second);
+                firstTicks[r] = MeasureOnce(first);
+            }
+        }
+
+        int firstWins = 0;
+        for (int r = 0; r < rounds; r++)
+            if (firstTicks[r] < secondTicks[r])
+                firstWins++;
+
+        double firstMedian = Median(firstTicks);
+        double secondMedian = Median(secondTicks);
+        return new InterleavedResult(firstMedian, secondMedian, firstMedian / secondMedian, firstWins, rounds);
+    }
+
+    static double Median(double[] values)
+    {
+        var sorted = (double[])values.Clone();
+        Array.Sort(sorted);
+        int n = sorted.Length;
+        return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
     }
 
     static float[] FillRowMajor(int rows, int cols, int seed)

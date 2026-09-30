@@ -172,16 +172,19 @@ which is covered by `GradKernelsTests` — unchanged.
 
 ## Verification steps
 
-1. `dotnet build Nivara.slnx` clean.
-2. `dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose` — confirm
-   the verdict holds.
-3. `dotnet run -c Debug --project tests/Nivara.SimdProbe -- transpose` — confirm
-   the probe *also* detects and reports the Debug condition rather than silently
-   reporting the kernel as slow (this is the #482 defect).
+1. `dotnet build -c Release Nivara.slnx` clean. **DONE — clean, 0 warnings.**
+2. `dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose` — confirm the
+   verdict holds. **DONE — tiled wins ~99-100% of rounds, median ratio ~0.30.**
+3. `dotnet run -c Debug --project tests/Nivara.SimdProbe -- transpose` — confirm the
+   probe detects and reports the Debug condition rather than silently reporting the
+   kernel as slow. **DONE — prints the build-configuration check and does not count a
+   Debug "tiled lost" reading as a failure.**
 4. Run the two reworked unit probes **10 consecutive times in Release**; require
    0 failures (baseline today: ~60% failure rate in Debug).
 5. Run them in **Debug**; require the configuration skip, not a red test.
 6. Full suite green, with and without `--filter "Category!=Performance"`.
+
+Steps 4-6 need `dotnet test` and are **awaiting human go-ahead** (AGENTS.md).
 
 ## Probe lifecycle
 

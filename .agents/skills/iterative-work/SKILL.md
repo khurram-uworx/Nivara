@@ -26,9 +26,29 @@ decision or red flag is never resolved by assumption when the human can be asked
 
 When the work calls for a performance measurement, an A/B comparison, or an isolated code probe:
 
-1. **Start in a temp location** — create the harness or probe under a temp directory
-   (e.g. `C:\Users\khurram\AppData\Local\Temp\opencode\`) as a standalone project, just as
-   agents naturally do. Run it there and evaluate the results.
+0. **Check for an existing mode BEFORE building anything.** Most kernel questions are
+   already answerable by a mode in this repo, and writing a scratch harness first is
+   wasted motion. List what already exists:
+
+   ```bash
+   grep -n "=> .*Run()" tests/Nivara.SimdProbe/Program.cs            # probe modes
+   grep -rn '"--[a-z-]*"' tests/Nivara.PerformanceTests/*.cs         # harness flags
+   ```
+
+   Read the matching `README.md` for what each mode already measures. `Nivara.SimdProbe`
+   exists precisely to answer "is this hand-written kernel worth keeping in `src/Nivara`,
+   and does the BCL beat it?" — the question behind most kernel investigations — so the
+   answer is usually an existing mode or a sibling of one. If a mode covers the question,
+   **use it**. If it covers the question but not the shape, add a case to it. Only fall
+   through to step 1 after confirming nothing existing fits, and record that reason in
+   `docs/TODO.md`.
+
+1. **Start in a temp location — only if step 0 found nothing.** Create the harness or
+   probe under a temp directory (e.g. `C:\Users\khurram\AppData\Local\Temp\opencode\`) as
+   a standalone project, just as agents naturally do. Run it there and evaluate the
+   results. Temp is a staging area for *novel* diagnostics, not the default home — a
+   scratch project promoted in step 3 has already duplicated code that `tests/` was
+   holding.
 
 2. **Decide if it's reusable** — after the probe runs, determine whether the harness or probe
    measures something that will be needed again (a regression gate, an A/B revisited across
@@ -42,9 +62,10 @@ When the work calls for a performance measurement, an A/B comparison, or an isol
      Add a scenario row (for repeatable ops) or a standalone `--<mode>` flag (for one-off A/B
      comparisons like `--safetensors-mmap`), following the existing `--dataset-test` pattern
      in `IncidentLabBenchmark.cs`. See its `README.md` for how to add modes and document them.
-   - `tests/Nivara.SimdProbe` — SIMD-specific probes (hardware intrinsics, widen-compute-narrow
-     decisions). Add a subcommand following the `Correctness`/`Benchmark` pattern. See its
-     `README.md`.
+   - `tests/Nivara.SimdProbe` — isolated kernel probes (hardware intrinsics,
+     widen-compute-narrow, hand-written-kernel-vs-BCL A/B). Add a subcommand following the
+     `Correctness`/`Benchmark` pattern, wire it into `Program.cs`, and document the mode, its
+     results, and its methodology in its `README.md`.
    Only create a brand-new probe project when no existing category fits.
 
 4. **Record the lifecycle in `docs/TODO.md`** — note the probe's temp origin, the reusability
