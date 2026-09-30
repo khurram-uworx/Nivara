@@ -172,11 +172,13 @@ constant (and it throws, hence the guard).
   well-defined and shows up in the row's `(valid N)` column.
 - No change under `src/` — no library, kernel, or public API surface. `ModernBertMasks` and
   `ModernBertGpuRunner` are read-only inputs (the cap const and the config).
-- Tests: none cover `NivaraInference`; the sample CLI is verified by running it. The reject
-  paths are chosen to fire before the weight load precisely so they are runnable in a checkout
-  with no `samples/data/`.
-- Published numbers: unchanged at default. The CPU benchmark gains one header line; no row is
-  recomputed or restated.
+- Tests: none cover `NivaraInference`; the sample CLI is verified by running it. The reject paths
+  are chosen to fire before **anything** touches the disk, precisely so they are runnable in a
+  checkout with no `samples/data/` — see the placement correction above.
+- Published numbers: unchanged at default. The CPU benchmark gains one header line, the GPU table
+  gains one conditional line it did not always print before; no row is recomputed or restated.
+- Landed diff: `src/` and `tests/` untouched, confirmed by `git diff main...HEAD --name-only`.
+  `ModernBert.cs` +101/-21, `Program.cs` +125/-4, docs and the Python docstring as listed.
 
 ## Verification — results
 
