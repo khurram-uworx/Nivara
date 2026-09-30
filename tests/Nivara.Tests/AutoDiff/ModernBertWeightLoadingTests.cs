@@ -314,4 +314,53 @@ public class ModernBertWeightLoadingTests
             Assert.That(LinearWeight(encoder.layers[i].attn.qProj), Is.EqualTo(expected), $"layer {i}");
         }
     }
+
+    [Test]
+    public void LoadWeights_EncoderNormsAreBiasFree()
+    {
+        // HuggingFace's norm_bias: false. Every norm in this architecture is constructed with
+        // bias: false, so no Bias exists to be loaded — and none is left registered for an
+        // optimizer to drift, which is the whole point of #446.
+        var config = TinyConfig;
+        var encoder = ModernBertEncoder<float>.LoadWeights(BuildStateDict("model"), config);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(encoder.embedNorm.Bias, Is.Null);
+            Assert.That(encoder.finalNorm.Bias, Is.Null);
+            Assert.That(encoder.embedNorm.Weight, Is.Not.Null);
+            Assert.That(encoder.finalNorm.Weight, Is.Not.Null);
+        });
+
+        for (int i = 0; i < Layers; i++)
+        {
+            Assert.That(encoder.layers[i].mlpNorm.Bias, Is.Null, $"layer {i} mlp_norm");
+            if (i > 0)
+                Assert.That(encoder.layers[i].attnNorm!.Bias, Is.Null, $"layer {i} attn_norm");
+        }
+    }
+
+    [Test]
+    public void LoadWeights_EncoderStateDictCarriesNoNormBias()
+    {
+        // A state dict written from a norm must round-trip through HuggingFace, which has no bias
+        // key for these norms. StateDict keys are index-based (Module_i.Weight), so this checks
+        // each norm's own dictionary rather than filtering the encoder's flat key list.
+        var encoder = ModernBertEncoder<float>.LoadWeights(BuildStateDict("model"), TinyConfig);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(encoder.embedNorm.StateDict().Keys, Is.EquivalentTo(new[] { "Weight" }));
+            Assert.That(encoder.finalNorm.StateDict().Keys, Is.EquivalentTo(new[] { "Weight" }));
+        });
+
+        for (int i = 0; i < Layers; i++)
+        {
+            Assert.That(encoder.layers[i].mlpNorm.StateDict().Keys, Is.EquivalentTo(new[] { "Weight" }),
+                $"layer {i} mlp_norm");
+            if (i > 0)
+                Assert.That(encoder.layers[i].attnNorm!.StateDict().Keys, Is.EquivalentTo(new[] { "Weight" }),
+                    $"layer {i} attn_norm");
+        }
+    }
 }

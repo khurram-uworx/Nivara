@@ -413,7 +413,7 @@ All CNN operations are fully implemented:
 | **No AdaptiveAvgPool2d module** | Needed for global average pooling. Forward: mean over spatial dims. Backward: gradient broadcast. | **High (v1.1)** |
 | No positional encoding module | Sinusoidal and learned PE not implemented | High |
 | TransformerBlock only supports causal attention | No encoder-style (non-causal) attention | Medium |
-| TransformerBlock hardcodes affine=false for LayerNorm | No learnable LN params in the block | Medium |
+| TransformerBlock passes empty gamma/beta spans to LayerNormKernel | No learnable LN params in the block | Medium |
 | No GELU/SiLU activation wrapper | Need to add to `Activation<T>` | High |
 
 ---

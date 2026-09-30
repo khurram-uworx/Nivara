@@ -154,7 +154,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
             var output = LayerNormKernel<T>.ForwardInference(
                 ModuleHelpers<T>.GetSpan(x), rows, cols,
                 ReadOnlySpan<T>.Empty, ReadOnlySpan<T>.Empty,
-                T.CreateChecked(eps), affine: false);
+                T.CreateChecked(eps));
             return new ReverseGradTensor<T>(
                 NivaraColumn<T>.CreateFromOwnedArray(output),
                 false, x.Shape);
@@ -166,7 +166,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
         var result = LayerNormKernel<T>.Forward(
             srcData, rows, cols,
             ReadOnlySpan<T>.Empty, ReadOnlySpan<T>.Empty,
-            T.CreateChecked(eps), affine: false);
+            T.CreateChecked(eps));
 
         var resultCol = NivaraColumn<T>.CreateFromOwnedArray(result.Output);
         var outTensor = new ReverseGradTensor<T>(resultCol, x.RequiresGrad, x.Shape);
@@ -181,7 +181,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
                 var gradInput = LayerNormKernel<T>.BackwardInput(
                     gradOut, result.XHat,
                     ReadOnlySpan<T>.Empty, result.InvStd,
-                    rows, cols, affine: false);
+                    rows, cols);
 
                 var gradCol = NivaraColumn<T>.Create(gradInput);
                 ReverseGradOperations.AccumulateGradient(x, gradCol);

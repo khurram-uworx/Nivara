@@ -29,18 +29,22 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
     /// <summary>
     /// Forward pass: y = (x - mean) / sqrt(var + eps) * gamma + beta
     /// input: [rows, normalizedShape] flattened row-major
-    /// gamma/beta: [normalizedShape] (affine parameters)
+    /// gamma/beta: [normalizedShape] (affine parameters). Each is independently optional:
+    /// an empty span means that term is not applied, so gamma-without-beta is expressible
+    /// and both empty gives a plain mean/variance normalization.
     /// </summary>
     internal static ForwardResult Forward(
         ReadOnlySpan<T> input,
         int rows, int normalizedShape,
         ReadOnlySpan<T> gamma, ReadOnlySpan<T> beta,
-        T eps, bool affine)
+        T eps)
     {
         var output = new T[input.Length];
         var mean = new T[rows];
         var invStd = new T[rows];
         var xHat = new T[input.Length];
+        bool applyGamma = gamma.Length > 0;
+        bool applyBeta = beta.Length > 0;
 
         for (int r = 0; r < rows; r++)
         {
@@ -71,18 +75,13 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
                 T inv = invStd[r];
                 var outputSlice = output.AsSpan(offset, normalizedShape);
                 var xHatSlice = xHat.AsSpan(offset, normalizedShape);
-                if (affine)
-                {
-                    TensorPrimitives.Multiply(diffSpan, inv, diffSpan);
-                    TensorPrimitives.Multiply(diffSpan, gamma, outputSlice);
-                    TensorPrimitives.Add(outputSlice, beta, outputSlice);
-                    diffSpan.CopyTo(xHatSlice);
-                }
+                TensorPrimitives.Multiply(diffSpan, inv, xHatSlice);
+                if (applyGamma)
+                    TensorPrimitives.Multiply(xHatSlice, gamma, outputSlice);
                 else
-                {
-                    TensorPrimitives.Multiply(diffSpan, inv, outputSlice);
-                    outputSlice.CopyTo(xHatSlice);
-                }
+                    xHatSlice.CopyTo(outputSlice);
+                if (applyBeta)
+                    TensorPrimitives.Add(outputSlice, beta, outputSlice);
             }
             finally
             {
@@ -101,9 +100,11 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
         ReadOnlySpan<T> input,
         int rows, int normalizedShape,
         ReadOnlySpan<T> gamma, ReadOnlySpan<T> beta,
-        T eps, bool affine)
+        T eps)
     {
         var output = new T[input.Length];
+        bool applyGamma = gamma.Length > 0;
+        bool applyBeta = beta.Length > 0;
 
         for (int r = 0; r < rows; r++)
         {
@@ -119,11 +120,10 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
             T invStd = T.One / T.CreateChecked(Math.Sqrt(double.CreateChecked((sumSq / T.CreateChecked(normalizedShape)) + eps)));
 
             TensorPrimitives.Multiply(outputSlice, invStd, outputSlice);
-            if (affine)
-            {
+            if (applyGamma)
                 TensorPrimitives.Multiply(outputSlice, gamma, outputSlice);
+            if (applyBeta)
                 TensorPrimitives.Add(outputSlice, beta, outputSlice);
-            }
         }
 
         return output;
@@ -131,17 +131,18 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
 
     /// <summary>
     /// Backward: dx = gamma * invStd * (dy - mean(dy) - xHat * mean(dy * xHat))
+    /// An empty <paramref name="gamma"/> drops the gamma scale.
     /// </summary>
     internal static T[] BackwardInput(
         ReadOnlySpan<T> gradOutput,
         ReadOnlySpan<T> xHat,
         ReadOnlySpan<T> gamma,
         ReadOnlySpan<T> invStd,
-        int rows, int normalizedShape,
-        bool affine)
+        int rows, int normalizedShape)
     {
         var gradInput = new T[gradOutput.Length];
         T scale = T.One / T.CreateChecked(normalizedShape);
+        bool applyGamma = gamma.Length > 0;
 
         for (int r = 0; r < rows; r++)
         {
@@ -180,7 +181,7 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
             T sumDYScaled = sumDY * scale;
             T sumDYXHatScaled = sumDYXHat * scale;
 
-            if (affine)
+            if (applyGamma)
             {
                 for (int j = 0; j < normalizedShape; j++)
                 {

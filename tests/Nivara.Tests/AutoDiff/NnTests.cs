@@ -2316,7 +2316,7 @@ public class NnTests
     [Test]
     public void LayerNorm_AffineFalse_NoScaleShift()
     {
-        using var ln = new LayerNorm<float>(4, affine: false);
+        using var ln = new LayerNorm<float>(4, affine: false, bias: false);
 
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create([1f, 2f, 3f, 4f]),
@@ -2333,7 +2333,7 @@ public class NnTests
     [Test]
     public void LayerNorm_NormalizedOutput()
     {
-        using var ln = new LayerNorm<float>(4, affine: false);
+        using var ln = new LayerNorm<float>(4, affine: false, bias: false);
 
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create([1f, 2f, 3f, 4f]),
@@ -3596,7 +3596,7 @@ public class NnTests
 
         var layerNormResult = LayerNormKernel<float>.Forward(data, 8, 16,
             ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
-            float.CreateChecked(1e-5), affine: false);
+            float.CreateChecked(1e-5));
 
         var rmsNormOutput = new float[data.Length];
         for (int r = 0; r < 8; r++)
@@ -3707,7 +3707,7 @@ public class NnTests
 
         var simdResult = LayerNormKernel<float>.Forward(input, rows, cols,
             ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
-            float.CreateChecked(1e-5), affine: false);
+            float.CreateChecked(1e-5));
 
         var scalarOutput = new float[rows * cols];
         for (int r = 0; r < rows; r++)
