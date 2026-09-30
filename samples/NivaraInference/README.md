@@ -45,7 +45,8 @@ dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
-dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark  # 3 warmup + 10 timed; --seq 256 doubles the length
+dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark  # seq 128 + 256; 1 warmup + 3 timed; --seq 256 times one length
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu benchmark  # seq 128 + 512 + 2048 + 4096
 
 # BERT-family encoders on the OpenCL iGPU (ILGPU 1.5.3; --gpu is F32-only in this phase)
 dotnet run --project samples/NivaraInference -c Release -- minilm --gpu
@@ -156,7 +157,7 @@ See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format detai
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes. Both frameworks are always measured in the same session.
+Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes, median reported — except the SmolLM and ModernBERT rows, which use 1 warmup + 3 timed on the Nivara side (see the note under the table). Both frameworks are always measured in the same session.
 
 | Model | Input | PyTorch cur | Nivara cur | Slowdown cur |
 |-------|-------|-------------|-------------|--------------|
@@ -170,7 +171,14 @@ Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 log
 | **ModernBERT-large** | 128 tokens | 287.3 ms | 1249.8 ms | **~4.3×** |
 | **ModernBERT-large** | 256 tokens | 504.0 ms | 1922.4 ms | **~3.8×** |
 
-*Cur* = 2026-09-27 on **AC power**, both frameworks in one session, same machine, Nivara .NET 11.0.0 Release, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass (3 warmup + 10 timed); SmolLM and ModernBERT report the median of 3 runs. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
+*Cur* = 2026-09-27 on **AC power**, both frameworks in one session, same machine, Nivara .NET 11.0.0 Release, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass (3 warmup + 10 timed); SmolLM and ModernBERT report the median of 3 runs — **1 warmup + 3 timed on the Nivara side, 3 warmup + 3 timed in PyTorch**, so the ModernBERT rows compare medians taken under different warmup counts. `modernbert benchmark --warmup 3` matches the Python side's protocol; the flag exists precisely because these two counts were previously only visible in the source. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
+
+`--seq N[,N...]` times a chosen subset of the benchmark's lengths (`--warmup N` and `--iters N` set the pass counts) on both paths; the defaults reproduce the tables above unchanged:
+
+```bash
+dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark --seq 512
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu benchmark --seq 2048,4096 --iters 10 --warmup 3
+```
 
 **GPU (iGPU, `--gpu`)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power:
 
@@ -179,6 +187,8 @@ Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 log
 | **MiniLM** | 24.1 ms | 71.2 ms | **~3.0× faster** |
 | **DistilBERT** | 63.3 ms | 209.7 ms | **~3.3× faster** |
 | **DistilBERT SST-2** | 63.8 ms | 199.9 ms | **~3.1× faster** |
+
+These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --gpu benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1b.
 
 See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
 
@@ -226,6 +236,7 @@ dotnet run --project samples/NivaraInference -c Release -- smollm benchmark     
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark   # native BF16
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark                      # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark                 # seq 128 + 256
+dotnet run --project samples/NivaraInference -c Release -- modernbert --gpu benchmark            # seq 128 + 512 + 2048 + 4096; --seq selects a subset
 
 # PyTorch (Python) — run immediately after on the same machine
 cd samples/NivaraInference/Python

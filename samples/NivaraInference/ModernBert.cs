@@ -46,13 +46,39 @@ public static class ModernBert
         "The parity gate compares the last hidden state, not a classification head.",
     ];
 
-    const int BenchmarkMaxLength = 128;
+    /// <summary>Untimed passes before the timed ones, and the timed pass count, when the caller does
+    /// not ask for something else. One untimed pass is enough to keep JIT, the rope cache and
+    /// first-touch page faults out of the samples at the CPU lengths; the GPU default is this low
+    /// rather than the 3 + 10 the DistilBERT/MiniLM GPU benchmarks use because at S=4096 one pass
+    /// is ~60 s. <c>--warmup</c> / <c>--iters</c> raise both.</summary>
+    public const int DefaultWarmup = 1;
+
+    /// <summary>See <see cref="DefaultWarmup"/> for why the timed count is 3 and not 10.</summary>
+    public const int DefaultIterations = 3;
+
+    /// <summary>
+    /// The CPU benchmark's default rows. A length above
+    /// <see cref="ModernBertMasks.MaxDenseLength"/> is rejected before the weights are loaded,
+    /// because the CPU path still builds a dense <c>[L, L]</c> mask per forward.
+    /// </summary>
+    static readonly int[] CpuBenchmarkSeqLengths = [128, 256];
+
+    /// <summary>
+    /// The GPU benchmark's default rows, which run past the CPU path's
+    /// <see cref="ModernBertMasks.MaxDenseLength"/> on purpose — see
+    /// <see cref="BenchmarkGpu"/>, where the 4096 row is the evidence that the GPU path carries
+    /// the band inside the kernel and so has no such allocation to run out of.
+    /// </summary>
+    static readonly int[] GpuBenchmarkSeqLengths = [128, 512, 2048, 4096];
 
     public static int Run<TModel, TWeight>(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         string modelDir,
         string mode,
-        string precisionLabel)
+        string precisionLabel,
+        int[]? seqLengths = null,
+        int warmup = DefaultWarmup,
+        int iterations = DefaultIterations)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
@@ -66,7 +92,7 @@ public static class ModernBert
         }
 
         return mode == "benchmark"
-            ? RunBenchmark<TModel, TWeight>(tensors, modelDir, precisionLabel)
+            ? RunBenchmark<TModel, TWeight>(tensors, modelDir, precisionLabel, seqLengths, warmup, iterations)
             : RunInference<TModel, TWeight>(tensors, modelDir, precisionLabel);
     }
 
@@ -145,7 +171,10 @@ public static class ModernBert
     static int RunBenchmark<TModel, TWeight>(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         string modelDir,
-        string precisionLabel)
+        string precisionLabel,
+        int[]? requestedSeqLengths,
+        int warmup,
+        int iterations)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
@@ -165,14 +194,34 @@ public static class ModernBert
         var tokenizer = LoadTokenizer(modelDir, config);
         string text = SampleSentences[0];
 
-        foreach (int maxLength in new[] { 128, 256 })
+        Console.WriteLine($"{warmup} warmup + {iterations} timed passes, median reported.");
+        if (warmup != 3)
         {
+            Console.WriteLine("The published CPU rows are compared against Python/modernbert_benchmark.py, which warms");
+            Console.WriteLine("up 3 passes; --warmup 3 matches that protocol.");
+        }
+        Console.WriteLine();
+
+        foreach (int maxLength in requestedSeqLengths ?? CpuBenchmarkSeqLengths)
+        {
+            // The CLI rejects an over-long length before the weights load; this is the backstop for
+            // a direct call, which would otherwise fail inside ModernBertMasks.Build after the load.
+            if (maxLength > ModernBertMasks.MaxDenseLength)
+            {
+                Console.WriteLine(
+                    $"skipping seq={maxLength}: the CPU path's dense [L, L] mask caps the length at " +
+                    $"{ModernBertMasks.MaxDenseLength}. Run 'modernbert --gpu benchmark --seq {maxLength}' instead.");
+                continue;
+            }
+
             var (ids, validLength) = PadTo(tokenizer, text, maxLength, config.PadTokenId);
 
-            // One untimed pass so JIT, the rope cache, and first-touch page faults are not in the samples.
-            encoder.Forward(ids, validLength);
+            for (int i = 0; i < warmup; i++)
+            {
+                // Untimed, so JIT, the rope cache, and first-touch page faults stay out of the samples.
+                _ = encoder.Forward(ids, validLength);
+            }
 
-            const int iterations = 3;
             var timings = new double[iterations];
             for (int i = 0; i < iterations; i++)
             {
@@ -183,13 +232,12 @@ public static class ModernBert
                 _ = hidden.Length;
             }
 
-            Array.Sort(timings);
-            double median = timings[iterations / 2];
+            var (median, min) = Summarize(timings);
             double tokensPerSecond = validLength / (median / 1000.0);
 
             Console.WriteLine(
                 $"seq={maxLength,4} (valid {validLength,3})  median {median,8:F1} ms  " +
-                $"min {timings[0],8:F1} ms  {tokensPerSecond,9:F1} tok/s  " +
+                $"min {min,8:F1} ms  {tokensPerSecond,9:F1} tok/s  " +
                 $"~{median / config.NumHiddenLayers:F2} ms/layer");
         }
 
@@ -563,8 +611,15 @@ public static class ModernBert
     /// <see cref="ModernBertMasks.MaxDenseLength"/> of 2048 on purpose: that cap exists because
     /// the CPU materialises a dense <c>[L, L]</c> mask, and the GPU carries the band inside the
     /// attention kernel, so there is no such allocation to run out of. The 4096 row is the evidence.
+    /// <c>--seq</c> re-times a subset of <see cref="GpuBenchmarkSeqLengths"/> without editing the
+    /// table; the default is deliberately 1 + 3 passes because at S=4096 one pass is ~60 s.
     /// </summary>
-    public static int BenchmarkGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    public static int BenchmarkGpu(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        int[]? requestedSeqLengths = null,
+        int warmup = DefaultWarmup,
+        int iterations = DefaultIterations)
     {
         var config = LoadConfig(modelDir);
         var tokenizer = LoadTokenizer(modelDir, config);
@@ -582,19 +637,29 @@ public static class ModernBert
         Console.WriteLine();
 
         string text = SampleSentences[0];
-        Console.WriteLine("1 warmup + 3 timed passes, median reported. Fewer than the 3 + 10 used by");
-        Console.WriteLine("the DistilBERT/MiniLM GPU benchmarks: at S=4096 one pass is ~60 s, so the");
-        Console.WriteLine("long rows would cost minutes. Not directly comparable to those tables.");
+        Console.WriteLine($"{warmup} warmup + {iterations} timed passes, median reported.");
+        if (warmup != 3 || iterations != 10)
+        {
+            Console.WriteLine("Not the 3 + 10 the DistilBERT/MiniLM GPU benchmarks use, and those report an average where");
+            Console.WriteLine("this table reports a median, so the rows are not directly comparable to those tables.");
+        }
         Console.WriteLine();
-        foreach (int maxLength in new[] { 128, 512, 2048, 4096 })
+
+        foreach (int maxLength in requestedSeqLengths ?? GpuBenchmarkSeqLengths)
         {
             if (maxLength > config.MaxPositionEmbeddings)
+            {
+                Console.WriteLine(
+                    $"skipping seq={maxLength}: above the model's max_position_embeddings=" +
+                    $"{config.MaxPositionEmbeddings}.");
                 continue;
+            }
+
             var (ids, validLength) = PadTo(tokenizer, text, maxLength, config.PadTokenId);
 
-            runner.Forward(ids, validLength);
+            for (int i = 0; i < warmup; i++)
+                runner.Forward(ids, validLength);
 
-            const int iterations = 3;
             var timings = new double[iterations];
             for (int i = 0; i < iterations; i++)
             {
@@ -604,13 +669,12 @@ public static class ModernBert
                 timings[i] = sw.Elapsed.TotalMilliseconds;
             }
 
-            Array.Sort(timings);
-            double median = timings[iterations / 2];
+            var (median, min) = Summarize(timings);
             double tokensPerSecond = validLength / (median / 1000.0);
 
             Console.WriteLine(
                 $"seq={maxLength,4} (valid {validLength,3})  median {median,8:F1} ms  " +
-                $"min {timings[0],8:F1} ms  {tokensPerSecond,9:F1} tok/s  " +
+                $"min {min,8:F1} ms  {tokensPerSecond,9:F1} tok/s  " +
                 $"~{median / config.NumHiddenLayers:F2} ms/layer");
         }
 
@@ -618,6 +682,22 @@ public static class ModernBert
         Console.WriteLine("Each pass encodes the full padded sequence — this mode has no KV cache, so " +
                           "cost scales with sequence length, not with tokens generated.");
         return 0;
+    }
+
+    /// <summary>
+    /// Median and minimum of one row's timed samples. The median is the true median — the mean of
+    /// the two middle samples when the count is even — so the printed word stays true at any
+    /// <c>--iters</c>. The default 3 keeps the single middle sample the published rows were
+    /// measured with, so the default table is unchanged.
+    /// </summary>
+    static (double Median, double Min) Summarize(double[] timings)
+    {
+        Array.Sort(timings);
+        int count = timings.Length;
+        double median = count % 2 == 1
+            ? timings[count / 2]
+            : (timings[count / 2 - 1] + timings[count / 2]) / 2.0;
+        return (median, timings[0]);
     }
 
     /// <summary>Row statistics over the valid region, for the GPU's flat output buffer.</summary>

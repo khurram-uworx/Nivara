@@ -6,6 +6,22 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Selectable sequence lengths and pass counts for the `modernbert` benchmark (#474)** — both
+  benchmark paths hardcoded their length table, so re-timing one row meant editing source and
+  rebuilding, and `modernbert benchmark --seq 256` did nothing at all: the arg loop treated the
+  bare token as the mode name. `modernbert benchmark` and `modernbert --gpu benchmark` now take
+  `--seq N[,N...]` (one length or a comma list, sorted ascending and de-duplicated) plus
+  `--warmup N` and `--iters N`. Defaults reproduce today's tables unchanged — 128+256 on CPU,
+  128/512/2048/4096 on `--gpu`, 1 warmup + 3 timed — so published rows are unaffected apart from
+  one added protocol line per table. Options are validated before the safetensors load and each
+  rejection names the offending token: non-integer or non-positive lengths, a length above the
+  CPU path's `ModernBertMasks.MaxDenseLength` of 2048 (the GPU path carries the band inside the
+  kernel, so it has no such cap), a missing flag value, and use outside `modernbert benchmark`.
+  The GPU path's silent skip of a length above `max_position_embeddings` now prints the row and
+  the cap. Both paths report a true median (mean of the two middle samples at even counts) and
+  say so when the pass counts are not the 3 + 10 the DistilBERT/MiniLM GPU tables were measured
+  with. Removes the dead `BenchmarkMaxLength = 128` constant.
+
 - **Bias-free `LayerNorm<T>` (#446)** — `LayerNorm<T>` gained a `bool bias = true`
   constructor parameter. `bias: false` keeps the learnable gamma and does not register
   beta, so `StateDict()`, `GetParameters()`, and an optimizer never see it. `affine: false`
@@ -191,6 +207,20 @@ All notable changes to Nivara are documented here. Released versions are publish
   forward-mode JVP sites) now share one authoritative implementation instead of a
   copy-pasted pair. Fully-masked rows still clamp to zeros via the separate
   `max == -inf` guard in `GradKernels`, which remains the second line of defence.
+
+### Documentation
+
+- **ModernBERT benchmark pass counts corrected (#474)** — the `NivaraInference` README annotated
+  `modernbert benchmark` as "3 warmup + 10 timed" and advertised a `--seq 256` that never
+  existed. The real protocol is **1 warmup + 3 timed, median of 3** — one untimed pass is enough
+  to keep JIT and first-touch page faults out of the samples, which is why it differs from the
+  3 + 10 the MiniLM/DistilBERT rows use. The README's table note and `docs/MODERNBERT.md` now say
+  so, and `Python/modernbert_benchmark.py`'s docstring no longer claims it "mirrors"
+  `ModernBert.RunBenchmark`'s warmup while doing 3 passes where the C# side does 1. The published
+  figures are unchanged; only the claim about how they were produced was wrong. The PyTorch side
+  also runs 3 warmup passes against Nivara's 1, so the ModernBERT ratio compares medians taken
+  under different warmup counts — `--warmup 3` now matches the two sides. `docs/ACCELERATION.md`
+  §1b item 12's note that the 4096 row cannot be re-measured alone is superseded by `--seq`.
 
 ## [1.4.0] - 2026-08-21
 

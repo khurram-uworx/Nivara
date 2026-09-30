@@ -7,6 +7,7 @@ using Nivara.Samples;
 using Nivara.Samples.Gpu;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
@@ -40,6 +41,9 @@ class Program
         int teacherExamples = 0;
         int seed = 42;
         string text = "";
+        string? seqArg = null;
+        string? warmupArg = null;
+        string? itersArg = null;
         bool isQwen = modelType == "qwen";
         for (int i = 1; i < args.Length; i++)
         {
@@ -84,6 +88,22 @@ class Program
                 plain = true;
             else if (args[i] == "--gpu")
                 useGpu = true;
+            else if (args[i] is "--seq" or "--warmup" or "--iters")
+            {
+                // The value is consumed here even when it is nonsense, so a flag's value can never
+                // fall through to the positional-mode branch below and be read as a mode name.
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine($"{args[i]} needs a value.");
+                    return 1;
+                }
+
+                string value = args[i + 1];
+                if (args[i] == "--seq") seqArg = value;
+                else if (args[i] == "--warmup") warmupArg = value;
+                else itersArg = value;
+                i++;
+            }
             else if (args[i] == "--text" && i + 1 < args.Length)
             {
                 text = args[i + 1];
@@ -112,6 +132,14 @@ class Program
             Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine();
+            Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
+            Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
+            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --gpu. The CPU path caps a");
+            Console.WriteLine("                   length at 2048 (dense [L, L] mask); --gpu has no such cap, and the");
+            Console.WriteLine("                   4096 row is the evidence. A length below the sentence truncates it.");
+            Console.WriteLine("  --warmup N       Untimed passes before timing (default 1)");
+            Console.WriteLine("  --iters N        Timed passes; the median is reported (default 3)");
+            Console.WriteLine();
             Console.WriteLine("Qwen options:");
             Console.WriteLine("  --text \"...\"      Override the default user prompt (tools or plain mode; default: Paris weather)");
             Console.WriteLine("  --plain           Plain (no-tools) prompt surface. With 'benchmark': run the plain-prompt");
@@ -134,6 +162,45 @@ class Program
             Console.WriteLine("                    (NivaraPrimitives.UseWidenSimd). A/B against scalar: run");
             Console.WriteLine("                    once without and once with this flag, or use the 'ab' mode.");
             return 1;
+        }
+
+        int[]? seqLengths = null;
+        int warmup = ModernBert.DefaultWarmup;
+        int iterations = ModernBert.DefaultIterations;
+
+        // Checked before anything touches the disk: a bad timing option is a typo, and a typo should
+        // cost a second rather than a 1.5 GB safetensors read.
+        if (seqArg is not null || warmupArg is not null || itersArg is not null)
+        {
+            if (modelType != "modernbert")
+            {
+                Console.Error.WriteLine("--seq / --warmup / --iters are options of 'modernbert benchmark' only; no other model's benchmark takes them.");
+                return 1;
+            }
+
+            if (mode != "benchmark")
+            {
+                Console.Error.WriteLine($"--seq / --warmup / --iters need the 'benchmark' mode; got '{modelType}{(mode.Length > 0 ? " " + mode : "")}'. Drop the flag or add 'benchmark'.");
+                return 1;
+            }
+
+            if (seqArg is not null && !TryParseSeqLengths(seqArg, useGpu, out seqLengths, out string seqError))
+            {
+                Console.Error.WriteLine(seqError);
+                return 1;
+            }
+
+            if (warmupArg is not null && (!TryParseCount(warmupArg, out warmup) || warmup < 1))
+            {
+                Console.Error.WriteLine($"--warmup expects a positive integer; got '{warmupArg}'.");
+                return 1;
+            }
+
+            if (itersArg is not null && (!TryParseCount(itersArg, out iterations) || iterations < 1))
+            {
+                Console.Error.WriteLine($"--iters expects a positive integer; got '{itersArg}'.");
+                return 1;
+            }
         }
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
@@ -296,7 +363,7 @@ class Program
             case "modernbert":
                 if (useGpu)
                 {
-                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir);
+                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations);
                     if (compare) return ModernBert.CompareGpu(tensors, modelDir);
                     if (compareDiag)
                     {
@@ -307,9 +374,9 @@ class Program
                 }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                 if (compare) return ModernBert.Compare(tensors, modelDir);
-                if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
-                if (fp16) return ModernBert.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
-                return ModernBert.Run<float, float>(tensors, modelDir, mode, "F32");
+                if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16", seqLengths, warmup, iterations);
+                if (fp16) return ModernBert.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half", seqLengths, warmup, iterations);
+                return ModernBert.Run<float, float>(tensors, modelDir, mode, "F32", seqLengths, warmup, iterations);
             case "smollm":
                 if (mode == "ab")
                 {
@@ -355,6 +422,60 @@ class Program
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
         }
+    }
+
+    /// <summary>
+    /// Parses an integer option value. The explicit culture is what makes the result the same on
+    /// every machine: <c>NumberStyles.Integer</c> allows a leading sign, and the sign character
+    /// comes from the culture's <c>NumberFormatInfo.PositiveSign</c> — <c>ar-SA</c> and <c>fa-IR</c>
+    /// spell it <c>؎+</c>, so the parameterless <c>int.TryParse</c> rejects a plain <c>+12</c>
+    /// there and accepts it here. Digits, surrounding whitespace and group separators behave
+    /// identically either way.
+    /// </summary>
+    static bool TryParseCount(string raw, out int value)
+        => int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+    /// <summary>
+    /// Parses a <c>--seq</c> value — one length or a comma-separated list — ascending and
+    /// de-duplicated, so the printed table stays ordered however the list was typed. A token must
+    /// be a positive integer, which also settles the <c>--seq 1,000</c> trap: the comma is the
+    /// list separator, so that is the tokens <c>1</c> and <c>000</c>, and <c>000</c> is not a length.
+    /// </summary>
+    static bool TryParseSeqLengths(string raw, bool useGpu, out int[] lengths, out string error)
+    {
+        var requested = new List<int>();
+        foreach (string token in raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!TryParseCount(token, out int length) || length <= 0)
+            {
+                lengths = [];
+                error = $"--seq expects positive integers, one value or a comma-separated list; got '{token}' in \"{raw}\".";
+                return false;
+            }
+
+            if (!useGpu && length > ModernBertMasks.MaxDenseLength)
+            {
+                lengths = [];
+                error = $"--seq {length} exceeds the CPU path's dense-mask limit of {ModernBertMasks.MaxDenseLength} " +
+                        "(the cost is the [L, L] allocation, not the arithmetic). " +
+                        $"Run 'modernbert --gpu benchmark --seq {length}', where the band lives inside the kernel; " +
+                        "the CPU equivalent is #473.";
+                return false;
+            }
+
+            requested.Add(length);
+        }
+
+        if (requested.Count == 0)
+        {
+            lengths = [];
+            error = $"--seq needs at least one sequence length; got \"{raw}\".";
+            return false;
+        }
+
+        lengths = [.. requested.Distinct().Order()];
+        error = "";
+        return true;
     }
 
     static int RunMobileNetV2Benchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
