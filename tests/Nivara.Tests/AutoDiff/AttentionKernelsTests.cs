@@ -287,6 +287,154 @@ public class AttentionKernelsTests
         Assert.That(ex!.Message, Does.Contain("does not match"));
     }
 
+    [Test]
+    public void ApplyMask_FinfoMinFill_AnnihilatesEveryScore_AndFlagsTheRow()
+    {
+        // The saturating fill. score + finfo.min == finfo.min for any score small enough that the
+        // float32 ULP at 3.4e38 (~2e31) swallows it, so the row's value no longer reflects the
+        // score at all. The row is therefore score-independent and the backward must zero it -
+        // which is the whole of #454.
+        var scores = new[] { 1.0f, -7.5f, 0.25f, 12f };
+        var mask = new[] { float.MinValue, float.MinValue, float.MinValue, float.MinValue };
+        var rowFlags = new bool[1];
+
+        AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 1, 4);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rowFlags, Is.EqualTo(new[] { true }),
+                "a fully-saturated row carries no score information and must be flagged");
+            Assert.That(scores, Is.All.EqualTo(float.MinValue),
+                "every cell saturates to the fill itself");
+        });
+    }
+
+    [Test]
+    public void ApplyMask_OrdinaryMask_FlagsNoRow()
+    {
+        // The shipped convention must not be flagged. Every mask builder in the tree emits
+        // {0, -inf}; a row that keeps any cell open still depends on its scores and must be left
+        // alone. If this ever flags, every -inf attention backward in the repo is zeroed.
+        var scores = new[] { 1.0f, -7.5f, 0.25f, 12f, 2f, 3f, 4f, 5f };
+        var mask = new[] { NegInf, NegInf, 0.0f, NegInf, 0f, 0f, 0f, 0f };
+        var rowFlags = new bool[2];
+
+        AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 2, 4);
+
+        Assert.That(rowFlags, Is.EqualTo(new[] { false, false }),
+            "a row with any live cell is still score-dependent");
+        Assert.That(scores.Take(4), Is.EqualTo(new[] { NegInf, NegInf, 0.25f, NegInf }));
+        Assert.That(scores.Skip(4), Is.EqualTo(new[] { 2f, 3f, 4f, 5f }));
+    }
+
+    [Test]
+    public void ApplyMask_PartialSaturation_KeepsRowLive_AndLeavesNoFlag()
+    {
+        // The boundary of the per-row flag, and the reason it is per-row rather than per-cell.
+        // A large-but-not-finfo.min fill leaves small scores intact, so this row's softmax is
+        // the ordinary one after the additive constant cancels, and its output still depends on
+        // q. A row-level flag can only answer "did the fill kill the whole row"; it says yes
+        // here is wrong, and #489 tracks the residual per-cell defect this shape leaves behind.
+        var scores = new[] { 1e-30f, -1e-30f, 0.0f, 1e-30f };
+        var mask = new[] { -1e30f, -1e30f, -1e30f, -1e30f };
+        var rowFlags = new bool[1];
+
+        AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 1, 4);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rowFlags, Is.EqualTo(new[] { false }),
+                "a non-saturating fill must not flag the row: the softmax cancels the constant");
+            Assert.That(scores[0], Is.EqualTo(-1e30f), "the fill is large enough to dominate the cell");
+            Assert.That(scores[0], Is.Not.EqualTo(mask[0]),
+                "yet the add is not an absorption - the score changed the stored value");
+        });
+    }
+
+    [Test]
+    public void ApplyMask_NegInfFill_FlagsTheSuppressedRow()
+    {
+        // -inf needs no special case: the suppressed cells are assigned -inf and count as dead,
+        // so a row that is entirely -inf flags exactly as it does under finfo.min. On this path
+        // P is already 0, so clearing dS is a no-op - which is what keeps the -inf fixtures
+        // bit-for-bit identical after #454.
+        var scores = new[] { 1.0f, NegInf, 3.0f, NegInf, NegInf, NegInf, NegInf, NegInf };
+        var mask = new[] { 0.0f, NegInf, 0.0f, NegInf, NegInf, NegInf, NegInf, NegInf };
+        var rowFlags = new bool[2];
+
+        AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 2, 4);
+
+        Assert.That(rowFlags, Is.EqualTo(new[] { false, true }));
+    }
+
+    [Test]
+    public void ApplyMask_NaNMaskCell_CountsAsLiveSoTheRowIsNotFlagged()
+    {
+        // `NaN == m` is false and `NaN + s` is NaN, so a NaN cell is never an absorption. It
+        // poisons the row through the softmax instead (see
+        // BandedAttention_NonFiniteMaskCells_PropagateAsNaNRows_MatchingPyTorch), and flagging the
+        // row here would silently swallow that signal.
+        var scores = new[] { 1.0f, 2.0f, 3.0f, 4.0f };
+        var mask = new[] { NaN, NaN, NaN, NaN };
+        var rowFlags = new bool[1];
+
+        AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 1, 4);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(rowFlags, Is.EqualTo(new[] { false }));
+            Assert.That(scores, Is.All.Matches<float>(float.IsNaN),
+                "a NaN mask cell stays additive, so the whole row goes NaN");
+        });
+    }
+
+    [Test]
+    public void ApplyMask_MismatchedRowFlags_ThrowsRatherThanWritingOutOfRange()
+    {
+        var scores = new[] { 1.0f, 2.0f, 3.0f, 4.0f };
+        var mask = new[] { 0.0f, 0.0f, 0.0f, 0.0f };
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            AttentionKernels<float>.ApplyMask(scores, mask, new bool[3], 2, 2));
+        Assert.That(ex!.Message, Does.Contain("does not match rows"));
+    }
+
+    [Test]
+    public void SoftmaxBackwardRows_FlaggedRow_ProducesExactlyZeroDScores()
+    {
+        // The consume side. A flagged row's dS must be exactly zero, not approximately: the
+        // softmax VJP is `P * (dP - dot)`, and with P uniform on a saturated row both terms are
+        // non-zero, so this is where the spurious gradient is born.
+        var weights = new[] { 0.25f, 0.25f, 0.25f, 0.25f };
+        var dS = new[] { 3.0f, -1.0f, 2.0f, 0.5f };
+
+        AttentionKernels<float>.SoftmaxBackwardRows(weights, dS, 1, 4, new[] { true });
+
+        Assert.That(dS, Is.All.EqualTo(0f),
+            "a score-independent row contributes no score gradient at all");
+    }
+
+    [Test]
+    public void SoftmaxBackwardRows_UnflaggedRow_IsUnchangedByTheOverload()
+    {
+        // The flag must be inert on every row that is not saturated, or the -inf and unmasked
+        // attention paths would all change. Pinned to the exact pre-flag values.
+        var weights = new[] { 0.25f, 0.25f, 0.25f, 0.25f, 1f, 0f, 0f, 0f };
+        var dS = new[] { 3.0f, -1.0f, 2.0f, 0.5f, 4.0f, 0f, 0f, 0f };
+        var expected = (float[])dS.Clone();
+
+        var baseline = (float[])dS.Clone();
+        AttentionKernels<float>.SoftmaxBackwardRows(weights, baseline, 2, 4);
+        AttentionKernels<float>.SoftmaxBackwardRows(weights, dS, 2, 4, new[] { false, false });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(dS, Is.EqualTo(expected).AsCollection,
+                "passing all-false flags must not perturb any element");
+            Assert.That(dS, Is.EqualTo(baseline).AsCollection);
+        });
+    }
+
     static void AssertSuppressesNaN<T>(T nan, T negInf)
         where T : struct, IFloatingPointIeee754<T>
     {

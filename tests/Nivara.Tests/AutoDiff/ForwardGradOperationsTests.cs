@@ -1663,6 +1663,30 @@ public class ForwardGradOperationsTests
     }
 
     [Test]
+    public void MultiHeadAttention_SaturatedFullyMaskedRow_ContributesZeroTangent()
+    {
+        // The JVP half of #454. The mask fill is finfo.min, which saturates, so the fully-masked
+        // row's scores are one constant and the row's output is mean(V): locally constant in q_1.
+        // Its tangent must therefore be exactly zero, not merely small - the score softmax JVP
+        // would otherwise report a nonzero dscore for a row the primal cannot distinguish.
+        var query = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4,
+            new float[] { 1f, 0f, 0f, 0f, 1f, 1f, 1f, 1f });
+        var key = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f }, 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 1f, 1f, 1f, 2f, 2f, 2f, 2f }, 2, 4);
+        var mask = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 0f, 0f, float.MinValue, float.MinValue }, 2, 2);
+
+        var result = ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f, mask);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent, Is.Not.Null);
+        Assert.That(result.Tangent![4], Is.Zero, "row 1 is fully masked, so its tangent is exactly zero");
+        Assert.That(result.Tangent![5], Is.Zero);
+        Assert.That(result.Tangent![6], Is.Zero);
+        Assert.That(result.Tangent![7], Is.Zero);
+    }
+
+    [Test]
     public void MultiHeadAttention_InvalidMaskShape_Throws()
     {
         var query = ForwardGradTensor<float>.FromMatrix(new float[8], 2, 4);
@@ -1725,6 +1749,28 @@ public class ForwardGradOperationsTests
         Assert.That(result.RequiresTangent, Is.True);
         for (int i = 0; i < 8; i++)
             Assert.That(result.Tangent![i], Is.EqualTo(0.0f).Within(1e-4f));
+    }
+
+    [Test]
+    public void BatchedMultiHeadAttention_SaturatedFullyMaskedRow_ContributesZeroTangent()
+    {
+        // The batched JVP half of #454. Shape [2, 2, 2]: batch 0 row 1 is saturated by a finfo.min
+        // fill, batch 1 row 1 is masked open, so a wrong batch offset cannot hide - either slice
+        // would leave one of the two rows nonzero.
+        var query = From3D(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var key = From3D(new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f }, 2, 2, 2);
+        var value = From3D(new float[] { 1f, 1f, 2f, 2f, 1f, 1f, 2f, 2f }, 2, 2, 2);
+        var mask = From3D(new float[] { 0f, 0f, float.MinValue, float.MinValue, 0f, 0f, 0f, 0f }, 2, 2, 2);
+
+        var result = ForwardGradOperations.BatchedMultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f, mask);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        var tangent = result.Tangent!;
+        Assert.That(tangent[2], Is.Zero, "batch 0 row 1 is saturated, so its tangent is exactly zero");
+        Assert.That(tangent[3], Is.Zero);
+        Assert.That(tangent.Skip(4).Any(x => x != 0f), Is.True,
+            "batch 1 row 1 is unmasked and must keep a real tangent - the flag is per batch element");
     }
 
     [Test]
