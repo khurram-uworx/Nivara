@@ -492,6 +492,13 @@ public static class ReverseGradOperations
     /// D = numHeads * headDim. <paramref name="mask"/> is an optional
     /// [qLen, kvLen] additive mask — use <c>T.NegativeInfinity</c> to suppress
     /// positions (padding/causal).
+    ///
+    /// The mask is a non-differentiable constant and is deliberately absent from
+    /// the node's input list, so no gradient is produced for it. Because
+    /// <see cref="AttentionKernels{T}.ApplyMask"/> <em>assigns</em> -inf to a
+    /// suppressed cell rather than adding to it, the mask is only piecewise
+    /// differentiable and a partial gradient would be misleading. Passing a
+    /// mask that requires gradients throws.
     /// </summary>
     public static ReverseGradTensor<T> MultiHeadAttention<T>(
         ReverseGradTensor<T> query,
@@ -525,6 +532,9 @@ public static class ReverseGradOperations
             throw new ArgumentException($"Key and Value row counts must match (got {key.shape[0]} vs {value.shape[0]}).");
         if (mask != null && (mask.Rank != 2 || mask.shape[0] != qLen || mask.shape[1] != kvLen))
             throw new ArgumentException($"Mask must be a {qLen}x{kvLen} additive matrix.");
+        if (mask is { RequiresGrad: true })
+            throw new ArgumentException(
+                "Mask is a non-differentiable constant and cannot require gradients.", nameof(mask));
 
         bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
         int scoreLen = qLen * kvLen;
@@ -584,11 +594,8 @@ public static class ReverseGradOperations
                     if (shouldTrack)
                     {
                         var weights = savedWeights!;
-                        var inputs = mask != null
-                            ? new ReverseGradTensor<T>[] { query, key, value, mask! }
-                            : new ReverseGradTensor<T>[] { query, key, value };
 
-                        var gradFn = new OpNode<T>("MultiHeadAttention", inputs, (typedGradOutput) =>
+                        var gradFn = new OpNode<T>("MultiHeadAttention", [query, key, value], (typedGradOutput) =>
                         {
                             var dQ = new T[qLen * D];
                             var dK = new T[kvLen * D];
@@ -699,6 +706,10 @@ public static class ReverseGradOperations
     /// <paramref name="mask"/> is an optional [B, qLen, kvLen] additive mask —
     /// use <c>T.NegativeInfinity</c> to suppress positions (padding/causal),
     /// applied per batch element.
+    ///
+    /// As in <see cref="MultiHeadAttention{T}"/>, the mask is a non-differentiable
+    /// constant, is absent from the node's input list, and throws if it requires
+    /// gradients.
     /// </summary>
     public static ReverseGradTensor<T> BatchedMultiHeadAttention<T>(
         ReverseGradTensor<T> query,
@@ -735,6 +746,9 @@ public static class ReverseGradOperations
             throw new ArgumentException($"Key and Value sequence lengths must match (got {key.shape[1]} vs {value.shape[1]}).");
         if (mask != null && (mask.Rank != 3 || mask.shape[0] != batch || mask.shape[1] != qLen || mask.shape[2] != kvLen))
             throw new ArgumentException($"Mask must be a {batch}x{qLen}x{kvLen} additive tensor.");
+        if (mask is { RequiresGrad: true })
+            throw new ArgumentException(
+                "Mask is a non-differentiable constant and cannot require gradients.", nameof(mask));
 
         bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
         int scoreLen = qLen * kvLen;
@@ -829,11 +843,8 @@ public static class ReverseGradOperations
                     if (shouldTrack)
                     {
                         var weights = savedWeights!;
-                        var inputs = mask != null
-                            ? new ReverseGradTensor<T>[] { query, key, value, mask! }
-                            : new ReverseGradTensor<T>[] { query, key, value };
 
-                        var gradFn = new OpNode<T>("BatchedMultiHeadAttention", inputs, (typedGradOutput) =>
+                        var gradFn = new OpNode<T>("BatchedMultiHeadAttention", [query, key, value], (typedGradOutput) =>
                         {
                             var dQ = new T[batch * qLen * D];
                             var dK = new T[batch * kvLen * D];
