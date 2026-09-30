@@ -112,13 +112,33 @@ if (mask is { RequiresGrad: true })
 The GPU/sample `BatchedAttention` and `DecodeAttention` build no graph nodes, so
 they are out of scope.
 
-### Decision to confirm at G1
+### G1 grounding outcome — decisions confirmed
 
-**Guard scope: unconditional, or only when `GradientUtils.IsGradEnabled`?**
-Recommendation is **unconditional** — `RequiresGrad` is a property of the
-tensor, and a caller who set the flag wants a gradient regardless of ambient
-scope. Gating on `Grad()` would leave the silent path open for anyone who sets
-the flag outside a scope.
+**Guard scope: unconditional.** Confirmed by the human. `RequiresGrad` is a
+property of the tensor, and a caller who set the flag wants a gradient
+regardless of ambient scope. Gating on `Grad()` would leave the silent path
+open for anyone who sets the flag outside a scope.
+
+**Exception type: `ArgumentException`.** Confirmed by the human. Matches the
+mask shape validation a few lines above it and the convention in the
+neighbouring attention ops.
+
+**PyTorch parity (the deciding evidence for Option B).** PyTorch's documented
+SDPA reference is a pure add — `attn_bias = attn_mask + attn_bias` — with no
+documented gradient contract for the mask. PyTorch also has an open bug for
+exactly this scenario: [pytorch#148476](https://github.com/pytorch/pytorch/issues/148476)
+crashes with *"Illegal memory access in `scaled_dot_product_attention` ... when
+using a float attention mask that requires grad while q, k and v do not require
+grad."* So the reference implementation neither supports a grad-requiring mask
+nor degrades gracefully — it faults. This validates the `shouldTrack`
+mask-exclusion at `:529`/`:739` as the correct shape, and makes Option B the
+parity-matching choice rather than merely the conservative one.
+
+**BCL limitation noted.** `TensorPrimitives` has no select/blend primitive (it
+offers `IsNegativeInfinity`, generic over `INumberBase<T>`, but no blend),
+matching the existing note at `AttentionKernels.cs:104` (tracked as #480). Not
+needed for Option B; recorded because it would constrain any future
+mask-gradient work to a scalar loop.
 
 ## Verification steps
 
