@@ -566,7 +566,7 @@ public static class ReverseGradOperations
                         var scoresSpan = scores.AsSpan(0, scoreLen);
                         TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                         if (!maskSpan.IsEmpty)
-                            TensorPrimitives.Add(scoresSpan, maskSpan, scoresSpan);
+                            AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan);
 
                         AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
 
@@ -804,7 +804,7 @@ public static class ReverseGradOperations
                                 var scoresSpan = scores.AsSpan(0, scoreLen);
                                 TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                                 if (!maskSpan.IsEmpty)
-                                    TensorPrimitives.Add(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen), scoresSpan);
+                                    AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen));
 
                                 AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
 

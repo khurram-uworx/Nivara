@@ -66,6 +66,63 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
         => GradKernels.SoftmaxGradient(weights, dS, dS, cols);
 
     /// <summary>
+    /// In-place additive attention mask over a flat [qLen, kvLen] score buffer.
+    /// A cell whose mask entry is exactly <c>-inf</c> is suppressed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The suppressed cell is <em>assigned</em> <c>-inf</c>, not summed into. Summing cannot
+    /// suppress a non-finite score: <c>NaN + (-inf) = NaN</c> and <c>(+inf) + (-inf) = NaN</c>, so
+    /// a score that already diverged (a NaN from q/k/v, or a <c>+inf</c> from an overflow in a
+    /// badly-scaled layer) escapes the mask and poisons every query row in the frame on the next
+    /// layer. Assigning discards the bad value instead of combining with it, so suppression is
+    /// unconditional.
+    /// </para>
+    /// <para>
+    /// Only the <c>-inf</c> cell counts as suppression. Every other entry stays additive, which is
+    /// what keeps the two fill conventions in the tree behaving as they do:
+    /// <list type="bullet">
+    /// <item>A <c>NaN</c> or <c>+inf</c> mask cell still propagates to <c>NaN</c>. <c>NaN == -inf</c>
+    /// is false (IEEE 754 unordered comparison), so such a cell takes the additive branch and the
+    /// row poisons exactly as PyTorch's <c>score + mask</c> does — see
+    /// <c>BandedAttention_NonFiniteMaskCells_PropagateAsNaNRows_MatchingPyTorch</c>, which is a
+    /// parity fixture and must keep passing.</item>
+    /// <item>A finite fill keeps its magnitude and still saturates. HuggingFace's
+    /// <c>masking_utils</c> fills with <c>torch.finfo(dtype).min</c> rather than <c>-inf</c>, and
+    /// that magnitude is load-bearing: at float32 the ULP at 3.4e38 is ~2e31, so
+    /// <c>score + finfo.min</c> collapses a fully-masked row to one constant and the row softmax
+    /// reduces to a uniform average of V. Discarding the magnitude would turn that into a raw
+    /// softmax over undamped scores — see
+    /// <c>BandedAttention_FinfoMinFill_Forward_MatchesPyTorch</c>.</item>
+    /// </list>
+    /// An unsuppressed cell therefore keeps today's behaviour bit for bit, including
+    /// <c>NaN + 0 = NaN</c>: a diverged score at a position the mask does not suppress must still
+    /// announce itself rather than be quietly swallowed.
+    /// </para>
+    /// <para>
+    /// A scalar loop rather than a <c>TensorPrimitives</c> call, because BCL has no select/blend
+    /// primitive and this mask cannot be expressed as arithmetic. Tracked as #480.
+    /// </para>
+    /// <para>
+    /// The lengths must match exactly. <c>TensorPrimitives.Add</c>, which this replaces, enforced
+    /// that; the loop on its own would only fault on a short mask and silently truncate a long
+    /// one, so a mis-shaped mask would become a wrong answer instead of an exception.
+    /// </para>
+    /// </remarks>
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask)
+    {
+        if (mask.Length != scores.Length)
+            throw new ArgumentException(
+                $"Mask length {mask.Length} does not match score length {scores.Length}.", nameof(mask));
+
+        for (int i = 0; i < scores.Length; i++)
+        {
+            T m = mask[i];
+            scores[i] = m == T.NegativeInfinity ? T.NegativeInfinity : scores[i] + m;
+        }
+    }
+
+    /// <summary>
     /// Single-query GQA decode attention over a cached KV prefix, with no materialization.
     ///
     /// Query is one row <c>[numHeads * headDim]</c>; the key/value caches are row-major
