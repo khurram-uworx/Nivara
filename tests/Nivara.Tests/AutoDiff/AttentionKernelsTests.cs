@@ -62,6 +62,24 @@ public class AttentionKernelsTests
     }
 
     [Test]
+    public void ApplyMask_SuppressedCell_AlreadyNegativeInfinityScoreStaysNegativeInfinity()
+    {
+        // The last untested row of the zero-delta table: an already-suppressed score under a -inf
+        // mask. Additive today gives -inf + (-inf) = -inf, and the select gives -inf, so nothing
+        // changed -- which is exactly why it needs a test rather than an argument. A double-add,
+        // a saturating combine, or a clamp written against +inf would each pass every other test
+        // in this fixture and break only here.
+        var scores = new[] { 1.0f, NegInf, 3.0f };
+        var mask = new[] { 0.0f, NegInf, NegInf };
+
+        AttentionKernels<float>.ApplyMask(scores, mask);
+
+        Assert.That(scores[1], Is.EqualTo(NegInf), "-inf + (-inf) must stay -inf, not become NaN");
+        Assert.That(scores[2], Is.EqualTo(NegInf), "a finite score under -inf is still suppressed");
+        Assert.That(scores[0], Is.EqualTo(1.0f));
+    }
+
+    [Test]
     public void ApplyMask_NaNScoreInKeptCell_PropagatesNaN()
     {
         // The guard against over-suppression. A NaN score the mask does NOT suppress must stay
@@ -131,12 +149,17 @@ public class AttentionKernelsTests
         // Every mask builder in the tree (CreateCausalMask, CreateBlockDiagonalMask,
         // CreatePaddingMask, ModernBertMasks.Build, BertModel) emits exactly {0, -inf}. Over that
         // domain ApplyMask must be indistinguishable from the TensorPrimitives.Add it replaced.
+        //
+        // Seeded with -0.0f deliberately: for a 0 mask cell, `score + 0.0f` is +0.0f, so returning
+        // `score` unchanged would be value-equal but not bit-equal. NUnit's Is.EqualTo on float
+        // collections would not notice, so this compares the raw bit patterns -- the assertion the
+        // test name claims.
         var rng = new Random(0x448);
         var scores = new float[512];
         var mask = new float[512];
         for (int i = 0; i < scores.Length; i++)
         {
-            scores[i] = (float)(rng.NextDouble() * 4.0 - 2.0);
+            scores[i] = i % 4 == 0 ? -0.0f : (float)(rng.NextDouble() * 4.0 - 2.0);
             mask[i] = rng.Next(3) == 0 ? NegInf : 0.0f;
         }
 
@@ -145,8 +168,9 @@ public class AttentionKernelsTests
 
         AttentionKernels<float>.ApplyMask(scores, mask);
 
-        Assert.That(scores, Is.EqualTo(expected),
-            "a {0, -inf} mask must produce bit-identical output to the additive form");
+        for (int i = 0; i < scores.Length; i++)
+            Assert.That(BitConverter.SingleToInt32Bits(scores[i]), Is.EqualTo(BitConverter.SingleToInt32Bits(expected[i])),
+                $"index {i}: a {{0, -inf}} mask must produce a bit-identical result to the additive form");
     }
 
     [Test]
