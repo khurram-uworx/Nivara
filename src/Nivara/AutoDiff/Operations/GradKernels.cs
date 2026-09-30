@@ -406,27 +406,33 @@ internal static class GradKernels
             SoftmaxSingle(x.Slice(r * cols, cols), x.Slice(r * cols, cols));
     }
 
-    public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount)
-        where T : struct, IFloatingPointIeee754<T>
-        => SoftmaxGradient(softmaxOutput, gradOutput, output, classCount, ReadOnlySpan<bool>.Empty);
-
+    /// <summary>
+    /// Softmax backward: dS[i,j] = P[i,j] * (dP[i,j] - dot(P_i, dP_i)), over a row-major span with
+    /// <paramref name="classCount"/> elements per row.
+    /// </summary>
+    /// <param name="independentRows">
+    /// Per-row flag where <c>true</c> means the row's input no longer depends on the original
+    /// value, so its gradient is exactly zero. Required to have length
+    /// <c>softmaxOutput.Length / classCount</c>. Pass <c>default</c> to ignore.
+    /// </param>
     public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount,
-                                         ReadOnlySpan<bool> independentRows)
+                                         ReadOnlySpan<bool> independentRows = default)
         where T : struct, IFloatingPointIeee754<T>
     {
         if (softmaxOutput.Length != gradOutput.Length || output.Length < gradOutput.Length)
             throw new ArgumentException("All spans must have the same length.");
-        if (classCount <= 0 || classCount >= softmaxOutput.Length)
+        int rows = classCount > 0 ? softmaxOutput.Length / classCount : 0;
+        if (classCount <= 0 || rows < 2)
         {
-            if (!independentRows.IsEmpty && independentRows.Length > 0 && independentRows[0])
+            if (!independentRows.IsEmpty && independentRows[0])
             {
-                output.Clear();
+                // Only the row itself, not the whole output: output may be longer than one row.
+                output.Slice(0, softmaxOutput.Length).Clear();
                 return;
             }
             SoftmaxGradientSingle(softmaxOutput, gradOutput, output);
             return;
         }
-        int rows = softmaxOutput.Length / classCount;
         if (!independentRows.IsEmpty && independentRows.Length != rows)
             throw new ArgumentException(
                 $"Row flags length {independentRows.Length} does not match rows {rows}.", nameof(independentRows));

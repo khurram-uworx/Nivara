@@ -1669,10 +1669,18 @@ public class ForwardGradOperationsTests
         // row's scores are one constant and the row's output is mean(V): locally constant in q_1.
         // Its tangent must therefore be exactly zero, not merely small - the score softmax JVP
         // would otherwise report a nonzero dscore for a row the primal cannot distinguish.
+        //
+        // t_Q is chosen so the test discriminates. With K's two rows at [1,0,1,0] and [0,1,0,1], a
+        // t_Q that is uniform within each head makes t_scores uniform too (e.g. [1,1]), and the
+        // softmax JVP then cancels on *every* row regardless of the mask - the same effect
+        // MultiHeadAttention_QueryTangentSummedSoftmax_ZeroJvp already covers, and this test
+        // would pass with the fix absent. t_Q = [1,0,0,1] gives t_scores [1,0] in head 0 and
+        // [0,1] in head 1, so the unmasked row's tangent is nonzero on every component and only
+        // the fix can zero the saturated one.
         var query = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4,
-            new float[] { 1f, 0f, 0f, 0f, 1f, 1f, 1f, 1f });
+            new float[] { 1f, 0f, 0f, 1f, 1f, 0f, 1f, 0f });
         var key = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f }, 2, 4);
-        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 1f, 1f, 1f, 2f, 2f, 2f, 2f }, 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4);
         var mask = ForwardGradTensor<float>.FromMatrix(
             new float[] { 0f, 0f, float.MinValue, float.MinValue }, 2, 2);
 
@@ -1680,10 +1688,17 @@ public class ForwardGradOperationsTests
 
         Assert.That(result.RequiresTangent, Is.True);
         Assert.That(result.Tangent, Is.Not.Null);
-        Assert.That(result.Tangent![4], Is.Zero, "row 1 is fully masked, so its tangent is exactly zero");
-        Assert.That(result.Tangent![5], Is.Zero);
-        Assert.That(result.Tangent![6], Is.Zero);
-        Assert.That(result.Tangent![7], Is.Zero);
+        var tangent = result.Tangent!;
+        Assert.Multiple(() =>
+        {
+            for (int i = 0; i < 4; i++)
+                Assert.That(tangent[i], Is.Not.Zero,
+                    $"the unmasked row must keep a real tangent at [{i}] - the flag is per row");
+
+            for (int i = 4; i < 8; i++)
+                Assert.That(tangent[i], Is.Zero,
+                    $"row 1 is saturated, so its tangent is exactly zero at [{i}]");
+        });
     }
 
     [Test]

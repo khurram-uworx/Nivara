@@ -62,9 +62,19 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// gradient span aliasing the output span (the per-row dot is computed
     /// before any write), so attention and the Softmax op share one kernel.
     /// </summary>
-    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols)
-        => SoftmaxBackwardRows(weights, dS, rows, cols, ReadOnlySpan<bool>.Empty);
-
+    /// <param name="scoreIndependentRows">
+    /// Per-row flag where <c>true</c> means the row's pre-softmax score no longer depends on any
+    /// input — the mask fill annihilated it — so its gradient is exactly zero. Recorded by
+    /// <see cref="ApplyMask{T}(Span{T}, ReadOnlySpan{T}, Span{Boolean}, int, int)"/> and required
+    /// to have length <paramref name="rows"/>. Pass <c>default</c> to ignore.
+    /// </param>
+    /// <remarks>
+    /// A flagged row is cleared, not scaled: on a fully-masked row under a saturating fill the
+    /// softmax is the uniform <c>1/cols</c> and the row's output is <c>mean(V)</c>, a function with
+    /// zero derivative, so the VJP term is not merely small — it is structurally absent. A row
+    /// flagged under <c>-inf</c> already has <c>P = 0</c> and clears to the same value, which is
+    /// what keeps that path bit-for-bit unchanged.
+    /// </remarks>
     public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
                                            ReadOnlySpan<bool> scoreIndependentRows = default)
     {
@@ -168,19 +178,8 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
         if (scoreIndependentRows.IsEmpty)
         {
             for (int i = 0; i < scores.Length; i++)
-            {
-                T m = mask[i];
-                if (m == T.NegativeInfinity)
-                {
-                    scores[i] = T.NegativeInfinity;
-                }
-                else
-                {
-                    T s = scores[i];
-                    T t = s + m;
-                    scores[i] = t;
-                }
-            }
+                scores[i] = MaskedCell(scores[i], mask[i], out _);
+
             return;
         }
 
@@ -191,27 +190,37 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
             bool rowIndependent = true;
             for (int c = 0; c < cols; c++, idx++)
             {
-                T s = scores[idx];
-                T m = mask[idx];
-                T t;
-                bool dead = false;
-                if (m == T.NegativeInfinity)
-                {
-                    t = T.NegativeInfinity;
-                    dead = true;
-                }
-                else
-                {
-                    t = s + m;
-                    if (m != T.Zero && t == m)
-                        dead = true;
-                }
-                scores[idx] = t;
+                scores[idx] = MaskedCell(scores[idx], mask[idx], out bool dead);
                 if (!dead)
                     rowIndependent = false;
             }
             scoreIndependentRows[r] = rowIndependent;
         }
+    }
+
+    /// <summary>
+    /// The one authoritative implementation of the mask rule, shared by the tracking and
+    /// non-tracking loops so the two cannot drift apart: a <c>-inf</c> cell is assigned
+    /// <c>-inf</c> rather than summed, every other cell is added.
+    /// </summary>
+    /// <param name="dead">
+    /// <c>true</c> when the mask annihilated the score, i.e. the stored value no longer depends
+    /// on it. Only meaningful when a score-independent row is being tracked; the rule is
+    /// <c>mask != 0 &amp;&amp; (score + mask) == mask</c>, which subsumes <c>-inf</c> without a
+    /// special case and rejects <c>NaN</c> (whose <c>==</c> is always false) so a poisoned row is
+    /// never silently reported as score-independent.
+    /// </param>
+    static T MaskedCell(T score, T mask, out bool dead)
+    {
+        if (mask == T.NegativeInfinity)
+        {
+            dead = true;
+            return T.NegativeInfinity;
+        }
+
+        T masked = score + mask;
+        dead = mask != T.Zero && masked == mask;
+        return masked;
     }
 
     /// <summary>
