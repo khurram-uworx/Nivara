@@ -418,11 +418,24 @@ mask cannot express, plus the safe-softmax behaviour that shape forces:
 - **`attn_band_padding_minfill`** (`torch.finfo(float32).min`, HuggingFace's convention) —
   forward parity on every row. `finfo.min + score` saturates the score away (the float32 ULP at
   3.4e38 is ~2e31), so row 7's scores collapse to one constant and both sides reduce it to a
-  uniform average of V. The **backward deliberately is not asserted**: `dk`/`dv` aggregate over
-  every query row and so inherit that saturated row, and Nivara and PyTorch disagree there
-  (Nivara's `dq[7]` is exactly `1/seqLen` of PyTorch's, on every component, while a hand-derived
-  float64 reference matches neither). The test records the divergence instead of pinning a
-  factor that is not understood.
+  uniform average of V.
+
+  Its **backward fixtures are not a parity target**, and the reason is worth stating because it is
+  not "the tolerances are tight". Both sides apply the softmax VJP as though row 7's pre-softmax
+  score still depended on `q_7`; under a saturating fill it does not. PyTorch's CPU SDPA backward
+  uses unnormalized `P = 1` there, Nivara used the normalized `P = 1/8`, so PyTorch's `dq[7]` is
+  `1/seqLen` times Nivara's on every component — and neither is right.
+
+  The correct answer was established by float64 central finite differences, which return
+  bit-identical losses for that row under both `finfo(f64).min` and `finfo(f32).min`:
+  **`dq[7]` is exactly zero.** The row's output is `mean(V)`, locally constant in `q_7`. The
+  non-saturating control is what makes this a claim about saturation rather than about masking: a
+  large-but-not-`finfo.min` fill cancels inside the softmax and leaves the ordinary unmasked
+  gradient intact. `finfo.min` is in the saturating regime by construction at any precision.
+
+  Nivara asserts the closed form instead: `dq[7] == 0` at zero tolerance, `dk` bit-identical to
+  the `-inf` fixture, and `dv` differing from it by exactly the uniform `p_7 * dout[7]` with
+  `p_7 = 1/L`. The `.bin` files stay on disk as the record of the divergence (resolved in #454).
 - **`attn_mask_nonfinite`** — a `+inf` and a `NaN` cell in the additive mask. Both poison
   exactly their own row to all-NaN, which is what `GradKernels` narrowing its clamp to
   `max == -inf` (rather than `!IsFinite`) is for.

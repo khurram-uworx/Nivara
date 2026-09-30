@@ -1678,12 +1678,23 @@ def run():
     # the fully-masked row 7, which is zeros.
     save_band_attn_case("attn_band_padding", band_mask(float("-inf")), "neg_inf")
 
-    # Case 2: HuggingFace's convention (finfo.min fill), same geometry. The two
-    # conventions agree BIT-EXACTLY on every non-fully-masked row (verified: max|diff|
-    # == 0.0) and differ only on row 7's forward output. In the backward pass dq still
-    # agrees on visible rows, but dk/dv differ at EVERY key, because a uniform-weight
-    # row 7 contributes to every key's gradient while a zero-weight row 7 contributes
-    # nothing. Pinned so the divergence is auditable rather than a comment.
+    # Case 2: HuggingFace's convention (finfo.min fill), same geometry. FORWARD is a valid
+    # parity fixture: the two conventions agree BIT-EXACTLY on every non-fully-masked row
+    # (verified: max|diff| == 0.0) and on row 7 both sides saturate the scores to one
+    # constant and reduce it to mean(V).
+    #
+    # The BACKWARD is not a parity target, and regenerating these three .bin files will not
+    # change that. finfo.min absorbs the score (score + finfo.min == finfo.min), so row 7's
+    # output is locally constant in q_7 and its true dq is exactly zero. Neither side
+    # computes that: torch's CPU SDPA backward applies the softmax VJP with unnormalized
+    # P = 1 on the saturated row, Nivara used the normalized P = 1/8, so torch's dq[7] is
+    # 1/seqLen times Nivara's on every component, and dk/dv inherit the error by
+    # aggregating over query rows. Nivara asserts the closed form instead - dq[7] == 0,
+    # dk bit-identical to the -inf fixture, dv == dv(-inf) + p_7 * dout[7] with
+    # p_7 = 1/L - established by float64 central finite differences in #454.
+    #
+    # Kept on disk as the record of the divergence, and kept regenerable so the
+    # reproduction stays auditable. See manifest "parity": "forward_only".
     save_band_attn_case("attn_band_padding_minfill",
                         band_mask(torch.finfo(torch.float32).min), "finfo_min")
 
