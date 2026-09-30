@@ -1756,10 +1756,15 @@ public class ForwardGradOperationsTests
     {
         // The batched JVP half of #454. Shape [2, 2, 2]: batch 0 row 1 is saturated by a finfo.min
         // fill, batch 1 row 1 is masked open, so a wrong batch offset cannot hide - either slice
-        // would leave one of the two rows nonzero.
+        // would leave one of the two rows zeroed.
+        //
+        // The tangent must be non-uniform in K for the softmax JVP to be nonzero: with K = ones
+        // every t_scores entry is the same, so the JVP cancels on every row regardless of the mask
+        // (see BatchedMultiHeadAttention_QueryTangent_ZeroJvp) and this test would pass with the
+        // fix absent. Distinct K rows make t_scores vary across the two keys.
         var query = From3D(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
-            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
-        var key = From3D(new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f }, 2, 2, 2);
+            new float[] { 1f, 1f, 1f, 1f, 0.5f, 0f, 0.25f, 0.25f });
+        var key = From3D(new float[] { 1f, 1f, 2f, 3f, 1f, 1f, 2f, 3f }, 2, 2, 2);
         var value = From3D(new float[] { 1f, 1f, 2f, 2f, 1f, 1f, 2f, 2f }, 2, 2, 2);
         var mask = From3D(new float[] { 0f, 0f, float.MinValue, float.MinValue, 0f, 0f, 0f, 0f }, 2, 2, 2);
 
@@ -1767,10 +1772,15 @@ public class ForwardGradOperationsTests
 
         Assert.That(result.RequiresTangent, Is.True);
         var tangent = result.Tangent!;
-        Assert.That(tangent[2], Is.Zero, "batch 0 row 1 is saturated, so its tangent is exactly zero");
-        Assert.That(tangent[3], Is.Zero);
-        Assert.That(tangent.Skip(4).Any(x => x != 0f), Is.True,
-            "batch 1 row 1 is unmasked and must keep a real tangent - the flag is per batch element");
+        Assert.Multiple(() =>
+        {
+            // Row-major [batch, qLen, D]: b0r1 -> 2..3, b1r1 -> 6..7.
+            Assert.That(tangent[2], Is.Zero, "batch 0 row 1 is saturated, so its tangent is exactly zero");
+            Assert.That(tangent[3], Is.Zero);
+            Assert.That(tangent[6], Is.Not.Zero,
+                "batch 1 row 1 is unmasked and must keep a real tangent - the flag is per batch element");
+            Assert.That(tangent[7], Is.Not.Zero);
+        });
     }
 
     [Test]

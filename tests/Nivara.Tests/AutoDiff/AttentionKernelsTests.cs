@@ -330,13 +330,13 @@ public class AttentionKernelsTests
     [Test]
     public void ApplyMask_PartialSaturation_KeepsRowLive_AndLeavesNoFlag()
     {
-        // The boundary of the per-row flag, and the reason it is per-row rather than per-cell.
-        // A large-but-not-finfo.min fill leaves small scores intact, so this row's softmax is
-        // the ordinary one after the additive constant cancels, and its output still depends on
-        // q. A row-level flag can only answer "did the fill kill the whole row"; it says yes
-        // here is wrong, and #489 tracks the residual per-cell defect this shape leaves behind.
-        var scores = new[] { 1e-30f, -1e-30f, 0.0f, 1e-30f };
-        var mask = new[] { -1e30f, -1e30f, -1e30f, -1e30f };
+        // The boundary of the per-row flag, and why it is per-row rather than per-cell.
+        // At a -1e7 fill the float32 ULP is ~1, so a score of 0.5 is absorbed while scores of
+        // 1, 2 and 5 survive: this row is *partially* saturated. It must not be flagged, because
+        // the surviving cells keep the softmax score-dependent. That the flag cannot see the dead
+        // cell within it is the residual defect #489 tracks.
+        var scores = new[] { 1.0f, 0.5f, 2.0f, 5.0f };
+        var mask = new[] { -1e7f, -1e7f, -1e7f, -1e7f };
         var rowFlags = new bool[1];
 
         AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 1, 4);
@@ -344,11 +344,28 @@ public class AttentionKernelsTests
         Assert.Multiple(() =>
         {
             Assert.That(rowFlags, Is.EqualTo(new[] { false }),
-                "a non-saturating fill must not flag the row: the softmax cancels the constant");
-            Assert.That(scores[0], Is.EqualTo(-1e30f), "the fill is large enough to dominate the cell");
-            Assert.That(scores[0], Is.Not.EqualTo(mask[0]),
-                "yet the add is not an absorption - the score changed the stored value");
+                "a row with any surviving cell is still score-dependent and must not be flagged");
+            Assert.That(scores[1], Is.EqualTo(-1e7f), "score 0.5 is absorbed: it is below the ULP at 1e7");
+            Assert.That(scores[0], Is.EqualTo(-9999999f), "score 1 is not absorbed");
+            Assert.That(scores[3], Is.EqualTo(-9999995f), "score 5 is not absorbed");
         });
+    }
+
+    [Test]
+    public void ApplyMask_NonSaturatingLargeFill_KeepsRowLive()
+    {
+        // A large fill is not automatically a saturating one, and conflating the two would zero
+        // the gradient of any row using a large learned bias. Absorption needs the score to fall
+        // below the fill's ULP (~2^-24 of it), so -1e7 leaves unit-magnitude scores intact and
+        // the softmax cancels the additive constant as it would any other.
+        var scores = new[] { 1.0f, -2.0f, 0.5f, 3.0f };
+        var mask = new[] { -1e7f, -1e7f, -1e7f, -1e7f };
+        var rowFlags = new bool[1];
+
+        AttentionKernels<float>.ApplyMask(scores, mask, rowFlags, 1, 4);
+
+        Assert.That(rowFlags, Is.EqualTo(new[] { false }));
+        Assert.That(scores[0], Is.Not.EqualTo(-1e7f));
     }
 
     [Test]
@@ -418,21 +435,19 @@ public class AttentionKernelsTests
     public void SoftmaxBackwardRows_UnflaggedRow_IsUnchangedByTheOverload()
     {
         // The flag must be inert on every row that is not saturated, or the -inf and unmasked
-        // attention paths would all change. Pinned to the exact pre-flag values.
+        // attention paths would all change. The kernel mutates dS in place, so the comparison is
+        // against the 4-argument overload on an identical input, element for element.
         var weights = new[] { 0.25f, 0.25f, 0.25f, 0.25f, 1f, 0f, 0f, 0f };
         var dS = new[] { 3.0f, -1.0f, 2.0f, 0.5f, 4.0f, 0f, 0f, 0f };
-        var expected = (float[])dS.Clone();
 
         var baseline = (float[])dS.Clone();
         AttentionKernels<float>.SoftmaxBackwardRows(weights, baseline, 2, 4);
         AttentionKernels<float>.SoftmaxBackwardRows(weights, dS, 2, 4, new[] { false, false });
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(dS, Is.EqualTo(expected).AsCollection,
-                "passing all-false flags must not perturb any element");
-            Assert.That(dS, Is.EqualTo(baseline).AsCollection);
-        });
+        Assert.That(dS, Is.EqualTo(baseline).AsCollection,
+            "passing all-false flags must not perturb any element");
+        Assert.That(dS.Any(x => x != 0f), Is.True,
+            "and the rows must still have been transformed - this is not a no-op comparison");
     }
 
     static void AssertSuppressesNaN<T>(T nan, T negInf)
