@@ -174,7 +174,11 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
             bool useAffine = affine;
             int savedN = n, savedC = c, savedPlaneSize = planeSize;
 
-            var gradFn = new OpNode<T>("BatchNorm1dTrain", [input], (typedGradOutput) =>
+            var gradFn = new OpNode<T>("BatchNorm1dTrain",
+                useAffine
+                    ? ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor)
+                    : ModuleHelpers<T>.NodeInputs(input),
+                (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);
@@ -426,7 +430,11 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
             bool useAffine = affine;
             int savedN = n, savedC = c;
 
-            var gradFn = new OpNode<T>("BatchNorm2d", [input], (typedGradOutput) =>
+            var gradFn = new OpNode<T>("BatchNorm2d",
+                useAffine
+                    ? ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor)
+                    : ModuleHelpers<T>.NodeInputs(input),
+                (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);

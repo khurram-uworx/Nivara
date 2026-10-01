@@ -58,10 +58,8 @@ GradTensor<T>                         ← Base: Data, Shape, Reshape, ToColumn/T
 
 OpNode<T>                             ← One operation node in the graph
 ├── OperationName                     ← "Add", "MatMul", "Relu", etc.
-├── Inputs                            ← Parent tensors (object[])
+├── Inputs                            ← IReadOnlyList<ReverseGradTensor<T>> (see Inputs contract)
 ├── BackwardFunction                  ← Action<NivaraColumn<T>> (local gradient rule)
-├── ShouldSaveForBackward             ← Whether to save values for backward pass
-├── SavedValues                       ← Dictionary of saved forward values
 └── Apply(gradOutput)                 ← Invokes the backward function
 
 ComputationGraph                      ← Graph traversal engine (internal)
@@ -253,16 +251,36 @@ Represents a single operation in the computation graph:
 ```csharp
 sealed class OpNode<T> where T : struct, IFloatingPointIeee754<T>
 {
-    string OperationName { get; }           // "Add", "MatMul", "Relu", etc.
-    IReadOnlyList<object> Inputs { get; }   // parent tensors
-    Action<NivaraColumn<T>, bool> BackwardFunction { get; }
-    bool ShouldSaveForBackward { get; }
-    Dictionary<string, object>? SavedValues { get; }
+    string OperationName { get; }                          // "Add", "MatMul", "Relu", etc.
+    IReadOnlyList<ReverseGradTensor<T>> Inputs { get; }    // see the Inputs contract below
+    Action<NivaraColumn<T>> BackwardFunction { get; }
     void Apply(NivaraColumn<T> gradOutput);
 }
 ```
 
 The `BackwardFunction` closure captures references to input tensors and any saved forward values (e.g., sigmoid output for sigmoid gradient). It computes the local gradient contribution and calls `AccumulateGradient` on each input that requires `grad`.
+
+### The `Inputs` contract
+
+`Inputs` is every tensor whose gradient the node's backward function is responsible
+for accumulating into, module parameters included. It is the graph's edge set, not a
+hint: `ComputationGraph` walks it to build the backward plan and to clear gradients.
+
+So a tensor absent from `Inputs` is unreachable to `Backward` and invisible to
+`GradientUtils.ZeroGrad`. An argument the backward deliberately does not
+differentiate must therefore be **rejected loudly** via `GradientUtils.RequireConstant`
+rather than quietly omitted. A tensor is never silently ignored.
+
+A module must list the parameters its backward accumulates into. `Conv1d`, `Conv2d`,
+`ConvTranspose2d`, `LayerNorm`, `RMSNorm`, `BatchNorm1d` and `BatchNorm2d` each gate
+that list differently (`useBias && bias != null`, independent null checks, `affine`, or
+unconditionally), and `ModuleHelpers.NodeInputs` holds the conditional so it cannot
+drift from the closure beside it.
+
+Forward mode has the same obligation against its `trackTangent` predicate, where the
+cost of getting it wrong is higher: there is no graph and no `Backward` to fail later.
+`MultiHeadAttention`, `BatchedMultiHeadAttention` and `SparseEmbeddingBag.indices` all
+reject a gradient-carrying constant in both modes.
 
 ### ComputationGraph
 
@@ -281,7 +299,7 @@ exposed through `GradientUtils`: `ZeroGrad`, `GetGraphInfo`, `PrintGraphSummary`
 
 **Backward algorithm:**
 
-1. `BuildNodeToOutputMap(tensor)` — maps OpNode → output tensor
+1. `BuildBackwardPlan(tensor)` — walks `Inputs` to map each OpNode → its output tensor
 2. `TopologicalSort(tensor)` — DFS producing a linear order
 3. Iterate nodes **in reverse** (reverse topological order)
 4. For each node, look up its output tensor, get `outputTensor.Grad`

@@ -129,4 +129,30 @@ internal static class ModuleHelpers<T> where T : struct, IFloatingPointIeee754<T
             return mu;
         return ReverseGradOperations.SampleNormal(mu, logVar, seed);
     }
+
+    /// <summary>
+    /// Builds the input list for a module's <see cref="OpNode{T}"/>, appending only the
+    /// optional parameter tensors that actually exist.
+    /// </summary>
+    /// <remarks>
+    /// Under the <c>OpNode.Inputs</c> contract a node lists every tensor whose gradient its
+    /// backward is responsible for, so a module must list the parameters it accumulates into.
+    /// The gates differ per module (some use <c>useBias</c>, some <c>affine</c>, some only null
+    /// checks, some nothing), so the conditional lives here once instead of being re-derived —
+    /// and therefore able to drift from the closure — at each site.
+    /// </remarks>
+    /// <param name="input">The module input, always listed.</param>
+    /// <param name="second">First optional tensor, typically the weight. Omitted when null.</param>
+    /// <param name="third">Second optional tensor, typically the bias. Omitted when null.</param>
+    internal static ReverseGradTensor<T>[] NodeInputs(
+        ReverseGradTensor<T> input,
+        ReverseGradTensor<T>? second = null,
+        ReverseGradTensor<T>? third = null)
+    {
+        if (second == null)
+            return [input];
+        if (third == null)
+            return [input, second];
+        return [input, second, third];
+    }
 }

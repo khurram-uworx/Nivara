@@ -44,6 +44,33 @@ public static class GradientUtils
         return false;
     }
 
+    /// <summary>
+    /// Rejects an argument that an operation treats as a non-differentiable
+    /// constant when the caller asks for a gradient on it. Call this instead of
+    /// silently omitting such an argument from <see cref="OpNode{T}.Inputs"/>:
+    /// an omitted argument is indistinguishable, at the call site, from one that
+    /// was accidentally left unwired. See the contract documented on
+    /// <see cref="OpNode{T}.Inputs"/>.
+    /// </summary>
+    /// <param name="name">The C# parameter name, so the thrown
+    /// <see cref="ArgumentException.ParamName"/> points at the offending argument.</param>
+    /// <param name="tensor">The constant argument, or <see langword="null"/> when absent.</param>
+    internal static void RequireConstant<T>(string name, ReverseGradTensor<T>? tensor)
+        where T : struct, IFloatingPointIeee754<T>
+        => RequireConstant(name, tensor is { RequiresGrad: true }, "gradients");
+
+    /// <inheritdoc cref="RequireConstant{T}(string, ReverseGradTensor{T}?)"/>
+    internal static void RequireConstant<T>(string name, ForwardGradTensor<T>? tensor)
+        where T : struct, IFloatingPointIeee754<T>
+        => RequireConstant(name, tensor is { RequiresTangent: true }, "tangents");
+
+    static void RequireConstant(string name, bool tracks, string noun)
+    {
+        if (tracks)
+            throw new ArgumentException(
+                $"{name} is a non-differentiable constant and cannot require {noun}.", name);
+    }
+
     private sealed class GradScope : IDisposable
     {
         private bool disposed;

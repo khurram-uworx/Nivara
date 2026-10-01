@@ -150,7 +150,11 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
             var capturedWeightData = weightSpan.ToArray();
             var capturedBiasData = biasSpan.Length > 0 ? biasSpan.ToArray() : null;
 
-            var gradFn = new OpNode<T>("Conv1d", [input, weight.Tensor], (gradOutput) =>
+            var gradFn = new OpNode<T>("Conv1d",
+                useBias && bias != null
+                    ? ModuleHelpers<T>.NodeInputs(input, weight.Tensor, bias.Tensor)
+                    : ModuleHelpers<T>.NodeInputs(input, weight.Tensor),
+                (gradOutput) =>
             {
                 var gradOutData = new T[n * outChannels * oL];
                 gradOutput.CopyTo(gradOutData, T.Zero);

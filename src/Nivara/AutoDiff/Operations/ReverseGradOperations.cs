@@ -532,9 +532,7 @@ public static class ReverseGradOperations
             throw new ArgumentException($"Key and Value row counts must match (got {key.shape[0]} vs {value.shape[0]}).");
         if (mask != null && (mask.Rank != 2 || mask.shape[0] != qLen || mask.shape[1] != kvLen))
             throw new ArgumentException($"Mask must be a {qLen}x{kvLen} additive matrix.");
-        if (mask is { RequiresGrad: true })
-            throw new ArgumentException(
-                "Mask is a non-differentiable constant and cannot require gradients.", nameof(mask));
+        GradientUtils.RequireConstant(nameof(mask), mask);
 
         bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
         int scoreLen = qLen * kvLen;
@@ -755,9 +753,7 @@ public static class ReverseGradOperations
             throw new ArgumentException($"Key and Value sequence lengths must match (got {key.shape[1]} vs {value.shape[1]}).");
         if (mask != null && (mask.Rank != 3 || mask.shape[0] != batch || mask.shape[1] != qLen || mask.shape[2] != kvLen))
             throw new ArgumentException($"Mask must be a {batch}x{qLen}x{kvLen} additive tensor.");
-        if (mask is { RequiresGrad: true })
-            throw new ArgumentException(
-                "Mask is a non-differentiable constant and cannot require gradients.", nameof(mask));
+        GradientUtils.RequireConstant(nameof(mask), mask);
 
         bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
         int scoreLen = qLen * kvLen;
@@ -2409,6 +2405,15 @@ public static class ReverseGradOperations
     /// Each valid index contributes one embedding row to the corresponding output row.
     /// paddingIndex entries are ignored in both forward and backward passes.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="indices"/> is a non-differentiable constant: it carries integer row
+    /// selectors, read via <c>int.CreateChecked</c>, so a partial gradient would be
+    /// meaningless. It is deliberately absent from the node's input list, and an
+    /// <paramref name="indices"/> that requires gradients throws rather than being silently
+    /// dropped. The analogous <see cref="Gather{T}(ReverseGradTensor{T}, int[], int)"/> takes
+    /// its indices as an <c>int[]</c>, which makes the same exclusion structural.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="indices"/> requires gradients.</exception>
     public static ReverseGradTensor<T> SparseEmbeddingBag<T>(
         ReverseGradTensor<T> weight,
         ReverseGradTensor<T> indices,
@@ -2417,6 +2422,7 @@ public static class ReverseGradOperations
     {
         if (weight == null) throw new ArgumentNullException(nameof(weight));
         if (indices == null) throw new ArgumentNullException(nameof(indices));
+        GradientUtils.RequireConstant(nameof(indices), indices);
         if (weight.Rank != 2)
             throw new ArgumentException("SparseEmbeddingBag weight must be a 2D tensor.", nameof(weight));
         if (indices.Rank != 2)
