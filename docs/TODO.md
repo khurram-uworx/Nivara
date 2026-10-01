@@ -230,6 +230,12 @@ New `tests/Nivara.Tests/AutoDiff/OpNodeInputContractTests.cs`:
   `ReverseGradOperations` and `ForwardGradOperations` whose signature contains a
   `ReverseGradTensor<T>`/`ForwardGradTensor<T>` parameter and assert each method
   name is covered by a row. This is what catches a genuinely new occurrence.
+- **A second reflection guard over modules** (human-confirmed at G1): the static
+  guard cannot see module sites, which are exactly the seven that change here.
+  Reflect over public `Module<T>` subclasses that own a `Parameter<T>` field and
+  require each in the module row table. Targeting only `Parameter`-owning modules
+  keeps it low-noise — modules without parameters need no row, and this is
+  precisely the category the contract change makes load-bearing.
 - **Module `Parameter` rows**: for each of the seven module sites, assert the
   parameter tensors appear in `output.GradFn.Inputs`, and that
   `GradientUtils.ZeroGrad(output)` clears a parameter gradient seeded before the
