@@ -39,19 +39,26 @@ So exactly **three** unguarded exclusions remain: forward-mode `mask` ×2 and
 ### The `Parameter` carve-out in the issue text does not match the tree
 
 The issue states module `Parameter`s are "deliberately excluded". They are not
-uniformly excluded, and the inconsistency has an observable consequence:
+uniformly excluded, and the inconsistency has an observable consequence.
+**Corrected at G1** — the first draft of this plan said all nine sites gain
+tensors; reading every closure shows **seven** do, and two are already correct:
 
-| Site | `OpNode.Inputs` today | Accumulated into but absent |
-|---|---|---|
-| `Conv1d` `Nn/Conv1d.cs:153` | `[input, weight.Tensor]` | `bias` |
-| `Conv2d` `Nn/Conv2d.cs:253` | `[input, weight.Tensor]` | `bias` |
-| `ConvTranspose2d` `Nn/Conv2d.cs:841` | `[input, weight.Tensor]` | `bias` |
-| `BatchNorm1dEval` `Nn/BatchNorm.cs:141` | `[input]` | `weight`, `bias` |
-| `BatchNorm1dTrain` `Nn/BatchNorm.cs:177` | `[input]` | `weight`, `bias` |
-| `BatchNorm2dEval` `Nn/BatchNorm.cs:392` | `[input]` | `weight`, `bias` |
-| `BatchNorm2d` `Nn/BatchNorm.cs:429` | `[input]` | `weight`, `bias` |
-| `LayerNorm` `Nn/LayerNorm.cs:124` | `[input]` | `weight`, `bias` |
-| `RMSNorm` `Nn/RMSNorm.cs:97` | `[input]` | `weight` |
+| Site | `OpNode.Inputs` today | Accumulates into | Action |
+|---|---|---|---|
+| `Conv1d` `Nn/Conv1d.cs:153` | `[input, weight.Tensor]` | input, weight, bias | add `bias` |
+| `Conv2d` `Nn/Conv2d.cs:253` | `[input, weight.Tensor]` | input, weight, bias | add `bias` |
+| `ConvTranspose2d` `Nn/Conv2d.cs:841` | `[input, weight.Tensor]` | input, weight, bias | add `bias` |
+| `BatchNorm1dTrain` `Nn/BatchNorm.cs:177` | `[input]` | input, weight, bias | add `weight`, `bias` |
+| `BatchNorm2d` `Nn/BatchNorm.cs:429` | `[input]` | input, weight, bias | add `weight`, `bias` |
+| `LayerNorm` `Nn/LayerNorm.cs:124` | `[input]` | input, weight, bias | add `weight`, `bias` |
+| `RMSNorm` `Nn/RMSNorm.cs:97` | `[input]` | input, weight | add `weight` |
+| `BatchNorm1dEval` `Nn/BatchNorm.cs:141` | `[input]` | input only | **none — correct** |
+| `BatchNorm2dEval` `Nn/BatchNorm.cs:392` | `[input]` | input only | **none — correct** |
+
+The two eval-path nodes accumulate into `input` only, so `[input]` is already
+the contract-correct answer for them. (That they produce *no* parameter gradient
+in eval mode is a separate PyTorch divergence — tracked as **#494**, out of
+scope here.)
 
 `ComputationGraph.ZeroGrad` walks `GradFn.Inputs` (`ComputationGraph.cs:155`), so
 the public `GradientUtils.ZeroGrad(tensor)` today clears `input` **and** `weight`
@@ -88,8 +95,10 @@ claim-discipline rules this is worse than no documentation.
    requires-grad indices tensor now gets an `ArgumentException`. Verified no
    in-tree caller does (`NnTests`/`SparseEmbeddingTests` build indices via
    `FromArray` with the `requiresGrad: false` default; `NivaraChess` likewise).
-3. **`Parameter`s are brought into `Inputs`** so the contract reads uniformly,
-   rather than documenting a carve-out that the tree does not honour.
+3. **`Parameter`s are brought into `Inputs`** at the **seven** sites whose backward
+   already accumulates into them, so the contract reads uniformly rather than
+   documenting a carve-out the tree does not honour. The two BatchNorm eval-path
+   nodes keep `[input]` — they accumulate into nothing else.
 4. **Enforcement is a table-driven contract test plus a reflection completeness
    guard**, so a *new* op fails the build until it gets a contract row.
 
@@ -157,22 +166,53 @@ passing unchanged.
 "structurally non-differentiable because it carries integer row selectors" note in
 their XML docs.
 
-### 4. Bring module `Parameter`s into `Inputs`
+### 4. Bring module `Parameter`s into `Inputs` (seven sites)
 
-Nine sites in `Nn/` gain the tensors their backward function already accumulates
-into, conditionally on the same `affine` / `useBias` predicates that gate the
-accumulation. Conditional collection expressions, e.g. for Conv:
+**Corrected at G1.** The first draft said nine sites and sketched a single
+`useBias`/`affine` predicate. Reading every closure shows neither is safe:
+
+| Site | Gate the `Inputs` list must mirror |
+|---|---|
+| `Conv1d` / `Conv2d` / `ConvTranspose2d` | weight always (as today); bias only under `useBias && bias != null` |
+| `LayerNorm` | `weight != null` and `bias != null` **independently** — *not* on `affine`, so all four combinations occur |
+| `BatchNorm1dTrain` / `BatchNorm2d` | `useAffine` **plus** independent `weight != null` / `bias != null` |
+| `RMSNorm` | `weight.Tensor` unconditionally — the closure accumulates into it with no guard, so the list must too |
+
+A single shared predicate would silently diverge from the closure at three of the
+seven. So the conditional lives in **one** authoritative helper, per AGENTS.md
+rule 8, rather than being re-derived per site:
 
 ```csharp
-ReverseGradTensor<T>[] nodeInputs = useBias && bias != null
-    ? [input, weight.Tensor, bias.Tensor]
-    : [input, weight.Tensor];
-
-var gradFn = new OpNode<T>("Conv1d", nodeInputs, (typedGradOutput) => { ... });
+// src/Nivara/AutoDiff/Nn/ModuleHelpers.cs
+internal static ReverseGradTensor<T>[] NodeInputs<T>(
+    ReverseGradTensor<T> input,
+    ReverseGradTensor<T>? second = null,
+    ReverseGradTensor<T>? third = null)
+    where T : struct, IFloatingPointIeee754<T>
+{
+    if (second == null) return [input];
+    if (third == null) return [input, second];
+    return [input, second, third];
+}
 ```
 
-The `weight`/`bias` `Parameter` nullability must follow the same predicate that
-already guards the accumulation in the closure — no new null paths.
+Each site becomes one expression that cannot drift from its own closure:
+
+```csharp
+var gradFn = new OpNode<T>("Conv1d",
+    useBias && bias != null
+        ? ModuleHelpers<T>.NodeInputs(input, weight.Tensor, bias.Tensor)
+        : ModuleHelpers<T>.NodeInputs(input, weight.Tensor),
+    (gradOutput) => { /* unchanged closure */ });
+
+var gradFn = new OpNode<T>("LayerNorm",
+    ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor),
+    (typedGradOutput) => { /* unchanged closure */ });
+```
+
+One 1–3 element array per module forward, allocated only on the
+`RequiresGrad` path. Cost is negligible against the per-call `T[]` output and
+gradient buffers these forwards already allocate.
 
 ### 5. Tests
 
@@ -190,10 +230,13 @@ New `tests/Nivara.Tests/AutoDiff/OpNodeInputContractTests.cs`:
   `ReverseGradOperations` and `ForwardGradOperations` whose signature contains a
   `ReverseGradTensor<T>`/`ForwardGradTensor<T>` parameter and assert each method
   name is covered by a row. This is what catches a genuinely new occurrence.
-- **Module `Parameter` rows**: for each of the nine module sites, assert the
+- **Module `Parameter` rows**: for each of the seven module sites, assert the
   parameter tensors appear in `output.GradFn.Inputs`, and that
   `GradientUtils.ZeroGrad(output)` clears a parameter gradient seeded before the
   call. This pins the `ZeroGrad` behaviour the contract now implies.
+- The two BatchNorm eval-path nodes get explicit rows asserting `[input]` only,
+  so the *correct* exclusion is pinned rather than left to drift into looking
+  anomalous — which is exactly what happened to the attention mask.
 
 Extend `tests/Nivara.Tests/AutoDiff/AttentionMaskTests.cs` with the forward-mode
 `mask.RequiresTangent` throws cases (currently only reverse is covered).
@@ -236,7 +279,7 @@ Extend `tests/Nivara.Tests/AutoDiff/AttentionMaskTests.cs` with the forward-mode
   samples). All covered by the existing suite.
 - **Touches**: `src/Nivara/AutoDiff/{OpNode.cs, ComputationGraph.cs (no change),
   Utilities/GradientUtils.cs, Operations/ReverseGradOperations.cs,
-  Operations/ForwardGradOperations.cs, Nn/{Conv1d,Conv2d,BatchNorm,LayerNorm,RMSNorm}.cs}`,
+  Operations/ForwardGradOperations.cs, Nn/{ModuleHelpers,Conv1d,Conv2d,BatchNorm,LayerNorm,RMSNorm}.cs}`,
   `docs/{AUTODIFF.md, TODO.md}`, `CHANGELOG.md`,
   `tests/Nivara.Tests/AutoDiff/{OpNodeInputContractTests, AttentionMaskTests}.cs`.
 - **No probe/harness needed** — this is a contract and test-coverage change with no
@@ -255,7 +298,46 @@ Extend `tests/Nivara.Tests/AutoDiff/AttentionMaskTests.cs` with the forward-mode
 5. `docs: state the OpNode.Inputs contract and correct the stale OpNode reference`
    (`OpNode.cs` XML doc, `docs/AUTODIFF.md`, `CHANGELOG.md`)
 
+## G1 grounding record (complete)
+
+Grounded before any implementation.
+
+**Microsoft Learn**
+- *System.Span\<T\> struct* — `Span<T>` is a `ref struct` and "can't be
+  boxed". Confirms a reflection-driven **invocation** harness is impossible for
+  Span-taking methods, so per-op contract rows must be hand-written lambdas and
+  the reflection guard is restricted to **signature scanning**. Verified no
+  *public* op in either class takes a `Span` (`DropoutWithMask` is `internal`),
+  so scanning public methods is safe.
+- *CA2208: Instantiate argument exceptions correctly* — an `ArgumentException`
+  from a method with a parameter must be constructed with the correct
+  `paramName`. Confirms `RequireConstant`'s `new ArgumentException(message,
+  nameof(param))` shape.
+- *Friend assemblies* — `InternalsVisibleTo` grants the test assembly access to
+  `internal OpNode<T>.Inputs`, which the contract tests assert on.
+
+**code-memory** — confirmed the exact `Forward` ranges holding all nine sites:
+`BatchNorm.cs:102-206` (1dEval/1dTrain), `BatchNorm.cs:351-458`
+(2dEval/2d), `Conv1d.cs:101-186`, `Conv2d.cs:154-368`,
+`Conv2d.cs:774-888` (ConvTranspose2d), `LayerNorm.cs:85-154`,
+`RMSNorm.cs:56-134`.
+
+**Red flags raised at G1 and resolved:**
+1. *The plan was wrong about two of nine sites* — `BatchNorm1dEval`/
+   `BatchNorm2dEval` accumulate into `input` only and are already
+   contract-correct. Corrected to seven sites above.
+2. *The gating predicates are not uniform* — a single `useBias`/`affine`
+   predicate would have diverged from three of the seven closures. Resolved with
+   one authoritative `ModuleHelpers.NodeInputs` helper (proposed change 4).
+3. *Out-of-scope PyTorch divergence* — BatchNorm eval mode produces no
+   `weight`/`bias` gradient while the eval forward does use them. Captured as
+   **#494**, not fixed here.
+
+Blast radius unchanged from the pre-G1 draft except: seven rather than nine
+module sites touched, and `Nn/ModuleHelpers.cs` added to the touched set.
+
 ## GitHub issues log
 
-- [ ] (none yet — create at discovery time as execution proceeds; do not defer to
-      the end of the plan, compaction can lose it)
+- [#494](https://github.com/khurram-uworx/Nivara/issues/494) — BatchNorm eval mode
+  produces no `weight`/`bias` gradient, diverging from PyTorch (created at G1
+  while auditing the nine `OpNode` sites)
