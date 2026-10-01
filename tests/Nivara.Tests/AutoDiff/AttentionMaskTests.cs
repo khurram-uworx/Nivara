@@ -53,6 +53,53 @@ public class AttentionMaskTests
     }
 
     [Test]
+    public void ForwardMultiHeadAttention_MaskRequiresTangent_Throws()
+    {
+        var q = FwdMat2D(Rand(16, 101), 4, 4, tangent: false);
+        var k = FwdMat2D(Rand(16, 102), 4, 4, tangent: false);
+        var v = FwdMat2D(Rand(16, 103), 4, 4, tangent: false);
+        var mask = FwdMat2D(Rand(16, 104), 4, 4, tangent: true);
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            ForwardGradOperations.MultiHeadAttention(q, k, v, 2, 0.5f, mask));
+
+        Assert.That(ex!.Message, Does.Contain("non-differentiable"));
+        Assert.That(ex.ParamName, Is.EqualTo("mask"));
+    }
+
+    [Test]
+    public void ForwardBatchedMultiHeadAttention_MaskRequiresTangent_Throws()
+    {
+        var q = FwdMat3D(Rand(32, 105), 2, 4, 4, tangent: false);
+        var k = FwdMat3D(Rand(32, 106), 2, 4, 4, tangent: false);
+        var v = FwdMat3D(Rand(32, 107), 2, 4, 4, tangent: false);
+        var mask = FwdMat3D(Rand(32, 108), 2, 4, 4, tangent: true);
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            ForwardGradOperations.BatchedMultiHeadAttention(q, k, v, 2, 0.5f, mask));
+
+        Assert.That(ex!.Message, Does.Contain("non-differentiable"));
+        Assert.That(ex.ParamName, Is.EqualTo("mask"));
+    }
+
+    [Test]
+    public void ForwardMultiHeadAttention_MaskOnlyCarriesTangent_ThrowsRatherThanSilentlyDroppingTheJvp()
+    {
+        // Forward mode is the worse half of this defect: trackTangent excluded the mask,
+        // so before the guard a mask-only tangent produced RequiresTangent == false with
+        // no error at all -- no graph, and no Backward to fail later.
+        var q = FwdMat2D(Rand(16, 109), 4, 4, tangent: false);
+        var k = FwdMat2D(Rand(16, 110), 4, 4, tangent: false);
+        var v = FwdMat2D(Rand(16, 111), 4, 4, tangent: false);
+        var mask = FwdMat2D(Rand(16, 112), 4, 4, tangent: true);
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            ForwardGradOperations.MultiHeadAttention(q, k, v, 2, 0.5f, mask));
+
+        Assert.That(ex!.ParamName, Is.EqualTo("mask"));
+    }
+
+    [Test]
     public void MultiHeadAttention_MaskOnlyRequiresGrad_ThrowsRatherThanSilentlySkippingTheGraph()
     {
         // shouldTrack excludes the mask, so before the guard this built no node at
@@ -206,5 +253,24 @@ public class AttentionMaskTests
         var tensor = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad);
         tensor.Reshape(b, l, d);
         return tensor;
+    }
+
+    static ForwardGradTensor<float> FwdMat2D(float[] data, int rows, int cols, bool tangent)
+        => ForwardGradTensor<float>.FromMatrix(data, rows, cols, tangent ? Ones(data.Length) : null);
+
+    static ForwardGradTensor<float> FwdMat3D(float[] data, int b, int l, int d, bool tangent)
+    {
+        var tensor = new ForwardGradTensor<float>(
+            NivaraColumn<float>.Create(data),
+            tangent ? NivaraColumn<float>.Create(Ones(data.Length)) : null);
+        tensor.Reshape(b, l, d);
+        return tensor;
+    }
+
+    static float[] Ones(int count)
+    {
+        var arr = new float[count];
+        Array.Fill(arr, 1f);
+        return arr;
     }
 }
