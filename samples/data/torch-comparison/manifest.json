@@ -1691,7 +1691,9 @@
       16
     ],
     "grads": true,
-    "grads_finite": true
+    "grads_finite": true,
+    "parity": "forward_only",
+    "note": "Backward is NOT a parity target. The forward is a valid fixture (both sides saturate row 7 to one constant and reduce it to mean(V)), but the backward is not: PyTorch's CPU SDPA backward applies the softmax VJP with unnormalized P=1 on the saturated row, so its dq[7] is 8x (1/SequenceLength) Nivara's, and dk/dv inherit the error by aggregating over query rows. Neither is the true derivative. A finfo.min fill absorbs the score (score + finfo.min == finfo.min, since the float32 ULP at 3.4e38 is ~2e31), so the row's output is mean(V) and locally constant in q - float64 central finite differences give dq[7] = 0 exactly. Nivara asserts that closed form (dq[7] == 0, dk bit-identical to the -inf fixture, dv = dv(-inf) + p_7 * dout[7] with p_7 = 1/L) rather than these files. Kept on disk as the record of the divergence. Resolved in #454."
   },
   "attn_mask_nonfinite": {
     "layer": "MultiHeadAttention",

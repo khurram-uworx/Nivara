@@ -185,6 +185,41 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **A fully-masked attention row under HuggingFace's `finfo.min` fill received a spurious
+  `dq` (#454)** — the row-7 divergence the `attn_band_padding_minfill` fixtures recorded as
+  unexplained. A `finfo.min` fill *absorbs* the score it masks: `score + finfo.min ==
+  finfo.min`, because the float32 ULP at 3.4e38 is ~2e31. A fully-masked query row therefore
+  collapses to one constant, its softmax is the uniform `1/L`, and its output is `mean(V)` —
+  **locally constant in `q`**. The backward nonetheless applied the softmax VJP to that row
+  and reported a nonzero `dq`, roughly `1/seqLen` of PyTorch's (PyTorch's CPU SDPA backward
+  uses unnormalized `P = 1` there; Nivara used the normalized `P = 1/8`). Neither was correct.
+
+  `ApplyMask` now reports per-row saturation in an optional `bool[qLen]` out-parameter — a
+  cell is dead iff `mask != 0 && (score + mask) == mask`, a row is flagged iff it holds no
+  live cell — and `SoftmaxBackwardRows` clears a flagged row's `dS` after the per-row dot.
+  Threaded through all four call sites: `MultiHeadAttention` and
+  `BatchedMultiHeadAttention`, reverse-mode and forward-mode JVP. The flags are allocated
+  only when tracking and never on the inference path.
+
+  **The exact derivative is `dq[7] == 0`**, established by float64 central finite
+  differences: bit-identical losses for that row under both `finfo(f64).min` and
+  `finfo(f32).min`. The load-bearing contrast is that a large-but-not-`finfo.min` fill
+  cancels inside the softmax and leaves the ordinary unmasked gradient intact — so "fully
+  masked" alone does not imply a zero gradient; `finfo.min` is in the saturating regime by
+  construction at any precision. Consequently `dk` becomes bit-for-bit the `-inf` fixture
+  (the cleared `dS` row contributes exactly what `P = 0` did) and `dv` differs from it by
+  exactly the uniform `p_7 * dout[7]` with `p_7 = 1/L`.
+
+  The `-inf` path is unchanged and bit-for-bit: the detector flags the same row there, and
+  `P = 0` makes clearing a no-op, which `BandedAttention_NegInfFill_ForwardAndBackward_MatchPyTorch`
+  and `BatchedMultiHeadAttention_Backward_SelfAttention_MatchesPerSequenceGradients` now prove
+  at zero tolerance. The `minfill` backward fixtures are **not** a parity target — the forward
+  still is — and are reclassified in the manifest, `samples/NivaraTorch/README.md`, and
+  `gen_reference.py` rather than regenerated; they are kept as the record of the divergence.
+  Partial saturation — a large-but-not-`finfo.min` fill that kills *some* cells in a row and
+  not others — is out of scope here because a per-row flag cannot express per-cell death; tracked
+  as #489.
+
 - **Attention ops declared the mask as an `OpNode` input but never differentiated
   it (#481)** — `ReverseGradOperations.MultiHeadAttention` and
   `BatchedMultiHeadAttention` passed the optional mask into the node's input list

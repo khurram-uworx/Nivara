@@ -62,8 +62,28 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// gradient span aliasing the output span (the per-row dot is computed
     /// before any write), so attention and the Softmax op share one kernel.
     /// </summary>
-    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols)
-        => GradKernels.SoftmaxGradient(weights, dS, dS, cols);
+    /// <param name="scoreIndependentRows">
+    /// Per-row flag where <c>true</c> means the row's pre-softmax score no longer depends on any
+    /// input — the mask fill annihilated it — so its gradient is exactly zero. Recorded by
+    /// <see cref="ApplyMask{T}(Span{T}, ReadOnlySpan{T}, Span{Boolean}, int, int)"/> and required
+    /// to have length <paramref name="rows"/>. Pass <c>default</c> to ignore.
+    /// </param>
+    /// <remarks>
+    /// A flagged row is cleared, not scaled: on a fully-masked row under a saturating fill the
+    /// softmax is the uniform <c>1/cols</c> and the row's output is <c>mean(V)</c>, a function with
+    /// zero derivative, so the VJP term is not merely small — it is structurally absent. A row
+    /// flagged under <c>-inf</c> already has <c>P = 0</c> and clears to the same value, which is
+    /// what keeps that path bit-for-bit unchanged.
+    /// </remarks>
+    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
+                                           ReadOnlySpan<bool> scoreIndependentRows = default)
+    {
+        if (!scoreIndependentRows.IsEmpty && scoreIndependentRows.Length != rows)
+            throw new ArgumentException(
+                $"Row flags length {scoreIndependentRows.Length} does not match rows {rows}.", nameof(scoreIndependentRows));
+
+        GradKernels.SoftmaxGradient(weights, dS, dS, cols, scoreIndependentRows);
+    }
 
     /// <summary>
     /// In-place additive attention mask over a flat [qLen, kvLen] score buffer.
@@ -111,15 +131,96 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// </remarks>
     public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask)
     {
+        ApplyMask(scores, mask, Span<bool>.Empty, 0, 0);
+    }
+
+    /// <summary>
+    /// In-place additive attention mask over a flat [qLen, kvLen] score buffer, recording
+    /// which query rows became score-independent due to saturation by the mask fill.
+    /// </summary>
+    /// <param name="scores">Flat score buffer [rows * cols].</param>
+    /// <param name="mask">Additive mask buffer [rows * cols].</param>
+    /// <param name="scoreIndependentRows">
+    /// Per-row flag where <c>true</c> means every cell in the row was annihilated
+    /// by the mask (the row's pre-softmax score no longer depends on any input after
+    /// masking). Pass <see cref="Span{Boolean}.Empty"/> to ignore.
+    /// </param>
+    /// <param name="rows">Query rows. If <paramref name="scoreIndependentRows"/> is not empty,
+    /// this must equal its length.</param>
+    /// <param name="cols">Keys per row.</param>
+    /// <remarks>
+    /// A cell is <em>dead</em> (score annihilated) if <c>mask[i] != T.Zero</c> and
+    /// <c>(scores[i] + mask[i]) == mask[i]</c>. This is the definitive test: adding the fill
+    /// does not change the stored value, so the final pre-softmax value carries no
+    /// dependence on the original score. The <c>-inf</c> branch is subsumed by this test
+    /// (adding <c>-inf</c> to a finite-or-infinite score produces <c>-inf</c> only in the
+    /// suppressed case; the equality test detects annihilation consistently). A row is
+    /// flagged when every cell in it is dead.
+    /// </remarks>
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask,
+                                 Span<bool> scoreIndependentRows, int rows, int cols)
+    {
         if (mask.Length != scores.Length)
             throw new ArgumentException(
                 $"Mask length {mask.Length} does not match score length {scores.Length}.", nameof(mask));
-
-        for (int i = 0; i < scores.Length; i++)
+        if (!scoreIndependentRows.IsEmpty)
         {
-            T m = mask[i];
-            scores[i] = m == T.NegativeInfinity ? T.NegativeInfinity : scores[i] + m;
+            if (rows < 0) throw new ArgumentOutOfRangeException(nameof(rows));
+            if (cols < 0) throw new ArgumentOutOfRangeException(nameof(cols));
+            if (scoreIndependentRows.Length != rows)
+                throw new ArgumentException(
+                    $"Row flags length {scoreIndependentRows.Length} does not match rows {rows}.", nameof(scoreIndependentRows));
+            if ((long)rows * cols != scores.Length)
+                throw new ArgumentException(
+                    $"rows*cols ({rows * cols}) must equal score length ({scores.Length}).");
         }
+
+        if (scoreIndependentRows.IsEmpty)
+        {
+            for (int i = 0; i < scores.Length; i++)
+                scores[i] = MaskedCell(scores[i], mask[i], out _);
+
+            return;
+        }
+
+        scoreIndependentRows.Clear();
+        int idx = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            bool rowIndependent = true;
+            for (int c = 0; c < cols; c++, idx++)
+            {
+                scores[idx] = MaskedCell(scores[idx], mask[idx], out bool dead);
+                if (!dead)
+                    rowIndependent = false;
+            }
+            scoreIndependentRows[r] = rowIndependent;
+        }
+    }
+
+    /// <summary>
+    /// The one authoritative implementation of the mask rule, shared by the tracking and
+    /// non-tracking loops so the two cannot drift apart: a <c>-inf</c> cell is assigned
+    /// <c>-inf</c> rather than summed, every other cell is added.
+    /// </summary>
+    /// <param name="dead">
+    /// <c>true</c> when the mask annihilated the score, i.e. the stored value no longer depends
+    /// on it. Only meaningful when a score-independent row is being tracked; the rule is
+    /// <c>mask != 0 &amp;&amp; (score + mask) == mask</c>, which subsumes <c>-inf</c> without a
+    /// special case and rejects <c>NaN</c> (whose <c>==</c> is always false) so a poisoned row is
+    /// never silently reported as score-independent.
+    /// </param>
+    static T MaskedCell(T score, T mask, out bool dead)
+    {
+        if (mask == T.NegativeInfinity)
+        {
+            dead = true;
+            return T.NegativeInfinity;
+        }
+
+        T masked = score + mask;
+        dead = mask != T.Zero && masked == mask;
+        return masked;
     }
 
     /// <summary>

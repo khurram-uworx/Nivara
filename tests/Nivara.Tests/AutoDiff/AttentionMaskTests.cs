@@ -125,6 +125,51 @@ public class AttentionMaskTests
         Assert.That(inputs, Does.Not.Contain(mask));
     }
 
+    /// <summary>
+    /// The mask is a non-differentiable constant, but the *scores* it touches are not
+    /// necessarily alive. A saturating fill absorbs the score it masks, so a fully-masked
+    /// query row becomes locally constant in q and its true dq is exactly zero (#454).
+    ///
+    /// This fixture is about the mask contract, so it asserts only that the two cases stay
+    /// distinguishable: a fully-masked row under `-inf` (P = 0) and under a saturating fill
+    /// (row flagged) both give exact zeros for different reasons, and neither may be silently
+    /// treated as an ordinary masked row. The closed forms themselves are asserted in
+    /// <c>BandedAttentionTests</c> against the PyTorch fixtures.
+    /// </summary>
+    [Test]
+    public void MultiHeadAttention_FullyMaskedRow_ZeroesDqUnderBothFillConventions()
+    {
+        const int len = 4, modelDim = 4, numHeads = 2;
+        var dOut = Mat2D(Rand(len * modelDim, 31), len, modelDim, requiresGrad: false);
+
+        float[] RunAndReadLastRowDq(bool saturating)
+        {
+            var q = Mat2D(Rand(len * modelDim, 11), len, modelDim, requiresGrad: true);
+            var k = Mat2D(Rand(len * modelDim, 12), len, modelDim, requiresGrad: true);
+            var v = Mat2D(Rand(len * modelDim, 13), len, modelDim, requiresGrad: true);
+            var maskData = new float[len * len];
+            for (int i = 0; i < len * len; i++)
+                maskData[i] = i / len == len - 1
+                    ? (saturating ? float.MinValue : float.NegativeInfinity)
+                    : 0f;
+
+            var outTensor = ReverseGradOperations.MultiHeadAttention(q, k, v, numHeads, 0.5f,
+                Mat2D(maskData, len, len, requiresGrad: false));
+            outTensor.Backward(dOut);
+
+            var grad = q.Grad!;
+            return grad.Skip((len - 1) * modelDim).Take(modelDim).ToArray();
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(RunAndReadLastRowDq(saturating: false), Is.All.EqualTo(0f),
+                "-inf fill: P = 0 on the fully-masked row, so dq is exactly zero");
+            Assert.That(RunAndReadLastRowDq(saturating: true), Is.All.EqualTo(0f),
+                "saturating fill: the row is score-independent, so dq is exactly zero too");
+        });
+    }
+
     static float[] CausalMask(int len)
     {
         var mask = new float[len * len];

@@ -1663,6 +1663,45 @@ public class ForwardGradOperationsTests
     }
 
     [Test]
+    public void MultiHeadAttention_SaturatedFullyMaskedRow_ContributesZeroTangent()
+    {
+        // The JVP half of #454. The mask fill is finfo.min, which saturates, so the fully-masked
+        // row's scores are one constant and the row's output is mean(V): locally constant in q_1.
+        // Its tangent must therefore be exactly zero, not merely small - the score softmax JVP
+        // would otherwise report a nonzero dscore for a row the primal cannot distinguish.
+        //
+        // t_Q is chosen so the test discriminates. With K's two rows at [1,0,1,0] and [0,1,0,1], a
+        // t_Q that is uniform within each head makes t_scores uniform too (e.g. [1,1]), and the
+        // softmax JVP then cancels on *every* row regardless of the mask - the same effect
+        // MultiHeadAttention_QueryTangentSummedSoftmax_ZeroJvp already covers, and this test
+        // would pass with the fix absent. t_Q = [1,0,0,1] gives t_scores [1,0] in head 0 and
+        // [0,1] in head 1, so the unmasked row's tangent is nonzero on every component and only
+        // the fix can zero the saturated one.
+        var query = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4,
+            new float[] { 1f, 0f, 0f, 1f, 1f, 0f, 1f, 0f });
+        var key = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f }, 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4);
+        var mask = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 0f, 0f, float.MinValue, float.MinValue }, 2, 2);
+
+        var result = ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f, mask);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent, Is.Not.Null);
+        var tangent = result.Tangent!;
+        Assert.Multiple(() =>
+        {
+            for (int i = 0; i < 4; i++)
+                Assert.That(tangent[i], Is.Not.Zero,
+                    $"the unmasked row must keep a real tangent at [{i}] - the flag is per row");
+
+            for (int i = 4; i < 8; i++)
+                Assert.That(tangent[i], Is.Zero,
+                    $"row 1 is saturated, so its tangent is exactly zero at [{i}]");
+        });
+    }
+
+    [Test]
     public void MultiHeadAttention_InvalidMaskShape_Throws()
     {
         var query = ForwardGradTensor<float>.FromMatrix(new float[8], 2, 4);
@@ -1725,6 +1764,38 @@ public class ForwardGradOperationsTests
         Assert.That(result.RequiresTangent, Is.True);
         for (int i = 0; i < 8; i++)
             Assert.That(result.Tangent![i], Is.EqualTo(0.0f).Within(1e-4f));
+    }
+
+    [Test]
+    public void BatchedMultiHeadAttention_SaturatedFullyMaskedRow_ContributesZeroTangent()
+    {
+        // The batched JVP half of #454. Shape [2, 2, 2]: batch 0 row 1 is saturated by a finfo.min
+        // fill, batch 1 row 1 is masked open, so a wrong batch offset cannot hide - either slice
+        // would leave one of the two rows zeroed.
+        //
+        // The tangent must be non-uniform in K for the softmax JVP to be nonzero: with K = ones
+        // every t_scores entry is the same, so the JVP cancels on every row regardless of the mask
+        // (see BatchedMultiHeadAttention_QueryTangent_ZeroJvp) and this test would pass with the
+        // fix absent. Distinct K rows make t_scores vary across the two keys.
+        var query = From3D(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f, 0.5f, 0f, 0.25f, 0.25f });
+        var key = From3D(new float[] { 1f, 1f, 2f, 3f, 1f, 1f, 2f, 3f }, 2, 2, 2);
+        var value = From3D(new float[] { 1f, 1f, 2f, 2f, 1f, 1f, 2f, 2f }, 2, 2, 2);
+        var mask = From3D(new float[] { 0f, 0f, float.MinValue, float.MinValue, 0f, 0f, 0f, 0f }, 2, 2, 2);
+
+        var result = ForwardGradOperations.BatchedMultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f, mask);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        var tangent = result.Tangent!;
+        Assert.Multiple(() =>
+        {
+            // Row-major [batch, qLen, D]: b0r1 -> 2..3, b1r1 -> 6..7.
+            Assert.That(tangent[2], Is.Zero, "batch 0 row 1 is saturated, so its tangent is exactly zero");
+            Assert.That(tangent[3], Is.Zero);
+            Assert.That(tangent[6], Is.Not.Zero,
+                "batch 1 row 1 is unmasked and must keep a real tangent - the flag is per batch element");
+            Assert.That(tangent[7], Is.Not.Zero);
+        });
     }
 
     [Test]

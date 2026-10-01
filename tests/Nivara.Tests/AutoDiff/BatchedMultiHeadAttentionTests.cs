@@ -157,6 +157,78 @@ public class BatchedMultiHeadAttentionTests
     }
 
     [Test]
+    public void BatchedBackward_SaturatedFullyMaskedRow_EqualsExactDerivative_PerBatchElement()
+    {
+        // The batched reverse-mode half of #454. Batch 0's last row is fully masked with a
+        // finfo.min fill, so it saturates and its output is mean(V): dq for that row is exactly
+        // zero. Batch 1 carries the same fill but keeps its last row open, so it must keep a real
+        // gradient - otherwise the flag has leaked across batch elements. Both are asserted
+        // against the same closed forms the single-sequence fixture uses.
+        const int B = 2, L = 4, D = 8, H = 2;
+        int headDim = D / H;
+        var qData = RandFloats(B * L * D, 61);
+        var kData = RandFloats(B * L * D, 62);
+        var vData = RandFloats(B * L * D, 63);
+        var dOut = RandFloats(B * L * D, 64);
+        var maskData = new float[B * L * L];
+        for (int b = 0; b < B; b++)
+        for (int j = 0; j < L; j++)
+            maskData[(b * L + (L - 1)) * L + j] = b == 0 ? float.MinValue : 0f;
+        float scale = 1f / MathF.Sqrt(D / H);
+
+        var q = Mat3D(qData, B, L, D, requiresGrad: true);
+        var k = Mat3D(kData, B, L, D, requiresGrad: true);
+        var v = Mat3D(vData, B, L, D, requiresGrad: true);
+        var batched = ReverseGradOperations.BatchedMultiHeadAttention(q, k, v, H, scale,
+            Mat3D(maskData, B, L, L, requiresGrad: false));
+        batched.Backward(Mat3D(dOut, B, L, D, requiresGrad: false));
+
+        // Closed form per sequence: dq of the saturated row is zero, dk is bit-for-bit the same as
+        // the -inf mask would give (the cleared dS row contributes exactly what P = 0 did), and dv
+        // keeps the uniform p = 1/L the saturated row adds to every key.
+        for (int b = 0; b < B; b++)
+        {
+            bool saturated = b == 0;
+            var negInfMask = new float[L * L];
+            for (int i = 0; i < L * L; i++)
+                negInfMask[i] = maskData[b * L * L + i] == float.MinValue ? float.NegativeInfinity : 0f;
+
+            var kRef = Mat2D(kData, b, L, D, true);
+            var vRef = Mat2D(vData, b, L, D, true);
+            var reference = ReverseGradOperations.MultiHeadAttention(
+                Mat2D(qData, b, L, D, true), kRef, vRef, H, scale,
+                Mat2D(negInfMask, 0, L, L, false));
+            reference.Backward(Mat2D(dOut, b, L, D, false));
+
+            var actualDq = GradSlice(q, b, L, D);
+            var expectedDk = GradData(kRef);
+            var expectedDv = (float[])GradData(vRef).Clone();
+            if (saturated)
+            {
+                for (int j = 0; j < L; j++)
+                for (int h = 0; h < H; h++)
+                for (int d = 0; d < headDim; d++)
+                    expectedDv[j * D + h * headDim + d] += dOut[b * L * D + (L - 1) * D + h * headDim + d] / L;
+            }
+
+            Assert.Multiple(() =>
+            {
+                if (saturated)
+                    Assert.That(actualDq.Skip((L - 1) * D).Take(D), Is.All.EqualTo(0f),
+                        $"b{b}: dq of a saturated fully-masked row is exactly zero");
+                else
+                    Assert.That(actualDq.Skip((L - 1) * D).Take(D).Any(x => x != 0f), Is.True,
+                        $"b{b}: the last row is open, so its dq must not be zeroed");
+
+                TestHelpers.AssertTensorClose(expectedDk, GradSlice(k, b, L, D),
+                    absTol: 0f, relTol: 0f, label: $"b{b} dK");
+                TestHelpers.AssertTensorClose(expectedDv, GradSlice(v, b, L, D),
+                    absTol: 1e-5f, relTol: 1e-5f, label: $"b{b} dV");
+            });
+        }
+    }
+
+    [Test]
     public void BatchedMultiHeadAttention_InvalidShapes_Throw()
     {
         const int B = 2, L = 4, D = 8, H = 2;

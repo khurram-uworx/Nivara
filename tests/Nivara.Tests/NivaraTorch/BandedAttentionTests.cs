@@ -134,18 +134,38 @@ public class BandedAttentionTests
     }
 
     /// <summary>
-    /// Records a measured divergence rather than asserting parity for it. Under HuggingFace's
-    /// <c>finfo.min</c> convention the gradients do <b>not</b> agree with PyTorch, and the
-    /// gradients are not independently verifiable either: row 7's scores are one saturated
-    /// constant, and <c>dk</c>/<c>dv</c> aggregate over every query row, so they inherit that
-    /// row's contribution. Measured against PyTorch, Nivara's <c>dq[7]</c> is exactly
-    /// <c>1/SequenceLength</c> of PyTorch's on every component, while a hand-derived float64
-    /// reference matches neither. This is not a contract and is deliberately not asserted as one.
-    /// It is inert for this sample (inference-only, and <c>-inf</c> is the mask actually used),
-    /// so it is tracked rather than fixed here.
+    /// The exact derivative under HuggingFace's <c>finfo.min</c> convention, which is
+    /// <b>not</b> what the PyTorch <c>minfill</c> backward fixtures contain.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Row 7 is fully masked, and <c>finfo.min</c> saturates: the float32 ULP at 3.4e38 is ~2e31,
+    /// so <c>score + finfo.min</c> returns <c>finfo.min</c> for every cell and the row collapses to
+    /// one constant. Its softmax is therefore the uniform <c>1/L</c>, and the row's output is
+    /// <c>mean(V)</c> — <em>locally constant</em> in <c>q_7</c>. Central finite differences in
+    /// float64 return bit-identical losses for that row under both <c>finfo(f64).min</c> and
+    /// <c>finfo(f32).min</c>, so <c>dq[7]</c> is exactly zero rather than merely small.
+    /// </para>
+    /// <para>
+    /// The <c>-inf</c> fill is the control that makes this a claim about saturation rather than
+    /// about masking: a <em>non</em>-saturating finite fill cancels inside the softmax and leaves
+    /// the ordinary unmasked gradient intact, so "fully masked" alone does not imply
+    /// <c>dq = 0</c>. <c>finfo.min</c> is in the saturating regime by construction at any
+    /// precision, which is why the zero holds for every <c>finfo.min</c> fill.
+    /// </para>
+    /// <para>
+    /// The tolerances here are the ones <see cref="TestHelpers.AssertTensorClose"/> defaults to,
+    /// matching every other parity fixture. <c>dq[7]</c> is separately asserted at <b>zero</b>
+    /// tolerance against a hard <c>0f</c> rather than a fixture — it is a cleared span, so any
+    /// nonzero value there is a structural defect rather than a rounding difference. The
+    /// <c>dk</c> and <c>dq</c> rows 0-6 comparisons stay at fixture tolerance because these are
+    /// cross-library references: PyTorch and Nivara order the same summation differently, which is
+    /// worth ~2e-7 here. The bit-exact claim is Nivara-versus-Nivara and is asserted by
+    /// <see cref="BandedAttention_FinfoMinFill_Backward_EqualsNegInfRunExceptForTheUniformVTerm"/>.
+    /// </para>
+    /// </remarks>
     [Test]
-    public void BandedAttention_FinfoMinFill_Backward_FiniteButDivergentFromPyTorch()
+    public void BandedAttention_FinfoMinFill_Backward_EqualsExactDerivative()
     {
         var q = Matrix("attn_band_padding_minfill_q.bin", requiresGrad: true);
         var k = Matrix("attn_band_padding_minfill_k.bin", requiresGrad: true);
@@ -158,22 +178,112 @@ public class BandedAttentionTests
 
         var dq = GradArray(q);
         var dk = GradArray(k);
+        var dv = GradArray(v);
         int visibleCount = FullyMaskedRow * ModelDim;
+
+        Assert.That(dq.Concat(dk).Concat(dv).Any(float.IsNaN), Is.False, "gradients stay finite");
+        Assert.That(dq.Skip(visibleCount).Take(ModelDim), Is.All.EqualTo(0f),
+            "dq of a saturated fully-masked row must be exactly zero, not merely small");
+
         Assert.Multiple(() =>
         {
-            Assert.That(dq.Concat(dk).Any(float.IsNaN), Is.False, "gradients stay finite");
             TestHelpers.AssertTensorClose(
-                TestHelpers.LoadBin("attn_band_padding_minfill_dq.bin").Take(visibleCount).ToArray(),
+                TestHelpers.LoadBin("attn_band_padding_dq.bin").Take(visibleCount).ToArray(),
                 dq.Take(visibleCount).ToArray(), label: "finfo.min dQ rows 0-6");
-        });
 
-        var expectedDk = TestHelpers.LoadBin("attn_band_padding_minfill_dk.bin");
-        bool differs = Enumerable.Range(0, dk.Length)
-            .Any(i => MathF.Abs(expectedDk[i] - dk[i]) > 1e-3f + 1e-3f * MathF.Abs(expectedDk[i]));
-        Assert.That(differs, Is.True,
-            "dk is expected to diverge from PyTorch under finfo.min; if this now matches, " +
-            "revisit the divergence note in this fixture and the linked issue.");
+            TestHelpers.AssertTensorClose(TestHelpers.LoadBin("attn_band_padding_dk.bin"), dk,
+                label: "finfo.min dK");
+
+            TestHelpers.AssertTensorClose(
+                GradientsUnder(MaskFill.NegInf).dv.Zip(UniformMaskedRowVTerm(),
+                    (a, t) => a + t).ToArray(), dv,
+                absTol: 1e-5f, relTol: 1e-5f, label: "finfo.min dV");
+        });
     }
+
+    /// <summary>
+    /// The bit-exact claim, which the fixture comparison above cannot make: Nivara's
+    /// <c>finfo.min</c> backward is bit-for-bit its own <c>-inf</c> backward except for the one
+    /// term the V path genuinely keeps. Same inputs, same kernels, same order — so this is a
+    /// zero-tolerance structural assertion rather than a tolerance band over a foreign library.
+    /// </summary>
+    [Test]
+    public void BandedAttention_FinfoMinFill_Backward_EqualsNegInfRunExceptForTheUniformVTerm()
+    {
+        var finfoMin = GradientsUnder(MaskFill.FinfoMin);
+        var negInf = GradientsUnder(MaskFill.NegInf);
+
+        Assert.Multiple(() =>
+        {
+            TestHelpers.AssertTensorClose(negInf.dq, finfoMin.dq, absTol: 0f, relTol: 0f,
+                label: "dq is identical across fills: both the -inf and the saturated row give zero");
+            TestHelpers.AssertTensorClose(negInf.dk, finfoMin.dk, absTol: 0f, relTol: 0f,
+                label: "dk is identical across fills - the cleared dS row adds only zeros");
+            // Asserted on the difference rather than the sum, so the tolerance measures only this
+            // one term and not the magnitude of dv itself. The residual is the position of the
+            // saturated row's term inside MatMul's qLen-term accumulation: dV here is
+            // MatMul(pT, dOH), and the term is added at a different point in the sum than when it
+            // is added to an already-summed -inf value. It is summation order, not slack in the
+            // derivative - which is why this is a difference assertion and the dq/dk comparisons
+            // above are not.
+            TestHelpers.AssertTensorClose(UniformMaskedRowVTerm(), Subtract(finfoMin.dv, negInf.dv),
+                absTol: 1e-6f, relTol: 1e-5f, label: "dv's difference from -inf is exactly the uniform p_7 term");
+        });
+    }
+
+    /// <summary>
+    /// The <c>-inf</c> control on the zero above: its <c>dq</c> is already exactly zero on the
+    /// fully-masked row, because <c>-inf</c> suppresses outright and <c>P = 0</c> there. So the
+    /// zero-tolerance <c>dq</c> comparison above is a real test rather than two zeros matching.
+    /// </summary>
+    [Test]
+    public void BandedAttention_NegInfFill_Backward_AlsoZeroesTheFullyMaskedRowDq()
+    {
+        var negInf = GradientsUnder(MaskFill.NegInf);
+
+        Assert.That(negInf.dq.Skip(FullyMaskedRow * ModelDim).Take(ModelDim), Is.All.EqualTo(0f),
+            "P = 0 on a -inf-masked row, so its dq is exactly zero too");
+    }
+
+    enum MaskFill { NegInf, FinfoMin }
+
+    (float[] dq, float[] dk, float[] dv) GradientsUnder(MaskFill fill)
+    {
+        var q = Matrix("attn_band_padding_minfill_q.bin", requiresGrad: true);
+        var k = Matrix("attn_band_padding_minfill_k.bin", requiresGrad: true);
+        var v = Matrix("attn_band_padding_minfill_v.bin", requiresGrad: true);
+        var dout = Matrix("attn_band_padding_minfill_dout.bin", requiresGrad: false);
+        var mask = fill == MaskFill.NegInf
+            ? ModernBertMasks.Build<float>(SeqLen, Band, ValidLength)
+            : FinfoMinMask(SeqLen, Band, ValidLength);
+
+        var output = ReverseGradOperations.MultiHeadAttention(q, k, v, NumHeads, Scale, mask);
+        output.Backward(dout);
+
+        return (GradArray(q), GradArray(k), GradArray(v));
+    }
+
+    /// <summary>
+    /// The one term the V path genuinely keeps from a saturated row: <c>p_7 &#183; dout[7]</c>
+    /// with <c>p_7 = 1/L</c>, broadcast to every key. <c>dV = MatMul(pT, dOH)</c> sums
+    /// <c>p[i,j] * dout[i]</c> over query rows, so the saturated row adds this to each key.
+    /// </summary>
+    float[] UniformMaskedRowVTerm()
+    {
+        var doutRow = TestHelpers.LoadBin("attn_band_padding_minfill_dout.bin")
+            .Skip(FullyMaskedRow * ModelDim).Take(ModelDim).ToArray();
+        var term = new float[SeqLen * ModelDim];
+
+        for (int h = 0; h < NumHeads; h++)
+        for (int j = 0; j < SeqLen; j++)
+        for (int d = 0; d < HeadDim; d++)
+            term[j * ModelDim + h * HeadDim + d] = doutRow[h * HeadDim + d] / SeqLen;
+
+        return term;
+    }
+
+    static float[] Subtract(float[] a, float[] b) =>
+        a.Zip(b, (x, y) => x - y).ToArray();
 
     [Test]
     public void BandedAttention_MaskFillConventions_DivergeOnlyOnTheFullyMaskedRow()
