@@ -218,14 +218,17 @@ gradient buffers these forwards already allocate.
 
 New `tests/Nivara.Tests/AutoDiff/OpNodeInputContractTests.cs`:
 
-- **Per-op rows** for every public op taking a tensor argument. Each row calls the
-  op inside a `Grad()` scope with **exactly one** tensor argument requiring a
-  gradient and asserts one of three outcomes: the argument is in
-  `result.GradFn.Inputs` (tracked), or the op throws `ArgumentException` naming
-  that argument (guarded), or the argument is excluded by type (`int[]`,
-  `ReadOnlySpan<bool>` — listed explicitly, no invocation needed).
+- **Per-op rows** for every public op taking **two or more** tensor arguments, plus
+  `Concat` (one argument that is a tensor array). Each row calls the op inside a
+  `Grad()` scope with **exactly one** tensor argument requiring a gradient and
+  asserts one of three outcomes: the argument is in `result.GradFn.Inputs`
+  (tracked), or the op throws `ArgumentException` naming that argument (guarded),
+  or the argument is excluded by type (`int[]`, `ReadOnlySpan<bool>` — pinned
+  explicitly, no invocation needed).
   The isolate-one-argument shape is what catches the #481 defect: setting *all*
   arguments to requires-grad would pass even when one is excluded.
+  Single-tensor-argument ops are out of scope — see the deviations section for why,
+  and note the reduced coverage is deliberate and recorded rather than accidental.
 - **A reflection completeness guard**: enumerate the public static methods of
   `ReverseGradOperations` and `ForwardGradOperations` whose signature contains a
   `ReverseGradTensor<T>`/`ForwardGradTensor<T>` parameter and assert each method
@@ -236,10 +239,12 @@ New `tests/Nivara.Tests/AutoDiff/OpNodeInputContractTests.cs`:
   require each in the module row table. Targeting only `Parameter`-owning modules
   keeps it low-noise — modules without parameters need no row, and this is
   precisely the category the contract change makes load-bearing.
-- **Module `Parameter` rows**: for each of the seven module sites, assert the
-  parameter tensors appear in `output.GradFn.Inputs`, and that
-  `GradientUtils.ZeroGrad(output)` clears a parameter gradient seeded before the
-  call. This pins the `ZeroGrad` behaviour the contract now implies.
+- **Module `Parameter` rows**: assert each parameter tensor is **reachable** from
+  `output.GradFn.Inputs` (walking the graph), and that `GradientUtils.ZeroGrad(output)`
+  clears a parameter gradient seeded before the call. Reachability rather than direct
+  membership, because three Parameter-owning modules reach their parameter through a
+  delegated op rather than their own node — see the deviations section. This pins the
+  `ZeroGrad` behaviour the contract now implies.
 - The two BatchNorm eval-path nodes get explicit rows asserting `[input]` only,
   so the *correct* exclusion is pinned rather than left to drift into looking
   anomalous — which is exactly what happened to the attention mask.
@@ -298,7 +303,8 @@ Extend `tests/Nivara.Tests/AutoDiff/AttentionMaskTests.cs` with the forward-mode
 1. `docs: plan #487 OpNode.Inputs contract in TODO.md`
 2. `fix(autodiff): reject a gradient-carrying constant argument in every mode`
    (`RequireConstant` + the 4 attention sites + the 2 `indices` sites)
-3. `fix(autodiff): list module parameters in OpNode.Inputs` (the 9 `Nn/` sites)
+3. `fix(autodiff): list module parameters in OpNode.Inputs` (the 7 `Nn/` sites that
+   accumulate into parameters — see the G1 correction)
 4. `test: enforce the OpNode.Inputs contract across both AD modes` (new contract
    tests + reflection completeness guard + forward-mode mask tests)
 5. `docs: state the OpNode.Inputs contract and correct the stale OpNode reference`
@@ -347,3 +353,72 @@ module sites touched, and `Nn/ModuleHelpers.cs` added to the touched set.
 - [#494](https://github.com/khurram-uworx/Nivara/issues/494) — BatchNorm eval mode
   produces no `weight`/`bias` gradient, diverging from PyTorch (created at G1
   while auditing the nine `OpNode` sites)
+
+## Deviations from the plan (recorded before G2)
+
+### Commits
+
+Six landed, not five. The plan's numbering put the docs last and had no slot for
+the TODO.md update, so the numbering drifted: actual order is `e51f0c3`, `4ce43fe`,
+`a959358`, `d2401bb`, `ad8f42b`, `4d2fb0b`, `0d5a478`. Content matches the intent of
+each planned commit; only the count and the placement of the G1-record commit differ.
+
+### Module rows: ten, not seven
+
+The plan's module-row scope was the seven sites that change. Writing the reflection
+guard showed that scope was the wrong cut: the guard is over *every* public
+`Module<T>` owning a `Parameter<T>`, which is ten. Three of them — `Linear`,
+`Embedding`, `SparseEmbedding` — build no `OpNode` of their own and reach their
+parameter through a delegated op, and the tenth (`VAE`) turned out to reach its
+`beta` only through `ElboLoss`, never through `Forward`.
+
+Keeping the guard over ten while writing rows for seven would have made it fail on
+every run, so the rows were widened to match the guard. Three consequences worth
+recording:
+
+1. **Module rows assert graph reachability, not direct `Inputs` membership.** For
+   `Linear`/`Embedding`/`SparseEmbedding`/`VAE` the parameter is not an input of the
+   output's own node, so direct membership is the wrong assertion — it would encode
+   a structural accident as if it were the contract. Reachability is what the
+   contract actually requires and what `ZeroGrad` needs, since `ZeroGrad` walks the
+   same edge set.
+2. **`Embedding` and `SparseEmbedding` consume their input as integer selectors**
+   (`int.CreateChecked`), so the input is a non-differentiable constant that
+   correctly never enters the graph. Their rows assert parameter reachability only,
+   and `ZeroGrad` is asserted *not* to touch the input. This was a genuine finding
+   from a failing row, not an assumption: the first version asserted the input was
+   cleared and failed.
+3. **`VAE.beta` is registered `requiresGrad: false`** and consumed as a scalar
+   multiplier on the KL term, so it is reachable only via
+   `ElboLoss(recon, original, mu, logVar)`. That is consistent with the contract —
+   beta's backward *is* `Multiply`'s backward, and `Multiply` already lists every
+   tensor argument — but it means the row's graph root is the loss, not `Forward`.
+
+### Test scope: single-tensor-argument ops excluded, with the reason recorded
+
+The plan said "every public op taking a tensor argument". That is 84 rows and adds
+no defect-catching power: with one tensor argument there is nothing for a node to
+omit. The guard's threshold is now *two or more* tensor arguments, plus `Concat`
+whose single argument is a tensor array (so a caller can pass a mixed-gradient
+array). This is a deliberate coverage reduction from the plan's wording and is
+stated in the test fixture's own XML doc so it cannot be mistaken for full coverage.
+The guard itself enforces the threshold, so if a single-tensor op ever grows a
+second tensor argument it is picked up automatically.
+
+### Verification actually performed
+
+- `dotnet build Nivara.slnx -c Release` clean, 0 warnings, 0 errors.
+- `dotnet test -c Release --no-build --filter "FullyQualifiedName~AutoDiff|Nn|Training|Backward"`:
+  **1307 passed, 0 failed**, 11 skipped (the skips are the pre-existing
+  unhostable-model ones, not new).
+- New suite alone: **93 passed, 0 failed**.
+- **Mutation-checked, because a green suite proves nothing until you know it can go
+  red.** Removing the forward-mode mask guards fails 5 tests; reverting
+  `LayerNorm`'s `NodeInputs` call fails 2. Both fixes were then restored and the
+  suite returned to green. Neither fix is passing vacuously.
+
+  One process note: the first mutation check appeared to still fail after restoring
+  the source, because an incremental build skipped the restore and the test ran
+  against the mutated DLL. `--no-incremental` plus a full rebuild confirmed green.
+  Had I not re-run after the rebuild I would have reported a passing suite against
+  code that was not the committed code.
