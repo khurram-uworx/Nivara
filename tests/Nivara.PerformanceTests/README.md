@@ -383,6 +383,134 @@ both in-tree legs take, and separating it would have needed a fourth leg. It was
 once the blocked reference failed to beat the in-tree kernel, since the question it was
 meant to inform - "is there a CPU GEMM fix worth making" - had been answered no.
 
+### `--mask` — `ApplyMask` vs the `TensorPrimitives.Add` it replaced (#480)
+
+```bash
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --mask
+```
+
+#448 replaced a vectorized `TensorPrimitives.Add` over the `[qLen, kvLen]` score
+buffer with `AttentionKernels<T>.ApplyMask`'s compare-and-select loop, because BCL
+has no select/blend primitive. The justification left on record was an inference
+from a MAC count, never a stopwatch reading, so this mode supplies the reading.
+It is a **probe, not a gate**: it exits 0 on a healthy run and asserts only the
+parity contract. It is deliberately not a scenario row, because the scenario table
+measures rows sequentially and cannot produce a ratio within one run — a ratio
+there means a recorded baseline JSON, which is cross-day and cross-machine drift.
+
+**Design** (from `tests/Nivara.SimdProbe/TransposeKernelProbe.cs`; the superseded
+transpose gate #482 failed 3 of 5 runs on a clean tree on a 0.2% margin because it
+took best-of-N per route, measured the routes sequentially with one always first,
+and warmed neither up):
+
+| aspect | choice | why |
+|---|---|---|
+| statistics | interleaved A/B, 30 rounds/cell, first-measured route alternates every round | cancels first-measured systematic drift |
+| warmup | 5 untimed passes **per route per `T`** | `ApplyMask<T>` is generic-specialized; tiered JIT settles per instantiation |
+| estimate | median ratio + win count + range | a distribution, not a point estimate |
+| noise band | ±3% | reused from `TransposeKernelProbe.Classify`, so two probes do not invent two thresholds |
+| build | `IsDebugBuild()` guard | Debug numbers are void, not a result |
+
+**Grid**: shapes `[512,512]` / `[2048,2048]` / `[1,512]` × `float` / `double` /
+`Half` / `BFloat16` (ADR-001's `IFloatingPointIeee754` domain) × mask regimes
+`None` / `Causal` (~50% `-inf`, the unpredictable-branch case) / `All` (`-inf`)
+× `rowFlags` empty vs populated (inference vs training). 72 cells.
+
+**Parity contract.** The two routes *cannot* be required to agree everywhere:
+assigning `-inf` rather than summing into it **is** the #448 fix, because
+`NaN + (-inf) = NaN` lets a diverged score escape suppression. So parity is
+asserted exactly (by raw bytes, no tolerance) only where the routes are required
+to agree — all-finite scores with a mask in `{0, -inf}` — and the two intentional
+divergences (a `NaN` score; a `+inf` score under a `-inf` cell) are documented
+rather than papered over. A shortfall is reported as a coverage failure on its own
+exit path, never folded into a numeric verdict.
+
+**Recorded baseline** (Release, .NET 11.0.0, x64, AVX2 — `Vector512` *not*
+accelerated; parity 72 of 72 bit-identical; exit 0):
+
+Aggregate over measurable cells: **median ratio 1.130**, ApplyMask slower in 32
+of 48. Coverage: **48 of 72 measurable**, 24 excluded as below the clock's
+resolution.
+
+The aggregate is close to meaningless on its own — it mixes types that disagree in
+*direction*. Scoped per type:
+
+| type | shape | flags | `None` | `Causal` | `All` |
+|---|---|---|---|---|---|
+| `float` | wide prefill | empty | 1.96× | 1.78× | 1.91× |
+| `float` | wide prefill | tracked | 3.27× | 2.97× | 2.95× |
+| `float` | S=512 | empty | **0.75×** | 1.17× | 1.31× |
+| `float` | S=512 | tracked | 2.11× | 2.18× | 1.60× |
+| `double` | wide prefill | empty | 1.70× | 2.46× | **0.86×** |
+| `double` | wide prefill | tracked | 1.92× | 1.61× | 1.26× |
+| `Half` | wide prefill | empty | **0.74×** | **0.56×** | **0.36×** |
+| `Half` | wide prefill | tracked | 1.13× | 1.03× | 1.10× |
+| `BFloat16` | wide prefill | empty | 1.12× | **0.81×** | **0.48×** |
+| `BFloat16` | wide prefill | tracked | 1.36× | 1.06× | **0.65×** |
+
+Three findings, and the third is the one that constrains any fix:
+
+1. **On `float32` at prefill widths the scalar loop is genuinely slower.** All six
+   wide-prefill `float` cells are outside the ±3% band with **0 of 30 rounds won**
+   — the strongest evidence in the grid, because the win count is independent of
+   the ratio. `float` is the shipping path and the only type Laya uses.
+2. **It is not uniform, and "add a fast path" is not the whole story.** `float` at
+   S=512 with an all-zero mask and no flag tracking *wins* (0.75×, 28 of 30 rounds).
+3. **For `Half`, `ApplyMask` is usually FASTER than the BCL add** (0.36–0.74× on
+   wide prefill, 30 of 30 rounds in 5 of 6 `Half` cells). GB/s explains it: the
+   BCL `Add<Half>` path runs at ~1.6 GB/s while `ApplyMask` reaches 4.5 GB/s —
+   neither is vectorized (no `Vector128<Half>`), and the hand-written loop simply
+   avoids the BCL's conversion overhead. **So restoring `TensorPrimitives.Add`
+   for `Half` would be a regression, not a fix.** This is the concrete form of the
+   "no hand-rolled SIMD" convention problem: a `Vector256.ConditionalSelect` fast
+   path cannot even be spelled for `Half`/`BFloat16` (`ConditionalSelect<T>`
+   throws `NotSupportedException` for them), so the current loop is the *only*
+   path for those types and it is currently winning.
+
+**Laya leg profile** (B=1, S=512, d=1024, H=16, headDim=64, 28 layers; legs mirror
+`ReverseGradOperations.MultiHeadAttention`):
+
+| leg | ms/call | ms/layer | share |
+|---|---|---|---|
+| PackHeads (×3) | 1.959 | 1.96 | 0.5% |
+| QK^T matmul | 15.089 | 241.42 | 62.0% |
+| scale multiply | 0.267 | 4.26 | 1.1% |
+| **ApplyMask** | **0.436** | **6.98** | **1.8%** |
+| softmax rows | 6.992 | 111.88 | 28.7% |
+| PV matmul | 1.395 | 22.33 | 5.7% |
+| ScatterHead | 0.030 | 0.47 | 0.1% |
+
+`ApplyMask` is **1.79% of attention's time**; the vectorized add would be 0.61%.
+Reverting would return **4.63 ms/layer, 129.5 ms per 28-layer forward** (measured
+absolute).
+
+**No percentage-of-forward is published, deliberately.** This run's own leg
+profile puts attention *alone* at 389 ms/layer = **10 900 ms per forward**, which
+cannot fit inside `docs/LAYA.md`'s recorded ~4.1 s forward; and the 2414 ms figure
+above is a **GEMM-only projection that excludes attention**, so it was never a
+forward total to begin with. Dividing a measured delta by a denominator this run
+contradicts would manufacture precision the evidence does not carry. The mode
+prints the reconciliation conflict instead. Unresolved cause candidates: the
+recorded forward came from a different code state or machine, or the leg profile
+is inflated by the single-threaded skinny `QK^T` (identical MAC count to `PV` but
+**11× slower** — 1.11 vs 12.0 GMAC/s, which is itself worth a look). Tracked
+separately.
+
+**Two caveats carried in the output.** (a) The `[1,512]` row measures the mask
+API *at decode shape*; `DecodeAttention` and `BatchedAttention` use a `Keep`
+predicate and never call `ApplyMask`, so it is not the decode path's cost. (b) All
+24 `[1,512]` cells are below timer resolution (~10 Stopwatch ticks) and print `n/a`;
+before that guard they reported 5–10× "regressions" that were pure clock
+quantization — the tell being a `61.44 GB/s` reading that is just a rounded tick
+count over 6 KB of L1-resident data. Publishing that as "6× slower at decode" is
+the kind of false claim this mode exists to prevent.
+
+**Ratio stability is limited.** The same nominal configuration measured different
+ways in the same run: `float` `[512,512]` causal/empty read 1.17× in the A/B but
+the leg profile's equivalent call read 2.96×. The direction is robust; the
+magnitude is not. Treat the wide-prefill `float` cells (0 of 30 rounds won) as the
+finding and single-cell ratios elsewhere as indicative.
+
 ### No-regression gate (P4)
 
 The harness doubles as an executable perf gate (`ADR-002` P4). Two modes:

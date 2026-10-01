@@ -242,12 +242,20 @@ stage: the harness is a known shape and lands directly in its permanent home).
 
 ## GitHub issues log
 
-- [ ] #NNN — decision issue for a float/double `Vector256.ConditionalSelect`
-      fast path, to be created **only if** the measurement comes out material
-      (created while working on the decision step).
-- [ ] #NNN — record that the probe's parity contract is sensitive to #489's
-      `MaskedCell` `dead`-rule change, if #489 lands first (created while working
-      on Leg 1).
+- [x] **#491** — decide the `ApplyMask` fast path. Carries the measurement. Created while
+      working on the decision step, because the measurement is material on `float` (1.8-3.3x,
+      0 of 30 rounds lost) but **actively constrains** the obvious fix: `ApplyMask` is currently
+      *faster* than the BCL add on `Half`/`BFloat16`, and `Vector256.ConditionalSelect<T>` throws
+      `NotSupportedException` for those types, so the fast path cannot be spelled for ADR-001's
+      narrow domain without a type dispatch that must preserve the win.
+- [x] **#492** — Laya CPU forward time does not reconcile with the attention leg profile
+      (10 900 ms attention alone vs a 4 100 ms recorded whole forward; the 2414 ms README figure
+      is GEMM-only and excludes attention). Created while working on Leg 2. Until resolved, no
+      percentage-of-forward is defensible, and `docs/LAYA.md` §3's MAC-share exclusion of
+      attention rests on an unverified time-share inference.
+- [ ] #489 (pre-existing, open) — disputes `MaskedCell`'s `dead` rule. It does **not** affect
+      the probe's parity contract (which is stated over mask in `{0,-inf}` with all-finite
+      scores), but the tracking-flag rows are the ones that would move if it lands.
 
 > As each task executes, if you find deferred work or a concern (known
 > limitations, follow-ups, refactors) outside this plan, create a tracked issue
