@@ -136,9 +136,14 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
                 var savedXHat = evalResult.XHat;
                 var savedInvStd = evalResult.InvStd;
                 var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
+                bool useAffine = affine;
                 int savedN = n, savedC = c, savedPlaneSize = planeSize;
 
-                var gradFn = new OpNode<T>("BatchNorm1dEval", [input], (typedGradOutput) =>
+                var gradFn = new OpNode<T>("BatchNorm1dEval",
+                    useAffine
+                        ? ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor)
+                        : ModuleHelpers<T>.NodeInputs(input),
+                    (typedGradOutput) =>
                 {
                     var gradOutData = new T[typedGradOutput.Length];
                     typedGradOutput.CopyTo(gradOutData, default(T)!);
@@ -148,6 +153,19 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
                         savedN, savedC, savedPlaneSize, savedGamma.Length > 0);
 
                     ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
+
+                    if (useAffine)
+                    {
+                        var gradGammaData = BatchNormKernel<T>.BackwardWeight(
+                            gradOutData, savedXHat, savedN, savedC, savedPlaneSize);
+                        var gradBetaData = BatchNormKernel<T>.BackwardBias(
+                            gradOutData, savedN, savedC, savedPlaneSize);
+
+                        if (weight != null)
+                            ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
+                        if (bias != null)
+                            ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
+                    }
                 });
 
                 ComputationGraph.AddNode(evalTensor, gradFn);
@@ -393,7 +411,11 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
                 bool useAffine = affine;
                 int savedN = n, savedC = c;
 
-                var gradFn = new OpNode<T>("BatchNorm2dEval", [input], (typedGradOutput) =>
+                var gradFn = new OpNode<T>("BatchNorm2dEval",
+                    useAffine
+                        ? ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor)
+                        : ModuleHelpers<T>.NodeInputs(input),
+                    (typedGradOutput) =>
                 {
                     var gradOutData = new T[typedGradOutput.Length];
                     typedGradOutput.CopyTo(gradOutData, default(T)!);
@@ -403,6 +425,19 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
                         savedN, savedC, hw, useAffine);
 
                     ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
+
+                    if (useAffine)
+                    {
+                        var gradGammaData = BatchNormKernel<T>.BackwardWeight(
+                            gradOutData, savedXHat, savedN, savedC, hw);
+                        var gradBetaData = BatchNormKernel<T>.BackwardBias(
+                            gradOutData, savedN, savedC, hw);
+
+                        if (weight != null)
+                            ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
+                        if (bias != null)
+                            ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
+                    }
                 });
 
                 ComputationGraph.AddNode(evalTensor, gradFn);
