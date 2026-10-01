@@ -49,8 +49,8 @@ public static class GradientUtils
     /// constant when the caller asks for a gradient on it. Call this instead of
     /// silently omitting such an argument from <see cref="OpNode{T}.Inputs"/>:
     /// an omitted argument is indistinguishable, at the call site, from one that
-    /// was accidentally left unwired. See the <c>OpNode.Inputs</c> contract in
-    /// <see cref="ReverseGradOperations"/>.
+    /// was accidentally left unwired. See the contract documented on
+    /// <see cref="OpNode{T}.Inputs"/>.
     /// </summary>
     /// <param name="name">The C# parameter name, so the thrown
     /// <see cref="ArgumentException.ParamName"/> points at the offending argument.</param>

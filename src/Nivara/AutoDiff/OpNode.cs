@@ -17,7 +17,8 @@ sealed class OpNode<T> where T : struct, IFloatingPointIeee754<T>
     /// <remarks>
     /// This list is the graph edge set, not a hint. <see cref="ComputationGraph"/> walks
     /// it to build the backward plan and to clear gradients, so a tensor absent from it
-    /// is unreachable to <c>Backward</c> and invisible to <see cref="Utilities.GradientUtils.ZeroGrad{T}"/>.
+    /// is unreachable to <c>Backward</c> and invisible to
+    /// <see cref="Utilities.GradientUtils.ZeroGrad{T}(ReverseGradTensor{T})"/>.
     /// <para>
     /// Therefore: an argument the backward deliberately does not differentiate must be
     /// rejected loudly with <c>GradientUtils.RequireConstant</c> rather than quietly

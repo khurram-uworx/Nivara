@@ -2407,7 +2407,7 @@ public static class ReverseGradOperations
     /// </summary>
     /// <remarks>
     /// <paramref name="indices"/> is a non-differentiable constant: it carries integer row
-    /// selectors, read via <see cref="int.CreateChecked{T}"/>, so a partial gradient would be
+    /// selectors, read via <c>int.CreateChecked</c>, so a partial gradient would be
     /// meaningless. It is deliberately absent from the node's input list, and an
     /// <paramref name="indices"/> that requires gradients throws rather than being silently
     /// dropped. The analogous <see cref="Gather{T}(ReverseGradTensor{T}, int[], int)"/> takes
