@@ -141,6 +141,43 @@ CHANGELOG entry — this is a public behaviour change (PyTorch parity).
   `BuildBackwardPlan`/`GetGraphInfo` skip them as before. Listing them in `Inputs`
   only widens what `GradientUtils.ZeroGrad` clears — which is #487's stated intent.
 
+## G1 grounding outcome
+
+**Empirical (torch 2.13.0+cpu, run directly).** Five eval-mode probes established
+that PyTorch's BN backward computes grad_weight/grad_bias and lets autograd attach
+them per-leaf, gated on each leaf's own `requires_grad` — never on the training
+flag. Decisive case: an input without a gradient does **not** suppress the
+parameter gradients. Full table above.
+
+**Formula cross-checked against Microsoft's DirectML BN grad operator** (the
+inference-mode sibling of the training-grad operator):
+`OutputScaleGradient = sum(InputGradient * (Input - Mean) / sqrt(Variance + Epsilon))`
+and `OutputBiasGradient = sum(InputGradient)` — identical in form to Nivara's
+`BackwardWeight`/`BackwardBias`. Two independent references agree, so the eval
+path reuses the existing kernels unchanged.
+
+**`ForwardEval` populates `xHat` on both affine branches** (BatchNormKernel.cs:217-220),
+so the saved value needed by `BackwardWeight` is already there — no kernel change.
+
+**No forward-mode BatchNorm exists.** BatchNorm lives only in `Nn/`, reverse-mode
+only; `ForwardGradOperations.cs` contains no BatchNorm reference. Single-mode fix.
+
+### Regression check: no caller runs `Backward()` while in `Eval()`
+
+Every `Backward()` in the tree was audited:
+
+| Site | Eval nearby? |
+|---|---|
+| `Training/TrainingLoop.cs:155` | no — loop never touches `Eval`/`IsTraining` |
+| `Training/DataParallelTrainer.cs:124` | no |
+| `samples/NivaraFineTuning/Program.cs:208` | no — that `Backward` is in the train loop; the three `Eval()` calls (249, 277, 318) are in later evaluate/predict modes |
+| `samples/NivaraChat/Training/IntentTrainer.cs:162` | no — `Eval()` is the final statement, after `loop.Run()` returns |
+| all `NivaraChat` / `NivaraInference` sites | inference only, no backward |
+
+So the new parameter gradients cannot reach an optimizer unexpectedly. The one
+intended behaviour change is the documented one: `Backward()` in eval now yields
+correct PyTorch-matching parameter gradients instead of `null`.
+
 ## Verification steps
 
 1. `dotnet build Nivara.slnx` — Debug, compile check only.
