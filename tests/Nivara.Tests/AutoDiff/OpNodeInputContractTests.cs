@@ -220,11 +220,17 @@ public class OpNodeInputContractTests
     }
 
     [Test]
-    public void BatchNorm_EvalPath_ListsOnlyTheInput()
+    public void BatchNorm_EvalPath_ListsAffineParameters()
     {
-        // The eval-path backward accumulates into the input alone, so [input] is already
-        // contract-correct. Pinning it stops the correct exclusion from drifting into
-        // looking anomalous, which is what happened to the attention mask.
+        // #494 resolved this in PyTorch's favour. The eval forward still computes
+        // gamma * xhat + beta, so gamma and beta stay in the differentiable path and
+        // their backward must produce gradients -- the eval path is not a frozen one.
+        //
+        // This assertion previously pinned the opposite conclusion ("the eval backward
+        // accumulates into input alone, so [input] is contract-correct"), which was true
+        // of the closure at the time but wrong about the math. Do not restore it: if the
+        // eval path ever stops reaching its parameters again, that is the bug, not the
+        // contract.
         var bn = new BatchNorm1d<float>(numFeatures: 3);
         bn.Eval();
         var input = Tensor3D(Rand(6, 901), 2, 3, 1, requiresGrad: true);
@@ -232,7 +238,35 @@ public class OpNodeInputContractTests
         var output = bn.Forward(input);
 
         Assert.That(output.GradFn, Is.Not.Null);
+        Assert.That(output.GradFn!.Inputs, Is.EqualTo(new[] { input, bn.Weight!.Tensor, bn.Bias!.Tensor }));
+    }
+
+    [Test]
+    public void BatchNorm_EvalPath_AffineFalse_ListsOnlyTheInput()
+    {
+        // Without affine there is no gamma or beta to differentiate, so the eval node
+        // really does have nothing but the input to list.
+        var bn = new BatchNorm1d<float>(numFeatures: 3, affine: false);
+        bn.Eval();
+        var input = Tensor3D(Rand(6, 902), 2, 3, 1, requiresGrad: true);
+
+        var output = bn.Forward(input);
+
+        Assert.That(output.GradFn, Is.Not.Null);
         Assert.That(output.GradFn!.Inputs, Is.EqualTo(new[] { input }));
+    }
+
+    [Test]
+    public void BatchNorm2d_EvalPath_ListsAffineParameters()
+    {
+        var bn = new BatchNorm2d<float>(numFeatures: 3);
+        bn.Eval();
+        var input = Tensor4D(Rand(12, 903), 2, 3, 2, 2, requiresGrad: true);
+
+        var output = bn.Forward(input);
+
+        Assert.That(output.GradFn, Is.Not.Null);
+        Assert.That(output.GradFn!.Inputs, Is.EqualTo(new[] { input, bn.Weight!.Tensor, bn.Bias!.Tensor }));
     }
 
     // ---------------------------------------------------------------------
