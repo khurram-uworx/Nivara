@@ -122,6 +122,12 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
                     {
                         TensorPrimitives.Add(inPlane, -m, normalized.AsSpan(0, planeSize));
                         TensorPrimitives.Multiply(normalized.AsSpan(0, planeSize), inv, normalized.AsSpan(0, planeSize));
+
+                        // xHat is the normalized value BEFORE the affine scale. BackwardWeight
+                        // contracts it against gradOutput to form grad_gamma, so scaling it here
+                        // would make grad_gamma come out multiplied by gamma a second time.
+                        normalized.AsSpan(0, planeSize).CopyTo(xHat.AsSpan(offset, planeSize));
+
                         if (affine)
                         {
                             TensorPrimitives.Multiply(normalized.AsSpan(0, planeSize), g, normalized.AsSpan(0, planeSize));
@@ -131,10 +137,6 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
                         {
                             normalized.AsSpan(0, planeSize).CopyTo(outPlane);
                         }
-                        if (affine)
-                            normalized.AsSpan(0, planeSize).CopyTo(xHat.AsSpan(offset, planeSize));
-                        else
-                            outPlane.CopyTo(xHat.AsSpan(offset, planeSize));
                     }
                     finally
                     {
@@ -205,6 +207,12 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
                     {
                         TensorPrimitives.Add(inPlane, -m, normalized.AsSpan(0, planeSize));
                         TensorPrimitives.Multiply(normalized.AsSpan(0, planeSize), inv, normalized.AsSpan(0, planeSize));
+
+                        // xHat is the normalized value BEFORE the affine scale. BackwardWeight
+                        // contracts it against gradOutput to form grad_gamma, so scaling it here
+                        // would make grad_gamma come out multiplied by gamma a second time.
+                        normalized.AsSpan(0, planeSize).CopyTo(xHat.AsSpan(offset, planeSize));
+
                         if (affine)
                         {
                             TensorPrimitives.Multiply(normalized.AsSpan(0, planeSize), g, normalized.AsSpan(0, planeSize));
@@ -214,10 +222,6 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
                         {
                             normalized.AsSpan(0, planeSize).CopyTo(outPlane);
                         }
-                        if (affine)
-                            normalized.AsSpan(0, planeSize).CopyTo(xHat.AsSpan(offset, planeSize));
-                        else
-                            outPlane.CopyTo(xHat.AsSpan(offset, planeSize));
                     }
                     finally
                     {
