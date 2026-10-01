@@ -50,7 +50,16 @@ namespace Nivara.PerformanceTests;
 /// need no re-seeding between rounds.</para>
 ///
 /// <para><b>Reading a verdict.</b> A median ratio above 1 means <c>ApplyMask</c> is SLOWER than the
-/// add it replaced. Inside roughly +/-3% is machine noise, not a result.</para>
+/// add it replaced. Inside roughly +/-3% is machine noise, not a result. Cells whose faster route
+/// spans fewer than <see cref="MinReliableTicks"/> ticks print <c>n/a</c> and are excluded from the
+/// aggregate, because at that scale the ratio is clock quantization rather than cost.</para>
+///
+/// <para><b>No percentage of end-to-end forward is printed.</b> The leg profile reports only what
+/// this run measures - the mask's share of attention, and the absolute ms per forward a revert
+/// would return. The two recorded forward-time figures do not reconcile with the leg profile
+/// (attention alone exceeds the recorded whole forward), so dividing by either would manufacture
+/// precision that the evidence does not carry. The reconciliation is printed so the conflict is
+/// visible instead of hidden.</para>
 /// </summary>
 static class ApplyMaskProbe
 {
@@ -59,6 +68,16 @@ static class ApplyMaskProbe
 
     const int Rounds = 30;
     const int Warmups = 5;
+
+    /// <summary>
+    /// A cell whose faster route still resolves to fewer ticks than this is below the clock's
+    /// resolution, and its ratio is quantization rather than cost. <c>[1, 512]</c> is the case
+    /// that matters: the whole call is ~10 Stopwatch ticks, which is why it reports ratios of
+    /// 5-10x. Those cells are labelled and excluded from the aggregate rather than published,
+    /// because "ApplyMask is 6x slower at decode" read off a rounded tick count is exactly the
+    /// false claim this probe exists to avoid.
+    /// </summary>
+    const int MinReliableTicks = 1000;
 
     /// <summary>The issue's three shapes. See the decode caveat printed at the end of the run.</summary>
     static readonly (int Rows, int Cols, string Label)[] Shapes =
@@ -74,10 +93,17 @@ static class ApplyMaskProbe
     // and batched loops are the same work.
     const int LayaQLen = 512, LayaD = 1024, LayaHeads = 16, LayaHeadDim = 64, LayaLayers = 28;
 
-    // Recorded cross-run denominators, NOT measured here: docs/LAYA.md records a ~4.1 s measured
-    // Laya forward, and the tests/Nivara.PerformanceTests README records a 2414 ms GEMM-only CPU
-    // projection that explicitly excludes attention, norms and dispatch. The README also warns the
-    // harness is load-sensitive, so read the percentages as orders of magnitude.
+    // Recorded cross-run figures, NOT measured here and NOT used as denominators. They are printed
+    // only so a reader can see that they do not reconcile with the leg profile measured in this
+    // run; see the reconciliation block at the end of RunLegProfile.
+    //
+    //   RecordedLayaForwardMs      - docs/LAYA.md's ~4.1 s measured Laya CPU forward.
+    //   RecordedLayaGemmProjectedMs - tests/Nivara.PerformanceTests README's 2414 ms CPU projection,
+    //                                 which explicitly EXCLUDES attention, norms and dispatch, so it
+    //                                 was never a forward total in the first place.
+    //
+    // The README also warns the harness is load-sensitive, which is a second reason not to divide
+    // a measured delta by either of these.
     const double RecordedLayaForwardMs = 4100.0;
     const double RecordedLayaGemmProjectedMs = 2414.0;
 
@@ -124,15 +150,34 @@ static class ApplyMaskProbe
             Console.WriteLine($"  {"shape",-25} {"regime",-7} {"flags",-8} {"ratio",7} {"wins",7} " +
                               $"{"ApplyMask",11} {"add",11} {"A/B GB/s",15}");
             foreach (CellResult c in forType)
-                Console.WriteLine($"  {c.ShapeLabel,-25} {c.Regime,-7} {c.Flags,-8} {c.MedianRatio,7:F3} " +
+            {
+                string ratioText = c.Measurable ? $"{c.MedianRatio,7:F3}" : "   n/a ";
+                Console.WriteLine($"  {c.ShapeLabel,-25} {c.Regime,-7} {c.Flags,-8} {ratioText} " +
                                   $"{c.WinText,-7} {c.MaskMs,9:F3}ms {c.AddMs,9:F3}ms " +
-                                  $"{c.MaskGBs,6:F2}/{c.AddGBs,6:F2}");
+                                  $"{c.MaskGBs,6:F2}/{c.AddGBs,6:F2}"
+                                  + (c.Measurable ? "" : "   (below timer resolution)"));
+            }
             Console.WriteLine();
         }
 
-        double overall = Median(cells.Select(c => c.MedianRatio).ToArray());
-        int slower = cells.Count(c => c.MedianRatio > 1.0);
-        Console.WriteLine($"All {cells.Count} cells: median ratio {overall:F3}, ApplyMask slower in {slower} of {cells.Count}.");
+        // The aggregate covers measurable cells only, and says so with its own denominator. A
+        // summary that mixed unmeasurable cells in would report a ratio drawn partly from clock
+        // quantization without revealing it.
+        var measurable = cells.Where(c => c.Measurable).ToList();
+        var unmeasurable = cells.Where(c => !c.Measurable).ToList();
+        double overall = Median(measurable.Select(c => c.MedianRatio).ToArray());
+        int slower = measurable.Count(c => c.MedianRatio > 1.0);
+        Console.WriteLine($"Aggregate over measurable cells: median ratio {overall:F3}, " +
+                          $"ApplyMask slower in {slower} of {measurable.Count}.");
+        Console.WriteLine($"Coverage: {measurable.Count} of {cells.Count} cells measurable. " +
+                          $"{unmeasurable.Count} excluded as below the clock's resolution (~{MinReliableTicks} ticks).");
+        if (unmeasurable.Count > 0)
+        {
+            Console.WriteLine("  Excluded shapes: " +
+                              string.Join(", ", unmeasurable.Select(c => $"{c.TypeName}/{c.ShapeLabel}/{c.Regime}").Distinct()));
+            Console.WriteLine("  These are reported as n/a, not as ratios. Publishing \"ApplyMask is 6x");
+            Console.WriteLine("  slower at decode\" off a rounded tick count would be a false claim.");
+        }
         Console.WriteLine();
 
         RunLegProfile();
@@ -181,7 +226,7 @@ static class ApplyMaskProbe
     sealed record CellResult(
         string TypeName, string ShapeLabel, string Regime, string Flags,
         double MedianRatio, double MaskMs, double AddMs, double MaskGBs, double AddGBs,
-        int MaskWins, int AddWins, int Ties, bool ParityExact)
+        int MaskWins, int AddWins, int Ties, bool ParityExact, bool Measurable)
     {
         public string WinText => $"{MaskWins}/{MaskWins + AddWins + Ties}";
     }
@@ -228,19 +273,35 @@ static class ApplyMaskProbe
             }
         }
 
-        var ratios = new double[Rounds];
+        // Only valid rounds contribute to the ratio, because Array.Sort's NaN ordering is not a
+        // contract to rely on and a poisoned median would read as a result.
+        var ratios = new List<double>(Rounds);
         int maskWins = 0, addWins = 0, ties = 0;
         for (int r = 0; r < Rounds; r++)
         {
-            ratios[r] = maskTicks[r] / addTicks[r];
+            // A zero-tick sample means the call fell between clock reads. Dividing by it would
+            // yield Infinity, so the round is recorded as a tie and the cell is demoted by the
+            // Measurable check below rather than misreported.
+            if (addTicks[r] == 0.0) { ties++; continue; }
+
+            ratios.Add(maskTicks[r] / addTicks[r]);
             if (maskTicks[r] < addTicks[r]) maskWins++;
             else if (addTicks[r] < maskTicks[r]) addWins++;
             else ties++;
         }
 
         double toMs = 1000.0 / Stopwatch.Frequency;
-        double maskMs = Median(maskTicks) * toMs;
-        double addMs = Median(addTicks) * toMs;
+        double medianMaskTicks = Median(maskTicks);
+        double medianAddTicks = Median(addTicks);
+        double maskMs = medianMaskTicks * toMs;
+        double addMs = medianAddTicks * toMs;
+
+        // A cell is only measurable when its FASTER route still spans enough ticks for the ratio
+        // to mean something. [1,512] is the case that matters: the entire call is ~10 ticks, so
+        // its ratio is quantization. Flagged, printed, and excluded from the aggregate - never
+        // published as a "N times slower at decode" figure, which is a false claim.
+        bool measurable = Math.Max(medianMaskTicks, medianAddTicks) >= MinReliableTicks
+                          && medianAddTicks > 0.0;
 
         // Both routes read two buffers and write one, so both move 3 * sizeof(T) * n bytes per
         // call. Reporting GB/s is what shows whether either route is bandwidth-saturated - which
@@ -250,10 +311,10 @@ static class ApplyMaskProbe
 
         return new CellResult(
             typeName, shapeLabel, regime.ToString(), track ? "tracked" : "empty",
-            Median(ratios), maskMs, addMs,
+            measurable ? Median(ratios.ToArray()) : double.NaN, maskMs, addMs,
             bytes / (maskMs / 1000.0) / 1e9,
             bytes / (addMs / 1000.0) / 1e9,
-            maskWins, addWins, ties, parityExact);
+            maskWins, addWins, ties, parityExact, measurable);
     }
 
     // ───────────────────────────── routes ─────────────────────────────
@@ -423,12 +484,30 @@ static class ApplyMaskProbe
         Console.WriteLine($"  add instead {addMs:F4} ms/head  {addGBs:F2} GB/s  (ratio {maskMs / addMs:F3})");
         Console.WriteLine($"  difference  {deltaPerLayer:F4} ms/layer  ->  {deltaPerForward:F2} ms per {LayaLayers}-layer forward");
         Console.WriteLine();
-        Console.WriteLine("  Materiality, against recorded cross-run denominators (see the field comments):");
-        Console.WriteLine($"    {deltaPerForward,8:F2} ms of a {RecordedLayaForwardMs:F0} ms measured forward      = {deltaPerForward / RecordedLayaForwardMs * 100:F3}%");
-        Console.WriteLine($"    {deltaPerForward,8:F2} ms of a {RecordedLayaGemmProjectedMs:F0} ms GEMM-only projection = {deltaPerForward / RecordedLayaGemmProjectedMs * 100:F3}%");
-        Console.WriteLine("    (the GEMM projection EXCLUDES attention/norms/dispatch, so it is a lower bound");
-        Console.WriteLine("     on total time - it overstates the percentage. Neither denominator was measured");
-        Console.WriteLine("     in this run, so read these as orders of magnitude.)");
+        Console.WriteLine($"  Materiality, expressed only in quantities measured IN THIS RUN:");
+        Console.WriteLine($"    ApplyMask is {heads * maskMs / layerTotal:P2} of attention; the vectorized add would be {heads * addMs / layerTotal:P2}.");
+        Console.WriteLine($"    Reverting would return {deltaPerLayer:F3} ms/layer, {deltaPerForward:F2} ms per {LayaLayers}-layer forward.");
+        Console.WriteLine();
+
+        // A percentage of end-to-end time is deliberately NOT printed here. No forward total was
+        // measured in this run, and the two recorded candidates do not reconcile with this run:
+        // the leg profile above already puts attention alone at layerTotal ms/layer, which over
+        // LayaLayers layers exceeds docs/LAYA.md's recorded ~4.1 s forward on its own. Dividing
+        // a measured delta by a denominator this run contradicts would produce a precise-looking
+        // number with no defensible meaning, which is worse than reporting none.
+        Console.WriteLine("  *** The forward-time reconciliation does not close, and this probe will not paper over it:");
+        Console.WriteLine($"      measured attention alone    : {layerTotal * LayaLayers,10:F0} ms per forward (from the legs above)");
+        Console.WriteLine($"      recorded measured forward   : {RecordedLayaForwardMs,10:F0} ms (docs/LAYA.md)");
+        Console.WriteLine($"      recorded GEMM-only projection: {RecordedLayaGemmProjectedMs,9:F0} ms (tests README - EXCLUDES attention)");
+        Console.WriteLine("      Attention alone is larger than the recorded whole forward, so the recorded figures");
+        Console.WriteLine("      cannot be the denominator for this delta. Possible causes: the recorded forward");
+        Console.WriteLine("      was measured on a different code state or a faster machine; the leg profile is");
+        Console.WriteLine("      inflated by single-threaded skinny matmuls (QK^T at K=64 runs at ~1 GMAC/s,");
+        Console.WriteLine("      versus ~20 GMAC/s for the recorded [512x1024x3072] projection); or the");
+        Console.WriteLine("      recorded forward ran a smaller effective S. NOT RESOLVED HERE - it is not this");
+        Console.WriteLine("      issue's question. Tracked separately so the number is not lost.");
+        Console.WriteLine("      Until it is resolved, treat the ABSOLUTE ms above as the finding and any");
+        Console.WriteLine("      percentage-of-forward as unmeasured.");
         Console.WriteLine();
 
         static void PrintLeg(string name, double perCallMs, double share)
