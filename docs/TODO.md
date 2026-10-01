@@ -123,6 +123,19 @@ copy). Laya's CPU path is `ModernBertModel.cs:307` →
 Output `ApplyMask` as a **percent of attention** and a **percent of the Laya
 forward**, so the Leg-1 ratio converts into a materiality verdict.
 
+> **Executed with one deliberate deviation.** The percent-of-attention is
+> reported (1.79%). The **percent-of-forward is not**, because the denominators
+> do not survive contact with the measurement: this run's own leg profile puts
+> attention *alone* at 316–389 ms/layer = 8.9–10.9 s per forward, which cannot fit
+> inside `docs/LAYA.md`'s recorded ~4.1 s whole forward, and the README's 2414 ms
+> figure is a **GEMM-only projection that excludes attention** — mis-cited as a
+> forward total in the first implementation of this probe. The probe now prints
+> the reconciliation conflict instead of a percentage. Filed as **#492**.
+>
+> The plan's premise that a ratio plus a denominator yields a materiality verdict
+> assumed the denominator was sound. It was not, and finding that out is part of
+> what the measurement was for.
+
 ### 5. What gets recorded — one change, all sites
 
 - `AttentionKernels.cs:122-124` — replace the *inferred* justification with the
@@ -218,6 +231,35 @@ stage: the harness is a known shape and lands directly in its permanent home).
   (20 `ApplyMask_*` tests) and `AttentionMaskTests.cs`.
 - **Risk**: measurement quality, not correctness. The failure mode to avoid is
   reporting a single best-of-N ratio as fact — the #482 trap.
+
+## Execution record
+
+All steps run; results as measured, not as hoped.
+
+| step | result |
+|---|---|
+| 1. `dotnet build Nivara.slnx -c Release` | clean, 0 warnings |
+| 2. `--mask` in Release | ran, exit 0 |
+| 3. parity N of N | **72 of 72** bit-identical |
+| 4. `dotnet test -c Release` | **Passed: 3654, Failed: 0, Skipped: 14** (3 m 6 s). The 14 skips are checkpoint/fixture-dependent and unrelated. |
+| 5. re-run to confirm the ratio is not a coin flip | ran 3× total. Absolute delta reproduces to **0.02 ms** (129.54 / 129.52); `float` wide-prefill holds at 0–1 of 30 rounds won. But the attention leg total swung 389→316 ms/layer and one cell straddled the noise band — **recorded as run-to-run variance rather than smoothed over.** |
+
+### Coverage
+
+- **Parity: 72 of 72** cells bit-identical.
+- **Timing: 48 of 72** measurable. **24 excluded** — every `[1,512]` cell, below clock resolution. The first implementation reported those as 5–10× "regressions" that were pure quantization; that was a defect in the probe, found and fixed, not a finding.
+
+### Defects found in this probe and fixed before recording
+
+1. Published below-timer-resolution ratios as if they were results.
+2. Divided by zero-tick samples, which could poison the median via `Array.Sort` NaN ordering.
+3. Computed a "% of forward" from a denominator this same run contradicts, and mis-labelled a GEMM-only projection as a forward total.
+4. Printed `NoiseBand` but never applied it, and counted `ratio > 1.0` as a regression — so a 1.02 cell would have been reported as one.
+5. Warmed the leg profile on different buffers than it timed.
+6. Derived a per-layer multiplier by string-comparing a label.
+7. Said "cells below disagree" for a per-cell property, over-claiming the damage.
+
+Each was a way this probe could have made a false claim. None reached the record.
 
 ## Verification steps
 
