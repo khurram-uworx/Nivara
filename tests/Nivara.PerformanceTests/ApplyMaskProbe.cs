@@ -147,13 +147,13 @@ static class ApplyMaskProbe
         {
             var forType = cells.Where(c => c.TypeName == type).ToList();
             Console.WriteLine($"--- {type} ---");
-            Console.WriteLine($"  {"shape",-25} {"regime",-7} {"flags",-8} {"ratio",7} {"wins",7} " +
+            Console.WriteLine($"  {"shape",-25} {"regime",-7} {"flags",-8} {"ratio",7} {"verdict",-14} {"wins",7} " +
                               $"{"ApplyMask",11} {"add",11} {"A/B GB/s",15}");
             foreach (CellResult c in forType)
             {
                 string ratioText = c.Measurable ? $"{c.MedianRatio,7:F3}" : "   n/a ";
                 Console.WriteLine($"  {c.ShapeLabel,-25} {c.Regime,-7} {c.Flags,-8} {ratioText} " +
-                                  $"{c.WinText,-7} {c.MaskMs,9:F3}ms {c.AddMs,9:F3}ms " +
+                                  $"{Classify(c),-14} {c.WinText,-7} {c.MaskMs,9:F3}ms {c.AddMs,9:F3}ms " +
                                   $"{c.MaskGBs,6:F2}/{c.AddGBs,6:F2}"
                                   + (c.Measurable ? "" : "   (below timer resolution)"));
             }
@@ -166,9 +166,15 @@ static class ApplyMaskProbe
         var measurable = cells.Where(c => c.Measurable).ToList();
         var unmeasurable = cells.Where(c => !c.Measurable).ToList();
         double overall = Median(measurable.Select(c => c.MedianRatio).ToArray());
-        int slower = measurable.Count(c => c.MedianRatio > 1.0);
-        Console.WriteLine($"Aggregate over measurable cells: median ratio {overall:F3}, " +
-                          $"ApplyMask slower in {slower} of {measurable.Count}.");
+        int slower = measurable.Count(c => Classify(c) == MaskSlower);
+        int faster = measurable.Count(c => Classify(c) == AddFaster);
+        int noise = measurable.Count(c => Classify(c) == WithinNoise);
+        Console.WriteLine($"Aggregate over measurable cells: median ratio {overall:F3}.");
+        Console.WriteLine($"  ApplyMask SLOWER in {slower}, FASTER in {faster}, within noise in {noise} " +
+                          $"(of {measurable.Count}).");
+        Console.WriteLine("  Read this only with the per-type tables. The aggregate mixes types that");
+        Console.WriteLine("  disagree in DIRECTION - on Half the BCL add is the slower route - so a");
+        Console.WriteLine("  median near 1.0 here is a coincidence of averaging, not a null result.");
         Console.WriteLine($"Coverage: {measurable.Count} of {cells.Count} cells measurable. " +
                           $"{unmeasurable.Count} excluded as below the clock's resolution (~{MinReliableTicks} ticks).");
         if (unmeasurable.Count > 0)
@@ -430,7 +436,7 @@ static class ApplyMaskProbe
         var output = new float[qLen * D];
 
         // One full forward warms every leg and leaves the buffers in their steady state.
-        RunOneHead(qHeads, kHeads, vHeads, qHeadsLen, kvHeadsLen, qLen, kvLen, D, heads, headDim,
+        RunOneHead(q, k, v, qHeads, kHeads, vHeads, qHeadsLen, kvHeadsLen, qLen, kvLen, D, heads, headDim,
                    scale, scores, mask, outHead, output, out bool finiteAfterWarmup);
         if (!finiteAfterWarmup)
         {
@@ -461,13 +467,16 @@ static class ApplyMaskProbe
         double layerTotal = packMs + heads * perHeadTotal;
 
         Console.WriteLine($"  {"leg",-22} {"per call":>11} {"per layer":>12} {"share":>8}");
-        PrintLeg("PackHeads (x3)", packMs, packMs / layerTotal);
-        PrintLeg("QK^T matmul", qkMs, heads * qkMs / layerTotal);
-        PrintLeg("scale multiply", scaleMs, heads * scaleMs / layerTotal);
-        PrintLeg("ApplyMask", maskMs, heads * maskMs / layerTotal);
-        PrintLeg("softmax rows", softmaxMs, heads * softmaxMs / layerTotal);
-        PrintLeg("PV matmul", pvMs, heads * pvMs / layerTotal);
-        PrintLeg("ScatterHead", scatterMs, heads * scatterMs / layerTotal);
+        // The multiplier is explicit rather than inferred from the label: PackHeads runs once per
+        // layer, every other leg once per head. Deriving it from a string comparison would break
+        // silently the first time a label was reworded.
+        PrintLeg("PackHeads (x3)", packMs, 1, layerTotal);
+        PrintLeg("QK^T matmul", qkMs, heads, layerTotal);
+        PrintLeg("scale multiply", scaleMs, heads, layerTotal);
+        PrintLeg("ApplyMask", maskMs, heads, layerTotal);
+        PrintLeg("softmax rows", softmaxMs, heads, layerTotal);
+        PrintLeg("PV matmul", pvMs, heads, layerTotal);
+        PrintLeg("ScatterHead", scatterMs, heads, layerTotal);
         Console.WriteLine($"  {"attention total":-22} {"":11} {layerTotal,10:F3}ms {1.0,8:P1}");
 
         // The counterfactual the issue actually asks for: if the mask went back to the vectorized
@@ -510,8 +519,9 @@ static class ApplyMaskProbe
         Console.WriteLine("      percentage-of-forward as unmeasured.");
         Console.WriteLine();
 
-        static void PrintLeg(string name, double perCallMs, double share)
-            => Console.WriteLine($"  {name,-22} {perCallMs,9:F4}ms {perCallMs * (name == "PackHeads (x3)" ? 1 : heads),10:F3}ms {share,8:P1}");
+        static void PrintLeg(string name, double perCallMs, int multiplier, double layerTotalMs)
+            => Console.WriteLine($"  {name,-22} {perCallMs,9:F4}ms {perCallMs * multiplier,10:F3}ms " +
+                                 $"{perCallMs * multiplier / layerTotalMs,8:P1}");
     }
 
     /// <summary>
@@ -519,13 +529,19 @@ static class ApplyMaskProbe
     /// <c>ReverseGradOperations.MultiHeadAttention</c>. Forward only: empty row flags and no
     /// saved-weights copy, which is what an inference pass does.
     /// </summary>
-    static void RunOneHead(float[] qHeads, float[] kHeads, float[] vHeads, int qHeadsLen, int kvHeadsLen,
+    static void RunOneHead(float[] q, float[] k, float[] v, float[] qHeads, float[] kHeads, float[] vHeads,
+                           int qHeadsLen, int kvHeadsLen,
                            int qLen, int kvLen, int D, int heads, int headDim, float scale,
                            float[] scores, float[] mask, float[] outHead, float[] output, out bool finite)
     {
-        AttentionKernels<float>.PackHeads(BuildScores<float>(qLen * D), qHeads.AsSpan(0, qHeadsLen), qLen, heads, headDim);
-        AttentionKernels<float>.PackHeads(BuildScores<float>(kvLen * D), kHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
-        AttentionKernels<float>.PackHeads(BuildScores<float>(kvLen * D), vHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
+        // The SAME q/k/v the timed legs use. An earlier revision built fresh inputs here, which
+        // meant the warmup and the measured legs ran on different data - structurally identical
+        // and equally deterministic, so the finite check still held, but it need not have. The
+        // finite check exists to catch NaN reaching a leg, so it should inspect the exact buffers
+        // that get timed.
+        AttentionKernels<float>.PackHeads(q, qHeads.AsSpan(0, qHeadsLen), qLen, heads, headDim);
+        AttentionKernels<float>.PackHeads(k, kHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
+        AttentionKernels<float>.PackHeads(v, vHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
 
         for (int h = 0; h < heads; h++)
         {
@@ -573,6 +589,23 @@ static class ApplyMaskProbe
         Array.Sort(sorted);
         int n = sorted.Length;
         return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
+    }
+
+    const string MaskSlower = "MASK SLOWER";
+    const string AddFaster = "add faster";
+    const string WithinNoise = "within noise";
+
+    /// <summary>
+    /// The verdict, and the reason the noise band exists at all: a raw ratio invites reading 1.03
+    /// as a 3% regression when it is indistinguishable from drift. Classification is deliberately
+    /// symmetric so a win is not reported as a neutral event.
+    /// </summary>
+    static string Classify(CellResult c)
+    {
+        if (!c.Measurable) return "not measured";
+        if (c.MedianRatio > 1.0 + NoiseBand) return MaskSlower;
+        if (c.MedianRatio < 1.0 - NoiseBand) return AddFaster;
+        return WithinNoise;
     }
 
     static bool IsDebugBuild()
