@@ -120,8 +120,23 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// announce itself rather than be quietly swallowed.
     /// </para>
     /// <para>
-    /// A scalar loop rather than a <c>TensorPrimitives</c> call, because BCL has no select/blend
-    /// primitive and this mask cannot be expressed as arithmetic. Tracked as #480.
+    /// A compare-and-select loop rather than a <c>TensorPrimitives</c> call, because BCL has no
+    /// select/blend primitive and this mask cannot be expressed as arithmetic.
+    /// </para>
+    /// <para>
+    /// Measured, not assumed (<c>--mask</c> in <c>tests/Nivara.PerformanceTests</c>, #480). On
+    /// <c>float</c> at prefill widths this loop is 1.8-3.3x slower than the
+    /// <c>TensorPrimitives.Add</c> it replaced, losing 0-1 of 30 interleaved rounds in every
+    /// wide-prefill cell across repeated runs, and costing 1.3-2.0% of a Laya-shaped attention pass
+    /// (96-133 ms per 28-layer forward; that share is unstable run to run - the attention total
+    /// swings 48% across three runs while this leg holds 36% - so quote the band, not a point).
+    /// It is not slower everywhere: at S=512 with an all-zero mask and no
+    /// flag tracking it wins, and on <c>Half</c>/<c>BFloat16</c> it is usually <em>faster</em> than
+    /// the BCL add, because the BCL has no vectorized <c>Add</c> for those types and this loop
+    /// avoids its conversion overhead. So the loop is the only mask path for
+    /// <c>Half</c>/<c>BFloat16</c> and is currently winning there; the measurement is recorded as
+    /// the baseline a <c>float</c>/<c>double</c> fast path would have to beat without regressing
+    /// the narrow types.
     /// </para>
     /// <para>
     /// The lengths must match exactly. <c>TensorPrimitives.Add</c>, which this replaces, enforced

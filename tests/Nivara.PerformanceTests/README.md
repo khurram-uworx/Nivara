@@ -383,6 +383,208 @@ both in-tree legs take, and separating it would have needed a fourth leg. It was
 once the blocked reference failed to beat the in-tree kernel, since the question it was
 meant to inform - "is there a CPU GEMM fix worth making" - had been answered no.
 
+### `--mask` — `ApplyMask` vs the `TensorPrimitives.Add` it replaced (#480)
+
+```bash
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --mask
+```
+
+#448 replaced a vectorized `TensorPrimitives.Add` over the `[qLen, kvLen]` score
+buffer with `AttentionKernels<T>.ApplyMask`'s compare-and-select loop, because BCL
+has no select/blend primitive. The justification left on record was an inference
+from a MAC count, never a stopwatch reading, so this mode supplies the reading.
+It is a **probe, not a gate**: it exits 0 on a healthy run and asserts only the
+parity contract. It is deliberately not a scenario row, because the scenario table
+measures rows sequentially and cannot produce a ratio within one run — a ratio
+there means a recorded baseline JSON, which is cross-day and cross-machine drift.
+
+**Design** (from `tests/Nivara.SimdProbe/TransposeKernelProbe.cs`; the superseded
+transpose gate #482 failed 3 of 5 runs on a clean tree on a 0.2% margin because it
+took best-of-N per route, measured the routes sequentially with one always first,
+and warmed neither up):
+
+| aspect | choice | why |
+|---|---|---|
+| statistics | interleaved A/B, 30 rounds/cell, first-measured route alternates every round | cancels first-measured systematic drift |
+| warmup | 5 untimed passes **per route per `T`** | `ApplyMask<T>` is generic-specialized; tiered JIT settles per instantiation |
+| estimate | median ratio + win count + range | a distribution, not a point estimate |
+| noise band | ±3% | reused from `TransposeKernelProbe.Classify`, so two probes do not invent two thresholds |
+| build | `IsDebugBuild()` guard | Debug numbers are void, not a result |
+
+**Grid**: shapes `[512,512]` / `[2048,2048]` / `[1,512]` × `float` / `double` /
+`Half` / `BFloat16` (ADR-001's `IFloatingPointIeee754` domain) × mask regimes
+`None` / `Causal` (~50% `-inf`, the unpredictable-branch case) / `All` (`-inf`)
+× `rowFlags` empty vs populated (inference vs training). 72 cells.
+
+**Parity contract.** The two routes *cannot* be required to agree everywhere:
+assigning `-inf` rather than summing into it **is** the #448 fix, because
+`NaN + (-inf) = NaN` lets a diverged score escape suppression. So parity is
+asserted exactly (by raw bytes, no tolerance) only where the routes are required
+to agree — all-finite scores with a mask in `{0, -inf}` — and the two intentional
+divergences (a `NaN` score; a `+inf` score under a `-inf` cell) are documented
+rather than papered over. A shortfall is reported as a coverage failure on its own
+exit path, never folded into a numeric verdict.
+
+**Recorded baseline** (Release, .NET 11.0.0, x64, AVX2 — `Vector512` *not*
+accelerated; parity 72 of 72 bit-identical; exit 0):
+
+Aggregate over measurable cells: **median ratio 1.130**, classified as MASK SLOWER
+in 29–32, add faster in 15, within noise in 4 (of 48, second run). Coverage:
+**48 of 72 measurable**, 24 excluded as below the clock's resolution.
+
+The aggregate is close to meaningless on its own — it mixes types that disagree in
+*direction*. Scoped per type:
+
+| type | shape | flags | `None` | `Causal` | `All` |
+|---|---|---|---|---|---|
+| `float` | wide prefill | empty | 1.96× | 1.78× | 1.91× |
+| `float` | wide prefill | tracked | 3.27× | 2.97× | 2.95× |
+| `float` | S=512 | empty | **0.75×** | 1.17× | 1.31× |
+| `float` | S=512 | tracked | 2.11× | 2.18× | 1.60× |
+| `double` | wide prefill | empty | 1.70× | 2.46× | **0.86×** |
+| `double` | wide prefill | tracked | 1.92× | 1.61× | 1.26× |
+| `Half` | wide prefill | empty | **0.74×** | **0.56×** | **0.36×** |
+| `Half` | wide prefill | tracked | 1.13× | 1.03× | 1.10× |
+| `BFloat16` | wide prefill | empty | 1.12× | **0.81×** | **0.48×** |
+| `BFloat16` | wide prefill | tracked | 1.36× | 1.06× | **0.65×** |
+
+Three findings, and the third is the one that constrains any fix:
+
+1. **On `float32` at prefill widths the scalar loop is genuinely slower.** All six
+   wide-prefill `float` cells are outside the ±3% band with **0 of 30 rounds won**
+   — the strongest evidence in the grid, because the win count is independent of
+   the ratio. `float` is the shipping path and the only type Laya uses.
+2. **It is not uniform, and "add a fast path" is not the whole story.** `float` at
+   S=512 with an all-zero mask and no flag tracking *wins* (0.75×, 28 of 30 rounds).
+3. **For `Half`, `ApplyMask` is usually FASTER than the BCL add** (0.36–0.74× on
+   wide prefill, 30 of 30 rounds in 5 of 6 `Half` cells). GB/s explains it: the
+   BCL `Add<Half>` path runs at ~1.6 GB/s while `ApplyMask` reaches 4.5 GB/s —
+   neither is vectorized (no `Vector128<Half>`), and the hand-written loop simply
+   avoids the BCL's conversion overhead. **So restoring `TensorPrimitives.Add`
+   for `Half` would be a regression, not a fix.** This is the concrete form of the
+   "no hand-rolled SIMD" convention problem: a `Vector256.ConditionalSelect` fast
+   path cannot even be spelled for `Half`/`BFloat16` (`ConditionalSelect<T>`
+   throws `NotSupportedException` for them), so the current loop is the *only*
+   path for those types and it is currently winning.
+
+**Laya leg profile** (B=1, S=512, d=1024, H=16, headDim=64, 28 layers; legs mirror
+`ReverseGradOperations.MultiHeadAttention`). Two consecutive runs of the
+per-round-chain design:
+
+| leg | ms/call A | ms/call B | ms/call C | spread |
+|---|---|---|---|---|
+| PackHeads (×3) | 1.908 | — | — | — |
+| QK^T matmul | 7.743 | 8.292 | — | 7% |
+| scale multiply | 0.282 | — | — | — |
+| **ApplyMask** | **0.388** | **0.429** | **0.316** | **36%** |
+| *add (counterfactual)* | *0.138* | *0.132* | *0.101* | *37%* |
+| softmax rows | 17.053 | 7.355 | 6.791 | **2.5× (A is the outlier)** |
+| PV matmul | 4.310 | 4.586 | 4.394 | 6% |
+| ScatterHead | 0.064 | — | 0.060 | — |
+| **attention total (ms/layer)** | **479.4** | **338.1** | **323.7** | **48%** |
+
+The mask's absolute cost is **96–133 ms per 28-layer forward** across the three runs.
+The *share* is **1.3–2.0%** of attention, which is unstable for the reason below.
+
+**Two earlier defects in this profile, both corrected here, and both of which had
+produced false claims.** The original design timed each leg 30× *in isolation*, and
+that is wrong in two separate ways:
+
+1. It never re-ran the chain, so each leg saw the buffer state its predecessor left
+   after 30 applications. `SoftmaxRows` is **not idempotent** — iterating it
+   converges toward uniform — so softmax was timed on already-softmaxed rows rather
+   than on masked scores. Its real cost was understated by **2.3×**.
+2. The `add` counterfactual was taken *after* the chain finished, so it was measured
+   on softmax output while the mask had been measured on post-scale output. The
+   headline delta was therefore comparing two routes on **two different inputs**.
+
+The replacement runs the whole chain in dependency order once per round, timing each
+leg in place, so `QK^T` rewrites `scores` from scratch every round and every leg sees
+the data it sees in production. The `add` counterfactual now sits immediately beside
+`ApplyMask` on the same buffer; both are idempotent and agree bit-for-bit here
+(finite scores, mask in `{0,-inf}`: `x + 0 == x`, `-inf + -inf == -inf`), so the
+delta is a real A/B on identical input rather than two independent measurements.
+
+**Consequence: the previously published 62% `QK^T` share and its 11× layout gap
+were mostly measurement artifact, and are retracted.** Under the corrected design
+`QK^T` is **25.8–39.2%** and the `QK^T`/`PV` gap is **~1.8×** (7.74 vs 4.31; 8.29 vs
+4.59), not 11×. The old gap was produced by `PV` reading the degenerate converged
+softmax output (measured 1.395 ms, vs 4.31 ms on real data) and by `QK^T` being timed
+back-to-back against a hot cache instead of interleaved with the other legs. A
+materiality argument built on that gap does not survive; it must not be cited from
+earlier revisions of this file.
+
+**The correction did not fix the reconciliation, and it did not fix stability.**
+Attention alone is 324–479 ms/layer = **9 100–13 400 ms per forward**, still far
+from `docs/LAYA.md`'s recorded ~4.1 s whole forward, and the total swings 48% across
+three runs while its neighbour legs sit at 6–7%. The spread is dominated by run A's
+`softmax rows` at 17.05 ms against 7.36/6.79 in runs B and C — so B and C agree
+within 8% and A is the outlier, rather than the leg being reliably bimodal. Three
+runs cannot distinguish "one contaminated run" from "a genuine low-probability
+state", so it is recorded as unexplained rather than characterized. Either way
+`SoftmaxSingle` — a scalar max loop plus `TensorPrimitives.Subtract`/`Exp`/`Divide`
+— costs 6.8–17 ms for 262 144 elements, i.e. 26–65 ns/element, far off a vectorized
+`Exp` rate, and at 33–57% it is the dominant attention leg. **No percentage-of-forward
+is published.** The mode prints the reconciliation conflict instead.
+
+**Two caveats carried in the output.** (a) The `[1,512]` row measures the mask
+API *at decode shape*; `DecodeAttention` and `BatchedAttention` use a `Keep`
+predicate and never call `ApplyMask`, so it is not the decode path's cost. (b) All
+24 `[1,512]` cells are below timer resolution (~10 Stopwatch ticks) and print `n/a`;
+before that guard they reported 5–10× "regressions" that were pure clock
+quantization — the tell being a `61.44 GB/s` reading that is just a rounded tick
+count over 6 KB of L1-resident data. Publishing that as "6× slower at decode" is
+the kind of false claim this mode exists to prevent.
+
+**Ratio stability is limited — read this before quoting any single cell.** Two
+consecutive runs:
+
+| quantity | run A | run B | run C | verdict |
+|---|---|---|---|---|
+| parity | 72 of 72 | 72 of 72 | 72 of 72 | **exact, stable** |
+| measurable cells | 48 of 72 | 48 of 72 | 48 of 72 | **exact, stable** |
+| absolute delta (ms / 28-layer forward) | 112.3 | 133.0 | 96.3 | **39% spread** |
+| `float` wide prefill, 6 cells | 0 of 30 rounds won | 0–1 of 30 | 0 of 30 | **stable** |
+| aggregate median ratio | 1.130 | 1.168 | — | ±3% wobble |
+| `float` `[512,512]` causal/empty | 1.17× (SLOWER) | 1.05× (SLOWER) | — | **straddles the band** |
+| `ApplyMask` leg (ms/call) | 0.388 | 0.429 | 0.316 | 36% |
+| `add` counterfactual (ms/call) | 0.138 | 0.132 | 0.101 | 37% |
+| `softmax rows` leg (ms/call) | 17.05 | 7.36 | 6.79 | **2.5×, A the outlier** |
+| attention total (ms/layer) | 479.4 | 338.1 | 323.7 | 48% |
+
+Five consequences:
+
+1. **The `float` `[512,512]` causal/empty cell straddles the ±3% band between
+   runs** (1.05–1.17×). It is *not* a reliable "slower" verdict, and the table
+   above records it as a ratio, not a conclusion.
+2. **The earlier "delta stable to 0.02 ms" is retracted.** That stability came
+   from the isolated-leg design, where both routes timed the same static buffer
+   every round. Under the corrected chain the delta spans 96–133 ms across three
+   runs, and both the mask leg (0.316–0.429) and the counterfactual (0.101–0.138)
+   move with it in the same direction. The earlier figure was stable *because* it
+   was measuring something other than the production data path, not because the
+   quantity is stable.
+3. **The attention total's 48% spread is dominated by one leg and one run.** Run
+   A's `softmax rows` reads 17.05 ms against 7.36/6.79 in B and C, and softmax is
+   33–57% of attention, so softmax alone accounts for the total's spread. The other
+   legs hold 6–7%. Three runs cannot separate "run A was contaminated" from "the
+   leg has a real low-probability slow state", so it stays unexplained. Until it is
+   settled the attention *share* is a 1.3–2.0% band, and the mask's *absolute*
+   96–133 ms/forward band is the citable quantity.
+4. The instability is **not** inherited from the kernel A/B grid: parity (72/72),
+   measurable-cell count (48/72) and the win counts are identical in all three
+   runs. Only the wall-clock legs move.
+5. Within one run, the same nominal configuration also read differently by
+   measurement path: `float` `[512,512]` causal/empty was 1.17× in the A/B and
+   2.96× in the leg profile.
+
+**What survives:** the `float` wide-prefill regression (all six cells outside the
+band, essentially 0 of 30 rounds won, across all three runs), the exact parity and
+coverage counts, and the mask's absolute cost as the 96–133 ms/forward band.
+**What does not:** any single-cell magnitude near the band, any second digit on the
+attention share, the prior "stable to 0.02 ms" delta, and the retracted 62%/11×
+`QK^T` figures.
+
 ### No-regression gate (P4)
 
 The harness doubles as an executable perf gate (`ADR-002` P4). Two modes:
