@@ -185,6 +185,29 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **BatchNorm eval mode now produces weight and bias gradients, matching PyTorch (#494)** —
+  `BatchNorm1dEval` and `BatchNorm2dEval` previously only accumulated gradients for
+  the input, listing only `[input]` in `OpNode.Inputs`, even though their forward
+  used `gamma` and `beta` (`y = gamma * xhat + beta`). When running `Backward()` in
+  `Eval()` mode, this produced silent `null` gradients for `Weight`/`Bias`. The
+  eval-path backward now computes `gradGamma = sum(gradOut · xHat)` and
+  `gradBeta = sum(gradOut)`, accumulates them into the parameter tensors when
+  `affine` is true, and includes those parameters in `OpNode.Inputs`. The
+  contract test for the eval path was updated accordingly (the old "only input"
+  assertion is replaced by affine-aware expectations). Training-mode behaviour is
+  unchanged. This matches the empirical PyTorch semantics (parameter gradients
+  depend on each leaf's `requires_grad`, not the training flag).
+
+- **xHat must be the pre-affine normalized value in BatchNorm's vectorized path (#494)** —
+  In `BatchNormKernel<T>.Forward` and `ForwardEval`, the vectorized branches were
+  writing `xHat` *after* multiplying by `gamma`, so `xHat = (x-mean)*invStd*gamma`.
+  That corrupted `BackwardWeight`'s `gradGamma = sum(gradOut · xHat)` by an extra
+  `gamma` factor. The scalar branches were already correct. Now `xHat` is copied
+  from the normalized buffer **before** applying the affine scale. Train-mode
+  `grad_gamma` values with non-unit gamma (and eval-mode values) are now
+  bit-parity correct against PyTorch. Added exact-value parity tests to prevent
+  regression.
+
 - **A fully-masked attention row under HuggingFace's `finfo.min` fill received a spurious
   `dq` (#454)** — the row-7 divergence the `attn_band_padding_minfill` fixtures recorded as
   unexplained. A `finfo.min` fill *absorbs* the score it masks: `score + finfo.min ==
