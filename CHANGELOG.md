@@ -238,6 +238,53 @@ All notable changes to Nivara are documented here. Released versions are publish
   a non-differentiable constant. No in-tree mask builder passes `requiresGrad: true`,
   so no existing caller changes behaviour; q/k/v gradients are untouched.
 
+- **`OpNode.Inputs` was never stated as a contract, and seven module nodes
+  disagreed with their own backward closures (#487)** — `Inputs` is the reverse
+  graph's edge set: `ComputationGraph` walks it to build the backward plan and to
+  clear gradients. Seven module nodes listed only their input while their backward
+  functions also accumulated into `weight` and/or `bias` — `Conv1d`, `Conv2d`,
+  `ConvTranspose2d`, `LayerNorm`, `RMSNorm`, `BatchNorm1d` and `BatchNorm2d`. The
+  user-visible consequence was that `GradientUtils.ZeroGrad` under-cleared,
+  contradicting its own documented promise, leaving LayerNorm/RMSNorm/BatchNorm
+  weight and bias plus Conv bias gradients behind after a supposedly complete
+  clear. Training loops were unaffected because `Optimizer.ZeroGrad()` walks
+  `Module.Parameters()` directly, which is why it went unnoticed. The contract is
+  now stated in `OpNode.Inputs` and enforced in both directions:
+
+  - **Track it.** Each of the seven now lists its parameters through one
+    `ModuleHelpers.NodeInputs` helper, so the conditional lives in one place and
+    cannot drift from the closure beside it. The gates differ per module
+    (`useBias && bias != null`, independent null checks, `affine`, or
+    unconditionally), which is why a shared predicate would have been the wrong
+    shape. `BatchNorm1dEval` and `BatchNorm2dEval` stay `[input]`-only: their
+    backward accumulates into nothing else, so that is already the correct answer.
+  - **Or reject it.** A gradient-carrying constant argument now throws
+    `ArgumentException` naming the parameter, via `GradientUtils.RequireConstant`,
+    instead of silently returning nothing. `SparseEmbeddingBag.indices` gains the
+    guard in both modes, and forward-mode `MultiHeadAttention` /
+    `BatchedMultiHeadAttention` gain the mask guard that #481 established in
+    reverse mode only. Forward mode is the worse half of that defect: there is no
+    graph and no `Backward` to fail later, so a mask-only tangent produced
+    `RequiresTangent == false` with no error at all. Indices and masks are read
+    through `int.CreateChecked` or applied piecewise, so propagating a gradient is
+    not an option for either.
+
+  `OpNodeInputContractTests` pins the contract: each row sets exactly one tensor
+  argument to require a gradient and requires the op to track it or reject it by
+  name — setting every argument at once would pass even when one is excluded.
+  Reflection guards keep that scope from drifting by requiring a row for every
+  public static op taking two or more tensor arguments (plus `Concat`, whose
+  single argument is an array of tensors) and every public `Module<T>` owning a
+  `Parameter<T>`. Both guards earned their place while being written: the module
+  guard initially failed to match open-generic names, and `Embedding` /
+  `SparseEmbedding` turned out to consume their input as integer selectors, so it
+  correctly never enters the graph.
+
+  Separately: `BatchNorm` in eval mode produces no weight or bias gradient while
+  its eval forward depends on them, diverging from PyTorch. That is a real gap but
+  a different one from this issue's silent-drop shape, so it is tracked as #494
+  rather than folded in here.
+
 - **Flaky timing gates in `TensorsHelperTests` (#482)** —
   `Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization` failed 3 of 5 runs
   on a clean tree, once on a 0.2% margin. Root cause was build configuration, not the
