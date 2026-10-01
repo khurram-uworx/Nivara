@@ -428,9 +428,9 @@ exit path, never folded into a numeric verdict.
 **Recorded baseline** (Release, .NET 11.0.0, x64, AVX2 — `Vector512` *not*
 accelerated; parity 72 of 72 bit-identical; exit 0):
 
-Aggregate over measurable cells: **median ratio 1.130**, ApplyMask slower in 32
-of 48. Coverage: **48 of 72 measurable**, 24 excluded as below the clock's
-resolution.
+Aggregate over measurable cells: **median ratio 1.130**, classified as MASK SLOWER
+in 29–32, add faster in 15, within noise in 4 (of 48, second run). Coverage:
+**48 of 72 measurable**, 24 excluded as below the clock's resolution.
 
 The aggregate is close to meaningless on its own — it mixes types that disagree in
 *direction*. Scoped per type:
@@ -505,11 +505,36 @@ quantization — the tell being a `61.44 GB/s` reading that is just a rounded ti
 count over 6 KB of L1-resident data. Publishing that as "6× slower at decode" is
 the kind of false claim this mode exists to prevent.
 
-**Ratio stability is limited.** The same nominal configuration measured different
-ways in the same run: `float` `[512,512]` causal/empty read 1.17× in the A/B but
-the leg profile's equivalent call read 2.96×. The direction is robust; the
-magnitude is not. Treat the wide-prefill `float` cells (0 of 30 rounds won) as the
-finding and single-cell ratios elsewhere as indicative.
+**Ratio stability is limited — read this before quoting any single cell.** Two
+consecutive runs:
+
+| quantity | run A | run B | verdict |
+|---|---|---|---|
+| parity | 72 of 72 | 72 of 72 | **exact, stable** |
+| measurable cells | 48 of 72 | 48 of 72 | **exact, stable** |
+| absolute delta (ms / 28-layer forward) | 129.54 | 129.52 | **stable to 0.02 ms** |
+| `float` wide prefill, 6 cells | 0 of 30 rounds won | 0–1 of 30 | **stable** |
+| aggregate median ratio | 1.130 | 1.168 | ±3% wobble |
+| `float` `[512,512]` causal/empty | 1.17× (SLOWER) | 1.05× (SLOWER) | **straddles the band** |
+| attention total (ms/layer) | 389.3 | 316.2 | **18% swing** |
+
+Three consequences:
+
+1. **The `float` `[512,512]` causal/empty cell straddles the ±3% band between
+   runs** (1.05–1.17×). It is *not* a reliable "slower" verdict, and the table
+   above records it as a ratio, not a conclusion.
+2. **The attention leg total swings 18% run to run** while the mask leg and the
+   delta stay flat. So the 1.79% *share* is a single-run figure with double-digit
+   uncertainty, even though the *absolute* ms is not. Another reason the
+   percentage-of-forward is not published.
+3. Within one run, the same nominal configuration also read differently by
+   measurement path: `float` `[512,512]` causal/empty was 1.17× in the A/B and
+   2.96× in the leg profile.
+
+**What survives:** the `float` wide-prefill regression (all six cells outside the
+band, essentially 0 of 30 rounds won, across both runs) and the absolute delta.
+**What does not:** any single-cell magnitude near the band, and the attention
+share's second digit.
 
 ### No-regression gate (P4)
 
