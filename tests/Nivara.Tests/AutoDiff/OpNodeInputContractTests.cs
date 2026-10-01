@@ -261,7 +261,7 @@ public class OpNodeInputContractTests
     {
         var bn = new BatchNorm2d<float>(numFeatures: 3);
         bn.Eval();
-        var input = Tensor4D(Rand(12, 903), 2, 3, 2, 2, requiresGrad: true);
+        var input = Tensor4D(Rand(24, 903), 2, 3, 2, 2, requiresGrad: true);
 
         var output = bn.Forward(input);
 

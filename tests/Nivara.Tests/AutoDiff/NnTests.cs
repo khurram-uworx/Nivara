@@ -1433,6 +1433,50 @@ public class NnTests
     }
 
     [Test]
+    public void BatchNorm2d_TrainMode_ParameterGradientsMatchPyTorch()
+    {
+        // Pins grad_gamma by value in train mode, which no test did before. The vectorized
+        // forward path once wrote the gamma-scaled buffer into xHat, so BackwardWeight
+        // contracted a value that already carried gamma and returned grad_gamma * gamma.
+        // Non-unit gamma is what makes the error visible; the pre-existing tests only
+        // asserted Grad != null and Length, so they could not see it.
+        using var bn = new BatchNorm2d<float>(2);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = ReverseGradTensor<float>.FromArray(new[] { 1.25f, -0.75f }),
+            ["Bias"] = ReverseGradTensor<float>.FromArray(new[] { 0.05f, -0.15f }),
+        });
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f, 4.0f, -1.0f, -2.0f, -3.0f, -4.0f }),
+            requiresGrad: true);
+        input.Reshape(1, 2, 2, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 0.5f, 1.5f, -0.5f, -1.5f, 1.0f, -1.0f, 0.25f, -0.25f }),
+            requiresGrad: false);
+        gradOutput.Reshape(1, 2, 2, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+
+        float[] expectedWeight = [-3.5776944160461426f, 1.1180294752120972f];
+        float[] expectedBias = [0.0f, 0.0f];
+
+        for (int i = 0; i < expectedWeight.Length; i++)
+        {
+            Assert.That(bn.Weight.Tensor.Grad![i], Is.EqualTo(expectedWeight[i]).Within(1e-5f),
+                $"weight gradient[{i}] diverges from PyTorch");
+            Assert.That(bn.Bias!.Tensor.Grad![i], Is.EqualTo(expectedBias[i]).Within(1e-5f),
+                $"bias gradient[{i}] diverges from PyTorch");
+        }
+    }
+
+    [Test]
     public void BatchNorm2d_EvalMode_AffineFalse_NoParameterGradients()
     {
         using var bn = new BatchNorm2d<float>(2, affine: false);
