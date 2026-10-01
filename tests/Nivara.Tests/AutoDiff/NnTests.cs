@@ -1290,6 +1290,178 @@ public class NnTests
     }
 
     [Test]
+    public void BatchNorm1d_EvalMode_ParameterGradientsMatchPyTorch()
+    {
+        // #494: the eval forward still computes gamma * xhat + beta, so gamma and beta are
+        // in the differentiable path and must receive gradients. Expected values are the
+        // verbatim grad_weight/grad_bias from torch 2.13.0+cpu for this exact input,
+        // grad_output, running_mean and running_var -- not a recomputation of the formula,
+        // so a wrong kernel cannot agree with a wrong expectation.
+        using var bn = new BatchNorm1d<float>(3);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = ReverseGradTensor<float>.FromArray(new[] { 1.5f, -2.0f, 0.25f }),
+            ["Bias"] = ReverseGradTensor<float>.FromArray(new[] { 0.1f, 0.2f, 0.3f }),
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.5f, -0.25f, 2.0f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 1.25f, 0.75f, 3.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] {
+                0.1f, 0.2f, 0.3f, 0.4f,
+                1.5f, 1.6f, 1.7f, 1.8f,
+                -2.0f, -1.5f, -1.0f, -0.5f,
+                0.0f, 0.5f, 1.0f, 1.5f,
+                3.0f, 3.5f, 4.0f, 4.5f,
+                -1.0f, -2.0f, -3.0f, -4.0f }),
+            requiresGrad: true);
+        input.Reshape(2, 3, 4);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] {
+                0.5f, -0.5f, 1.0f, -1.5f,
+                2.0f, 1.0f, -1.0f, -2.0f,
+                0.25f, 0.75f, -0.25f, -1.25f,
+                1.5f, 0.25f, -0.75f, 0.5f,
+                -0.5f, 1.25f, 0.5f, -0.25f,
+                1.0f, -0.5f, 0.75f, -1.5f }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 4);
+
+        output.Backward(gradOutput);
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+
+        float[] expectedWeight = [-0.6484571099281311f, 3.8104865550994873f, 2.4053475856781006f];
+        float[] expectedBias = [1.0f, 1.0f, -0.75f];
+
+        for (int i = 0; i < expectedWeight.Length; i++)
+        {
+            Assert.That(bn.Weight.Tensor.Grad![i], Is.EqualTo(expectedWeight[i]).Within(1e-5f),
+                $"weight gradient[{i}] diverges from PyTorch");
+            Assert.That(bn.Bias!.Tensor.Grad![i], Is.EqualTo(expectedBias[i]).Within(1e-5f),
+                $"bias gradient[{i}] diverges from PyTorch");
+        }
+    }
+
+    [Test]
+    public void BatchNorm1d_EvalMode_AffineFalse_NoParameterGradients()
+    {
+        // Without affine there is no gamma or beta in the forward, so nothing may
+        // accumulate into them. Guards against the fix leaking a parameter accumulation
+        // past the affine gate.
+        using var bn = new BatchNorm1d<float>(3, affine: false);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.5f, -0.25f, 2.0f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 1.25f, 0.75f, 3.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] {
+                0.1f, 0.2f, 0.3f, 0.4f,
+                1.5f, 1.6f, 1.7f, 1.8f,
+                -2.0f, -1.5f, -1.0f, -0.5f,
+                0.0f, 0.5f, 1.0f, 1.5f,
+                3.0f, 3.5f, 4.0f, 4.5f,
+                -1.0f, -2.0f, -3.0f, -4.0f }),
+            requiresGrad: true);
+        input.Reshape(2, 3, 4);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] {
+                0.5f, -0.5f, 1.0f, -1.5f,
+                2.0f, 1.0f, -1.0f, -2.0f,
+                0.25f, 0.75f, -0.25f, -1.25f,
+                1.5f, 0.25f, -0.75f, 0.5f,
+                -0.5f, 1.25f, 0.5f, -0.25f,
+                1.0f, -0.5f, 0.75f, -1.5f }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 4);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null, "The input gradient must still flow in eval mode.");
+        Assert.That(bn.Weight, Is.Null);
+        Assert.That(bn.Bias, Is.Null);
+    }
+
+    [Test]
+    public void BatchNorm2d_EvalMode_ParameterGradientsMatchPyTorch()
+    {
+        using var bn = new BatchNorm2d<float>(2);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = ReverseGradTensor<float>.FromArray(new[] { 1.25f, -0.75f }),
+            ["Bias"] = ReverseGradTensor<float>.FromArray(new[] { 0.05f, -0.15f }),
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.3f, -0.8f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 2.0f, 0.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f, 4.0f, -1.0f, -2.0f, -3.0f, -4.0f }),
+            requiresGrad: true);
+        input.Reshape(1, 2, 2, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 0.5f, 1.5f, -0.5f, -1.5f, 1.0f, -1.0f, 0.25f, -0.25f }),
+            requiresGrad: false);
+        gradOutput.Reshape(1, 2, 2, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+
+        float[] expectedWeight = [-2.8284201622009277f, 1.767749309539795f];
+        float[] expectedBias = [0.0f, 0.0f];
+
+        for (int i = 0; i < expectedWeight.Length; i++)
+        {
+            Assert.That(bn.Weight.Tensor.Grad![i], Is.EqualTo(expectedWeight[i]).Within(1e-5f),
+                $"weight gradient[{i}] diverges from PyTorch");
+            Assert.That(bn.Bias!.Tensor.Grad![i], Is.EqualTo(expectedBias[i]).Within(1e-5f),
+                $"bias gradient[{i}] diverges from PyTorch");
+        }
+    }
+
+    [Test]
+    public void BatchNorm2d_EvalMode_AffineFalse_NoParameterGradients()
+    {
+        using var bn = new BatchNorm2d<float>(2, affine: false);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.3f, -0.8f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 2.0f, 0.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f, 4.0f, -1.0f, -2.0f, -3.0f, -4.0f }),
+            requiresGrad: true);
+        input.Reshape(1, 2, 2, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 0.5f, 1.5f, -0.5f, -1.5f, 1.0f, -1.0f, 0.25f, -0.25f }),
+            requiresGrad: false);
+        gradOutput.Reshape(1, 2, 2, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null, "The input gradient must still flow in eval mode.");
+        Assert.That(bn.Weight, Is.Null);
+        Assert.That(bn.Bias, Is.Null);
+    }
+
+    [Test]
     public void BatchNorm2d_Backward_GradientsFlow()
     {
         using var bn = new BatchNorm2d<float>(2);
