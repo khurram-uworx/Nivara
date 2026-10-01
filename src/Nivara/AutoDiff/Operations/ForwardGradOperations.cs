@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Utilities;
 using Nivara.Helpers;
 using System.Buffers;
 using System.Numerics;
@@ -650,6 +651,13 @@ public static class ForwardGradOperations
     /// equal to <paramref name="paddingIndex"/> are skipped. Indices are not differentiable;
     /// JVP: t_out = SparseEmbeddingBag(t_weight, indices, paddingIndex).
     /// </summary>
+    /// <remarks>
+    /// <paramref name="indices"/> carries integer row selectors, so its tangent is excluded
+    /// from the tracking predicate and an <paramref name="indices"/> that requires a tangent
+    /// throws rather than having it silently dropped. Mirrors the reverse-mode guard in
+    /// <see cref="ReverseGradOperations.SparseEmbeddingBag{T}"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="indices"/> requires a tangent.</exception>
     public static ForwardGradTensor<T> SparseEmbeddingBag<T>(
         ForwardGradTensor<T> weight,
         ForwardGradTensor<T> indices,
@@ -658,6 +666,7 @@ public static class ForwardGradOperations
     {
         if (weight == null) throw new ArgumentNullException(nameof(weight));
         if (indices == null) throw new ArgumentNullException(nameof(indices));
+        GradientUtils.RequireConstant(nameof(indices), indices);
         if (weight.Rank != 2)
             throw new ArgumentException("SparseEmbeddingBag weight must be a 2D tensor.", nameof(weight));
         if (indices.Rank != 2)
@@ -1543,6 +1552,15 @@ public static class ForwardGradOperations
     /// JVP: t_scores = scale * (t_Q @ K^T + Q @ t_K^T), t_P = SoftmaxBackwardRows(P, t_scores),
     /// t_out = t_P @ V + P @ t_V.
     /// </summary>
+    /// <remarks>
+    /// The mask is excluded from the tangent predicate, so passing a mask with
+    /// <see cref="ForwardGradTensor{T}.RequiresTangent"/> set throws rather than silently
+    /// dropping its JVP contribution. <c>AttentionKernels.ApplyMask</c> <em>assigns</em> the fill
+    /// to a suppressed cell rather than adding to it, so the mask is only piecewise
+    /// differentiable and a partial tangent would be misleading. This mirrors the
+    /// reverse-mode guard in <see cref="ReverseGradOperations.MultiHeadAttention{T}"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="mask"/> requires a tangent.</exception>
     public static ForwardGradTensor<T> MultiHeadAttention<T>(
         ForwardGradTensor<T> query,
         ForwardGradTensor<T> key,
@@ -1575,6 +1593,7 @@ public static class ForwardGradOperations
             throw new ArgumentException($"Key and Value row counts must match (got {key.shape[0]} vs {value.shape[0]}).");
         if (mask != null && (mask.Rank != 2 || mask.shape[0] != qLen || mask.shape[1] != kvLen))
             throw new ArgumentException($"Mask must be a {qLen}x{kvLen} additive matrix.");
+        GradientUtils.RequireConstant(nameof(mask), mask);
 
         bool trackTangent = query.RequiresTangent || key.RequiresTangent || value.RequiresTangent;
         int scoreLen = qLen * kvLen;
@@ -1735,6 +1754,12 @@ public static class ForwardGradOperations
     /// <see cref="MultiHeadAttention{T}"/>. Mask is an optional [B, qLen, kvLen]
     /// additive tensor (non-differentiable constant).
     /// </summary>
+    /// <remarks>
+    /// As in <see cref="MultiHeadAttention{T}"/>, a mask that
+    /// <see cref="ForwardGradTensor{T}.RequiresTangent"/> throws rather than having its JVP
+    /// contribution silently dropped.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="mask"/> requires a tangent.</exception>
     public static ForwardGradTensor<T> BatchedMultiHeadAttention<T>(
         ForwardGradTensor<T> query,
         ForwardGradTensor<T> key,
@@ -1770,6 +1795,7 @@ public static class ForwardGradOperations
             throw new ArgumentException($"Key and Value sequence lengths must match (got {key.shape[1]} vs {value.shape[1]}).");
         if (mask != null && (mask.Rank != 3 || mask.shape[0] != batch || mask.shape[1] != qLen || mask.shape[2] != kvLen))
             throw new ArgumentException($"Mask must be a {batch}x{qLen}x{kvLen} additive tensor.");
+        GradientUtils.RequireConstant(nameof(mask), mask);
 
         bool trackTangent = query.RequiresTangent || key.RequiresTangent || value.RequiresTangent;
         int scoreLen = qLen * kvLen;
