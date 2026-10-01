@@ -79,6 +79,7 @@ one always first, and no warmup.
 | Statistics | interleaved A/B, `Rounds = 30`, alternate first-measured route each round | cancels first-measured systematic drift |
 | Warmup | 5 untimed passes **per route per `T`** | `ApplyMask<T>` is generic-specialized; tiered JIT settles per instantiation |
 | Estimate | median ratio + win rate + range | distribution, not a point estimate |
+| Reported **per cell** | median **ns/op**, **ns/element**, **GB/s**, *and* the ratio | see G1 finding 3 below — a bare ratio cannot separate a bandwidth-bound parity from a compute-bound one |
 | Verdict band | ±3% = noise (reuse the transpose probe's band) | do not invent a threshold per probe |
 | Build | `IsDebugBuild()` guard + `BuildConfigurationWarning` | Debug numbers are void, not a result (#482) |
 
@@ -147,6 +148,56 @@ forward**, so the Leg-1 ratio converts into a materiality verdict.
   for this one kernel, and covers the type-dispatch fallback the issue itself
   identifies (`ConditionalSelect` is not uniform across `Half`/`BFloat16`).
   Do **not** implement the blend here.
+
+## Probe-existence check (skill step 0 — why a new mode, not an extension)
+
+Confirmed no existing mode covers the CPU `ApplyMask`:
+
+- `tests/Nivara.SimdProbe/Program.cs` modes: `cpu`, `support`, `correctness`,
+  `benchmark`, `scalar`, `transpose`. `transpose` is the A/B-methodology
+  template but measures `TensorsHelper.Transpose`; `scalar` measures
+  GEMV/attention-V/rotary at Laya layers, not the score mask.
+- `tests/Nivara.PerformanceTests` flags: `--dataset-test`, `--safetensors-mmap`,
+  `--gemm`, `--gemm-legs`, `--gpu-alloc`, `--cpu-gemm`.
+- **Nearest neighbour rejected:** `GemmLegBenchmark.cs:134-148` allocates a
+  `maskBuf`, but that is a **GPU** mask for the ILGPU `BatchedAttention`
+  (`samples/Nivara.Samples/Gpu/AttentionKernels.cs`) — a different kernel that
+  never calls `AttentionKernels<T>.ApplyMask`. `--gemm-legs` attributes GPU time
+  and cannot see the CPU mask at all.
+
+So a new `--mask` mode in `Nivara.PerformanceTests` is justified rather than an
+extension, and the temp-harness path is skipped entirely (nothing novel to
+stage: the harness is a known shape and lands directly in its permanent home).
+
+## Grounding (G1) — microsoft-learn + code-memory
+
+1. **In-place `TensorPrimitives.Add` is legal.** The `Add<T>(x, y, destination)`
+   overload documents its overlap exception as *"reference overlapping memory
+   locations **and do not begin at the same location**"* — exact aliasing is
+   explicitly permitted. Route A is valid as written. Same page corroborates the
+   divergence: *"If either of the element-wise input values is equal to NaN, the
+   resulting element-wise value is also NaN."*
+2. **The issue's reason #2 for not using a blend is confirmed.** The documented
+   element set for `Vector128<T>`/`Vector256<T>`/`Vector512<T>` is
+   `byte, sbyte, short, ushort, int, uint, long, ulong, float, double, nint,
+   nuint`; `ConditionalSelect<T>` throws `NotSupportedException` otherwise.
+   **`Half` and `BFloat16` are not supported**, so a `ConditionalSelect` fast
+   path cannot cover ADR-001's domain without a type-dispatch branch.
+3. **Red flag → probe must report absolute throughput, not just a ratio.** The
+   SIMD guidance states *"Speedups are rarely perfect… memory throughput,
+   alignment, and instruction latency all factor in"* and that a 256-bit vector
+   on 32-bit elements will not reliably be 8× faster. Both routes move identical
+   bytes over identical spans, so two possibilities must be distinguished:
+   - the pass may be **bandwidth-bound**, in which case scalar and vectorized can
+     reach parity and the ratio means little without GB/s to prove saturation;
+   - `scores[i] = MaskedCell(...)` is a select the **JIT may already
+     auto-vectorize**, making "scalar" a misnomer and part of the issue's premise
+     wrong. GB/s plus ns/element makes this falsifiable.
+
+   The direction of the result is therefore **not** pre-declared; the measurement
+   decides. Human confirmed the amended output shape.
+4. Type domain confirmed against the suite: `float`, `double`, `Half`,
+   `BFloat16` (`AttentionKernelsTests.cs:258-265`).
 
 ## Blast radius
 
