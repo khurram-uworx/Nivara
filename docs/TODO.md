@@ -197,7 +197,10 @@ correct PyTorch-matching parameter gradients instead of `null`.
 
 ## GitHub issues log
 
-- [ ] #494 — BatchNorm eval mode produces no weight/bias gradient (this work)
+- [x] #494 — BatchNorm eval mode produces no weight/bias gradient (this work)
+- [x] #496 — `Incident.AnalysisTests` teardown file-lock makes the full suite exit 1
+  despite all tests passing (created while verifying #494; pre-existing and unrelated
+  to AutoDiff — passes 34/34 in isolation)
 
 > As each task executes, if you find deferred work or a concern, create a tracked
 > issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its
