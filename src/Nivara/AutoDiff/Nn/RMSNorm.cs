@@ -94,7 +94,9 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
             int savedNormShape = normalizedShape;
             double savedEps = double.CreateChecked(eps);
 
-            var gradFn = new OpNode<T>("RMSNorm", [input], (typedGradOutput) =>
+            var gradFn = new OpNode<T>("RMSNorm",
+                ModuleHelpers<T>.NodeInputs(input, weight.Tensor),
+                (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);

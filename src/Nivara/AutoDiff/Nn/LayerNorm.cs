@@ -121,7 +121,9 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
             int savedRows = rows;
             int savedNormShape = normalizedShape;
 
-            var gradFn = new OpNode<T>("LayerNorm", [input], (typedGradOutput) =>
+            var gradFn = new OpNode<T>("LayerNorm",
+                ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor),
+                (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);
