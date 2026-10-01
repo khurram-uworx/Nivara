@@ -134,13 +134,23 @@ static class ApplyMaskProbe
 
         // Coverage is stated as N of M, and a shortfall is reported as a failure rather than a
         // neutral event: a run that tested three quarters of what it claims must not print the
-        // same summary as one that tested all of it.
-        int parityExact = cells.Count(c => c.ParityExact);
+        // same summary as one that tested all of it. Parity is per-cell and cells are
+        // independent, so a failing cell names itself rather than being allowed to imply that
+        // every ratio below is void - which would be as wrong as hiding it.
+        var parityFailed = cells.Where(c => !c.ParityExact).ToList();
+        int parityExact = cells.Count - parityFailed.Count;
         Console.WriteLine("Parity - the routes must agree bit-for-bit where the contract says they must");
         Console.WriteLine("  (all-finite scores, mask in {0,-inf}; outside that domain they differ by design, #448)");
         Console.WriteLine($"  {parityExact} of {cells.Count} cells bit-identical");
-        if (parityExact != cells.Count)
-            Console.WriteLine("  *** COVERAGE SHORTFALL - cells below disagree where the contract says they must not.");
+        if (parityFailed.Count > 0)
+        {
+            Console.WriteLine($"  *** PARITY VIOLATION in {parityFailed.Count} cell(s) - these routes disagreed where the");
+            Console.WriteLine("      contract says they must agree, so the comparison is broken and the run FAILS:");
+            foreach (CellResult c in parityFailed)
+                Console.WriteLine($"      - {c.TypeName} / {c.ShapeLabel} / {c.Regime} / {c.Flags}");
+            Console.WriteLine("      The failing cells' ratios below are void. Every other cell's parity was");
+            Console.WriteLine("      checked independently, so its ratio stands.");
+        }
         Console.WriteLine();
 
         foreach (string type in new[] { "float", "double", "Half", "BFloat16" })
