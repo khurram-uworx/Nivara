@@ -468,33 +468,64 @@ Three findings, and the third is the one that constrains any fix:
    path for those types and it is currently winning.
 
 **Laya leg profile** (B=1, S=512, d=1024, H=16, headDim=64, 28 layers; legs mirror
-`ReverseGradOperations.MultiHeadAttention`):
+`ReverseGradOperations.MultiHeadAttention`). Two consecutive runs of the
+per-round-chain design:
 
-| leg | ms/call | ms/layer | share |
-|---|---|---|---|
-| PackHeads (×3) | 1.959 | 1.96 | 0.5% |
-| QK^T matmul | 15.089 | 241.42 | 62.0% |
-| scale multiply | 0.267 | 4.26 | 1.1% |
-| **ApplyMask** | **0.436** | **6.98** | **1.8%** |
-| softmax rows | 6.992 | 111.88 | 28.7% |
-| PV matmul | 1.395 | 22.33 | 5.7% |
-| ScatterHead | 0.030 | 0.47 | 0.1% |
+| leg | ms/call A | ms/call B | ms/call C | spread |
+|---|---|---|---|---|
+| PackHeads (×3) | 1.908 | — | — | — |
+| QK^T matmul | 7.743 | 8.292 | — | 7% |
+| scale multiply | 0.282 | — | — | — |
+| **ApplyMask** | **0.388** | **0.429** | **0.316** | **36%** |
+| *add (counterfactual)* | *0.138* | *0.132* | *0.101* | *37%* |
+| softmax rows | 17.053 | 7.355 | 6.791 | **2.5× (A is the outlier)** |
+| PV matmul | 4.310 | 4.586 | 4.394 | 6% |
+| ScatterHead | 0.064 | — | 0.060 | — |
+| **attention total (ms/layer)** | **479.4** | **338.1** | **323.7** | **48%** |
 
-`ApplyMask` is **1.79% of attention's time**; the vectorized add would be 0.61%.
-Reverting would return **4.63 ms/layer, 129.5 ms per 28-layer forward** (measured
-absolute).
+The mask's absolute cost is **96–133 ms per 28-layer forward** across the three runs.
+The *share* is **1.3–2.0%** of attention, which is unstable for the reason below.
 
-**No percentage-of-forward is published, deliberately.** This run's own leg
-profile puts attention *alone* at 389 ms/layer = **10 900 ms per forward**, which
-cannot fit inside `docs/LAYA.md`'s recorded ~4.1 s forward; and the 2414 ms figure
-above is a **GEMM-only projection that excludes attention**, so it was never a
-forward total to begin with. Dividing a measured delta by a denominator this run
-contradicts would manufacture precision the evidence does not carry. The mode
-prints the reconciliation conflict instead. Unresolved cause candidates: the
-recorded forward came from a different code state or machine, or the leg profile
-is inflated by the single-threaded skinny `QK^T` (identical MAC count to `PV` but
-**11× slower** — 1.11 vs 12.0 GMAC/s, which is itself worth a look). Tracked
-separately.
+**Two earlier defects in this profile, both corrected here, and both of which had
+produced false claims.** The original design timed each leg 30× *in isolation*, and
+that is wrong in two separate ways:
+
+1. It never re-ran the chain, so each leg saw the buffer state its predecessor left
+   after 30 applications. `SoftmaxRows` is **not idempotent** — iterating it
+   converges toward uniform — so softmax was timed on already-softmaxed rows rather
+   than on masked scores. Its real cost was understated by **2.3×**.
+2. The `add` counterfactual was taken *after* the chain finished, so it was measured
+   on softmax output while the mask had been measured on post-scale output. The
+   headline delta was therefore comparing two routes on **two different inputs**.
+
+The replacement runs the whole chain in dependency order once per round, timing each
+leg in place, so `QK^T` rewrites `scores` from scratch every round and every leg sees
+the data it sees in production. The `add` counterfactual now sits immediately beside
+`ApplyMask` on the same buffer; both are idempotent and agree bit-for-bit here
+(finite scores, mask in `{0,-inf}`: `x + 0 == x`, `-inf + -inf == -inf`), so the
+delta is a real A/B on identical input rather than two independent measurements.
+
+**Consequence: the previously published 62% `QK^T` share and its 11× layout gap
+were mostly measurement artifact, and are retracted.** Under the corrected design
+`QK^T` is **25.8–39.2%** and the `QK^T`/`PV` gap is **~1.8×** (7.74 vs 4.31; 8.29 vs
+4.59), not 11×. The old gap was produced by `PV` reading the degenerate converged
+softmax output (measured 1.395 ms, vs 4.31 ms on real data) and by `QK^T` being timed
+back-to-back against a hot cache instead of interleaved with the other legs. A
+materiality argument built on that gap does not survive; it must not be cited from
+earlier revisions of this file.
+
+**The correction did not fix the reconciliation, and it did not fix stability.**
+Attention alone is 324–479 ms/layer = **9 100–13 400 ms per forward**, still far
+from `docs/LAYA.md`'s recorded ~4.1 s whole forward, and the total swings 48% across
+three runs while its neighbour legs sit at 6–7%. The spread is dominated by run A's
+`softmax rows` at 17.05 ms against 7.36/6.79 in runs B and C — so B and C agree
+within 8% and A is the outlier, rather than the leg being reliably bimodal. Three
+runs cannot distinguish "one contaminated run" from "a genuine low-probability
+state", so it is recorded as unexplained rather than characterized. Either way
+`SoftmaxSingle` — a scalar max loop plus `TensorPrimitives.Subtract`/`Exp`/`Divide`
+— costs 6.8–17 ms for 262 144 elements, i.e. 26–65 ns/element, far off a vectorized
+`Exp` rate, and at 33–57% it is the dominant attention leg. **No percentage-of-forward
+is published.** The mode prints the reconciliation conflict instead.
 
 **Two caveats carried in the output.** (a) The `[1,512]` row measures the mask
 API *at decode shape*; `DecodeAttention` and `BatchedAttention` use a `Keep`
@@ -508,33 +539,51 @@ the kind of false claim this mode exists to prevent.
 **Ratio stability is limited — read this before quoting any single cell.** Two
 consecutive runs:
 
-| quantity | run A | run B | verdict |
-|---|---|---|---|
-| parity | 72 of 72 | 72 of 72 | **exact, stable** |
-| measurable cells | 48 of 72 | 48 of 72 | **exact, stable** |
-| absolute delta (ms / 28-layer forward) | 129.54 | 129.52 | **stable to 0.02 ms** |
-| `float` wide prefill, 6 cells | 0 of 30 rounds won | 0–1 of 30 | **stable** |
-| aggregate median ratio | 1.130 | 1.168 | ±3% wobble |
-| `float` `[512,512]` causal/empty | 1.17× (SLOWER) | 1.05× (SLOWER) | **straddles the band** |
-| attention total (ms/layer) | 389.3 | 316.2 | **18% swing** |
+| quantity | run A | run B | run C | verdict |
+|---|---|---|---|---|
+| parity | 72 of 72 | 72 of 72 | 72 of 72 | **exact, stable** |
+| measurable cells | 48 of 72 | 48 of 72 | 48 of 72 | **exact, stable** |
+| absolute delta (ms / 28-layer forward) | 112.3 | 133.0 | 96.3 | **39% spread** |
+| `float` wide prefill, 6 cells | 0 of 30 rounds won | 0–1 of 30 | 0 of 30 | **stable** |
+| aggregate median ratio | 1.130 | 1.168 | — | ±3% wobble |
+| `float` `[512,512]` causal/empty | 1.17× (SLOWER) | 1.05× (SLOWER) | — | **straddles the band** |
+| `ApplyMask` leg (ms/call) | 0.388 | 0.429 | 0.316 | 36% |
+| `add` counterfactual (ms/call) | 0.138 | 0.132 | 0.101 | 37% |
+| `softmax rows` leg (ms/call) | 17.05 | 7.36 | 6.79 | **2.5×, A the outlier** |
+| attention total (ms/layer) | 479.4 | 338.1 | 323.7 | 48% |
 
-Three consequences:
+Five consequences:
 
 1. **The `float` `[512,512]` causal/empty cell straddles the ±3% band between
    runs** (1.05–1.17×). It is *not* a reliable "slower" verdict, and the table
    above records it as a ratio, not a conclusion.
-2. **The attention leg total swings 18% run to run** while the mask leg and the
-   delta stay flat. So the 1.79% *share* is a single-run figure with double-digit
-   uncertainty, even though the *absolute* ms is not. Another reason the
-   percentage-of-forward is not published.
-3. Within one run, the same nominal configuration also read differently by
+2. **The earlier "delta stable to 0.02 ms" is retracted.** That stability came
+   from the isolated-leg design, where both routes timed the same static buffer
+   every round. Under the corrected chain the delta spans 96–133 ms across three
+   runs, and both the mask leg (0.316–0.429) and the counterfactual (0.101–0.138)
+   move with it in the same direction. The earlier figure was stable *because* it
+   was measuring something other than the production data path, not because the
+   quantity is stable.
+3. **The attention total's 48% spread is dominated by one leg and one run.** Run
+   A's `softmax rows` reads 17.05 ms against 7.36/6.79 in B and C, and softmax is
+   33–57% of attention, so softmax alone accounts for the total's spread. The other
+   legs hold 6–7%. Three runs cannot separate "run A was contaminated" from "the
+   leg has a real low-probability slow state", so it stays unexplained. Until it is
+   settled the attention *share* is a 1.3–2.0% band, and the mask's *absolute*
+   96–133 ms/forward band is the citable quantity.
+4. The instability is **not** inherited from the kernel A/B grid: parity (72/72),
+   measurable-cell count (48/72) and the win counts are identical in all three
+   runs. Only the wall-clock legs move.
+5. Within one run, the same nominal configuration also read differently by
    measurement path: `float` `[512,512]` causal/empty was 1.17× in the A/B and
    2.96× in the leg profile.
 
 **What survives:** the `float` wide-prefill regression (all six cells outside the
-band, essentially 0 of 30 rounds won, across both runs) and the absolute delta.
-**What does not:** any single-cell magnitude near the band, and the attention
-share's second digit.
+band, essentially 0 of 30 rounds won, across all three runs), the exact parity and
+coverage counts, and the mask's absolute cost as the 96–133 ms/forward band.
+**What does not:** any single-cell magnitude near the band, any second digit on the
+attention share, the prior "stable to 0.02 ms" delta, and the retracted 62%/11×
+`QK^T` figures.
 
 ### No-regression gate (P4)
 

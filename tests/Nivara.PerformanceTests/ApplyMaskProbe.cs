@@ -445,34 +445,62 @@ static class ApplyMaskProbe
         var outHead = new float[qLen * headDim];
         var output = new float[qLen * D];
 
-        // One full forward warms every leg and leaves the buffers in their steady state.
-        RunOneHead(q, k, v, qHeads, kHeads, vHeads, qHeadsLen, kvHeadsLen, qLen, kvLen, D, heads, headDim,
-                   scale, scores, mask, outHead, output, out bool finiteAfterWarmup);
-        if (!finiteAfterWarmup)
+        // Every leg is timed IN PLACE inside one dependency-ordered chain, once per round, for
+        // Rounds rounds. Two earlier designs were wrong and both are worth recording:
+        //
+        //   1. Timing each leg 30x in isolation (the original) never re-ran the chain, so each
+        //      leg saw the buffer state its predecessor left after 30 applications. Worst of all,
+        //      SoftmaxRows is NOT idempotent - iterating it converges toward uniform - so softmax
+        //      was timed on already-softmaxed rows, not on masked scores.
+        //   2. Taking the add counterfactual after the chain finished measured it on softmax
+        //      output, while the mask had been measured on post-scale output. The headline delta
+        //      therefore compared two routes on two different inputs.
+        //
+        // Re-running the chain fixes both: QK^T rewrites `scores` from scratch every round, so
+        // the mask sees real post-scale matmul data and the add counterfactual sits directly
+        // beside it. Both are idempotent and agree bit-for-bit on this domain (finite scores,
+        // mask in {0,-inf}), so running both in one round is a no-op pair.
+        //
+        // Ordering inside a round is forced by the data dependency and cannot be shuffled -
+        // but that is the production order, so the cache behaviour being measured is the real
+        // one rather than an artifact. The alternation available is PackHeads' position: it does
+        // not depend on `scores`, so it is measured first on even rounds and last on odd rounds.
+        var legCount = LegCount;
+        var samples = new double[legCount][];
+        for (int i = 0; i < legCount; i++) samples[i] = new double[Rounds];
+
+        var chain = new LegChain(q, k, v, qHeads, kHeads, vHeads, qHeadsLen, kvHeadsLen,
+                                 scores, mask, outHead, output,
+                                 qLen, kvLen, D, heads, headDim, scale);
+
+        // Warm the whole chain before any sample, so tiered JIT and first-touch faults do not
+        // land inside one leg's first measurement.
+        for (int w = 0; w < Warmups; w++) chain.RunUntimed();
+
+        for (int r = 0; r < Rounds; r++) chain.RunTimed(samples, r, packHeadsFirst: r % 2 == 0);
+
+        if (!AllFinite(scores))
         {
-            // A NaN here would put every leg on the slow NaN path and make the timings below a
-            // measurement of NaN handling rather than of the mask. That is a structural void, so
+            // A NaN reaching a leg would put it on the slow NaN path, so the timings would be a
+            // measurement of NaN handling rather than of the mask. That is a structural void, and
             // it is reported as one rather than folded into a numeric verdict.
-            Console.WriteLine("  *** VOID: the warmup forward produced a non-finite score. Every leg below");
+            Console.WriteLine("  *** VOID: the chain produced a non-finite score. Every leg above");
             Console.WriteLine("      would be timing NaN handling. The leg numbers are not printed.");
             Console.WriteLine();
             return;
         }
 
-        var packMs = TimeLeg(() =>
-        {
-            AttentionKernels<float>.PackHeads(q, qHeads.AsSpan(0, qHeadsLen), qLen, heads, headDim);
-            AttentionKernels<float>.PackHeads(k, kHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
-            AttentionKernels<float>.PackHeads(v, vHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
-        });
-        var qkMs = TimeLeg(() => GradKernels.MatMulTransposedB(qHeads, kHeads, scores, qLen, headDim, kvLen));
-        var scaleMs = TimeLeg(() => TensorPrimitives.Multiply(scores, scale, scores));
-        var maskMs = TimeLeg(() => AttentionKernels<float>.ApplyMask(scores, mask));
-        var softmaxMs = TimeLeg(() => AttentionKernels<float>.SoftmaxRows(scores, qLen, kvLen));
-        var pvMs = TimeLeg(() => GradKernels.MatMul(scores, vHeads, outHead, qLen, kvLen, headDim));
-        var scatterMs = TimeLeg(() =>
-            AttentionKernels<float>.ScatterHead(outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, 0, headDim));
+        var medians = new double[legCount];
+        double ticksToMs = 1000.0 / Stopwatch.Frequency;
+        for (int i = 0; i < legCount; i++) medians[i] = Median(samples[i]) * ticksToMs;
 
+        double packMs = medians[PackIdx], qkMs = medians[QKIdx], scaleMs = medians[ScaleIdx],
+               maskMs = medians[MaskIdx], addMs = medians[AddIdx], softmaxMs = medians[SoftmaxIdx],
+               pvMs = medians[PVIdx], scatterMs = medians[ScatterIdx];
+
+        // The counterfactual sits in the chain, so `add` is timed on exactly the input `ApplyMask`
+        // saw in the same round. That is what makes the difference below a real A/B rather than
+        // two independent measurements of different buffers.
         double perHeadTotal = qkMs + scaleMs + maskMs + softmaxMs + pvMs + scatterMs;
         double layerTotal = packMs + heads * perHeadTotal;
 
@@ -480,20 +508,25 @@ static class ApplyMaskProbe
         // The multiplier is explicit rather than inferred from the label: PackHeads runs once per
         // layer, every other leg once per head. Deriving it from a string comparison would break
         // silently the first time a label was reworded.
-        PrintLeg("PackHeads (x3)", packMs, 1, layerTotal);
-        PrintLeg("QK^T matmul", qkMs, heads, layerTotal);
-        PrintLeg("scale multiply", scaleMs, heads, layerTotal);
-        PrintLeg("ApplyMask", maskMs, heads, layerTotal);
-        PrintLeg("softmax rows", softmaxMs, heads, layerTotal);
-        PrintLeg("PV matmul", pvMs, heads, layerTotal);
-        PrintLeg("ScatterHead", scatterMs, heads, layerTotal);
+        // The counterfactual is printed but NOT counted in the total - it is not a real leg, it
+        // is the alternative to ApplyMask, and including it would double-count the mask's slot.
+        double[] legMs = [packMs, qkMs, scaleMs, maskMs, addMs, softmaxMs, pvMs, scatterMs];
+        int[] legMultiplier = [1, heads, heads, heads, 0, heads, heads, heads];
+        for (int i = 0; i < LegCount; i++)
+        {
+            if (legMultiplier[i] == 0)
+            {
+                Console.WriteLine($"  {LegNames[i],-22} {legMs[i],9:F4}ms {"(alternative)",12} {"":8}");
+                continue;
+            }
+            PrintLeg(LegNames[i], legMs[i], legMultiplier[i], layerTotal);
+        }
         Console.WriteLine($"  {"attention total":-22} {"":11} {layerTotal,10:F3}ms {1.0,8:P1}");
 
         // The counterfactual the issue actually asks for: if the mask went back to the vectorized
         // add, how much of the forward would come back? Measured, not inferred from a MAC count.
         double maskBytes = 3.0 * sizeof(float) * scoreLen;
         double maskGBs = maskBytes / (maskMs / 1000.0) / 1e9;
-        double addMs = TimeLeg(() => TensorPrimitives.Add(scores, mask, scores));
         double addGBs = maskBytes / (addMs / 1000.0) / 1e9;
         double deltaPerLayer = heads * (maskMs - addMs);
         double deltaPerForward = deltaPerLayer * LayaLayers;
@@ -521,10 +554,14 @@ static class ApplyMaskProbe
         Console.WriteLine("      Attention alone is larger than the recorded whole forward, so the recorded figures");
         Console.WriteLine("      cannot be the denominator for this delta. Possible causes: the recorded forward");
         Console.WriteLine("      was measured on a different code state or a faster machine; the leg profile is");
-        Console.WriteLine("      inflated by single-threaded skinny matmuls (QK^T at K=64 runs at ~1 GMAC/s,");
-        Console.WriteLine("      versus ~20 GMAC/s for the recorded [512x1024x3072] projection); or the");
-        Console.WriteLine("      recorded forward ran a smaller effective S. NOT RESOLVED HERE - it is not this");
-        Console.WriteLine("      issue's question. Tracked separately so the number is not lost.");
+        Console.WriteLine("      inflated by the single-threaded skinny QK^T (K=64, so every MAC is a short");
+        Console.WriteLine("      reduction, versus the recorded [512x1024x3072] projection's deep-K shapes);");
+        Console.WriteLine("      or the recorded forward ran a smaller effective S. NOT RESOLVED HERE - it is not");
+        Console.WriteLine("      this issue's question. Tracked separately so the number is not lost.");
+        Console.WriteLine("      The softmax leg's share swings several-fold between runs of this probe while every");
+        Console.WriteLine("      other leg holds single digits, and its input is deterministic and allocation-free.");
+        Console.WriteLine("      That bimodality is unexplained and is NOT quantified here. Read the attention share");
+        Console.WriteLine("      as a band, not a value, and prefer the ABSOLUTE ms above.");
         Console.WriteLine("      Until it is resolved, treat the ABSOLUTE ms above as the finding and any");
         Console.WriteLine("      percentage-of-forward as unmeasured.");
         Console.WriteLine();
@@ -534,54 +571,97 @@ static class ApplyMaskProbe
                                  $"{perCallMs * multiplier / layerTotalMs,8:P1}");
     }
 
+    const int PackIdx = 0, QKIdx = 1, ScaleIdx = 2, MaskIdx = 3, AddIdx = 4, SoftmaxIdx = 5, PVIdx = 6, ScatterIdx = 7;
+    const int LegCount = 8;
+
+    static readonly string[] LegNames =
+    [
+        "PackHeads (x3)", "QK^T matmul", "scale multiply", "ApplyMask",
+        "add (counterfactual)", "softmax rows", "PV matmul", "ScatterHead",
+    ];
+
     /// <summary>
-    /// One head's leg sequence, verbatim in structure from
-    /// <c>ReverseGradOperations.MultiHeadAttention</c>. Forward only: empty row flags and no
-    /// saved-weights copy, which is what an inference pass does.
+    /// One dependency-ordered pass through a Laya-shaped attention layer, timing each leg in
+    /// place. Structure mirrors <c>ReverseGradOperations.MultiHeadAttention</c>; forward only
+    /// (empty row flags, no saved-weights copy), which is what an inference pass does.
     /// </summary>
-    static void RunOneHead(float[] q, float[] k, float[] v, float[] qHeads, float[] kHeads, float[] vHeads,
-                           int qHeadsLen, int kvHeadsLen,
-                           int qLen, int kvLen, int D, int heads, int headDim, float scale,
-                           float[] scores, float[] mask, float[] outHead, float[] output, out bool finite)
+    sealed class LegChain(
+        float[] q, float[] k, float[] v, float[] qHeads, float[] kHeads, float[] vHeads,
+        int qHeadsLen, int kvHeadsLen, float[] scores, float[] mask, float[] outHead, float[] output,
+        int qLen, int kvLen, int D, int heads, int headDim, float scale)
     {
-        // The SAME q/k/v the timed legs use. An earlier revision built fresh inputs here, which
-        // meant the warmup and the measured legs ran on different data - structurally identical
-        // and equally deterministic, so the finite check still held, but it need not have. The
-        // finite check exists to catch NaN reaching a leg, so it should inspect the exact buffers
-        // that get timed.
-        AttentionKernels<float>.PackHeads(q, qHeads.AsSpan(0, qHeadsLen), qLen, heads, headDim);
-        AttentionKernels<float>.PackHeads(k, kHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
-        AttentionKernels<float>.PackHeads(v, vHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
+        public void RunUntimed() => Execute(packHeadsFirst: true, samples: null, round: 0);
 
-        for (int h = 0; h < heads; h++)
+        /// <summary>
+        /// One timed pass. Every leg is measured on the output of the leg that feeds it, in the
+        /// same round, so drift within a round is shared across legs instead of accumulating
+        /// across a whole leg's 30 samples.
+        /// </summary>
+        public void RunTimed(double[][] samples, int round, bool packHeadsFirst)
+            => Execute(packHeadsFirst, samples, round);
+
+        void Execute(bool packHeadsFirst, double[][]? samples, int round)
         {
-            var qh = qHeads.AsSpan(h * qLen * headDim, qLen * headDim);
-            var kh = kHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
-            var vh = vHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+            long t;
 
-            GradKernels.MatMulTransposedB(qh, kh, scores, qLen, headDim, kvLen);
+            if (packHeadsFirst) { t = Stopwatch.GetTimestamp(); Pack(); Record(samples, PackIdx, round, t); }
+
+            // Dependency order from here on: each leg consumes what the previous one wrote.
+            t = Stopwatch.GetTimestamp();
+            GradKernels.MatMulTransposedB(qHeads, kHeads, scores, qLen, headDim, kvLen);
+            Record(samples, QKIdx, round, t);
+
+            t = Stopwatch.GetTimestamp();
             TensorPrimitives.Multiply(scores, scale, scores);
+            Record(samples, ScaleIdx, round, t);
+
+            // The mask under test, then the counterfactual on the SAME buffer, immediately after.
+            // Both are idempotent here and agree bit-for-bit (finite scores, mask in {0,-inf}:
+            // x + 0 == x, -inf + -inf == -inf), so running both is a no-op pair and the delta
+            // compares two routes on identical input.
+            t = Stopwatch.GetTimestamp();
             AttentionKernels<float>.ApplyMask(scores, mask);
+            Record(samples, MaskIdx, round, t);
+
+            t = Stopwatch.GetTimestamp();
+            TensorPrimitives.Add(scores, mask, scores);
+            Record(samples, AddIdx, round, t);
+
+            t = Stopwatch.GetTimestamp();
             AttentionKernels<float>.SoftmaxRows(scores, qLen, kvLen);
-            GradKernels.MatMul(scores, vh, outHead, qLen, kvLen, headDim);
+            Record(samples, SoftmaxIdx, round, t);
+
+            t = Stopwatch.GetTimestamp();
+            GradKernels.MatMul(scores, vHeads, outHead, qLen, kvLen, headDim);
+            Record(samples, PVIdx, round, t);
+
+            t = Stopwatch.GetTimestamp();
             AttentionKernels<float>.ScatterHead(
-                outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, h, headDim);
+                outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, 0, headDim);
+            Record(samples, ScatterIdx, round, t);
+
+            if (!packHeadsFirst) { t = Stopwatch.GetTimestamp(); Pack(); Record(samples, PackIdx, round, t); }
         }
 
-        finite = true;
-        foreach (float s in scores)
+        void Pack()
         {
-            if (!float.IsFinite(s)) { finite = false; break; }
+            AttentionKernels<float>.PackHeads(q, qHeads.AsSpan(0, qHeadsLen), qLen, heads, headDim);
+            AttentionKernels<float>.PackHeads(k, kHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
+            AttentionKernels<float>.PackHeads(v, vHeads.AsSpan(0, kvHeadsLen), kvLen, heads, headDim);
+        }
+
+        static void Record(double[][]? samples, int leg, int round, long start)
+        {
+            if (samples is null) return;
+            samples[leg][round] = Stopwatch.GetTimestamp() - start;
         }
     }
 
-    /// <summary>Median of <see cref="Rounds"/> timed passes, after the same warmup both routes get.</summary>
-    static double TimeLeg(Action action)
+    static bool AllFinite(float[] data)
     {
-        for (int w = 0; w < Warmups; w++) action();
-        var samples = new double[Rounds];
-        for (int r = 0; r < Rounds; r++) samples[r] = Time(action);
-        return Median(samples) * (1000.0 / Stopwatch.Frequency);
+        foreach (float x in data)
+            if (!float.IsFinite(x)) return false;
+        return true;
     }
 
     // ───────────────────────────── helpers ─────────────────────────────
