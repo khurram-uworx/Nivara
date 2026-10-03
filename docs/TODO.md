@@ -128,6 +128,52 @@ means an earlier test leaked. One failure reason per verdict.
 
 Expected: the two grouped-aggregation tests are **red before** the fix, green after.
 
+## G1 grounding outcome
+
+**Official docs (`FileShare`, `File.Delete`) confirm the mechanism:**
+
+- `FileShare.Delete` — "Allows subsequent deleting of a file." It is a distinct flag
+  (value 4) that `FileShare.Read` (value 1) does not include, so
+  `ParquetDataSource.CreateReader`'s `FileShare.Read` withholds delete permission
+  from other handles.
+- `File.Delete` throws `IOException` — "The specified file is in use." That is the
+  exact exception and message shape the issue reports.
+- `FileShare.None` — "Declines sharing of the current file. Any request to open the
+  file (by this process or another process) will fail until the file is closed."
+  This validates the probe in the new gate: `FileShare.None` fails while *any*
+  other handle is open, so it detects the leak deterministically.
+
+Note the message says "another process" even when the holder is the current process
+— which is why a same-process leak was misread as a cross-process race.
+
+**Codebase navigation (`code-memory` + reads):**
+
+- `QueryFrame.Dispose()` (`src/Nivara/Query/QueryFrame.cs:1111`) disposes the shared
+  `source`; every derived frame (`Filter`/`Select`/window ops) shares that one
+  source, so disposing the returned frame is sufficient and the intermediate frames
+  need no disposal of their own.
+- `ParquetLazySource.Dispose()` (`ParquetDataSource.cs:494`) is idempotent via its
+  `disposed` guard, so double-dispose is a no-op.
+- `CsvLazySource` (`CsvDataSource.cs:583`) opens the same way and holds the handle
+  for the frame's lifetime, but `ParquetCsvConvergence_SameAnalysisSameResults`
+  already uses `using`, so no CSV leak remains to expose after the Parquet fix.
+- `NivaraResourceManager` tracking (the mechanism that could reclaim abandoned lazy
+  frames) is opt-in and process-global, toggled by `ResourceManagementPropertyTests`
+  — off while `Incident.*` runs, so no deterministic backstop exists today.
+- `DatasetGenerator.GenerateFromRecordCount` writes the same six instance columns
+  and the same four parquet files the test-local generator does, so the new gate can
+  reuse it without behaviour drift.
+
+**Considered and rejected:** adding `FileShare.Delete` to
+`ParquetLazySource.CreateReader` would make the symptom disappear without fixing the
+leak, and contradicts the documented contract at `NivaraParquetReader.cs:122-127`
+("the file handle stays open until the returned frame is disposed"). Out of scope;
+the leak is fixed at the source instead.
+
+**Blast radius:** as tabulated above — two sample files, two test files, one new
+test file. No public API, kernel, tensor or AutoDiff surface changes. The CLI's six
+call sites into `Analysis.*` get correct handle lifetimes as a side effect.
+
 ## Verification steps
 
 1. Add the gate file alone, run it against unfixed code → expect exactly the two
