@@ -136,6 +136,9 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
         RunBenchmarkIteration("Grouped Aggregation", iters, warmup,
             () => Analysis.AnalyzeGroupedAggregation(dsPath, sc));
 
+        RunBenchmarkIteration("Typed LINQ Grouped Agg", iters, warmup,
+            () => Analysis.AnalyzeGroupedAggregationWithTypedLinq(dsPath, sc));
+
         return;
     }
 
@@ -173,6 +176,10 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
     Console.WriteLine();
     Console.WriteLine("=== Grouped Aggregation ===");
     PrintFrameSummary(Analysis.AnalyzeGroupedAggregation(dsPath, sc));
+
+    Console.WriteLine();
+    Console.WriteLine("=== Typed LINQ Grouped Aggregation ===");
+    PrintFrameSummary(Analysis.AnalyzeGroupedAggregationWithTypedLinq(dsPath, sc));
 
     Console.WriteLine();
     sw.Stop();
