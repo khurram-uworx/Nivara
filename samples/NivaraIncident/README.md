@@ -90,11 +90,10 @@ dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./samples/
 
 ```
 Nivara.Samples/Incident/
-├── Schema.cs             # Telemetry record types (RequestTelemetry, DeploymentEvent, etc.)
 ├── Scenarios.cs          # 4 deterministic incident scenarios (A–D)
 ├── DatasetGenerator.cs   # 10M+ record generator (Parquet + CSV output, seeded RNG, Box-Muller latency)
 ├── Ingestion.cs          # Parquet/CSV loading wrappers + async streaming helper
-└── Analysis.cs           # 5 analysis methods exercising QueryFrame pipeline
+└── Analysis.cs           # 6 analysis methods exercising QueryFrame pipeline
 
 NivaraIncident.Cli/
 ├── NivaraIncident.Cli.csproj
