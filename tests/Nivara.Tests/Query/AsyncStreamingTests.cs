@@ -481,8 +481,9 @@ public class AsyncStreamingTests
             Assert.That(rows.Select(r => r.Age), Is.EqualTo(new[] { 30, 25, 35 }));
             Assert.That(rows.Select(r => r.Salary), Is.EqualTo(new[] { 75000.0, 65000.0, 85000.0 }));
 
-            // The reused Parquet reader holds the file open until the owning frame is disposed.
-            query.AsQueryFrame().Dispose();
+            // The reused Parquet reader holds the file open until the source handle is released,
+            // so the teardown File.Delete below needs the query disposed first.
+            query.Dispose();
         }
         finally
         {
