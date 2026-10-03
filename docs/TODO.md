@@ -84,12 +84,21 @@ Internal, non-generic. One instance per source, created only by the root constru
 - wraps one `IQuerySource`
 - `Source`, `Schema`, `IsLazy` forward to it
 - `bool Released`
-- `Release()` is idempotent — untracks, then disposes (async-aware) on first call only
+- `Release()` is idempotent — untracks, then disposes on first call only
+- `ReleaseAsync()` — same, async-aware
 - registers the `NivaraResourceManager` entry **here, once**, keyed on the handle
 
 Every frame references the handle, so the handle's reachability *is* "can anyone still reach this
 source". Tracking the handle instead of the frame makes the cleanup condition exactly correct: the
 timer can no longer fire while a live frame exists.
+
+**The cleanup closure must capture the source, never the handle.** `_trackedResources` is a static
+dictionary holding `ResourceInfo.CleanupAction`, so anything the closure captures stays reachable
+forever. Writing `() => Release()` would capture `this`, keep the handle permanently alive, and make
+`weakRef.Target == null` unsatisfiable — silently disabling the abandoned-resource cleanup this
+whole mechanism exists for, with no error. The closure must close over the raw `IQuerySource`
+local, which is what today's code does (it captures `source`, not `this`) and why the frame's weak
+reference can currently go null at all.
 
 ### 2. `src/Nivara/Query/QueryFrame.cs`
 
@@ -98,8 +107,10 @@ timer can no longer fire while a live frame exists.
 - **root ctor signature unchanged** (`QueryFrame(IQuerySource)`), so all 8 root call sites are
   untouched (`NivaraFrame.cs:322`, `JsonExtensions.cs:49`, `CsvExtensions.cs:49`,
   `NivaraParquetReader.cs:113`, + 4 test sites)
-- delete `bool disposed`; every guard reads `handle.Released`
-- `Dispose` / `DisposeAsync` -> `handle.Release()`
+- delete `bool disposed`; every guard reads `handle.Released` (23 `ObjectDisposedException.ThrowIf`
+  sites, plus the `if (disposed)` at `:580` in `ToString`)
+- `Dispose` -> `handle.Release()` (swallows source disposal errors, as today);
+  `DisposeAsync` -> `handle.ReleaseAsync()` (propagates them, as today — see Grounding)
 - 18 derivation sites `new QueryFrame(source, ...)` -> `new QueryFrame(handle, ...)`
 - 6 `new QueryPlan(source, ...)` -> `new QueryPlan(handle.Source, ...)`
 - `ToString()` (`:587`,`:589`) uses `handle.Source.GetType().Name`; output must stay byte-identical
@@ -140,11 +151,14 @@ Swap `query.AsQueryFrame().Dispose()` -> `query.Dispose()`, rename
 source class):
 
 1. `Release_IsIdempotent` — two releases, no throw, handle released once.
-2. `DerivedFrame_Abandoned_DoesNotReleaseSourceWhileSiblingLives` — **the regression test for the
+2. `Handle_Abandoned_ReleasesSourceWhenNothingReferencesIt` — guards the closure-capture trap:
+   enable the resource manager, build a frame, drop every reference, GC, `ForceCleanup()`, assert the
+   source was released. Silently passes forever if the closure ever captures the handle.
+3. `DerivedFrame_Abandoned_DoesNotReleaseSourceWhileSiblingLives` — **the regression test for the
    timer bug.** Root -> mid -> leaf, drop `mid`, GC, `ForceCleanup()`, assert `leaf` still reads.
    Goes red on today's code.
-3. `Frame_Disposed_SiblingFrame_ThrowsObjectDisposedException` — pins the behavior change in 2.
-4. `Frame_Disposed_SiblingFrame_ReportsSameDisposedState` — `IsLazy`/`Schema` agree across a chain.
+4. `Frame_Disposed_SiblingFrame_ThrowsObjectDisposedException` — pins the behavior change in 2.
+5. `Frame_Disposed_SiblingFrame_ReportsSameDisposedState` — `IsLazy`/`Schema` agree across a chain.
 
 **New — `tests/Nivara.Tests/Query/NivaraQueryDisposalTests.cs`**:
 
@@ -200,6 +214,52 @@ authoritative probe, per AGENTS.md rule 8.
   `using var frame = Ingestion.LoadParquet(...)` and the typed path runs off the in-memory `collected`
   -> `MemoryQuerySource`, which holds no handle. `NivaraGroupedQuery`'s missing release path stays a
   **library-surface gap**, reachable only via `ScanQuery<T>(parquet).GroupBy(...)`.
+- **`src/Nivara.Extensions/Streamix/NivaraFlux.cs`** — `ToFlux`, `ToFluxWithTimestamp` (x2),
+  `EnumerateRows`, `ToFluxRows` all accept a `QueryFrame` and do **not** own it. Signatures untouched;
+  listed because they are the #502 surface and should be re-checked at G2.
+- **Every `IQuerySource` implementor** (verified via code-memory, 6 in `src/`: `CsvLazySource`,
+  `CsvEagerSource`, `JsonLazySource`, `JsonEagerSource`, `ParquetLazySource`, `MemoryQuerySource`;
+  13 in `tests/`) keeps its existing contract. `QuerySourceHandle` holds the interface and never
+  re-implements it.
+
+## Grounding (G1)
+
+Checked against Microsoft Learn and code-memory.
+
+**`IAsyncDisposable` is essentially unused in this repository.** ripgrep finds it in exactly two
+places, both in `QueryFrame.cs`: the class declaration (`:15`) and `if (source is IAsyncDisposable
+asyncDisposable)` (`:1137`). No `IQuerySource` implementor — in `src/` or `tests/` — implements it, so
+**that branch at `:1137` is currently unreachable**, and `ReleaseAsync`'s async-awareness is
+forward-looking only. Stated so the plan does not overclaim an async release path that nothing
+exercises today.
+
+*(Method note: code-memory's `Implements` index reported zero `IAsyncDisposable` implementors, which
+is wrong — `QueryFrame` is one. The index does not resolve interface lists, so this fact was taken
+from ripgrep instead.)*
+
+**Implementing both interfaces is correct and required, not stylistic.** Microsoft Learn is explicit
+that a type using `IAsyncDisposable` should normally also implement `IDisposable`, because a consumer
+who calls `Dispose` would never reach `DisposeAsync` and would leak. It is also required for
+compile-time use: CS8417 (`await using` on `IDisposable`-only) and CS8418 (`using` on
+`IAsyncDisposable`-only) are both errors. Implementing only `IDisposable` would make `await using` on
+`NivaraQuery<T>` a compile error, so `ScanQuery<T>` consumers could not use the async form at all.
+
+**Idempotent release is the documented requirement.** The dispose-pattern guidelines say "DO allow
+`Dispose` to be called more than once — the method might choose to do nothing after the first call,"
+`IDisposable.Dispose` says a repeated call "must ignore all calls after the first one" and "must not
+throw," and they also say "X AVOID throwing an exception from within `Dispose(bool)`". `Release()`
+being idempotent and non-throwing matches all three.
+
+**Throwing after dispose is the documented requirement, which is what validates the behavior change
+above.** The guidelines say "✓ DO throw an `ObjectDisposedException` from any member that cannot be
+used after the object has been disposed of." The old code violated this for siblings — a disposed
+frame reported `disposed == false` to everyone else in the chain. Delegating guards to
+`handle.Released` brings `QueryFrame` into line.
+
+**Sealed types need no `Dispose(bool)` / `DisposeAsyncCore()`.** CA1063 applies to unsealed types, and
+the async docs state that when an `IAsyncDisposable` implementation is sealed, `DisposeAsyncCore` is
+unnecessary. Both target types are `sealed` (confirmed via code-memory `IsSealed`), so implementing
+`Dispose()` and `DisposeAsync()` directly is the correct shape and adds no analyzer burden.
 
 ## Verification steps
 
@@ -207,10 +267,10 @@ authoritative probe, per AGENTS.md rule 8.
 2. `QuerySourceHandleTests` targeted, `-c Release`. **Step 2's test 2 must be verified RED against
    pre-change `main`** (stash the src change, run it) — a regression test that was never seen red
    proves nothing.
-3. `ScanAsQueryFrameHandleTests` + `NivaraQueryDisposalTests` + `QueryFrameTests` +
-   `ResourceManagementPropertyTests` + `AsyncStreamingTests`, `-c Release`. Negative control
-   (`Probe_DetectsDeliberatelyLeakedHandle`) must stay green — it is what gives the gate teeth on
-   `ubuntu-latest`.
+3. `ScanAsQueryFrameHandleTests` + `NivaraQueryDisposalTests` + `QuerySourceHandleTests` +
+   `QueryFrameTests` + `ResourceManagementPropertyTests` + `AsyncStreamingTests`, `-c Release`.
+   Negative control (`Probe_DetectsDeliberatelyLeakedHandle`) must stay green — it is what gives the
+   gate teeth on `ubuntu-latest`.
 4. Full suite `-c Release --filter "Category!=Performance"`, capturing the **process** exit status,
    not a pipeline filter's. This is what confirms the `handle.Released` behavior change is safe.
 5. Re-run 3 to confirm the negative control is stable, not flaky.
