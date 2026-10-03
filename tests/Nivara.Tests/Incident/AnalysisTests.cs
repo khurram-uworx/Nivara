@@ -104,7 +104,7 @@ public class AnalysisTests
     {
         var dir = Path.Combine(tempDir, sid);
         var scenario = Scenarios.Get(sid);
-        var frame = Analysis.AnalyzeGroupedAggregation(dir, scenario);
+        using var frame = Analysis.AnalyzeGroupedAggregation(dir, scenario);
         Assert.That(frame.RowCount, Is.GreaterThan(0));
     }
 

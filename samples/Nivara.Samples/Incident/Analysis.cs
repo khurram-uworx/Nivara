@@ -214,11 +214,11 @@ public static class Analysis
 
     public static NivaraFrame AnalyzeGroupedAggregation(string datasetPath, IncidentScenario scenario)
     {
-        var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
+        using var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
         var incidentStart = scenario.IncidentStart.Ticks;
         var incidentEnd = scenario.IncidentEnd.Ticks;
 
-        var result = frame
+        using var result = frame
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .Collect();
@@ -255,10 +255,13 @@ public static class Analysis
         var incidentStart = scenario.IncidentStart.Ticks;
         var incidentEnd = scenario.IncidentEnd.Ticks;
 
-        var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
-        var collected = frame
+        using var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
+        using var collected = frame
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .PercentRank("DurationPercentRank",
+                [new SortKey("DurationMs", SortDirection.Ascending)],
+                "Service")
             .Collect();
 
         var typedQuery = collected.Query<RequestRow>();

@@ -32,7 +32,7 @@ public static class StreamixScenarios
         int rowCount = 0;
         int chunkCount = 0;
 
-        var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
+        using var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
@@ -69,7 +69,7 @@ public static class StreamixScenarios
         var windowResults = new List<WindowResult>();
         int totalRows = 0;
 
-        var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
+        using var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
@@ -140,7 +140,7 @@ public static class StreamixScenarios
         int totalBatches = 0;
         float lastLoss = 0f;
 
-        var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
+        using var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
