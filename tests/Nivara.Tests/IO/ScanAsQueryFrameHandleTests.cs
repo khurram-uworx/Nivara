@@ -124,6 +124,9 @@ public class ScanAsQueryFrameHandleTests
         {
         }
 
+        FileHandleProbe.AssertLocked(path,
+            "ParquetLazySource holds its reader until Dispose, so a full Collect must leave the handle open");
+
         // NivaraQuery<T> does not implement IDisposable (issue #501), so AsQueryFrame() is the
         // only release path. Named here so a future red is not "fixed" by adding a `using` to a
         // type that cannot carry one.
