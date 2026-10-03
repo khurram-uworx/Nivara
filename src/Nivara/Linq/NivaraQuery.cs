@@ -31,8 +31,6 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
         this.frame = frame ?? throw new ArgumentNullException(nameof(frame));
     }
 
-    internal QueryFrame Frame => frame;
-
     /// <summary>
     /// Gets a value indicating whether this query uses a lazy data source
     /// </summary>
@@ -51,6 +49,13 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
     /// <summary>
     /// Returns the underlying lazy query frame for advanced composition
     /// </summary>
+    /// <remarks>
+    /// The returned frame shares this query's source, so disposing it releases that source for
+    /// the whole chain and every surviving query then throws <see cref="ObjectDisposedException"/>.
+    /// That is the same action as <see cref="Dispose"/> — prefer disposing this query, which is
+    /// the documented release path. <see cref="DisposeAsync"/> behaves the same way through
+    /// <see cref="QueryFrame.DisposeAsync"/>.
+    /// </remarks>
     public QueryFrame AsQueryFrame() => frame;
 
     /// <inheritdoc />

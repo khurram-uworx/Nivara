@@ -62,8 +62,9 @@ public class NivaraQueryToObjectsAsyncTests
             }
             finally
             {
-                // The reused Parquet reader holds the file open until the owning frame is disposed.
-                query.AsQueryFrame().Dispose();
+                // The reused Parquet reader holds the file open until the source handle is
+                // released, so the teardown File.Delete below needs the query disposed first.
+                query.Dispose();
             }
         }
         finally
@@ -97,7 +98,11 @@ public class NivaraQueryToObjectsAsyncTests
             }
             finally
             {
-                query.AsQueryFrame().Dispose();
+                // `query` is the result of .Where(...), so this disposes a derived query rather
+                // than the root. Correct under the one-source-one-release contract - it releases
+                // the source for the whole chain - and safe here only because nothing else in
+                // this test still holds a live handle on it.
+                query.Dispose();
             }
         }
         finally
@@ -152,7 +157,9 @@ public class NivaraQueryToObjectsAsyncTests
             }
             finally
             {
-                query.AsQueryFrame().Dispose();
+                // A cancelled enumeration abandons the source part-way through the file, so the
+                // handle is still open and the teardown File.Delete below needs it released.
+                query.Dispose();
             }
         }
         finally
