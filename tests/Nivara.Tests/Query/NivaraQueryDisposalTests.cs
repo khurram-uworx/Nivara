@@ -87,9 +87,6 @@ public class NivaraQueryDisposalTests
 
             FileHandleProbe.AssertLocked(path,
                 "the read stopped short of EOF, so CsvLazySource's chunk reader must still be open");
-
-            FileHandleProbe.AssertLocked(path,
-                "a `using` scope must not release eagerly - that would hide a leak until scope exit");
         }
 
         FileHandleProbe.AssertUnlocked(path,
@@ -105,15 +102,24 @@ public class NivaraQueryDisposalTests
 
         var grouped = NivaraParquetReader.ScanQuery<IndexRow>(path).GroupBy(row => row.Group);
 
-        using (var collected = grouped.Collect())
+        // Disposed in a finally so a genuine failure reports exactly once. Releasing only on the
+        // happy path would leave the handle open, and the TearDown's Directory.Delete would then
+        // fail on Windows - burying the real assertion under the misleading "being used by another
+        // process" teardown error that #496 and #498 were about.
+        try
         {
-            Assert.That(collected.RowCount, Is.EqualTo(GroupCount), "one row per distinct group key");
+            using (var collected = grouped.Collect())
+            {
+                Assert.That(collected.RowCount, Is.EqualTo(GroupCount), "one row per distinct group key");
+            }
+
+            FileHandleProbe.AssertLocked(path,
+                "ParquetLazySource holds its reader until Dispose, so even a full Collect leaves the handle open");
         }
-
-        FileHandleProbe.AssertLocked(path,
-            "ParquetLazySource holds its reader until Dispose, so even a full Collect leaves the handle open");
-
-        grouped.Dispose();
+        finally
+        {
+            grouped.Dispose();
+        }
 
         FileHandleProbe.AssertUnlocked(path,
             "NivaraGroupedQuery<TKey, T> had no release path at all before #501, so a Parquet-backed "
@@ -127,14 +133,19 @@ public class NivaraQueryDisposalTests
 
         var grouped = NivaraParquetReader.ScanQuery<IndexRow>(path).GroupBy(row => row.Group);
 
-        using (var collected = grouped.Collect())
+        try
         {
-            Assert.That(collected.RowCount, Is.EqualTo(GroupCount));
+            using (var collected = grouped.Collect())
+            {
+                Assert.That(collected.RowCount, Is.EqualTo(GroupCount));
+            }
+
+            FileHandleProbe.AssertLocked(path, "ParquetLazySource holds its reader until Dispose");
         }
-
-        FileHandleProbe.AssertLocked(path, "ParquetLazySource holds its reader until Dispose");
-
-        await grouped.DisposeAsync();
+        finally
+        {
+            await grouped.DisposeAsync();
+        }
 
         FileHandleProbe.AssertUnlocked(path, "DisposeAsync on NivaraGroupedQuery must release the handle too");
     }
