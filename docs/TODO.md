@@ -211,7 +211,9 @@ existing baseline, so it must be identifiable as such.
 
 ## Blast radius
 
-- **Sample surface only.** No `src/` change, no public library API change, no behavior change.
+- **Sample surface only.** No `src/` change, no public library API change. The plan originally
+  said "no behavior change" too; that was wrong, and two sample behaviors changed — the
+  `StreamixScenarios` window bounds and `Scenarios.Get(null)`'s exception type.
 - `Schema.cs` deletion: zero references confirmed by grep across `.cs`/`.md`/`.slnx`/`.csproj`.
   `Nivara.Samples` is not packable/published; its 8 referencing projects are all in-repo.
 - `Analysis.DeploymentRow` deletion: zero references confirmed.
@@ -228,9 +230,44 @@ existing baseline, so it must be identifiable as such.
   *correct*. Correctness stays with the per-fixture assertions in step 4/5. It also cannot run
   `DatasetGenerator.Generate`, so that one member's coverage is reported, not verified, here.
 
+## Execution record — deviations from the plan above
+
+Recorded because the plan was written before execution and several of its
+statements did not survive contact with the code.
+
+1. **The plan said the sixth analysis "returns a distinct column set".** It does not.
+   `AnalyzeGroupedAggregationWithTypedLinq` returns `Service`, `TotalRequests`,
+   `ErrorCount`, `AvgDuration`; the hand-rolled one returns `Service`, `ErrorRate`,
+   `AvgDurationMs`, `TotalRequests`. Two of four names differ and both carry
+   `Service`/`TotalRequests`. They are still worth having both of.
+2. **"Fixture runs in ~1 s"** in commit 4 was a single estimate with no method. The
+   re-baseline commit gave a 5-run distribution; the gate fixture was not
+   re-measured the same way and the estimate stands as indicative only.
+3. **"zero references … including the README"** in commit 2 was true of *code* only.
+   The README did name the deleted types in two file trees, which is why commits 3
+   and 8 had to remove them.
+4. **The window partition identity is not what the plan said.** `WindowByTime(5 min,
+   slide: 1 min)` is sliding, so `TotalRows` is *meant* to exceed the source row
+   count. The assertion still holds and is still worth having; its stated purpose
+   was wrong and was corrected in commit 9.
+5. **"had never been executed"** was false at the base branch.
+   `AnalysisResourceTests` has invoked the method since #496. What was absent was an
+   assertion on its result, and #496 fixed the throw itself.
+6. **Two planned changes did not happen as written.** The gate does not reuse
+   `FileHandleProbe` — the plan's own "do not duplicate #498" rule makes that
+   unnecessary, since no new exercise opens a handle it must release. And the full
+   suite was not run; per the human's instruction the run covered
+   `Nivara.Tests.Incident` + `Nivara.Tests.IO` (351 tests, exit 0), so anything
+   outside those two namespaces is **unverified by this branch**.
+7. **Work found outside the plan** → filed as **#504** rather than folded in:
+   `IngestionTests` carries a *second* duplicate `GenerateSmallDataset`, with two
+   hard-coded absolute counts (line 34 `RowCount == 10_000`, line 73
+   `chunkCount == 100`) that the real generator's 9,990 rows would break.
+
 ## GitHub issues log
 
-- [ ] #499 — `samples/Nivara.Samples/Incident` methods are callable but unverified (this work)
+- [x] #499 — `samples/Nivara.Samples/Incident` methods are callable but unverified (this work)
+- [x] #504 — `IngestionTests` still carries a duplicate dataset generator with hard-coded counts
 
 > As each task executes, if you find deferred work or a concern outside this plan, create a
 > tracked issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its
