@@ -154,7 +154,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 - Async IPC/Parquet scanning via `IAsyncEnumerable` chunk streams with the existing memory budget (`StreamingBufferManager`).
 - `CollectAsync`/streaming entry points consume chunks end to end.
 
-**Key files:** `src/Nivara/IO/` lazy sources, `src/Nivara/Execution/StreamingExecutionStrategy.cs`, `src/Nivara/Query/IQueryInterfaces.cs` (async seams already exist), `src/Nivara.Extensions/IO/ParquetReader.cs`, `ParquetWriter.cs`.
+**Key files:** `src/Nivara/IO/` lazy sources, `src/Nivara/Execution/StreamingExecutionStrategy.cs`, `src/Nivara/Query/IQueryInterfaces.cs` (async seams already exist), `src/Nivara.Extensions/IO/NivaraParquetReader.cs`, `NivaraParquetWriter.cs`.
 
 **Dependencies:** Phases A + D; converges with POLARS-ROADMAP Phase 4.
 

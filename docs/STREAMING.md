@@ -9,7 +9,7 @@ Public entry points for chunked, lazy processing of query frames:
 | `NivaraFrame.AsQueryFrame()` / `NivaraQuery<T>.AsQueryFrame()` | `src/Nivara/NivaraFrame.cs` / `src/Nivara/Linq/NivaraQuery.cs` |
 | `Csv.ScanAsQueryFrame(string, CsvOptions?)` | `src/Nivara.Extensions/IO/CsvExtensions.cs` |
 | `Json.ScanAsQueryFrame(string, JsonOptions?)` | `src/Nivara/IO/JsonExtensions.cs` |
-| `Parquet.ScanAsQueryFrame(string, ParquetReadOptions?)` | `src/Nivara.Extensions/IO/NivaraParquetReader.cs` |
+| `NivaraParquetReader.ScanAsQueryFrame(string, ParquetReadOptions?)` | `src/Nivara.Extensions/IO/NivaraParquetReader.cs` |
 
 ## When to use streaming
 

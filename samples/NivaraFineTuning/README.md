@@ -87,7 +87,7 @@ The encoder uses `BertEncoder<T>.ForwardBatched` with a block-diagonal attention
 
 Labels: `0` = negative, `1` = positive.
 
-The data is loaded via `Nivara.IO.ParquetReader` from `Nivara.Extensions` (Parquet.Net 6.0.3).
+The data is loaded via `Nivara.IO.NivaraParquetReader` from `Nivara.Extensions` (Parquet.Net 6.0.3).
 
 ## Setup
 
@@ -336,7 +336,7 @@ Uses identical hyperparameters (lr=2e-5, epochs=3, batch_size=4, max_len=128) wi
 | `ModelSerializer.Save/Load` | Fine-tuned model persistence |
 | `SafeTensorsLoader` | Zero-dependency SafeTensors binary parser (via `Nivara.Samples`) |
 | `Module<T>.Train/Eval` | Training/eval mode toggle |
-| `Nivara.IO.ParquetReader` | Parquet dataset loading (via `Nivara.Extensions`) |
+| `Nivara.IO.NivaraParquetReader` | Parquet dataset loading (via `Nivara.Extensions`) |
 
 ## Core library improvements made during implementation
 

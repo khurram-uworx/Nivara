@@ -316,7 +316,7 @@ Nivara supports multiple execution strategies via the `Nivara.Execution.Executio
 - Automatic chunk size calculation
 - Suitable for datasets larger than available memory
 - Falls back to lazy for operations requiring full data (Sort, GroupBy, Join)
-- **Public API**: `QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`; `NivaraQuery<T>.AsStream` passthrough. Lazy query-frame factories (`Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `Parquet.ScanAsQueryFrame`) open streaming directly from files.
+- **Public API**: `QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`; `NivaraQuery<T>.AsStream` passthrough. Lazy query-frame factories (`Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `NivaraParquetReader.ScanAsQueryFrame`) open streaming directly from files.
 
 #### 4. Parallel
 - Uses multiple threads for CPU-intensive operations
@@ -352,12 +352,17 @@ Execution begins only when `Collect()` or similar materialization methods are in
 
 `QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`. Fully-streamable plans (Filter, Select, Slice, SelectRows) process each chunk independently; non-streamable boundaries (Sort, GroupBy, Join, Rolling, Cumulative, Shift, Rank) or window expressions fall back to a single merged frame identical to `CollectAsync()`.
 
-Lazy query-frame factories open streaming directly from files:
-- `Csv.ScanAsQueryFrame(path, chunkSize)`
-- `Json.ScanAsQueryFrame(path, chunkSize)`
-- `Parquet.ScanAsQueryFrame(path, chunkSize)`
+Lazy query-frame factories open streaming directly from files — each takes a path and an
+options object, and no chunk size:
+- `Csv.ScanAsQueryFrame(string filePath, CsvOptions? options = null)` — `src/Nivara.Extensions/IO/CsvExtensions.cs`
+- `Json.ScanAsQueryFrame(string filePath, JsonOptions? options = null)` — `src/Nivara/IO/JsonExtensions.cs`
+- `NivaraParquetReader.ScanAsQueryFrame(string filePath, ParquetReadOptions? options = null)` — `src/Nivara.Extensions/IO/NivaraParquetReader.cs`
 
-`chunkSize` is honored by row-oriented sources and advisory (row-group aligned) for Parquet; when unset it is derived from the memory budget (`clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)`). Full contract in `docs/STREAMING.md`.
+There is no `Parquet` factory class and no `chunkSize` parameter on any of the three; the
+chunk size is supplied when streaming, by `AsStream(chunkSize:)`. It is honored by
+row-oriented sources and advisory (row-group aligned) for Parquet; when unset it is derived
+from the memory budget (`clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)`). Full contract in
+`docs/STREAMING.md`.
 
 ## Query Optimization Engine
 
@@ -1021,7 +1026,7 @@ This appendix summarizes key architecture decisions in concise form. See the rel
 ### Streaming API
 
 - **Public API**: `QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`. `NivaraQuery<T>.AsStream` passthrough.
-- **Lazy factories**: `Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `Parquet.ScanAsQueryFrame` open streaming directly from files.
+- **Lazy factories**: `Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `NivaraParquetReader.ScanAsQueryFrame` open streaming directly from files.
 - **Streamable plans**: Filter, Select, Slice, SelectRows process each chunk independently. Non-streamable boundaries (Sort, GroupBy, Join, windows) fall back to merged frame.
 - **Chunk size**: Honored by row-oriented sources; advisory (row-group aligned) for Parquet. Derived from memory budget when unset.
 - **Contract**: Full details in `docs/STREAMING.md`.
