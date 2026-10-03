@@ -125,6 +125,50 @@ with no exposing property — it has no duplicate of this defect and nothing to 
    — the new gate must run and pass. As cheap insurance this also covers
    `QuerySourceHandleTests` and `ScanAsQueryFrameHandleTests`.
 
+### Results
+
+| Step | Result |
+|---|---|
+| `dotnet build Nivara.slnx -c Release` | succeeded, **0 warnings**, 0 errors — after each of commits 2, 3, 4, 5 |
+| Targeted fixtures (disposal / handle / streaming) | **58/58 pass** |
+| Full suite, `--filter "Category!=Performance"` | **3795 passed, 14 skipped, 0 failed** (2 m 43 s) |
+| `rg 'AsQueryFrame\(\)\.Dispose'` over `src/` and `tests/` | no code hits; the two remaining hits are the CHANGELOG's #501 entry and this file |
+| `rg 'owning frame'` repo-wide | no hits — the three stale comments are gone |
+
+### The stale-build trap, recorded because it nearly produced a false pass
+
+The gate's negative control was run by adding a temporary `internal QueryFrame RawFrame`
+and confirming the test went red. Removing it and rebuilding left `RawFrame` **compiled into
+`bin/`, and a subsequent `--no-build` run reported the gate failing on a property that no
+longer existed in source** — an incremental build that did not notice the reverted file.
+
+`dotnet build --no-incremental` cleared it and the fixture returned to 9/9. Worth knowing
+for anyone re-running that negative control: a red result immediately after an edit is not
+trustworthy until the build is forced. Had the stale copy been *green* rather than red, the
+control would have looked like it had never fired.
+
+### G2 review findings
+
+Both pre-deletion reviews cleared with no code changes required.
+
+- **Against #507** — the issue offered two options, delete or document, and recommended
+  deletion. Both landed: the property is gone, and the surviving accessor carries the
+  warning. Root cause addressed rather than symptom.
+- **Dead code left behind** — checked. The `frame` field is still read by 20+ members, and
+  `AsQueryFrame()` is now the sole `QueryFrame`-returning member on the type.
+- **Gate proven in both directions** — not assumed. See the negative control above.
+- **Plan drift** — one addition, recorded at G1 and at commit `581685f9`: commit 5 (#512),
+  confirmed by the human rather than folded in silently.
+- **Commit count** — the plan listed 6; 6 landed, in order, with no unrelated commits.
+
+### Coverage this work does not claim
+
+The full-suite result is a **regression check**, not a verification of the fix. Nothing in
+the suite can observe the absence of a member that had no readers; the deletion is proved by
+the clean build plus the search, and the doc comment by nothing at all — no XML doc file is
+produced, so no test can assert on it. 3795 green means "nothing that was passing broke",
+which is a weaker claim than it looks and is the only claim the suite supports here.
+
 ### Claims this work does NOT make
 
 - Commits 1 and 2 have **no behavioural verification**. A green suite proves only that
