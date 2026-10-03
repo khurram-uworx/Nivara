@@ -216,6 +216,50 @@ Non-regression check only, after the fix:
    CancellationToken ct)` — `QueryFrame.cs:461`; `ToFlux(QueryFrame, int chunkSize,
    ChannelBackpressureMode, int, string?)` — `NivaraFlux.cs:10-15`).
 
+### Verification results (all run on Windows, Release)
+
+| # | Check | Expected | Actual |
+|---|---|---|---|
+| 1 | Drop `frame.Dispose()` from the CSV partial-read gate | red | **red, exit 1** — `AssertUnlocked` fired with correct attribution |
+| 2 | Abandon the frame mid-file in the #502 fixture, then probe | locked | **locked, and TearDown failed** with `IOException: ... is being used by another process` |
+| 3 | Non-regression across 4 fixtures | green | **30 passed, exit 0** |
+
+Two findings that changed what could be claimed:
+
+- **The Windows teardown symptom is provable after all.** The issue reasons that
+  `Directory.Delete` cannot fail on `ubuntu-latest` and stops there. CI is Linux-only, but the
+  verification host is Windows, where neither masking condition applies. So check 2 produced
+  the actual #496/#502 failure rather than a proxy reading.
+- **`$LASTEXITCODE` after a pipe reports the pipe's status.** The first pass printed
+  `EXITCODE=0` next to `Failed: 1`. Every result above was re-captured without a pipeline.
+  This is the `AGENTS.md` "capture the exit status of the process you care about" rule biting.
+
+### G2 review finding — one commit superseded
+
+The docs commit wrote `shared.Subscribe(...)` and disposed its return value. **`Subscribe` does
+not exist in Streamix.** Confirmed three ways: reflection over Streamix 1.2.3, a grep of the
+Streamix source for `public static .*Subscribe`, and its public interface list. The real API is
+`Publish`/`Replay` → `IConnectableStream<T> : IFlux<T>` with `Connect() -> IDisposable`,
+`RefCount()`, `WhenRefCountDisconnectedAsync()`. There is no subscribe call because none is
+needed — enumerating the connectable stream is what subscribes, and `ForEachAsync` returns a
+`Task`, not a disposable.
+
+Fixed in an additional commit rather than by rewriting history. The ownership handle the
+section needed already existed and was being discarded: `Connect()` returns the `IDisposable`
+that disconnects the shared subscription, which belongs beside the frame.
+
+Every other Streamix operator in these docs was verified real in the same pass — `Named`,
+`Retry`, `Checkpoint`, `WindowByTime`, `FlatMap`, `Trace`, `Log`, `Filter`, `ToSseAsync`,
+`FluxResult`. `Subscribe` was the only one missing. Checked upstream
+(`khurram-uworx/streamix`) for a matching gap and found none: Streamix's own
+`GETTING-STARTED.md:175-176` already demonstrates `Connect()` + `ForEachAsync`, so this was
+our documentation error, not a Streamix defect. No upstream issue filed — filing one would be
+noise.
+
+Subscribe-then-connect ordering was checked in `ConnectableStream.cs`, not assumed:
+`GetAsyncEnumerator` registers an unbounded channel per subscriber (`:305-324`) before
+`Connect()` starts the source enumeration (`:278-296`), so no items are lost.
+
 ## Blast radius
 
 - **Commit A** — one line in one test fixture. No public API, no production code, no other
