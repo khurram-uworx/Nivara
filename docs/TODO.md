@@ -265,10 +265,14 @@ Subscribe-then-connect ordering was checked in `ConnectableStream.cs`, not assum
 - **Commit A** — one line in one test fixture. No public API, no production code, no other
   caller. Teardown interaction: `StreamixBridgeIntegrationTests.TearDown` does
   `Directory.Delete(tempDir, true)`, which is where a leaked handle would surface on
-  Windows (`IOException`). Not observable on `ubuntu-latest`.
-- **Commit B** — documentation only, zero runtime blast radius. Two of the eleven sites
-  (354, 315) encode lifetime semantics that a naive `using` would actively break, so the
-  diff needs review rather than a mechanical sweep.
+  Windows (`IOException`). Not observable on `ubuntu-latest`, but reproducible on the Windows
+  verification host — see the verification table.
+- **Commit B** — documentation only, zero runtime blast radius. Two of the fifteen sites
+  (354 controller, 315 `Publish`) encode lifetime semantics that a naive `using` would
+  actively break, so the diff needed review rather than a mechanical sweep. This held up:
+  the review is what caught the non-existent `Subscribe` in 315.
+- **The G2 follow-up commit** — also documentation only, and confined to the two snippets
+  that were already wrong for an unrelated reason.
 - **Explicitly out of scope:** flipping `NivaraResourceManager` on by default, adding a
   finalizer to `QuerySourceHandle`, and any static gate for the class of bug that is
   invisible at runtime. #501 is already landed on this branch's base.
@@ -277,4 +281,18 @@ Subscribe-then-connect ordering was checked in `ConnectableStream.cs`, not assum
 
 - [x] #510 — stale API in doc snippets (`Filter("status","OK")`, `AsStream(enforced: true)`,
   `Csv.ScanAsQueryFrame(path, chunkSize)`, `Parquet.ScanAsQueryFrame`) — created while
-  working on #502. The two snippets #502 edits are fixed there; the rest is #510.
+  working on #502. `STREAMING.md:135` and `ACCELERATION.md:214-216` are fixed in #502 since
+  this branch already edited them; `ARCHITECTURE.md` and `samples/NivaraIncident/README.md`
+  remain open in #510.
+
+Nothing else was deferred. Considered and deliberately not filed:
+
+- **A `Subscribe`-shaped convenience on `IConnectableStream<T>`** (Streamix). Checked
+  upstream `khurram-uworx/streamix`: `GETTING-STARTED.md:175-176` already documents
+  `Connect()` + `ForEachAsync`, so there is no gap to report. Our docs were wrong, not
+  Streamix.
+- **A doc-snippet compile check.** This is the third time a snippet in these files was found
+  to call an API that does not exist, and a mechanical gate would have caught all of them.
+  Larger than this issue's scope; raised with the human rather than filed blind.
+- **`QuerySourceHandle` finalizer / `NivaraResourceManager` default.** Already listed as out
+  of scope above.
