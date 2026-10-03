@@ -19,14 +19,6 @@ public sealed class RequestRow
     public double DurationPercentRank { get; set; }
 }
 
-public sealed class DeploymentRow
-{
-    public long Timestamp { get; set; }
-    public string Service { get; set; } = "";
-    public string Version { get; set; } = "";
-    public string Region { get; set; } = "";
-}
-
 public sealed class InstanceRow
 {
     public long Timestamp { get; set; }

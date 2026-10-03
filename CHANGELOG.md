@@ -185,6 +185,35 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`RunWindowedAnalytics` reported inverted window bounds (#499)** — the Incident sample
+  computed `WindowStart = timestamps[0]` and `WindowEnd = timestamps[last]`, treating
+  row position as timestamp order. `DatasetGenerator` draws each row's offset within
+  its minute from `rng.NextDouble()`, so rows inside a 5-minute `WindowByTime` bucket
+  are not ordered by event time: `WindowEnd` could precede `WindowStart` (observed
+  inverted by about a second), and neither value bounded the window's real extent. Now
+  uses `Min()`/`Max()`. The existing test passed throughout, because it only asserted
+  `WindowStart != default`, which holds either way.
+
+- **`Scenarios.Get(null)` threw `NullReferenceException` (#499)** — the Incident sample's
+  public scenario lookup dereferenced `id` directly, so a null argument surfaced as an
+  NRE from `ToUpperInvariant`, reading like a bug inside `Get` rather than a caller
+  passing nothing. It now throws `ArgumentNullException` via `ThrowIfNull`. An empty id
+  remains `ArgumentException`, and the exact-type assertion keeps the two from merging.
+
+- **Uncalled public API in the Incident sample (#499)** —
+  `AnalyzeGroupedAggregationWithTypedLinq` had no production caller and no
+  assertion on its result. #496 fixed the `SchemaValidationException` it threw
+  (it mapped `RequestRow`, which declares `DurationPercentRank`, without creating
+  that column), but the file-handle probe added then still passed on a method
+  whose output nothing inspected. It is now run by the CLI's `analyze` and
+  `--benchmark` paths, and `tests/Nivara.Tests/Incident/IncidentSurfaceTests.cs`
+  accounts for every public member of `Nivara.Samples.Incident` — 29 rows: 21
+  executed, 2 covered by a named exercise, 1 skipped with a reason, 5 static
+  holder types resolved through their members — and fails on any member that is
+  not accounted for. It also asserts the result, so a member cannot pass by
+  returning nothing. The five unreferenced types deleted as part of this are
+  sample-only — no `src/` or public library API changed.
+
 - **BatchNorm eval mode now produces weight and bias gradients, matching PyTorch (#494)** —
   `BatchNorm1dEval` and `BatchNorm2dEval` previously only accumulated gradients for
   the input, listing only `[input]` in `OpNode.Inputs`, even though their forward
