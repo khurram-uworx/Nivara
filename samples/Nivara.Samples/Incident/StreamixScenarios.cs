@@ -100,8 +100,11 @@ public static class StreamixScenarios
                     if (statusCodes[i] >= 500) errorCount++;
                 double errorRate = (double)errorCount / statusCodes.Length;
 
-                var windowStart = new DateTimeOffset(timestamps[0], TimeSpan.Zero);
-                var windowEnd = new DateTimeOffset(timestamps[timestamps.Length - 1], TimeSpan.Zero);
+                // The generator draws each row's offset within its minute at random, so rows inside
+                // a window are not in timestamp order. Taking the first and last position yielded
+                // an inverted WindowStart/WindowEnd whenever the extremes were not at the edges.
+                var windowStart = new DateTimeOffset(timestamps.Min(), TimeSpan.Zero);
+                var windowEnd = new DateTimeOffset(timestamps.Max(), TimeSpan.Zero);
 
                 Interlocked.Add(ref totalRows, result.RowCount);
                 return new WindowResult(windowStart, windowEnd, result.RowCount, avgDuration, lastRollingAvg, errorRate);

@@ -83,12 +83,17 @@ public static class Scenarios
 
     public static IReadOnlyList<IncidentScenario> All { get; } = [A, B, C, D];
 
-    public static IncidentScenario Get(string id) => id.ToUpperInvariant() switch
+    public static IncidentScenario Get(string id)
     {
-        "A" => A,
-        "B" => B,
-        "C" => C,
-        "D" => D,
-        _ => throw new ArgumentException($"Unknown scenario: {id}")
-    };
+        ArgumentNullException.ThrowIfNull(id);
+
+        return id.ToUpperInvariant() switch
+        {
+            "A" => A,
+            "B" => B,
+            "C" => C,
+            "D" => D,
+            _ => throw new ArgumentException($"Unknown scenario: {id}")
+        };
+    }
 }

@@ -38,6 +38,48 @@ public class ScenarioTests
     }
 
     [Test]
+    public void Scenarios_Get_ThrowsArgumentNullOnNull()
+    {
+        // A null id is a caller error, not an unknown scenario. Without the guard this surfaced as
+        // NullReferenceException from ToUpperInvariant, which reads like a bug inside Get.
+        var ex = Assert.Throws<ArgumentNullException>(() => Scenarios.Get(null!));
+        Assert.That(ex!.ParamName, Is.EqualTo("id"));
+    }
+
+    [Test]
+    public void Scenarios_Get_ThrowsArgumentOnEmpty()
+    {
+        // An empty id is an unknown scenario, not a null one, so it must not be reported as
+        // ArgumentNullException -- Assert.Throws matches the exact type, so this pins that down.
+        var ex = Assert.Throws<ArgumentException>(() => Scenarios.Get(""));
+        Assert.That(ex!.ParamName, Is.Null);
+    }
+
+    [Test]
+    public void AllScenarios_EventsArePopulatedAndInsideTheIncidentWindow()
+    {
+        foreach (var scenario in Scenarios.All)
+        {
+            foreach (var evt in scenario.Events)
+            {
+                var where = $"Scenario {scenario.Id} event '{evt.EventType}'";
+                Assert.Multiple(() =>
+                {
+                    Assert.That(evt.Service, Is.Not.Empty, $"{where}: Service should name a service");
+                    Assert.That(evt.EventType, Is.Not.Empty, $"{where}: EventType should name a type");
+                    Assert.That(evt.Magnitude, Is.GreaterThan(0), $"{where}: Magnitude should be positive");
+                    Assert.That(evt.Timestamp, Is.GreaterThanOrEqualTo(scenario.IncidentStart),
+                        $"{where}: Timestamp {evt.Timestamp:O} precedes IncidentStart {scenario.IncidentStart:O}");
+                    Assert.That(evt.Timestamp, Is.LessThanOrEqualTo(scenario.IncidentEnd),
+                        $"{where}: Timestamp {evt.Timestamp:O} follows IncidentEnd {scenario.IncidentEnd:O}");
+                    Assert.That(scenario.AffectedServices, Does.Contain(evt.Service),
+                        $"{where}: Service '{evt.Service}' is not in AffectedServices");
+                });
+            }
+        }
+    }
+
+    [Test]
     public void ScenarioA_DatabaseDegradation_HasCorrectServices()
     {
         var scenario = Scenarios.A;
