@@ -128,6 +128,51 @@ means an earlier test leaked. One failure reason per verdict.
 
 Expected: the two grouped-aggregation tests are **red before** the fix, green after.
 
+## G2 review outcome
+
+### (a) Branch work as a whole
+
+Root cause fixed at the source, not papered over: the handle leak is gone at all
+six sites, and the `StreamixScenarioTests` blanket catch — the thing that made the
+defect invisible — is deleted rather than narrowed. No dead code left behind: the
+gate's helpers are both used, and every `using` added corresponds to a real handle.
+No silent failure modes: the gate asserts the post-condition (`FileShare.None`
+probe), not merely that no exception was thrown.
+
+The `PercentRank` addition to `AnalyzeGroupedAggregationWithTypedLinq` was reviewed
+against its twin: `AnalyzeRegionalPartitioning:187` uses the same step partitioned
+by `"Region"`; here it is partitioned by `"Service"`, which is the column the method
+groups by, so the window is coherent. Its `Select` does not read
+`DurationPercentRank` — the column exists solely to satisfy the `RequestRow` mapping
+— which is why the choice of sort key is not load-bearing.
+
+Tests pin the actual acceptance criterion, not a happy path: the failure mode from
+the issue is a *lingering handle*, so the gate probes for a lingering handle.
+
+### (b) Branch work against this plan
+
+Every planned item landed, plus one unplanned change the human approved
+(`PercentRank`, surfaced by the gate). No silent drift; the commit list grew from 5
+to 6 with the extra docs commit recording results.
+
+- Problem — matches the landed diff; two of the issue's premises were corrected.
+- Proposed changes — all six landed as specified.
+- Verification steps — all five run, results recorded above.
+- Planned commits — all present, plus one additive docs commit.
+- Blast radius — unchanged and accurate: no public API change.
+- Issues log — #496 and two follow-ups (#498, #499) filed and recorded.
+
+### Caveat worth stating plainly
+
+The 3× full-suite exit-0 result is consistent with the fix but is **not** by itself
+proof of it. The original symptom was 1-in-N and GC-timing-dependent, so three
+clean runs cannot exclude a rarer recurrence. The deterministic evidence is the
+gate: it failed on the pristine tree and passes now, with the leak named in the
+failure message. Treat the full-suite runs as corroboration, not as the proof.
+
+Skips are unchanged at 14 (GPT-2/Qwen tokenizer + model-parity tests), unrelated to
+this work and pre-existing.
+
 ## G1 grounding outcome
 
 **Official docs (`FileShare`, `File.Delete`) confirm the mechanism:**
