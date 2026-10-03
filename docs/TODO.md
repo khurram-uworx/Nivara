@@ -145,7 +145,16 @@ than recorded as a hollow entry.
 2. `refactor: delete the dead internal NivaraQuery<T>.Frame`
 3. `docs: state the chain-release consequence on AsQueryFrame()`
 4. `test: gate the shape of the query release surface`
-5. `docs: remove TODO.md — plan executed`
+5. `test: repoint the remaining AsQueryFrame().Dispose() call sites` — **added at G1**, see below
+6. `docs: remove TODO.md — plan executed`
+
+> Commit 5 was not in the original plan. G1 grounding found #512's four call sites, and
+> commit 3 documents "dispose the query, not the frame you got from `AsQueryFrame()`".
+> Landing that while four repo tests do the opposite would make the branch
+> self-contradictory — and `NivaraQueryToObjectsAsyncTests.cs:89-100` already does the
+> harmful version, disposing a **derived** query. Confirmed by the human at G1 to be fixed
+> here rather than left open on its own branch. It stays a separate commit, so each commit
+> still carries one reason.
 
 > As each task executes, if you find deferred work or a concern outside this plan, create a
 > tracked issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its
@@ -161,4 +170,6 @@ than recorded as a hollow entry.
   (`NivaraQueryToObjectsAsyncTests.cs:89-100`) disposes a **derived** query
   (`ScanQuery<Person>(file).Where(...)`), so it releases the source for the whole chain —
   the precise hazard #507 accuses `Frame` of, already realised through the surviving
-  accessor. Mechanically fixable and behaviour-preserving. Filed during grounding.
+  accessor. Mechanically fixable and behaviour-preserving. Filed during grounding, then
+  **confirmed at G1 to be fixed in this branch** as commit 5 — see the note under
+  Planned commits. Closes with that commit.
