@@ -6,6 +6,37 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`IDisposable` / `IAsyncDisposable` on the typed LINQ query types (#501)** - `NivaraQuery<T>` and
+  `NivaraGroupedQuery<TKey, T>` now forward disposal to the frame they hold, so a `ScanQuery<T>`
+  consumer can use `using` / `await using` instead of `query.AsQueryFrame().Dispose()`.
+  `NivaraGroupedQuery` was the worse half: it had no `AsQueryFrame()` at all, so
+  `ScanQuery<T>(parquet).GroupBy(...).Collect()` had no caller-side release path whatsoever, and
+  `ParquetLazySource` holds its reused reader until disposal - that path leaked a handle on every
+  call. Both interfaces are implemented deliberately: implementing only `IDisposable` makes
+  `await using` a compile error (CS8417) and only `IAsyncDisposable` makes `using` one (CS8418).
+
+### Fixed
+
+- **Query-source lifetime is tracked per source, not per frame (#501)** - `QueryFrame`'s derived
+  constructor tracked *every* derived frame with a cleanup action that disposed the *shared* source,
+  so the abandoned-resource timer released the source as soon as any intermediate frame in a chain
+  became unreachable - while live siblings were still reading from it. `NivaraGroupedQuery.Collect()`
+  manufactured that exact shape on every call. Ownership now sits on a single `QuerySourceHandle` per
+  source, shared by the whole chain, so the timer's condition (weak reference cleared) is only
+  satisfiable when nothing can still reach the source. Reference counting was rejected: derived frames
+  are temporaries inside expressions that are never disposed, so a per-frame count never reaches zero
+  and `using var q = ...; q.Where(...).Collect();` would leak.
+
+  **Behaviour change:** `QueryFrame`'s per-frame `disposed` flag is gone and guards now read the
+  shared handle's released state. A sibling frame in a chain now throws `ObjectDisposedException`
+  once any link is disposed, where it previously passed its own guard and failed deeper inside the
+  source wrapped in `QueryExecutionException`. This is the documented dispose-pattern rule (throw
+  `ObjectDisposedException` from any member unusable after disposal), which the old per-frame flag
+  violated for siblings. One source, one release, as `FileStream` behaves.
+
+  Also renames the `NivaraResourceManager` tracked-resource label from `LazyQueryFrame` to
+  `LazyQuerySource`, since the tracked object is now the source handle.
+
 - **Selectable sequence lengths and pass counts for the `modernbert` benchmark (#474)** — both
   benchmark paths hardcoded their length table, so re-timing one row meant editing source and
   rebuilding, and `modernbert benchmark --seq 256` did nothing at all: the arg loop treated the

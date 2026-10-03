@@ -173,10 +173,13 @@ source class):
    `QueryFrameTests.cs:332-355`.
 5. `NivaraQuery_Collect_AfterDispose_ThrowsObjectDisposedException` — mirrors `QueryFrameTests.cs:342`.
 6. `NivaraQuery_DisposingDerivedQuery_InvalidatesSiblingChain` — pins the ownership decision.
-   Asserts a throw whose chain contains `ObjectDisposedException`, **not**
-   `Throws.TypeOf<ObjectDisposedException>()`: the disposed object is the *source*, not the frame, so
-   `CollectAsync`'s catch-all (`:434`) wraps it in `QueryExecutionException`. Pinning the outer type
-   would pin an accident of the wrapper.
+   **Correction after execution:** the plan hedged and asserted on the exception *chain* rather than
+   `Throws.TypeOf<ObjectDisposedException>()`, on the reasoning that the disposed object is the source
+   and `CollectAsync`'s catch-all would wrap it in `QueryExecutionException`. That reasoning was
+   wrong: the frame's own guard fires *before* the try block (`:379`), so the survivor throws a bare
+   `ObjectDisposedException` naming `Nivara.Query.QueryFrame`. The test now asserts
+   `Throws.TypeOf<ObjectDisposedException>()` directly — a stronger, less accidental pin than the
+   plan could have specified.
 
 **Gate constraint carried from #503:** the leak window for CSV/JSON is **partial-read only** — a full
 `Collect()` reaches EOF and self-releases (`CsvDataSource.cs:405`). #503 verified by probing that
@@ -263,10 +266,10 @@ unnecessary. Both target types are `sealed` (confirmed via code-memory `IsSealed
 
 ## Verification steps
 
-1. `dotnet build Nivara.slnx` — 0 warnings, 0 errors.
-2. `QuerySourceHandleTests` targeted, `-c Release`. **Step 2's test 2 must be verified RED against
-   pre-change `main`** (stash the src change, run it) — a regression test that was never seen red
-   proves nothing.
+1. `dotnet build Nivara.slnx -c Release` — 0 warnings, 0 errors.
+2. **RED proof** of the regression test against the pre-fix `QueryFrame.cs` (restored from
+   `c2a0363`, with `QuerySourceHandle.cs` removed and the fixture reduced to its four frame-level
+   tests, since the handle cannot exist there). A regression test never seen red proves nothing.
 3. `ScanAsQueryFrameHandleTests` + `NivaraQueryDisposalTests` + `QuerySourceHandleTests` +
    `QueryFrameTests` + `ResourceManagementPropertyTests` + `AsyncStreamingTests`, `-c Release`.
    Negative control (`Probe_DetectsDeliberatelyLeakedHandle`) must stay green — it is what gives the
@@ -275,14 +278,73 @@ unnecessary. Both target types are `sealed` (confirmed via code-memory `IsSealed
    not a pipeline filter's. This is what confirms the `handle.Released` behavior change is safe.
 5. Re-run 3 to confirm the negative control is stable, not flaky.
 
-## Planned commits
+## Corrections after execution
+
+Four things the plan got wrong or understated. Each was found by running the code, not by reading it.
+
+**The label rename touched two assertions, not one.** The plan named
+`ResourceManagementPropertyTests.cs:178` as the only site. There is a second,
+`AbandonedQueryCleanup_ShouldAutomaticallyCleanupResources` at `:318`, in a different test. It
+surfaced only when the targeted run failed on it. Both are updated, and each commit that caused a
+break carries the fix for it, so no commit is left red.
+
+**The `QueryExecutionException` hedge was wrong, and the reality is stronger.** Test 6 was specified
+to assert on the exception *chain* rather than `Throws.TypeOf<ObjectDisposedException>()`, reasoning
+that the released source would fail deeper and get wrapped. It does not: the frame's own guard fires
+*before* `CollectAsync`'s try block, so a survivor throws a bare `ObjectDisposedException` naming
+`Nivara.Query.QueryFrame`. The test asserts the precise type instead. Worth recording because the
+plan's version would have been a weaker gate written from a plausible but unverified story.
+
+**The handle needs no `Schema` forwarder.** The plan specified `Source` / `Schema` / `IsLazy`
+forwarders. `QueryFrame` only ever reads `source.IsLazy`; `IQuerySource.Schema` has no reader in the
+file, so a forwarder would be dead code.
+
+**`IAsyncDisposable` is dead code today, not just unused.** ripgrep finds it in exactly two places
+repo-wide, both in `QueryFrame.cs`, and **no** `IQuerySource` implementor implements it. So the
+`source is IAsyncDisposable` branch — which this change moves into `ReleaseAsync` — is unreachable and
+has never executed. It is in the right place for the future, but nothing exercises it yet.
+
+## Verification results
+
+| Step | Result |
+| --- | --- |
+| 1. Build `-c Release` | 0 warnings, 0 errors. Adding `IDisposable` broke no overload resolution anywhere in the solution (samples, Extensions, tests). |
+| 2. RED proof | **4/4 fail** against pre-fix `QueryFrame.cs`, each for the predicted reason. `DerivedFrame_Abandoned_...`: `DisposeCount` 1 vs expected 0 *and* the surviving leaf's `Collect()` threw `ObjectDisposedException` — the live bug. `DerivedFrame_Added_...`: `TotalTrackedResources` 3 vs 1. `..._ReportsSameDisposedState`: sibling's `ToString()` reported a live pipeline. `..._ThrowsObjectDisposedException`: got `QueryExecutionException` wrapping `ObjectDisposedException` — the exact inconsistency the handle removes. |
+| 3. Targeted fixtures | 102 pass, exit 0, after the second label fix. `AbandonedQueryCleanup_ShouldAutomaticallyCleanupResources` passing is independent confirmation that the cleanup closure does not capture the handle. |
+| 3b. `NivaraQueryDisposalTests` | 8/8 pass. Two authoring bugs found and fixed first: the in-memory frame's column was `A` against a `Person` mapping `Age` (`SchemaValidationException`), and `GroupBy(row => "all")` is a constant key the operation does not accept. |
+| 3c. `ScanAsQueryFrameHandleTests` | 7/7 pass, negative control included. No `AsQueryFrame().Dispose()` remains. |
+| 4. Full suite | **NOT RUN** — declined by the human at G2; they will run it. Unverified. |
+| 5. Re-run | **NOT RUN** — same. |
+
+> **Coverage gap, stated plainly.** Steps 1–3c cover the four fixtures that touch `QueryFrame`
+> lifetime and the source manager. The full suite has not been run on this branch, so the
+> `handle.Released` guard change is **not** verified against the rest of the test surface — any test
+> elsewhere in the repository that disposed one frame and kept reading from a sibling would fail,
+> and none was found by reading, which is exactly what the step-2 RED proof showed reading cannot
+> guarantee. Treat steps 4–5 as a required gate before this branch merges, not as a formality.
+>
+> To run them:
+>
+> ```
+> dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "Category!=Performance"
+> dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~ScanAsQueryFrameHandleTests"
+> ```
+>
+> Capture the **process** exit status, not the status of a filter in a pipeline. Both must be 0.
+
+## Commits (as landed)
 
 1. `docs: plan #501 in TODO.md`
-2. `refactor: track query-source lifetime on a shared handle instead of per-frame`
-3. `test: gate the shared-source release contract and the abandoned-frame regression`
-4. `feat: implement IDisposable and IAsyncDisposable on the typed LINQ query types`
-5. `test: repoint the ScanQuery handle gate at query.Dispose()`
-6. `docs: update ScanQuery disposal guidance in XML docs, LINQ.md and CHANGELOG`
+2. `docs: record G1 grounding findings for #501 in TODO.md`
+3. `refactor: track query-source lifetime on a shared handle instead of per-frame`
+4. `test: gate the shared-source release contract and the abandoned-frame regression`
+5. `feat: implement IDisposable and IAsyncDisposable on the typed LINQ query types`
+6. `test: repoint the ScanQuery handle gate at query.Dispose()`
+7. `docs: update ScanQuery disposal guidance in XML docs, LINQ.md and CHANGELOG`
+
+> The plan proposed 6, and it became 7. The G1 findings needed their own commit so the refactor
+> could cite them, and the feature and its tests landed together rather than apart: a commit that
+> adds a public `IDisposable` contract with nothing pinning it is not verified on its own.
 
 > As each task executes, if you find deferred work or a concern outside this plan, create a tracked
 > issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its number below — do
@@ -302,3 +364,14 @@ unnecessary. Both target types are `sealed` (confirmed via code-memory `IsSealed
   commit 5 repoints its typed cases.
 - [ ] #499 / PR #505 — Incident-surface gate. In this branch's history; adds the live
   `NivaraGroupedQuery` consumer that must stay green.
+
+### Filed during this work
+
+- [x] **#507** — `NivaraQuery<T>.Frame` is dead internal code, and now an ambiguous disposal path.
+  Confirmed by ripgrep for `\.Frame\b`: zero readers anywhere. Left in place here to keep the branch
+  to one reason, but it is now a hazard — a property named `Frame` on a type that owns the frame's
+  lifetime invites `query.Frame.Dispose()`, which releases the source for the whole chain while
+  carrying none of the documentation.
+- [x] **#508** — `QueryFrame.DisposeAsync` propagates source disposal errors while `Dispose` swallows
+  them. Preserved deliberately here so the refactor stayed a pure move; it is currently unobservable
+  because no `IQuerySource` implements `IAsyncDisposable`.
