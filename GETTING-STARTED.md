@@ -340,11 +340,13 @@ public sealed class Employee
 }
 
 // Lazy CSV scanning with schema inference (CSV integers infer as int)
-var csvQuery = Csv.ScanQuery<Employee>("employees.csv")
+// The query is lazy and holds the file open, so it is the query you dispose —
+// not just the frame Collect() returns.
+using var csvQuery = Csv.ScanQuery<Employee>("employees.csv")
     .Where(e => e.Salary > 70000)
     .Select(e => new { e.Name, e.Department, e.Salary });
 
-var result = csvQuery.Collect();
+using var result = csvQuery.Collect();
 
 // Custom CSV options
 var csvOptions = CsvOptions.Default.With(
@@ -352,8 +354,8 @@ var csvOptions = CsvOptions.Default.With(
     delimiter: ",",
     trimOptions: CsvTrimOptions.Trim);
 
-var customCsv = Csv.ScanQuery<Employee>("data.csv", csvOptions)
-    .Collect();
+using var customCsvQuery = Csv.ScanQuery<Employee>("data.csv", csvOptions);
+using var customCsv = customCsvQuery.Collect();
 ```
 
 ### JSON Data Sources
@@ -370,11 +372,11 @@ public sealed class User
 }
 
 // Lazy JSON scanning (JSON numbers infer as double)
-var jsonQuery = Json.ScanQuery<User>("data.json")
+using var jsonQuery = Json.ScanQuery<User>("data.json")
     .Where(u => u.Active)
     .Select(u => new { u.Id, u.Name, u.Email });
 
-var jsonResult = jsonQuery.Collect();
+using var jsonResult = jsonQuery.Collect();
 ```
 
 ### Schema Inference
@@ -937,14 +939,15 @@ public sealed class Employee
 // 2. Multiple filters are combined (operation fusion)
 // 3. Unused columns are eliminated early (projection pushdown)
 
-var query = Csv.ScanQuery<Employee>("employees.csv")
+using var query = Csv.ScanQuery<Employee>("employees.csv")
     .Where(e => e.Age > 25)
     .Where(e => e.Salary > 50000)
     .Select(e => new { e.Name, e.Salary });
 
-var result = query.Collect(); // Optimizations applied during execution
+using var result = query.Collect(); // Optimizations applied during execution
 
-// Inspect the optimized plan
+// Inspect the optimized plan — `query` is still usable here, because the `using`
+// above only disposes it at the end of this block.
 Console.WriteLine(query.ExplainPlan());
 ```
 
