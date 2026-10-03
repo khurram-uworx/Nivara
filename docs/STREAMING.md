@@ -348,13 +348,16 @@ var metrics = NivaraParquetReader.ScanAsQueryFrame("metrics.parquet")
 
 var shared = metrics.ToFlux(chunkSize: 50_000).Publish();
 
-var dash = shared.Subscribe(chunk => dashboard.Update(chunk));   // consumer 1
-var archive = shared.Subscribe(chunk => archival.Write(chunk));  // consumer 2
-shared.Connect();                                               // start the shared subscription
+// Both consumers read the one shared upstream enumeration.
+var dashTask = shared.ForEachAsync(chunk => dashboard.Update(chunk));    // consumer 1
+var archiveTask = shared.ForEachAsync(chunk => archival.Write(chunk));   // consumer 2
 
-// On shutdown, in this order:
-archive.Dispose();
-dash.Dispose();
+// Connect() returns the handle that owns the shared subscription.
+var connection = shared.Connect();
+
+// On shutdown:
+connection.Dispose();
+await Task.WhenAll(dashTask, archiveTask);
 metrics.Dispose();
 ```
 
@@ -362,8 +365,11 @@ metrics.Dispose();
 
 ```csharp
 var replayed = query.ToFlux(chunkSize: 10_000).Replay(bufferSize: 3);
-replayed.Subscribe(chunk => liveUI.Push(chunk));  // gets last 3 immediately
-replayed.Connect();
+
+// gets the last 3 items immediately, then live
+var uiTask = replayed.ForEachAsync(chunk => liveUI.Push(chunk));
+
+var replayConnection = replayed.Connect();
 ```
 
 ### ASP.NET Core SSE streaming
