@@ -16,7 +16,13 @@ namespace Nivara.Linq;
 /// <see cref="Collect"/>, <see cref="ToObjects"/>, or <see cref="ToList"/> is called.
 /// </summary>
 /// <typeparam name="T">The row type</typeparam>
-public sealed class NivaraQuery<T>
+/// <remarks>
+/// A query over a lazy file source holds that source open, so dispose it when finished -
+/// <c>using var query = Csv.ScanQuery&lt;Person&gt;(path);</c> - or the file stays locked. Queries
+/// derived from this one share one source, so disposing any of them releases it for the whole chain
+/// and the remaining queries then throw <see cref="ObjectDisposedException"/>.
+/// </remarks>
+public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
 {
     readonly QueryFrame frame;
 
@@ -46,6 +52,12 @@ public sealed class NivaraQuery<T>
     /// Returns the underlying lazy query frame for advanced composition
     /// </summary>
     public QueryFrame AsQueryFrame() => frame;
+
+    /// <inheritdoc />
+    public void Dispose() => frame.Dispose();
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => frame.DisposeAsync();
 
     /// <summary>
     /// Filters the rows using the given predicate
@@ -407,7 +419,13 @@ public sealed class NivaraQuery<T>
 /// </summary>
 /// <typeparam name="TKey">The group key type</typeparam>
 /// <typeparam name="T">The row type being grouped</typeparam>
-public sealed class NivaraGroupedQuery<TKey, T>
+/// <remarks>
+/// A grouped query over a lazy file source holds that source open, so dispose it when finished -
+/// <c>using var grouped = Csv.ScanQuery&lt;Person&gt;(path).GroupBy(p =&gt; p.Region);</c> - or the
+/// file stays locked. The grouped query and the query it came from share one source, so disposing
+/// either releases it for both.
+/// </remarks>
+public sealed class NivaraGroupedQuery<TKey, T> : IDisposable, IAsyncDisposable
 {
     readonly QueryFrame baseFrame;
     readonly ColumnExpression keyExpression;
@@ -650,6 +668,12 @@ public sealed class NivaraGroupedQuery<TKey, T>
 
         return ddof;
     }
+
+    /// <inheritdoc />
+    public void Dispose() => baseFrame.Dispose();
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => baseFrame.DisposeAsync();
 
     readonly record struct GroupAggregate(ColumnExpression Source, AggregationFunction Function);
 }
