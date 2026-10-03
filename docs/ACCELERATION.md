@@ -168,7 +168,21 @@ Prioritized for the next iterations of the GPU journey (see also [ROADMAP-SUGGES
 
 # Streaming Memory-Budget Enforcement
 
-Phase 1 of [issue #325](https://github.com/khurram-uworx/Nivara/issues/325).
+> **Status: design proposal — not implemented.** Nothing in this section ships. The
+> `BudgetEnforcement` enum, the `MemoryBudget` class, and an `enforced:` parameter on
+> `QueryFrame.AsStream` do not exist anywhere in `src/`; the whole signature is
+> `AsStream(int chunkSize = 10000, CancellationToken ct = default)` (`QueryFrame.cs:461`).
+> Every code block below is the *proposed* shape, not something a reader can call. For the
+> streaming contract that does ship, see [`docs/STREAMING.md`](STREAMING.md).
+>
+> It also no longer matches the issue it names. #325 proposes **spill-to-disk** for boundary
+> operators (`SpillDirectory` on the context, spill then reconstruct); what is described here
+> is an in-memory byte-budget gate that pauses the producer. Both are open; neither is
+> planned. Treat the divergence as an open question for whoever picks this up, not as a
+> settled design.
+
+Phase 1 of [issue #325](https://github.com/khurram-uworx/Nivara/issues/325) — read the status
+note above before treating this as that issue's design.
 
 ## Problem
 
@@ -191,32 +205,32 @@ The budget behavior is **configurable** and defaults to the current advisory mod
 
 ### Configuration
 
-Mode is set via `NivaraExecutionContext` or at strategy construction time.
+**Today there is no knob for any of this.** `QueryFrame.AsStream` builds its own
+`NivaraExecutionContext(ExecutionStrategy.Streaming)` internally (`QueryFrame.cs:461-478`)
+and sets only `CancellationToken`, `ChunkSize`, and `ExecutionDiagnostics`;
+`MemoryBudget` is left at its 1 GB constructor default (`NivaraExecutionContext.cs:17`) and
+no overload accepts a context. The one sizing knob a caller can reach is `AsStream(chunkSize:)`.
+`StreamingExecutionStrategy` is internal, so its
+`StreamChunksAsync(QueryPlan, NivaraExecutionContext, CancellationToken)` cannot be called
+from outside the assembly either; the only public route to a custom context is
+`ExecutionEngine.Execute(plan, context)`, which materializes one whole frame and yields no
+chunks at all. So the old sentence here — "mode is set via `NivaraExecutionContext` or at
+strategy construction time" — described an object that never reaches `AsStream`, and a
+strategy constructor that takes no arguments.
+
+What actually bounds streaming memory today is the bounded producer/consumer channel, with
+`StreamingBudgetTracker` warning on top — not a byte budget. See `docs/STREAMING.md`
+§"Memory budget → chunk size" and §"AC3 resolution (memory budget enforcement)", and
+`StreamingBackpressureTests`.
 
 ```csharp
-// Advisory (default — same as today)
-var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
-{
-    MemoryBudget = 256 * 1024 * 1024,   // 256 MB
-    BudgetEnforcement = BudgetEnforcement.Advisory   // default, can be omitted
-};
-
-// Enforced — source reads are gated by the budget
-var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
-{
-    MemoryBudget = 256 * 1024 * 1024,
-    BudgetEnforcement = BudgetEnforcement.Enforced
-};
-```
-
-```csharp
-// Fluent API on QueryFrame
+// What is settable today: the chunk size, on AsStream.
 await using var telemetry = Csv.ScanAsQueryFrame("data.csv")
     .Filter(ColumnExpressions.Col("status") == "OK");
 
-await foreach (var chunk in telemetry.AsStream())
+await foreach (var chunk in telemetry.AsStream(chunkSize: 50_000))
 {
-    // The consumer owns each yielded chunk, and the budget caps how big one gets.
+    // The consumer owns each yielded chunk.
     using (chunk)
     {
         Process(chunk);
@@ -224,14 +238,36 @@ await foreach (var chunk in telemetry.AsStream())
 }
 ```
 
-`AsStream` takes `(int chunkSize = 10000, CancellationToken ct = default)`. Budget
-enforcement is a property of the execution context, not of `AsStream` — set
-`BudgetEnforcement = BudgetEnforcement.Enforced` on the `NivaraExecutionContext` that
-runs the query, as shown above.
+**Proposed**, per this section's design and not compilable today — `BudgetEnforcement` does
+not exist, and neither the property nor an `enforced:` shorthand is reachable from the
+streaming surface for the reasons above:
 
-When `BudgetEnforcement` is `Advisory`, the pipeline behaves identically to today: `StreamingBudgetTracker` records and warns, but reads are never blocked.
+```csharp
+// Proposed only. Does not compile: no BudgetEnforcement, no AsStream(enforced:).
+var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
+{
+    MemoryBudget = 256 * 1024 * 1024,   // 256 MB
+    BudgetEnforcement = BudgetEnforcement.Enforced
+};
+```
 
-When `BudgetEnforcement` is `Enforced`, the `MemoryBudget` primitive gates every chunk allocation at the source boundary.
+Implementing it would need a public route for the context to reach the strategy — tracked
+as #514.
+
+Two properties of the proposal, neither of which holds today:
+
+- `AsStream` takes `(int chunkSize = 10000, CancellationToken ct = default)` and no context.
+  Enforcement would have to travel on the execution context, and nothing public currently
+  carries a caller's context into the streaming strategy.
+- Both `MemoryBudget` and the `BudgetEnforcement` flag would be additive to
+  `NivaraExecutionContext`, which today has neither.
+
+When `BudgetEnforcement` is `Advisory` (the proposed default), the pipeline behaves
+identically to today: `StreamingBudgetTracker` records and warns, but reads are never
+blocked.
+
+When `BudgetEnforcement` is `Enforced`, the proposed `MemoryBudget` primitive gates every
+chunk allocation at the source boundary.
 
 ## Architecture
 
@@ -422,8 +458,8 @@ No `MemoryBudget` primitive is created. No blocking. Identical to today.
 | Source readers (`CsvLazySource`, `ParquetLazySource`, `JsonLazySource`) | ✓ | They read `chunkSize` rows as requested. Budget gating happens at the *caller*, not inside the reader. |
 | `NivaraExecutionContext.MemoryBudget` | ✓ | Still a `long` in bytes. Default 1 GB. |
 | `StreamingExecutionStrategy.CalculateChannelCapacity` | ✓ | Channel capacity formula is unchanged. |
-| `QueryFrame.AsStream()` | ✓ | Public API unchanged. `enforced: true` is an optional parameter. |
-| Streamix bridge (`NivaraFlux`) | ✓ | Uses `AsStream` under the hood. Enforced mode flows through automatically. |
+| `QueryFrame.AsStream()` | ✓ | Public API unchanged by this proposal — it would *gain* an `enforced:` parameter, since it has none today. Reaching the strategy from that parameter is the open part: `StreamingExecutionStrategy` is internal and `AsStream` takes no context. |
+| Streamix bridge (`NivaraFlux`) | ✓ | Uses `AsStream` under the hood, so Enforced mode would flow through — conditional on the same missing route as the row above. |
 
 ## Migration path
 

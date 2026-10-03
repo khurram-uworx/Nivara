@@ -159,14 +159,21 @@ before running anything long regardless.
 
 ## GitHub issues log
 
-Created during execution, recorded here as they are filed:
+Created during execution:
 
-- [ ] #NNN — no public knob for a streaming memory budget: `AsStream` hard-codes 1 GB and
-  takes no context; `StreamingExecutionStrategy` is internal (so `StreamChunksAsync` is
-  unreachable); `NivaraExecutionContext.MemoryBudget` cannot reach the chunk path. The
-  capability gap behind the `ACCELERATION.md` rewrite — filed when the rewrite lands.
-- [ ] #NNN — doc snippets are never compiled; ~110 fenced `csharp` blocks, no gate. Explicitly
-  out of scope per #510; needs a design for fragment-wrapping before it is cheap.
+- [x] #514 — no public knob for a streaming memory budget: `AsStream` takes no context and
+  hard-codes the 1 GB default; `StreamingExecutionStrategy` is internal, so
+  `StreamChunksAsync` is unreachable; `NivaraExecutionContext.MemoryBudget` cannot reach the
+  chunk path. The capability gap behind Commit C's rewrite, and the thing #325's Phase 1
+  cannot be implemented on top of as written.
+- [x] #515 — doc snippets are never compiled: 110 fenced `csharp` blocks, no gate, four
+  issues in a row (#510, #502, #501, #498) found by reading docs against source instead of
+  by a tool. Explicitly out of scope per #510; the body carries the sizing and the design
+  constraints (no silent skips, proposal docs excluded by an explicit list).
+- [x] #516 — `AGENTS.md:123` and `docs/STREAMING.md:105` both say the default streaming
+  memory budget is 256 MB; `NivaraExecutionContext` defaults it to 1 GB. The 256 MB constant
+  is real but belongs to `StreamingBufferManager` (IO layer), which `docs/STREAMING.md`
+  already says is not wired into the core pipeline. Found while grounding Commit C.
 
 Reminder: as each task executes, if further deferred work or a concern appears, create the
 issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record the number
