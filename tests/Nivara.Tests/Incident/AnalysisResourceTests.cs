@@ -1,4 +1,5 @@
 using Nivara.Samples.Incident;
+using Nivara.Tests.IO;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Incident;
@@ -13,6 +14,12 @@ namespace Nivara.Tests.Incident;
 /// failure behind issue #496. Probing with <c>FileShare.None</c> fails while any
 /// other handle is open, which detects the leak deterministically instead of relying
 /// on finalizer timing.
+/// </para>
+/// <para>
+/// The probe itself moved to <see cref="FileHandleProbe"/> in #498, which also covers the
+/// consumers outside this sample. Unlike those, every entry point here reads to EOF through
+/// <c>ParquetLazySource</c>, which does not release at EOF — so a plain open/dispose/probe
+/// cycle is load-bearing here and needs no midpoint assertion.
 /// </para>
 /// </summary>
 [TestFixture]
@@ -88,25 +95,9 @@ public class AnalysisResourceTests
     }
 
     void AssertReleasesFileHandle(string analysisName, Func<IDisposable?> analysis)
-    {
-        AssertFileUnlocked($"a handle was already open before {analysisName} ran");
-
-        var result = analysis();
-        Assert.That(result, Is.Not.Null, $"{analysisName} returned nothing to dispose");
-        result!.Dispose();
-
-        AssertFileUnlocked($"{analysisName} left the Parquet file handle open");
-    }
-
-    void AssertFileUnlocked(string because)
-    {
-        try
-        {
-            using var probe = new FileStream(requestsPath, FileMode.Open, FileAccess.Read, FileShare.None);
-        }
-        catch (IOException ex)
-        {
-            Assert.Fail($"'{Path.GetFileName(requestsPath)}' is still locked: {because}. {ex.Message}");
-        }
-    }
+        => FileHandleProbe.AssertReleasesAfter(
+            requestsPath,
+            analysisName,
+            analysis,
+            result => result!.Dispose());
 }

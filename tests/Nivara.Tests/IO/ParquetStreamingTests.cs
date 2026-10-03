@@ -264,10 +264,10 @@ public class ParquetStreamingTests
                 Assert.That(result["Index"].Length, Is.EqualTo(2500));
             }
 
-            // The reused reader owns a single file stream; disposing the source must release it
-            // so the file can be deleted on Windows.
-            File.Delete(file);
-            Assert.That(File.Exists(file), Is.False);
+            // The reused reader owns a single file stream; disposing the source must release it.
+            // Probed rather than asserted via File.Delete: Unix unlinks an open file
+            // unconditionally, so a delete succeeding proves nothing on the CI platform (#498).
+            FileHandleProbe.AssertUnlocked(file, "ParquetLazySource.Dispose left the file handle open");
         }
         finally
         {

@@ -260,7 +260,7 @@ public class JsonStreamingTests
     }
 
     [Test]
-    public void JsonLazySource_FileHandleReleased_AfterStreamingToEnd()
+    public void JsonLazySource_Dispose_ReleasesFileHandle()
     {
         var tempDir = CreateTempDir();
         try
@@ -272,10 +272,10 @@ public class JsonStreamingTests
                 Assert.That(result["name"].Length, Is.EqualTo(1000));
             }
 
-            // The persistent file handle is closed once the source streamed to EOF, so the
-            // file can be deleted (Windows fails on open handles).
-            File.Delete(file);
-            Assert.That(File.Exists(file), Is.False);
+            // Probed rather than asserted via File.Delete: Unix unlinks an open file
+            // unconditionally, so a delete succeeding proves nothing on the CI platform (#498).
+            // The probe observes the handle directly.
+            FileHandleProbe.AssertUnlocked(file, "JsonLazySource.Dispose left the file handle open");
         }
         finally
         {
