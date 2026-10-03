@@ -71,6 +71,12 @@ public static class Json
     /// <param name="filePath">The path to the JSON file</param>
     /// <param name="options">Optional JSON reading options</param>
     /// <returns>A lazy typed query that will read the JSON when executed</returns>
+    /// <remarks>
+    /// The returned query is <see cref="IDisposable"/>: a partial read leaves the JSON open, so wrap
+    /// it in <c>using</c> to release the handle — important before deleting or replacing the file.
+    /// Queries derived from it share the same source, so disposing any of them releases it for the
+    /// whole chain.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
     public static NivaraQuery<T> ScanQuery<T>(string filePath, JsonOptions? options = null)

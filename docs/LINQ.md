@@ -70,6 +70,36 @@ These create a lazy typed query over the file — the schema is inferred from a 
 and data is read only when the query is executed. Row types must map to the inferred column types
 (CSV integers infer as `int`; JSON numbers infer as `double`).
 
+#### Resource management
+
+`NivaraQuery<T>` and `NivaraGroupedQuery<TKey, T>` are `IDisposable` and `IAsyncDisposable`. A lazy
+query holds its file open, so wrap it in `using`:
+
+```csharp
+using var query = Csv.ScanQuery<Person>("data.csv");
+var adults = query.Where(p => p.Age >= 18).Collect();
+```
+
+This matters most for **Parquet**, where the reused reader holds the file until disposal. CSV and
+JSON close their chunk reader on their own once a read reaches EOF, so a full read to completion
+releases the handle even without disposing — which means a partial read (breaking out of `ToObjectsAsync`
+or `AsStream` part-way through) is the case that actually leaks.
+
+**One source, one release.** A query derived from another shares the same source, so disposing any
+query in a chain releases it for the whole chain and the survivors then throw
+`ObjectDisposedException`. This is the same contract `FileStream` has, and it is deliberate:
+reference counting is not possible here, because derived queries are temporaries inside expressions
+(`q.Where(...).Collect()`) that are never disposed, so a count would never return to zero and the
+common pattern would leak instead. Dispose the query you created.
+
+`NivaraGroupedQuery<TKey, T>` also releases through `Dispose`, so a grouped Parquet query is
+disposable too:
+
+```csharp
+using var grouped = NivaraParquetReader.ScanQuery<Row>(path).GroupBy(r => r.Category);
+var totals = grouped.Select(g => new { g.Key, Total = g.Count() }).Collect();
+```
+
 ---
 
 ## Typed Query Reference

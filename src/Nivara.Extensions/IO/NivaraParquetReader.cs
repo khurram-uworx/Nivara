@@ -121,9 +121,9 @@ public static class NivaraParquetReader
     /// </summary>
     /// <remarks>
     /// The source reuses a single Parquet reader (footer metadata parsed once) for the frame's
-    /// lifetime, so the file handle stays open until the returned frame is disposed. Use
-    /// <c>using</c> (or dispose the frame / <see cref="ScanQuery{T}"/>'s frame via
-    /// <c>AsQueryFrame()</c>) to release the file — important before deleting or replacing it.
+    /// lifetime, so the file handle stays open until the returned frame is disposed. Wrap it in
+    /// <c>using</c> to release the file — important before deleting or replacing it. Frames derived
+    /// from this one share the same reader, so disposing any of them releases it for the whole chain.
     /// </remarks>
     /// <param name="filePath">The path to the Parquet file</param>
     /// <param name="options">Optional Parquet reading options</param>
@@ -137,8 +137,11 @@ public static class NivaraParquetReader
     /// Creates a lazy typed query that scans a Parquet file without immediately reading it.
     /// </summary>
     /// <remarks>
-    /// The underlying frame holds the file open until disposed (reused single reader); dispose it
-    /// via <c>AsQueryFrame()</c> when done, e.g. before deleting the file.
+    /// The query holds the file open until disposed (reused single reader), so wrap it in
+    /// <c>using</c> — e.g. before deleting the file:
+    /// <code>using var query = NivaraParquetReader.ScanQuery&lt;Row&gt;(path);</code>
+    /// Queries and grouped queries derived from it share the same reader, so disposing any of them
+    /// releases it for the whole chain.
     /// </remarks>
     /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
     /// (case-insensitively) to the file's columns with exact or nullable-compatible types.</typeparam>

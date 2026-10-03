@@ -71,6 +71,12 @@ public static class Csv
     /// <param name="filePath">The path to the CSV file</param>
     /// <param name="options">Optional CSV reading options</param>
     /// <returns>A lazy typed query that will read the CSV when executed</returns>
+    /// <remarks>
+    /// The returned query is <see cref="IDisposable"/>: a partial read leaves the CSV open, so wrap
+    /// it in <c>using</c> to release the handle — important before deleting or replacing the file.
+    /// Queries derived from it share the same source, so disposing any of them releases it for the
+    /// whole chain.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
     public static NivaraQuery<T> ScanQuery<T>(string filePath, CsvOptions? options = null)
