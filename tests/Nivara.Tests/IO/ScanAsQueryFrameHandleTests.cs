@@ -132,7 +132,10 @@ public class ScanAsQueryFrameHandleTests
         // type that cannot carry one.
         query.AsQueryFrame().Dispose();
 
-        FileHandleProbe.AssertUnlocked(path, "NivaraParquetReader.ScanQuery left the file handle open");
+        FileHandleProbe.AssertUnlocked(path,
+            "NivaraParquetReader.ScanQuery left the file handle open. NivaraQuery<T> is not "
+            + "IDisposable (#501), so query.AsQueryFrame().Dispose() above is the only release "
+            + "path - do not 'fix' this by adding a using to the query");
     }
 
     // ── CSV: partial read, so disposal is the only thing that can release ──
@@ -171,7 +174,10 @@ public class ScanAsQueryFrameHandleTests
         // See ParquetScanQuery: NivaraQuery<T> is not IDisposable (issue #501).
         query.AsQueryFrame().Dispose();
 
-        FileHandleProbe.AssertUnlocked(path, "Csv.ScanQuery left the file handle open");
+        FileHandleProbe.AssertUnlocked(path,
+            "Csv.ScanQuery left the file handle open. NivaraQuery<T> is not IDisposable (#501), "
+            + "so query.AsQueryFrame().Dispose() above is the only release path - do not 'fix' "
+            + "this by adding a using to the query");
     }
 
     // ── JSON: partial read, so disposal is the only thing that can release ──
@@ -210,7 +216,10 @@ public class ScanAsQueryFrameHandleTests
         // See ParquetScanQuery: NivaraQuery<T> is not IDisposable (issue #501).
         query.AsQueryFrame().Dispose();
 
-        FileHandleProbe.AssertUnlocked(path, "Json.ScanQuery left the file handle open");
+        FileHandleProbe.AssertUnlocked(path,
+            "Json.ScanQuery left the file handle open. NivaraQuery<T> is not IDisposable (#501), "
+            + "so query.AsQueryFrame().Dispose() above is the only release path - do not 'fix' "
+            + "this by adding a using to the query");
     }
 
     // ── Helpers ──
