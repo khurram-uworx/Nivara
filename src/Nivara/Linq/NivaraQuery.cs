@@ -31,8 +31,6 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
         this.frame = frame ?? throw new ArgumentNullException(nameof(frame));
     }
 
-    internal QueryFrame Frame => frame;
-
     /// <summary>
     /// Gets a value indicating whether this query uses a lazy data source
     /// </summary>
