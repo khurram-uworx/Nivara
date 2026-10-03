@@ -77,6 +77,56 @@ public class IncidentSurfaceTests
             Directory.Delete(tempDir, true);
     }
 
+    /// <summary>
+    /// Two limits of <see cref="Surface"/> would make it silently under-count instead of failing.
+    /// Neither bites today, so nothing else in this fixture would notice them arriving.
+    /// </summary>
+    [Test]
+    public void IncidentSurface_SurfaceEnumerationHasNoKnownGaps()
+    {
+        const BindingFlags Declared = BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+        var types = typeof(Analysis).Assembly
+            .GetExportedTypes()
+            .Where(t => t.Namespace == IncidentNamespace)
+            .Where(t => !t.IsNested)
+            .OrderBy(t => t.Name, StringComparer.Ordinal);
+
+        var collisions = new List<string>();
+        var invisibleProperties = new List<string>();
+
+        foreach (var type in types)
+        {
+            // Surface() keys rows by member name alone, so two overloads would collapse into a
+            // single row and one exercise would then mark both of them covered.
+            collisions.AddRange(type.GetMethods(Declared)
+                .Where(m => !m.IsSpecialName)
+                .Where(m => !m.Name.StartsWith('<'))
+                .GroupBy(m => m.Name, StringComparer.Ordinal)
+                .Where(g => g.Skip(1).Any())
+                .Select(g => $"{type.Name}.{g.Key} has {g.Count()} overloads"));
+
+            // Surface() only emits a row for a property with a public static getter, so a static
+            // property with a setter but no getter would vanish instead of failing the gate.
+            // Restricted to static setters so this does not fire on every init-only POCO.
+            invisibleProperties.AddRange(type.GetProperties(Declared)
+                .Where(p => p.SetMethod is { IsPublic: true, IsStatic: true })
+                .Where(p => p.GetMethod is not { IsPublic: true })
+                .Select(p => $"{type.Name}.{p.Name}"));
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(collisions, Is.Empty,
+                "Surface() keys rows by member name alone, so overloads would collapse into one row "
+                + "and a single exercise would mark both of them covered. Key rows by signature "
+                + "before adding an overload.");
+            Assert.That(invisibleProperties, Is.Empty,
+                "Surface() only emits a row for a property with a public static getter, so a "
+                + "write-only static property would disappear rather than fail the gate.");
+        });
+    }
+
     [Test]
     public void IncidentSurface_HasNoUnregisteredMembers()
     {
@@ -92,6 +142,10 @@ public class IncidentSurfaceTests
         // A static holder class (Analysis, Ingestion, ...) has no behaviour of its own, so its row
         // is satisfied when every member it declares is resolved. Spelling that out here rather
         // than hand-listing five more registry entries keeps the two from drifting apart.
+        // Consequence worth stating: a holder can resolve entirely through skipped members, which
+        // is what DatasetGenerator does today -- Generate is skipped, and the holder row resolves
+        // without that member executing. That is the skip list working as intended, and the
+        // printed summary names the skips so a reader can see it rather than infer it.
         foreach (var holder in StaticHolderTypes())
         {
             var members = surface
