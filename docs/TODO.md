@@ -70,10 +70,10 @@ Left alone deliberately — changing it would add noise for no behavioural gain.
 is correct for the same reason: the `using` binds to the terminal query, which owns the
 shared handle.
 
-**Docs — the gap is that `STREAMING.md` teaches a shape `LINQ.md` now forbids.** #501
+**Docs — the gap is that the examples teach a shape `LINQ.md` now forbids.** #501
 documented the disposal contract for the typed `ScanQuery` surface (`docs/LINQ.md:73-101`,
-including "Dispose the query you created" at `:93`) but left the `ScanAsQueryFrame`
-examples untouched. Eleven sites contradict it:
+including "Dispose the query you created" at `:94`) but left the example snippets
+untouched, in `docs/` and at the repo root. Fifteen sites contradict it:
 
 | File | Line | Shape |
 |---|---|---|
@@ -88,6 +88,21 @@ examples untouched. Eleven sites contradict it:
 | `docs/ACCELERATION.md` | 214 | `await foreach (... in Csv.ScanAsQueryFrame(p).Filter(...).AsStream(...))` |
 | `docs/LINQ.md` | 505 | `var adults = Csv.ScanQuery<Person>(p).Where(...).ToObjects();` — terminal is a `List<Person>`, so **nothing** in the chain is ever disposed. Same shape as the test defect. |
 | `docs/LINQ.md` | 64, 66 | `var query = Json.ScanQuery<Person>(...)` / `var csvQuery = Csv.ScanQuery<Person>(...)` — held in locals, never disposed, 10 lines above the guidance that says to wrap them in `using` |
+| `GETTING-STARTED.md` | 355 | `var customCsv = Csv.ScanQuery<Employee>(p, opts).Collect();` — **identical to the test defect**, in the onboarding doc |
+| `GETTING-STARTED.md` | 343 | `var csvQuery = Csv.ScanQuery<Employee>(...)...; var result = csvQuery.Collect();` — held, never disposed |
+| `GETTING-STARTED.md` | 373 | `var jsonQuery = Json.ScanQuery<User>(...)...; var jsonResult = jsonQuery.Collect();` — held, never disposed |
+| `GETTING-STARTED.md` | 940 | `var query = Csv.ScanQuery<Employee>(...)...; var result = query.Collect(); query.ExplainPlan();` — held, never disposed, and used after `Collect()` |
+
+> **Sweep correction.** The first pass reported "eleven doc sites" and was wrong: the grep
+> was scoped to `docs/`, so it never saw the repo-root markdown. A repo-wide sweep during
+> execution added the four `GETTING-STARTED.md` rows, one of which (`:355`) is the same
+> defect as the test. Recorded rather than quietly absorbed, because the original plan text
+> is the thing G2 checks the branch against.
+
+Also swept and confirmed **clean**: no `.cs` hit outside the one test line, no
+`Csv`/`Json` reader pointed at a `.parquet` path outside the three `STREAMING.md`
+instances corrected in this commit, and no other root-level markdown (`README.md`,
+`ARCHITECTURE.md`, `EXAMPLES.md`, `CHANGELOG.md`) containing a discarded-scan shape.
 
 ## Proposed changes
 
@@ -111,11 +126,18 @@ Safe, with three points verified rather than assumed:
   `QueryFrame.Dispose()` no longer keeps a per-frame `disposed` flag — the whole chain
   shares one release point.
 
-### Commit B — `docs: bind the lazy frame in examples instead of discarding it`
+### Commit B — `docs: make the examples obey the disposal contract #501 documented`
 
-Bind to a named local at the eleven sites. Most are mechanical — each is `await`ed to
-completion or `foreach`ed to exhaustion, so `using var` / `await using var` scoped to the
-block is correct.
+Bind to a named local at the fifteen sites across four files. Most are mechanical — each is
+`await`ed to completion or `foreach`ed to exhaustion, so `using var` / `await using var`
+scoped to the block is correct.
+
+**Also rewrites the `STREAMING.md` "Resource management" section** (`:164-190`). The examples
+are only self-consistent if the section states the rules they now follow, so this commit adds
+four bullets: dispose the scan you created; one source, one release (cross-linked to the
+authoritative `LINQ.md#resource-management`); a full read masks a missing `Dispose`; and
+deferred operators need the frame to outlive setup. Without them the new `await using` lines
+read as unexplained verbosity.
 
 **Three are deferred-lifetime sites and are the real risk in this commit.** `ToFlux()`
 returns an `IFlux` built by `Flux.From(queryFrame.AsStream(...))` (`NivaraFlux.cs:19-20`),
@@ -132,21 +154,40 @@ the body is read — converting a leak into a use-after-dispose.
 - **370 (minimal API `ToSseAsync`)** — mechanically fine (awaited to completion), but sits
   in the same block family as 354; confirm the two read consistently.
 
-`docs/LINQ.md:505` needs its own shape: the terminal is a `List<Person>`, so binding a
-local is not enough — the query has to be named, held, and disposed.
+`docs/LINQ.md:505` needs its own shape: `ToObjects()` returns `IReadOnlyList<T>`
+(`NivaraQuery.cs:358`), which is not disposable, so binding a local to the result is not
+enough — the query has to be named, held, and disposed. `GETTING-STARTED.md:355` is the same:
+`Collect()` returns the disposable `NivaraFrame` (`NivaraQuery.cs:303`), so a `using` on the
+chained expression binds to the result and the query still needs its own.
 
-**Two snippets are edited for both disposal and API correctness** (human decision, G1). Where
-a snippet is already being rewritten for disposal, leaving a call to an API that does not
-exist would be worse than leaving either problem alone:
+**Three snippets are edited for both disposal and API correctness** (human decision at G1,
+extended during execution). Where a snippet is already being rewritten for disposal, leaving a
+call that cannot work would be worse than leaving either problem alone:
 
 - `docs/ACCELERATION.md:214-216` — `.AsStream(enforced: true)` and `.Filter("status", "OK")`
   have no counterpart in `QueryFrame.AsStream(int chunkSize = 10000, CancellationToken ct)`
-  (`QueryFrame.cs:461`) or `QueryFrame.Filter(ColumnExpression)` (`QueryFrame.cs:110`).
+  (`QueryFrame.cs:461`) or `QueryFrame.Filter(ColumnExpression)` (`QueryFrame.cs:110`). The
+  inline comment "chunk memory is guaranteed to stay within the budget" was propped up by the
+  fake `enforced:` parameter, so it goes too, replaced by a pointer to the execution-context
+  route shown directly above it in the same file. The yielded chunk was also never disposed,
+  which violates the rule the commit is enforcing, so it is wrapped.
 - `docs/STREAMING.md:135` — the same `.Filter("status", "OK")`, in the same code block as
   site 153, so the two are corrected together or not at all.
+- `docs/STREAMING.md:222, 315, 386` — `Csv.ScanAsQueryFrame("*.parquet")`. A CSV reader on a
+  Parquet file fails at read time; the correct factory is `NivaraParquetReader.ScanAsQueryFrame`.
+  All three instances were being edited for disposal anyway, and making two of three correct
+  would be worse than making none.
+
+`QueryFrame.Select(params string[] columnNames)` **does** exist (`QueryFrame.cs:121`), so
+`.Select("timestamp", "value")` at `STREAMING.md:136` was already valid. An earlier draft of
+this commit "fixed" it to `ColumnExpressions.Col(...)`; that was reverted rather than leave an
+unnecessary change in the diff. Verified against the signature, not assumed.
 
 Stale mentions in files this branch does not otherwise touch (`ARCHITECTURE.md:356-358`,
-`README.md:83`, `ARCHITECTURE.md:319`) are filed as a separate issue rather than folded in.
+`ARCHITECTURE.md:319`, `ARCHITECTURE.md:1024`, `README.md:84`,
+`samples/NivaraIncident/README.md:83, 167-168`) are filed as #510 rather than folded in.
+`CHANGELOG.md:443-444` is left alone deliberately: a changelog entry is a historical record of
+what shipped, not a usage example.
 
 ## Verification
 
