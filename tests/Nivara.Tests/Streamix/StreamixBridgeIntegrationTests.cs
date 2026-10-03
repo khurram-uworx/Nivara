@@ -270,7 +270,16 @@ public class StreamixBridgeIntegrationTests
     public async Task ToFluxRows_ToNivaraFrameAsync_CsvRoundTrips()
     {
         var csvPath = CreateCsvFile(tempDir, 20);
-        using var expected = Csv.ScanAsQueryFrame(csvPath).Collect();
+
+        // Hold the frame, not just the collected result: the `using` on a chained
+        // Csv.ScanAsQueryFrame(...).Collect() binds to the NivaraFrame and leaves the
+        // QueryFrame - the sole owner of the CsvLazySource - to be finalized. Nothing
+        // releases it deterministically: QuerySourceHandle has no finalizer and its
+        // NivaraResourceManager tracking is opt-in and off by default. A full Collect()
+        // happens to reach EOF, where CsvLazySource closes its chunk reader on its own,
+        // which is the only reason this was not visible.
+        using var expectedFrame = Csv.ScanAsQueryFrame(csvPath);
+        using var expected = expectedFrame.Collect();
 
         using var queryFrame = Csv.ScanAsQueryFrame(csvPath);
         var fluxRows = queryFrame.ToFluxRows(chunkSize: 5);
