@@ -1,7 +1,9 @@
 using Nivara.IO;
 using Nivara.Linq;
+using Nivara.Query;
 using Nivara.Tests.IO;
 using NUnit.Framework;
+using System.Reflection;
 
 namespace Nivara.Tests.Query;
 
@@ -224,6 +226,70 @@ public class NivaraQueryDisposalTests
             Assert.That(() => derived.Where(p => p.Age > 2), Throws.TypeOf<ObjectDisposedException>());
             Assert.That(() => _ = derived.IsLazy, Throws.TypeOf<ObjectDisposedException>());
         });
+    }
+
+    /// <summary>
+    /// Gates the shape of the release surface: exactly one declared member hands out the
+    /// <see cref="QueryFrame"/>, and it is the public, documented <c>AsQueryFrame()</c> - issue #507.
+    /// <para>
+    /// #507 deleted <c>internal QueryFrame Frame</c>, which had no reader anywhere and duplicated
+    /// <c>AsQueryFrame()</c> exactly. It was a trap rather than dead code: it returned the same
+    /// shared-source frame that <c>Dispose()</c> releases, so <c>query.Frame.Dispose()</c> was the
+    /// same action as <c>query.Dispose()</c> carrying none of the one-source-one-release
+    /// documentation. A future <c>RawFrame</c> or second accessor would reproduce it under a
+    /// different spelling, which a gate on the name "Frame" alone would not catch.
+    /// </para>
+    /// <para>
+    /// <b>What this gate proves, and what it cannot.</b> It pins the <em>shape</em> of the release
+    /// surface, so the next accessor has to be argued rather than added silently. It does not
+    /// prove any member is unused - that claim rests on the search, and only the compiler can
+    /// rule out a reader, which it already does because every assembly with access to Nivara
+    /// internals builds from this repository. Nor can it check that <c>AsQueryFrame()</c> is
+    /// documented: no XML doc file is produced, so the strongest form of this gate is not
+    /// buildable here. The grouped query is asserted to expose nothing because it deliberately has
+    /// no <c>AsQueryFrame()</c>; #501's CHANGELOG frames that absence as the defect it fixed, so
+    /// growing one back would regress that fix's intent.
+    /// </para>
+    /// </summary>
+    [Test]
+    public void NivaraQuery_ReleaseSurfaceExposesOnlyTheDocumentedAccessor()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(QueryFrameAccessorsOf(typeof(NivaraQuery<Person>)), Is.EqualTo(new[] { "AsQueryFrame() (method)" }),
+                "every way to reach the QueryFrame must be one the XML docs describe, because "
+                + "disposing it releases the source for the whole chain. A second accessor "
+                + "(RawFrame, UnderlyingFrame, a second AsQueryFrame overload) reintroduces the "
+                + "#507 trap under a name this gate cannot anticipate.");
+
+            Assert.That(QueryFrameAccessorsOf(typeof(NivaraGroupedQuery<string, Person>)), Is.Empty,
+                "NivaraGroupedQuery<TKey, T> has no AsQueryFrame() by design - #501 gave it Dispose "
+                + "instead, and its CHANGELOG entry records the missing accessor as the defect. "
+                + "Adding one would reopen the release path #501 closed.");
+        });
+    }
+
+    /// <summary>
+    /// Names every declared instance member - public or not - whose type is
+    /// <see cref="QueryFrame"/>, so the release surface is compared as a set rather than by
+    /// asserting one known name is absent.
+    /// </summary>
+    static string[] QueryFrameAccessorsOf(Type queryType)
+    {
+        const BindingFlags Declared =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+        return queryType
+            .GetMembers(Declared)
+            .Select(member => member switch
+            {
+                PropertyInfo property when property.PropertyType == typeof(QueryFrame) => $"{property.Name} (property)",
+                MethodInfo method when method.ReturnType == typeof(QueryFrame) && !method.IsSpecialName => $"{method.Name}() (method)",
+                _ => null,
+            })
+            .OfType<string>()
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
     }
 
     /// <summary>
