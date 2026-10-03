@@ -135,6 +135,19 @@ the body is read — converting a leak into a use-after-dispose.
 `docs/LINQ.md:505` needs its own shape: the terminal is a `List<Person>`, so binding a
 local is not enough — the query has to be named, held, and disposed.
 
+**Two snippets are edited for both disposal and API correctness** (human decision, G1). Where
+a snippet is already being rewritten for disposal, leaving a call to an API that does not
+exist would be worse than leaving either problem alone:
+
+- `docs/ACCELERATION.md:214-216` — `.AsStream(enforced: true)` and `.Filter("status", "OK")`
+  have no counterpart in `QueryFrame.AsStream(int chunkSize = 10000, CancellationToken ct)`
+  (`QueryFrame.cs:461`) or `QueryFrame.Filter(ColumnExpression)` (`QueryFrame.cs:110`).
+- `docs/STREAMING.md:135` — the same `.Filter("status", "OK")`, in the same code block as
+  site 153, so the two are corrected together or not at all.
+
+Stale mentions in files this branch does not otherwise touch (`ARCHITECTURE.md:356-358`,
+`README.md:83`, `ARCHITECTURE.md:319`) are filed as a separate issue rather than folded in.
+
 ## Verification
 
 **The fix's behavioural effect is unobservable on this code path.** A green handle probe
@@ -177,6 +190,6 @@ Non-regression check only, after the fix:
 
 ## GitHub issues log
 
-- [ ] #NNN — stale API in doc snippets (`Filter("status","OK")`, `AsStream(enforced: true)`,
+- [x] #510 — stale API in doc snippets (`Filter("status","OK")`, `AsStream(enforced: true)`,
   `Csv.ScanAsQueryFrame(path, chunkSize)`, `Parquet.ScanAsQueryFrame`) — created while
-  working on #502
+  working on #502. The two snippets #502 edits are fixed there; the rest is #510.
