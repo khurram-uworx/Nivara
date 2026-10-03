@@ -313,10 +313,10 @@ public class ResourceManagementPropertyTests
             // Act - Create lazy queries and abandon them in a separate method to ensure no strong references
             CreateAndAbandonQueries(tempFiles, weakRefs);
 
-            // Verify queries are tracked
+            // Verify the query source handles behind them are tracked
             var statsBefore = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQueryFrame"), Is.True,
-                "Lazy query frames should be tracked");
+            Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQuerySource"), Is.True,
+                "Lazy query sources should be tracked");
 
             // Force multiple garbage collection cycles to ensure cleanup
             for (int i = 0; i < 5; i++)
