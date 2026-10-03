@@ -174,15 +174,42 @@ the leak is fixed at the source instead.
 test file. No public API, kernel, tensor or AutoDiff surface changes. The CLI's six
 call sites into `Analysis.*` get correct handle lifetimes as a side effect.
 
-## Verification steps
+## Verification steps — all executed, with results
 
-1. Add the gate file alone, run it against unfixed code → expect exactly the two
-   grouped-aggregation tests red. If they pass, the diagnosis is wrong and we stop.
-2. Apply changes 1-4 → gate green.
-3. `dotnet test -c Release --filter "FullyQualifiedName~Incident"`.
-4. Full suite `dotnet test -c Release --filter "Category!=Performance"`, capturing
-   the exit status of the process itself (not of a pipeline filter), repeated >=3x
-   since the original symptom was 1-in-N. Report the distribution, not one run.
+1. **Gate red before the fix.** `AnalysisResourceTests` against unfixed code:
+   `Failed: 4, Passed: 2`, `dotnet test` exit status **1**. The shape was not the
+   predicted "exactly 2 red" — `AnalyzeGroupedAggregation` failed on its own
+   post-call probe (*"AnalyzeGroupedAggregation left the Parquet file handle
+   open"*) and the three alphabetically later tests then failed on their
+   **baseline** probe. One root cause, four red tests; the baseline probe is what
+   made the attribution unambiguous.
+2. **A second, pre-existing bug surfaced.** `AnalyzeGroupedAggregationWithTypedLinq`
+   kept failing after the disposal fix — with `SchemaValidationException`, not a
+   lock. It maps `RequestRow`, which declares `DurationPercentRank`, but its
+   pipeline never created that column. It has **zero callers** outside the new gate
+   and had never been executed. Confirmed pre-existing by reproducing it on a
+   `git stash`ed pristine tree. Fixed by adding the same `PercentRank` step
+   `AnalyzeRegionalPartitioning` already uses (human-approved; not a handle defect).
+3. **Gate green after the fix.** `AnalysisResourceTests`: `Passed: 6, Failed: 0`,
+   exit status **0**.
+4. **No incident regression.** `FullyQualifiedName~Nivara.Tests.Incident`:
+   `Passed: 62, Failed: 0`, exit status **0** — including with the
+   `StreamixScenarioTests` swallow removed.
+5. **Full suite, 3 consecutive runs**, exit status captured from the `dotnet test`
+   process itself with no pipeline in the way:
+
+   | Run | Exit | Result |
+   | --- | --- | --- |
+   | 1 | 0 | Passed: 3761, Failed: 0, Skipped: 14, Total: 3775 |
+   | 2 | 0 | Passed: 3761, Failed: 0, Skipped: 14, Total: 3775 |
+   | 3 | 0 | Passed: 3761, Failed: 0, Skipped: 14, Total: 3775 |
+
+   3/3 at exit 0, against a 1-in-N reported symptom.
+
+Note on method: an initial gate run reported `EXITCODE=0` while printing four
+failures, because `$LASTEXITCODE` after a pipe is the *pipe's* status. Every
+result above re-runs without a pipeline. This is the exact trap AGENTS.md warns
+about, and the same one that made #496 hard to read.
 
 ## Blast radius
 
@@ -195,18 +222,37 @@ call sites into `Analysis.*` get correct handle lifetimes as a side effect.
 
 No public API or contract change. No kernel, tensor or AutoDiff surface is touched.
 
-## Planned commits
+## Planned commits — as landed
 
-1. `docs: plan #496 in TODO.md`
-2. `fix(incident): dispose Parquet-backed QueryFrames in Analysis and StreamixScenarios`
-3. `test(incident): gate Parquet file-handle release per Analysis entry point`
-4. `test(incident): remove StreamixScenarioTests teardown IOException swallow`
-5. `docs: remove TODO.md — #496 plan executed`
+1. `docs: plan #496 in TODO.md` — `366ada2`
+2. `docs: record #496 G1 grounding outcome in TODO.md` — `4e3fba7`
+3. `test(incident): gate Parquet file-handle release per Analysis entry point` — `9813a9c`
+   (committed **red**, before the fix, so the gate's value is evidenced rather than asserted)
+4. `fix(incident): dispose Parquet-backed QueryFrames in Analysis and StreamixScenarios` — `24d10e1`
+5. `test(incident): remove StreamixScenarioTests teardown IOException swallow` — `5015257`
+
+Planned order was gate-after-fix; the gate was moved ahead of the fix so its red
+state could be observed and recorded. Commits 3 and 4 remain separately
+reviewable, and the fix commit's message states the before/after counts.
+
+## Deferred work discovered during execution
+
+- `AnalyzeGroupedAggregationWithTypedLinq` had **no test coverage and had never
+  run**. Fixed here (human-approved). The wider gap — sample methods in
+  `samples/Nivara.Samples/Incident/` being callable-but-unverified — is logged as
+  a follow-up issue below.
+- `ParquetLazySource` opens with `FileShare.Read` and no `FileShare.Delete`, so
+  *any* future leak in *any* consumer blocks deletion on Windows. The new gate
+  covers the six `Analysis` entry points only; other `ScanAsQueryFrame` consumers
+  (`Csv`, `Json`, `AsyncStreamingTests`, `NivaraParquetReader.ScanQuery`) have no
+  equivalent handle-release gate. Logged as a follow-up issue below.
 
 ## GitHub issues log
 
 - [x] #496 — this work (created while verifying #494)
-- [ ] #494 — BatchNorm eval mode produces no weight/bias gradient (merged, PR #497)
+- [ ] #498 — no handle-release gate for non-Incident `ScanAsQueryFrame` consumers (created while fixing #496)
+- [ ] #499 — `samples/Nivara.Samples/Incident` methods are callable but unverified (created while fixing #496)
+- [x] #494 — BatchNorm eval mode produces no weight/bias gradient (merged, PR #497)
 
 > As each task executes, if you find deferred work or a concern, create a tracked
 > issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its
