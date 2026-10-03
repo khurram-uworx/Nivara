@@ -211,14 +211,23 @@ var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
 
 ```csharp
 // Fluent API on QueryFrame
-await foreach (var chunk in Csv.ScanAsQueryFrame("data.csv")
-    .Filter("status", "OK")
-    .AsStream(enforced: true))   // shorthand: sets BudgetEnforcement.Enforced
+await using var telemetry = Csv.ScanAsQueryFrame("data.csv")
+    .Filter(ColumnExpressions.Col("status") == "OK");
+
+await foreach (var chunk in telemetry.AsStream())
 {
-    // chunk memory is guaranteed to stay within the budget
-    Process(chunk);
+    // The consumer owns each yielded chunk, and the budget caps how big one gets.
+    using (chunk)
+    {
+        Process(chunk);
+    }
 }
 ```
+
+`AsStream` takes `(int chunkSize = 10000, CancellationToken ct = default)`. Budget
+enforcement is a property of the execution context, not of `AsStream` — set
+`BudgetEnforcement = BudgetEnforcement.Enforced` on the `NivaraExecutionContext` that
+runs the query, as shown above.
 
 When `BudgetEnforcement` is `Advisory`, the pipeline behaves identically to today: `StreamingBudgetTracker` records and warns, but reads are never blocked.
 

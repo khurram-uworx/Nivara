@@ -61,9 +61,10 @@ exact or nullable-underlying type, validated eagerly at `Query<T>()` (no data ac
 
 ```csharp
 // Nivara.IO.Json (core) and Nivara.Extensions.IO.Csv (Extensions)
-var query = Json.ScanQuery<Person>("data.json");
+// Both are lazy and hold the file open — see "Resource management" below.
+using var query = Json.ScanQuery<Person>("data.json");
 
-var csvQuery = Csv.ScanQuery<Person>("data.csv");
+using var csvQuery = Csv.ScanQuery<Person>("data.csv");
 ```
 
 These create a lazy typed query over the file — the schema is inferred from a sample on construction,
@@ -502,7 +503,11 @@ var sampled = frame.Query<Product>().SelectRows(3, 0).ToObjects();
 ```csharp
 using Nivara.IO;
 
-var adults = Csv.ScanQuery<Person>("people.csv")
+// The query is what holds the file open — ToObjects() returns a plain
+// IReadOnlyList<T>, so the query is the thing you dispose, not the result.
+using var adultsQuery = Csv.ScanQuery<Person>("people.csv");
+
+var adults = adultsQuery
     .Where(p => p.Age > 30)
     .ToObjects();
 ```

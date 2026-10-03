@@ -270,7 +270,13 @@ public class StreamixBridgeIntegrationTests
     public async Task ToFluxRows_ToNivaraFrameAsync_CsvRoundTrips()
     {
         var csvPath = CreateCsvFile(tempDir, 20);
-        using var expected = Csv.ScanAsQueryFrame(csvPath).Collect();
+
+        // Dispose the scan, not just its result. On one line the `using` binds to the
+        // NivaraFrame and the QueryFrame - which owns the CsvLazySource - is abandoned with
+        // no deterministic release. See docs/STREAMING.md "Resource management"; the
+        // ScanAsQueryFrameHandleTests CSV case is the gate for this class of leak.
+        using var expectedFrame = Csv.ScanAsQueryFrame(csvPath);
+        using var expected = expectedFrame.Collect();
 
         using var queryFrame = Csv.ScanAsQueryFrame(csvPath);
         var fluxRows = queryFrame.ToFluxRows(chunkSize: 5);

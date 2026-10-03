@@ -132,7 +132,7 @@ budgets in the core query pipeline.
 
 ```csharp
 await using var query = Csv.ScanAsQueryFrame("telemetry.csv")
-    .Filter("status", "OK")
+    .Filter(ColumnExpressions.Col("status") == "OK")
     .Select("timestamp", "value");
 
 await foreach (var chunk in query.AsStream(chunkSize: 50_000, ct))
@@ -150,9 +150,10 @@ await foreach (var chunk in query.AsStream(chunkSize: 50_000, ct))
 
 // Non-streamable fallback: Sort needs the whole dataset → single frame.
 // The single frame is consumer-owned too — dispose it when done.
-await foreach (var frame in Csv.ScanAsQueryFrame("telemetry.csv")
-                 .Sort("timestamp")
-                 .AsStream())
+await using var sorted = Csv.ScanAsQueryFrame("telemetry.csv")
+    .Sort("timestamp");
+
+await foreach (var frame in sorted.AsStream())
 {
     // frame holds ALL rows — same as CollectAsync()
     frame.Dispose();
@@ -163,11 +164,36 @@ await foreach (var frame in Csv.ScanAsQueryFrame("telemetry.csv")
 
 - `QueryFrame` implements `IDisposable` and `IAsyncDisposable`; wrap scan/query chains in
   `await using` where possible.
+- **Dispose the scan you created, not just its result.** A lazy scan holds the file open.
+  `using var expected = Csv.ScanAsQueryFrame(p).Collect();` binds the `using` to the returned
+  `NivaraFrame` and discards the `QueryFrame`, which is the frame that actually owns the
+  source. Bind the scan to a named local and dispose that:
+  `await using var scan = Csv.ScanAsQueryFrame(p); var result = scan.Collect();`
+- **One source, one release.** A frame derived from another shares the same source, so
+  disposing any frame in a chain releases it for the whole chain and the survivors then throw
+  `ObjectDisposedException`. This is the same contract `FileStream` has, and it is deliberate —
+  reference counting is not possible because derived frames are temporaries inside expressions
+  that are never disposed. So you do not have to dispose each intermediate: a `using` bound to
+  the terminal of a chain is sufficient, and an abandoned intermediate is not itself a leak.
+  Dispose the scan you created. See [LINQ.md](LINQ.md#resource-management) for the typed-query
+  form of the same contract.
+- **A full read masks a missing `Dispose`.** CSV and JSON close their chunk reader on their own
+  once a read reaches EOF, so reading to completion releases the handle even if the scan was
+  never disposed. Partial reads (a filter, a `break`, cancellation) are where an undisposed scan
+  actually leaks, and Parquet holds its reader until disposal in every case. Do not use
+  "the test passes" as evidence that a scan is disposed.
 - **The consumer owns each yielded chunk frame.** `AsStream` yields raw `NivaraFrame`s to the
   caller; the pipeline never disposes them (disposing the enumerator only disposes the
   enumerator). Dispose each chunk when you are done with it — wrap the loop body in
   `try/finally chunk.Dispose()` as shown above. This also applies to the single-frame
   fallback.
+- **Deferred operators need the frame to outlive the setup call.** `ToFlux`, `Publish` and
+  `FluxResult` all defer the read until the consumer subscribes or the response body is
+  enumerated. A `using` in the method that builds the pipeline would dispose the frame first,
+  and by the "one source, one release" rule above every later read would throw
+  `ObjectDisposedException`. Tie the frame to whatever actually owns the subscription — for a
+  response, `HttpContext.Response.RegisterForDispose(frame)`; see the `Publish` and
+  `FluxResult` examples below.
 - Cancellation (via `ct`) propagates into the source reader and the producer loop; the
   channel is completed on normal exit and faulted on error.
 
@@ -218,9 +244,10 @@ Use `ToFlux` (Streamix bridge) when you need:
 **Streaming chunks with retries:**
 
 ```csharp
-await Csv.ScanAsQueryFrame("telemetry.parquet")
-    .Filter(ColumnExpressions.Col("cpu") > 80)
-    .ToFlux(chunkSize: 50_000)
+await using var cpuSpikes = NivaraParquetReader.ScanAsQueryFrame("telemetry.parquet")
+    .Filter(ColumnExpressions.Col("cpu") > 80);
+
+await cpuSpikes.ToFlux(chunkSize: 50_000)
     .Named("cpu-spike-scan")
     .Retry(3, (attempt, ex) => TimeSpan.FromMilliseconds(100 * attempt))
     .Checkpoint("chunk")
@@ -231,8 +258,9 @@ await Csv.ScanAsQueryFrame("telemetry.parquet")
 
 ```csharp
 // String-based overload (column must be DateTimeOffset)
-await Csv.ScanAsQueryFrame("telemetry.csv")
-    .ToFluxWithTimestamp("observed_at", chunkSize: 1000)
+await using var telemetry = Csv.ScanAsQueryFrame("telemetry.csv");
+
+await telemetry.ToFluxWithTimestamp("observed_at", chunkSize: 1000)
     .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1))
     .FlatMap(async window =>
     {
@@ -281,8 +309,8 @@ await query
 **Row-level reverse terminal (collect a row stream back to a frame):**
 
 ```csharp
-var fluxRows = Csv.ScanAsQueryFrame("events.csv")
-    .ToFluxRows(chunkSize: 5000);
+await using var events = Csv.ScanAsQueryFrame("events.csv");
+var fluxRows = events.ToFluxRows(chunkSize: 5000);
 
 using var result = await fluxRows.ToNivaraFrameAsync();
 // result is the full NivaraFrame, same as CollectAsync()
@@ -312,22 +340,36 @@ Streamix's `Publish()` and `Replay()` let a single Nivara query fan out to multi
 consumers without re-executing the source:
 
 ```csharp
-var shared = Csv.ScanAsQueryFrame("metrics.parquet")
-    .Filter(ColumnExpressions.Col("status") == "active")
-    .ToFlux(chunkSize: 50_000)
-    .Publish();
+// Publish defers every read until Connect(), and the shared subscription outlives
+// this setup - so the frame cannot be disposed here. It is owned by whoever tears
+// the subscription down.
+var metrics = NivaraParquetReader.ScanAsQueryFrame("metrics.parquet")
+    .Filter(ColumnExpressions.Col("status") == "active");
 
-shared.Subscribe(chunk => dashboard.Update(chunk));   // consumer 1
-shared.Subscribe(chunk => archival.Write(chunk));      // consumer 2
-shared.Connect();                                      // start the shared subscription
+var shared = metrics.ToFlux(chunkSize: 50_000).Publish();
+
+// Both consumers read the one shared upstream enumeration.
+var dashTask = shared.ForEachAsync(chunk => dashboard.Update(chunk));    // consumer 1
+var archiveTask = shared.ForEachAsync(chunk => archival.Write(chunk));   // consumer 2
+
+// Connect() returns the handle that owns the shared subscription.
+var connection = shared.Connect();
+
+// On shutdown:
+connection.Dispose();
+await Task.WhenAll(dashTask, archiveTask);
+metrics.Dispose();
 ```
 
 `Replay(bufferSize)` additionally replays the last N items to late subscribers:
 
 ```csharp
 var replayed = query.ToFlux(chunkSize: 10_000).Replay(bufferSize: 3);
-replayed.Subscribe(chunk => liveUI.Push(chunk));  // gets last 3 immediately
-replayed.Connect();
+
+// gets the last 3 items immediately, then live
+var uiTask = replayed.ForEachAsync(chunk => liveUI.Push(chunk));
+
+var replayConnection = replayed.Connect();
 ```
 
 ### ASP.NET Core SSE streaming
@@ -351,10 +393,15 @@ public class TelemetryController : ControllerBase
     [HttpGet("stream")]
     public IActionResult StreamTelemetry()
     {
-        var flux = Csv.ScanAsQueryFrame("telemetry.csv")
-            .Filter(ColumnExpressions.Col("host") == "prod-01")
-            .ToFlux(chunkSize: 1000);
-        return new FluxResult<NivaraFrame>(flux);
+        var telemetry = Csv.ScanAsQueryFrame("telemetry.csv")
+            .Filter(ColumnExpressions.Col("host") == "prod-01");
+
+        // ToFlux defers every read until the response body is enumerated, so the frame must
+        // outlive this method. Tie it to the request, not to a using — a using here would
+        // dispose the source before FluxResult ever enumerates it.
+        HttpContext.Response.RegisterForDispose(telemetry);
+
+        return new FluxResult<NivaraFrame>(telemetry.ToFlux(chunkSize: 1000));
     }
 }
 ```
@@ -367,9 +414,11 @@ using Streamix.AspNetCore;
 
 app.MapGet("/api/telemetry/stream", async (HttpResponse response) =>
 {
-    await Csv.ScanAsQueryFrame("telemetry.csv")
-        .Filter(ColumnExpressions.Col("host") == "prod-01")
-        .ToFlux(chunkSize: 1000)
+    // ToSseAsync is awaited to completion, so the frame can be scoped to this handler.
+    await using var telemetry = Csv.ScanAsQueryFrame("telemetry.csv")
+        .Filter(ColumnExpressions.Col("host") == "prod-01");
+
+    await telemetry.ToFlux(chunkSize: 1000)
         .ToSseAsync(response);
 });
 ```
@@ -383,8 +432,9 @@ Streamix's diagnostic operators compose directly with Nivara `IFlux<T>` streams.
 Use them for visibility into chunk flow, latency, and pipeline health:
 
 ```csharp
-await Csv.ScanAsQueryFrame("telemetry.parquet")
-    .ToFlux(chunkSize: 50_000)
+await using var telemetry = NivaraParquetReader.ScanAsQueryFrame("telemetry.parquet");
+
+await telemetry.ToFlux(chunkSize: 50_000)
     .Named("telemetry-pipeline")       // appears in logs and diagnostics
     .Checkpoint("after-scan")          // logs item count + elapsed time
     .Trace("chunk-flow")               // logs OnNext/OnError/OnComplete lifecycle
