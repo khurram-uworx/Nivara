@@ -146,10 +146,26 @@ platform-dependent.
 
 ## Verification steps
 
-1. **G1 first — prove the negative control goes red by design on ubuntu-latest.** Run the
-   control in a Linux container and record the exit status. If `FileShare.None` has no teeth
-   there, stop and escalate: the gate would be reporting nothing on CI, and that is a different
-   fix (not "make the test pass").
+1. ~~**G1 — prove the negative control goes red by design on ubuntu-latest.**~~ **DONE.**
+   Ran `FileHandleProbe`'s exact probe semantics in `mcr.microsoft.com/dotnet/sdk:11.0`
+   (Ubuntu 26.04.1 LTS, .NET 11.0.0-rc.1) and on Windows 10.0.26300. Both, exit 0:
+
+   | check | Linux | Windows |
+   |---|---|---|
+   | probe sees a `FileShare.Read` handle (negative control) | **PASS** | **PASS** |
+   | probe sees two concurrent `FileShare.Read` handles | **PASS** | **PASS** |
+   | probe sees a `FileShare.ReadWrite` handle | **PASS** | **PASS** |
+   | probe clean after release (no sticky lock) | **PASS** | **PASS** |
+   | `File.Delete` with a handle open | **succeeded ⇒ vacuous** | threw ⇒ carries weight |
+
+   So the probe is **not** vacuous on the Linux CI runner: .NET maps share modes onto
+   `flock(2)` and honours them across separate descriptors in one process. The gate has real
+   teeth on CI. The same run confirms the plan's other claim — the existing `File.Delete`
+   assertions in `ParquetStreamingTests.cs:254` / `JsonStreamingTests.cs:262` are structurally
+   incapable of failing there, so repointing them (step 5) is a coverage gain, not a no-op.
+
+   What the gate still cannot prove: the Windows `Directory.Delete` *symptom* #496 reported.
+   Detection is proven; reproduction is not. Stated in the fixture doc comment.
 2. `dotnet build Nivara.slnx` — no new warnings.
 3. Targeted run of the new fixture + `AnalysisResourceTests` + the two repointed tests,
    `-c Release`.
@@ -187,8 +203,15 @@ rather than weakening the gate — one commit, one reason.
 ## GitHub issues log
 
 - [ ] #498 — handle-release gate for non-Incident `ScanAsQueryFrame` consumers (this work)
-- [ ] TBD — `NivaraQuery<T>` does not implement `IDisposable`, so `ScanQuery<T>` consumers have
-  no `using` and must call `query.AsQueryFrame().Dispose()`. Create at G1.
+- [x] #501 — `NivaraQuery<T>` is not `IDisposable`, so `ScanQuery<T>` consumers have no `using`
+  and must call `query.AsQueryFrame().Dispose()`. Public API addition, split out of this gate.
+- [x] #502 — `StreamixBridgeIntegrationTests.cs:273` abandons a `QueryFrame`
+  (`Csv.ScanAsQueryFrame(...).Collect()` bound to the result, not the frame). Masked today
+  because `CsvLazySource` self-releases at EOF and CI's delete-based assertions cannot fail.
+  Deliberately **not** fixed here: #498 is the gate that catches this class; #496 set the same
+  precedent (gate in `9813a9c`, consumer fix in `24d10e1`). Once the gate lands, confirm this
+  line is genuinely red — if it passes unfixed, the gate's CSV/JSON cases are vacuous and that
+  is the more important finding.
 
 > As each task executes, if you find deferred work or a concern outside this plan, create a
 > tracked issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record its
