@@ -1,3 +1,4 @@
+using Nivara.Expressions;
 using Nivara.IO;
 using Nivara.Samples.Incident;
 using NUnit.Framework;
@@ -188,6 +189,103 @@ public class AnalysisTests
             regions.Add((string)regionCol.GetValue(i)!);
 
         Assert.That(regions, Does.Contain("ap-south-1"));
+    }
+
+    [Test]
+    public void TypedLinqGroupedAggregation_AgreesWithTheHandRolledAggregation()
+    {
+        var dir = Path.Combine(tempDir, "A");
+        var scenario = Scenarios.Get("A");
+
+        using var typed = Analysis.AnalyzeGroupedAggregationWithTypedLinq(dir, scenario);
+        using var handRolled = Analysis.AnalyzeGroupedAggregation(dir, scenario);
+
+        // Both group the incident window by Service and report per-service totals, so the two must
+        // agree exactly on the shared columns. This is the only assertion on the results of the
+        // method #499 is named after; everything else about it checks that it runs.
+        // Compared by service key, not row position: the hand-rolled analysis sorts service names
+        // explicitly, while the typed LINQ GroupBy emits groups in first-seen order. Row i is a
+        // different service on each side, which is why this compares through a lookup.
+        var typedByService = IndexByService(typed, "TotalRequests", "AvgDuration");
+        var handByService = IndexByService(handRolled, "TotalRequests", "AvgDurationMs");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(typed.RowCount, Is.EqualTo(handRolled.RowCount),
+                "both analyses group by Service, so they should produce the same number of groups");
+            Assert.That(typedByService.Keys, Is.EquivalentTo(handByService.Keys),
+                "both analyses should group over the same set of services");
+
+            foreach (var (service, (typedTotal, typedAvg)) in typedByService)
+            {
+                if (!handByService.TryGetValue(service, out var hand))
+                {
+                    Assert.Fail($"service '{service}' is missing from the hand-rolled result");
+                    continue;
+                }
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(typedTotal, Is.EqualTo(hand.Total),
+                        $"TotalRequests disagrees for service '{service}'");
+                    Assert.That(typedAvg, Is.EqualTo(hand.Avg).Within(1e-9),
+                        $"AvgDuration disagrees for service '{service}'");
+                });
+            }
+        });
+    }
+
+    static Dictionary<string, (long Total, double Avg)> IndexByService(
+        NivaraFrame frame, string totalColumn, string avgColumn)
+    {
+        var service = frame.GetColumn<string>("Service");
+        var avg = frame.GetColumn<double>(avgColumn);
+
+        // TotalRequests is Int32 in the hand-rolled result and Int64 in the typed LINQ one, because
+        // g.Count() over the grouped query widens. Reading it as IColumn and switching on the
+        // runtime value keeps this test from encoding which spelling each pipeline happened to
+        // choose -- the widened-vs-narrow distinction is a shape detail, not a result.
+        var total = frame.GetColumn(totalColumn);
+
+        var index = new Dictionary<string, (long, double)>(StringComparer.Ordinal);
+        for (int i = 0; i < frame.RowCount; i++)
+        {
+            object? cell = total.GetValue(i);
+            long count = cell switch { int narrow => narrow, long wide => wide, _ => throw new InvalidOperationException($"unexpected {cell?.GetType()} in {totalColumn}") };
+            index[(string)service.GetValue(i)!] = (count, (double)avg.GetValue(i)!);
+        }
+
+        return index;
+    }
+
+    [Test]
+    public void TypedLinqGroupedAggregation_TotalsMatchTheIncidentWindow()
+    {
+        var dir = Path.Combine(tempDir, "A");
+        var scenario = Scenarios.Get("A");
+
+        using var typed = Analysis.AnalyzeGroupedAggregationWithTypedLinq(dir, scenario);
+        var typedTotal = typed.GetColumn<long>("TotalRequests");
+
+        // Cross-check the group sums against the incident window read directly, so a pipeline that
+        // silently filtered rows away could not still agree with itself. WindowByTime is not
+        // involved here, so the two counts must be identical.
+        int expected;
+        using (var query = Ingestion.LoadParquet(Path.Combine(dir, "requests.parquet"))
+            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
+            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks)))
+        using (var frame = query.Collect())
+        {
+            expected = frame.RowCount;
+        }
+
+        long summed = 0;
+        for (int i = 0; i < typed.RowCount; i++)
+            summed += (long)typedTotal.GetValue(i)!;
+
+        Assert.That(expected, Is.GreaterThan(0), "the incident window should contain rows");
+        Assert.That(summed, Is.EqualTo(expected),
+            "group totals should add up to the rows in the incident window");
     }
 
     [Test]

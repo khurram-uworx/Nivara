@@ -6,20 +6,22 @@ using System.Reflection;
 namespace Nivara.Tests.Incident;
 
 /// <summary>
-/// Gates that every public member of <c>Nivara.Samples.Incident</c> is actually executed.
+/// Gates that every public member of <c>Nivara.Samples.Incident</c> is accounted for, and
+/// that the ones which produce a result are executed and inspected.
 /// <para>
-/// <see cref="Analysis.AnalyzeGroupedAggregationWithTypedLinq"/> shipped broken: it mapped
-/// <c>RequestRow</c>, which declares <c>DurationPercentRank</c>, but its pipeline never created
-/// that column, so the first call threw <c>SchemaValidationException</c>. Nothing caught it
-/// because nothing had ever called it.
+/// <see cref="Analysis.AnalyzeGroupedAggregationWithTypedLinq"/> is why that matters. It threw
+/// <c>SchemaValidationException</c> on first call: it mapped <c>RequestRow</c>, which declares
+/// <c>DurationPercentRank</c>, but its pipeline never created that column. #496 fixed the method,
+/// and the file-handle probe added then did invoke it &#8212; but that probe only checked the
+/// handle, so no test asserted anything about what the method returned. A method can be called
+/// and still be unverified.
 /// </para>
 /// <para>
 /// <b>Why this is an execution gate and not a coverage-presence gate.</b> A gate that only asked
 /// "is this member named in some test?" would not have caught that method either &#8212;
-/// <c>AnalysisResourceTests</c> already called it and passed, because it only probed the file
-/// handle and never looked at a result. So every row here is actually <em>run</em> and its output
-/// inspected. Handle release is a separate concern and is gated by #498's
-/// <c>FileHandleProbe</c>.
+/// <c>AnalysisResourceTests</c> already named it and passed, because it never looked at a result.
+/// So every row here is actually <em>run</em> and its output inspected. Handle release is a
+/// separate concern and is gated by #498's <c>FileHandleProbe</c>.
 /// </para>
 /// <para>
 /// <b>Row granularity.</b> Rows are the public callable members &#8212; methods, static
@@ -30,11 +32,25 @@ namespace Nivara.Tests.Incident;
 /// <c>SchemaValidationException</c>, so the row is bound tightly to the bug class.
 /// </para>
 /// <para>
-/// <b>What this gate does not claim.</b> It proves each registered member executes and returns
-/// something non-empty. It does not prove the returned values are correct &#8212; that stays with
-/// the per-fixture assertions in <see cref="AnalysisTests"/> and
-/// <see cref="StreamixScenarioTests"/>. Nested summary records are excluded because they are
+/// <para>
+/// <b>What this gate does not claim.</b> For members that return a frame or a summary, it proves
+/// the call completed and the result is non-empty; it does not prove the values are correct
+/// &#8212; that stays with the per-fixture assertions in <see cref="AnalysisTests"/> and
+/// <see cref="StreamixScenarioTests"/>. The 2 covered-by and 5 static-holder rows are resolved
+/// without being executed here: the holders by their members' exercises, and the two data types
+/// by the <c>Query&lt;T&gt;()</c> binding performed by a named exercise, which is itself asserted
+/// by that exercise running. The <see cref="ServiceEvent"/> and <see cref="IncidentScenario"/>
+/// rows are the weakest &#8212; they confirm construction and assignment, and exist mainly so the
+/// types are not silently untested. Nested summary records are excluded because they are
 /// constructed by the registered <c>Run*</c> exercises.
+/// </para>
+/// <para>
+/// <b>Known limit of the covered-by mechanism.</b> Nothing here verifies that the named exercise
+/// still binds the type it is credited with covering. If an analysis stopped calling
+/// <c>Query&lt;RequestRow&gt;()</c>, the <c>RequestRow</c> row would stay resolved and its
+/// properties would rot undetected &#8212; which is the bug class this file exists to prevent. The
+/// binding is not introspectable from here, so the row states the intent rather than enforcing it.
+/// </para>
 /// </para>
 /// </summary>
 [TestFixture]

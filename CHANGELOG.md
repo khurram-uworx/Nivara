@@ -201,14 +201,18 @@ All notable changes to Nivara are documented here. Released versions are publish
   remains `ArgumentException`, and the exact-type assertion keeps the two from merging.
 
 - **Uncalled public API in the Incident sample (#499)** —
-  `AnalyzeGroupedAggregationWithTypedLinq` had no caller anywhere and had never been
-  executed; it mapped `RequestRow`, which declares `DurationPercentRank`, but its
-  pipeline never created that column, so the first call threw
-  `SchemaValidationException`. It is now run by the CLI's `analyze` and `--benchmark`
-  paths, and `tests/Nivara.Tests/Incident/IncidentSurfaceTests.cs` executes every public
-  member of `Nivara.Samples.Incident` (29 rows: 21 exercised, 2 covered-by, 1 skipped
-  with a reason) and fails on an unregistered one. The five unreferenced types deleted
-  as part of this are sample-only — no `src/` or public library API changed.
+  `AnalyzeGroupedAggregationWithTypedLinq` had no production caller and no
+  assertion on its result. #496 fixed the `SchemaValidationException` it threw
+  (it mapped `RequestRow`, which declares `DurationPercentRank`, without creating
+  that column), but the file-handle probe added then still passed on a method
+  whose output nothing inspected. It is now run by the CLI's `analyze` and
+  `--benchmark` paths, and `tests/Nivara.Tests/Incident/IncidentSurfaceTests.cs`
+  accounts for every public member of `Nivara.Samples.Incident` — 29 rows: 21
+  executed, 2 covered by a named exercise, 1 skipped with a reason, 5 static
+  holder types resolved through their members — and fails on any member that is
+  not accounted for. It also asserts the result, so a member cannot pass by
+  returning nothing. The five unreferenced types deleted as part of this are
+  sample-only — no `src/` or public library API changed.
 
 - **BatchNorm eval mode now produces weight and bias gradients, matching PyTorch (#494)** —
   `BatchNorm1dEval` and `BatchNorm2dEval` previously only accumulated gradients for

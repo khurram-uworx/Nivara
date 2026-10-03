@@ -58,8 +58,17 @@ public class ScenarioTests
     [Test]
     public void AllScenarios_EventsArePopulatedAndInsideTheIncidentWindow()
     {
+        // Coverage: every event of every scenario. The guards make that non-vacuous -- without
+        // them an empty Scenarios.All, or a scenario with no events, would pass this test having
+        // asserted nothing at all.
+        Assert.That(Scenarios.All, Is.Not.Empty, "no scenarios to check");
+        var eventCount = 0;
+
         foreach (var scenario in Scenarios.All)
         {
+            Assert.That(scenario.Events, Is.Not.Empty, $"scenario {scenario.Id} has no events to check");
+            eventCount += scenario.Events.Count;
+
             foreach (var evt in scenario.Events)
             {
                 var where = $"Scenario {scenario.Id} event '{evt.EventType}'";
@@ -77,6 +86,9 @@ public class ScenarioTests
                 });
             }
         }
+
+        Assert.That(eventCount, Is.EqualTo(Scenarios.All.Sum(s => s.Events.Count)),
+            "every event should have been visited exactly once");
     }
 
     [Test]

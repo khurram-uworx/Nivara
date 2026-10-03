@@ -87,13 +87,20 @@ public class StreamixScenarioTests
         var summary = await StreamixScenarios.RunWindowedAnalytics(
             tempDir, scenario, chunkSize: ChunkSize);
 
-        // Exact, not a tolerance band: totalRows is accumulated per window, so a partition that
-        // double-counted or lost a chunk would break the identity. WindowResult.Empty contributes
-        // 0 to both sides, so a window that arrived with no rows does not skew it.
+        // A bookkeeping identity, not a data-partition one, and the distinction matters.
+        // WindowByTime(5 min, slide: 1 min) is a *sliding* window, so every row is deliberately
+        // counted in up to 5 windows -- TotalRows is meant to exceed the source row count, and
+        // asserting otherwise would fail on correct code. Both sides are summed from the same
+        // per-window RowCount, so this cannot detect loss inside a window either. What it does
+        // pin down is that RunWindowedAnalytics counts a window exactly once: it skips the
+        // counter on the zero-row early return (StreamixScenarios.cs:84 precedes :109) and
+        // appends each result once, so a result that were counted but not returned, or vice
+        // versa, would break the identity. WindowResult.Empty contributes 0 to both sides.
         Assert.Multiple(() =>
         {
             Assert.That(summary.Windows.Sum(w => w.RowCount), Is.EqualTo(summary.TotalRows),
-                "every counted row should belong to exactly one window");
+                "every counted row should be reported in exactly one window's result -- these are "
+                + "sliding windows, so TotalRows is expected to exceed the source row count");
 
             foreach (var window in summary.Windows)
             {
@@ -160,7 +167,10 @@ public class StreamixScenarioTests
         Assert.Multiple(() =>
         {
             Assert.That(summary.TrainingBatches, Is.GreaterThan(0));
-            Assert.That(summary.Model, Is.Not.Null);
+
+            // summary.Model is not asserted: AutoDiffSummary.Model is a non-nullable
+            // Linear<float>, so Is.Not.Null cannot fail and would read as coverage of the
+            // trained model while proving nothing.
 
             // Is.Not.NaN passes for +/-Infinity, which would sail through the assertion above even
             // though it means training diverged. MSE cannot be negative, so both bounds are real.
