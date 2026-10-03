@@ -80,7 +80,7 @@ dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./samples/
 - **Rank family** — `PercentRank` partitioned by region for regional incident analysis.
 - **Typed LINQ GroupBy** — `NivaraQuery<T>.GroupBy().Select()` with `Count()`, `Sum()`, `Average()` for grouped aggregation.
 - **Chunked / streaming execution** — `AsStream()` over Parquet row groups with `IAsyncEnumerable` and `IAsyncDisposable`.
-- **Parquet / CSV ingestion** — `Parquet.ScanAsQueryFrame` and `Csv.ScanAsQueryFrame` for chunk-capable data sources.
+- **Parquet / CSV ingestion** — `NivaraParquetReader.ScanAsQueryFrame` and `Csv.ScanAsQueryFrame` for chunk-capable data sources.
 - **Execution diagnostics** — `QueryFrame.GetExecutionDiagnostics()` for rows read, kernel counts, and elapsed time.
 - **Benchmark harness** — `--benchmark` (per-analysis timing), `bench-stream` (streaming vs eager memory curve), `bench-kernels` (kernel vectorization rate via `DiagnosticsTracker`).
 - **Streamix bridge** — `ToFlux`, `ToFluxWithTimestamp`, `ToFluxRows`, `BufferFrames` for event-driven streaming pipelines.
@@ -164,7 +164,7 @@ dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./samples/
 | `NivaraQuery<T>.GroupBy/Select/Count/Sum/Average` | Grouped aggregation | Typed LINQ aggregation pipeline |
 | `QueryFrame.AsStream(int, CancellationToken)` | Replay engine | Chunked, backpressured streaming |
 | `QueryFrame.GetExecutionDiagnostics()` | Diagnostics | Rows read, kernel counts, elapsed time |
-| `Parquet.ScanAsQueryFrame` | Ingestion | Chunk-capable Parquet source |
+| `NivaraParquetReader.ScanAsQueryFrame` | Ingestion | Chunk-capable Parquet source |
 | `Csv.ScanAsQueryFrame` | Ingestion | Chunk-capable CSV source |
 | `NivaraFrame.Create` | Result construction | Build result frames from columns |
 | `ColumnExpressions.Col/Lit` | Expression tree | Typed expression nodes for filter/sort |

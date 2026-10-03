@@ -441,8 +441,9 @@ All notable changes to Nivara are documented here. Released versions are publish
   non-chunk-capable source, falls back to a single merged frame with rows identical to
   `CollectAsync()`. `NivaraFrame.AsQueryFrame()` / `NivaraQuery<T>.AsQueryFrame()` are
   public, and public lazy query-frame factories `Csv.ScanAsQueryFrame`,
-  `Json.ScanAsQueryFrame`, and `Parquet.ScanAsQueryFrame` open the streaming entry point
-  directly from files. `chunkSize` is honored by row-oriented sources and advisory
+  `Json.ScanAsQueryFrame`, and `NivaraParquetReader.ScanAsQueryFrame` open the streaming
+  entry point directly from files. Those factories take a path and an options object; the
+  `chunkSize` is supplied to `AsStream`, honored by row-oriented sources and advisory
   (row-group aligned) for Parquet; when unset it is derived from the memory budget
   (`clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)`). Full contract in
   `docs/STREAMING.md`; `QueryFrame.ToQueryPlan()` stays internal (see #275).
