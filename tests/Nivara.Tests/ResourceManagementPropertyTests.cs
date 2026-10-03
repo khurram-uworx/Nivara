@@ -173,10 +173,10 @@ public class ResourceManagementPropertyTests
             queryFrame = Json.ScanFrame(tempFile);
             queryRef = new WeakReference(queryFrame);
 
-            // Verify query frame is tracked
+            // Verify the query source handle behind the frame is tracked
             var statsBefore = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQueryFrame"), Is.True,
-                "Lazy query frame should be tracked");
+            Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQuerySource"), Is.True,
+                "Lazy query source should be tracked");
 
             // Dispose the query frame
             queryFrame.Dispose();

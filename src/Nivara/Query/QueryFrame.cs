@@ -14,10 +14,9 @@ namespace Nivara.Query;
 /// </summary>
 public sealed class QueryFrame : IDisposable, IAsyncDisposable
 {
-    readonly IQuerySource source;
+    readonly QuerySourceHandle handle;
     readonly List<IQueryOperation> operations;
     ExecutionDiagnostics? lastDiagnostics;
-    bool disposed;
 
     /// <summary>
     /// Initializes a new instance of QueryFrame with the specified data source
@@ -26,54 +25,24 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when source is null</exception>
     internal QueryFrame(IQuerySource source)
     {
-        this.source = source ?? throw new ArgumentNullException(nameof(source));
-        operations = new List<IQueryOperation>();
+        ArgumentNullException.ThrowIfNull(source);
 
-        // Track lazy queries for abandoned resource cleanup (opt-in via NivaraResourceManager.Enable)
-        if (source.IsLazy && NivaraResourceManager.IsEnabled)
-        {
-            NivaraResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
-            {
-                // Cleanup action for abandoned lazy queries
-                try
-                {
-                    source?.Dispose();
-                }
-                catch
-                {
-                    // Ignore disposal errors for abandoned resources
-                }
-            });
-        }
+        handle = new QuerySourceHandle(source);
+        operations = new List<IQueryOperation>();
     }
 
     /// <summary>
-    /// Initializes a new instance of QueryFrame with the specified data source and operations
+    /// Initializes a new instance of QueryFrame sharing an existing query source handle
     /// </summary>
-    /// <param name="source">The data source for the query</param>
+    /// <param name="handle">The handle owning the source for the whole chain</param>
     /// <param name="operations">The existing operations</param>
-    /// <exception cref="ArgumentNullException">Thrown when source or operations is null</exception>
-    internal QueryFrame(IQuerySource source, IEnumerable<IQueryOperation> operations)
+    /// <exception cref="ArgumentNullException">Thrown when handle or operations is null</exception>
+    internal QueryFrame(QuerySourceHandle handle, IEnumerable<IQueryOperation> operations)
     {
-        this.source = source ?? throw new ArgumentNullException(nameof(source));
-        this.operations = operations?.ToList() ?? throw new ArgumentNullException(nameof(operations));
+        ArgumentNullException.ThrowIfNull(handle);
 
-        // Track lazy queries for abandoned resource cleanup (opt-in via NivaraResourceManager.Enable)
-        if (source.IsLazy && NivaraResourceManager.IsEnabled)
-        {
-            NivaraResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
-            {
-                // Cleanup action for abandoned lazy queries
-                try
-                {
-                    source?.Dispose();
-                }
-                catch
-                {
-                    // Ignore disposal errors for abandoned resources
-                }
-            });
-        }
+        this.handle = handle;
+        this.operations = operations?.ToList() ?? throw new ArgumentNullException(nameof(operations));
     }
 
     /// <summary>
@@ -83,8 +52,8 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            var plan = new QueryPlan(source, operations);
+            ObjectDisposedException.ThrowIf(handle.Released, this);
+            var plan = new QueryPlan(handle.Source, operations);
             return plan.ResultSchema;
         }
     }
@@ -96,8 +65,8 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
-            return source.IsLazy;
+            ObjectDisposedException.ThrowIf(handle.Released, this);
+            return handle.Source.IsLazy;
         }
     }
 
@@ -109,14 +78,14 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when condition is null</exception>
     public QueryFrame Filter(ColumnExpression condition)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         ArgumentNullException.ThrowIfNull(condition);
 
         var filterOperation = new FilterOperation(condition);
         var newOperations = operations.Concat(new[] { filterOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -128,7 +97,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when no columns are specified</exception>
     public QueryFrame Select(params ColumnExpression[] columns)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (columns == null)
             throw new ArgumentNullException(nameof(columns));
@@ -139,7 +108,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         var selectOperation = new SelectOperation(columns);
         var newOperations = operations.Concat(new[] { selectOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -151,7 +120,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when no column names are specified</exception>
     public QueryFrame Select(params string[] columnNames)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (columnNames == null)
             throw new ArgumentNullException(nameof(columnNames));
@@ -172,7 +141,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when no column names are specified</exception>
     public QueryFrame GroupBy(params string[] columnNames)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (columnNames == null)
             throw new ArgumentNullException(nameof(columnNames));
@@ -184,7 +153,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         var groupByOperation = new GroupByOperation(expressions);
         var newOperations = operations.Concat(new[] { groupByOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -196,7 +165,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when no columns are specified</exception>
     public QueryFrame GroupBy(params ColumnExpression[] columns)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (columns == null)
             throw new ArgumentNullException(nameof(columns));
@@ -207,7 +176,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         var groupByOperation = new GroupByOperation(columns);
         var newOperations = operations.Concat(new[] { groupByOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -216,12 +185,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>A new QueryFrame with the distinct operation added</returns>
     public QueryFrame Distinct()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var distinctOp = new DistinctOperation();
         var newOperations = operations.Concat(new[] { distinctOp });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -233,7 +202,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when no column names are specified</exception>
     public QueryFrame Distinct(params string[] columnNames)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (columnNames == null)
             throw new ArgumentNullException(nameof(columnNames));
@@ -244,7 +213,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         var distinctOp = new DistinctOperation(columnNames);
         var newOperations = operations.Concat(new[] { distinctOp });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -259,7 +228,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     public QueryFrame Sort(string columnName, SortDirection direction = SortDirection.Ascending,
         NullOrdering nullOrdering = NullOrdering.NullsLast, bool stable = true)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (string.IsNullOrWhiteSpace(columnName))
             throw new ArgumentException("Column name cannot be null or whitespace", nameof(columnName));
@@ -267,7 +236,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         var sortOperation = new SortOperation(columnName, direction, nullOrdering, stable);
         var newOperations = operations.Concat(new[] { sortOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -280,7 +249,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when no sort keys are provided</exception>
     public QueryFrame Sort(IEnumerable<SortKey> sortKeys, bool stable = true)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (sortKeys == null)
             throw new ArgumentNullException(nameof(sortKeys));
@@ -288,7 +257,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         var sortOperation = new SortOperation(sortKeys, stable);
         var newOperations = operations.Concat(new[] { sortOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -317,14 +286,14 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     public QueryFrame SortByExpression(ColumnExpression keyExpression, SortDirection direction = SortDirection.Ascending,
         NullOrdering nullOrdering = NullOrdering.NullsLast, bool stable = true)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         ArgumentNullException.ThrowIfNull(keyExpression);
 
         var sortOperation = new SortByExpressionOperation(keyExpression, direction, nullOrdering, stable);
         var newOperations = operations.Concat(new[] { sortOperation });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -340,7 +309,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     internal QueryFrame ThenBy(ColumnExpression key, SortDirection direction = SortDirection.Ascending,
         NullOrdering nullOrdering = NullOrdering.NullsLast)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         ArgumentNullException.ThrowIfNull(key);
 
@@ -368,7 +337,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
                     newOperations[^1] = new SortByExpressionOperation(mergedKeys, sortOp.IsStable);
                 }
 
-                return new QueryFrame(source, newOperations);
+                return new QueryFrame(handle, newOperations);
             }
 
             if (last is SortByExpressionOperation sortExprOp)
@@ -378,7 +347,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
                     .ToArray();
                 newOperations[^1] = new SortByExpressionOperation(mergedKeys, sortExprOp.IsStable);
 
-                return new QueryFrame(source, newOperations);
+                return new QueryFrame(handle, newOperations);
             }
         }
 
@@ -387,7 +356,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         else
             newOperations.Add(new SortByExpressionOperation(key, direction, nullOrdering));
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -407,11 +376,11 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="QueryExecutionException">Thrown when query execution fails</exception>
     public async Task<NivaraFrame> CollectAsync(CancellationToken ct = default)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         try
         {
-            var queryPlan = new QueryPlan(source, operations);
+            var queryPlan = new QueryPlan(handle.Source, operations);
             var engine = new ExecutionEngine();
             var diagnostics = new ExecutionDiagnostics();
             var context = new NivaraExecutionContext(ExecutionStrategy.Lazy)
@@ -491,9 +460,9 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
     public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
-        var queryPlan = new QueryPlan(source, operations);
+        var queryPlan = new QueryPlan(handle.Source, operations);
         var engine = new ExecutionEngine();
         var diagnostics = new ExecutionDiagnostics();
         var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
@@ -528,9 +497,9 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>A formatted string describing the query plan</returns>
     public string ExplainPlan()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
-        var queryPlan = new QueryPlan(source, operations);
+        var queryPlan = new QueryPlan(handle.Source, operations);
         return QueryPlanAnalyzer.Explain(queryPlan);
     }
 
@@ -541,9 +510,9 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>Diagnostic information formatted according to the mode</returns>
     public string GetDiagnosticInfo(QueryDiagnosticMode mode = QueryDiagnosticMode.Basic)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
-        var queryPlan = new QueryPlan(source, operations);
+        var queryPlan = new QueryPlan(handle.Source, operations);
         return QueryDiagnostics.GetDiagnosticInfo(queryPlan, mode);
     }
 
@@ -553,9 +522,9 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>A list of optimization suggestions</returns>
     public IReadOnlyList<string> AnalyzeOptimizations()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
-        var queryPlan = new QueryPlan(source, operations);
+        var queryPlan = new QueryPlan(handle.Source, operations);
         return QueryPlanAnalyzer.AnalyzeOptimizations(queryPlan);
     }
 
@@ -565,9 +534,9 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>A list of diagnostic recommendations</returns>
     public IReadOnlyList<string> AnalyzeQueryPlan()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
-        var queryPlan = new QueryPlan(source, operations);
+        var queryPlan = new QueryPlan(handle.Source, operations);
         return QueryDiagnostics.AnalyzeQueryPlan(queryPlan);
     }
 
@@ -577,16 +546,16 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>A formatted string describing the query frame</returns>
     public override string ToString()
     {
-        if (disposed)
+        if (handle.Released)
             return "QueryFrame [Disposed]";
 
         var operationNames = operations.Select(op => op.OperationType);
         var pipeline = string.Join(" -> ", operationNames);
 
         if (string.IsNullOrEmpty(pipeline))
-            return $"QueryFrame {{ Source: {source.GetType().Name}, Operations: None }}";
+            return $"QueryFrame {{ Source: {handle.Source.GetType().Name}, Operations: None }}";
 
-        return $"QueryFrame {{ Source: {source.GetType().Name}, Pipeline: {pipeline} }}";
+        return $"QueryFrame {{ Source: {handle.Source.GetType().Name}, Pipeline: {pipeline} }}";
     }
 
     /// <summary>
@@ -617,12 +586,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when indices is empty</exception>
     public QueryFrame SelectRows(params int[] indices)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var selectRowsOp = new SelectRowsOperation(indices);
         var newOperations = operations.Concat(new[] { selectRowsOp });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -633,12 +602,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown when count is negative</exception>
     public QueryFrame Skip(int count)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var sliceOp = new SliceOperation(skip: count);
         var newOperations = operations.Concat(new[] { sliceOp });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -649,12 +618,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown when count is negative</exception>
     public QueryFrame Take(int count)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var sliceOp = new SliceOperation(skip: 0, take: count);
         var newOperations = operations.Concat(new[] { sliceOp });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -666,12 +635,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown when skip or take are negative</exception>
     public QueryFrame Slice(int skip, int take)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var sliceOp = new SliceOperation(skip, take);
         var newOperations = operations.Concat(new[] { sliceOp });
 
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     // ── Window functions ──
@@ -685,7 +654,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <remarks>Added as part of issue #162 Over/WindowSpec builder delivery.</remarks>
     public WindowSpec Over()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
         return new WindowSpec();
     }
 
@@ -1067,7 +1036,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
 
     QueryFrame AddWindowOperation(IQueryOperation operation)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         if (operation is WindowOperationBase windowOp)
         {
@@ -1078,7 +1047,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         }
 
         var newOperations = operations.Concat(new[] { operation });
-        return new QueryFrame(source, newOperations);
+        return new QueryFrame(handle, newOperations);
     }
 
     /// <summary>
@@ -1087,8 +1056,8 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <returns>A QueryPlan representing this query's source and operations</returns>
     public QueryPlan ToQueryPlan()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
-        return new QueryPlan(source, operations);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
+        return new QueryPlan(handle.Source, operations);
     }
 
     /// <summary>
@@ -1100,46 +1069,22 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when operation is null</exception>
     internal QueryFrame WithOperation(IQueryOperation operation)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(handle.Released, this);
 
         ArgumentNullException.ThrowIfNull(operation);
 
-        return new QueryFrame(source, operations.Concat(new[] { operation }));
+        return new QueryFrame(handle, operations.Concat(new[] { operation }));
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!disposed)
-        {
-            NivaraResourceManager.UntrackResource(this);
-
-            try
-            {
-                source.Dispose();
-            }
-            catch
-            {
-                // Ignore disposal errors, mirroring the abandoned-resource cleanup path.
-            }
-
-            disposed = true;
-        }
+        handle.Release();
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (!disposed)
-        {
-            NivaraResourceManager.UntrackResource(this);
-
-            if (source is IAsyncDisposable asyncDisposable)
-                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-            else
-                source.Dispose();
-
-            disposed = true;
-        }
+        return handle.ReleaseAsync();
     }
 }
