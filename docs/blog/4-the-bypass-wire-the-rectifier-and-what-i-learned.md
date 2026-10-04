@@ -97,16 +97,23 @@ GELU(x) = x · Φ(x) = x · ½(1 + erf(x/√2))
 
   For large positive x, Φ(x)→1 so GELU(x)≈x. For large negative x, Φ(x)→0 so GELU(x)≈0.
   Around 0 it's smooth — small signals pass *partially*, unlike ReLU's hard cutoff.
-- Exact-erf kernel (`src/Nivara/Tensors/NivaraTensorExtensions.cs:1366-1388`, float path —
-  the formula at line 1386):
+- Exact-erf kernel (`src/Nivara/AutoDiff/Operations/GradKernels.cs:212-223`, generic over
+  `IFloatingPointIeee754<T>` — the formula itself is line 221):
 
 ```csharp
-// vectorized: result[i] = x[i] * 0.5 * (1 + erf(x[i] * 1/sqrt(2)))
-var xv = Vector.LoadUnsafe(ref xRef, (nuint)i);
-var erfv = ErfVector(xv * invSqrt2);                 // invSqrt2 = 0.70710678…
-var onePlus = Vector<float>.One + erfv;
-Vector.StoreUnsafe(xv * half * onePlus, ref rRef, (nuint)i);
+T invSqrt2 = T.CreateChecked(0.7071067811865475);
+for (int i = 0; i < input.Length; i++)
+{
+    T v = input[i];
+    output[i] = T.CreateChecked(0.5) * v * (T.One + Erf(v * invSqrt2));
+}
 ```
+
+  Note the shape: this is the one flavor that **stays scalar**, and that isn't an oversight.
+  The tanh flavor below is `TensorPrimitives` from end to end, so it auto-vectorizes for free.
+  `erf` has no BCL primitive to hang a `Vector<T>` off — `Erf` here is a scalar
+  Abramowitz–Stegun polynomial with a data-dependent sign branch (`GradKernels.cs:845-856`) —
+  so the exact-erf path drops to a plain loop and pays for its accuracy in throughput.
 
 ### Three look-alike flavors, and the bug they caused
 
@@ -186,7 +193,7 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 
 - **L2 normalization** (`BertModel.cs:376-397`): divide every element by the vector's
   magnitude, producing a **unit vector** (the sample prints `L2 norm: ~1.0`,
-  `Program.cs:682`).
+  `samples/NivaraInference/Program.cs:1080`).
 - Why: magnitude stops mattering, direction survives — so
   `cosine(a,b) = dot(a,b) / (|a|·|b|) = dot(a,b)` for unit vectors. Two sentences are
   "similar" iff their 384-d directions are close. This closes the loop on the running
