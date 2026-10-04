@@ -753,7 +753,7 @@ Nivara uses a structured exception hierarchy that provides detailed context abou
 #### Exception Types
 
 - **JoinException**: Join operation failures with key and type information
-- **SchemaValidationException**: Schema mismatch details with specific error locations
+- **QuerySchemaValidationException**: Schema mismatch details with specific error locations
 - **QueryExecutionException**: Query execution failures with plan context
 - **DataFrameOperationException**: General DataFrame operation errors
 

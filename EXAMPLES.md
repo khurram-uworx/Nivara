@@ -325,7 +325,7 @@ locals: NivaraFrame employees = NivaraFrame.Create(("Name", NivaraColumn<string>
 using Nivara.Linq;
 
 var query = employees.Query<Employee>();
-// SchemaValidationException: Column 'Salary' type mismatch: expected Int32, found String
+// QuerySchemaValidationException: Column 'Salary' type mismatch: expected Int32, found String
 ```
 
 #### 5c. Typed object LINQ — `frame.Query<T>()`

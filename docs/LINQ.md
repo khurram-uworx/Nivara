@@ -55,7 +55,7 @@ var query = frame.Query<Person>();   // NivaraQuery<Person> — deferred, nothin
 `frame.Query<T>()` (requires `T : class, new()`; `using Nivara.Linq;`) returns an immutable
 `NivaraQuery<T>`. Every property of `T` maps to a column with the same name (case-insensitive) and an
 exact or nullable-underlying type, validated eagerly at `Query<T>()` (no data access) with
-`SchemaValidationException` on mismatch.
+`QuerySchemaValidationException` on mismatch.
 
 ### From file sources (lazy)
 
@@ -271,7 +271,7 @@ spec.OrderBy("salary");                       // ascending, NULLS LAST
 - A spec with no keys at all (`new WindowSpec()`) is valid and matches the un-partitioned,
   row-order behavior of the plain overloads.
 - Partition keys and order keys are validated up front: missing columns and non-comparable
-  order-key columns throw `ArgumentException` (eager) or a wrapped `SchemaValidationException`
+  order-key columns throw `ArgumentException` (eager) or a wrapped `QuerySchemaValidationException`
   (lazy `Collect()`).
 
 ### Semantics
@@ -343,7 +343,7 @@ order keys.
 `QueryFrame` mirrors the eager surface: `Over()`, plus the same overloads (`RollingSum`,
 `CumulativeCount`, `Shift`, `Rank`, ...). Because the pipeline is lazy, partition/order-key
 validation happens at `Collect()` time (thrown as `QueryExecutionException` wrapping a
-`SchemaValidationException`), or immediately when `Schema` is read.
+`QuerySchemaValidationException`), or immediately when `Schema` is read.
 
 ### Window functions in the expression DSL
 
