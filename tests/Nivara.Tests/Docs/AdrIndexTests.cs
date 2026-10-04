@@ -179,12 +179,12 @@ public class AdrIndexTests
     [Test]
     public void EveryIndexEntryStatesWhatTheDecisionConstrains()
     {
-        var summaryless = AdrIndex.ReadEntries().Where(e => e.Summary.Length == 0).ToArray();
+        var drift = AdrIndex.Compare(AdrIndex.ReadFileNames(), AdrIndex.ReadEntries());
 
-        Assert.That(summaryless, Is.Empty,
+        Assert.That(drift.Summaryless, Is.Empty,
             "an index line with a path but no summary is a bare link. Its purpose is to let an agent "
             + "decide relevance without opening the file, so the summary is the whole value: "
-            + string.Join(", ", summaryless.Select(e => e.Label)));
+            + string.Join(", ", drift.Summaryless));
     }
 
     [Test]
@@ -242,6 +242,27 @@ public class AdrIndexTests
              new AdrIndexEntry("ADR-001", "docs/adr/001-real.md", "decides a thing")]);
 
         Assert.That(drift.Duplicate, Is.EqualTo(new[] { "001-real.md" }));
+    }
+
+    [Test]
+    public void NegativeControl_TheScanReportsAnEntryWithNoSummary()
+    {
+        var files = new[] { "001-a.md", "002-b.md" };
+
+        // Both files are listed, so this isolates the summary and nothing else — a control that
+        // also tripped a dangling entry would pass for the wrong reason.
+        var drift = AdrIndex.Compare(files,
+        [
+            new AdrIndexEntry("ADR-001", "docs/adr/001-a.md", "decides a thing"),
+            new AdrIndexEntry("ADR-002", "docs/adr/002-b.md", ""),
+        ]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(drift.Summaryless, Is.EqualTo(new[] { "ADR-002" }));
+            Assert.That(drift.Unlisted, Is.Empty);
+            Assert.That(drift.Dangling, Is.Empty);
+        });
     }
 
     [Test]
