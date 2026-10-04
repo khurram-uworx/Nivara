@@ -251,8 +251,6 @@ result = employees[
 
 **Nivara** — lazy plan with ExplainPlan(), schema errors caught at `Query<T>()`:
 ```csharp
-using Nivara.Linq;
-
 public sealed class Employee
 {
     public string Name { get; set; }
@@ -260,6 +258,11 @@ public sealed class Employee
     public int Salary { get; set; }
     public bool IsActive { get; set; }
 }
+```
+
+With the row type declared, the frame and its query follow:
+```csharp
+using Nivara.Linq;
 
 var employees = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Charlie", "Diana"])),
@@ -293,17 +296,20 @@ Query Execution Plan:
 
 **Nivara**
 ```csharp
-using Nivara.Linq;
-
 // Property-name typos are compile errors in the typed API. Schema *type*
-// mismatches surface at Query<T>() — no data access needed:
+// mismatches surface at Query<T>() - no data access needed:
 public sealed class Employee
 {
     public string Name { get; set; }
     public string Department { get; set; }
-    public string Salary { get; set; } // wrong type — the frame column is Int32
+    public string Salary { get; set; } // wrong type - the frame column is Int32
     public bool IsActive { get; set; }
 }
+```
+
+The mismatch is caught when the query binds, not when it runs:
+```csharp
+using Nivara.Linq;
 
 var query = employees.Query<Employee>();
 // SchemaValidationException: Column 'Salary' type mismatch: expected Int32, found String
@@ -326,8 +332,6 @@ stats = employees[employees["Age"] > 30].groupby("City")["Salary"].mean()
 
 **Nivara** — typed predicates/projections, no string column names:
 ```csharp
-using Nivara.Linq;
-
 public sealed class Employee
 {
     public string Name { get; set; }
@@ -335,6 +339,11 @@ public sealed class Employee
     public int Age { get; set; }
     public double Salary { get; set; }
 }
+```
+
+With the row type declared, the query is typed end to end:
+```csharp
+using Nivara.Linq;
 
 var employees = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Carol", "Dan", "Eve"])),
@@ -390,14 +399,17 @@ top = active.nlargest(100, "RiskScore")[["CustomerId", "RiskScore"]]
 
 **Nivara** — build once, query lazily:
 ```csharp
-using Nivara.Linq;
-
 public sealed class Customer
 {
     public string CustomerId { get; set; }
     public string Segment { get; set; }
     public float RiskScore { get; set; }
 }
+```
+
+Scored against the stored embeddings, then queried with the score attached:
+```csharp
+using Nivara.Linq;
 
 var vectors = NivaraFrame.FromRows(
     [
@@ -499,11 +511,6 @@ See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/N
 
 **Nivara** — declare model architecture as a class and train with `TrainingLoop`:
 ```csharp
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Training;
-
 class LinearModel : Module<float>
 {
     Linear<float> L1;
@@ -517,6 +524,14 @@ class LinearModel : Module<float>
     public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
         => L1.Forward(x);
 }
+```
+
+Wiring the model to a loader and an optimizer:
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
 
 var frame = NivaraFrame.Create(
     ("x0", NivaraColumn<float>.Create([1.0f, 2.0f, 3.0f, 4.0f])),
@@ -561,13 +576,6 @@ result.PrintSummary();
 
 **Nivara**
 ```csharp
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Training;
-using Nivara.AutoDiff.Serialization;
-using Nivara.AutoDiff.Optimizer;
-
 // 1. Define model
 class FraudNet : Module<float>
 {
@@ -588,6 +596,16 @@ class FraudNet : Module<float>
         return L3.Forward(h);
     }
 }
+```
+
+Then load data, train with data parallelism, save, and infer:
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
+using Nivara.AutoDiff.Serialization;
+using Nivara.AutoDiff.Optimizer;
 
 // 2. Load data (from CSV or in-memory)
 var frame = NivaraFrame.Create(
@@ -667,14 +685,7 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 
 **Nivara**
 ```csharp
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Training;
-using Nivara.AutoDiff.Serialization;
-using Nivara.AutoDiff.Optimizer;
-
-// Same architecture as Act 8 — the deployed FraudNet
+// Same architecture as Act 8 - the deployed FraudNet
 class FraudNet : Module<float>
 {
     Linear<float> L1, L2, L3;
@@ -694,6 +705,16 @@ class FraudNet : Module<float>
         return L3.Forward(h);
     }
 }
+```
+
+Corrected labels plus the two new rows, then warm-start, resume, and persist:
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
+using Nivara.AutoDiff.Serialization;
+using Nivara.AutoDiff.Optimizer;
 
 // 1. Original 5 rows from Act 8 + 2 new validated feedback rows (drift correction)
 var frame = NivaraFrame.Create(

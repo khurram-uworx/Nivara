@@ -133,12 +133,19 @@ This changes the repository's snippet count: 14 splits is +14 blocks, so the uni
 
 ### 4. Gate both documents
 
+Splitting is complete and verified: **zero CS8803 blocks remain** across both documents, confirmed
+by parsing each block's top-level shape with the same parser the gate uses rather than a line-order
+heuristic. That distinction matters — a heuristic that matches the first `var` in a block counts a
+type declaration's own method body as a top-level statement, so it reported 3 of the 14 type-only
+blocks I had just created as still-broken. They were not.
+
+The same classification fixes the wrap modes exactly: **14 TYPE-ONLY blocks**, one per split, each
+needing `mode: File`. The remaining 64 blocks are `STATEMENTS-ONLY` or the one legal
+statements-then-type block at `GETTING-STARTED.md:211`, all of which stay `TopLevel`.
+
 - Move `GETTING-STARTED.md` and `EXAMPLES.md` from `UngatedDocuments` to `GatedDocuments`.
-- Add gate comments to all 78 blocks. Almost all stay `TopLevel` (the default), which is already
-  correct for statements and for the legal statements-then-type block at line 210. The one
-  type-declaration-only block needs `mode: File`, because `File` is the only mode that emits a
-  genuine library output kind — CS8805 rejects top-level statements in a `DynamicallyLinkedLibrary`,
-  so `File` cannot hold statements and `TopLevel` must not hold a bare type.
+- Add gate comments to all 92 blocks: `mode: File` on the 14 type-only ones, default `TopLevel`
+  elsewhere, and a `locals:` line wherever the block needs context from earlier in its section.
 - Progressive context, one preamble per section for `GETTING-STARTED.md`'s 13 `##` headings rather
   than one per block: the document is cumulative (block #3 consumes `column` from block #2), and a
   section-scoped context is 13 preambles instead of 63. Where a section's context is wrong for one

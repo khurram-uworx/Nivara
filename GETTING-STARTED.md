@@ -271,7 +271,12 @@ public sealed class Person
     public int Age { get; set; }
     public double Salary { get; set; }
 }
+```
 
+With the row type in place, the query binds to it and the predicates are checked against real
+property types:
+
+```csharp
 var people = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
     ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })),
@@ -279,7 +284,7 @@ var people = NivaraFrame.Create(
     ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
 );
 
-// Typed predicates and projections — validated eagerly at Query<T>()
+// Typed predicates and projections - validated eagerly at Query<T>()
 var result = people.Query<Person>()
     .Where(p => p.Age > 30 && p.Salary > 55000)
     .OrderByDescending(p => p.Salary)
@@ -330,17 +335,21 @@ var result = query.Collect();
 ### CSV Data Sources
 
 ```csharp
-using Nivara.IO;
-
 public sealed class Employee
 {
     public string Name { get; set; }
     public string Department { get; set; }
     public int Salary { get; set; }
 }
+```
+
+The row type is what `ScanQuery<T>` binds the CSV header to:
+
+```csharp
+using Nivara.IO;
 
 // Lazy CSV scanning with schema inference (CSV integers infer as int)
-// The query is lazy and holds the file open, so it is the query you dispose —
+// The query is lazy and holds the file open, so it is the query you dispose -
 // not just the frame Collect() returns.
 using var csvQuery = Csv.ScanQuery<Employee>("employees.csv")
     .Where(e => e.Salary > 70000)
@@ -470,7 +479,11 @@ public sealed class Player
     public string Name { get; set; }
     public int? Score { get; set; }
 }
+```
 
+The row type carries the nullability, so the ordering below is expressed in terms of `Player`:
+
+```csharp
 var frameWithNulls = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
     ("Score", NivaraColumn.CreateFromNullable(new int?[] { 85, null, 92 }))
@@ -772,14 +785,18 @@ var combined = names.Combine(details);
 ### GroupBy Operations
 
 ```csharp
-using Nivara.Linq;
-
 public sealed class Employee
 {
     public string Name { get; set; }
     public string Department { get; set; }
     public double Salary { get; set; }
 }
+```
+
+`GroupBy` is typed against the row type, so the key selector is checked:
+
+```csharp
+using Nivara.Linq;
 
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Alice", "Charlie" })),
@@ -863,7 +880,11 @@ public class MedianAggregation : AggregationFunction
             : validValues[mid];
     }
 }
+```
 
+An aggregation is a plain class, so it can also be called directly against a column:
+
+```csharp
 // Use custom aggregation
 var medianAgg = new MedianAggregation();
 var salaryColumn = frame.GetColumn<double>("Salary");
@@ -897,15 +918,19 @@ Console.WriteLine(series.ValidCount()); // 3 (excludes nulls)
 ### Fluent API
 
 ```csharp
-using Nivara.Linq;
-using Nivara.Operations;
-
 public sealed class Contestant
 {
     public string Name { get; set; }
     public int Age { get; set; }
     public double Score { get; set; }
 }
+```
+
+Chaining stays typed end to end:
+
+```csharp
+using Nivara.Linq;
+using Nivara.Operations;
 
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })),
@@ -924,8 +949,6 @@ var result = frame.Query<Contestant>()
 ### Query Optimization
 
 ```csharp
-using Nivara.IO;
-
 public sealed class Employee
 {
     public string Name { get; set; }
@@ -933,8 +956,13 @@ public sealed class Employee
     public int Salary { get; set; }
     public string Department { get; set; }
 }
+```
 
-// Queries are optimized automatically before execution:
+Queries are optimized automatically before execution:
+
+```csharp
+using Nivara.IO;
+
 // 1. Filters are pushed closer to the data source (predicate pushdown)
 // 2. Multiple filters are combined (operation fusion)
 // 3. Unused columns are eliminated early (projection pushdown)
