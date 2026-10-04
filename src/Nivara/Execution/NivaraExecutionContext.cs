@@ -110,6 +110,18 @@ public sealed class NivaraExecutionContext
             MemoryBudget = memoryBudgetBytes
         };
 
+
+    /// <summary>
+    /// Creates an execution context with the specified chunk size for streaming
+    /// </summary>
+    /// <param name="chunkSize">The chunk size in rows</param>
+    /// <returns>A new ExecutionContext with the specified chunk size</returns>
+    public static NivaraExecutionContext WithChunkSize(int chunkSize)
+        => new NivaraExecutionContext
+        {
+            ChunkSize = chunkSize
+        };
+
     /// <summary>
     /// Creates an execution context with the specified cancellation token
     /// </summary>

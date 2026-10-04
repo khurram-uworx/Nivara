@@ -457,23 +457,49 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// chunks are aligned to native row-group boundaries.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
+    public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext? context = null, int? chunkSize = null, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var queryPlan = new QueryPlan(handle.Source, operations);
         var engine = new ExecutionEngine();
-        var diagnostics = new ExecutionDiagnostics();
-        var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
-        {
-            CancellationToken = ct,
-            ChunkSize = chunkSize,
-            ExecutionDiagnostics = diagnostics
-        };
+        var diagnostics = context?.ExecutionDiagnostics ?? new ExecutionDiagnostics();
+        var streamingContext = context ?? new NivaraExecutionContext(ExecutionStrategy.Streaming);
+        streamingContext.Strategy = ExecutionStrategy.Streaming;
+        if (streamingContext.ExecutionDiagnostics == null) streamingContext.ExecutionDiagnostics = diagnostics;
+        if (chunkSize.HasValue) streamingContext.ChunkSize = chunkSize.Value;
+        streamingContext.CancellationToken = ct;
 
         var strategy = engine.GetStrategy(ExecutionStrategy.Streaming) as StreamingExecutionStrategy
             ?? throw new QueryExecutionException("Streaming execution strategy is not registered");
-        return captureDiagnosticsOnComplete(strategy.StreamChunksAsync(queryPlan, context, ct), diagnostics);
+        return captureDiagnosticsOnComplete(strategy.StreamChunksAsync(queryPlan, streamingContext, streamingContext.CancellationToken), streamingContext.ExecutionDiagnostics);
+    }
+
+    /// <summary>
+    /// Streams processed chunks from the query as an async enumerable.
+    /// </summary>
+    /// <param name="chunkSize">The target number of rows per chunk.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
+    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize, CancellationToken ct = default)
+        => AsStream((NivaraExecutionContext?)null, chunkSize, ct);
+
+    /// <summary>
+    /// Streams processed chunks from the query as an async enumerable.
+    /// </summary>
+    /// <param name="chunkSize">The target number of rows per chunk.</param>
+    /// <param name="memoryBudget">Optional memory budget in bytes.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
+    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize, long memoryBudget, CancellationToken ct = default)
+    {
+        var streamingContext = new NivaraExecutionContext(ExecutionStrategy.Streaming)
+        {
+            MemoryBudget = memoryBudget,
+            ChunkSize = chunkSize,
+            CancellationToken = ct
+        };
+        return AsStream(streamingContext, chunkSize, ct);
     }
 
     /// <summary>
