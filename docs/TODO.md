@@ -685,6 +685,132 @@ every other code unchanged.
 - [ ] #528 — closed out by the section above.
 
 
+## GETTING-STARTED.md: the remaining 110
+
+Continues #520's plan onto the second gated document. Branch `khurram/getting-started`, PR target
+`khurram/528` so #528's work stays independently reviewable. `EXAMPLES.md` is already at 0.
+
+**When this section completes, `docs/TODO.md` is deleted** — that is #520's own rule, and it now
+covers the whole gate plan: #528 and #524's `EXAMPLES.md` portion are closed, and the eight issues
+below are the rest. Nothing here is worth keeping once they land.
+
+### Baseline and reconciliation
+
+`EXAMPLES.md` 0 · `GETTING-STARTED.md` 110 · total 110 (from 127). Reconciles exactly against the
+partition table above: **#524=84** (69 `CS0103` + 15 `CS0246`), **#525=3**, **#526=5**,
+**#527=7**, **#529=5**, **#530=2**, **#531=2**, **#532=2**. 84+3+5+7+5+2+2+2 = 110.
+
+### Method
+
+Section-by-section in document order, gate re-run after each wave, and each wave's sections
+confirmed clear from the gate's own line numbers before the next starts. Not one bulk edit and a
+single verification at the end — the point of re-running is that a later fix must not be able to
+mask an earlier section's remaining error, which a single end-of-run check cannot rule out.
+
+| Wave | Lines | Sections | Diags | Issues |
+| --- | --- | --- | --- | --- |
+| 1 | 43–196 | Explicit Null Semantics → Accessing Data | 10 | #524 #525 #529 |
+| 2 | 178–392 | Schema Validation → JSON Data Sources | 15 | #524 #529 #531 |
+| 3 | 399–517 | Schema Inference → Null Handling in Sorting | 13 | #524 #527 |
+| 4 | 520–600 | Column Transformations → Column Exclusion | 8 | #524 #529 |
+| 5 | 686–939 | Conflict Resolution → Fluent API | 8 | #524 #525 #532 |
+| 6 | 1011–1173 | Execution → Zeroing Gradients | 10 | #524 #530 |
+| 7 | 1190–1395 | Embedding Layers → Sampling | 33 | #524 #526 #527 |
+| 8 | 1397–1462 | Arrow → Configuration | 13 | #524 #526 #527 #532 |
+
+45 sections carry diagnostics; the other ~80 are already clean and are not touched. Line numbers
+are the *current* ones and shift as waves land, so each wave re-reads its own sites rather than
+trusting this table's arithmetic.
+
+### Findings that contradict the filed issues
+
+Verified in source, not taken from the diagnostics — #528's prescription was wrong, and #532's
+premise is wrong, so none of the eight are assumed correct.
+
+- **#525 correct.** `ValidCount` exists nowhere in the repo; `NivaraColumn<T>` has `NullCount`
+  (`NivaraColumn.cs:2071`), `HasNulls`, `Length`, `IsNull`, `WithoutNulls`. No `operator>` on
+  `NivaraColumn<T>` — comparison is `GreaterThan`/`LessThan` (`NivaraColumn.cs:1958-2041`). Fix is
+  `numbers.GreaterThan(3)` and `NullCount`.
+- **#526 half right.** `Embedding(numEmbeddings:, embeddingDim:)` is a pure rename — true. But
+  `FromMatrix(batchSize:)` has **two** wrong names, not one: the signature is
+  `FromMatrix(rowMajorData, rows, cols, requiresGrad)`, so `batchSize`→`rows` *and* `seqLen`→`cols`;
+  Roslyn reports only the first. `VAE.EncodeDecode` is **not** a rename and no 3-tuple member
+  exists — the real flow is `Encode` → `(mu, logVar)`, then reparameterise, then `Decode`, which
+  also removes the `CS8130` on the deconstructed `recon`. `ZeroGrad` lives on `Optimizer<T>`, not
+  `Module<T>`, and the doc's receiver is `classifier`, not `model` as #526 quotes.
+- **#529 all doc defects.** All five `int[]`→`double[]` sites pass int literals to double-typed
+  tensor/column parameters. No `int[]` overload exists and none should: these are float tensor
+  APIs. Doc-side fix, not an API gap.
+- **#532's premise is false.** It states the type is "thrown from different layers and users need
+  to distinguish them". `Nivara.IO.SchemaValidationException` (`IOExceptions.cs:100`) is thrown from
+  **nowhere** — the only `throw new SchemaValidationException` in the repo is `NivaraFrame.cs:1203`,
+  which binds to `Nivara.Exceptions.SchemaValidationException`. The IO type has two constructors,
+  XML docs, and zero uses. It is dead public API, which removes the justification for #532's
+  "rename it" and "derive it" options. #532 also cites both source paths wrongly. **Needs a
+  decision — see below.**
+- **#527 is three real doc defects plus one claim that is false.** The Parquet sites are typos:
+  `NivaraFrameExtensions` → **`NivaraFrameIOExtensions`** (`src/Nivara.Extensions/IO/`), and
+  `WriteParquetBatch`'s argument order is reversed in the doc — it is
+  `WriteParquetBatch(frames, path, options)`, not `(path, frames, options)`
+  (`NivaraParquetWriter.cs:195`). `TextTokenizer.ToJson`/`FromJson` do not exist in any form; the
+  real API is `Save(path)` / `Load(path)` (`TextTokenizer.cs:172,186`), so that is a shape change,
+  not a rename — `Save` returns `void` and takes a filesystem path, and no string-based tokenizer
+  round-trip exists.
+  **#527's claim that the Arrow site documents removed zero-copy interop is false.** `GETTING-STARTED.md`
+  never mentions zero-copy anywhere; `UseZeroCopy` is gone from `ArrowConversionOptions` and the
+  `ZeroCopy` identifier does not exist in `src/`. The site simply names the wrong helper —
+  `IArrowArray.FromArrowArray` → **`ToNivaraSeries<T>()`** (`NivaraSeriesExtensions.cs:39`), the only
+  `this IArrowArray` extension in the repo. One identifier. The related-but-true fact — that no
+  public zero-copy Arrow API exists today, tracked for return under #94 — is **not** what breaks
+  this block, and treating it as such would have meant rewriting a claim the document never made.
+- **`Csv.InferSchema` has a second defect the gate is currently hiding.** There is no public schema
+  inference on `Csv` at all (`CsvExtensions.cs` has only `ReadFrame`/`ScanFrame`/`ScanAsQueryFrame`/
+  `ScanQuery`; every `InferSchema` is `private`). The real API is `Csv.ScanAsQueryFrame(path).Schema`,
+  which honours the snippet's own "without loading data" comment — `ReadFrame(...).Schema` would
+  contradict it. But the snippet then reads `schema.Columns`, and **`Schema` has no `Columns`**; it
+  exposes `ColumnNames`/`ColumnTypes` (`Schema.cs:83,88`). Those member errors are masked because
+  `schema` has an error type while the `var` initializer fails. **Fixing line 405 alone will not make
+  this block compile** — the trap #520's record warns about, in a new instance.
+- **The gate can see all of `Nivara.Extensions`.** `DocSnippetCompiler.References()` (`:216-240`)
+  builds its reference list from the process's whole trusted-platform closure, with no allow-list,
+  and the test project references `Nivara.Extensions`. So every Parquet and Arrow member the doc
+  already uses correctly (`ToParquet`, `ToArrowTable`, `ToArrowArray`, `ParquetWriteOptions`) needs
+  no harness change. The gate's blind spot is `internal` only — the generated `Nivara.DocSnippet`
+  assembly is deliberately given no `InternalsVisibleTo` grant (`:71-75`).
+
+### Stubs to add (`row-types`, Wave 4 onward)
+
+`Person` (10 sites), `Player` (2), `Contestant` (3) — the remaining 15 `CS0246`s, all #524. Same
+union caveat as `Employee` applies where a name is reused across sections; recorded per stub.
+
+### #531 also needs the coverage pins moved
+
+Splitting each `CS8803` fence (:228, :392) adds one block each, so the gate's own pins move:
+all blocks 247→249, gated 106→108, compiled 104→106. Ungated stays 141. A pin left behind fails
+the gate for the wrong reason, which is the failure mode #520's record warns about.
+
+### #532 — decided: delete the dead type
+
+**Decision: delete `Nivara.IO.SchemaValidationException`** (`IOExceptions.cs:100-118`), rather than
+qualify the two doc sites and leave it standing. Confirmed against source: it is thrown from
+nowhere, caught by nothing, and referenced by nothing but its own two constructors and XML docs.
+
+Qualifying the doc sites was the alternative and would have been cheaper, but it settles the two
+diagnostics while leaving a shipped, public, permanently-unthrowable exception type in the surface —
+and it would leave the next reader with the same question this investigation just answered. The type
+is not a promise anyone can currently rely on, because no code path can produce one.
+
+Scope note: this is a **breaking public API change**, and it is the only source change in this
+branch. Recorded as such in the PR body rather than folded in silently among doc edits.
+
+### Verification policy
+
+`AGENTS.md` asks before `dotnet test`; the maintainer's answer for this branch is **filtered tests,
+gates and probe only — CI runs the full suite.** Every wave's claim below is therefore backed by the
+doc gate and the `tensor-api` probe, and the PR will say so in those terms rather than implying a
+suite run that did not happen.
+
+
 Reminder: as each task executes, if you find deferred work or a concern outside this plan,
 create a tracked issue immediately via `gh issue create --repo khurram-uworx/Nivara` and
 record its number above. Do not rely on memory or wait until the plan finishes.
