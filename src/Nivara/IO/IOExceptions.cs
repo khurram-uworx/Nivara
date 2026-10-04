@@ -100,14 +100,14 @@ public sealed class UnsupportedTypeException : NivaraIOException
 public sealed class DataSchemaValidationException : NivaraIOException
 {
     /// <summary>
-    /// Initializes a new instance of SchemaValidationException
+    /// Initializes a new instance of <see cref="DataSchemaValidationException"/>
     /// </summary>
     /// <param name="message">The error message</param>
     public DataSchemaValidationException(string message) : base(message)
     { }
 
     /// <summary>
-    /// Initializes a new instance of SchemaValidationException with type mismatches and schema details
+    /// Initializes a new instance of <see cref="DataSchemaValidationException"/> with type mismatches and schema details
     /// </summary>
     /// <param name="message">The error message</param>
     /// <param name="typeMismatches">The type mismatches found</param>

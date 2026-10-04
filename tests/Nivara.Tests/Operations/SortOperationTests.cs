@@ -110,7 +110,7 @@ public class SortOperationTests
     }
 
     [Test]
-    public void TransformSchema_WithMissingColumn_ShouldThrowSchemaValidationException()
+    public void TransformSchema_WithMissingColumn_ShouldThrowQuerySchemaValidationException()
     {
         // Arrange
         var schema = new Schema(new[]

@@ -125,10 +125,10 @@ public class IOExceptionTests
 
     #endregion
 
-    #region SchemaValidationException Tests
+    #region DataSchemaValidationException Tests
 
     [Test]
-    public void SchemaValidationException_BasicConstructor_InitializesCorrectly()
+    public void DataSchemaValidationException_BasicConstructor_InitializesCorrectly()
     {
         const string message = "Schema validation failed";
         var exception = new DataSchemaValidationException(message);
@@ -140,7 +140,7 @@ public class IOExceptionTests
     }
 
     [Test]
-    public void SchemaValidationException_WithDetails_InitializesCorrectly()
+    public void DataSchemaValidationException_WithDetails_InitializesCorrectly()
     {
         const string message = "Schema validation failed";
         var typeMismatches = new[] { "Column 'Age' expected int but got string", "Column 'Name' missing" };
@@ -155,14 +155,14 @@ public class IOExceptionTests
     }
 
     [Test]
-    public void SchemaValidationException_InheritsFromNivaraIOException()
+    public void DataSchemaValidationException_InheritsFromNivaraIOException()
     {
         var exception = new DataSchemaValidationException("Test message");
         Assert.That(exception, Is.InstanceOf<NivaraIOException>());
     }
 
     [Test]
-    public void SchemaValidationException_WithEmptyTypeMismatches_HandlesCorrectly()
+    public void DataSchemaValidationException_WithEmptyTypeMismatches_HandlesCorrectly()
     {
         const string message = "Schema validation failed";
         var typeMismatches = Array.Empty<string>();
@@ -337,7 +337,7 @@ public class IOExceptionTests
     }
 
     [Test]
-    public void SchemaValidationException_JsonSerialization_PreservesProperties()
+    public void DataSchemaValidationException_JsonSerialization_PreservesProperties()
     {
         const string message = "Schema validation failed";
         var typeMismatches = new[] { "Column 'Age' expected int but got string" };
@@ -361,7 +361,7 @@ public class IOExceptionTests
         Assert.That(json, Does.Contain("expected int but got string"));
         Assert.That(json, Does.Contain("Age: int"));
         Assert.That(json, Does.Contain("Age: string"));
-        Assert.That(json, Does.Contain("SchemaValidationException"));
+        Assert.That(json, Does.Contain("DataSchemaValidationException"));
     }
 
     [Test]

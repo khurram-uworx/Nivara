@@ -62,7 +62,7 @@ public static class SnippetReport
 /// Row types the typed-query snippets bind against. <c>Query&lt;T&gt;()</c> maps each property to a
 /// like-named column case-insensitively, so what the gate actually checks here is that the predicate
 /// and projection expressions reference members that exist and that the chain resolves — the
-/// property-to-column mapping itself is a runtime <c>SchemaValidationException</c>, never a compile
+/// property-to-column mapping itself is a runtime <c>QuerySchemaValidationException</c>, never a compile
 /// error, so it was never something this gate verified.
 /// </summary>
 /// <remarks>

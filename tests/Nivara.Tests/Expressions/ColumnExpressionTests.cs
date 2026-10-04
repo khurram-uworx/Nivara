@@ -49,7 +49,7 @@ public class ColumnExpressionTests
     }
 
     [Test]
-    public void ColumnReference_Validate_InvalidColumn_ThrowsSchemaValidationException()
+    public void ColumnReference_Validate_InvalidColumn_ThrowsQuerySchemaValidationException()
     {
         var colRef = new ColumnReference("NonExistent");
 
@@ -59,7 +59,7 @@ public class ColumnExpressionTests
     }
 
     [Test]
-    public void ColumnReference_Validate_WrongType_ThrowsSchemaValidationException()
+    public void ColumnReference_Validate_WrongType_ThrowsQuerySchemaValidationException()
     {
         var colRef = new ColumnReference("Age", typeof(string)); // Age is int, not string
 

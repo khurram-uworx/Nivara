@@ -58,7 +58,7 @@ public class TypedLinqTests
     }
 
     [Test]
-    public void Query_RowTypeNotMapping_SchemaValidationException()
+    public void Query_RowTypeNotMapping_ThrowsQuerySchemaValidationException()
     {
         using var frame = CreatePeopleFrame();
 
@@ -72,7 +72,7 @@ public class TypedLinqTests
     }
 
     [Test]
-    public void Query_RowTypeWithNoProperties_SchemaValidationException()
+    public void Query_RowTypeWithNoProperties_ThrowsQuerySchemaValidationException()
     {
         using var frame = CreatePeopleFrame();
 

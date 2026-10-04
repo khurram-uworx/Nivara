@@ -196,7 +196,7 @@ public class MixedTypeIntegrationTests
         Assert.That(ex3.Message, Contains.Substring("Index"), "Error message should contain 'Index'");
 
         // Query with invalid column reference
-        var queryEx = Assert.Throws<QueryExecutionException>(() => // Expect QueryExecutionException which wraps SchemaValidationException
+        var queryEx = Assert.Throws<QueryExecutionException>(() => // Expect QueryExecutionException which wraps QuerySchemaValidationException
         {
             var query = frame.AsQueryFrame().Filter(ColumnExpressions.Col("InvalidColumn") > 0);
             query.Collect();
@@ -328,7 +328,7 @@ public class MixedTypeIntegrationTests
 
         // Query operations should validate schema
         var validFrame = NivaraFrame.Create(("Data", shortColumn));
-        var schemaEx = Assert.Throws<QueryExecutionException>(() => // Expect QueryExecutionException which wraps SchemaValidationException
+        var schemaEx = Assert.Throws<QueryExecutionException>(() => // Expect QueryExecutionException which wraps QuerySchemaValidationException
         {
             var query = validFrame.AsQueryFrame().Filter(ColumnExpressions.Col("NonExistent") > 0);
             query.Collect();

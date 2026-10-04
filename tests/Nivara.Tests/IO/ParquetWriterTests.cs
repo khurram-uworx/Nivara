@@ -196,7 +196,7 @@ public class ParquetWriterTests
     }
 
     [Test]
-    public void WriteParquetBatch_WithIncompatibleSchemas_ThrowsSchemaValidationException()
+    public void WriteParquetBatch_WithIncompatibleSchemas_ThrowsDataSchemaValidationException()
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
