@@ -15,6 +15,33 @@ All notable changes to Nivara are documented here. Released versions are publish
   call. Both interfaces are implemented deliberately: implementing only `IDisposable` makes
   `await using` a compile error (CS8417) and only `IAsyncDisposable` makes `using` one (CS8418).
 
+- **Documentation citation gate: every `File.cs:NN` reference in the docs must resolve (#518)** —
+  no test read the markdown, so a doc could name a file, a line or a member that no longer
+  existed and nothing noticed. #516 is the worked example: two docs stated a 256 MB streaming
+  budget while an executable test asserted 1 GB, and the clamp gave both inputs the same answer,
+  so even a hand-written check passed. `DocumentationSnippetTests` (#515) gates the code shown
+  inline; this gates the file references pointing at it. A citation resolves only if it names
+  exactly one source file and a line inside it — a path-qualified citation must resolve exactly,
+  a bare basename must be unique in the repository (`Program.cs` exists in 14 files), an
+  **ambiguous** basename fails rather than silently picking one, and ranges are judged by their
+  **last** line, since `1366-1388` in a 187-line file is precisely what a start-only check waves
+  through.
+
+  Fixes 17 citations that had rotted: 11 named `MemoryStorage.cs` / `TensorStorage.cs` (deleted
+  by the 2026-08-03 storage consolidation) or `ExpressionEvaluator.cs` (replaced by the fused
+  expression engine), 1 pointed past end-of-file, and 5 more used an ambiguous bare basename.
+  Two `docs/plan/POLARS-REVIEW.md` findings turned out to be **false** rather than merely stale,
+  and were re-audited against code instead of re-pointed: the "one fatal flaw" — a boxed, per-row
+  expression interpreter — no longer exists at all, and the claimed non-float softmax fallback is
+  gone because that kernel is now generic over `IFloatingPointIeee754<T>`. Measured coverage is
+  105 citations across 46 documents, with those counts pinned so a shrinking scope reads as
+  reduced coverage rather than a quiet pass.
+
+  **Limitation:** the gate checks that a citation *resolves*, not that the cited lines support
+  the sentence around them. `docs/plan/POLARS-REVIEW.md` cited `NivaraColumn.cs:188-208` for a
+  float/double type-switch claim while those lines hold `getTypeSize` — perfectly resolvable, and
+  still wrong. That one needs a reader.
+
 ### Fixed
 
 - **Query-source lifetime is tracked per source, not per frame (#501)** - `QueryFrame`'s derived

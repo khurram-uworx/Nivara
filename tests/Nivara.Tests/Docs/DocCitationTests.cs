@@ -14,7 +14,7 @@ public class DocCitationTests
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenCitations.md";
 
     /// <summary>Count of citations found repository-wide. Pinned deliberately: see the coverage test.</summary>
-    const int ExpectedCitationCount = 105;
+    const int ExpectedCitationCount = 106;
 
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
     const int ExpectedCitedDocumentCount = 16;
