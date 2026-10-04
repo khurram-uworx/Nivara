@@ -87,8 +87,8 @@ The pillars below are the concrete translation.
 | Pillar | Status | Evidence | Roadmap |
 | --- | --- | --- | --- |
 | 1 · GC-aware pooled memory | ✅ Native | Sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`); zero-copy `AsTensor()` view cached; `BufferPool`/`ArrayPool` in hot paths (Adam/AdamW, AccumulateGradient); immutability + structural sharing | Done |
-| 2 · Typed expression → fused kernels | ❌ Violated | Boxed interpreter in `src/Nivara/Helpers/ExpressionEvaluator.cs`; see §4 | **Phase 1–2** |
-| 3 · Generic math (SAIS) | 🟡 Partial | AutoDiff already `IFloatingPointIeee754<T>` + generic `TensorPrimitives`; but `NivaraColumn` arithmetic still float/double type-switches (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`) | Phase 2 |
+| 2 · Typed expression → fused kernels | ✅ Native | Every expression-bearing operation — filter, select, group-by, sort, window, rank — constructs a `FusedExpressionEvaluator`, which compiles the `ColumnExpression` AST to a cached delegate over typed leaf arrays (`src/Nivara/Expressions/FusedExpressionEvaluator.cs:16-33`). `FusedKernel` is the fallback, and non-fusible expressions **throw** rather than fall back to a boxed interpreter (`src/Nivara/Expressions/FusedKernel.cs:17`); see §4 | Done |
+| 3 · Generic math (SAIS) | 🟡 Partial | AutoDiff is `IFloatingPointIeee754<T>` + generic `TensorPrimitives`, and the column layer has since followed: `NivaraColumn<T>` arithmetic dispatches through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs:72-73`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs:41-42`); type support is a predicate, not a float/double switch (`src/Nivara/NivaraColumn.cs:175-190`). What is still missing is generic-math *methods* on the column surface | Phase 2 |
 | 4 · BCL tensor substrate | ✅ Native | `TensorPrimitives` kernels in `TensorsHelper.cs`, `NivaraTensorExtensions.cs`; `Tensor<T>` storage | Done |
 | 5 · Plan + optimizer | ✅ Strong | `QueryPlan`, `QueryOptimizer`, `OptimizationEngine`, pushdown/fusion/elimination rules (`src/Nivara/Optimization/`) | Phase 2 (kernel fusion) |
 | 6 · Async-first streaming | 🟡 Partial | Async seams exist on `IQuerySource` (`src/Nivara/Query/IQueryInterfaces.cs:34-52`); strategies implemented, but pipeline is pull-chunk, not async-native | Phase 4 |
@@ -100,32 +100,71 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
 ---
 
-## 4. The one fatal flaw: the boxed expression evaluator
+## 4. The one fatal flaw: the boxed expression evaluator — since resolved
 
-`src/Nivara/Helpers/ExpressionEvaluator.cs` is the single largest contradiction to Pillar 2 in the codebase.
+> **Re-audited against current code.** This section originally documented
+> `src/Nivara/Helpers/ExpressionEvaluator.cs` and called a boxed, per-row interpreter the single
+> largest contradiction to Pillar 2 in the codebase. That file no longer exists, and neither
+> does any of its machinery: `ApplyBinaryOperation`, `AddValues`, `RowExpressionBuilder` and
+> `NivaraLinqExtensions` all have zero symbols today. The finding was correct when written and
+> has since been fixed, so what follows is what replaced it — kept because the reasoning still
+> explains why the fix took the shape it did, and because "we fixed the fatal flaw" is only
+> useful next to the evidence that it is fixed.
 
-Every query predicate or projection that goes through `QueryFrame` (`.Where(...)`, `.Select(...)`) is evaluated by this interpreter:
+Every query predicate or projection that goes through `QueryFrame` (`.Where(...)`,
+`.Select(...)`) is now evaluated by `FusedExpressionEvaluator`
+(`src/Nivara/Expressions/FusedExpressionEvaluator.cs:16-33`), which lowers a validated
+`ColumnExpression` AST into a single-pass kernel over the whole column with **no intermediate
+columns and no per-element `object?` boxing** — the exact phrase that type's own documentation
+now uses. This is not one call site: filter, select, group-by, sort, window and rank operations
+each construct an evaluator, so there is no surviving path around it.
 
-- `ApplyBinaryOperation` allocates an `object?[]` and calls `left.GetValue(i)`/`right.GetValue(i)` per row (`ExpressionEvaluator.cs:220-235`).
-- `AddValues`/`SubtractValues`/... pattern-match boxed values and fall back to `Convert.ToDouble` (`ExpressionEvaluator.cs:262-320`).
-- Comparisons go through `IComparable` (`ExpressionEvaluator.cs:345-391`).
+**How the boxing was removed:**
+- The primary target compiles the expression tree with `System.Linq.Expressions` into a
+  **cached delegate over typed leaf arrays** (`FusedExpressionEvaluator.cs:20-22`). The leaves
+  are the columns' own backing arrays, so even a sliced column is read in place and chunked
+  execution addresses the contiguous backing array directly — no whole-column snapshot copy
+  (`:24-26`).
+- The straight-line loop body is emitted by the JIT and **auto-vectorizes** for numeric leaves
+  (`:23`) — which is the thing the old interpreter could not do at all.
+- Where the compiled target cannot be built, a generic node-tree kernel (`FusedKernel`,
+  `src/Nivara/Expressions/FusedKernel.cs:17`) runs instead: still typed, still span-based
+  (`:29-30`).
+- Expressions that cannot be fused at all **throw**. There is deliberately no boxed fallback to
+  regress into, so the old failure mode cannot return quietly (`:30`).
+- Null masks are OR'd from the leaf masks in a separate pass, and comparisons produce
+  masked-false at nulls — SQL-like semantics, deliberately matched to the legacy evaluator
+  (`:31-32`).
 
-**Consequences:**
-- No SIMD, no `TensorPrimitives`, no `Span<T>` — the exact path Polars compiles to fused kernels is a per-row, boxing, allocating interpreter here.
-- Meanwhile `NivaraColumn<T>` arithmetic is fully typed and vectorized (`TensorPrimitives.Multiply(xFloat, yFloat, destFloat)`). The query path and the column path are two different worlds of performance.
-- Result columns degrade to `NivaraColumn<object?>` in many cases, leaking the untyped fallback into the result schema.
+**The gap is guarded, not merely closed.** The evaluator counts how many evaluations took each
+of its four paths — fused, compiled, span-kernel, `TensorPrimitives` (`FusedExpressionEvaluator.cs:36-39`)
+— and guardrail tests assert the fused path is actually selected. A silent regression to an
+interpreter therefore fails the build instead of quietly halving throughput.
 
-**Contributing factor — the `OrderBy` gap:** `NivaraQuery.OrderBy` (then `NivaraLinqExtensions.OrderBy`) only supported direct column references or simple name-based expressions and threw `NotSupportedException` for complex keys. The sort layer expected a column name, so the expression engine could not feed it computed keys. This is a symptom of the same disease: expressions are not first-class typed values.
+**Two consequences the old section predicted, now confirmed:**
+- Result columns no longer degrade to `NivaraColumn<object?>`. The only `object`-typed column in
+  the codebase is the optional label index, and the only `object?` parameters left are window
+  fill and null handlers.
+- `OrderBy` accepts computed keys. `SortByExpressionOperation`
+  (`src/Nivara/Operations/SortByExpressionOperation.cs:49`) sorts on
+  `SortExpressionKey(ColumnExpression key, …)` (`:19`) evaluated through the fused evaluator, so
+  the "expressions are not first-class typed values" symptom is gone. What remains is a naming
+  artefact: the query surface is `NivaraQuery` (`src/Nivara/Linq/NivaraQuery.cs`), formerly
+  `NivaraLinqExtensions`.
 
-**Contributing factor — two front ends, one weak back end:** both `ColumnExpression` operator overloads (the DSL, `src/Nivara/Expressions/ColumnExpression.cs`) and `RowExpressionBuilder` (the LINQ-ish surface, `src/Nivara/Linq/NivaraQuery.cs`, formerly `NivaraLinqExtensions.cs`) ultimately produce the *same* `ColumnExpression` AST. The split is not two ASTs — it is two ergonomic front ends converging on one AST that is then interpreted through the boxed evaluator. Fixing the back end fixes both front ends at once. This is the highest-leverage change in the project.
+**Still true from the original analysis:** two front ends, one back end. The DSL operator
+overloads on `ColumnExpression` (`src/Nivara/Expressions/ColumnExpression.cs:38-326`) and the
+LINQ-ish surface both produce the same AST. That convergence is precisely why fixing the back
+end fixed both front ends at once, and it is why the original review called this the
+highest-leverage change in the project. That judgement was right.
 
 ---
 
 ## 5. Secondary gaps
 
 1. **No operator-level fusion rule.** The inert `OperationFusionRule` was removed; the optimizer currently focuses on pushdown and column elimination. Kernel-level expression fusion is provided by `FusedExpressionEvaluator`, but chained plan operators still materialize intermediate columns.
-2. **No window functions.** No `Over`/rolling/cumulative/lag/rank anywhere in `src/` (confirmed by grep). This is the largest *analytical feature* gap versus Polars.
-3. **Generic-math collapse pending.** `NivaraColumn<T>` arithmetic branches on `float`/`double` explicitly. AutoDiff proves the generic `IFloatingPointIeee754<T>` pattern works; the column layer has not adopted it.
+2. **Window functions — built since this review.** `WindowSpec` (`src/Nivara/Operations/WindowSpec.cs:15`) plus `WindowOperations` and `WindowFrameExtensions` provide `Over()`, rolling, cumulative, shift/lead/lag, row number and rank, including over computed window sources. This was the largest *analytical feature* gap versus Polars that the review identified, and it is now closed.
+3. **Generic-math collapse partly done.** `NivaraColumn<T>` arithmetic no longer branches on `float`/`double` explicitly: it routes through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs:72-73`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs:41-42`). What remains is that the column *surface* still exposes per-type methods rather than generic-math ones.
 4. **Async not first-class in streaming.** The seams exist; the streaming strategy is still a synchronous chunk puller with async wrappers.
 5. **No source generators.** The uniquely-.NET differentiator is untouched (see Pillar 8, Phase 5).
 
@@ -144,7 +183,7 @@ Every query predicate or projection that goes through `QueryFrame` (`.Where(...)
 
 Nivara is ~75% a "Polars for .NET" and ~80% a "columnar + Arrow-inspired + AI infrastructure in .NET style," but those numbers are not the point. The lens says something sharper:
 
-> Nivara already makes the right native-.NET choices on **memory**, **tensor substrate**, **Arrow positioning**, **optimization**, and **observability**. It violates the native model in exactly one architectural place — the expression engine boxes instead of compiling — and it is missing the native-only differentiators (source generators) and the analytical breadth (window functions).
+> Nivara already makes the right native-.NET choices on **memory**, **tensor substrate**, **Arrow positioning**, **optimization**, and **observability**. At the time of this review it violated the native model in exactly one architectural place — the expression engine boxed instead of compiling — and it was missing the native-only differentiators (source generators) and the analytical breadth (window functions). The expression engine and the window functions have since been built (§4, §5.2), so the remaining native-only gap is source generators; what is still open is the secondary list in §5.
 
 The roadmap to close those gaps is in **`docs/POLARS-ROADMAP.md`**.
 
