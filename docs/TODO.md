@@ -133,35 +133,92 @@ This changes the repository's snippet count: 14 splits is +14 blocks, so the uni
 
 ### 4. Gate both documents
 
-Splitting is complete and verified: **zero CS8803 blocks remain** across both documents, confirmed
-by parsing each block's top-level shape with the same parser the gate uses rather than a line-order
-heuristic. That distinction matters — a heuristic that matches the first `var` in a block counts a
-type declaration's own method body as a top-level statement, so it reported 3 of the 14 type-only
-blocks I had just created as still-broken. They were not.
+**Correction, and the gate is what caught it.** An interim Roslyn diagnostic claimed zero CS8803
+blocks remained after the 14 splits. That was wrong: it compared only the *first* type declaration
+against the *first* top-level statement, so a `statements -> type -> statements` block read as legal
+because its first statement preceded its type. The rule is that *no* top-level statement may follow
+*any* type declaration, so the check must be "exists a type that starts before some statement". The
+gate reports two survivors — `GETTING-STARTED.md` fences 210 and 378 — both of that shape, needing
+2 more splits for **16** total and a universe of 249. Prefer the gate's own diagnostics to a
+hand-rolled classifier; this is the second time a heuristic has been wrong here, the first being the
+`using var` confusion.
 
-The same classification fixes the wrap modes exactly: **14 TYPE-ONLY blocks**, one per split, each
-needing `mode: File`. The remaining 64 blocks are `STATEMENTS-ONLY` or the one legal
-statements-then-type block at `GETTING-STARTED.md:211`, all of which stay `TopLevel`.
+### The first gate run was wrong about the cause of 5 of its own errors
+
+The first run reported **140** errors, and five of the defects it named were not defects at all.
+`DocSnippetCompiler.BaseUsings` listed 17 of the 32 namespaces the public surface occupies, so the
+gate could not resolve names that genuinely exist:
+
+| Reported as missing | Actually in | Errors withdrawn |
+|---|---|---|
+| `NivaraFrame.ToTensor` | `Nivara.Tensors` | 2 |
+| `NivaraFrame.ToReverseGradTensors` | `Nivara.AutoDiff` | 1 |
+| `ColumnDisambiguationStrategy` | `Nivara.Operations` | 2 |
+| `ReverseGradOperations` | `Nivara.AutoDiff.Operations` | 5 |
+| `FileStream` / `FileMode` | `System.IO` | — |
+| `JoinException` | `Nivara.Exceptions` | — |
+
+Widening `BaseUsings` to every public namespace dropped the count to **129**. Widening it cannot mask
+a defect — it affects name resolution only, never whether a member is present — so this is strictly a
+harness fix, and it is what makes the remaining diagnostics trustworthy. Two rounds of classification
+were discarded because of this, and the CS0104 pair it introduced is a real API finding rather than a
+doc defect (#532).
+
+**Verified final partition — the parts sum to the whole:**
+
+| Class | Count | Issue |
+|---|---|---|
+| Missing context (70 × CS0103, 30 × CS0246) | 100 | #524 |
+| Column/series members that do not exist (CS0019, CS1061 ×2) | 3 | #525 |
+| AutoDiff call sites (CS1061 ×2, CS1739 ×3, CS8130 ×1) | 6 | #526 |
+| IO / Arrow / tokenizer call sites (CS1061 ×2, CS0117 ×5) | 7 | #527 |
+| `Tensor<T>.AsSpan()` does not exist (CS1929 ×2) | 2 | #528 |
+| `int[]` where `double[]` is required (CS1503 ×5) | 5 | #529 |
+| Block-internal name collisions (CS0128, CS0136) | 2 | #530 |
+| Blocks still needing a split (CS8803 ×2) | 2 | #531 |
+| `SchemaValidationException` declared twice (CS0104 ×2) | 2 | #532 |
+| **Total** | **129** | |
+
+`frame` alone accounts for 36 of the missing-context errors and appears under several incompatible
+shapes, so no single preamble can serve it; that work is per-block `locals:` authoring (#524).
+
+Each of the 29 genuine-defect diagnostics needs the real API looked up before the doc is corrected,
+which is the slow part and the actual deliverable — so it becomes follow-up work rather than more
+commits on this branch (see *Split of work* below).
 
 - Move `GETTING-STARTED.md` and `EXAMPLES.md` from `UngatedDocuments` to `GatedDocuments`.
-- Add gate comments to all 92 blocks: `mode: File` on the 14 type-only ones, default `TopLevel`
-  elsewhere, and a `locals:` line wherever the block needs context from earlier in its section.
-- Progressive context, one preamble per section for `GETTING-STARTED.md`'s 13 `##` headings rather
-  than one per block: the document is cumulative (block #3 consumes `column` from block #2), and a
-  section-scoped context is 13 preambles instead of 63. Where a section's context is wrong for one
-  block, the compiler names that block and the fix is a per-block `locals:` override.
+- 16 blocks become TYPE-ONLY and need `mode: File`; the other 76 stay `TopLevel`.
+- Progressive context: the 112 context errors show a per-section preamble is too coarse, because
+  `frame` has several different shapes. Expect mostly per-block `locals:` with a small number of
+  named preambles for the row types the splits created.
 - Extend `KnownPreambles`; the bidirectional assertion already fails on drift.
-- Re-pin the coverage numbers, and update the prose in the assertion's failure message so it still
-  describes the real split. Projected: universe **247**, ungated **134**, compiled **111**,
-  excluded **2** (the existing ASP.NET Core pair). Projections; the real figures get pinned from
-  what the gate reports.
+- Re-pin the coverage numbers from what the gate reports rather than from projection. The first
+  projection (universe 247, ungated 141, compiled 104) was right on universe and ungated but the
+  2 extra splits move the universe to 249.
 - `GatedStreamixBlocks_OnlyDependOnTheStreamixPackageTheRepoReferences` filters on
   `DocumentPath == "docs/STREAMING.md"`, so it stays correct untouched.
 
 The gate goes red at this point. That is the intended sequence — it cannot be enabled until the docs
 are green, and the docs cannot be fixed until it runs. CI only ever sees the pushed state.
 
-### 5. Fix what the gate finds, one class of defect per commit
+### 5. Split of work: gate here, defects as follow-up issues
+
+The human's call was to split this: land the gate red, and file the defects it found rather than
+fixing them here. The reasoning that matters is not scheduling but **what the branch is for**. Once
+the gate is enabled, any fix lands *after* the check that catches it, so the fixes are ordinary
+follow-up work with an issue number each — while the branch stays one reviewable unit whose only
+purpose is to make the check exist.
+
+Two alternatives were put to the human and rejected: pushing all 129 fixes through this branch (many
+hours of mechanical `locals:` authoring mixed in with a harness change, so the harness change could
+not be reviewed on its own), and narrowing the allowlist to blocks that already pass. The second was
+rejected on principle — an allowlist that only admits passing blocks cannot fail, and a gate that
+cannot fail is indistinguishable from no gate at all.
+
+Nine issues filed, one per fix rather than one per diagnostic, each stating its site count so the
+partition in section 4 can be audited against the gate output. Nothing is annotated in the documents:
+the gate comment records a block's declared context, and defect commentary in prose is exactly the
+kind of comment that goes stale.
 
 ### 6. `CHANGELOG.md`
 
@@ -221,12 +278,17 @@ put to them, and grounding refined the counts underneath them rather than the di
 
 1. `dotnet build Nivara.slnx -c Release` — preambles are compiled C#, so a broken preamble fails
    the build itself.
-2. `dotnet test -c Release --filter "FullyQualifiedName~DocumentationSnippetTests"` — green, and
-   reporting the real pinned numbers.
-3. The citation gate still passes — `FullyQualifiedName~DocCitation`.
+2. `dotnet test -c Release --filter "FullyQualifiedName~DocumentationSnippetTests"` — **red by
+   design**: `EveryGatedBlock_CompilesWithoutErrors` reports the 129 in section 4. The other ten pass,
+   including the coverage assertion that pins 104/2/141/247, so a red here is the known count and
+   not a regression. A change in that number means the partition above is stale.
+3. The citation gate still passes — `FullyQualifiedName~DocCitation` (8 tests, verified green before
+   each of the two gate commits).
 4. The negative control still fails: `Fixtures/Broken.md` reports its own line.
-5. Every one of the 15 fixed call sites compiles — proven by the gate for the 14 in the two
-   documents, and by inspection for `AGENTS.md:153`, which is prose rather than a fenced block.
+5. The 15 fixed call sites are pinned by review, not by the gate. The gate cannot certify them while
+   it is red — most of those blocks still fail for missing context — so the claim rests on the diff
+   plus the fact that `NivaraColumn.CreateFromNullable<T>(T?[])` is the only such factory in
+   `src/Nivara/NivaraColumn.Factory.cs:19`. #525 onward is where this stops being true.
 6. Re-run the bogus-member injection check to confirm line mapping survived the hoist.
 7. Full suite `dotnet test -c Release --filter "Category!=Performance"` — **ask first**; the
    previous branch declined it, and the same gap would recur here.
@@ -237,37 +299,70 @@ put to them, and grounding refined the counts underneath them rather than the di
 2. `docs: correct the stale NivaraColumn<T>.CreateFromNullable call shape`
 3. `test: hoist leading using directives out of gated snippet bodies`
 4. `docs: split the blocks that mix a row type with statements`
-5. `test: gate GETTING-STARTED.md and EXAMPLES.md snippets`
-6. `fix: <one commit per class of defect the gate finds>` (additive, count unknown)
+5. `test: widen snippet BaseUsings to every public namespace`
+6. `test: gate GETTING-STARTED.md and EXAMPLES.md, red on 129 known errors`
 7. `docs: remove TODO.md - plan executed`
+
+Steps 5 and 6 are recorded separately because step 5 is green on its own merits and step 6 is the
+red state. Commit 5 alone is red on one assertion — the coverage count the step-4 splits invalidated
+and step 6 re-pins — so the branch is red from step 4 onward, by design.
 
 ## Risks and open items
 
-- **Unknown defect yield.** One stale shape already spans 15 sites in documents nothing has ever
-  compiled. I expect more, and the count is not knowable until the gate runs. If it is large this
-  becomes several commits, and the documentation fixes are the deliverable rather than the gate.
-- **Section-scoped preambles may be too coarse.** `GETTING-STARTED.md`'s "Automatic Differentiation"
-  section alone has 16 blocks. Where a context is wrong for a specific block the gate names it, and
-  the fix is a per-block `locals:` override — the mechanism already supports that, but it means
-  preambles may not be as tidy as "one per section".
+- **The branch is red and cannot merge until the follow-ups land.** `EveryGatedBlock_CompilesWithoutErrors`
+  reports 129 errors and the human chose to let CI show that rather than hide it behind a narrowed
+  allowlist. The consequence to keep visible: this branch is a mechanism, not a mergeable change, and
+  #524 (100 of the 129) is the gate for the gate — until that lands, merging it would break main.
+- **Commit 5 in isolation is red on the coverage assertion.** Verified, not inferred: stashing steps
+  6's changes and running `DocumentationSnippetTests|DocSnippetCompilerTests` gives 26 passed / 1
+  failed, and the failure is the repository-wide count that step 4 moved from 233 to 247. Stated here
+  because a bisect landing on that commit will see a red that no single commit caused.
+- **Defect yield turned out to be 29, not the 21 first projected** — and 5 of the original 21 were
+  never defects. The projection was made before the gate ran and was wrong twice over; the verified
+  partition in section 4 supersedes it.
+- **Section-scoped preambles are too coarse**, as the plan suspected but could not confirm until the
+  gate ran. `GETTING-STARTED.md`'s "Automatic Differentiation" section alone has 16 blocks, and
+  `frame` appears in 36 blocks under incompatible shapes. The fix is per-block `locals:` plus a small
+  number of named preambles for the row types the splits created (#524).
 - **The hoist changes line mapping for all gated blocks.** Highest-risk step in the plan. Mitigated
   by dedicated tests and by re-running the injection check.
 - **Stage 2 may need its own counted exclusions** — illustrative fragments that are not meant to
-  compile. Each would be asserted by value, like the existing ASP.NET pair.
+  compile. Each would be asserted by value, like the existing ASP.NET pair. None were needed at 129
+  errors: every one of them names a real member or a real missing local, so no block has to be
+  excused yet. If #524 finds a fragment that genuinely cannot compile, it must be counted by value
+  rather than added to the allowlist.
 - `DocWrapMode.File` previously had no consumer among the gated blocks, which was a speculative
-  generality. Stage 2's one type-declaration-only block needs it, so the concern resolves itself.
-- **The defect yield is still unknown, and grounding does not touch that.** Everything above is
-  structural. Whether the 78 blocks reference Nivara members that do not exist is a separate
-  question that only a run can answer, and it is the open risk on this branch.
+  generality. Stage 2's 14 type-declaration-only blocks need it, so the concern resolves itself.
 
 ## GitHub issues log
 
+Fixed here:
+
 - [x] #517 — `docs/ACCELERATION.md:22` cites a nonexistent `src/Nivara.Gpu`
 - [x] #518 — `docs/LINQ.md` calls `QueryFrame` internal; it is `public sealed class`
-- [x] #520 — the subject of this plan. Premise correction is recorded above and in the issue.
+- [x] #520 — the subject of this plan. Premise correction is recorded above; the issue body still
+      carries the original framing and should be corrected when it is closed.
+
+Filed by this branch, one per fix, partition in section 4:
+
+- [ ] #524 — 100 gated blocks fail on missing context (70 CS0103 + 30 CS0246). **The gate for the
+      gate**: until this lands, this branch cannot merge.
+- [ ] #525 — `ValidCount` (×2) and `operator>` on `NivaraColumn<T>` (×1) do not exist
+- [ ] #526 — five AutoDiff call sites: `EncodeDecode`, `ZeroGrad`, `vocabSize:`, `batchSize:`, `lr:`
+- [ ] #527 — seven IO / Arrow / tokenizer call sites, including the removed zero-copy Arrow API
+- [ ] #528 — `Tensor<T>.AsSpan()` does not exist; the property is `.Span`
+- [ ] #529 — five snippets pass `int[]` where `double[]` is required
+- [ ] #530 — two snippets declare the same variable name twice (`recon`, `result`)
+- [ ] #531 — two blocks still need a third split (CS8803); re-pins the universe 247 → 249
+- [ ] #532 — **API**, not documentation: `SchemaValidationException` is declared in both
+      `Nivara.Exceptions` and `Nivara.IO`, so any user importing both gets CS0104
+
+Still to file:
+
 - [ ] `README.md:58` — declares a row type before top-level statements, the same CS8803 defect as
-      the 14 blocks in step 3. Not in the stage-2 allowlist, so the gate will not cover it; to be
-      confirmed and filed once step 3's exact shape is known.
+      the 14 blocks split in step 4. `README.md` is not in the stage-2 allowlist, so the gate will
+      not cover it. #531 fixes the same shape in `GETTING-STARTED.md`; this should be folded into
+      that issue or filed once #531's exact shape is known.
 
 Reminder: as each task executes, if you find deferred work or a concern (a known limitation, a
 follow-up, a refactor) that is outside the current plan, create a tracked issue immediately via
