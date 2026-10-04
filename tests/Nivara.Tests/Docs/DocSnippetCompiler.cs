@@ -57,8 +57,16 @@ static class DocSnippetCompiler
     /// <summary>Compiles one block and returns its errors, each mapped back to a document line.</summary>
     internal static IReadOnlyList<DocSnippetError> Compile(DocBlock block)
     {
+        var hoisted = HoistLeadingUsings(string.Join("\n", block.Code.Split('\n')));
+        var body = hoisted.Region;
+
         var generated = new List<string>(BaseUsings);
-        var body = block.Code.Split('\n');
+        if (hoisted.Directives.Length > 0)
+        {
+            generated.AddRange(hoisted.Directives);
+            generated.Add(string.Empty);
+        }
+
         int bodyStart;
 
         if (block.Mode == DocWrapMode.GenericLocal)
@@ -115,8 +123,58 @@ static class DocSnippetCompiler
     }
 
     /// <summary>
+    /// Lifts a block's own using directives into the generated prologue. A using directive is only
+    /// legal ahead of every other element in a compilation unit (CS1529), so a snippet that spells
+    /// out <c>using Nivara.Linq;</c> cannot also be spliced in as top-level statements.
+    ///
+    /// Directive lines are blanked rather than removed, which keeps the body region's line count
+    /// identical to the document's and leaves <see cref="Map"/>'s arithmetic untouched. Removal would
+    /// have required threading a hoisted-line offset through it, and a silent off-by-N there would
+    /// misdirect every future reader to the wrong line.
+    ///
+    /// Only genuine directives move. <c>using var csv = …</c> and <c>using (GradientUtils.Grad())</c>
+    /// are statements that are legal where they stand, and the parser already separates the two forms
+    /// — a line-based <c>^\s*using\s</c> hoist would have lifted them into the prologue and broken
+    /// every block that disposes a resource.
+    /// </summary>
+    static (string[] Directives, string[] Region) HoistLeadingUsings(string bodyText)
+    {
+        var root = CSharpSyntaxTree.ParseText(bodyText, ParseOptions).GetCompilationUnitRoot();
+
+        // Usings are in source order, so the first one at or after the first member is misplaced and
+        // is left alone to surface as CS1529 against the document rather than being silently fixed.
+        var firstMemberStart = root.Members.Count > 0 ? root.Members[0].SpanStart : int.MaxValue;
+
+        var region = bodyText.Split('\n');
+        var blanked = new bool[region.Length];
+        var directives = new List<string>();
+        var seen = new HashSet<string>(BaseUsings.Select(u => u.Trim()), StringComparer.Ordinal);
+
+        foreach (var directive in root.Usings)
+        {
+            if (directive.SpanStart >= firstMemberStart)
+                break;
+
+            var text = directive.ToString().Trim();
+            if (text.Length > 0 && seen.Add(text))
+                directives.Add(text);
+
+            blanked[directive.GetLocation().GetLineSpan().StartLinePosition.Line] = true;
+        }
+
+        // A directive already present in BaseUsings is blanked but not re-emitted; a repeat would be
+        // CS0105, a warning, so deduplication is hygiene here rather than a correctness requirement.
+        for (var i = 0; i < region.Length; i++)
+            if (blanked[i])
+                region[i] = string.Empty;
+
+        return ([.. directives], region);
+    }
+
+    /// <summary>
     /// Maps a diagnostic line in the generated unit back to the document. Diagnostics landing in the
     /// generated prologue report the block's own line, since that is the snippet the reader must fix.
+    /// Hoisting preserves the body's line count, so the body term needs no offset.
     /// </summary>
     static DocSnippetError Map(Diagnostic diagnostic, DocBlock block, int bodyStart)
     {

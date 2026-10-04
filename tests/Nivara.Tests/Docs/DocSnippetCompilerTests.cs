@@ -111,6 +111,94 @@ public class DocSnippetCompilerTests
     }
 
     [Test]
+    public void Compile_BlockWithItsOwnUsingDirective_CompilesInsteadOfReportingCS1529()
+    {
+        var errors = Compile(Block(
+            """
+            using Nivara.Linq;
+            NivaraColumn<int> c = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+            var sum = c.Sum();
+            """));
+
+        Assert.That(errors.Ids, Does.Not.Contain("CS1529"),
+            "a using directive inside the body is only legal hoisted into the prologue");
+        Assert.That(errors.IsEmpty, Is.True, errors.Describe());
+    }
+
+    [Test]
+    public void Compile_UsingStatement_StaysInPlaceAndKeepsItsVariableInScope()
+    {
+        var errors = Compile(Block(
+            """
+            using var disposable = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+            var sum = disposable.Sum();
+            """));
+
+        Assert.That(errors.Ids, Does.Not.Contain("CS0103"),
+            "`using var` is a statement, not a directive; hoisting it would strand the variable");
+        Assert.That(errors.IsEmpty, Is.True, errors.Describe());
+    }
+
+    [Test]
+    public void Compile_UsingStatementBlock_PreservesTheDisposablesItDeclares()
+    {
+        var errors = Compile(Block(
+            """
+            using var frame = NivaraFrame.Create(
+                ("A", NivaraColumn<int>.Create(new[] { 1, 2 })));
+            using var other = NivaraFrame.Create(
+                ("A", NivaraColumn<int>.Create(new[] { 3, 4 })));
+            var total = frame.RowCount + other.RowCount;
+            """));
+
+        Assert.That(errors.Ids, Does.Not.Contain("CS0103"),
+            "both `using var` locals must stay in scope, which only holds if neither was hoisted");
+        Assert.That(errors.IsEmpty, Is.True, errors.Describe());
+    }
+
+    [Test]
+    public void Compile_MisplacedUsingDirective_IsReportedRatherThanSilentlyHoisted()
+    {
+        var errors = Compile(Block(
+            """
+            var a = 1;
+            using Nivara.Linq;
+            """));
+
+        Assert.That(errors.Ids, Does.Contain("CS1529"),
+            "a directive after a statement is a document defect and must surface against the document");
+    }
+
+    [Test]
+    public void Compile_UsingDirectiveDuplicatingABaseUsing_StillCompiles()
+    {
+        var errors = Compile(Block(
+            """
+            using System;
+            using System.Linq;
+            var joined = string.Join(",", new[] { "a", "b" }.Select(x => x));
+            """));
+
+        Assert.That(errors.IsEmpty, Is.True, errors.Describe());
+    }
+
+    [Test]
+    public void Compile_HoistedDirective_DoesNotShiftMappedBodyLines()
+    {
+        var errors = Compile(Block(
+            """
+            using Nivara.Linq;
+            var a = 1;
+            var b = NoSuch();
+            """,
+            startLine: 40));
+
+        Assert.That(errors.Locations, Does.Contain("docs/INLINE.md:43"),
+            "hoisting blanks the directive line rather than removing it, so the body's line count is "
+            + "unchanged; removing it would have reported line 42 and misdirected the reader");
+    }
+
+    [Test]
     public void Extract_BrokenFixture_ProducesExactlyOneExcludedFreeBlock()
     {
         var blocks = DocSnippetExtractor.Extract(FixturePath);
