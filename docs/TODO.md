@@ -577,6 +577,8 @@ the replacement independently checkable.
 - [ ] #524 — 100 missing-context errors; the gate for the gate. Untouched here.
 - [ ] #525 / #526 / #527 / #529 / #530 / #531 — the other filed defects. Untouched here.
 - [ ] #532 — `SchemaValidationException` is an API defect, not a doc defect. Untouched here.
+      *(Superseded later in this file: it is a naming collision between two live types, and the
+      fix lands doc-side by qualifying the two `catch` sites.)*
 - [ ] #536 — **raised by step 2.** `ColumnStorage<T>.AsTensor()` caches a zero-copy
       `Tensor.Create` view over the sole-owner `T[]`. Safe today only because nothing writes
       `data` in place, and nothing asserts that. Any future in-place kernel would silently
@@ -741,13 +743,12 @@ premise is wrong, so none of the eight are assumed correct.
 - **#529 all doc defects.** All five `int[]`→`double[]` sites pass int literals to double-typed
   tensor/column parameters. No `int[]` overload exists and none should: these are float tensor
   APIs. Doc-side fix, not an API gap.
-- **#532's premise is false.** It states the type is "thrown from different layers and users need
-  to distinguish them". `Nivara.IO.SchemaValidationException` (`IOExceptions.cs:100`) is thrown from
-  **nowhere** — the only `throw new SchemaValidationException` in the repo is `NivaraFrame.cs:1203`,
-  which binds to `Nivara.Exceptions.SchemaValidationException`. The IO type has two constructors,
-  XML docs, and zero uses. It is dead public API, which removes the justification for #532's
-  "rename it" and "derive it" options. #532 also cites both source paths wrongly. **Needs a
-  decision — see below.**
+- **#532's premise is correct; an earlier correction of it here was wrong.** It states the type is
+  "thrown from different layers and users need to distinguish them". `Nivara.IO.SchemaValidationException`
+  (`IOExceptions.cs:100`) is thrown from the **Parquet reader and writer** —
+  `NivaraParquetReader.cs:363`, `NivaraParquetWriter.cs:246,270` — and caught in the writer's filters
+  at `NivaraParquetWriter.cs:78,131`. The `Nivara.Exceptions` type is the one thrown from the ~60
+  query-engine sites. Both are live. Resolved by qualifying the two doc sites — see below.
 - **#527 is three real doc defects plus one claim that is false.** The Parquet sites are typos:
   `NivaraFrameExtensions` → **`NivaraFrameIOExtensions`** (`src/Nivara.Extensions/IO/`), and
   `WriteParquetBatch`'s argument order is reversed in the doc — it is
@@ -789,19 +790,34 @@ Splitting each `CS8803` fence (:228, :392) adds one block each, so the gate's ow
 all blocks 247→249, gated 106→108, compiled 104→106. Ungated stays 141. A pin left behind fails
 the gate for the wrong reason, which is the failure mode #520's record warns about.
 
-### #532 — decided: delete the dead type
+### #532 — resolved: qualify the doc sites; the type is not dead
 
-**Decision: delete `Nivara.IO.SchemaValidationException`** (`IOExceptions.cs:100-118`), rather than
-qualify the two doc sites and leave it standing. Confirmed against source: it is thrown from
-nowhere, caught by nothing, and referenced by nothing but its own two constructors and XML docs.
+**Superseded. An earlier finding in this file claimed `Nivara.IO.SchemaValidationException` was
+dead public API and was wrong.** The search behind it was `Select-String -Path src/Nivara/IO/*.cs`
+plus `src/Nivara/*.cs,src/Nivara/**/*.cs` — neither pattern reaches `src/Nivara.Extensions/`, where
+the type actually has uses. A repo-wide search finds:
 
-Qualifying the doc sites was the alternative and would have been cheaper, but it settles the two
-diagnostics while leaving a shipped, public, permanently-unthrowable exception type in the surface —
-and it would leave the next reader with the same question this investigation just answered. The type
-is not a promise anyone can currently rely on, because no code path can produce one.
+- thrown at `NivaraParquetReader.cs:363` and `NivaraParquetWriter.cs:246,270` (all in
+  `namespace Nivara.IO`, binding to the IO type, not the `Nivara.Exceptions` one),
+- caught in the writer's `catch` filters at `NivaraParquetWriter.cs:78,131`,
+- documented in `<exception cref>` tags at `NivaraParquetWriter.cs:117,149`.
 
-Scope note: this is a **breaking public API change**, and it is the only source change in this
-branch. Recorded as such in the PR body rather than folded in silently among doc edits.
+So #532's filed premise — "thrown from different layers and users need to distinguish them" — is
+**correct**, and the decision recorded below was taken on a false claim. The type is genuinely
+thrown from the Parquet reader and writer and genuinely distinct from the query-engine type.
+
+**Resolution: qualify the two doc sites.** `catch (SchemaValidationException ex)` at both
+`ColumnDisambiguationStrategy.Error` and `ConcatenationMismatchHandling.Error` becomes
+`catch (Nivara.Exceptions.SchemaValidationException ex)`. Verified against source rather than
+inferred: `JoinOperation.cs` (8 throw sites, incl. `:788` for `DisambiguationStrategy.Error`) and
+`ConcatenationOperation.cs` (4 throw sites) import only `Nivara.Exceptions`, so the path each doc
+site documents throws that type. A note now records the ambiguity for readers, since both namespaces
+are normally in scope in user code too.
+
+This is the cheaper option and also the only one available: deleting the type would have broken the
+Parquet writer's two `catch` filters and its `<exception>` docs, and there is no third type to
+delete — the two exceptions are both live and both meaningful. The lesson recorded for the rest of
+this sweep is in #538: verify reach before concluding absence.
 
 ### Verification policy
 
