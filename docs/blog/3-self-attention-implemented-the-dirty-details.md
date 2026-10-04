@@ -82,7 +82,7 @@ write-back.
 - Fix: **pack** each head's columns into a contiguous span once, run all kernels on
   contiguous spans, then **scatter** results back. The packing is a cheap gather; the
   matmuls are the expensive part and they get contiguous memory.
-- `PackHeads` (`AttentionKernels.cs:42-46`):
+- `PackHeads` (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs:45-49`):
 
 ```csharp
 public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int numHeads, int headDim)
@@ -92,7 +92,7 @@ public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int num
 }
 ```
 
-- The comment above the class says it all (`AttentionKernels.cs:6-14`): packed once so every
+- The comment above the class says it all (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs:9-17`): packed once so every
   matmul feeds the SIMD `MultiplyCore` path "with zero per-head transposes (QKᵀ uses the
   transposed-B layout directly)." This is an engineer's cache-locality lesson, not an ML
   lesson.
@@ -113,26 +113,30 @@ public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int num
 
 - `exp(x)` overflows float at ~`x > 88`. Attention scores can exceed that.
 - The fix is numerically trivial and universally missed in tutorials
-  (`AttentionKernels.cs:59-70`, float path):
+  (`src/Nivara/AutoDiff/Operations/GradKernels.cs:493-520`, one generic kernel):
 
 ```csharp
-static void SoftmaxRow(Span<T> row)
-{
-    T max = T.NegativeInfinity;
-    for (int i = 0; i < row.Length; i++)
-        if (row[i] > max) max = row[i];
+T max = input[0];
+for (int i = 1; i < input.Length; i++)
+    if (input[i] > max) max = input[i];
 
-    TensorPrimitives.Subtract(row, max, row);   // row - max  (max ≤ 0 now)
-    TensorPrimitives.Exp(row, row);             // safe: exp(x - max) ≤ 1
-    TensorPrimitives.Divide(row, TensorPrimitives.Sum(row), row); // normalize to sum=1
-}
+if (max == T.NegativeInfinity) { output.Clear(); return; }   // every key masked out
+
+TensorPrimitives.Subtract(input, max, output);
+TensorPrimitives.Exp(output, output);
+TensorPrimitives.Divide(output, TensorPrimitives.Sum(output), output);
 ```
 
 - Subtracting the max doesn't change the softmax output (it cancels in the numerator and
   denominator) — it only makes it *computable*. This is a "which mathematically-equivalent
   expression do I ship?" decision (a theme returned to in Post 4 with GELU).
-- Non-float fallback (Half/BFloat16) does the same idea in scalar `double` math
-  (`AttentionKernels.cs:72-88`).
+- The same max scan is what makes the all-masked row *detectable*: `max == -inf` is the one
+  case where `x - max` would be `NaN`, so it clamps to zeros and matches PyTorch's
+  `_safe_softmax`. Section 6's `-∞` mask is what manufactures that row in the first place.
+- There is **no** separate non-float path. `SoftmaxSingle<T>` is constrained once to
+  `IFloatingPointIeee754<T>` and every step goes through `TensorPrimitives`, so Half,
+  BFloat16, float and double all run identical code — the payoff of writing kernels against
+  spans rather than arrays.
 
 ## 6. The padding mask: the `-∞` / tri-state trick
 
@@ -194,7 +198,7 @@ ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLe
 2. **The `-∞` mask removed an entire code path.** No `if masked` branch anywhere in the
    kernel. The mask is data.
 3. **Packing heads is the difference between SIMD-friendly and cache-hostile.** All the
-   matmuls feed `TensorsHelper.MultiplyCore` over contiguous spans (`AttentionKernels.cs:6-14`).
+   matmuls feed `TensorsHelper.MultiplyCore` over contiguous spans (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs:9-17`).
 4. **Softmax max-subtraction is non-negotiable** — scores genuinely exceed exp's range;
    the naive formula is a latent `NaN`.
 5. **Honest performance (worth writing down):** MiniLM at 128 tokens: PyTorch **11 ms** vs
