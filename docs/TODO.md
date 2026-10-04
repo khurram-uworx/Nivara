@@ -228,11 +228,11 @@ semantics. Only the short names move.
 ## GitHub issues log
 
 - [ ] #532 — resolve the duplicate `SchemaValidationException` public type *(this branch)*
-- [ ] TBD — `main` is red: 53 CS0104 diagnostics in `EveryGatedBlock_CompilesWithoutErrors`
+- [x] #541 — `main` is red: 53 CS0104 diagnostics in `EveryGatedBlock_CompilesWithoutErrors`
       from `GETTING-STARTED.md:35` colliding with `Nivara.Linq.QueryFrame`. Introduced
       after `2f2fb0e4`. Unrelated to #532 but blocks using "gate is green" as a
       verification signal. *(created while grounding #532)*
-- [ ] TBD — `DataFrameSchemaValidationException` (`src/Nivara/Exceptions/DataFrameExceptions.cs:91`)
+- [x] #542 — `DataFrameSchemaValidationException` (`src/Nivara/Exceptions/DataFrameExceptions.cs:91`)
       is dead public API: never thrown by production code, only constructed in
       `tests/Nivara.Tests/Exceptions/DataFrameExceptionTests.cs`. A third
       schema-validation exception in the same namespace as the renamed
