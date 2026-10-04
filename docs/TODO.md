@@ -508,6 +508,24 @@ re-derive it: `Tensor<T>` has no `Span`/`AsSpan()`; use `GetSpan`; supply every 
 Grounding note: AGENTS.md edits must not introduce new `File.cs:NN` citations — the citation
 gate (#518) scans it and this plan adds none, so no new citation risk is taken.
 
+**As landed, deliberately not as planned above.** The right-hand column was used to *verify*
+that the file was stale, and then not copied in. On review the instruction was to name the
+packages without pinning versions, because they move with the SDK and a copied version that
+has drifted is worse than no version — this file had already drifted twice (net10 → net11,
+and the Tensors version that came with it). So the landed edit says `.NET 11, latest NuGet
+packages (versions unpinned — read the csproj)` and lists the package names only. The
+target-framework fact is kept because it does not drift on its own; the package versions
+are dropped because they do.
+
+The verification then came full circle: the claim is only true if the packages actually *are*
+current, so the pending dependency bumps were folded into the branch and verified —
+`Microsoft.Agents.AI*` 1.21.0 → 1.23.0, `OllamaSharp` 5.4.30 → 5.5.0,
+`Microsoft.Extensions.AI.Abstractions` 10.10.0 → 10.10.1, `Microsoft.NET.Test.Sdk`
+18.10.0 → 18.10.1, `NUnit` 5.0.0-beta.1 → 5.0.0 stable, `coverlet.collector` 10.0.1 →
+10.1.0, `Microsoft.CodeAnalysis.CSharp` 5.0.0 → 5.9.0. The CodeAnalysis bump changes the
+Roslyn the snippet gate compiles with, so the diagnostic set was diffed rather than assumed:
+127 distinct before and after, EXAMPLES.md still 11.
+
 ## Blast radius
 
 - **`EXAMPLES.md`** — two lines in two fenced blocks. Both blocks currently fail the gate for

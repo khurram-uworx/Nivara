@@ -302,6 +302,14 @@ first document. That is the failure this mode exists to make visible, and it ass
 the third row's output against the flat row-major slice exactly, with no tolerance
 band, because a wrong row offset is structural rather than a precision question.
 
+**What this table is and is not evidence for.** The "compiles" column for the two rows
+that fail to compile comes from compiling them, in a scratch project, at the time the
+issue was analysed — this mode cannot re-derive it, because a form that does not compile
+cannot appear in a file that must itself compile. Those two rows are covered reflectively
+instead (step 2 of the probe below). Everything the mode reports about *running* is
+re-verified on every invocation. Likewise the `CS0121` / `CS9174` diagnostics quoted for
+`[]` and `Slice([i], ..)` are from that same compile check, not from this mode.
+
 **What it does**
 
 1. Reflects and prints the resolved `Tensor<T>` public surface, with generic
