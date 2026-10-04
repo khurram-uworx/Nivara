@@ -21,9 +21,9 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.VectorData.InMemory" Version="1.0.1" />
-    <PackageReference Include="Microsoft.Agents.AI" Version="1.21.0" />
-    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.21.0" />
-    <PackageReference Include="Microsoft.Agents.AI.Workflows.Generators" Version="1.21.0">
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.23.0" />
+    <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.23.0" />
+    <PackageReference Include="Microsoft.Agents.AI.Workflows.Generators" Version="1.23.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -31,7 +31,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0-rc.1.26425.128" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0-rc.1.26425.128" />
     <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.10.0" />
-    <PackageReference Include="OllamaSharp" Version="5.4.30" />
+    <PackageReference Include="OllamaSharp" Version="5.5.0" />
     <PackageReference Include="TypeSafeAI" Version="0.2.0" />
   </ItemGroup>
 

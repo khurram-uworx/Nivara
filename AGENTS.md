@@ -6,7 +6,7 @@
 
 - Nivara AutoDiff product direction: inference is the default/common path; reverse-mode training is opt-in via `using (GradientUtils.Grad())`. Do not implement NoGrad as the primary API. Built-in training loops should enter Grad() internally, while manual training examples/docs should wrap forward/loss/backward/optimizer code in Grad().
 - Nivara AutoDiff ADR-001 (non-nullable domain) is fully implemented. Type constraint relaxed from `INumber<T>` to `IFloatingPointIeee754<T>`, which passes Half/F16 and BFloat16 through runtime validation alongside float/double. All AutoDiff ops are span-ified (no NivaraColumn.Data access; Span<T> + TensorPrimitives).
-- Key BCL .NET 10 tensor patterns: TensorPrimitives now generic (200+ overloads for any INumber/IRootFunctions T), ReadOnlyTensorSpan<T> with TryGetSpan, implicit conversion from T[] to ReadOnlyTensorSpan<T>, Tensor<T> stable in .NET 10. Spans are the currency.
+- Key BCL .NET 11 tensor patterns: TensorPrimitives now generic (200+ overloads for any INumber/IRootFunctions T), ReadOnlyTensorSpan<T> with TryGetSpan, implicit conversion from T[] to ReadOnlyTensorSpan<T>, Tensor<T> stable (no longer experimental). Spans are the currency.
 - Nivara v1.4.0 shipped: public streaming API (`QueryFrame.AsStream`, `ScanAsQueryFrame` factories), `Over()`/`WindowSpec` window functions, fused expression engine (`FusedExpressionEvaluator` with SIMD backend + flat IR fallback), genuinely async `CollectAsync`, conditional expressions (`?:` in LINQ DSL), new aggregations (Quantile, Median, StdDev, Variance), public QueryPlan/ExecutionEngine/IExecutionStrategy/QueryDiagnostics/ExecutionProgress.
 
 ## Shell environment (Windows with GNU coreutils)
@@ -53,6 +53,7 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 - Slicing null masks: always check `.Length > 0` before slicing.
 - `Tensor.Create(..., [length])` should use `new nint[] { length }` for dimensions.
 - `Tensor.Lengths` is `nint[]`, not `int[]`.
+- `Tensor<T>` has **no** `Span`, `Memory`, `AsSpan()` or `AsMemory()`. To read one row of a rank-2 tensor use `GetSpan(startIndexes, length)` — and supply **one index per dimension**: `GetSpan([i, 0], dims)`. `GetSpan([i], dims)` compiles and then throws `ArgumentOutOfRangeException`, which the snippet gate cannot catch because it compiles but never runs. Its `length` parameter is `int` while `Lengths` is `nint[]`, and it is overloaded on both `ReadOnlySpan<nint>` and `ReadOnlySpan<NIndex>`, so a collection expression (`[i, 0]`) is what resolves the ambiguity. **Before writing a `Tensor<T>` call from a doc or an issue, run the probe** — `dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api` — which prints the real surface, asserts the members above are absent, and runs each candidate form against a flat row-major reference. Issues #524–#532 are eight more "the doc names an API that does not exist", and the recurring finding is that the filed prescription is itself wrong; check rather than trust the issue body.
 - Avoid reflection/emits that attempt to pass `Span<T>` to `MethodInfo.Invoke` — convert to arrays first.
 - Nullable generics & static constraints (CS0080): avoid `where T : struct` on static methods in generic classes. Validate at runtime and throw clear exceptions.
 - MemoryMarshal.Cast requires unmanaged constraints; use explicit type switch with `(T)(object)` casting for safe conversion.
@@ -98,6 +99,7 @@ See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null
 - A gate must state its own coverage in every summary, and reduced coverage is a failure, not a neutral event. Keep unhostable-skip and compile-failure on separate paths, and count each verdict in a separate counter so a structural failure is never reported as a numeric one.
 - When a new implementation must reproduce a reference bit-for-bit, assert that instead of a tolerance band. A tolerance turns a structural defect into a judgement call; exactness does not.
 - One commit, one reason. Do not alter a test's inputs, thresholds or counts inside a commit about something else — it silently invalidates the baselines the next person compares against.
+- **Do not sign commits or PRs.** No `Co-Authored-By`, `Signed-off-by`, `Reviewed-by`, or AI-attribution trailers, and no `git commit -S`. The human has not asked for attribution and a trailer naming a model is a false claim about who wrote the code. Describe the change and its reason in the message body; nothing else. If you find a trailer you added earlier, say so rather than quietly leaving it.
 - When a measurement is superseded, move every site that carries any part of it in one change, then check the arithmetic: parts of a partition should sum to the whole.
 - Capture the exit status of the process you care about, not of a filter in a pipeline — a filtered command reports the filter's status. Never report a check you have not seen fail.
 - Native integer types (`nint`): use `nint` for test assertions when comparing tensor dimensions.
@@ -112,7 +114,7 @@ See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null
 - **Arrow:** Build arrays using builders and individual `Append`/`AppendNull` calls. Convert `DateTime` to UTC and use `DateTimeOffset` for Timestamp arrays. Handle chunked arrays by iterating `chunkedArray.ArrayCount`. Create valid empty schemas/record batches for empty tables.
 - **Parquet:** Validate schema first, then reconstruct columns — use `CreateFromNullable` for value types, build arrays preserving nulls for reference types. `Parquet.Net DataColumn` expects non-nullable arrays matching `DataField<T>` generic type; pass `default(T)` for nulls and set field as nullable. Preserve string nulls as null, not empty string.
 - **CSV/JSON:** Lazy sources: `IsLazy = true`, infer schema from samples (e.g., 100 rows). Eager sources wrap lazy ones and materialize immediately. Conservative type detection: int → double → string; fallback to string in ambiguous cases. Lazy sources should validate structure/schema early, collect scan errors while traversing data, and throw during `Collect()` with source and operation context.
-- **Dependencies (Extensions only):** CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.10
+- **Dependencies (Extensions only):** CsvHelper, Apache.Arrow, Parquet.Net, Microsoft.ML, Microsoft.Extensions.AI.Abstractions, Streamix, System.Numerics.Tensors — .NET 11 latest, versions deliberately unpinned. Read the csproj.
 
 ## Performance & Optimization Thresholds
 
@@ -148,8 +150,8 @@ See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null
 ## Quick Reference
 
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
-- **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.10
-- **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.10
+- **Target framework**: .NET 11, latest NuGet packages (versions unpinned — read the csproj)
+- **Common deps (Extensions only)**: same set as above — .NET 11 latest, unpinned
 - **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn.CreateFromNullable<T>(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>`, `Adam<T>`, `AdamW<T>`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer`, `Loss<T>`/`Reduction`, `Activation.Gelu`, `ReverseGradOperations.Gelu`
 - **AutoDiff type constraint**: `IFloatingPointIeee754<T>` (float, double, Half) — ADR-001 non-nullable domain
 - **Storage**: single `ColumnStorage<T>` for all types (sole-owner `T[]` + optional `bool[]` null mask; zero-copy Slice; lazy `AsTensorView()`); vectorization decided by `KernelSelector`

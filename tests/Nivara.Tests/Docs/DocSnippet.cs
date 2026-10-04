@@ -92,6 +92,8 @@ static partial class DocSnippetExtractor
     [
         "agent-null-tensor",
         "agent-tensor-kernel",
+        "nn-models",
+        "row-types",
         "streaming-as-stream",
         "streaming-flux-basic",
         "streaming-flux-frame",

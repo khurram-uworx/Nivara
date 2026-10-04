@@ -219,7 +219,7 @@ var docVectors = documents.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>
 var scores = new float[docVectors.Lengths[0]];
 var dims = (int)docVectors.Lengths[1];
 for (int i = 0; i < scores.Length; i++)
-    scores[i] = TensorPrimitives.CosineSimilarity(docVectors.AsSpan().Slice(i * dims, dims), query);
+    scores[i] = TensorPrimitives.CosineSimilarity(docVectors.GetSpan([i, 0], dims), query);
 
 var ranking = documents.GetColumn<string>("DocumentId")
     .Select((id, i) => (Label: id, Score: scores[i]))
@@ -264,6 +264,9 @@ public sealed class Employee
 ```
 
 With the row type declared, the frame and its query follow:
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -314,6 +317,10 @@ public sealed class Employee
 ```
 
 The mismatch is caught when the query binds, not when it runs:
+<!-- gate
+preamble: row-types
+locals: NivaraFrame employees = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob"])), ("Department", NivaraColumn<string>.CreateForReferenceType(["Engineering", "Sales"])), ("Salary", NivaraColumn<int>.Create([120000, 90000])), ("IsActive", NivaraColumn<bool>.Create([true, false])));
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -351,6 +358,9 @@ public sealed class Employee
 ```
 
 With the row type declared, the query is typed end to end:
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -420,6 +430,9 @@ public sealed class Customer
 ```
 
 Scored against the stored embeddings, then queried with the score attached:
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -441,7 +454,7 @@ var embeddings = customers.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>
 float[] riskPattern = [0.8f, 0.1f, 0.6f, 0.3f];
 var riskScores = new float[customers.RowCount];
 for (int i = 0; i < customers.RowCount; i++)
-    riskScores[i] = TensorPrimitives.CosineSimilarity(embeddings.AsSpan().Slice(i * 4, 4), riskPattern);
+    riskScores[i] = TensorPrimitives.CosineSimilarity(embeddings.GetSpan([i, 0], 4), riskPattern);
 
 var withScores = customers.WithColumn("RiskScore", NivaraColumn<float>.Create(riskScores));
 
@@ -542,6 +555,9 @@ class LinearModel : Module<float>
 ```
 
 Wiring the model to a loader and an optimizer:
+<!-- gate
+preamble: nn-models
+-->
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -560,7 +576,7 @@ var loader = new DataLoader<float>(
     batchSize: 2, shuffle: false);
 
 var model = new LinearModel();
-var optimizer = new SGD<float>(lr: 0.01f);
+var optimizer = new SGD<float>(learningRate: 0.01f);
 optimizer.AddParameterGroup(model.GetParameters().Values, learningRate: 0.01f);
 
 var loop = new TrainingLoop<float>(
@@ -617,6 +633,9 @@ class FraudNet : Module<float>
 ```
 
 Then load data, train with data parallelism, save, and infer:
+<!-- gate
+preamble: nn-models
+-->
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -729,6 +748,9 @@ class FraudNet : Module<float>
 ```
 
 Corrected labels plus the two new rows, then warm-start, resume, and persist:
+<!-- gate
+preamble: nn-models
+-->
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;

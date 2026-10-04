@@ -29,6 +29,7 @@ dotnet run -c Release --project tests/Nivara.SimdProbe -- correctness   # valida
 dotnet run -c Release --project tests/Nivara.SimdProbe -- benchmark     # timed scalar vs SIMD
 dotnet run -c Release --project tests/Nivara.SimdProbe -- scalar       # Qwen decode scalar hot-path: RoPE + attention V-phase (AVX-512 probe)
 dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose    # #136 transpose A/B: tiled kernel vs BCL view+flatten
+dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api   # reading one row of a rank-2 Tensor<T> (docs fixes, #528)
 dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
@@ -271,6 +272,92 @@ failure.
 3. **Generic-vs-concrete dispatch** — `Transpose<T> where T : struct, INumber<T>`
    measured identical to a concrete `float` specialization (4.13 ms vs 4.11 ms).
 
+## `Tensor<T>` row extraction (`tensor-api` mode) — issue #528
+
+The other modes answer performance questions. This one is a **correctness probe for
+the docs**: it exists so a documentation fix never has to guess at a BCL API, and
+never gets certified by a gate that only compiles.
+
+```bash
+dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api
+```
+
+It has no SIMD content at all — no timing, no Release requirement (it passes in
+Debug, and says so, because nothing it measures is affected by optimization). It
+is self-contained, referencing only `System.Numerics.Tensors`, because the subject
+is the BCL contract the docs are written against.
+
+**Why a probe at all, for a two-line doc fix.** Because the obvious fixes are all
+wrong in ways a compiling gate cannot see:
+
+| Candidate | Compiles | Runs |
+|---|---|---|
+| `tensor.Span.Slice(i * dims, dims)` — what #528 prescribed | no, `CS1061` | — |
+| `tensor.GetSpan([i], dims)` | **yes** | **no — `ArgumentOutOfRangeException`** |
+| `tensor.GetSpan([i, 0], dims)` | yes | yes |
+
+`DocumentationSnippetTests` compiles; it does not run. So the middle row — which
+looks correct, reads correct, and passes the gate — throws on the first row of the
+first document. That is the failure this mode exists to make visible, and it asserts
+the third row's output against the flat row-major slice exactly, with no tolerance
+band, because a wrong row offset is structural rather than a precision question.
+
+**What this table is and is not evidence for.** The "compiles" column for the two rows
+that fail to compile comes from compiling them, in a scratch project, at the time the
+issue was analysed — this mode cannot re-derive it, because a form that does not compile
+cannot appear in a file that must itself compile. Those two rows are covered reflectively
+instead (step 2 of the probe below). Everything the mode reports about *running* is
+re-verified on every invocation. Likewise the `CS0121` / `CS9174` diagnostics quoted for
+`[]` and `Slice([i], ..)` are from that same compile check, not from this mode.
+
+**What it does**
+
+1. Reflects and prints the resolved `Tensor<T>` public surface, with generic
+   arguments expanded — `Span<Single> GetSpan(ReadOnlySpan<nint>, Int32)` and the
+   `ReadOnlySpan<NIndex>` twin are otherwise both `ReadOnlySpan\`1` and
+   indistinguishable.
+2. Asserts `Tensor<T>` has **no** public `Span`, `Memory`, `AsSpan` or `AsMemory`.
+   Issue #528 said "the property is `.Span`"; that does not exist. The `CS1929` the
+   gate reports is the compiler having resolved `AsSpan` to
+   `MemoryExtensions.AsSpan(string?)`. This check fails loudly if a future release
+   adds one of those members and the docs should be revisited.
+3. Runs every candidate form that *can* compile, comparing each row against the flat
+   row-major slice. The non-compiling forms cannot appear in a file that must itself
+   compile, so their status is covered by step 2 instead. The tensor is built from a
+   **clone** of the reference array, because `Tensor.Create` aliases its input rather
+   than copying — verified, not assumed. Comparing an extracted row against an array
+   the tensor also points into would be correct by construction, and nothing would
+   demonstrate the comparison discriminates. A negative control therefore asserts that
+   a deliberately wrong row is rejected, so a passing row check means something.
+4. Runs both `EXAMPLES.md` scoring snippets end to end on the Act 4 dataset and
+   asserts the descending ranking is `doc-101, doc-103`, which is what the document
+   claims. The numpy values are printed alongside for a human to compare — they are
+   not asserted, because a float tolerance would let a real bug hide behind it.
+
+## `Tensor.Create` aliases its input
+
+Found while building this mode, and it is a trap for any zero-copy reasoning: passing a
+`float[]` to `Tensor.Create` does **not** snapshot it. Mutating the array afterwards
+changes the tensor, and writing through the tensor changes the array — in both
+directions. So a "reference" array that the tensor also points into is not a reference.
+
+## Tensor<T> findings (`tensor-api` mode)
+
+- **`Tensor<T>` has no `Span`/`Memory`/`AsSpan()`.** To read one row of a rank-2
+  tensor, use `GetSpan(startIndexes, length)`.
+- **`GetSpan` takes one index per dimension.** `GetSpan([i], dims)` on a `[rows, cols]`
+  tensor compiles and throws. Use `GetSpan([i, 0], dims)`.
+- **`GetSpan`'s length parameter is `int`, not `nint`**, while `Tensor.Lengths` is
+  `ReadOnlySpan<nint>` — so the natural `nint dims = tensor.Lengths[1]` is `CS1503`.
+- **`nint` vs `NIndex` is a real ambiguity.** `GetSpan` is overloaded on both and
+  `int` converts to each; a collection expression (`[i, 0]`) resolves, while `[]` and
+  `Slice([i], ..)` do not.
+
+**Use this mode when a doc names a `Tensor<T>` member that does not compile.**
+Issues #524–#532 are nine more of the same class, and the recurring finding is that
+the filed prescription is not the fix. Run the mode and read the surface rather than
+implementing an issue body verbatim. See `docs/TODO.md`.
+
 ## Findings
 
 1. **BFloat16 SIMD dot products run ~12–24× faster** than the scalar BCL fallback
@@ -323,5 +410,10 @@ ADR-001 span-ified design) are `TensorsHelper` (matmul) and `RMSNormKernel`
   `TensorsHelper.Transpose` kernel against the BCL view + `FlattenTo` route,
   interleaved with alternating order, plus the build-configuration check that
   explains the #482 flakiness. Run with `-c Release`.
+- `TensorApiProbe.cs` (`tensor-api` mode) — reflects the real `Tensor<T>` surface
+  and asserts that it has no `Span`/`Memory`/`AsSpan`, then runs every row-extraction
+  form that *can* compile against the flat row-major slice and against the `EXAMPLES.md`
+  ranking. A correctness probe for doc fixes, not a benchmark — run it before
+  implementing any filed issue that names a `Tensor<T>` member.
 - `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `scalar` /
-  `transpose` / `all`).
+  `transpose` / `tensor-api` / `all`).
