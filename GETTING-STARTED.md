@@ -441,11 +441,13 @@ using var jsonResult = jsonQuery.Collect();
 Data sources automatically infer schemas:
 
 ```csharp
+using Nivara.IO;
+
 // Get inferred schema without loading data
-var schema = Csv.InferSchema("employees.csv");
-foreach (var column in schema.Columns)
+using var query = Csv.ScanAsQueryFrame("employees.csv");
+foreach (var name in query.Schema.ColumnNames)
 {
-    Console.WriteLine($"{column.Name}: {column.Type}");
+    Console.WriteLine($"{name}: {query.Schema.GetColumnType(name)}");
 }
 ```
 
@@ -477,6 +479,9 @@ var activeUsers = frame.FilterByMask(activeMask);
 
 ### Row Slicing
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Active", NivaraColumn<bool>.Create(new[] { true, false, true, false })));
+-->
 ```csharp
 // Take first n rows
 var firstThree = frame.Take(3);
@@ -497,6 +502,9 @@ var slice = frame.Slice(1, 2); // Start at index 1, take 2 rows
 
 ### Sorting
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
+-->
 ```csharp
 using Nivara.Linq;
 using Nivara.Operations;
