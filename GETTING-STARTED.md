@@ -601,6 +601,9 @@ var frameWithBonus = frame.WithComputedColumn<int, double, double>(
 
 ### Column Selection and Projection
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+-->
 ```csharp
 // Select specific columns
 var nameAndAge = frame.Select("Name", "Age");
@@ -621,6 +624,9 @@ var renamedFrame = frame.SelectAndRename(new Dictionary<string, string?>
 
 ### Column Renaming
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+-->
 ```csharp
 // Rename single column
 var renamedSingle = frame.RenameColumn("Age", "YearsOld");
@@ -635,6 +641,9 @@ var renamedMultiple = frame.RenameColumns(new Dictionary<string, string>
 
 ### Column Exclusion
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+-->
 ```csharp
 // Exclude specific columns
 var withoutAge = frame.Exclude("Age");
