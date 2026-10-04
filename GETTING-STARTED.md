@@ -350,7 +350,9 @@ public sealed class Employee
 ```
 
 The row type is what `ScanQuery<T>` binds the CSV header to:
-
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.IO;
 
@@ -806,7 +808,9 @@ public sealed class Employee
 ```
 
 `GroupBy` is typed against the row type, so the key selector is checked:
-
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -835,7 +839,9 @@ var byDept = frame.Query<Employee>()
 ```
 
 ### Aggregation Functions
-
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 // Built-in aggregation functions
 var countAgg = AggregationFunctions.Count();
@@ -980,7 +986,9 @@ public sealed class Employee
 ```
 
 Queries are optimized automatically before execution:
-
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.IO;
 

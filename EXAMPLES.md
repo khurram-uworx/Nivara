@@ -264,6 +264,9 @@ public sealed class Employee
 ```
 
 With the row type declared, the frame and its query follow:
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -314,6 +317,10 @@ public sealed class Employee
 ```
 
 The mismatch is caught when the query binds, not when it runs:
+<!-- gate
+preamble: row-types
+locals: NivaraFrame employees = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob"])), ("Department", NivaraColumn<string>.CreateForReferenceType(["Engineering", "Sales"])), ("Salary", NivaraColumn<int>.Create([120000, 90000])), ("IsActive", NivaraColumn<bool>.Create([true, false])));
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -351,6 +358,9 @@ public sealed class Employee
 ```
 
 With the row type declared, the query is typed end to end:
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -420,6 +430,9 @@ public sealed class Customer
 ```
 
 Scored against the stored embeddings, then queried with the score attached:
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 
@@ -542,6 +555,9 @@ class LinearModel : Module<float>
 ```
 
 Wiring the model to a loader and an optimizer:
+<!-- gate
+preamble: nn-models
+-->
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -617,6 +633,9 @@ class FraudNet : Module<float>
 ```
 
 Then load data, train with data parallelism, save, and infer:
+<!-- gate
+preamble: nn-models
+-->
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -729,6 +748,9 @@ class FraudNet : Module<float>
 ```
 
 Corrected labels plus the two new rows, then warm-start, resume, and persist:
+<!-- gate
+preamble: nn-models
+-->
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
