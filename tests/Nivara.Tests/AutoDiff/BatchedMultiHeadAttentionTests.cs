@@ -172,8 +172,8 @@ public class BatchedMultiHeadAttentionTests
         var dOut = RandFloats(B * L * D, 64);
         var maskData = new float[B * L * L];
         for (int b = 0; b < B; b++)
-        for (int j = 0; j < L; j++)
-            maskData[(b * L + (L - 1)) * L + j] = b == 0 ? float.MinValue : 0f;
+            for (int j = 0; j < L; j++)
+                maskData[(b * L + (L - 1)) * L + j] = b == 0 ? float.MinValue : 0f;
         float scale = 1f / MathF.Sqrt(D / H);
 
         var q = Mat3D(qData, B, L, D, requiresGrad: true);
@@ -206,9 +206,9 @@ public class BatchedMultiHeadAttentionTests
             if (saturated)
             {
                 for (int j = 0; j < L; j++)
-                for (int h = 0; h < H; h++)
-                for (int d = 0; d < headDim; d++)
-                    expectedDv[j * D + h * headDim + d] += dOut[b * L * D + (L - 1) * D + h * headDim + d] / L;
+                    for (int h = 0; h < H; h++)
+                        for (int d = 0; d < headDim; d++)
+                            expectedDv[j * D + h * headDim + d] += dOut[b * L * D + (L - 1) * D + h * headDim + d] / L;
             }
 
             Assert.Multiple(() =>

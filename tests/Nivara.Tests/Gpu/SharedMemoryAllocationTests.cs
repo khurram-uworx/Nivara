@@ -1,7 +1,7 @@
-using System.Reflection;
-using System.Reflection.Emit;
 using Nivara.Samples.Gpu;
 using NUnit.Framework;
+using System.Reflection;
+using System.Reflection.Emit;
 
 namespace Nivara.Tests.Gpu;
 

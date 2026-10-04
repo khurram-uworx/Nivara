@@ -66,11 +66,11 @@ public class OpNodeInputContractTests
     }
 
     public /// <summary>
-    /// One module's forward graph plus the parameters that graph must reach.
-    /// <paramref name="InputIsGraphInput"/> is false for modules whose input is an
-    /// index constant consumed as integers (Embedding, SparseEmbedding): the tensor
-    /// never enters the graph, so ZeroGrad correctly never touches it.
-    /// </summary>
+           /// One module's forward graph plus the parameters that graph must reach.
+           /// <paramref name="InputIsGraphInput"/> is false for modules whose input is an
+           /// index constant consumed as integers (Embedding, SparseEmbedding): the tensor
+           /// never enters the graph, so ZeroGrad correctly never touches it.
+           /// </summary>
     sealed record ModuleRowContext(
         ReverseGradTensor<float> Input,
         ReverseGradTensor<float> Output,

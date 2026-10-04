@@ -1,4 +1,3 @@
-using Nivara.IO;
 using Nivara.Samples.Incident;
 using NUnit.Framework;
 using System.Reflection;

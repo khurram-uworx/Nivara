@@ -275,9 +275,9 @@ public class BandedAttentionTests
         var term = new float[SeqLen * ModelDim];
 
         for (int h = 0; h < NumHeads; h++)
-        for (int j = 0; j < SeqLen; j++)
-        for (int d = 0; d < HeadDim; d++)
-            term[j * ModelDim + h * HeadDim + d] = doutRow[h * HeadDim + d] / SeqLen;
+            for (int j = 0; j < SeqLen; j++)
+                for (int d = 0; d < HeadDim; d++)
+                    term[j * ModelDim + h * HeadDim + d] = doutRow[h * HeadDim + d] / SeqLen;
 
         return term;
     }
