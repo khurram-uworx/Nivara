@@ -774,11 +774,6 @@ catch (QuerySchemaValidationException ex)
 }
 ```
 
-> **Note:** Nivara ships two types named `SchemaValidationException`. Query and frame operations throw
-> `Nivara.Exceptions.SchemaValidationException`; the Parquet reader and writer throw
-> `Nivara.IO.SchemaValidationException` (a subclass of `NivaraIOException`). Because both namespaces are
-> usually in scope, the unqualified name is ambiguous — catch the fully-qualified one.
-
 ### DataFrame Concatenation
 
 #### Vertical Concatenation (Row Append)
