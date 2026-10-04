@@ -37,6 +37,37 @@ All notable changes to Nivara are documented here. Released versions are publish
   Also renames the `NivaraResourceManager` tracked-resource label from `LazyQueryFrame` to
   `LazyQuerySource`, since the tracked object is now the source handle.
 
+- **Streaming budget derivations no longer wrap above ~2.1 TB (#516)** — both budget-to-sizing
+  formulas in `StreamingExecutionStrategy` narrowed a `long` to an `int` *before* clamping:
+
+  ```csharp
+  var calculatedChunkSize = (int)(chunkMemory / estimatedBytesPerRow);
+  return Math.Max(1000, Math.Min(calculatedChunkSize, 100000));
+  ```
+
+  Explicit integral conversions are unchecked by default (no project sets
+  `CheckForOverflowUnderflow`), so past ~2.1 TB the truncation discarded the high-order bits
+  and the clamp saw an arbitrary value — inverting the derivation, where the largest possible
+  budget produced the *smallest* chunk size. `CalculateChunkSize(long.MaxValue)` returned 1,000
+  and `CalculateChannelCapacity(long.MaxValue, 1_000)` returned 2. Both clamp bounds fit in an
+  `int`, so the clamp is now applied to the `long` and the narrowing happens afterwards.
+
+  **Behaviour change:** budgets above ~2.1 TB now yield the ceiling (100,000 rows; capacity 16)
+  instead of collapsing to the floor. No reachable path is affected — the budget-derived chunk
+  size and the channel are not settable from the public API (#514) — and every budget below the
+  wrap region is byte-identical to before. `StreamingStrategy_MemoryBudgetMaxValue_Works` passes
+  `long.MaxValue` but only asserted `RowCount`, so it never observed the chunk size; the new
+  `StreamingChunkSizeTests` covers the formula directly. `calculateChunkSize` is renamed
+  `CalculateChunkSize` and made `internal` so it is testable, mirroring `CalculateChannelCapacity`.
+
+  Also corrects `AGENTS.md` and `docs/STREAMING.md`, which both stated the default streaming
+  memory budget as 256 MB — the IO-layer `StreamingBufferManager`'s constant, not the core
+  pipeline's. The real default is 1 GB (`NivaraExecutionContext.cs:17`), already asserted by
+  `ExecutionContextTests`; both docs now name the 256 MB's owner, and the worked example is
+  denominated in bytes with a row strictly inside the clamp so the arithmetic is checkable (the
+  old example clamped both 256 MB and 1 GB to the same answer, which is why it could not detect
+  the error).
+
 - **Selectable sequence lengths and pass counts for the `modernbert` benchmark (#474)** — both
   benchmark paths hardcoded their length table, so re-timing one row meant editing source and
   rebuilding, and `modernbert benchmark --seq 256` did nothing at all: the arg loop treated the
