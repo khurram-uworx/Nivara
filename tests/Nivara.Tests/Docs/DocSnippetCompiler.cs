@@ -19,26 +19,49 @@ static class DocSnippetCompiler
     /// <summary>
     /// Base usings prepended to every generated unit. Kept broad on purpose: a snippet should fail
     /// for naming a member that does not exist, not for omitting a using the tutorial assumes.
+    ///
+    /// This list must cover every namespace the public surface actually occupies. A narrower list
+    /// does not merely add friction, it produces false defect reports: a first cut omitted
+    /// <c>Nivara.Tensors</c> and <c>Nivara.Operations</c>, so <c>frame.ToTensor()</c> and
+    /// <c>OrderBy(..., NullOrdering.NullsFirst)</c> were both reported as missing members when they
+    /// exist and compile. Widening the list is what makes the diagnostics trustworthy; it cannot
+    /// mask a defect, because it only affects name resolution, never whether a member is present.
     /// </summary>
     static readonly string[] BaseUsings =
     [
         "using System;",
         "using System.Collections.Generic;",
+        "using System.IO;",
         "using System.Linq;",
         "using System.Numerics.Tensors;",
         "using System.Threading;",
         "using System.Threading.Tasks;",
         "using Nivara;",
         "using Nivara.AutoDiff;",
+        "using Nivara.AutoDiff.Exceptions;",
+        "using Nivara.AutoDiff.Extensions;",
         "using Nivara.AutoDiff.Nn;",
         "using Nivara.AutoDiff.Nn.Functional;",
+        "using Nivara.AutoDiff.Nn.Initializers;",
+        "using Nivara.AutoDiff.Operations;",
         "using Nivara.AutoDiff.Optimizer;",
+        "using Nivara.AutoDiff.Serialization;",
+        "using Nivara.AutoDiff.Training;",
         "using Nivara.AutoDiff.Utilities;",
+        "using Nivara.Diagnostics;",
+        "using Nivara.Exceptions;",
+        "using Nivara.Execution;",
         "using Nivara.Expressions;",
+        "using Nivara.Helpers;",
         "using Nivara.IO;",
         "using Nivara.Linq;",
+        "using Nivara.Operations;",
+        "using Nivara.Optimization;",
+        "using Nivara.Primitives;",
         "using Nivara.Query;",
+        "using Nivara.Storage;",
         "using Nivara.Streamix;",
+        "using Nivara.Tensors;",
         "using Nivara.Tests.Docs.Preambles;",
         "using NUnit.Framework;",
         "using static Nivara.Tests.Docs.Preambles.SnippetReport;",
