@@ -100,6 +100,54 @@ public sealed class Customer
 }
 
 /// <summary>
+/// Row type for the typed-query sections, the union of the two <c>Person</c> rows the document
+/// declares: <c>GETTING-STARTED.md</c> "Basic Queries" writes <c>{Name, Age, Salary}</c> while
+/// "Typed Object LINQ" writes <c>{Name, Department, Age, Salary}</c> and groups by
+/// <c>Department</c>. One stub cannot be both, and the union is what satisfies every expression.
+/// <see cref="Employee"/> carries the same caveat for the same reason.
+/// </summary>
+public sealed class Person
+{
+    public string Name { get; set; } = string.Empty;
+    public string Department { get; set; } = string.Empty;
+    public int Age { get; set; }
+    public double Salary { get; set; }
+}
+
+/// <summary>
+/// Row type for the null-ordering example, matching its <c>Name</c> and <c>Score</c> columns.
+/// <c>Score</c> is <c>int</c> even though the column is <c>int?</c>, because <c>Query&lt;T&gt;()</c>
+/// binds a nullable column to the non-nullable property — the null mask is carried by the frame,
+/// not by the row type.
+/// </summary>
+public sealed class Player
+{
+    public string Name { get; set; } = string.Empty;
+    public int Score { get; set; }
+}
+
+/// <summary>
+/// Row type for the fluent-API and execution examples, matching their <c>Name</c>, <c>Age</c> and
+/// <c>Score</c> columns. <c>Score</c> is <c>double</c> here, unlike <see cref="Player"/>'s
+/// <c>int</c>, because the two sections build their frames from different column types.
+/// </summary>
+public sealed class Contestant
+{
+    public string Name { get; set; } = string.Empty;
+    public int Age { get; set; }
+    public double Score { get; set; }
+}
+
+/// <summary>Row type for the JSON scanning example, matching the <c>Id/Name/Email/Active</c> fields.</summary>
+public sealed class User
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public bool Active { get; set; }
+}
+
+/// <summary>
 /// Compile-time stand-in for the <c>Module&lt;float&gt;</c> subclasses the AutoDiff snippets declare in
 /// their own <c>mode: File</c> block. Mirrors that declaration member for member so the training-loop
 /// snippets bind against the same surface — <c>Forward</c> is overridden rather than stubbed out,
