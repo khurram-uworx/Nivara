@@ -24,7 +24,7 @@ clean.
 The issue I filed said the API was the outlier and hinted at restoring symmetry. That is incorrect,
 and the evidence is unambiguous:
 
-- `CHANGELOG.md:757` records **"Removed `NivaraColumn<T>.CreateFromNullable(Array)` (breaking,
+- The #222 removal entry in `CHANGELOG.md` records **"Removed `NivaraColumn<T>.CreateFromNullable(Array)` (breaking,
   #222)"** — the generic-class overload was deleted deliberately, because it boxed via
   `Array.GetValue`. `NivaraColumn.CreateFromNullable<T>(T?[])` is documented as **"the single entry
   point"**, and the entry records that **"all internal dispatch and every call site now use it"**.
@@ -39,8 +39,8 @@ pre-#222 docs. Fix the docs; do not touch the API.
 
 Two further corrections to the issue as filed:
 
-- It counted 16 sites. `CHANGELOG.md:757` is the *before* side of a migration instruction and is
-  correct in context — **15** real sites.
+- It counted 16 sites. The #222 removal entry in `CHANGELOG.md` is the *before* side of a migration
+  instruction and is correct in context — **15** real sites.
 - `NivaraColumn<T>` is not the outlier by accident: 6 of the 7 `NivaraColumn` factories
   (`Create`, `CreateForReferenceType`, `CreateFromSpans`, `CreateFromOwnedArray(es)`) do sit on the
   generic form, and `NivaraFrame.Create` sits on the non-generic form because `NivaraFrame` is
@@ -96,7 +96,7 @@ argument at every site — verified individually, including the site inside
 agent reads before writing the call, which is how 15 sites drifted in the first place.
 
 Already correct, left alone: `docs/AGENT-CODE-EXAMPLES.md`, `docs/AUTODIFF.md`,
-`docs/BFLOAT16.md`, and `CHANGELOG.md:757`.
+`docs/BFLOAT16.md`, and the #222 removal entry in `CHANGELOG.md`.
 
 ### 2. Add leading-`using` hoisting to `DocSnippetCompiler`
 

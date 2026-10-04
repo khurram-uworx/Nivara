@@ -72,8 +72,8 @@ result = df["A"] + df["B"]
 
 **Nivara** — automatic null mask propagation:
 ```csharp
-var colA = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f, null });
-var colB = NivaraColumn<float>.CreateFromNullable(new float?[] { null, 2.0f, 3.0f, null });
+var colA = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f, null });
+var colB = NivaraColumn.CreateFromNullable(new float?[] { null, 2.0f, 3.0f, null });
 var result = colA.Add(colB);
 // result.IsNull(0) → true, result[2] → 6.0f, result.IsNull(3) → true
 ```
@@ -89,8 +89,8 @@ df["total"] = df["price"] * df["qty"]
 
 **Nivara** — mask-OR semantics:
 ```csharp
-var price = NivaraColumn<float>.CreateFromNullable(new float?[] { 10.0f, 20.0f, null, 40.0f });
-var qty = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f, 2.0f });
+var price = NivaraColumn.CreateFromNullable(new float?[] { 10.0f, 20.0f, null, 40.0f });
+var qty = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f, 2.0f });
 var total = price.Multiply(qty);
 // [10.0, null, null, 80.0]
 ```
@@ -101,7 +101,7 @@ var total = price.Multiply(qty);
 ```csharp
 using Nivara.Tensors;
 
-var score = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.9f, null, 0.4f });
+var score = NivaraColumn.CreateFromNullable(new float?[] { 0.9f, null, 0.4f });
 NullableTensor<float> tensor = score.ToNullableTensor();
 
 // Tensor data is available for platform APIs; the mask remains authoritative.

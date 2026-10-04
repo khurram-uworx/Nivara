@@ -44,6 +44,24 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **15 documentation call sites used the removed `NivaraColumn<T>.CreateFromNullable` shape (#520)** -
+  the docs had drifted, not the API. `NivaraColumn<T>.CreateFromNullable(Array)` was deleted
+  deliberately in #222 because it boxed per element via `Array.GetValue`; the replacement
+  `NivaraColumn.CreateFromNullable<T>(T?[])` moved to the non-generic class so that `where T : struct`
+  can reject reference-type arguments at compile time instead of throwing
+  `InvalidOperationException` at runtime, and it is documented as *the single entry point*. The code
+  migration completed; the documentation never followed.
+
+  Fixes 9 sites in `GETTING-STARTED.md` and 5 in `EXAMPLES.md`, plus the signature in the
+  "Useful helpers" list at `AGENTS.md:153`. That signature is the highest-value single edit here: it
+  is what an agent reads before writing the call, so its wrong form is the most likely reason the
+  other 14 drifted in the first place. The #222 removal entry below is left alone — it is the
+  *before* side of the migration instruction, and is correct in context.
+
+  **No API change.** Re-adding a generic-class overload would partly reverse a shipped breaking
+  change. The `where T : struct` constraint is the reason it moved: on the non-generic class it can
+  be a generic method that constrains `T`, which on `NivaraColumn<T>` it could not be.
+
 - **Query-source lifetime is tracked per source, not per frame (#501)** - `QueryFrame`'s derived
   constructor tracked *every* derived frame with a cleanup action that disposed the *shared* source,
   so the abandoned-resource timer released the source as soon as any intermediate frame in a chain
