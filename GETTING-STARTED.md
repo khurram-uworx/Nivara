@@ -768,11 +768,16 @@ try
     var errorResult = leftFrame.InnerJoin(rightFrame, "Id", 
         ColumnDisambiguationStrategy.Error);
 }
-catch (SchemaValidationException ex)
+catch (Nivara.Exceptions.SchemaValidationException ex)
 {
     Console.WriteLine($"Column conflict: {ex.Message}");
 }
 ```
+
+> **Note:** Nivara ships two types named `SchemaValidationException`. Query and frame operations throw
+> `Nivara.Exceptions.SchemaValidationException`; the Parquet reader and writer throw
+> `Nivara.IO.SchemaValidationException` (a subclass of `NivaraIOException`). Because both namespaces are
+> usually in scope, the unqualified name is ambiguous — catch the fully-qualified one.
 
 ### DataFrame Concatenation
 
@@ -819,7 +824,7 @@ try
 {
     var strict = employees.ConcatenateVertical(contractors, ConcatenationMismatchHandling.Error);
 }
-catch (SchemaValidationException ex)
+catch (Nivara.Exceptions.SchemaValidationException ex)
 {
     Console.WriteLine($"Schema mismatch: {ex.Message}");
 }
@@ -874,7 +879,7 @@ using Nivara.Linq;
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Alice", "Charlie" })),
     ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })),
-    ("Salary", NivaraColumn<double>.Create(new[] { 75000, 65000, 78000, 85000 }))
+    ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0, 85000.0 }))
 );
 
 // Group by a single key column — collect the distinct keys
@@ -898,6 +903,7 @@ var byDept = frame.Query<Employee>()
 ### Aggregation Functions
 <!-- gate
 preamble: row-types
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Alice", "Charlie" })), ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })), ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0, 85000.0 })));
 -->
 ```csharp
 // Built-in aggregation functions
@@ -962,6 +968,9 @@ public class MedianAggregation : AggregationFunction
 
 An aggregation is a plain class, so it can also be called directly against a column:
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0 })));
+-->
 ```csharp
 // Use custom aggregation
 var medianAgg = new MedianAggregation();
@@ -986,7 +995,7 @@ var series = new NivaraSeries<int>(column);
 Console.WriteLine(series.Sum());     // 9 (ignores nulls)
 Console.WriteLine(series.Average()); // 3.0 (9/3, ignores nulls)
 Console.WriteLine(series.Count());   // 5 (includes nulls)
-Console.WriteLine(series.ValidCount()); // 3 (excludes nulls)
+Console.WriteLine(series.Length - column.NullCount); // 3 (excludes nulls)
 ```
 
 ---
