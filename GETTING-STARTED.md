@@ -262,6 +262,9 @@ var bonusQuery = frame.Query<Person>()
 
 The typed object model layers strongly typed lambdas over the same query engine — no string column names and no `RowExpressionBuilder`:
 
+<!-- gate
+mode: File
+-->
 ```csharp
 // Define a row type whose properties map to columns (case-insensitive)
 public sealed class Person
@@ -334,6 +337,9 @@ var result = query.Collect();
 
 ### CSV Data Sources
 
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Employee
 {
@@ -473,6 +479,9 @@ var multiSorted = frame.Query<Person>()
 
 ### Null Handling in Sorting
 
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Player
 {
@@ -784,6 +793,9 @@ var combined = names.Combine(details);
 
 ### GroupBy Operations
 
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Employee
 {
@@ -853,6 +865,9 @@ foreach (var group in grouped)
 
 ### Custom Aggregation Functions
 
+<!-- gate
+mode: File
+-->
 ```csharp
 public class MedianAggregation : AggregationFunction
 {
@@ -917,6 +932,9 @@ Console.WriteLine(series.ValidCount()); // 3 (excludes nulls)
 
 ### Fluent API
 
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Contestant
 {
@@ -948,6 +966,9 @@ var result = frame.Query<Contestant>()
 
 ### Query Optimization
 
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Employee
 {

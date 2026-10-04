@@ -250,6 +250,9 @@ result = employees[
 ```
 
 **Nivara** — lazy plan with ExplainPlan(), schema errors caught at `Query<T>()`:
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Employee
 {
@@ -295,6 +298,9 @@ Query Execution Plan:
 #### 5b. Eager validation catches type mismatches
 
 **Nivara**
+<!-- gate
+mode: File
+-->
 ```csharp
 // Property-name typos are compile errors in the typed API. Schema *type*
 // mismatches surface at Query<T>() - no data access needed:
@@ -331,6 +337,9 @@ stats = employees[employees["Age"] > 30].groupby("City")["Salary"].mean()
 ```
 
 **Nivara** — typed predicates/projections, no string column names:
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Employee
 {
@@ -398,6 +407,9 @@ top = active.nlargest(100, "RiskScore")[["CustomerId", "RiskScore"]]
 ```
 
 **Nivara** — build once, query lazily:
+<!-- gate
+mode: File
+-->
 ```csharp
 public sealed class Customer
 {
@@ -510,6 +522,9 @@ See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/N
 ```
 
 **Nivara** — declare model architecture as a class and train with `TrainingLoop`:
+<!-- gate
+mode: File
+-->
 ```csharp
 class LinearModel : Module<float>
 {
@@ -575,6 +590,9 @@ result.PrintSummary();
 #### Fraud detection classifier
 
 **Nivara**
+<!-- gate
+mode: File
+-->
 ```csharp
 // 1. Define model
 class FraudNet : Module<float>
@@ -684,6 +702,9 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 > Same FraudNet from Act 8, later in production. New labeled examples arrive (human corrections, LLM feedback, A/B results) — retrain incrementally instead of from scratch: warm-start the weights, retrain on the original data plus the new examples at a lower learning rate, and carry Adam's moment buffers across sessions via checkpoints. A fine-tune, not a re-train.
 
 **Nivara**
+<!-- gate
+mode: File
+-->
 ```csharp
 // Same architecture as Act 8 - the deployed FraudNet
 class FraudNet : Module<float>
