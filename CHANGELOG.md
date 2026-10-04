@@ -200,6 +200,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **`DataFrameSchemaValidationException` removed (breaking, #542)** — the type was never thrown by
+  production code and never caught by any; the only place it was constructed or asserted on was
+  `DataFrameExceptionTests`. A third schema-validation exception, declared in `Nivara.Exceptions`
+  beside the `QuerySchemaValidationException` below, existed purely as public surface. Removing it
+  is a compile-time break for anyone who had named it, which is the point: it was a name with no
+  behaviour behind it. `DataFrameException`, `JoinException`, and `SchemaMismatch` are unchanged,
+  so `catch (DataFrameException)` filters are unaffected.
+
 - **Three ambiguous public type names renamed (breaking, #532)** — two breaking renames, both
   removing a name that did not identify what the type was:
 
