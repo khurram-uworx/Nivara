@@ -174,7 +174,7 @@ something.
 | Step | Result |
 |---|---|
 | 1 | Partial. `Nivara.Tests` builds clean in Release. `Nivara.slnx` as a whole was not built. |
-| 2 | Done. 19 passed / 0 failed across both doc fixtures in Release. |
+| 2 | Done. 21 passed / 0 failed across both doc fixtures in Release (19 at the time of the gate commit, 21 after the G2 fixes). |
 | 3 | Done. Negative control reports `Fixtures/Broken.md:13 CS1061`. |
 | 4 | Done. Injected `ThisMemberDoesNotExist` into `docs/STREAMING.md`; the gate reported `docs/STREAMING.md:179 CS1061`, the exact injected line. Reverted. |
 | 5 | **Not run** — declined at the human's direction on 2026-10-04. The new `Microsoft.CodeAnalysis.CSharp` 5.0.0 dependency is therefore unverified against the rest of the suite. CI's `--filter "Category!=Performance"` run on ubuntu is the first check. |
@@ -187,24 +187,49 @@ something.
 4. `docs: add gate preambles and fix the AsTensorSpan snippet`
 5. `docs: remove TODO.md - plan executed`
 
-## Risks and open items
+## Drift from the plan, and what the plan got wrong
 
-- **6 of the 9 gateable STREAMING blocks depend on Streamix 1.2.3's operator surface**
-  (`Named`, `Retry`, `Checkpoint`, `Trace`, `Log`, `Filter`, `Publish`, `Replay`,
-  `Connect`, `ForEachAsync`, `WindowByTime`, `FlatMap`, `Where`), which Nivara does
-  not define. Cannot be confirmed offline; if any are missing, those blocks become
-  stage-1 doc fixes. The gate working as intended, but it enlarges the commit.
-- Stage 1's defect yield is small: the Nivara-side members of all 9 gateable STREAMING
-  blocks were verified to exist (`NivaraFrame.GetColumn<T>` at `NivaraFrame.cs:366`,
-  `Module<T>.GetParameters()` returning `Dictionary<string, Parameter<T>>` at
-  `Module.cs:103`, `Optimizer.AddParameterGroup(IEnumerable<Parameter<T>>)` at
-  `Optimizer.cs:89`, `ColumnExpressions.Col` at `ColumnExpression.cs:834`,
-  `operator ==(ColumnExpression, object)` at `ColumnExpression.cs:261`). Failures
-  should be confined to preamble gaps plus the one real `AsTensorSpan` defect. The
-  defect-finding value concentrates in stage 2 (GETTING-STARTED.md 63, AUTODIFF.md 59,
-  EXAMPLES.md 15), which is why the 233-total assertion matters.
-- `Microsoft.AspNetCore.App.Ref` is present locally, so only `Streamix.AspNetCore`
-  blocks 11/11 later — one `<FrameworkReference>` plus one `PackageReference`.
+Recorded rather than rewritten, so the comparison above stays honest.
+
+1. **§2's preamble shape was not implementable as written.** The plan put locals in a compiled
+   preamble file. Locals only exist inside a method or at top-level statements, and a preamble
+   file carrying top-level statements would collide with `Nivara.Tests`' own entry point
+   (CS8802, one compilation unit may hold them). Landed instead: preamble *types* are compiled
+   in `Preambles/SnippetStubs.cs`, and the *locals* are spliced verbatim from a `locals:`
+   line in the gate comment. The anti-rot property still holds where it matters — every type a
+   snippet names is compiled C# — and the gate comment now uses a multi-line form so `locals`
+   can hold arbitrary code.
+2. **Four wrap modes, not two.** `TopLevel` and `File` as planned, plus `GenericLocal` because
+   `docs/AGENT-CODE-EXAMPLES.md` block 2 uses the type parameter `T` at top level, and
+   `MemberDecl` because block 3 is a method declaration, not a type declaration.
+   `File` currently has no consumer among the gated blocks; its only use is its own test. It is
+   kept because stage 2 documents declare types, and it should be deleted if stage 2 does not
+   need it.
+3. **§8's `AsTensorSpan` diagnosis was wrong.** `Tensor<T>.AsTensorSpan()` returns
+   `TensorSpan<T>`, not `Span<T>`, so the original comment's return type was right; the real
+   defects were the undeclared `tensorStorage` variable and the fictional `MyKernels`. The
+   landed fix uses `NivaraColumn<T>.TryGetSpan(out ReadOnlySpan<T>)`, the actual zero-copy path.
+4. **§8 found a second, larger defect.** `NivaraColumn<int>.CreateFromNullable` does not exist;
+   the static is on the non-generic class with `T` inferred. Fixed in the gated document and
+   tracked as #520 for the 16 other call sites. So blast radius's "the only production-visible
+   artefact is the `AsTensorSpan` doc fix" understated it: two API shapes in
+   `docs/AGENT-CODE-EXAMPLES.md` changed, still markdown-only.
+5. **Planned commit 4 was folded into commit 3.** The gate comments and the `AsTensorSpan`
+   fix are one logical unit, since the gate is what proved the defect. An unplanned fifth
+   commit carries the G2 review fixes.
+
+## Risks and open items — as resolved
+
+- **The Streamix operator risk did not materialise.** `Named`, `Retry`, `Checkpoint`, `Trace`,
+  `Log`, `Filter`, `Publish`, `Replay`, `Connect`, `ForEachAsync`, `WindowByTime`, `FlatMap`
+  and `Where` all resolved from Streamix 1.2.3, so no gated block needed a doc fix on account
+  of them. All 12 gated blocks compile.
+- **Defect yield was 2, not 1**: `CreateFromNullable` (#520) and the zero-copy snippet. Stage 1
+  found nothing in `docs/STREAMING.md` — its 9 gated blocks are correct as written. The defect
+  value concentrates in stage 2 (GETTING-STARTED.md 63, AUTODIFF.md 59, EXAMPLES.md 15), which
+  is why the 233/219 pin is the assertion that carries the gate's credibility.
+- `Microsoft.AspNetCore.App.Ref` is present locally, so only `Streamix.AspNetCore` blocks
+  11/11 later — one `<FrameworkReference>` plus one `PackageReference`.
 
 ## GitHub issues log
 
