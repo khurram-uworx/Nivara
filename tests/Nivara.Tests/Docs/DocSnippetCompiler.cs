@@ -89,9 +89,11 @@ static class DocSnippetCompiler
             [tree],
             References(),
             new CSharpCompilationOptions(
-                block.Mode == DocWrapMode.TopLevel
-                    ? OutputKind.ConsoleApplication
-                    : OutputKind.DynamicallyLinkedLibrary));
+                // TopLevel statements and GenericLocal's wrapper are both top-level statements, so
+                // both require an executable. Only File mode is a genuine library.
+                block.Mode == DocWrapMode.File
+                    ? OutputKind.DynamicallyLinkedLibrary
+                    : OutputKind.ConsoleApplication));
 
         return compilation
             .GetDiagnostics()
@@ -108,8 +110,8 @@ static class DocSnippetCompiler
     {
         var generatedLine = diagnostic.Location.GetLineSpan().StartLinePosition.Line;
         var documentLine = generatedLine >= bodyStart
-            ? block.StartLine + (generatedLine - bodyStart) + 1
-            : block.StartLine + 1;
+            ? block.StartLine + (generatedLine - bodyStart)
+            : block.StartLine;
 
         return new DocSnippetError(block.DocumentPath, documentLine, diagnostic.Id, diagnostic.GetMessage());
     }

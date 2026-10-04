@@ -26,11 +26,11 @@ public class DocSnippetCompilerTests
     }
 
     [Test]
-    public void Compile_UnknownType_ReportsErrorNamingTheType()
+    public void Compile_UnknownName_ReportsErrorNamingTheName()
     {
         var errors = Compile(Block("var x = NoSuchType.Foo();"));
 
-        Assert.That(errors.Ids, Does.Contain("CS0246"));
+        Assert.That(errors.Ids, Does.Contain("CS0103"));
     }
 
     [Test]
@@ -128,7 +128,7 @@ public class DocSnippetCompilerTests
 
         Assert.That(errors.IsEmpty, Is.False, "the negative control must fail or the gate proves nothing");
         Assert.That(errors.Ids, Does.Contain("CS1061"));
-        Assert.That(errors.Locations, Has.Some.EqualTo($"{FixturePath}:14"));
+        Assert.That(errors.Locations, Has.Some.EqualTo($"{FixturePath}:13"));
     }
 }
 
