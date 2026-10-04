@@ -115,10 +115,11 @@ public sealed class Person
 }
 
 /// <summary>
-/// Row type for the null-ordering example, matching its <c>Name</c> and <c>Score</c> columns.
-/// <c>Score</c> is <c>int</c> even though the column is <c>int?</c>, because <c>Query&lt;T&gt;()</c>
-/// binds a nullable column to the non-nullable property — the null mask is carried by the frame,
-/// not by the row type.
+/// Row type for the null-ordering example. <c>Score</c> is <c>int</c> rather than <c>int?</c> because
+/// the document's own <c>Player</c> declaration is not what this resolves for — "Null Handling in
+/// Sorting" declares its own in a <c>mode: File</c> block, and a type in the compilation unit's own
+/// namespace wins over one merely imported from here. This stub serves the blocks that do not
+/// declare their own.
 /// </summary>
 public sealed class Player
 {
