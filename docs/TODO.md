@@ -114,9 +114,13 @@ Existing ADR shape: `Status` / `Date` / `Context` / `Decision` /
   `Report(...)` resolve in every block.
 - **Amendment process** — matching ADR-002/003/004.
 - **Answers in-record**: Q1 current behaviour, Rule 6 marked load-bearing with
-  the CS-cascade reason; Q2 accepted steady state, pointing at
-  `Coverage_IsFullyAccountedForAcrossTheWholeRepository` as what keeps it
-  honest; Q3 by the DRY strategy below.
+  the CS-cascade reason, follow-up filed as #546; Q2 accepted steady state,
+  pointing at `Coverage_IsFullyAccountedForAcrossTheWholeRepository` as what
+  keeps it honest; Q3 answered **in the ADR itself**, under "Where this record is
+  linked, and why only there", not left to this plan — #538 asks the ADR to
+  *settle* it, and the three rejected alternatives (`docs/adr/README.md`,
+  `CONTRIBUTING.md`, `ARCHITECTURE.md`) are recorded there.
+- The four gated documents are named in Context, as the issue asks, not just counted.
 
 ### 2. `AGENTS.md` — one line after ADR-004
 
@@ -196,10 +200,32 @@ One list, in the file every agent already loads. Enforced, not duplicated.
 
 ## GitHub issues log
 
-- [ ] #NNN — `preamble:` should gate the namespace import (created while
-  planning ADR-005; costs a harness change and re-verification of all 108 gated
-  blocks)
-- [ ] #NNN — `docs/TODO.md` is listed in `ScanExcludedDocuments` but was deleted
-  in `da3f3c66`; the gate still passes because the name is simply never matched,
-  so the exclusion and its stated rationale are dead (created while planning
-  ADR-005)
+- [x] #546 — `preamble:` should gate the namespace import. The directive is never read; the
+  unconditional import at `DocSnippetCompiler.cs:65` is the real mechanism, so the eleven names
+  are labels over one flat namespace and constrain nothing. Filed while writing ADR-005.
+- [x] #547 — `docs/TODO.md` is listed in `ScanExcludedDocuments` but was deleted in `da3f3c66`.
+  The gate still passes because the name is simply never matched, so the exclusion is dead
+  configuration that reads like a safeguard. Filed while writing ADR-005.
+- [x] #545 — CI duration is gated on one test class: `[Category("Performance")]` appears twice,
+  both in `TensorsHelperTests.cs`, while both workflows run
+  `--filter "Category!=Performance"` (`ci.yml:30`, `cd.yml:42`). Per-test durations were **not**
+  measured, so the issue establishes the measurement as its first task rather than asserting
+  numbers. Filed at the human's request.
+
+### Surface changes vs. the plan as written
+
+- The drift gate was **not** implemented with a regular expression. At the human's direction it
+  is built on `MarkdownSections`, a reusable heading-structure reader with no pattern in it: the
+  gate asks for the `Architectural Decisions (ADRs)` section by name and reads its bullets.
+  `MarkdownSectionsTests` covers that reader separately, driven by synthetic lines.
+- The gate consequently checks more than the plan's single "every ADR is listed" assertion:
+  duplicates, entries whose file is gone, entries with no routing summary, and index labels that
+  disagree with the file they name. Each direction that can produce a misleading index needed its
+  own assertion, because the plan's version would pass on all four.
+- Planned commits 2 and 4 were **merged into one**. The plan listed the citation-count bump as its
+  own commit, but the repo's own rule (ADR-005 rule 9, from #531) is that a change to the scanned
+  document set moves the pin *in the same commit*. Splitting them would have left the citation gate
+  red in between, for what reads as a citation defect rather than deliberate scope growth.
+- `MarkdownSections` treats a bare `#` line as text, not as an empty heading. CommonMark accepts it
+  as a heading, but an unnamed section cannot be required by name, so admitting one would only
+  produce a section no caller can address. Recorded in the type's remarks and pinned by test.
