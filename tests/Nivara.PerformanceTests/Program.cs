@@ -731,7 +731,7 @@ static class Program
         // branches — only PrefillInto's body swaps — so --compare gates the true before/after.
         // The L = 64/256 seed rows are batched-only NEW rows added by the implementation commit
         // (the loop cost ~30-100 s/op there; the L = 64 before/after is carried by the E2E split
-        // prefill/decode timing, docs/TODO.md §C). "Qwen full fwd" rows are unchanged
+        // prefill/decode timing, docs/QWEN.md "Making Qwen fast"). "Qwen full fwd" rows are unchanged
         // model.Forward(ids) on both branches — no-regression siblings.
         Run("Qwen prefill seed [8 tok]", 1, 6, () => CreateQwenPrefillScenario(8));
         Run("Qwen prefill seed [16 tok]", 1, 6, () => CreateQwenPrefillScenario(16));

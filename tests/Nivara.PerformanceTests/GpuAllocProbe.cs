@@ -5,7 +5,8 @@ using System.Diagnostics;
 namespace Nivara.PerformanceTests;
 
 /// <summary>
-/// On-demand device-memory ceiling probe for the Laya backend decision (docs/TODO.md, leg 1).
+/// On-demand device-memory ceiling probe for the Laya backend decision
+/// ([docs/LAYA.md](../../docs/LAYA.md), "Performance" — the memory leg).
 ///
 /// Laya's checkpoint is 421,293,830 F16 parameters, but the GPU path is F32-only
 /// (<c>--gpu</c> rejects bf16/fp16), so an F32 working set needs

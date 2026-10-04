@@ -827,7 +827,7 @@ internal static class L0Run
         Console.WriteLine("  OpFDiv as OpFMul (deterministic, proven by the evidence probes). The dot16/SiLU kernels");
         Console.WriteLine("  are structurally valid; their gate failures above are expected driver-bug diagnostics");
         Console.WriteLine("  (Σ(a−b) and x·(1+exp(−x)) mirrors match exactly). Proof-of-correctness pivots to the");
-        Console.WriteLine("  oneAPI SYCL/DPC++ toolchain path (compiler-produced SPIR-V) — see docs/TODO.md.");
+        Console.WriteLine("  oneAPI SYCL/DPC++ toolchain path (compiler-produced SPIR-V) - see SYCL.md.");
     }
 
     private static void RunSiluKernelPhase(

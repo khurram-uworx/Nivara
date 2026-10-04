@@ -9,8 +9,9 @@ namespace Nivara.GpuProbe.Kernels;
 /// <summary>
 /// CPU leg of the multi-leg gate: the production Nivara kernels exactly as
 /// <c>NivaraInference</c> calls them for SmolLM, consumed read-only through public API.
-/// This is the gold target — every GPU leg (L0 hand-authored, SYCL/oneAPI, DX12) is
-/// gated against it (see docs/TODO.md), not against a hand-rolled or double-precision oracle.
+/// This is the gold target - every GPU leg (L0 hand-authored, SYCL/oneAPI, DX12) is
+/// gated against it, not against a hand-rolled or double-precision oracle; the
+/// per-backend results are tabulated in [docs/ILGPU.md](../../../docs/ILGPU.md).
 /// </summary>
 internal static class CpuLeg
 {
