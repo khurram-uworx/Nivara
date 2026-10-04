@@ -602,6 +602,89 @@ plainly because the first version would still have caught a wrong offset — the
 check *demonstrate* that it discriminates, not make it newly capable of failing.
 
 
+## EXAMPLES.md: the remaining eleven
+
+Extends the #528 work above from two diagnostics to the whole document. **This section was
+executed without its plan being written here first**, which is the one process deviation in
+this branch; the investigation notes below are recorded after the fact rather than before it.
+
+### What the eleven actually were
+
+| Count | Diagnostic | Cause | Owner |
+| --- | --- | --- | --- |
+| 9 | `CS0246` | Row types (`Employee`, `Customer`, `LinearModel`, `FraudNet`) declared in a `mode: File` block and used in the next fence | #524 |
+| 1 | `CS0103` | `employees`, a frame the prose carries over from an earlier block | #524 |
+| 1 | `CS1739` | `SGD<float>(lr:)` — a parameter the API does not have | #526 |
+
+Only the last is a documentation defect. `SGD<T>` declares
+`SGD(T learningRate, double momentum = 0.0)` (`SGD.cs:143`), verified in source rather than
+inferred from the diagnostic, which reports only that no parameter is named `lr`.
+
+### Two mechanism facts that shaped the fix
+
+Neither is stated in #524, and both decide the approach:
+
+1. **`locals:` cannot supply a type.** It is emitted *before* the block body, so a `record`
+   there is `CS8803`. All eight existing uses are variable declarations.
+2. **`preamble:` is bookkeeping only.** `DocSnippetCompiler` never reads `PreambleName`; types
+   resolve because `BaseUsings` imports `Nivara.Tests.Docs.Preambles` into *every* block. So a
+   type in that namespace is the only route that works, and `KnownPreambles` is what keeps the
+   name honest rather than decorative.
+
+### Decision: `Employee` is a union, and the conflict is disclosed
+
+EXAMPLES.md declares two incompatible `Employee` rows — §5a `{Name, Department, Salary,
+IsActive}` over an `int` Salary, §5c `{Name, City, Age, Salary}` over a `double` one — and §5b a
+third, deliberately wrong one, to show eager schema validation. Stub namespaces are global and
+cannot be overloaded per document, so one stub cannot honestly be all three. The stub is the
+union with `Salary` as `double`, which satisfies both sets of expressions. That it matches no
+real frame is recorded in the stub's doc comment and reported on #524, per #524's own instruction
+to say so rather than stub silently.
+
+What this costs is bounded: `Query<T>()` maps properties to columns at *runtime*, so the mapping
+was never something the gate verified. What the gate checks — members exist, chain resolves — the
+union preserves. §5b is unaffected because it declares `Employee` in its own block's global
+namespace, which outranks an imported one.
+
+### GETTING-STARTED.md was not optional
+
+Adding `Employee` resolved six `Query<Employee>()` / `ScanQuery<Employee>()` sites there as a
+side effect, because the stub namespace is global. Those four fences are annotated `preamble:
+row-types` so the assumption is recorded at each block; #524 rejects a silent implicit preamble,
+and leaving them resolving invisibly would have been exactly that.
+
+### Verified
+
+Build exit 0, 0 warnings, 0 errors. Doc gates 18 passed / 1 failed, the failure being
+`EveryGatedBlock_CompilesWithoutErrors`, still red on GETTING-STARTED.md.
+
+| | before | after |
+| --- | --- | --- |
+| `EXAMPLES.md` | 13 | **0** |
+| `GETTING-STARTED.md` | 116 | 110 |
+| total distinct | 127 | 110 |
+
+Arithmetic: 127 − 11 − 6 = 110. Per-code: `CS0246` 30 → 15, `CS0103` 70 → 69, `CS1739` 3 → 2,
+every other code unchanged.
+
+### Not done
+
+- `GETTING-STARTED.md`'s remaining 110 diagnostics. The "Aggregation Functions" fence is
+  annotated but still fails on `frame` (`CS0103`), which is #524's and was left in place.
+- `Person`, `Contestant` and `Player` row types still unstubbed — #524's remaining `CS0246`s.
+- #525, #527, #529, #530, #531, #532 — untouched.
+- The full NUnit suite — still not run; `AGENTS.md` asks first and only doc gates were in scope.
+
+### Issue status after this section
+
+- [ ] #524 — **EXAMPLES.md's ten missing-context diagnostics are resolved.** Its ~90
+      `GETTING-STARTED.md` diagnostics remain, so it stays open. The `Employee` shape conflict is
+      reported there for a maintainer decision.
+- [ ] #526 — **its `EXAMPLES.md:563` site is resolved** (`lr:` → `learningRate:`). Its four
+      `GETTING-STARTED.md` sites remain, so it stays open.
+- [ ] #528 — closed out by the section above.
+
+
 Reminder: as each task executes, if you find deferred work or a concern outside this plan,
 create a tracked issue immediately via `gh issue create --repo khurram-uworx/Nivara` and
 record its number above. Do not rely on memory or wait until the plan finishes.
