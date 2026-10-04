@@ -45,7 +45,7 @@ public void NullMaskMaintenance_ArithmeticOperations_PreservesNullPositions()
     var testCases = new[] { new int?[] { 1, null, 3 } };
     foreach (var values in testCases)
     {
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var result = column.Multiply(5);
         for (int i = 0; i < values.Length; i++)
             Assert.That(result.IsNull(i), Is.EqualTo(values[i] == null));

@@ -768,7 +768,7 @@ try
     var errorResult = leftFrame.InnerJoin(rightFrame, "Id", 
         ColumnDisambiguationStrategy.Error);
 }
-catch (Nivara.Exceptions.SchemaValidationException ex)
+catch (QuerySchemaValidationException ex)
 {
     Console.WriteLine($"Column conflict: {ex.Message}");
 }
@@ -824,7 +824,7 @@ try
 {
     var strict = employees.ConcatenateVertical(contractors, ConcatenationMismatchHandling.Error);
 }
-catch (Nivara.Exceptions.SchemaValidationException ex)
+catch (QuerySchemaValidationException ex)
 {
     Console.WriteLine($"Schema mismatch: {ex.Message}");
 }
