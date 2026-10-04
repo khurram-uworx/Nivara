@@ -200,6 +200,47 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **Three ambiguous public type names renamed (breaking, #532)** — two breaking renames, both
+  removing a name that did not identify what the type was:
+
+  | Before | After | Namespace |
+  |---|---|---|
+  | `SchemaValidationException` | `QuerySchemaValidationException` | `Nivara.Exceptions` (unchanged) |
+  | `SchemaValidationException` | `DataSchemaValidationException` | `Nivara.IO` (unchanged) |
+  | `NivaraColumn` (static factory) | `NivaraColumnFactory` | `Nivara` (unchanged) |
+
+  `SchemaValidationException` was declared **twice in the same assembly**, once in
+  `Nivara.Exceptions` and once in `Nivara.IO`. The library never tripped over it because the
+  Parquet reader and writer are declared `namespace Nivara.IO` and import no `Nivara.Exceptions`,
+  so the bare name resolved there — but every consumer that both runs a query and reads a file
+  imports both namespaces and got CS0104 at each use site. The two are now named for their
+  origin: `QuerySchemaValidationException` at the ~60 query-engine throw sites,
+  `DataSchemaValidationException` in the Parquet reader and writer. Namespaces and base classes
+  are unchanged, so existing `catch` filters and `is` patterns still behave.
+
+  #539 fixed the symptom by qualifying the *documentation* — `catch
+  (Nivara.Exceptions.SchemaValidationException ex)` — which silenced the doc gate without
+  touching the library. That has been reverted: the name is unique, so the qualification is
+  unnecessary, and instructing readers to work around a library defect was the wrong lesson.
+
+  `NivaraColumn` was a non-generic static factory sitting beside `NivaraColumn<T>` in the same
+  namespace. Legal C#, but `NivaraColumn.CreateFromNullable` and `NivaraColumn<T>.Create` read
+  as one type when they are two — and #222 had deliberately moved `CreateFromNullable` onto the
+  non-generic class so that `where T : struct` could reject reference-type arguments at compile
+  time, a distinction the shared name obscured. `NivaraColumn<T>` is untouched.
+
+  **No `[Obsolete]` shim is possible for either rename.** The exception types are `sealed`, so C#
+  cannot alias them, and re-introducing a `SchemaValidationException` in any form would restore
+  the ambiguity being removed.
+
+  Adds `TypeNameUniquenessTests`, which fails when one short name is public in more than one
+  namespace across the two shipped assemblies. #532 survived a documentation-gate fix because the
+  gate reports what the document claims compiles, not what the library makes ambiguous — no
+  behavioural test could have caught it. Its coverage limit is recorded in the fixture: grouping
+  by `Type.Name` means generic arity participates, so arity pairs like
+  `NivaraColumn`/`NivaraColumn<T>` are deliberately not flagged, which is why the factory rename
+  above was done by hand.
+
 - **Nested (non-slot) cumulative windows fall back to exact boundary materialization (#360)** —
   `StreamingWindowProcessor.isStreamableNode` now only admits a cumulative window
   (`CumulativeSum`/`CumulativeMax`/`CumulativeMin`/`CumulativeProduct`/`CumulativeCount`)
