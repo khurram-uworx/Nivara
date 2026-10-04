@@ -219,7 +219,7 @@ var docVectors = documents.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>
 var scores = new float[docVectors.Lengths[0]];
 var dims = (int)docVectors.Lengths[1];
 for (int i = 0; i < scores.Length; i++)
-    scores[i] = TensorPrimitives.CosineSimilarity(docVectors.AsSpan().Slice(i * dims, dims), query);
+    scores[i] = TensorPrimitives.CosineSimilarity(docVectors.GetSpan([i, 0], dims), query);
 
 var ranking = documents.GetColumn<string>("DocumentId")
     .Select((id, i) => (Label: id, Score: scores[i]))
@@ -441,7 +441,7 @@ var embeddings = customers.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>
 float[] riskPattern = [0.8f, 0.1f, 0.6f, 0.3f];
 var riskScores = new float[customers.RowCount];
 for (int i = 0; i < customers.RowCount; i++)
-    riskScores[i] = TensorPrimitives.CosineSimilarity(embeddings.AsSpan().Slice(i * 4, 4), riskPattern);
+    riskScores[i] = TensorPrimitives.CosineSimilarity(embeddings.GetSpan([i, 0], 4), riskPattern);
 
 var withScores = customers.WithColumn("RiskScore", NivaraColumn<float>.Create(riskScores));
 
