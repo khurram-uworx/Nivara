@@ -315,11 +315,23 @@ band, because a wrong row offset is structural rather than a precision question.
    adds one of those members and the docs should be revisited.
 3. Runs every candidate form that *can* compile, comparing each row against the flat
    row-major slice. The non-compiling forms cannot appear in a file that must itself
-   compile, so their status is covered by step 2 instead.
+   compile, so their status is covered by step 2 instead. The tensor is built from a
+   **clone** of the reference array, because `Tensor.Create` aliases its input rather
+   than copying — verified, not assumed. Comparing an extracted row against an array
+   the tensor also points into would be correct by construction, and nothing would
+   demonstrate the comparison discriminates. A negative control therefore asserts that
+   a deliberately wrong row is rejected, so a passing row check means something.
 4. Runs both `EXAMPLES.md` scoring snippets end to end on the Act 4 dataset and
    asserts the descending ranking is `doc-101, doc-103`, which is what the document
    claims. The numpy values are printed alongside for a human to compare — they are
    not asserted, because a float tolerance would let a real bug hide behind it.
+
+## `Tensor.Create` aliases its input
+
+Found while building this mode, and it is a trap for any zero-copy reasoning: passing a
+`float[]` to `Tensor.Create` does **not** snapshot it. Mutating the array afterwards
+changes the tensor, and writing through the tensor changes the array — in both
+directions. So a "reference" array that the tensor also points into is not a reference.
 
 ## Tensor<T> findings (`tensor-api` mode)
 

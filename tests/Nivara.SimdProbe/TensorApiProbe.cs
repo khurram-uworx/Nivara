@@ -61,6 +61,7 @@ internal static class TensorApiProbe
 
         failures += ReportApiSurface();
         failures += ReportOverloads();
+        failures += CheckReferenceDiscriminates();
         failures += CheckCandidates();
         failures += CheckScoring();
 
@@ -145,6 +146,60 @@ internal static class TensorApiProbe
     }
 
     /// <summary>
+    /// Proves the row comparison is a real check rather than an identity.
+    ///
+    /// <para><b>Why this exists.</b> <c>Tensor.Create</c> does <i>not</i> copy — verified by mutating
+    /// the source array and watching the tensor's element change. The first version of this probe
+    /// built the tensor from <see cref="RowMajor"/> and compared the extracted row against
+    /// <see cref="RowMajor"/>, i.e. compared one region of the array with itself. That is correct by
+    /// construction rather than by evidence: a wrong offset would still have been caught (the values
+    /// differ), but nothing proved the comparison was discriminating, and it silently would not
+    /// notice the tensor's storage diverging from the reference.</para>
+    ///
+    /// <para>Building the tensor from a clone makes the two genuinely independent objects, and the
+    /// negative control below then demonstrates the comparison has teeth — so a passing row check is
+    /// informative instead of tautological.</para>
+    /// </summary>
+    static int CheckReferenceDiscriminates()
+    {
+        Console.WriteLine("--- reference independence ---");
+
+        var tensor = Tensor.Create(RowMajor.ToArray(), [Rows, Dims]);
+
+        bool cloned = !ReferenceOverlapsTensor(tensor);
+        Console.WriteLine($"  {(cloned ? "ok  " : "FAIL")}  tensor storage is a clone, not RowMajor itself");
+        if (!cloned) return 1;
+
+        int mismatches = 0;
+        for (int i = 0; i < Rows; i++)
+        {
+            int wrong = (i + 1) % Rows;
+            if (Matches(tensor.GetSpan([wrong, 0], Dims), RowMajor, i, Dims)) mismatches++;
+        }
+
+        bool discriminates = mismatches == 0;
+        Console.WriteLine($"  {(discriminates ? "ok  " : "FAIL")}  a deliberately wrong row fails the comparison " +
+                          $"({Rows - mismatches}/{Rows} rows rejected)");
+        Console.WriteLine();
+
+        return discriminates ? 0 : 1;
+    }
+
+    /// <summary>
+    /// True if the tensor's storage is still the original <see cref="RowMajor"/> array, which would
+    /// make every row comparison in this probe vacuous. Detected by mutating through the tensor and
+    /// watching the array, rather than by trusting that Create copies.
+    /// </summary>
+    static bool ReferenceOverlapsTensor(Tensor<float> tensor)
+    {
+        float sentinel = RowMajor[0];
+        tensor[0, 0] = sentinel + 12345f;
+        bool aliased = RowMajor[0] != sentinel;
+        RowMajor[0] = sentinel;
+        return aliased;
+    }
+
+    /// <summary>
     /// Every candidate form, on both axes: what the compiler accepts, and whether it actually returns
     /// the row. Only the forms that compile can be present in this file.
     /// </summary>
@@ -155,7 +210,8 @@ internal static class TensorApiProbe
         Console.WriteLine("   status is asserted reflectively above and not reproduced here)");
         Console.WriteLine();
 
-        var tensor = Tensor.Create(RowMajor, [Rows, Dims]);
+        // Cloned, not RowMajor: Create aliases its input, and RowMajor is the reference.
+        var tensor = Tensor.Create(RowMajor.ToArray(), [Rows, Dims]);
         // An int, deliberately: GetSpan's second parameter is `int` length, while its first is a
         // span of indices. The two have different element types and mixing them up is a CS1503.
         int dims = Dims;
@@ -175,10 +231,17 @@ internal static class TensorApiProbe
             Console.WriteLine($"    compiles: yes   (documented form: {source})");
 
             bool ok = true;
+            int thrownAt = -1;
             try
             {
                 for (int i = 0; i < Rows; i++)
-                    ok &= Matches(form(i), RowMajor, i, Dims);
+                {
+                    // The row is reported from the loop variable rather than assumed to be 0: a form
+                    // that succeeded for a while and then threw must not be described as failing on
+                    // the first row.
+                    try { ok &= Matches(form(i), RowMajor, i, Dims); }
+                    catch { thrownAt = i; throw; }
+                }
 
                 if (ok)
                     Console.WriteLine("    runs:     yes — all rows equal the flat row-major slice, exactly");
@@ -191,9 +254,9 @@ internal static class TensorApiProbe
             catch (Exception ex)
             {
                 // The trap. It compiles, so the doc-snippet gate certifies it, and it fails on the
-                // very first row instead. Reported as a trap, not a probe failure — the probe is
+                // first row it reaches instead. Reported as a trap, not a probe failure — the probe is
                 // behaving correctly by observing it.
-                Console.WriteLine($"    runs:     NO — throws {ex.GetType().Name} on row 0");
+                Console.WriteLine($"    runs:     NO — throws {ex.GetType().Name} on row {thrownAt}");
                 Console.WriteLine("              TRAP: compiles, throws at run time. The gate cannot catch this.");
             }
 
@@ -211,7 +274,8 @@ internal static class TensorApiProbe
     {
         Console.WriteLine("--- EXAMPLES.md scoring, using GetSpan([i, 0], dims) ---");
 
-        var docVectors = Tensor.Create(RowMajor, [Rows, Dims]);
+        // Cloned for the same reason as in CheckCandidates: RowMajor is the reference below.
+        var docVectors = Tensor.Create(RowMajor.ToArray(), [Rows, Dims]);
         var scores = new float[Rows];
         int dims = Dims;
 

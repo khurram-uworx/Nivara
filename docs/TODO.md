@@ -553,12 +553,36 @@ the replacement independently checkable.
 
 ## GitHub issues log
 
-- [x] #528 — the subject of this section. **Its premise is corrected here**; the issue body
-      still says the property is `.Span`, which does not exist, so it must be corrected on
-      the way out or the next reader will implement it literally and fail.
+- [x] #528 — the subject of this section. **Its premise is corrected on the way out**: the issue
+      body says the property is `.Span`, which does not exist. Corrected in a comment on the issue,
+      not only here.
 - [ ] #524 — 100 missing-context errors; the gate for the gate. Untouched here.
 - [ ] #525 / #526 / #527 / #529 / #530 / #531 — the other filed defects. Untouched here.
 - [ ] #532 — `SchemaValidationException` is an API defect, not a doc defect. Untouched here.
+- [ ] #536 — **raised by step 2.** `ColumnStorage<T>.AsTensor()` caches a zero-copy
+      `Tensor.Create` view over the sole-owner `T[]`. Safe today only because nothing writes
+      `data` in place, and nothing asserts that. Any future in-place kernel would silently
+      change every view already handed out. Found because `Tensor.Create` aliases its input
+      rather than copying — which also invalidated the probe's first reference, see below.
+
+## Probe lifecycle
+
+The probe began as a throwaway project in the temp directory, was measured across four
+candidate forms, and was **promoted** into `tests/Nivara.SimdProbe` as the `tensor-api`
+mode rather than left as scratch — step 0 of the probe workflow confirmed no existing mode
+covered "what is the correct API shape", and #524–#532 are eight more instances of that
+question. The temp project was deleted; the temp `aliascheck` project used to verify
+`Tensor.Create`'s aliasing behaviour was deleted after the fact was folded into the mode's
+`CheckReferenceDiscriminates`.
+
+**Finding that changed the probe:** `Tensor.Create` does not copy — it wraps the array.
+The probe's first version built the tensor from the same `RowMajor` array it compared
+extracted rows against, making the central assertion a region compared with itself. That
+is correct by construction rather than by evidence, so the tensor is now built from a clone
+and a negative control asserts that a deliberately wrong row is rejected. Worth stating
+plainly because the first version would still have caught a wrong offset — the fix makes the
+check *demonstrate* that it discriminates, not make it newly capable of failing.
+
 
 Reminder: as each task executes, if you find deferred work or a concern outside this plan,
 create a tracked issue immediately via `gh issue create --repo khurram-uworx/Nivara` and
