@@ -169,6 +169,16 @@ something.
 5. Full suite `dotnet test -c Release --filter "Category!=Performance"` to confirm no
    regression from the new dependency.
 
+### Verification status as executed
+
+| Step | Result |
+|---|---|
+| 1 | Partial. `Nivara.Tests` builds clean in Release. `Nivara.slnx` as a whole was not built. |
+| 2 | Done. 19 passed / 0 failed across both doc fixtures in Release. |
+| 3 | Done. Negative control reports `Fixtures/Broken.md:13 CS1061`. |
+| 4 | Done. Injected `ThisMemberDoesNotExist` into `docs/STREAMING.md`; the gate reported `docs/STREAMING.md:179 CS1061`, the exact injected line. Reverted. |
+| 5 | **Not run** — declined at the human's direction on 2026-10-04. The new `Microsoft.CodeAnalysis.CSharp` 5.0.0 dependency is therefore unverified against the rest of the suite. CI's `--filter "Category!=Performance"` run on ubuntu is the first check. |
+
 ## Planned commits
 
 1. `docs: plan #515 in TODO.md`

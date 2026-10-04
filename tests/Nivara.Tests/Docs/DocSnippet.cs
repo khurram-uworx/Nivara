@@ -83,6 +83,25 @@ static partial class DocSnippetExtractor
     ];
 
     /// <summary>
+    /// Every context name a gate comment may use. The types each name supplies are compiled in
+    /// <c>Preambles/SnippetStubs.cs</c>, so they cannot rot; this list is what makes the name itself
+    /// a checked contract rather than a comment, and it is asserted against actual usage in both
+    /// directions so a typo or a stale entry fails the gate.
+    /// </summary>
+    internal static readonly string[] KnownPreambles =
+    [
+        "agent-null-tensor",
+        "agent-tensor-kernel",
+        "streaming-as-stream",
+        "streaming-flux-basic",
+        "streaming-flux-frame",
+        "streaming-flux-publish",
+        "streaming-flux-reverse",
+        "streaming-flux-training",
+        "streaming-flux-window",
+    ];
+
+    /// <summary>
     /// Transient working documents left out of the scan. They are not reader-facing, and
     /// <c>docs/TODO.md</c> is deleted once its plan executes, so classifying it would make the
     /// coverage assertions flap across commits. Asserted explicitly by the gate, never a glob.

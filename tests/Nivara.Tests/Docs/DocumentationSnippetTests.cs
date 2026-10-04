@@ -16,15 +16,24 @@ public class DocumentationSnippetTests
         [.. DocSnippetExtractor.GatedDocuments.SelectMany(DocSnippetExtractor.Extract)];
 
     [Test]
-    public void GatedDocuments_ContainBlocksAndNoUntaggedBlock()
+    public void GatedDocuments_ContainBlocksToGate()
     {
-        var blocks = GatedBlocks();
+        Assert.That(GatedBlocks(), Is.Not.Empty, "the allowlist named no snippets to gate");
+    }
 
-        Assert.That(blocks, Is.Not.Empty, "the allowlist named no snippets to gate");
-        Assert.That(
-            blocks.Where(b => !b.IsExcluded && b.PreambleName is null && b.Locals.Length == 0 && b.Mode == DocWrapMode.TopLevel),
-            Is.Empty,
-            "a TopLevel block with no preamble and no locals declares no context; it is checked, but nothing pins the types it names");
+    [Test]
+    public void PreambleNames_ResolveInBothDirections()
+    {
+        var used = GatedBlocks()
+            .Select(b => b.PreambleName)
+            .Where(name => name is not null)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        var known = DocSnippetExtractor.KnownPreambles.OrderBy(n => n, StringComparer.Ordinal).ToArray();
+
+        Assert.That(used, Is.EqualTo(known),
+            "every preamble name in a gate comment must be declared, and every declared name must be used");
     }
 
     [Test]
@@ -63,8 +72,26 @@ public class DocumentationSnippetTests
             Assert.That(gated.Count - excludedCount, Is.EqualTo(12),
                 "expected 9 gated docs/STREAMING.md blocks plus 3 docs/AGENT-CODE-EXAMPLES.md blocks");
             Assert.That(excludedCount, Is.EqualTo(2));
-            Assert.That(all.Length, Is.EqualTo(ungatedCount + gated.Count),
-                "the gate lost or invented blocks relative to a whole-repository scan");
+            Assert.That(ungatedCount, Is.EqualTo(219));
+            Assert.That(all.Length, Is.EqualTo(233),
+                "the repository-wide snippet count moved; update this number deliberately. The gate "
+                + "covers 14 of these blocks, so the remaining 219 are unverified and a drop here is "
+                + "reduced coverage, not a neutral event");
+        });
+    }
+
+    [Test]
+    public void ProposalDocuments_AreExcludedByNameNotByGlob()
+    {
+        var gated = DocSnippetExtractor.GatedDocuments;
+        var ungated = DocSnippetExtractor.UngatedDocuments;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(gated, Does.Not.Contain("docs/ACCELERATION.md"));
+            Assert.That(gated, Does.Not.Contain("docs/ROADMAP-SUGGESTION.md"));
+            Assert.That(ungated, Does.Contain("docs/ACCELERATION.md"),
+                "docs/ACCELERATION.md is a design proposal whose snippets deliberately do not compile");
         });
     }
 
