@@ -170,6 +170,10 @@ See `docs/ACCELERATION.md` §"Configuration" for the same analysis.
 
 ## Example
 
+<!-- gate
+preamble: streaming-as-stream
+locals: CancellationToken ct = default;
+-->
 ```csharp
 await using var query = Csv.ScanAsQueryFrame("telemetry.csv")
     .Filter(ColumnExpressions.Col("status") == "OK")
@@ -283,6 +287,10 @@ Use `ToFlux` (Streamix bridge) when you need:
 
 **Streaming chunks with retries:**
 
+<!-- gate
+preamble: streaming-flux-basic
+locals: ISink sink = new RecordingSink();
+-->
 ```csharp
 await using var cpuSpikes = NivaraParquetReader.ScanAsQueryFrame("telemetry.parquet")
     .Filter(ColumnExpressions.Col("cpu") > 80);
@@ -296,6 +304,10 @@ await cpuSpikes.ToFlux(chunkSize: 50_000)
 
 **Event-time windowing with `ToFluxWithTimestamp`:**
 
+<!-- gate
+preamble: streaming-flux-window
+locals: IPager pager = new RecordingPager();
+-->
 ```csharp
 // String-based overload (column must be DateTimeOffset)
 await using var telemetry = Csv.ScanAsQueryFrame("telemetry.csv");
@@ -317,6 +329,10 @@ await telemetry.ToFluxWithTimestamp("observed_at", chunkSize: 1000)
 
 **Mini-batch framing for online learning:**
 
+<!-- gate
+preamble: streaming-flux-training
+locals: QueryFrame query = Csv.ScanAsQueryFrame("training.csv"); int featureCount = 8;
+-->
 ```csharp
 var model = new Linear<float>(featureCount, 1);
 var optimizer = new Adam<float>((float)1e-3);
@@ -348,6 +364,9 @@ await query
 
 **Row-level reverse terminal (collect a row stream back to a frame):**
 
+<!-- gate
+preamble: streaming-flux-reverse
+-->
 ```csharp
 await using var events = Csv.ScanAsQueryFrame("events.csv");
 var fluxRows = events.ToFluxRows(chunkSize: 5000);
@@ -358,6 +377,10 @@ using var result = await fluxRows.ToNivaraFrameAsync();
 
 **Reverse terminal (collect a frame stream back to a frame):**
 
+<!-- gate
+preamble: streaming-flux-frame
+locals: QueryFrame queryFrame = Csv.ScanAsQueryFrame("events.csv");
+-->
 ```csharp
 var flux = queryFrame.ToFlux(chunkSize: 10_000);
 using var result = await flux.ToNivaraFrameAsync();
@@ -379,6 +402,10 @@ using var result = await flux.ToNivaraFrameAsync();
 Streamix's `Publish()` and `Replay()` let a single Nivara query fan out to multiple
 consumers without re-executing the source:
 
+<!-- gate
+preamble: streaming-flux-publish
+locals: Dashboard dashboard = new(); Archival archival = new();
+-->
 ```csharp
 // Publish defers every read until Connect(), and the shared subscription outlives
 // this setup - so the frame cannot be disposed here. It is owned by whoever tears
@@ -403,6 +430,10 @@ metrics.Dispose();
 
 `Replay(bufferSize)` additionally replays the last N items to late subscribers:
 
+<!-- gate
+preamble: streaming-flux-publish
+locals: QueryFrame query = Csv.ScanAsQueryFrame("events.csv"); LiveUi liveUI = new();
+-->
 ```csharp
 var replayed = query.ToFlux(chunkSize: 10_000).Replay(bufferSize: 3);
 
@@ -422,6 +453,10 @@ Requires the `Streamix.AspNetCore` NuGet package in your web project.
 
 **Controller pattern (`FluxResult<T>`):**
 
+<!-- gate
+exclude: streamix-aspnetcore
+reason: requires the Streamix.AspNetCore package and ASP.NET Core, neither of which the doc gate's compilation references include
+-->
 ```csharp
 using Nivara.Streamix;
 using Streamix.AspNetCore;
@@ -448,6 +483,10 @@ public class TelemetryController : ControllerBase
 
 **Minimal API pattern (`ToSseAsync`):**
 
+<!-- gate
+exclude: streamix-aspnetcore
+reason: requires the Streamix.AspNetCore package and ASP.NET Core, neither of which the doc gate's compilation references include
+-->
 ```csharp
 using Nivara.Streamix;
 using Streamix.AspNetCore;
@@ -471,6 +510,10 @@ app.MapGet("/api/telemetry/stream", async (HttpResponse response) =>
 Streamix's diagnostic operators compose directly with Nivara `IFlux<T>` streams.
 Use them for visibility into chunk flow, latency, and pipeline health:
 
+<!-- gate
+preamble: streaming-flux-basic
+locals: ISink sink = new RecordingSink();
+-->
 ```csharp
 await using var telemetry = NivaraParquetReader.ScanAsQueryFrame("telemetry.parquet");
 
