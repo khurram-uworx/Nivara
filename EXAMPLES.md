@@ -576,7 +576,7 @@ var loader = new DataLoader<float>(
     batchSize: 2, shuffle: false);
 
 var model = new LinearModel();
-var optimizer = new SGD<float>(lr: 0.01f);
+var optimizer = new SGD<float>(learningRate: 0.01f);
 optimizer.AddParameterGroup(model.GetParameters().Values, learningRate: 0.01f);
 
 var loop = new TrainingLoop<float>(
