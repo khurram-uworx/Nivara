@@ -376,3 +376,190 @@ Reminder: as each task executes, if you find deferred work or a concern (a known
 follow-up, a refactor) that is outside the current plan, create a tracked issue immediately via
 `gh issue create --repo khurram-uworx/Nivara` and record its number in the log above. Do not rely on
 memory or wait until the plan finishes — compaction during execution can lose important items.
+---
+
+# Plan — #528: `Tensor<T>` row-span extraction in EXAMPLES.md, plus the .NET 11 correction
+
+Branch: `khurram/528`, branched off `main` at `8be35dea`.
+
+This section is appended to the #520 record above rather than replacing it. That file is
+load-bearing: it is the only explanation of why `EveryGatedBlock_CompilesWithoutErrors` is red
+in CI, and the earlier plan was explicit that it is deleted only when the follow-ups land
+(#524–#532), not before. #528 is one of those follow-ups.
+
+## Problem
+
+`EXAMPLES.md:222` and `EXAMPLES.md:444` call `.AsSpan()` on a `Tensor<float>`:
+
+```csharp
+scores[i] = TensorPrimitives.CosineSimilarity(docVectors.AsSpan().Slice(i * dims, dims), query);
+```
+
+The gate reports both as `CS1929`.
+
+## Premise correction: #528 as filed is also wrong about the fix
+
+The issue says *"the property is `.Span`"*. **`Tensor<T>` has no `Span` property.** Its
+entire public surface, read from the .NET runtime source at the pinned commit
+`3551975be08744f0418857c5bed8ab1545c5dd47` (`System.Numerics.Tensors` 11.0.0-rc.1), is:
+
+| Member | Kind |
+|---|---|
+| `FlattenedLength`, `IsDense`, `IsEmpty`, `IsPinned`, `HasAnyDenseDimensions` | property |
+| `Lengths`, `Rank`, `Strides` | property |
+| `GetSpan` / `TryGetSpan` / `FlattenTo` / `TryFlattenTo` / `Slice` / `CopyTo` / `ToArray` / `AsTensorSpan` / `AsReadOnlyTensorSpan` | method |
+
+There is no `Span`, no `Memory`, and no `AsSpan()`. Applying the issue's prescribed
+substitution produces `CS1061: 'Tensor<float>' does not contain a definition for 'Span'`
+(verified — candidate D below). **Implementing #528 literally trades one compile error for
+another.** This is the second time a filed issue's premise has been wrong in this area
+(#520 claimed the `CreateFromNullable` API was the outlier; it was the docs).
+
+The diagnostic shape in the issue is explained: the compiler *did* resolve `AsSpan`, to
+`MemoryExtensions.AsSpan(string?)`, which is why this reads as CS1929 rather than CS1061.
+
+## Measurements — four candidate forms, compile **and** runtime
+
+Compile-only evidence is not sufficient here, and the reason is the finding in row 2.
+
+| # | Candidate | Compiles | Runs |
+|---|---|---|---|
+| D | `.Span.Slice(i * dims, dims)` (the issue's advice) | no — `CS1061` | — |
+| A | `GetSpan([i], dims)` | yes | **no — throws `ArgumentOutOfRangeException`** |
+| B | `GetSpan(new nint[] { i }, dims)` | yes | no — same throw |
+| C | `GetSpan([i, 0], dims)` | yes | **yes** |
+
+Two things this table settles that the issue could not:
+
+1. **`GetSpan` requires an index for every dimension.** `startIndexes` must have `Rank`
+   elements; `[i]` alone on a rank-2 tensor passes the compiler and throws on the first
+   loop iteration. A compile-only gate reports this snippet as correct. This is the
+   non-obvious part of the fix and the reason the probe in step 2 exists.
+2. **`nint` vs `NIndex` is genuinely ambiguous** — `GetSpan` is overloaded on
+   `ReadOnlySpan<nint>` and `ReadOnlySpan<NIndex>`, and `int` converts implicitly to both.
+   A collection expression `[i, 0]` resolves (standard `int`→`nint` beats user-defined
+   `int`→`NIndex`); `new nint[] { i, 0 }` also resolves, but `[]` and `Slice([i], ..)`
+   do not (`CS0121`, `CS9174`).
+
+Correctness of candidate C was checked against the snippet's own Python reference, not
+merely asserted to compile:
+
+| | doc-101 | doc-102 | doc-103 |
+|---|---|---|---|
+| `GetSpan([i,0],dims)` | 0.985318 | 0.410305 | 0.974284 |
+| Python `v·q / (‖v‖‖q‖)` | 0.985318 | 0.410305 | 0.974284 |
+
+and the descending ranking `doc-101, doc-103` matches the top-2 the document claims.
+
+## Proposed changes
+
+### 1. Preserve the probe as a `tensor-api` mode in `tests/Nivara.SimdProbe`
+
+The probe used to establish the table above was a temp scratch project. #524–#532 are
+nine more "the doc names the wrong API" issues of exactly this kind, so a throwaway is the
+wrong home: the next session needs to check an API shape against the real assembly rather
+than guess, and the failure mode (compiles but throws) is invisible to the snippet gate.
+
+New `TensorApiProbe.cs`, `tensor-api` mode, following the existing `Correctness`/`Benchmark`
+pattern and the `TransposeKernelProbe` precedent of a self-contained `--mode`:
+
+- print the resolved `Tensor<T>` public surface by reflection, so the next agent reads the
+  API instead of inferring it;
+- for each candidate row-extraction form, record **compiles / runs / row matches the flat
+  row-major slice**, catching row 2 above as a first-class result rather than a surprise;
+- exit non-zero if the recommended form stops compiling or stops matching, so the probe is a
+  gate on the API, not a printout;
+- keep the `GetSpan` rank trap and the `nint`/`NIndex` ambiguity in its output and README,
+  because both are invisible to a reader who has not been bitten.
+
+Self-contained like the rest of the project (only `System.Numerics.Tensors`), so it stays
+decoupled from Nivara internals and builds fast.
+
+### 2. Fix the two EXAMPLES.md call sites
+
+- `:222` — `docVectors.AsSpan().Slice(i * dims, dims)` → `docVectors.GetSpan([i, 0], dims)`
+- `:444` — `embeddings.AsSpan().Slice(i * 4, 4)` → `embeddings.GetSpan([i, 0], 4)`
+
+No prose changes. Checked per the issue's own instruction: `:186` ("lays them out row-major
+as a 2D tensor") and `:422` ("Scored against the stored embeddings") describe the *layout*,
+not the method, so both remain accurate.
+
+### 3. Correct AGENTS.md — this is the root cause, not a footnote
+
+AGENTS.md is the file an agent reads before writing a call, which is how these defects get
+written in the first place (the #520 plan made the same argument about
+`NivaraColumn<T>.CreateFromNullable`). It is stale on the target framework:
+
+| AGENTS.md says | The build says |
+|---|---|
+| "Target framework: .NET 10.0 with System.Numerics.Tensors 10.0.10" (×2) | `net11.0`, `System.Numerics.Tensors 11.0.0-rc.1.26425.128` |
+| "Key BCL .NET 10 tensor patterns" | .NET 11 |
+| "Microsoft.ML 5.0.0" (×2) | `6.0.0-preview.26457.2` |
+| "Parquet.Net 6.0.3" (×2) | `6.1.1-pre.1` |
+| — (absent) | `Streamix 1.2.3`, `Microsoft.Extensions.AI.Abstractions 10.10.0` |
+
+Every `.csproj` in the repo is already `net11.0`; `docs/TENSORS.md` already says
+`11.0.0-preview.7`. Only AGENTS.md was left behind, and it is the highest-traffic doc for
+exactly the fact that was wrong.
+
+Also add the row-span rule and a pointer to the probe, so the next session does not
+re-derive it: `Tensor<T>` has no `Span`/`AsSpan()`; use `GetSpan`; supply every rank index.
+
+Grounding note: AGENTS.md edits must not introduce new `File.cs:NN` citations — the citation
+gate (#518) scans it and this plan adds none, so no new citation risk is taken.
+
+## Blast radius
+
+- **`EXAMPLES.md`** — two lines in two fenced blocks. Both blocks currently fail the gate for
+  *other* reasons too (`CS0246` on the row types at `:277` and `:449`, owned by #524), so
+  neither block goes green here. The claim is precisely "these two diagnostics are gone",
+  not "EXAMPLES.md compiles".
+- **The gate stays red**, by the human's decision: `GETTING-STARTED.md` still reports its
+  #524/#525/#527/#529/#530/#531 errors. The EXAMPLES.md error count must move 13 → 11 and no
+  diagnostic may be added or removed.
+- **`tests/Nivara.SimdProbe`** — new file + one `Program.cs` switch arm + README section.
+  Standalone, not referenced by `Nivara.slnx` CI paths, no `[Category]`, not in the NUnit
+  suite. Cannot affect the gate.
+- **`AGENTS.md`** — prose only. Changes what future agents are told to write; that is the
+  intent.
+- No `src/` change, no public API change, no behaviour change.
+
+## Verification
+
+1. `dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api` — prints the API
+   surface, all four candidate forms with their compile/run results, and exits 0.
+2. `dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --nologo --filter
+   "FullyQualifiedName~DocumentationSnippetTests"` — **red by design**;
+   `EveryGatedBlock_CompilesWithoutErrors` must drop from 13 to 11 EXAMPLES.md diagnostics,
+   with `:222` and `:444` absent and every other diagnostic byte-identical. The other 10
+   tests in the fixture must pass, including the coverage pins and the `Broken.md` negative
+   control.
+3. `dotnet test ... --filter "FullyQualifiedName~DocCitation"` — must stay green, since
+   AGENTS.md and EXAMPLES.md are both in its scope.
+4. Full suite — **ask first**; out of scope for a two-line docs fix.
+5. Never report a check as passing that has not been seen fail or pass. Step 2's baseline
+   count is captured from a real run, not from the partition table in the #520 section above.
+
+## Planned commits
+
+1. `docs: plan #528 in TODO.md`
+2. `test: add a tensor-api probe for row-span extraction`
+3. `docs: fix the two EXAMPLES.md row-extraction call sites`
+4. `docs: correct the .NET 11 target and tensor API notes in AGENTS.md`
+
+Step 3 alone cannot be verified by the gate, because both blocks still fail on #524's
+missing row types. The pinned claim is the diagnostic diff, and step 2's probe is what makes
+the replacement independently checkable.
+
+## GitHub issues log
+
+- [x] #528 — the subject of this section. **Its premise is corrected here**; the issue body
+      still says the property is `.Span`, which does not exist, so it must be corrected on
+      the way out or the next reader will implement it literally and fail.
+- [ ] #524 — 100 missing-context errors; the gate for the gate. Untouched here.
+- [ ] #525 / #526 / #527 / #529 / #530 / #531 — the other filed defects. Untouched here.
+- [ ] #532 — `SchemaValidationException` is an API defect, not a doc defect. Untouched here.
+
+Reminder: as each task executes, if you find deferred work or a concern outside this plan,
+create a tracked issue immediately via `gh issue create --repo khurram-uworx/Nivara` and
+record its number above. Do not rely on memory or wait until the plan finishes.
