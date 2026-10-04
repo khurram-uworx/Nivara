@@ -24,6 +24,12 @@ public class StreamingBackpressureTests
     }
 
     [Test]
+    public void CalculateChannelCapacity_MaxValueBudget_ClampsToMaximumSixteen()
+    {
+        Assert.That(StreamingExecutionStrategy.CalculateChannelCapacity(long.MaxValue, 1_000), Is.EqualTo(16));
+    }
+
+    [Test]
     public void CalculateChannelCapacity_ShrinkingBudget_NeverIncreasesCapacity()
     {
         const int chunkSize = 1_000;
