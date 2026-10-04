@@ -104,11 +104,31 @@ static partial class DocSnippetExtractor
     ];
 
     /// <summary>
-    /// Transient working documents left out of the scan. They are not reader-facing, and
-    /// <c>docs/TODO.md</c> is deleted once its plan executes, so classifying it would make the
-    /// coverage assertions flap across commits. Asserted explicitly by the gate, never a glob.
+    /// Transient working documents left out of the scan. They are not reader-facing, and the plan file
+    /// is <c>docs/TODO.md</c> because <c>iterative-work</c> <em>commits</em> it for the duration of a
+    /// multi-step piece of work and removes it at G2 — so it sits in the tree, and would otherwise be
+    /// scanned, for most of a workflow's life. Excluding it by name is what keeps the snippet and
+    /// citation pins from moving while it exists. A named list, never a glob: a broad rule would hide
+    /// real documents. Asserted by both gate fixtures while the file exists, not merely named here.
     /// </summary>
     internal static readonly string[] ScanExcludedDocuments = ["docs/TODO.md"];
+
+    /// <summary>
+    /// Whether a repo-relative markdown path is inside the gate's scan scope. One decision site, so
+    /// the filter a test exercises is the filter <see cref="MarkdownFiles"/> applies.
+    /// </summary>
+    internal static bool IsScanned(string repoRelativePath) => IsScanned(repoRelativePath, ScanExcludedDocuments);
+
+    /// <summary>
+    /// The scope predicate over an explicit exclusion list. The second parameter exists so a test can
+    /// ask the counterfactual — would this path be scanned without that entry — which is the only way
+    /// to tell a working exclusion from one that is merely declared.
+    /// </summary>
+    internal static bool IsScanned(string repoRelativePath, IReadOnlyList<string> exclusions) =>
+        !exclusions.Contains(repoRelativePath, StringComparer.Ordinal);
+
+    /// <summary>Absolute path of the transient plan document.</summary>
+    internal static string PlanDocumentPath => Path.Combine(RepoRoot, "docs", "TODO.md");
 
     /// <summary>Markdown files scanned for snippets: repository root plus everything under docs/.</summary>
     internal static IReadOnlyList<string> MarkdownFiles()
@@ -121,9 +141,56 @@ static partial class DocSnippetExtractor
 
         return files
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
-            .Where(path => !ScanExcludedDocuments.Contains(path, StringComparer.Ordinal))
+            .Where(IsScanned)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Materialises the transient plan document so a test can observe the scan scope with it present.
+    /// Asserting that the scan skips a file that is not there proves nothing — the file's absence and a
+    /// working exclusion produce identical results — so the exclusion has to be observed while the file
+    /// exists.
+    /// <para>
+    /// When the file already exists, the normal case while a plan is in flight, it is used as-is and
+    /// never deleted. Otherwise a body engineered to move every pin it could is written and removed on
+    /// dispose. NUnit runs fixtures sequentially unless marked <c>[Parallelizable]</c>, and none here
+    /// are, so this cannot interleave with the coverage assertions that count documents.
+    /// </para>
+    /// </summary>
+    internal static IDisposable PlanDocumentPresent()
+    {
+        if (File.Exists(PlanDocumentPath))
+            return new PlanDocumentScope(null);
+
+        File.WriteAllText(PlanDocumentPath, PlanProbeBody);
+        return new PlanDocumentScope(PlanDocumentPath);
+    }
+
+    /// <summary>
+    /// A body chosen so a leak is unmissable. The fenced block moves the repository-wide snippet total
+    /// and the document-classification assertion; the citation moves the citation totals. The citation
+    /// resolves on purpose — an unresolvable one would raise a fault of its own, and the totals would
+    /// stop being the thing that catches the leak.
+    /// </summary>
+    const string PlanProbeBody = """
+        # Plan (probe)
+
+        ```csharp
+        var sum = 1 + 1;
+        ```
+
+        Grounding: `src/Nivara/Execution/NivaraExecutionContext.cs:17`.
+        """;
+
+    /// <summary>Removes the probe document, and only if this scope is what created it.</summary>
+    sealed class PlanDocumentScope(string? createdPath) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (createdPath is not null)
+                File.Delete(createdPath);
+        }
     }
 
     /// <summary>Repo root located by walking up to the solution file, so nesting changes cannot break it.</summary>

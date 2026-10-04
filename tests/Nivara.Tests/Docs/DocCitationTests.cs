@@ -19,7 +19,12 @@ public class DocCitationTests
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
     const int ExpectedCitedDocumentCount = 16;
 
-    /// <summary>Count of documents in scope. Pinned so a shrinking scan cannot look like a pass.</summary>
+    /// <summary>
+    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 38 under
+    /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
+    /// <c>docs/TODO.md</c> does <em>not</em> make this 48 — excluding it is the point, and it is what
+    /// keeps the number stable across a workflow that commits one.
+    /// </summary>
     const int ExpectedDocumentCount = 47;
 
     [Test]
@@ -50,10 +55,30 @@ public class DocCitationTests
     }
 
     [Test]
-    public void ScanScope_ExcludesTheTransientPlanDocument()
+    public void ScanScope_ExcludesThePlanDocumentWhileItExists_AndNoCitationPinMoves()
     {
-        Assert.That(DocSnippetExtractor.MarkdownFiles(), Does.Not.Contain("docs/TODO.md"),
-            "the gate reuses the snippet gate's document scope, which leaves the transient plan out");
+        var documents = DocSnippetExtractor.MarkdownFiles().Count;
+        var citations = DocCitationExtractor.CitationCount();
+        var citedDocuments = DocCitationExtractor.CitedDocumentCount();
+
+        using (DocSnippetExtractor.PlanDocumentPresent())
+        {
+            Assert.That(File.Exists(DocSnippetExtractor.PlanDocumentPath), Is.True,
+                "the helper must leave the plan document in place for the assertions below, or they "
+                + "are asserting nothing");
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(DocSnippetExtractor.MarkdownFiles(), Does.Not.Contain("docs/TODO.md"),
+                    "the citation gate reuses the snippet gate's scope, which must leave the plan out");
+                Assert.That(DocSnippetExtractor.MarkdownFiles(), Has.Count.EqualTo(documents),
+                    $"the document scope must stay {ExpectedDocumentCount} while a plan is in the tree");
+                Assert.That(DocCitationExtractor.CitationCount(), Is.EqualTo(citations),
+                    "the plan document cites a source file, so a leak moves the repository-wide count");
+                Assert.That(DocCitationExtractor.CitedDocumentCount(), Is.EqualTo(citedDocuments),
+                    "a plan document carrying a citation would count as one more cited document");
+            });
+        }
     }
 
     [Test]
