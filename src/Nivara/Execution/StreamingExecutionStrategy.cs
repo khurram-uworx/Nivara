@@ -21,12 +21,14 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     /// Derives a default chunk size from the memory budget. This is the fallback used when
     /// the caller did not set an explicit <see cref="NivaraExecutionContext.ChunkSize"/>.
     /// </summary>
-    static int calculateChunkSize(long memoryBudget)
+    internal static int CalculateChunkSize(long memoryBudget)
     {
         const long estimatedBytesPerRow = 100;
         var chunkMemory = memoryBudget / 10;
-        var calculatedChunkSize = (int)(chunkMemory / estimatedBytesPerRow);
-        return Math.Max(1000, Math.Min(calculatedChunkSize, 100000));
+        var calculatedChunkSize = chunkMemory / estimatedBytesPerRow;
+        // Clamped as a long, then narrowed. Narrowing first is unchecked, so above ~2.1 TB the
+        // truncation wraps and the largest budgets collapse to the 1,000-row floor.
+        return (int)Math.Clamp(calculatedChunkSize, 1000, 100000);
     }
 
     /// <summary>
@@ -34,7 +36,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     /// wins; otherwise the value is derived from <see cref="NivaraExecutionContext.MemoryBudget"/>.
     /// </summary>
     static int resolveChunkSize(NivaraExecutionContext context)
-        => context.ChunkSize ?? calculateChunkSize(context.MemoryBudget);
+        => context.ChunkSize ?? CalculateChunkSize(context.MemoryBudget);
 
     static IReadOnlyDictionary<string, IColumn> executeOperationsOnData(
         IReadOnlyDictionary<string, IColumn> data,
@@ -96,8 +98,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         const long estimatedBytesPerRow = 100;
         var bytesPerChunk = (long)chunkSize * estimatedBytesPerRow;
         if (bytesPerChunk <= 0) return 2;
-        var capacity = (int)(memoryBudget / bytesPerChunk);
-        return Math.Max(2, Math.Min(capacity, 16));
+        // Clamped as a long, then narrowed — same overflow hazard as CalculateChunkSize.
+        var capacity = memoryBudget / bytesPerChunk;
+        return (int)Math.Clamp(capacity, 2, 16);
     }
 
     internal static Channel<NivaraFrame> CreateBoundChannel(long memoryBudget, int chunkSize)

@@ -89,11 +89,16 @@ so any boundary needing the whole dataset defeats chunking.
 - **Columnar sources (Parquet):** advisory — chunks align to native row-group boundaries.
 - **Explicit always wins:** a caller-supplied `chunkSize` (via `AsStream` or
   `NivaraExecutionContext.ChunkSize`) overrides the budget-derived default below.
+- **`AsStream` always supplies one,** so its 10,000-row default shadows the budget
+  derivation entirely: `resolveChunkSize` is `ChunkSize ?? <derived>`, and that parameter
+  default is never null. The derivation therefore only runs when `ChunkSize` is left null,
+  which on the public API means `ExecutionEngine.Execute(plan, context)` with
+  `Strategy = Streaming` — see §"AC3 resolution".
 
 ## Memory budget → chunk size
 
 When no explicit chunk size is set anywhere, the streaming strategy derives one from the
-memory budget (`StreamingExecutionStrategy.calculateChunkSize`):
+memory budget (`StreamingExecutionStrategy.CalculateChunkSize`):
 
 ```
 chunkSize = clamp((memoryBudget / 10) / 100 bytes-per-row, 1_000, 100_000)
@@ -101,8 +106,22 @@ chunkSize = clamp((memoryBudget / 10) / 100 bytes-per-row, 1_000, 100_000)
 
 - `memoryBudget / 10` — only 10% of the budget is reserved for one in-flight chunk.
 - `100 bytes-per-row` — fixed estimate for a typical columnar row.
-- Clamped to [1000, 100,000] rows so chunking stays meaningful at either extreme
-  (default budget 256 MB → `(25,600,000) / 100` → 256,000 → clamped to 100,000).
+- Integer division truncates at each step, and the clamp is applied to the `long` result
+  *before* it is narrowed to `int`. Narrowing first is unchecked, so clamping afterwards
+  would wrap above ~2.1 TB and collapse the largest budgets to the 1,000-row floor.
+- Only budgets between roughly 1 MB and 100 MB land strictly inside the clamp. Worked
+  values, in bytes so the arithmetic can be checked by hand:
+
+  | `MemoryBudget` | `/ 10` | `/ 100` | `chunkSize` |
+  |---|---|---|---|
+  | 67,108,864 — inside the clamp | 6,710,886 | 67,108 | **67,108** |
+  | 1,073,741,824 — the 1 GB default | 107,374,182 | 1,073,741 | 100,000 (clamped) |
+
+The default `MemoryBudget` is **1 GB** (`1024 * 1024 * 1024`, assigned in
+`NivaraExecutionContext.cs:17`). That is above the unclamped range, so the default always
+yields the 100,000-row ceiling. It is the *core query pipeline's* budget and is unrelated
+to the 256 MB default owned by the IO-layer `StreamingBufferManager` — see
+§"AC3 resolution" below.
 
 ### Channel capacity (async pipeline)
 
@@ -115,6 +134,17 @@ capacity = clamp(memoryBudget / (chunkSize * 100 bytes-per-row), 2, 16)
 
 This bounds how many chunk frames are in flight, keeping peak memory inside the budget.
 
+At the 1 GB default with `AsStream`'s 10,000-row chunks this resolves to
+`clamp(1,073,741,824 / 1,000,000, 2, 16)` = **16**. Because that is the ceiling, capacity
+does not respond to the budget at all until it falls below 16,000,000 bytes (~15.3 MiB),
+and it reaches the floor of 2 at 2,000,000 bytes. `StreamingBudgetTracker` warns at twice the
+budget, i.e. **2 GB** at the default.
+
+Both of those sit at their clamp, which is worth stating plainly: on the `AsStream` path
+the budget's only observable effects are these two ceilings, so a flat result is not
+evidence that the budget was ignored — nor evidence that it was honoured at the value you
+expected.
+
 ### AC3 resolution (memory budget enforcement)
 
 The bounded channel *is* the memory-budget enforcement in the query pipeline: at most
@@ -126,7 +156,17 @@ producer never exceeds capacity against a slow consumer).
 `StreamingBufferManager.IsMemoryBudgetExceeded` (Nivara.Extensions) is an IO-layer-only
 helper for chunk-buffered readers (CSV/Parquet). It is **intentionally not** wired into
 `StreamingExecutionStrategy` — row-chunk frames plus a bounded channel replace byte-level
-budgets in the core query pipeline.
+budgets in the core query pipeline. Its 256 MB default therefore describes the IO layer
+only; the core pipeline's default is the 1 GB in `NivaraExecutionContext.cs:17`.
+
+One caveat on the derivation in §"Memory budget → chunk size": its input is not reachable
+from the public API today. `QueryFrame.AsStream` builds its own context, takes no context
+argument, and always sets `ChunkSize`; `StreamingExecutionStrategy` is internal; and the one
+public route to a custom context, `ExecutionEngine.Execute(plan, context)`, materializes one
+whole frame. So a caller cannot set `MemoryBudget` for a chunked stream at all — the 1 GB
+default is the only budget in play there (tracked as #514). Until that lands, `AsStream`'s
+10,000-row chunk size plus the two ceilings above are the whole of the reachable contract.
+See `docs/ACCELERATION.md` §"Configuration" for the same analysis.
 
 ## Example
 
