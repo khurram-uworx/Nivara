@@ -356,7 +356,8 @@ directions. So a "reference" array that the tensor also points into is not a ref
 **Use this mode when a doc names a `Tensor<T>` member that does not compile.**
 Issues #524–#532 are nine more of the same class, and the recurring finding is that
 the filed prescription is not the fix. Run the mode and read the surface rather than
-implementing an issue body verbatim. See `docs/TODO.md`.
+implementing an issue body verbatim. See the `Tensor<T>` entry under "Common gotchas"
+in [`AGENTS.md`](../../AGENTS.md).
 
 ## Findings
 

@@ -5,7 +5,8 @@ using System.Numerics;
 namespace Nivara.PerformanceTests;
 
 /// <summary>
-/// On-demand CPU GEMM ceiling probe for the Laya backend decision (docs/TODO.md, leg 3).
+/// On-demand CPU GEMM ceiling probe for the Laya backend decision
+/// ([docs/LAYA.md](../../docs/LAYA.md), "Performance" — leg 3).
 ///
 /// This is the decisive measurement. The question is not "is the CPU slow" — it is
 /// "how fast could the CPU be, given a properly blocked GEMM", because the GPU is
@@ -13,8 +14,8 @@ namespace Nivara.PerformanceTests;
 /// grounding identified. Deciding CPU on an unfixed-GPU-vs-unfixed-CPU comparison would
 /// be circular.
 ///
-/// Grounding (docs/TODO.md § Grounding corrections) established three facts that shape
-/// this probe:
+/// Grounding ([docs/LAYA.md](../../docs/LAYA.md), "Performance") established three facts
+/// that shape this probe:
 ///
 /// 1. There is no BCL matrix multiply to compare against. <c>TensorPrimitives.Dot</c> is
 ///    the *vector* dot product, and <c>Tensor.MatrixMultiply</c> has not shipped

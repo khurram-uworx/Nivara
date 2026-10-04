@@ -44,6 +44,70 @@ public class DocumentationSnippetTests
     }
 
     [Test]
+    public void ScanExclusion_IsCausal_RemovingTheEntryWouldScanThePlan()
+    {
+        var withoutThePlan = DocSnippetExtractor.ScanExcludedDocuments
+            .Where(path => path != "docs/TODO.md")
+            .ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(DocSnippetExtractor.IsScanned("docs/TODO.md"), Is.False,
+                "the named exclusion must keep the transient plan document out of the scan");
+            Assert.That(DocSnippetExtractor.IsScanned("docs/TODO.md", withoutThePlan), Is.True,
+                "removing the entry has to change the outcome. If both assertions can hold at once then "
+                + "the exclusion is decorative, and asserting the first one alone proves nothing about "
+                + "the scan — which is the state #547 reported");
+        });
+    }
+
+    [Test]
+    public void ScanExclusion_MatchesTheWholeRepoRelativeNameOnly()
+    {
+        // A rule that folded case, matched a prefix, or matched the basename alone would satisfy the
+        // causality test above while quietly hiding real documents from the gate.
+        foreach (var nearMiss in new[] { "docs/TODO.mdx", "docs/TODO.md.bak", "docs/blog/TODO.md", "TODO.md", "docs/todo.md" })
+            Assert.That(DocSnippetExtractor.IsScanned(nearMiss), Is.True,
+                $"'{nearMiss}' is a different document and must stay in scope");
+    }
+
+    [Test]
+    public void ScanScope_ExcludesThePlanDocumentWhileItExists_AndNoSnippetPinMoves()
+    {
+        var documents = DocSnippetExtractor.MarkdownFiles();
+        var snippets = documents.Sum(document => DocSnippetExtractor.Extract(document).Count);
+        var known = DocSnippetExtractor.GatedDocuments
+            .Concat(DocSnippetExtractor.UngatedDocuments)
+            .ToHashSet(StringComparer.Ordinal);
+
+        using (DocSnippetExtractor.PlanDocumentPresent())
+        {
+            Assert.That(File.Exists(DocSnippetExtractor.PlanDocumentPath), Is.True,
+                "the helper must leave the plan document in place for the assertions below, or they "
+                + "are asserting nothing");
+
+            var rescanned = DocSnippetExtractor.MarkdownFiles();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(rescanned, Does.Not.Contain("docs/TODO.md"),
+                    "the plan document exists on disk and must still be out of scope");
+                Assert.That(rescanned, Has.Count.EqualTo(documents.Count),
+                    "a plan document in the tree must not change how many documents are scanned");
+                Assert.That(rescanned.Sum(document => DocSnippetExtractor.Extract(document).Count),
+                    Is.EqualTo(snippets),
+                    "the plan document carries a fenced block, so a leak moves the repository-wide total");
+                Assert.That(
+                    rescanned.Where(document => DocSnippetExtractor.Extract(document).Count > 0)
+                        .Where(document => !known.Contains(document)),
+                    Is.Empty,
+                    "a plan document carrying fenced blocks would re-enter scope and land in neither the "
+                    + "gated nor the ungated list, failing classification");
+            });
+        }
+    }
+
+    [Test]
     public void EveryGatedBlock_CompilesWithoutErrors()
     {
         var failures = new List<string>();
