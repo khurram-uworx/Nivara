@@ -1,5 +1,5 @@
-using System.Reflection;
 using NUnit.Framework;
+using System.Reflection;
 
 namespace Nivara.Tests.Exceptions;
 
