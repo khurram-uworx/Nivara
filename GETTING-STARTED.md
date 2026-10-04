@@ -1076,6 +1076,9 @@ Console.WriteLine(query.ExplainPlan());
 
 ### Execution
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
+-->
 ```csharp
 // Execution is lazy by default. The engine optimizes the plan (predicate
 // pushdown, operation fusion, projection pushdown) before any data is
@@ -1091,11 +1094,14 @@ var result = query.Collect();
 
 ### Error Handling and Diagnostics
 
+<!-- gate
+locals: var leftFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B" }))); var rightFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y" }))); var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
+-->
 ```csharp
 // Structured exception handling
 try
 {
-    var result = leftFrame.InnerJoin(rightFrame, "InvalidKey");
+    var errorResult = leftFrame.InnerJoin(rightFrame, "InvalidKey");
 }
 catch (JoinException ex)
 {
@@ -1205,6 +1211,9 @@ var y = tensors["y"];
 
 `ReverseGradTensor<T>` supports `+`, `-`, `*`, `/` and unary `-` operator overloads that delegate to `ReverseGradOperations`:
 
+<!-- gate
+locals: var x = ReverseGradTensor<float>.FromArray(new[] { 1.0f, 2.0f, 3.0f }, requiresGrad: false); var y = ReverseGradTensor<float>.FromArray(new[] { 2.0f, 4.0f, 6.0f }, requiresGrad: false);
+-->
 ```csharp
 // Simple linear model: z = w * x + b using operator overloads.
 var w = ReverseGradTensor<float>.FromArray(new[] { 0.5f, 0.5f, 0.5f }, requiresGrad: true);
@@ -1231,6 +1240,9 @@ Console.WriteLine($"b gradient at index 0: {b.Grad![0]:F4}");
 
 Extract gradients back into a Nivara DataFrame for analysis:
 
+<!-- gate
+locals: var df = NivaraFrame.Create(("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })), ("y", NivaraColumn<float>.Create(new[] { 2.0f, 4.0f, 6.0f }))); var tensors = df.ToReverseGradTensors<float>(new[] { "x", "y" }, requiresGrad: true);
+-->
 ```csharp
 // Get a DataFrame containing gradients for all tracking tensors
 var gradFrame = tensors.ToGradientFrame();
@@ -1240,6 +1252,9 @@ var gradFrame = tensors.ToGradientFrame();
 
 When training in a loop, zero out gradients before the next pass:
 
+<!-- gate
+locals: var df = NivaraFrame.Create(("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })), ("y", NivaraColumn<float>.Create(new[] { 2.0f, 4.0f, 6.0f }))); var tensors = df.ToReverseGradTensors<float>(new[] { "x", "y" }, requiresGrad: true);
+-->
 ```csharp
 tensors.BatchZeroGrad();
 ```
@@ -1261,12 +1276,12 @@ Nivara includes differentiable embedding layers for mapping discrete token IDs t
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 
-// Dense embedding: vocabSize → embeddingDim
-var embedding = new Embedding<float>(vocabSize: 1000, embeddingDim: 64);
+// Dense embedding: numEmbeddings → embeddingDim
+var embedding = new Embedding<float>(numEmbeddings: 1000, embeddingDim: 64);
 
 // Forward pass with token IDs (flattened batch)
 var tokenIds = ReverseGradTensor<float>.FromMatrix(
-    new[] { 1.0f, 5.0f, 12.0f, 3.0f }, batchSize: 2, seqLen: 2, requiresGrad: false);
+    new[] { 1.0f, 5.0f, 12.0f, 3.0f }, rows: 2, cols: 2, requiresGrad: false);
 var embedded = embedding.Forward(tokenIds);
 // embedded.Shape = [2, 2, 64]
 
@@ -1289,6 +1304,7 @@ var lnBlock = new TransformerBlock<float>(
     nEmbd: 128, nHead: 4, dropout: 0.1, maxSeqLen: 256, normType: NormType.LayerNorm);
 
 // Forward: [seqLen, nEmbd] → [seqLen, nEmbd]
+var inputTensor = ReverseGradTensor<float>.FromMatrix(new float[256 * 128], rows: 256, cols: 128);
 var output = block.Forward(inputTensor);
 ```
 
@@ -1303,19 +1319,25 @@ using Nivara.AutoDiff.Nn;
 
 // 1D convolution: [batch, inChannels, length] → [batch, outChannels, outLength]
 var conv1d = new Conv1d<float>(inChannels: 64, outChannels: 128, kernelSize: 3, stride: 1, padding: 1);
-var output1d = conv1d.Forward(inputTensor);  // [B, 128, L]
+var input1d = ReverseGradTensor<float>.FromArray(new float[2 * 64 * 32]);
+input1d.Reshape(2, 64, 32);
+var output1d = conv1d.Forward(input1d);  // [2, 128, 32]
 
 // 2D convolution: [batch, inChannels, H, W] → [batch, outChannels, H', W']
 // Uses PatchLocation lookup + 1×1 fast path + InputGrad specializations
 var conv2d = new Conv2d<float>(inChannels: 3, outChannels: 16, kernelSize: 3, stride: 1, padding: 1);
-var output2d = conv2d.Forward(inputTensor);  // [B, 16, H, W]
+var input2d = ReverseGradTensor<float>.FromArray(new float[3 * 32 * 32]);
+input2d.Reshape(3, 32, 32);
+var output2d = conv2d.Forward(input2d);  // [3, 16, 32, 32]
 
 // Grouped convolution (depthwise)
 var depthwise = new Conv2d<float>(inChannels: 64, outChannels: 64, kernelSize: 3, groups: 64);
 
 // Transposed convolution (decoder upsampling)
 var deconv = new ConvTranspose2d<float>(inChannels: 32, outChannels: 16, kernelSize: 4, stride: 2, padding: 1);
-var upsampled = deconv.Forward(latentTensor);  // [B, 16, H*2, W*2]
+var latentTensor = ReverseGradTensor<float>.FromArray(new float[32 * 14 * 14]);
+latentTensor.Reshape(1, 32, 14, 14);
+var upsampled = deconv.Forward(latentTensor);  // [1, 16, 28, 28]
 
 // Depthwise separable convolution (MobileNet-style)
 var separable = new DepthwiseSeparableConv2d<float>(inChannels: 64, outChannels: 128, kernelSize: 3);
@@ -1339,6 +1361,7 @@ var ln = new LayerNorm<float>(normalizedShape: 128);
 
 ```csharp
 // Activations are functional — call them via the Activation helper class
+var x = ReverseGradTensor<float>.FromArray(new float[4]);
 var h = Activation.Gelu(x);        // tanh approximation, PyTorch-compatible
 var r = Activation.Relu(x);
 var t = Activation.Tanh(x);
@@ -1354,7 +1377,9 @@ var h2 = ReverseGradOperations.Gelu(x);
 ```csharp
 // Max pooling (2D, [B, C, H, W])
 var pool = new MaxPool2d<float>(kernelSize: 2, stride: 2, padding: 0);
-var pooled = pool.Forward(x);  // [B, C, H/2, W/2]
+var x = ReverseGradTensor<float>.FromArray(new float[4 * 8 * 8]);
+x.Reshape(1, 4, 8, 8);
+var pooled = pool.Forward(x);  // [1, 4, 4, 4]
 
 // Adaptive average pooling (global → [B, C, 1, 1])
 var gap = new AdaptiveAvgPool2d<float>(outputSize: 1);
@@ -1364,9 +1389,12 @@ var flat = gap.Forward(x);  // used by classifier heads
 ### Variational Autoencoders
 
 ```csharp
-// Standard VAE (MLP-based)
+// Standard VAE (MLP-based) — encode, reparameterize, decode
 var vae = new VAE<float>(inputDim: 784, latentDim: 32, hiddenDim: 256);
-var (recon, mu, logVar) = vae.EncodeDecode(input);
+var input = ReverseGradTensor<float>.FromArray(new float[784]);
+var (mu, logVar) = vae.Encode(input);
+var z = vae.Reparameterize(mu, logVar);
+var recon = vae.Decode(z);           // [784]
 
 // Convolutional VAE (spatial latent representations)
 var convVae = new ConvVAE<float>(
@@ -1375,7 +1403,9 @@ var convVae = new ConvVAE<float>(
     latentChannels: 16,
     spatialSize: 28,
     kernelSize: 3, stride: 2, padding: 1);
-var recon = convVae.Forward(imageTensor);
+var imageTensor = ReverseGradTensor<float>.FromArray(new float[28 * 28]);
+imageTensor.Reshape(1, 1, 28, 28);
+var convRecon = convVae.Forward(imageTensor);
 ```
 
 ### Attention
@@ -1383,9 +1413,16 @@ var recon = convVae.Forward(imageTensor);
 ```csharp
 // Standalone multi-head attention (self-attention or cross-attention)
 var mha = new MultiheadAttention<float>(embedDim: 128, numHeads: 4);
+var input = ReverseGradTensor<float>.FromMatrix(new float[16 * 128], rows: 16, cols: 128);
 var selfAttn = mha.Forward(input);                          // self-attention
+var query = ReverseGradTensor<float>.FromMatrix(new float[16 * 128], rows: 16, cols: 128);
+var key = ReverseGradTensor<float>.FromMatrix(new float[8 * 128], rows: 8, cols: 128);
+var value = ReverseGradTensor<float>.FromMatrix(new float[8 * 128], rows: 8, cols: 128);
 var crossAttn = mha.Forward(query, key, value);             // cross-attention
-var causalAttn = mha.Forward(input, causal: true);          // with causal mask
+
+// Causal masking is a constructor setting for the single-tensor overload
+var causalMha = new MultiheadAttention<float>(embedDim: 128, numHeads: 4, causal: true);
+var causalAttn = causalMha.Forward(input);
 ```
 
 ### NLP Models
@@ -1398,18 +1435,25 @@ Two ready-to-use differentiable NLP models ship as application-level sample code
 var classifier = new TextClassifierModel<float>(
     vocabSize: 5000, embeddingDim: 64, hiddenDim: 128, numClasses: 3, maxSeqLen: 50);
 
+// Hand the model's parameters to an optimizer
+var optimizer = new SGD<float>(learningRate: 0.01f);
+optimizer.AddParameterGroup(classifier.GetParameters().Values);
+
 // Training
+var inputTokens = ReverseGradTensor<float>.FromMatrix(new float[4 * 50], rows: 4, cols: 50);
+int[] labels = [0, 1, 2, 1];
+
 using (GradientUtils.Grad())
 {
     var logits = classifier.Forward(inputTokens);
     var loss = new CrossEntropyLoss<float>().Forward(logits, labels);
     loss.Backward();
     optimizer.Step();
-    classifier.ZeroGrad();
+    optimizer.ZeroGrad();
 }
 
-// Inference
-int[] predictedClasses = classifier.Predict(tokenIds);
+// Inference — tokenIds length must be a multiple of MaxSeqLen
+int[] predictedClasses = classifier.Predict(new int[50]);
 ```
 
 #### Token Classifier (sequence → per-token labels)
@@ -1419,16 +1463,20 @@ var tokenClassifier = new TokenClassifierModel<float>(
     vocabSize: 5000, embeddingDim: 64, hiddenDim: 128, numClasses: 9, maxSeqLen: 50);
 
 // Forward: [batchSize, maxSeqLen] → [batchSize * maxSeqLen, numClasses]
+var inputTokens = ReverseGradTensor<float>.FromMatrix(new float[4 * 50], rows: 4, cols: 50);
 var logits = tokenClassifier.Forward(inputTokens);
 
 // Inference — returns one label per token position
-int[] tokenLabels = tokenClassifier.Predict(tokenIds);
+int[] tokenLabels = tokenClassifier.Predict(new int[50]);
 ```
 
 ### Tokenization
 
 `TextTokenizer` builds a word-level vocabulary from documents and encodes/decodes text:
 
+<!-- gate
+locals: string[] trainingDocuments = ["the quick brown fox", "jumps over the lazy dog"];
+-->
 ```csharp
 var tokenizer = TextTokenizer.FromDocuments(
     trainingDocuments, maxVocabSize: 10000, minFreq: 2);
@@ -1440,9 +1488,9 @@ string text = tokenizer.Decode(tokenIds);
 Console.WriteLine(tokenizer.PadToken);  // <PAD> index
 Console.WriteLine(tokenizer.VocabSize);
 
-// Serialize/deserialize
-string json = tokenizer.ToJson();
-var restored = TextTokenizer.FromJson(json);
+// Serialize/deserialize — both take a filesystem path
+tokenizer.Save("tokenizer.json");
+var restored = TextTokenizer.Load("tokenizer.json");
 ```
 
 ### Sampling
@@ -1453,6 +1501,7 @@ var restored = TextTokenizer.FromJson(json);
 var sampler = new Sampler<float>(seed: 42);
 
 // logits: [vocabSize] raw model output
+var logits = ReverseGradTensor<float>.FromArray(new float[5000]);
 int nextToken = sampler.Sample(logits, temperature: 0.8, topK: 50);
 ```
 
@@ -1465,6 +1514,11 @@ int nextToken = sampler.Sample(logits, temperature: 0.8, topK: 50);
 ```csharp
 using Nivara.IO;
 
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
+);
+
 // Convert NivaraFrame to Arrow Table
 var arrowTable = frame.ToArrowTable();
 
@@ -1474,7 +1528,7 @@ var restoredFrame = arrowTable.FromArrowTable();
 // Series-level conversions
 var series = new NivaraSeries<int>(NivaraColumn<int>.Create(new[] { 1, 2, 3 }));
 var arrowArray = series.ToArrowArray();
-var restoredSeries = arrowArray.FromArrowArray<int>();
+var restoredSeries = arrowArray.ToNivaraSeries<int>();
 
 // Custom conversion options
 var arrowOptions = new ArrowConversionOptions
@@ -1491,15 +1545,20 @@ var customArrowTable = frame.ToArrowTable(arrowOptions);
 ```csharp
 using Nivara.IO;
 
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
+);
+
 // Write to Parquet file
 frame.ToParquet("employees.parquet");
 
 // Read from Parquet file
-var loadedFrame = NivaraFrameExtensions.LoadParquet("employees.parquet");
+var loadedFrame = NivaraFrameIOExtensions.LoadParquet("employees.parquet");
 
 // Async operations
 await frame.ToParquetAsync("employees_async.parquet");
-var asyncFrame = await NivaraFrameExtensions.LoadParquetAsync("employees_async.parquet");
+var asyncFrame = await NivaraFrameIOExtensions.LoadParquetAsync("employees_async.parquet");
 
 // Stream-based operations
 using var fileStream = new FileStream("employees_stream.parquet", FileMode.Create);
@@ -1513,9 +1572,12 @@ var parquetOptions = ParquetWriteOptions.Default.With(
 
 frame.ToParquet("employees_custom.parquet", parquetOptions);
 
-// Batch operations
+// Batch operations — frames come first
+var frame1 = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" })));
+var frame2 = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Bob" })));
+var frame3 = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie" })));
 var frames = new[] { frame1, frame2, frame3 };
-NivaraFrameExtensions.WriteParquetBatch("batch.parquet", frames, parquetOptions);
+NivaraParquetWriter.WriteParquetBatch(frames, "batch.parquet", parquetOptions);
 ```
 
 ### Configuration and Performance Tuning
@@ -1523,6 +1585,13 @@ NivaraFrameExtensions.WriteParquetBatch("batch.parquet", frames, parquetOptions)
 Nivara's performance tuning is built into the core APIs:
 
 ```csharp
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 41 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 82000.0 }))
+);
+
 // Queries are lazy and optimized automatically (predicate pushdown,
 // operation fusion, projection pushdown)
 var query = frame.Query<Person>()
