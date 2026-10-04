@@ -13,6 +13,12 @@ enum DocWrapMode
 
     /// <summary>Statements wrapped in an unconstrained-by-usage generic local function.</summary>
     GenericLocal,
+
+    /// <summary>
+    /// Member declarations (a method, a property) wrapped in a class, modelling a snippet meant to
+    /// be pasted inside a type such as a test fixture.
+    /// </summary>
+    MemberDecl,
 }
 
 /// <param name="DocumentPath">Repo-relative path of the markdown file.</param>
@@ -76,6 +82,13 @@ static partial class DocSnippetExtractor
         "docs/research/AGENT-FRAMEWORK.md",
     ];
 
+    /// <summary>
+    /// Transient working documents left out of the scan. They are not reader-facing, and
+    /// <c>docs/TODO.md</c> is deleted once its plan executes, so classifying it would make the
+    /// coverage assertions flap across commits. Asserted explicitly by the gate, never a glob.
+    /// </summary>
+    internal static readonly string[] ScanExcludedDocuments = ["docs/TODO.md"];
+
     /// <summary>Markdown files scanned for snippets: repository root plus everything under docs/.</summary>
     internal static IReadOnlyList<string> MarkdownFiles()
     {
@@ -87,6 +100,7 @@ static partial class DocSnippetExtractor
 
         return files
             .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/'))
+            .Where(path => !ScanExcludedDocuments.Contains(path, StringComparer.Ordinal))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
     }

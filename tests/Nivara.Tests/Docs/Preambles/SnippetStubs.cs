@@ -14,12 +14,18 @@ public interface IPager
     void Ping(NivaraFrame frame);
 }
 
-sealed class RecordingSink : ISink
+/// <summary>
+/// Stand-ins for the sinks the streaming snippets write to. They must stay <c>public</c>: the
+/// generated snippet assembly is not named <c>Nivara.Tests</c>, so it holds no
+/// <c>InternalsVisibleTo</c> grant and an internal stub would fail every snippet that uses it.
+/// </summary>
+public sealed class RecordingSink : ISink
 {
     public Task WriteAsync(NivaraFrame chunk) => Task.CompletedTask;
 }
 
-sealed class RecordingPager : IPager
+/// <summary>Stand-in for the pager; public for the reason given on <see cref="RecordingSink"/>.</summary>
+public sealed class RecordingPager : IPager
 {
     public void Ping(NivaraFrame frame) { }
 }

@@ -198,10 +198,15 @@ something.
 
 ## GitHub issues log
 
-- [ ] #517 — `docs/ACCELERATION.md:22` cites a nonexistent `src/Nivara.Gpu`; issue
+- [x] #517 — `docs/ACCELERATION.md:22` cites a nonexistent `src/Nivara.Gpu`; issue
       #515's proposed direction assumed a `Nivara.Gpu` assembly that does not exist
-- [ ] #518 — `docs/LINQ.md:5-6,27` calls `QueryFrame` internal; it is
+- [x] #518 — `docs/LINQ.md:5-6,27` calls `QueryFrame` internal; it is
       `public sealed class` (`src/Nivara/Query/QueryFrame.cs:14`)
+- [x] #520 — `NivaraColumn<T>.CreateFromNullable` does not exist; 16 documented call
+      sites use the wrong shape (GETTING-STARTED.md ×9, EXAMPLES.md ×5, AGENTS.md ×1,
+      CHANGELOG.md ×1). The static is `NivaraColumn.CreateFromNullable<T>(T?[])`
+      (`src/Nivara/NivaraColumn.Factory.cs:19`) and `T` is inferred. Found by this
+      gate; stage 2 will resurface it. AGENTS.md's helper list is the highest-value fix.
 
 Reminder: as each task executes, if you find deferred work or a concern, create a
 tracked issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record

@@ -25,6 +25,7 @@ static class DocSnippetCompiler
         "using System;",
         "using System.Collections.Generic;",
         "using System.Linq;",
+        "using System.Numerics.Tensors;",
         "using System.Threading;",
         "using System.Threading.Tasks;",
         "using Nivara;",
@@ -39,6 +40,7 @@ static class DocSnippetCompiler
         "using Nivara.Query;",
         "using Nivara.Streamix;",
         "using Nivara.Tests.Docs.Preambles;",
+        "using NUnit.Framework;",
         "using static Nivara.Tests.Docs.Preambles.SnippetReport;",
         "using Streamix;",
     ];
@@ -71,6 +73,15 @@ static class DocSnippetCompiler
             generated.AddRange(Indented(string.Join("\n", body), 1));
             generated.Add("}");
         }
+        else if (block.Mode == DocWrapMode.MemberDecl)
+        {
+            generated.Add(string.Empty);
+            generated.Add("public class __DocSnippet");
+            generated.Add("{");
+            bodyStart = generated.Count;
+            generated.AddRange(Indented(string.Join("\n", body), 1));
+            generated.Add("}");
+        }
         else
         {
             generated.Add(string.Empty);
@@ -89,11 +100,12 @@ static class DocSnippetCompiler
             [tree],
             References(),
             new CSharpCompilationOptions(
-                // TopLevel statements and GenericLocal's wrapper are both top-level statements, so
-                // both require an executable. Only File mode is a genuine library.
-                block.Mode == DocWrapMode.File
-                    ? OutputKind.DynamicallyLinkedLibrary
-                    : OutputKind.ConsoleApplication));
+                // Only TopLevel statements and GenericLocal's wrapper local function are top-level
+                // statements, and CS8805 requires those to be in an executable. File and MemberDecl
+                // wrap in a type declaration and are genuine libraries.
+                block.Mode is DocWrapMode.TopLevel or DocWrapMode.GenericLocal
+                    ? OutputKind.ConsoleApplication
+                    : OutputKind.DynamicallyLinkedLibrary));
 
         return compilation
             .GetDiagnostics()
