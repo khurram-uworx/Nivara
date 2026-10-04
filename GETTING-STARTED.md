@@ -185,6 +185,9 @@ Console.WriteLine(schema.GetColumnType("Age")); // System.Int32
 
 Schemas are immutable and validated on every transformation:
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })));
+-->
 ```csharp
 try
 {
@@ -213,22 +216,34 @@ catch (InvalidCastException ex)
 
 ### Basic Queries
 
+A row type whose properties map to columns (case-insensitive, validated eagerly) is all a typed
+query needs:
+
+<!-- gate
+mode: File
+-->
 ```csharp
-using Nivara.Linq;
-
-var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
-    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
-    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
-);
-
-// Row type whose properties map to columns (case-insensitive, validated eagerly)
 public sealed class Person
 {
     public string Name { get; set; }
     public int Age { get; set; }
     public double Salary { get; set; }
 }
+```
+
+With the row type in place, the predicates and projections are checked against real property types:
+
+<!-- gate
+preamble: row-types
+-->
+```csharp
+using Nivara.Linq;
+
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 }))
+);
 
 // Filter rows with typed predicates
 var adults = frame.Query<Person>()
@@ -252,6 +267,10 @@ var result = frame.Query<Person>()
 
 ### Complex Expressions
 
+<!-- gate
+preamble: row-types
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
+-->
 ```csharp
 // Multiple conditions
 var complexFilter = frame.Query<Person>()
@@ -285,12 +304,15 @@ public sealed class Person
 With the row type in place, the query binds to it and the predicates are checked against real
 property types:
 
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 var people = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
     ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
-    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 }))
 );
 
 // Typed predicates and projections - validated eagerly at Query<T>()
@@ -324,6 +346,10 @@ Notes:
 
 Queries are planned and validated before execution:
 
+<!-- gate
+preamble: row-types
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
+-->
 ```csharp
 // Build query (no execution yet) — typed queries are lazy and inspectable
 var query = frame.Query<Person>()
@@ -383,9 +409,10 @@ using var customCsv = customCsvQuery.Collect();
 
 ### JSON Data Sources
 
+<!-- gate
+mode: File
+-->
 ```csharp
-using Nivara.IO;
-
 public sealed class User
 {
     public string Id { get; set; }
@@ -393,6 +420,13 @@ public sealed class User
     public string Email { get; set; }
     public bool Active { get; set; }
 }
+```
+
+<!-- gate
+preamble: row-types
+-->
+```csharp
+using Nivara.IO;
 
 // Lazy JSON scanning (JSON numbers infer as double)
 using var jsonQuery = Json.ScanQuery<User>("data.json")
