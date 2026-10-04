@@ -37,18 +37,36 @@ Parquet file.
    rename lands, that workaround stops compiling — CS0246 — and the gate will
    demand the doc be updated. Rename and doc are one change, not two.
 
-### Red flag found while grounding (out of scope, tracked separately)
+### Correction: an earlier red flag in this plan was wrong
 
-`main` is currently **red**: 53 CS0104 diagnostics from
-`EveryGatedBlock_CompilesWithoutErrors`, all rooted in
-`GETTING-STARTED.md:35`'s snippet colliding with `Nivara.Linq.QueryFrame`
-(CI run 30061467490, and the same 53 locally). Main last built clean at
-`2f2fb0e4`, before #528–#532 landed.
+An earlier draft of this plan claimed `main` was red with **53 CS0104
+diagnostics**, all from `GETTING-STARTED.md:35` colliding with a
+`Nivara.Linq.QueryFrame`. **That claim was not verified and it is false.**
 
-This is orthogonal to the rename — a different type pair in a different
-namespace — so it does not block this work, but it means **"the gate is green"
-cannot be used as the verification for this branch.** Verification below is
-scoped to the diagnostics this change can actually affect.
+Two independent checks refute it:
+
+1. `rg '(class|struct|interface|record)\s+QueryFrame' src/ samples/` returns
+   exactly one hit — `public sealed class QueryFrame` at
+   `src/Nivara/Query/QueryFrame.cs:14`, namespace `Nivara.Query`. There is no
+   `Nivara.Linq.QueryFrame`, and no `using` alias anywhere in the repository, so
+   the cited ambiguity cannot exist.
+2. An actual gate run on this branch reports **2 errors, `CS0234`, and nothing
+   else**:
+   ```
+   GETTING-STARTED.md:771: CS0234 The type or namespace name
+       'SchemaValidationException' does not exist in the namespace 'Nivara.Exceptions'
+   GETTING-STARTED.md:827: CS0234 (same)
+   ```
+
+Both are `CS0234`, not `CS0104`, and both are the *predicted consequence of this
+rename meeting an un-updated document* — the qualified `Nivara.Exceptions.SchemaValidationException`
+written by #539 no longer names a type. They are evidence the gate works and is
+correctly coupled to the document, not evidence of a second defect.
+
+Consequence: **verification for this branch is a plain green gate**, and the
+"diff against a 53-diagnostic baseline" verification sketched earlier is
+withdrawn as unnecessary. #541 is corrected on GitHub and to be closed once this
+plan lands — its stated root cause does not exist.
 
 ## Decision
 
@@ -197,20 +215,21 @@ semantics. Only the short names move.
 ## Verification
 
 1. `dotnet build Nivara.slnx` — green.
-2. Targeted gate, **diffed against the baseline** (the tree is red on `main`):
+2. Targeted gate, twice — the before/after pair that proves the gate is
+   coupled to the document and that the doc fix is what closes it:
    ```
    dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --nologo `
      --filter "FullyQualifiedName~EveryGatedBlock_CompilesWithoutErrors"
    ```
-   The gate is doc-coupled, so renaming without updating the doc fails it with
-   CS0246 at `GETTING-STARTED.md`. After the doc update it must return to
-   **exactly the same 53 baseline diagnostics** — no more, no fewer. Any other
-   delta is a regression. (Needs the full diagnostic list saved first; the
-   summary line truncates.)
+   - **Before** the doc update (already captured): fails with **2 `CS0234`** at
+     `GETTING-STARTED.md:771,827`.
+   - **After** the doc update: must be **green, zero errors**.
+
+   A green run here is a real signal, because the before-run is known to be
+   red for exactly the reason this change addresses.
 3. Full suite in Release — `dotnet test -c Release --filter "Category!=Performance"`.
    Release per `AGENTS.md`: a Debug run compares unoptimized `Nivara.dll`
-   against ReadyToRun framework code. Expect the 53 pre-existing failures plus any
-   other pre-existing breakage on `main`; the bar is **no new** failures.
+   against ReadyToRun framework code. Bar: **no new failures.**
 4. `TypeNameUniquenessTests` green, including its negative control.
 5. `rg -w SchemaValidationException` must return exactly two intentional
    survivors: `CHANGELOG.md:312` and `tests/Nivara.Tests/Incident/IncidentSurfaceTests.cs:12,31`.
@@ -228,10 +247,12 @@ semantics. Only the short names move.
 ## GitHub issues log
 
 - [ ] #532 — resolve the duplicate `SchemaValidationException` public type *(this branch)*
-- [x] #541 — `main` is red: 53 CS0104 diagnostics in `EveryGatedBlock_CompilesWithoutErrors`
-      from `GETTING-STARTED.md:35` colliding with `Nivara.Linq.QueryFrame`. Introduced
-      after `2f2fb0e4`. Unrelated to #532 but blocks using "gate is green" as a
-      verification signal. *(created while grounding #532)*
+- [x] #541 — **withdrawn, to be closed.** It claimed `main` was red with 53 CS0104
+      diagnostics from a `Nivara.Query.QueryFrame` / `Nivara.Linq.QueryFrame` clash at
+      `GETTING-STARTED.md:35`. No `Nivara.Linq.QueryFrame` exists — there is one
+      `QueryFrame` class, at `src/Nivara/Query/QueryFrame.cs:14` — and a real gate run
+      reports 2 `CS0234`, not 53 CS0104. The premise is false; corrected on GitHub.
+      To be closed once this plan lands.
 - [x] #542 — `DataFrameSchemaValidationException` (`src/Nivara/Exceptions/DataFrameExceptions.cs:91`)
       is dead public API: never thrown by production code, only constructed in
       `tests/Nivara.Tests/Exceptions/DataFrameExceptionTests.cs`. A third
