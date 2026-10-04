@@ -20,7 +20,7 @@ public class DocCitationTests
     const int ExpectedCitedDocumentCount = 16;
 
     /// <summary>Count of documents in scope. Pinned so a shrinking scan cannot look like a pass.</summary>
-    const int ExpectedDocumentCount = 46;
+    const int ExpectedDocumentCount = 47;
 
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()
