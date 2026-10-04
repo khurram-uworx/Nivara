@@ -52,6 +52,8 @@ static partial class DocSnippetExtractor
     [
         "docs/AGENT-CODE-EXAMPLES.md",
         "docs/STREAMING.md",
+        "EXAMPLES.md",
+        "GETTING-STARTED.md",
     ];
 
     /// <summary>
@@ -62,8 +64,6 @@ static partial class DocSnippetExtractor
     internal static readonly string[] UngatedDocuments =
     [
         "ARCHITECTURE.md",
-        "EXAMPLES.md",
-        "GETTING-STARTED.md",
         "README.md",
         "docs/ACCELERATION.md",
         "docs/AUTODIFF.md",
