@@ -187,11 +187,13 @@ which is the slow part and the actual deliverable — so it becomes follow-up wo
 commits on this branch (see *Split of work* below).
 
 - Move `GETTING-STARTED.md` and `EXAMPLES.md` from `UngatedDocuments` to `GatedDocuments`.
-- 16 blocks become TYPE-ONLY and need `mode: File`; the other 76 stay `TopLevel`.
-- Progressive context: the 112 context errors show a per-section preamble is too coarse, because
+- 14 blocks become TYPE-ONLY and need `mode: File` (7 in each document, all inserted); the other 92
+  of the 106 gated blocks stay `TopLevel`. Two more still need splitting — see #531.
+- Progressive context: the 100 context errors (#524) show a per-section preamble is too coarse, because
   `frame` has several different shapes. Expect mostly per-block `locals:` with a small number of
   named preambles for the row types the splits created.
-- Extend `KnownPreambles`; the bidirectional assertion already fails on drift.
+- Extend `KnownPreambles`; the bidirectional assertion already fails on drift. **Deferred to #524** —
+  no preamble is referenced yet, because every block that needs one is still missing context.
 - Re-pin the coverage numbers from what the gate reports rather than from projection. The first
   projection (universe 247, ungated 141, compiled 104) was right on universe and ungated but the
   2 extra splits move the universe to 249.
@@ -306,6 +308,12 @@ put to them, and grounding refined the counts underneath them rather than the di
 Steps 5 and 6 are recorded separately because step 5 is green on its own merits and step 6 is the
 red state. Commit 5 alone is red on one assertion — the coverage count the step-4 splits invalidated
 and step 6 re-pins — so the branch is red from step 4 onward, by design.
+
+**Step 7 is deliberately not taken.** The skill's normal ending is to delete the plan once its gates
+clear, but these cannot clear: the branch ends on a failing assertion by the human's decision, and
+steps 5 and 6 of the plan are now #524–#532. This file is therefore not a live plan but the record
+of *why* the branch is red, which a red CI run will otherwise look like an unexplained regression.
+It is deleted when the follow-ups land, not before.
 
 ## Risks and open items
 
