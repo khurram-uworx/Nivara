@@ -6,9 +6,10 @@
 ## Context
 
 `DocumentationSnippetTests` compiles every fenced `csharp` block in four
-documents and fails on any Roslyn error. Since it landed (#515), the sweep
-behind #524-#532 has driven `EXAMPLES.md` and `GETTING-STARTED.md` to zero
-diagnostics.
+documents — `docs/AGENT-CODE-EXAMPLES.md`, `docs/STREAMING.md`, `EXAMPLES.md`
+and `GETTING-STARTED.md` — and fails on any Roslyn error. Since it landed
+(#515), the sweep behind #524-#532 has driven `EXAMPLES.md` and
+`GETTING-STARTED.md` to zero diagnostics.
 
 The gate works. The **contract for authoring a block that passes it** does not
 exist as a document. It lives in `tests/Nivara.Tests/Docs/`, and the reasoning
@@ -170,6 +171,27 @@ runtime closure, wrapped by a per-block mode, and annotated only by an adjacent
     `docs/adr/` would enter the ungated count and break the coverage assertion; a
     `File.cs:NN` citation would move the citation pins. Both are cheap to avoid and
     expensive to discover later, so this ADR obeys the rule it states.
+
+### Where this record is linked, and why only there
+
+`AGENTS.md` carries the single ADR index, and this ADR is listed in it. That is the
+only place. Three alternatives were considered and rejected:
+
+- **A `docs/adr/README.md` index** — a second list of the same records, kept in sync by
+  remembering. That is the failure this record was written after: ADR-004 landed and its
+  index line appeared six weeks later.
+- **`CONTRIBUTING.md`** — the obvious home by convention, but its own header declares
+  the file human-owned, forbids AI tools from modifying it, and routes AI coding
+  guidance to `AGENTS.md`. This contract *is* AI coding guidance.
+- **`ARCHITECTURE.md`** — that file describes the architecture. A test harness's
+  authoring contract is not part of it.
+
+Because a list kept in sync by remembering is not a list, `AdrIndexTests` reads the
+`AGENTS.md` section by name and compares it against this folder in both directions,
+so an ADR that lands unlisted fails the build instead of being invisible. An index
+entry must also carry a sentence saying what the decision constrains: a bare link
+does not let a reader decide relevance without opening the file, which is the only
+reason the index is worth having.
 
 ## Consequences
 
