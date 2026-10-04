@@ -56,6 +56,9 @@ Console.WriteLine(column.IsNull(1));  // True (index 1 is null)
 
 Null-aware operations behave predictably:
 
+<!-- gate
+locals: NivaraColumn<int> column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
+-->
 ```csharp
 var filled = column.FillNull(0);  // [1, 0, 3]
 var dropped = column.DropNulls(); // [1, 3]
@@ -109,7 +112,7 @@ var doubled = numbers * 2;           // [2, 4, 6, 8, 10]
 var incremented = numbers + 1;       // [2, 3, 4, 5, 6]
 
 // Comparison operations
-var mask = numbers > 3;              // [false, false, false, true, true]
+var mask = numbers.GreaterThan(3);  // [false, false, false, true, true]
 
 // Aggregations
 var sum = numbers.Sum();             // 15
@@ -125,9 +128,9 @@ var data = new int?[] { 1, null, 3, null, 5 };
 var column = NivaraColumn.CreateFromNullable(data);
 
 // Check for nulls
-Console.WriteLine(column.HasNulls);     // True
-Console.WriteLine(column.NullCount);    // 2
-Console.WriteLine(column.ValidCount);   // 3
+Console.WriteLine(column.HasNulls);              // True
+Console.WriteLine(column.NullCount);             // 2
+Console.WriteLine(column.Length - column.NullCount);  // 3
 
 // Handle nulls
 var filled = column.FillNull(0);        // [1, 0, 3, 0, 5]
@@ -149,7 +152,7 @@ var doubled = column * 2;               // [2, null, 6, null, 10]
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })),
-    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000 }))
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 }))
 );
 
 Console.WriteLine(frame.RowCount);      // 3
@@ -159,13 +162,16 @@ Console.WriteLine(frame.ColumnNames);   // ["Name", "Age", "Salary"]
 
 ### Accessing Data
 
+<!-- gate
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+-->
 ```csharp
 // Get columns
 var nameColumn = frame.GetColumn<string>("Name");
 var ageColumn = frame.GetColumn<int>("Age");
 
-// Get column by index
-var firstColumn = frame.GetColumn(0);
+// Get a column by position. There is no index overload on GetColumn, so go via ColumnNames.
+var firstColumn = frame.GetColumn(frame.ColumnNames[0]);
 
 // Check if column exists
 bool hasAge = frame.HasColumn("Age");
@@ -523,7 +529,7 @@ var nullsLast = frameWithNulls.Query<Player>()
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })),
-    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000 }))
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 }))
 );
 
 // Transform single column (create new column)
