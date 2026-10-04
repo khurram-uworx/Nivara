@@ -6,6 +6,30 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Snippet-gate authoring contract recorded as ADR-005, plus a gate on the ADR index (#538)** —
+  the contract for writing a fenced `csharp` block that passes `DocumentationSnippetTests` lived
+  only in `tests/Nivara.Tests/Docs/`, and the reasoning behind it only in a `docs/TODO.md` that
+  the completing PR deletes on purpose, so the next edit to a fenced block rediscovered all of it
+  by experiment. Most of those rules are not preferences but consequences of `DocSnippetCompiler`,
+  and several contradict what the gate's own code appears to say. The sharpest: `preamble:` is
+  never read by the compiler. `BaseUsings` emits `using Nivara.Tests.Docs.Preambles;` into every
+  block unconditionally, so the eleven `KnownPreambles` names are labels over one flat namespace
+  that constrain nothing, and "tidying up" the apparent redundancy by making the import
+  conditional would break every annotated snippet in the repository at once. Also recorded, read out
+  of the wrapper and exercised by no current document: `locals:` with `mode: File` is CS8805,
+  `locals:` with `mode: MemberDecl` is silently dropped with no diagnostic, hence `locals:` is
+  load-bearing only in `TopLevel` and `GenericLocal`. The ADR states coverage honestly — 141 of 249
+  fenced blocks are ungated and therefore unverified rather than known-good — along with the two
+  pinned-count traps that bite when a fence is split or a document is added. Separately,
+  `AdrIndexTests` closes the reason this ADR's own index line needed remembering: ADR-004's
+  appeared six weeks after the ADR, with nothing to catch it. It reads the
+  `Architectural Decisions (ADRs)` section by name through a new `MarkdownSections` heading reader
+  and compares it against `docs/adr/` in both directions, so an unlisted ADR, a duplicate entry, a
+  dangling entry, an entry with no routing summary, and an index label disagreeing with the file it
+  names are all failures. `MarkdownSections` uses plain string tests rather than patterns, so the
+  machinery a gate is built from stays readable to whoever maintains it. Design rationale recorded
+  in `docs/adr/005-snippet-gate-authoring-contract.md`.
+
 - **`IDisposable` / `IAsyncDisposable` on the typed LINQ query types (#501)** - `NivaraQuery<T>` and
   `NivaraGroupedQuery<TKey, T>` now forward disposal to the frame they hold, so a `ScanQuery<T>`
   consumer can use `using` / `await using` instead of `query.AsQueryFrame().Dispose()`.
