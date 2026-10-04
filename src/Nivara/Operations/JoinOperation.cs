@@ -147,8 +147,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         .GetMethod(nameof(CreateCoalescedJoinKeyColumnTyped), BindingFlags.Static | BindingFlags.NonPublic)!;
     static readonly MethodInfo gatherKernel = typeof(JoinOperation)
         .GetMethod(nameof(GatherColumnTyped), BindingFlags.Static | BindingFlags.NonPublic)!;
-    static readonly MethodInfo createFromNullableFactory = typeof(NivaraColumn)
-        .GetMethod(nameof(NivaraColumn.CreateFromNullable), BindingFlags.Public | BindingFlags.Static)!;
+    static readonly MethodInfo createFromNullableFactory = typeof(NivaraColumnFactory)
+        .GetMethod(nameof(NivaraColumnFactory.CreateFromNullable), BindingFlags.Public | BindingFlags.Static)!;
 
     static readonly ConcurrentDictionary<Type, MethodInfo> coalesceKernelCache = new();
     static readonly ConcurrentDictionary<Type, MethodInfo> gatherKernelCache = new();
@@ -216,13 +216,13 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         {
             if (!leftSchema.HasColumn(joinKey.LeftColumn))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Left join key column '{joinKey.LeftColumn}' not found in left schema. Available columns: {string.Join(", ", leftSchema.ColumnNames)}");
             }
 
             if (!rightSchema.HasColumn(joinKey.RightColumn))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Right join key column '{joinKey.RightColumn}' not found in right schema. Available columns: {string.Join(", ", rightSchema.ColumnNames)}");
             }
 
@@ -232,7 +232,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             if (!AreTypesCompatibleForJoin(leftType, rightType))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Join key types are incompatible: left column '{joinKey.LeftColumn}' is {leftType.Name}, right column '{joinKey.RightColumn}' is {rightType.Name}");
             }
         }
@@ -283,13 +283,13 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             {
                 if (!leftColumns.ContainsKey(joinKey.LeftColumn))
                 {
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Left join key column '{joinKey.LeftColumn}' not found in left DataFrame. Available columns: {string.Join(", ", leftColumns.Keys)}");
                 }
 
                 if (!rightColumns.ContainsKey(joinKey.RightColumn))
                 {
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Right join key column '{joinKey.RightColumn}' not found in right DataFrame. Available columns: {string.Join(", ", rightColumns.Keys)}");
                 }
 
@@ -299,7 +299,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
                 if (!AreTypesCompatibleForJoin(leftType, rightType))
                 {
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Join key types are incompatible: left column '{joinKey.LeftColumn}' is {leftType.Name}, right column '{joinKey.RightColumn}' is {rightType.Name}");
                 }
             }
@@ -310,7 +310,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             // Materialize the join result
             return MaterializeJoinResult(joinIndices);
         }
-        catch (Exception ex) when (ex is not QueryExecutionException and not SchemaValidationException)
+        catch (Exception ex) when (ex is not QueryExecutionException and not QuerySchemaValidationException)
         {
             throw new QueryExecutionException($"Join operation failed: {ex.Message}", ex);
         }
@@ -785,7 +785,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         {
             ColumnDisambiguationStrategy.Prefix => isLeft ? $"{leftPrefix}_{originalName}" : $"{rightPrefix}_{originalName}",
             ColumnDisambiguationStrategy.Suffix => isLeft ? $"{originalName}_{leftPrefix}" : $"{originalName}_{rightPrefix}",
-            ColumnDisambiguationStrategy.Error => throw new SchemaValidationException(
+            ColumnDisambiguationStrategy.Error => throw new QuerySchemaValidationException(
                 $"Column name conflict: '{originalName}' exists in both left and right DataFrames. Use a different disambiguation strategy or rename columns."),
             _ => throw new ArgumentException($"Unknown disambiguation strategy: {disambiguationStrategy}")
         };

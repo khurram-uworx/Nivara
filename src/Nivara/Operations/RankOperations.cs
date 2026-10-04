@@ -159,14 +159,14 @@ sealed class RankOperation : IQueryOperation
                 {
                     key.Key.Validate(inputSchema);
                 }
-                catch (SchemaValidationException ex)
+                catch (QuerySchemaValidationException ex)
                 {
-                    throw new SchemaValidationException($"Rank order expression validation failed: {ex.Message}");
+                    throw new QuerySchemaValidationException($"Rank order expression validation failed: {ex.Message}");
                 }
 
                 if (!SortOperation.IsComparableType(key.Key.ResultType))
                 {
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Rank order expression '{key.Key.Name}' of type '{key.Key.ResultType.Name}' is not comparable and cannot be used for ranking");
                 }
             }
@@ -177,9 +177,9 @@ sealed class RankOperation : IQueryOperation
                 {
                     partition.Validate(inputSchema);
                 }
-                catch (SchemaValidationException ex)
+                catch (QuerySchemaValidationException ex)
                 {
-                    throw new SchemaValidationException($"Rank partition expression validation failed: {ex.Message}");
+                    throw new QuerySchemaValidationException($"Rank partition expression validation failed: {ex.Message}");
                 }
             }
 
@@ -190,7 +190,7 @@ sealed class RankOperation : IQueryOperation
         {
             if (!inputSchema.HasColumn(partition))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Partition column '{partition}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
             }
         }
@@ -199,14 +199,14 @@ sealed class RankOperation : IQueryOperation
         {
             if (!inputSchema.HasColumn(sortKey.ColumnName))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Order column '{sortKey.ColumnName}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
             }
 
             var columnType = inputSchema.GetColumnType(sortKey.ColumnName);
             if (!SortOperation.IsComparableType(columnType))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Column '{sortKey.ColumnName}' of type '{columnType.Name}' is not comparable and cannot be used for ranking");
             }
         }

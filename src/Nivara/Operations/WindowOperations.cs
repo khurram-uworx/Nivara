@@ -90,9 +90,9 @@ abstract class WindowOperationBase : IQueryOperation
             {
                 SourceExpression.Validate(inputSchema);
             }
-            catch (SchemaValidationException ex)
+            catch (QuerySchemaValidationException ex)
             {
-                throw new SchemaValidationException($"Window source expression validation failed: {ex.Message}");
+                throw new QuerySchemaValidationException($"Window source expression validation failed: {ex.Message}");
             }
 
             sourceType = SourceExpression.ResultType;
@@ -100,7 +100,7 @@ abstract class WindowOperationBase : IQueryOperation
         else
         {
             if (!inputSchema.HasColumn(Source!))
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Window source column '{Source}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
 
             sourceType = inputSchema.GetColumnType(Source!);
@@ -114,19 +114,19 @@ abstract class WindowOperationBase : IQueryOperation
             foreach (var partition in Spec.PartitionColumns)
             {
                 if (!inputSchema.HasColumn(partition))
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Partition column '{partition}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
             }
 
             foreach (var sortKey in Spec.OrderKeys)
             {
                 if (!inputSchema.HasColumn(sortKey.ColumnName))
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Order column '{sortKey.ColumnName}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
 
                 var columnType = inputSchema.GetColumnType(sortKey.ColumnName);
                 if (!SortOperation.IsComparableType(columnType))
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Order column '{sortKey.ColumnName}' of type '{columnType.Name}' is not comparable and cannot be used for the window");
             }
         }

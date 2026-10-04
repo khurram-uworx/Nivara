@@ -111,7 +111,7 @@ public static class TypeCompatibilityValidator
     /// <param name="frame">The frame to validate</param>
     /// <param name="operationName">The name of the operation</param>
     /// <param name="requiredCompatibility">The type of compatibility required</param>
-    /// <exception cref="SchemaValidationException">Thrown when frame has incompatible types</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when frame has incompatible types</exception>
     public static void ValidateFrameTypeCompatibility(NivaraFrame frame, string operationName, TypeCompatibilityRequirement requiredCompatibility)
     {
         if (frame == null)
@@ -272,7 +272,7 @@ public static class TypeCompatibilityValidator
         {
             if (types[i] != firstType)
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Operation '{operationName}' requires all columns to have the same type. " +
                     $"Found {firstType.Name} and {types[i].Name}.");
             }
@@ -288,7 +288,7 @@ public static class TypeCompatibilityValidator
             if (!numericTypes.Contains(type))
             {
                 var supportedTypeNames = string.Join(", ", numericTypes.Select(t => t.Name));
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Operation '{operationName}' requires all columns to be numeric types. " +
                     $"Column type {type.Name} is not supported. Supported types: {supportedTypeNames}.");
             }
@@ -303,7 +303,7 @@ public static class TypeCompatibilityValidator
             {
                 var supportedTypes = GetComparisonSupportedTypes();
                 var supportedTypeNames = string.Join(", ", supportedTypes.Select(t => t.Name));
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Operation '{operationName}' requires all columns to support comparison operations. " +
                     $"Column type {type.Name} is not supported. Supported types: {supportedTypeNames}.");
             }
@@ -320,7 +320,7 @@ public static class TypeCompatibilityValidator
         {
             if (!AreArithmeticCompatible(firstType, types[i]))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Operation '{operationName}' requires all columns to have arithmetic-compatible types. " +
                     $"Types {firstType.Name} and {types[i].Name} are not compatible.");
             }

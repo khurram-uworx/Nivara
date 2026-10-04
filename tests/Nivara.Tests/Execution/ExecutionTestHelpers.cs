@@ -186,7 +186,7 @@ sealed class StubChunkedQuerySource : IQuerySource
             var global = start + i;
             values[i] = global % 5 == 0 ? null : global * 10;
         }
-        return NivaraColumn.CreateFromNullable(values);
+        return NivaraColumnFactory.CreateFromNullable(values);
     }
 
     public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(

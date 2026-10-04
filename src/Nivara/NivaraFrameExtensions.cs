@@ -529,7 +529,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the inner join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame InnerJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -558,7 +558,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the inner join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame InnerJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -587,7 +587,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the left join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame LeftJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -616,7 +616,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the left join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame LeftJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -645,7 +645,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the right join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame RightJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -674,7 +674,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the right join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame RightJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -703,7 +703,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the full outer join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame FullOuterJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -732,7 +732,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the full outer join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame FullOuterJoin(
         this NivaraFrame left,
         NivaraFrame right,
@@ -762,7 +762,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
     /// <returns>A new DataFrame containing the join result</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when join keys are incompatible</exception>
     public static NivaraFrame Join(
         this NivaraFrame left,
         NivaraFrame right,
@@ -813,7 +813,7 @@ public static partial class NivaraFrameExtensions
     /// <returns>A new DataFrame containing all rows from the input DataFrames</returns>
     /// <exception cref="ArgumentNullException">Thrown when frames is null</exception>
     /// <exception cref="ArgumentException">Thrown when no frames are provided</exception>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
     public static NivaraFrame ConcatenateVertical(
         IEnumerable<NivaraFrame> frames,
         ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.FillWithNulls)
@@ -854,7 +854,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="mismatchHandling">How to handle schema mismatches</param>
     /// <returns>A new DataFrame containing rows from both DataFrames</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
     public static NivaraFrame ConcatenateVertical(
         this NivaraFrame first,
         NivaraFrame second,
@@ -875,7 +875,7 @@ public static partial class NivaraFrameExtensions
     /// <returns>A new DataFrame containing all columns from the input DataFrames</returns>
     /// <exception cref="ArgumentNullException">Thrown when frames is null</exception>
     /// <exception cref="ArgumentException">Thrown when no frames are provided or row counts don't match</exception>
-    /// <exception cref="SchemaValidationException">Thrown when column names conflict</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when column names conflict</exception>
     public static NivaraFrame ConcatenateHorizontal(IEnumerable<NivaraFrame> frames)
     {
         if (frames == null)
@@ -914,7 +914,7 @@ public static partial class NivaraFrameExtensions
     /// <returns>A new DataFrame containing columns from both DataFrames</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
     /// <exception cref="ArgumentException">Thrown when row counts don't match</exception>
-    /// <exception cref="SchemaValidationException">Thrown when column names conflict</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when column names conflict</exception>
     public static NivaraFrame ConcatenateHorizontal(this NivaraFrame first, NivaraFrame second)
     {
         if (first == null)
@@ -933,7 +933,7 @@ public static partial class NivaraFrameExtensions
     /// <param name="mismatchHandling">How to handle schema mismatches</param>
     /// <returns>A new DataFrame with appended rows</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
     public static NivaraFrame Append(
         this NivaraFrame first,
         NivaraFrame second,
@@ -950,7 +950,7 @@ public static partial class NivaraFrameExtensions
     /// <returns>A new DataFrame with combined columns</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
     /// <exception cref="ArgumentException">Thrown when row counts don't match</exception>
-    /// <exception cref="SchemaValidationException">Thrown when column names conflict</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when column names conflict</exception>
     public static NivaraFrame Combine(this NivaraFrame first, NivaraFrame second)
     {
         return first.ConcatenateHorizontal(second);

@@ -46,7 +46,7 @@ public static class AggregateExample
         // Test with null values
         Console.WriteLine("Series with Null Values:");
         var nullableData = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
         var nullableSeries = new NivaraSeries<int>(column);
 
         Console.WriteLine($"Data: [1, null, 3, null, 5]");

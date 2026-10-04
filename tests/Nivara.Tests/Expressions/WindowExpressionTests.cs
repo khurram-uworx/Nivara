@@ -84,7 +84,7 @@ public class WindowExpressionTests
         var schema = CreateSchema();
         var expression = ColumnExpressions.RollingSum(ColumnExpressions.Col("Missing"), 2);
 
-        Assert.That(() => expression.Validate(schema), Throws.TypeOf<SchemaValidationException>());
+        Assert.That(() => expression.Validate(schema), Throws.TypeOf<QuerySchemaValidationException>());
     }
 
     [Test]

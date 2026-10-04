@@ -35,7 +35,7 @@ public class TypedLinqTests
 
     static NivaraFrame CreateNullableFrame()
     {
-        var values = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
+        var values = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
         var labels = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
         return NivaraFrame.Create(("Value", values), ("Label", labels));
     }
@@ -58,11 +58,11 @@ public class TypedLinqTests
     }
 
     [Test]
-    public void Query_RowTypeNotMapping_SchemaValidationException()
+    public void Query_RowTypeNotMapping_ThrowsQuerySchemaValidationException()
     {
         using var frame = CreatePeopleFrame();
 
-        Assert.Throws<SchemaValidationException>(() => frame.Query<UnmappedRow>());
+        Assert.Throws<QuerySchemaValidationException>(() => frame.Query<UnmappedRow>());
     }
 
     sealed class UnmappedRow
@@ -72,11 +72,11 @@ public class TypedLinqTests
     }
 
     [Test]
-    public void Query_RowTypeWithNoProperties_SchemaValidationException()
+    public void Query_RowTypeWithNoProperties_ThrowsQuerySchemaValidationException()
     {
         using var frame = CreatePeopleFrame();
 
-        Assert.Throws<SchemaValidationException>(() => frame.Query<EmptyRow>());
+        Assert.Throws<QuerySchemaValidationException>(() => frame.Query<EmptyRow>());
     }
 
     sealed class EmptyRow
@@ -555,7 +555,7 @@ public class TypedLinqTests
     {
         using var frame = CreateNullableFrame();
 
-        Assert.Throws<SchemaValidationException>(() => frame.Query<NonNullableRow>().ToObjects());
+        Assert.Throws<QuerySchemaValidationException>(() => frame.Query<NonNullableRow>().ToObjects());
     }
 
     sealed class NonNullableRow

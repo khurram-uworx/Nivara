@@ -54,8 +54,8 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_ChainedArithmetic_ComputesCorrectValues_WithNullMasks()
     {
-        var left = NivaraColumn.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
-        var right = NivaraColumn.CreateFromNullable(new double?[] { null, 10.0, 30.0, 40.0 });
+        var left = NivaraColumnFactory.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var right = NivaraColumnFactory.CreateFromNullable(new double?[] { null, 10.0, 30.0, 40.0 });
         var input = new Dictionary<string, IColumn>
         {
             ["A"] = left,
@@ -74,7 +74,7 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_Comparison_WithNullsMaskedFalse()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 50.0, 250.0, null, 400.0 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 50.0, 250.0, null, 400.0 });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
         var expression = ColumnExpressions.Col("A") > 100;
 
@@ -94,8 +94,8 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_MixedIntDouble_PromotesToDouble()
     {
-        var ints = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4 });
-        var doubles = NivaraColumn.CreateFromNullable(new double?[] { 10.5, 20.5, null, 40.5 });
+        var ints = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, 4 });
+        var doubles = NivaraColumnFactory.CreateFromNullable(new double?[] { 10.5, 20.5, null, 40.5 });
         var input = new Dictionary<string, IColumn>
         {
             ["I"] = ints,
@@ -113,8 +113,8 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_AndOrNot_PropagatesNullMasks()
     {
-        var a = NivaraColumn.CreateFromNullable(new bool?[] { true, false, null, true });
-        var b = NivaraColumn.CreateFromNullable(new bool?[] { false, false, true, null });
+        var a = NivaraColumnFactory.CreateFromNullable(new bool?[] { true, false, null, true });
+        var b = NivaraColumnFactory.CreateFromNullable(new bool?[] { false, false, true, null });
         var input = new Dictionary<string, IColumn>
         {
             ["A"] = a,
@@ -146,7 +146,7 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_DecimalColumn_RunsThroughFusedPath()
     {
-        var column = NivaraColumn.CreateFromNullable(new decimal?[] { 1.5m, null, 3.5m });
+        var column = NivaraColumnFactory.CreateFromNullable(new decimal?[] { 1.5m, null, 3.5m });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
         var expression = ColumnExpressions.Col("A") * 2;
         var fused = new FusedExpressionEvaluator();
@@ -337,8 +337,8 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_ModuloBinary_ComputesRemainder_WithNullMasks()
     {
-        var left = NivaraColumn.CreateFromNullable(new int?[] { 10, null, 25, 30 });
-        var right = NivaraColumn.CreateFromNullable(new int?[] { 3, 4, 7, 9 });
+        var left = NivaraColumnFactory.CreateFromNullable(new int?[] { 10, null, 25, 30 });
+        var right = NivaraColumnFactory.CreateFromNullable(new int?[] { 3, 4, 7, 9 });
         var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
         var expression = ColumnExpressions.Col("A") % ColumnExpressions.Col("B");
 
@@ -395,7 +395,7 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void NodeTreeKernel_UniformGenericMath_MatchesReference_WithMask()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 2.0, null, 6.0 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 2.0, null, 6.0 });
         var columnRef = new ColumnReference("A");
         var binding = new FusedColumnBinding(columnRef, column);
         var expression = columnRef * 2 + 3;
@@ -412,8 +412,8 @@ public class FusedExpressionEvaluatorTests
     {
         var leftRef = new ColumnReference("A");
         var rightRef = new ColumnReference("B");
-        var left = NivaraColumn.CreateFromNullable(new double?[] { 2.0, null, 6.0 });
-        var right = NivaraColumn.CreateFromNullable(new double?[] { null, 5.0, 7.0 });
+        var left = NivaraColumnFactory.CreateFromNullable(new double?[] { 2.0, null, 6.0 });
+        var right = NivaraColumnFactory.CreateFromNullable(new double?[] { null, 5.0, 7.0 });
         var expression = leftRef + rightRef;
         var leaves = new[]
         {
@@ -442,7 +442,7 @@ public class FusedExpressionEvaluatorTests
     [Test]
     public void Evaluate_NullBearingUniformPlan_RoutesToSpanKernel()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 1.0, null, 3.0 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 1.0, null, 3.0 });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
         var expression = ColumnExpressions.Col("A") * 2.0;
 
@@ -526,7 +526,7 @@ public class FusedExpressionEvaluatorTests
             values[i] = i % 97 == 0 ? null : (double)i;
         var input = new Dictionary<string, IColumn>
         {
-            ["A"] = NivaraColumn.CreateFromNullable(values),
+            ["A"] = NivaraColumnFactory.CreateFromNullable(values),
             ["B"] = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)(i * 3)).ToArray())
         };
         var expression = ColumnExpressions.Col("A") * 1.1 + 1000 - ColumnExpressions.Col("B");
@@ -811,7 +811,7 @@ public class FusedExpressionEvaluatorTests
     {
         var input = new Dictionary<string, IColumn>
         {
-            ["A"] = NivaraColumn.CreateFromNullable(new nint?[] { 10, null, 20 })
+            ["A"] = NivaraColumnFactory.CreateFromNullable(new nint?[] { 10, null, 20 })
         };
         var fused = new FusedExpressionEvaluator();
 
@@ -947,7 +947,7 @@ public class FusedExpressionEvaluatorTests
         // leaf carries a null, whose backing storage is default(int) = 0 — dividing by it must
         // not throw, and masked positions must hold default(decimal), not a computed value.
         var left = NivaraColumn<decimal>.Create(new decimal[] { 10m, 20m, 30m, 40m });
-        var right = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, null });
+        var right = NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 4, null });
         var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
         var expression = ColumnExpressions.Col("A") / ColumnExpressions.Col("B");
 
@@ -964,7 +964,7 @@ public class FusedExpressionEvaluatorTests
     public void EvaluateChunked_CompiledMaskedDivide_MatchesWholeColumn()
     {
         var left = NivaraColumn<decimal>.Create(new decimal[] { 10m, 20m, 30m, 40m, 50m, 60m, 70m, 80m });
-        var right = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, null, 5, null, 7, 8 });
+        var right = NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 4, null, 5, null, 7, 8 });
         var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
         var expression = ColumnExpressions.Col("A") / ColumnExpressions.Col("B");
 
@@ -980,15 +980,15 @@ public class FusedExpressionEvaluatorTests
         // The span kernel (uniform generic math, null-bearing) already short-circuits masked
         // positions to default(T). The compiled path (decimal, not generic math) must now agree
         // on both the null mask and the raw masked backing values.
-        var spanLeft = NivaraColumn.CreateFromNullable(new double?[] { 10.0, 20.0, 30.0, 40.0 });
-        var spanRight = NivaraColumn.CreateFromNullable(new double?[] { 2.0, null, 4.0, null });
+        var spanLeft = NivaraColumnFactory.CreateFromNullable(new double?[] { 10.0, 20.0, 30.0, 40.0 });
+        var spanRight = NivaraColumnFactory.CreateFromNullable(new double?[] { 2.0, null, 4.0, null });
         var spanInput = new Dictionary<string, IColumn> { ["A"] = spanLeft, ["B"] = spanRight };
         var spanFused = new FusedExpressionEvaluator();
         var spanResult = spanFused.Evaluate(ColumnExpressions.Col("A") / ColumnExpressions.Col("B"), spanInput);
         Assert.That(spanFused.SpanKernelPathEvaluationCount, Is.EqualTo(1), "double plans with nulls must route to the span kernel");
 
         var compiledLeft = NivaraColumn<decimal>.Create(new decimal[] { 10m, 20m, 30m, 40m });
-        var compiledRight = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, null });
+        var compiledRight = NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 4, null });
         var compiledInput = new Dictionary<string, IColumn> { ["A"] = compiledLeft, ["B"] = compiledRight };
         var compiledFused = new FusedExpressionEvaluator();
         var compiledResult = compiledFused.Evaluate(ColumnExpressions.Col("A") / ColumnExpressions.Col("B"), compiledInput);

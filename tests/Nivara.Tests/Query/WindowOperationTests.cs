@@ -325,7 +325,7 @@ public class WindowOperationTests
     [Test]
     public void Rolling_AllNullColumn_ThroughPipeline_AllMasked()
     {
-        var source = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+        var source = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null, null });
         using var frame = FrameWith(("v", source));
         using var result = frame.AsQueryFrame()
             .RollingSum("v", "sum", 2)
@@ -347,7 +347,7 @@ public class WindowOperationTests
     [Test]
     public void Rolling_AllNullColumn_ThroughPipeline_WithNullHandler_Fills()
     {
-        var source = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+        var source = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null, null });
         using var frame = FrameWith(("v", source));
         using var result = frame.AsQueryFrame()
             .RollingSum("v", "sum", 2, nullHandler: () => 0)
@@ -406,7 +406,7 @@ public class WindowOperationTests
     [Test]
     public void Shift_AllNullColumn_ThroughPipeline_AllMasked()
     {
-        var source = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var source = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
         using var frame = FrameWith(("v", source));
         using var result = frame.AsQueryFrame().Shift("v", "lag", 1).Collect();
 

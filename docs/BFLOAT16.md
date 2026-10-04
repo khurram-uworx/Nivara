@@ -103,7 +103,7 @@ memory (2 B/param vs `float`'s 4): the sample measures ~91→~45.5 MB (MiniLM) a
 
 ```csharp
 var col  = NivaraColumn<BFloat16>.Create(new BFloat16[] { (BFloat16)1.5f, (BFloat16)2.5f, (BFloat16)3.5f });
-var ncol = NivaraColumn.CreateFromNullable(new BFloat16?[] { (BFloat16)1.5f, null, (BFloat16)3.5f });
+var ncol = NivaraColumnFactory.CreateFromNullable(new BFloat16?[] { (BFloat16)1.5f, null, (BFloat16)3.5f });
 ```
 
 `BFloat16` is recognized as a numeric type everywhere the type system dispatches:

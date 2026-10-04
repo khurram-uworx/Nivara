@@ -310,9 +310,9 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
             {
                 column.Validate(inputSchema);
             }
-            catch (SchemaValidationException ex)
+            catch (QuerySchemaValidationException ex)
             {
-                throw new SchemaValidationException($"GroupBy column validation failed for '{column.Name}': {ex.Message}");
+                throw new QuerySchemaValidationException($"GroupBy column validation failed for '{column.Name}': {ex.Message}");
             }
         }
 

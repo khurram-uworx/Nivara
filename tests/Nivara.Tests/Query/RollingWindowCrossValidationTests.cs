@@ -50,7 +50,7 @@ public class RollingWindowCrossValidationTests
 
             var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase)
             {
-                ["v"] = NivaraColumn.CreateFromNullable(values),
+                ["v"] = NivaraColumnFactory.CreateFromNullable(values),
             };
             if (partition is not null)
                 columns["g"] = NivaraColumn<string>.CreateForReferenceType(partition!);

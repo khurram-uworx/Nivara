@@ -42,7 +42,7 @@ public class PolarsMomentsCrossValidationTests
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
                 .ToArray();
 
-            using var series = new NivaraSeries<double>(NivaraColumn.CreateFromNullable(values));
+            using var series = new NivaraSeries<double>(NivaraColumnFactory.CreateFromNullable(values));
 
             if (kind == "stddev")
             {
@@ -67,7 +67,7 @@ public class PolarsMomentsCrossValidationTests
         if (validCount < 2)
             return;
 
-        using var series = new NivaraSeries<double>(NivaraColumn.CreateFromNullable(values));
+        using var series = new NivaraSeries<double>(NivaraColumnFactory.CreateFromNullable(values));
         var population = kind == "stddev" ? series.StdDev(0) : series.Variance(0);
         var sample = kind == "stddev" ? series.StdDev(1) : series.Variance(1);
 

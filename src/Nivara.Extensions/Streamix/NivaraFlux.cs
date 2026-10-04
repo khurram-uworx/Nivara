@@ -219,7 +219,7 @@ public static class NivaraFlux
                 data[i] = values[i]!.Value;
             return new NivaraColumn<T>(new Storage.ColumnStorage<T>(new ReadOnlyMemory<T>(data)));
         }
-        return NivaraColumn.CreateFromNullable(values);
+        return NivaraColumnFactory.CreateFromNullable(values);
     }
 
     static NivaraColumn<T> ReadColumnFastRef<T>(IList<NivaraRow> rows, int colIdx, int count) where T : class

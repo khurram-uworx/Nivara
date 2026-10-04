@@ -127,9 +127,9 @@ sealed class SortByExpressionOperation : IQueryOperation
             {
                 sortKey.Key.Validate(inputSchema);
             }
-            catch (SchemaValidationException ex)
+            catch (QuerySchemaValidationException ex)
             {
-                throw new SchemaValidationException($"Sort key expression validation failed: {ex.Message}");
+                throw new QuerySchemaValidationException($"Sort key expression validation failed: {ex.Message}");
             }
         }
 

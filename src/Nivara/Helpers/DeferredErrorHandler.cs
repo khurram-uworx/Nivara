@@ -145,7 +145,7 @@ public sealed class DeferredErrorHandler
     /// <param name="schemaError">The schema validation error</param>
     /// <param name="context">The context where the error occurred</param>
     /// <param name="operationType">The type of operation</param>
-    public void AddSchemaValidationError(SchemaValidationException schemaError, string context, string operationType)
+    public void AddSchemaValidationError(QuerySchemaValidationException schemaError, string context, string operationType)
     {
         if (schemaError == null)
             throw new ArgumentNullException(nameof(schemaError));

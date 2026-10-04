@@ -7,7 +7,7 @@ namespace Nivara;
 /// <see cref="CreateFromNullable{T}(T?[])"/> overload builds columns from nullable value-type
 /// arrays without boxing each element.
 /// </summary>
-public static class NivaraColumn
+public static class NivaraColumnFactory
 {
     /// <summary>
     /// Creates a new column from a nullable value-type array without boxing each element.

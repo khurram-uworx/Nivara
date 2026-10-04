@@ -1159,7 +1159,7 @@ public sealed class NivaraFrame : IFrame
     /// <param name="mismatchHandling">How to handle schema mismatches (default Error)</param>
     /// <returns>A new frame containing rows from both frames</returns>
     /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
     public NivaraFrame Concat(NivaraFrame other, ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.Error)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -1176,7 +1176,7 @@ public sealed class NivaraFrame : IFrame
     /// <returns>A new frame containing rows from all input frames</returns>
     /// <exception cref="ArgumentNullException">Thrown when frames is null</exception>
     /// <exception cref="ArgumentException">Thrown when no frames are provided</exception>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
     public static NivaraFrame Concat(IEnumerable<NivaraFrame> frames, ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.Error)
     {
         ArgumentNullException.ThrowIfNull(frames);
@@ -1190,7 +1190,7 @@ public sealed class NivaraFrame : IFrame
     /// <param name="other">The other frame to validate against</param>
     /// <param name="operationName">The name of the operation for error messages</param>
     /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when schemas are incompatible</exception>
     public void ValidateSchemaCompatibility(NivaraFrame other, string operationName)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -1200,7 +1200,7 @@ public sealed class NivaraFrame : IFrame
 
         if (!Schema.IsCompatibleWith(other.Schema, requireExactMatch: false))
         {
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Schema incompatibility detected for operation '{operationName}'. " +
                 $"This frame has schema: {Schema}. Other frame has schema: {other.Schema}.",
                 Schema,

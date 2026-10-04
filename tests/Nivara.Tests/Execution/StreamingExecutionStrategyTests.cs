@@ -2726,7 +2726,7 @@ sealed class PartitionedChunkedSource : IQuerySource
             var global = start + i;
             nullableKeys_[i] = global % 7 == 0 ? null : KeyAt(global, cardinality);
         }
-        return NivaraColumn.CreateFromNullable(nullableKeys_);
+        return NivaraColumnFactory.CreateFromNullable(nullableKeys_);
     }
 
     IReadOnlyDictionary<string, IColumn> Build(int start, int count)

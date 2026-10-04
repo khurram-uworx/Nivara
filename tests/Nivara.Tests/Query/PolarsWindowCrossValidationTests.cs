@@ -48,7 +48,7 @@ public class PolarsWindowCrossValidationTests
 
             var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase)
             {
-                ["v"] = NivaraColumn.CreateFromNullable(order),
+                ["v"] = NivaraColumnFactory.CreateFromNullable(order),
             };
             if (partition is not null)
                 columns["g"] = NivaraColumn<string>.CreateForReferenceType(partition!);

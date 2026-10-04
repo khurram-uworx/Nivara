@@ -105,7 +105,7 @@ public class WindowExpressionEvaluationTests
     [Test]
     public void Evaluate_RowNumber_NullOrderKey_NumberedLast()
     {
-        var input = Input(("v", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 1, null })));
+        var input = Input(("v", NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 1, null })));
         var fused = new FusedExpressionEvaluator();
 
         var result = fused.Evaluate(
@@ -141,7 +141,7 @@ public class WindowExpressionEvaluationTests
     [Test]
     public void Evaluate_RollingSum_OverNulls_PropagatesWindowSemantics()
     {
-        var input = Input(("A", NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4 })));
+        var input = Input(("A", NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, 4 })));
         var fused = new FusedExpressionEvaluator();
 
         var result = fused.Evaluate(ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2), input);
@@ -152,7 +152,7 @@ public class WindowExpressionEvaluationTests
     [Test]
     public void Evaluate_CumulativeCount_OverSourceWithNulls_CountsValidOnly()
     {
-        var input = Input(("A", NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4 })));
+        var input = Input(("A", NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, 4 })));
         var fused = new FusedExpressionEvaluator();
 
         var result = fused.Evaluate(ColumnExpressions.CumulativeCount(ColumnExpressions.Col("A")), input);

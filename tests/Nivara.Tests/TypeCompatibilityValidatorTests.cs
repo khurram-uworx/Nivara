@@ -191,7 +191,7 @@ public class TypeCompatibilityValidatorTests
                 "Frame with all numeric columns should pass AllNumeric validation");
 
             // Property: AllNumeric requirement should fail for mixed type frames
-            Assert.Throws<SchemaValidationException>(() =>
+            Assert.Throws<QuerySchemaValidationException>(() =>
                 TypeCompatibilityValidator.ValidateFrameTypeCompatibility(
                     mixedTypeFrame, "Numeric Operation", TypeCompatibilityRequirement.AllNumeric),
                 "Frame with mixed types should fail AllNumeric validation");
@@ -203,7 +203,7 @@ public class TypeCompatibilityValidatorTests
                 "Frame with all same type columns should pass AllSameType validation");
 
             // Property: AllSameType requirement should fail for mixed type frames
-            Assert.Throws<SchemaValidationException>(() =>
+            Assert.Throws<QuerySchemaValidationException>(() =>
                 TypeCompatibilityValidator.ValidateFrameTypeCompatibility(
                     mixedTypeFrame, "Same Type Operation", TypeCompatibilityRequirement.AllSameType),
                 "Frame with mixed types should fail AllSameType validation");

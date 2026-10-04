@@ -186,7 +186,7 @@ public class DiagnosticsTests
 
         try
         {
-            var column = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+            var column = NivaraColumnFactory.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
 
             var tensor = column.ToTensor(-1.0f);
 

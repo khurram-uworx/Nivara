@@ -289,7 +289,7 @@ public class TypedGroupKeyTests
         var columns = new Dictionary<string, IColumn>
         {
             ["Name"] = NivaraColumn<string>.Create(new[] { "A", "A", "B", "B", "A", "C" }),
-            ["Score"] = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 2, 2, 1, null }),
+            ["Score"] = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 2, 2, 1, null }),
             ["Weight"] = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0, 3.0, 1.0, 2.0 })
         };
 
@@ -334,8 +334,8 @@ public class TypedGroupKeyTests
     [Test]
     public void TypedKey_NullVsNonNullValue_AreNotEqual()
     {
-        var columnA = NivaraColumn.CreateFromNullable(new int?[] { null, 5 });
-        var columnB = NivaraColumn.CreateFromNullable(new int?[] { 5, 5 });
+        var columnA = NivaraColumnFactory.CreateFromNullable(new int?[] { null, 5 });
+        var columnB = NivaraColumnFactory.CreateFromNullable(new int?[] { 5, 5 });
         var readersA = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(columnA) };
         var readersB = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(columnB) };
 

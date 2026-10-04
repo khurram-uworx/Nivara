@@ -16,7 +16,7 @@ public static class NivaraTypedLinqExtensions
     /// <param name="frame">The source frame</param>
     /// <returns>A lazy typed query</returns>
     /// <exception cref="ArgumentNullException">Thrown when frame is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when the row type does not map to the frame schema</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when the row type does not map to the frame schema</exception>
     public static NivaraQuery<T> Query<T>(this NivaraFrame frame)
         where T : class, new()
     {

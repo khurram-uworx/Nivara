@@ -1571,7 +1571,7 @@ AutoDiff is a non-nullable domain. Resolve nulls before crossing the
 nulls via `Debug.Assert`):
 
 ```csharp
-var raw = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+var raw = NivaraColumnFactory.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
 
 // Option 1: fill nulls with a sentinel value
 var filled = raw.FillNull(0.0f);

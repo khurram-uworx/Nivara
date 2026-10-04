@@ -95,24 +95,25 @@ public sealed class DataSourceException : Exception
 }
 
 /// <summary>
-/// Exception thrown when schema validation fails
+/// Exception thrown when a column or row type does not match the schema a query
+/// operation is validated against
 /// </summary>
-public sealed class SchemaValidationException : Exception
+public sealed class QuerySchemaValidationException : Exception
 {
     /// <summary>
-    /// Initializes a new instance of SchemaValidationException
+    /// Initializes a new instance of <see cref="QuerySchemaValidationException"/>
     /// </summary>
     /// <param name="message">The error message</param>
-    public SchemaValidationException(string message) : base(message)
+    public QuerySchemaValidationException(string message) : base(message)
     { }
 
     /// <summary>
-    /// Initializes a new instance of SchemaValidationException with schema details
+    /// Initializes a new instance of <see cref="QuerySchemaValidationException"/> with schema details
     /// </summary>
     /// <param name="message">The error message</param>
     /// <param name="expectedSchema">The expected schema</param>
     /// <param name="actualSchema">The actual schema</param>
-    public SchemaValidationException(string message, Schema expectedSchema, Schema actualSchema) : base(message)
+    public QuerySchemaValidationException(string message, Schema expectedSchema, Schema actualSchema) : base(message)
     {
         ExpectedSchema = expectedSchema;
         ActualSchema = actualSchema;

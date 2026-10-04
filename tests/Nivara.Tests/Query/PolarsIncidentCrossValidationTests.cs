@@ -75,7 +75,7 @@ public class PolarsIncidentCrossValidationTests
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
                 .ToArray();
 
-            using var series = new NivaraSeries<double>(NivaraColumn.CreateFromNullable(values));
+            using var series = new NivaraSeries<double>(NivaraColumnFactory.CreateFromNullable(values));
             var actual = series.Quantile(q);
             var exp = expected.GetProperty(svcName).GetDouble();
 
@@ -100,7 +100,7 @@ public class PolarsIncidentCrossValidationTests
 
             var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase)
             {
-                ["v"] = NivaraColumn.CreateFromNullable(values),
+                ["v"] = NivaraColumnFactory.CreateFromNullable(values),
             };
 
             var spec = new WindowSpec();
@@ -151,7 +151,7 @@ public class PolarsIncidentCrossValidationTests
 
         var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase)
         {
-            ["v"] = NivaraColumn.CreateFromNullable(deltas.ToArray()),
+            ["v"] = NivaraColumnFactory.CreateFromNullable(deltas.ToArray()),
         };
 
         var partitionBy = Array.Empty<string>();
@@ -214,7 +214,7 @@ public class PolarsIncidentCrossValidationTests
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
                 .ToArray();
 
-            using var series = new NivaraSeries<double>(NivaraColumn.CreateFromNullable(values));
+            using var series = new NivaraSeries<double>(NivaraColumnFactory.CreateFromNullable(values));
             var actual = series.StdDev(ddof);
             var exp = expected.GetProperty(svcName).GetDouble();
 

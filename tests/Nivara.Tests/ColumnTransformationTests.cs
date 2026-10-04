@@ -30,7 +30,7 @@ public class ColumnTransformationTests
     {
         // Arrange
         var nullableData = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 
         // Act
         var transformed = column.Transform(x => x * 2);
@@ -69,7 +69,7 @@ public class ColumnTransformationTests
     {
         // Arrange
         var nullableData = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 
         // Act
         var transformed = column.TransformNonNull(x => x * 2);

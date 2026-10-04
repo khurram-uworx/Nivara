@@ -8,43 +8,6 @@ namespace Nivara.Tests.Exceptions;
 public class DataFrameExceptionTests
 {
     [Test]
-    public void DataFrameSchemaValidationException_WithSchemas_ProvidesMismatchDetails()
-    {
-        // Arrange
-        var expectedSchema = new Schema(new[]
-        {
-            ("id", typeof(int)),
-            ("name", typeof(string))
-        });
-
-        var actualSchema = new Schema(new[]
-        {
-            ("id", typeof(string)), // Type mismatch
-            ("age", typeof(int))    // Extra column, missing 'name'
-        });
-
-        // Act
-        var exception = new DataFrameSchemaValidationException(
-            "Schema validation failed", expectedSchema, actualSchema);
-
-        // Assert
-        Assert.That(exception.ExpectedSchema, Is.EqualTo(expectedSchema));
-        Assert.That(exception.ActualSchema, Is.EqualTo(actualSchema));
-
-        var mismatches = exception.Mismatches;
-        Assert.That(mismatches.Count, Is.EqualTo(3)); // Missing 'name', extra 'age', type mismatch 'id'
-
-        // Check for missing column
-        Assert.That(mismatches.Any(m => m.MismatchType == SchemaMismatchType.MissingColumn && m.ColumnName == "name"), Is.True);
-
-        // Check for extra column
-        Assert.That(mismatches.Any(m => m.MismatchType == SchemaMismatchType.ExtraColumn && m.ColumnName == "age"), Is.True);
-
-        // Check for type mismatch
-        Assert.That(mismatches.Any(m => m.MismatchType == SchemaMismatchType.TypeMismatch && m.ColumnName == "id"), Is.True);
-    }
-
-    [Test]
     public void JoinException_WithJoinDetails_ProvidesComprehensiveContext()
     {
         // Arrange
@@ -89,36 +52,6 @@ public class DataFrameExceptionTests
 
         // Assert
         Assert.That(description, Is.EqualTo("Column 'age' has type String but expected Int32"));
-    }
-
-    [Test]
-    public void DataFrameSchemaValidationException_GetDetailedContext_IncludesAllRelevantInformation()
-    {
-        // Arrange
-        var expectedSchema = new Schema(new[]
-        {
-            ("id", typeof(int)),
-            ("name", typeof(string))
-        });
-
-        var actualSchema = new Schema(new[]
-        {
-            ("id", typeof(int)),
-            ("age", typeof(int))
-        });
-
-        var exception = new DataFrameSchemaValidationException(
-            "Schema mismatch detected", expectedSchema, actualSchema);
-
-        // Act
-        var context = exception.GetDetailedContext();
-
-        // Assert
-        Assert.That(context, Does.Contain("DataFrameSchemaValidationException"));
-        Assert.That(context, Does.Contain("Schema mismatch detected"));
-        Assert.That(context, Does.Contain("Expected Schema:"));
-        Assert.That(context, Does.Contain("Actual Schema:"));
-        Assert.That(context, Does.Contain("Schema Mismatches:"));
     }
 
     [Test]

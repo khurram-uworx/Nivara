@@ -110,7 +110,7 @@ public class SortOperationTests
     }
 
     [Test]
-    public void TransformSchema_WithMissingColumn_ShouldThrowSchemaValidationException()
+    public void TransformSchema_WithMissingColumn_ShouldThrowQuerySchemaValidationException()
     {
         // Arrange
         var schema = new Schema(new[]
@@ -121,7 +121,7 @@ public class SortOperationTests
         var operation = new SortOperation("MissingColumn");
 
         // Act & Assert
-        var ex = Assert.Throws<SchemaValidationException>(() => operation.TransformSchema(schema));
+        var ex = Assert.Throws<QuerySchemaValidationException>(() => operation.TransformSchema(schema));
         Assert.That(ex.Message, Contains.Substring("MissingColumn"));
     }
 
@@ -214,7 +214,7 @@ public class SortOperationTests
     public void Execute_WithNullValues_ShouldHandleNullsCorrectly()
     {
         // Arrange
-        var nullableNumbers = NivaraColumn.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
+        var nullableNumbers = NivaraColumnFactory.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
         var names = NivaraColumn<string>.Create(new[] { "c", "null1", "a", "null2", "b" });
         var input = new Dictionary<string, IColumn>
         {
@@ -245,7 +245,7 @@ public class SortOperationTests
     public void Execute_WithNullsLast_ShouldPlaceNullsAtEnd()
     {
         // Arrange
-        var nullableNumbers = NivaraColumn.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
+        var nullableNumbers = NivaraColumnFactory.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
         var names = NivaraColumn<string>.Create(new[] { "c", "null1", "a", "null2", "b" });
         var input = new Dictionary<string, IColumn>
         {

@@ -81,7 +81,7 @@ public sealed class QueryPlan
             }
             catch (Exception ex)
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Operation '{operation.OperationType}' failed to transform schema: {ex.Message}");
             }
         }

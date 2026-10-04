@@ -614,7 +614,7 @@ public class WindowFunctionsTests
     [Test]
     public void Rolling_AllNullColumn_AllPositionsMasked()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null, null });
 
         var sum = column.RollingSum(2);
         var mean = column.RollingMean(2);
@@ -632,7 +632,7 @@ public class WindowFunctionsTests
     [Test]
     public void Rolling_AllNullColumn_WithNullHandler_FillsEveryPosition()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null, null });
 
         var sum = column.RollingSum(2, nullHandler: () => 0);
         var mean = column.RollingMean(2, nullHandler: () => 10);
@@ -652,7 +652,7 @@ public class WindowFunctionsTests
     [Test]
     public void Cumulative_AllNullColumn_AllPositionsMasked()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
 
         var sum = column.CumulativeSum();
         var min = column.CumulativeMin();
@@ -669,7 +669,7 @@ public class WindowFunctionsTests
     [Test]
     public void Cumulative_AllNullColumn_WithNullHandler_FillsEveryPosition()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
 
         var sum = column.CumulativeSum(() => 2);
         var max = column.CumulativeMax(() => 2);
@@ -683,7 +683,7 @@ public class WindowFunctionsTests
     [Test]
     public void Shift_AllNullColumn_AllPositionsMasked()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
 
         var shifted = column.Shift(1);
         var filled = column.Shift(1, 0);

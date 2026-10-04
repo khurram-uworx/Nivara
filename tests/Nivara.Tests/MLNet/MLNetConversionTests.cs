@@ -205,7 +205,7 @@ public class MLNetConversionTests
     [Test]
     public void ToDataView_NullNumericValue_BecomesZero()
     {
-        var column = NivaraColumn.CreateFromNullable(new float?[] { 1.5f, null, 3.5f });
+        var column = NivaraColumnFactory.CreateFromNullable(new float?[] { 1.5f, null, 3.5f });
         var frame = NivaraFrame.Create(("Value", column));
 
         var dataView = frame.ToDataView(mlContext);
