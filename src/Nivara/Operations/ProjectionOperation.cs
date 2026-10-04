@@ -64,7 +64,7 @@ sealed class ProjectionOperation : IQueryOperation
         {
             if (!inputSchema.HasColumn(originalName))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Projection column '{originalName}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
             }
         }

@@ -312,12 +312,12 @@ public class ConcatenationOperationTests
         // Arrange
         var frame1 = NivaraFrame.Create(
             ("Name", NivaraColumn<string>.Create(new string?[] { "Alice", null }!)),
-            ("Age", NivaraColumn.CreateFromNullable(new int?[] { 25, null }))
+            ("Age", NivaraColumnFactory.CreateFromNullable(new int?[] { 25, null }))
         );
 
         var frame2 = NivaraFrame.Create(
             ("Name", NivaraColumn<string>.Create(new string?[] { null, "Bob" }!)),
-            ("Age", NivaraColumn.CreateFromNullable(new int?[] { null, 30 }))
+            ("Age", NivaraColumnFactory.CreateFromNullable(new int?[] { null, 30 }))
         );
 
         // Act

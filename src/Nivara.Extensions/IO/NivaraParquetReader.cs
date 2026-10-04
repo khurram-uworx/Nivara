@@ -360,7 +360,7 @@ public static class NivaraParquetReader
         if (unsupportedFields.Count > 0)
         {
             var supportedTypes = string.Join(", ", TypeMapper.GetSupportedTypes().Select(t => t.Name));
-            throw new SchemaValidationException($"Unsupported field types found: {string.Join(", ", unsupportedFields)}. Supported types: {supportedTypes}")
+            throw new DataSchemaValidationException($"Unsupported field types found: {string.Join(", ", unsupportedFields)}. Supported types: {supportedTypes}")
             {
                 TypeMismatches = unsupportedFields,
                 ExpectedSchema = $"Schema with supported types: {supportedTypes}",
@@ -493,7 +493,7 @@ public static class NivaraParquetReader
         for (int i = 0; i < length; i++)
             nullableArray[i] = convert(columnData.GetValue(i));
 
-        return NivaraColumn.CreateFromNullable(nullableArray);
+        return NivaraColumnFactory.CreateFromNullable(nullableArray);
     }
 
     /// <summary>
@@ -505,7 +505,7 @@ public static class NivaraParquetReader
     private static NivaraColumn<T> CreateNivaraColumn<T>(Array columnData) where T : struct
     {
         if (columnData is T?[] nullableArray)
-            return NivaraColumn.CreateFromNullable(nullableArray);
+            return NivaraColumnFactory.CreateFromNullable(nullableArray);
 
         if (columnData is T[] typedArray)
             return NivaraColumn<T>.Create(typedArray);
@@ -529,7 +529,7 @@ public static class NivaraParquetReader
             }
         }
 
-        return NivaraColumn.CreateFromNullable(nullableArray);
+        return NivaraColumnFactory.CreateFromNullable(nullableArray);
     }
 
     /// <summary>

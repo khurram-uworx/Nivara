@@ -90,7 +90,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 
         // Act
         var result = column.Sum();
@@ -127,7 +127,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { null, null, null };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 
         // Act
         var result = column.Sum();
@@ -193,7 +193,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { 2, null, 4, null, 6 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
         var series = new NivaraSeries<int>(column);
 
         // Act
@@ -303,7 +303,7 @@ public class NivaraSeriesAggregateTests
     public void Average_Int128WithNulls_ReturnsValidAverage()
     {
         // Arrange
-        var column = NivaraColumn.CreateFromNullable(new Int128?[] { 2, null, 4, null, 6 });
+        var column = NivaraColumnFactory.CreateFromNullable(new Int128?[] { 2, null, 4, null, 6 });
         var series = new NivaraSeries<Int128>(column);
 
         // Act
@@ -416,7 +416,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { 2, null, 8, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 
         // Act
         var result = column.Max();
@@ -485,7 +485,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Sum with null handling")]
     public void Sum_Series_WithNullValues_ReturnsValidSum()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
         using var series = new NivaraSeries<int>(column);
 
         Assert.That(series.Sum(), Is.EqualTo(9)); // 1 + 3 + 5
@@ -505,7 +505,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Sum with null handling")]
     public void Sum_AllNullSeries_ReturnsZero()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
         using var series = new NivaraSeries<int>(column);
 
         Assert.That(series.Sum(), Is.EqualTo(0));
@@ -551,7 +551,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Min/Max with null handling")]
     public void MinMax_Series_WithNullValues_ReturnsValidExtremes()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 8, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 8, null, 5 });
         using var series = new NivaraSeries<int>(column);
 
         Assert.That(series.Min(), Is.EqualTo(2));
@@ -574,7 +574,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Min/Max error handling")]
     public void MinMax_AllNullSeries_ThrowsInvalidOperationException()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
         using var series = new NivaraSeries<int>(column);
 
         var minEx = Assert.Throws<InvalidOperationException>(() => series.Min());
@@ -653,7 +653,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Quantile with null handling")]
     public void Quantile_WithNullValues_IgnoresNulls()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
         using var series = new NivaraSeries<double>(column);
 
         Assert.That(series.Quantile(0.25), Is.EqualTo(2.5).Within(1e-9));
@@ -684,7 +684,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Quantile error handling")]
     public void Quantile_AllNullSeries_ThrowsInvalidOperationException()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null });
         using var series = new NivaraSeries<int>(column);
 
         var ex = Assert.Throws<InvalidOperationException>(() => series.Quantile(0.5));
@@ -750,7 +750,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Median with null handling")]
     public void Median_WithNullValues_IgnoresNulls()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
         using var series = new NivaraSeries<double>(column);
 
         Assert.That(series.Median(), Is.EqualTo(3.5).Within(1e-9));
@@ -770,7 +770,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Median error handling")]
     public void Median_AllNullSeries_ThrowsInvalidOperationException()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null });
         using var series = new NivaraSeries<int>(column);
 
         var ex = Assert.Throws<InvalidOperationException>(() => series.Median());
@@ -813,7 +813,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: StdDev with null handling")]
     public void StdDev_WithNullValues_IgnoresNulls()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
         using var series = new NivaraSeries<double>(column);
 
         Assert.That(series.StdDev(), Is.EqualTo(1.479019945774904).Within(1e-9));
@@ -892,7 +892,7 @@ public class NivaraSeriesAggregateTests
     [Category("Feature: nivara-series, Property: Variance with null handling")]
     public void Variance_WithNullValues_IgnoresNulls()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
         using var series = new NivaraSeries<double>(column);
 
         Assert.That(series.Variance(), Is.EqualTo(2.1875).Within(1e-9));
@@ -977,7 +977,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { null, null, null };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 
         // Act & Assert
         var minEx = Assert.Throws<InvalidOperationException>(() => column.Min());

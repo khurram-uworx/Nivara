@@ -75,7 +75,7 @@ public static class NivaraParquetWriter
 
             await ConvertNivaraFrameToParquet(frame, stream, options, cancellationToken);
         }
-        catch (Exception ex) when (ex is not NivaraIOException and not UnsupportedTypeException and not SchemaValidationException)
+        catch (Exception ex) when (ex is not NivaraIOException and not UnsupportedTypeException and not DataSchemaValidationException)
         {
             throw new NivaraIOException($"Failed to write Parquet stream: {ex.Message}", ex)
             {
@@ -114,7 +114,7 @@ public static class NivaraParquetWriter
     /// <param name="options">Optional Parquet writing options</param>
     /// <param name="cancellationToken">Token to cancel the operation</param>
     /// <exception cref="ArgumentNullException">Thrown when frames or filePath is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when frames have incompatible schemas</exception>
+    /// <exception cref="DataSchemaValidationException">Thrown when frames have incompatible schemas</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled</exception>
     public static async Task WriteParquetBatchAsync(IEnumerable<NivaraFrame> frames, string filePath, ParquetWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -128,7 +128,7 @@ public static class NivaraParquetWriter
             using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
             await WriteParquetBatchAsync(frames, fileStream, options, cancellationToken);
         }
-        catch (Exception ex) when (ex is not NivaraIOException and not SchemaValidationException)
+        catch (Exception ex) when (ex is not NivaraIOException and not DataSchemaValidationException)
         {
             throw new NivaraIOException($"Failed to write Parquet batch file: {ex.Message}", ex)
             {
@@ -146,7 +146,7 @@ public static class NivaraParquetWriter
     /// <param name="options">Optional Parquet writing options</param>
     /// <param name="cancellationToken">Token to cancel the operation</param>
     /// <exception cref="ArgumentNullException">Thrown when frames or stream is null</exception>
-    /// <exception cref="SchemaValidationException">Thrown when frames have incompatible schemas</exception>
+    /// <exception cref="DataSchemaValidationException">Thrown when frames have incompatible schemas</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled</exception>
     public static async Task WriteParquetBatchAsync(IEnumerable<NivaraFrame> frames, Stream stream, ParquetWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -243,7 +243,7 @@ public static class NivaraParquetWriter
         if (unsupportedColumns.Count > 0)
         {
             var supportedTypes = string.Join(", ", TypeMapper.GetSupportedTypes().Select(t => t.Name));
-            throw new SchemaValidationException(
+            throw new DataSchemaValidationException(
                 $"Frame contains unsupported column types for Parquet: {string.Join(", ", unsupportedColumns)}. " +
                 $"Supported types: {supportedTypes}")
             {
@@ -267,7 +267,7 @@ public static class NivaraParquetWriter
 
             if (!AreFramesSchemaCompatible(firstFrame, currentFrame))
             {
-                throw new SchemaValidationException(
+                throw new DataSchemaValidationException(
                     $"Frame {i} has incompatible schema with the first frame. All frames must have the same column names and types.")
                 {
                     ExpectedSchema = GetFrameSchemaDescription(firstFrame),
@@ -796,7 +796,7 @@ public static class NivaraParquetWriter
             }
         }
 
-        return NivaraColumn.CreateFromNullable(nullableArray);
+        return NivaraColumnFactory.CreateFromNullable(nullableArray);
     }
 
     /// <summary>

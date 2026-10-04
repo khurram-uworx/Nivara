@@ -97,13 +97,13 @@ public sealed class UnsupportedTypeException : NivaraIOException
 /// <summary>
 /// Exception thrown when schema validation fails during I/O operations
 /// </summary>
-public sealed class SchemaValidationException : NivaraIOException
+public sealed class DataSchemaValidationException : NivaraIOException
 {
     /// <summary>
     /// Initializes a new instance of SchemaValidationException
     /// </summary>
     /// <param name="message">The error message</param>
-    public SchemaValidationException(string message) : base(message)
+    public DataSchemaValidationException(string message) : base(message)
     { }
 
     /// <summary>
@@ -113,7 +113,7 @@ public sealed class SchemaValidationException : NivaraIOException
     /// <param name="typeMismatches">The type mismatches found</param>
     /// <param name="expectedSchema">The expected schema description</param>
     /// <param name="actualSchema">The actual schema description</param>
-    public SchemaValidationException(string message, IEnumerable<string> typeMismatches, string expectedSchema, string actualSchema)
+    public DataSchemaValidationException(string message, IEnumerable<string> typeMismatches, string expectedSchema, string actualSchema)
         : base(message)
     {
         TypeMismatches = typeMismatches.ToList();

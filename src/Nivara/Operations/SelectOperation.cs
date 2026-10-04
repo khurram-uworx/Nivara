@@ -68,9 +68,9 @@ sealed class SelectOperation : IQueryOperation
             {
                 column.Validate(inputSchema);
             }
-            catch (SchemaValidationException ex)
+            catch (QuerySchemaValidationException ex)
             {
-                throw new SchemaValidationException($"Select column validation failed for '{column.Name}': {ex.Message}");
+                throw new QuerySchemaValidationException($"Select column validation failed for '{column.Name}': {ex.Message}");
             }
         }
 

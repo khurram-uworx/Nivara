@@ -379,7 +379,7 @@ public class TypeSafetyTests
     public void ReverseGradTensor_FromColumn_Nullable_ThrowsRuntime()
     {
         // Arrange
-        var nullableCol = NivaraColumn.CreateFromNullable(new float?[] { 1f, null, 3f });
+        var nullableCol = NivaraColumnFactory.CreateFromNullable(new float?[] { 1f, null, 3f });
 
         // Act & Assert
         var ex = Assert.Throws<AutoGradException>(() => ReverseGradTensor<float>.FromColumn(nullableCol));
@@ -390,7 +390,7 @@ public class TypeSafetyTests
     public void ReverseGradTensor_Constructor_Nullable_ThrowsRuntime()
     {
         // Arrange
-        var nullableCol = NivaraColumn.CreateFromNullable(new float?[] { 1f, null, 3f });
+        var nullableCol = NivaraColumnFactory.CreateFromNullable(new float?[] { 1f, null, 3f });
 
         // Act & Assert
         var ex = Assert.Throws<AutoGradException>(() => new ReverseGradTensor<float>(nullableCol));
@@ -401,7 +401,7 @@ public class TypeSafetyTests
     public void ForwardGradTensor_FromColumn_Nullable_ThrowsRuntime()
     {
         // Arrange
-        var nullableCol = NivaraColumn.CreateFromNullable(new float?[] { 1f, null, 3f });
+        var nullableCol = NivaraColumnFactory.CreateFromNullable(new float?[] { 1f, null, 3f });
 
         // Act & Assert
         var ex = Assert.Throws<AutoGradException>(() => ForwardGradTensor<float>.FromColumn(nullableCol));
@@ -413,7 +413,7 @@ public class TypeSafetyTests
     {
         // Arrange
         var col = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
-        var nullableTangent = NivaraColumn.CreateFromNullable(new float?[] { 1f, null, 3f });
+        var nullableTangent = NivaraColumnFactory.CreateFromNullable(new float?[] { 1f, null, 3f });
 
         // Act & Assert
         var ex = Assert.Throws<AutoGradException>(() =>
@@ -505,7 +505,7 @@ public class TypeSafetyTests
     public void NivaraColumn_AsTensorView_ThrowsOnNulls()
     {
         // Arrange
-        var column = NivaraColumn.CreateFromNullable(new float?[] { 1f, null, 3f });
+        var column = NivaraColumnFactory.CreateFromNullable(new float?[] { 1f, null, 3f });
 
         // Act + Assert
         var ex = Assert.Throws<InvalidOperationException>(() => column.AsTensorView());

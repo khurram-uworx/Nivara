@@ -213,7 +213,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert
-            Assert.Throws<SchemaValidationException>(() => NivaraParquetWriter.WriteParquetBatch(frames, tempFile));
+            Assert.Throws<DataSchemaValidationException>(() => NivaraParquetWriter.WriteParquetBatch(frames, tempFile));
         }
         finally
         {
@@ -230,7 +230,7 @@ public class ParquetWriterTests
     {
         // Arrange
         var nullableIntArray = new int?[] { 1, null, 3, null, 5 };
-        var intColumn = NivaraColumn.CreateFromNullable(nullableIntArray);
+        var intColumn = NivaraColumnFactory.CreateFromNullable(nullableIntArray);
 
         var stringArray = new string[] { "a", null!, "c", null!, "e" };
         var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringArray);

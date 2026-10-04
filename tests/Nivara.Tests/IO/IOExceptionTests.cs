@@ -131,7 +131,7 @@ public class IOExceptionTests
     public void SchemaValidationException_BasicConstructor_InitializesCorrectly()
     {
         const string message = "Schema validation failed";
-        var exception = new SchemaValidationException(message);
+        var exception = new DataSchemaValidationException(message);
 
         Assert.That(exception.Message, Is.EqualTo(message));
         Assert.That(exception.TypeMismatches, Is.Empty);
@@ -146,7 +146,7 @@ public class IOExceptionTests
         var typeMismatches = new[] { "Column 'Age' expected int but got string", "Column 'Name' missing" };
         const string expectedSchema = "Age: int, Name: string";
         const string actualSchema = "Age: string";
-        var exception = new SchemaValidationException(message, typeMismatches, expectedSchema, actualSchema);
+        var exception = new DataSchemaValidationException(message, typeMismatches, expectedSchema, actualSchema);
 
         Assert.That(exception.Message, Is.EqualTo(message));
         Assert.That(exception.TypeMismatches, Is.EqualTo(typeMismatches));
@@ -157,7 +157,7 @@ public class IOExceptionTests
     [Test]
     public void SchemaValidationException_InheritsFromNivaraIOException()
     {
-        var exception = new SchemaValidationException("Test message");
+        var exception = new DataSchemaValidationException("Test message");
         Assert.That(exception, Is.InstanceOf<NivaraIOException>());
     }
 
@@ -166,7 +166,7 @@ public class IOExceptionTests
     {
         const string message = "Schema validation failed";
         var typeMismatches = Array.Empty<string>();
-        var exception = new SchemaValidationException(message, typeMismatches, "expected", "actual");
+        var exception = new DataSchemaValidationException(message, typeMismatches, "expected", "actual");
 
         Assert.That(exception.TypeMismatches, Is.Empty);
         Assert.That(exception.ExpectedSchema, Is.EqualTo("expected"));
@@ -259,7 +259,7 @@ public class IOExceptionTests
     public void AllCustomExceptions_InheritFromNivaraIOException()
     {
         var unsupportedTypeException = new UnsupportedTypeException(typeof(Guid));
-        var schemaValidationException = new SchemaValidationException("Test");
+        var schemaValidationException = new DataSchemaValidationException("Test");
         var dataCorruptionException = new DataCorruptionException("Test");
 
         Assert.That(unsupportedTypeException, Is.InstanceOf<NivaraIOException>());
@@ -272,7 +272,7 @@ public class IOExceptionTests
     {
         var nivaraIOException = new NivaraIOException("Test");
         var unsupportedTypeException = new UnsupportedTypeException(typeof(Guid));
-        var schemaValidationException = new SchemaValidationException("Test");
+        var schemaValidationException = new DataSchemaValidationException("Test");
         var dataCorruptionException = new DataCorruptionException("Test");
 
         Assert.That(nivaraIOException, Is.InstanceOf<Exception>());
@@ -343,7 +343,7 @@ public class IOExceptionTests
         var typeMismatches = new[] { "Column 'Age' expected int but got string" };
         const string expectedSchema = "Age: int";
         const string actualSchema = "Age: string";
-        var originalException = new SchemaValidationException(message, typeMismatches, expectedSchema, actualSchema);
+        var originalException = new DataSchemaValidationException(message, typeMismatches, expectedSchema, actualSchema);
 
         // Create a serializable representation
         var serializableData = new
@@ -406,7 +406,7 @@ public class IOExceptionTests
         {
             new NivaraIOException("IO Error", "/path/file.parquet", "reading"),
             new UnsupportedTypeException(typeof(Guid), new[] { "string", "byte[]" }),
-            new SchemaValidationException("Schema error", new[] { "mismatch1" }, "expected", "actual"),
+            new DataSchemaValidationException("Schema error", new[] { "mismatch1" }, "expected", "actual"),
             new DataCorruptionException("Corruption", "/path/file.parquet", "reading", new[] { "col1" }, new Range(0, 10))
         };
 
@@ -416,7 +416,7 @@ public class IOExceptionTests
             object additionalData = exception switch
             {
                 DataCorruptionException dce => new { dce.AffectedColumns, RowRangeStart = dce.AffectedRowRange.Start.Value, RowRangeEnd = dce.AffectedRowRange.End.Value },
-                SchemaValidationException sve => new { sve.TypeMismatches, sve.ExpectedSchema, sve.ActualSchema },
+                DataSchemaValidationException sve => new { sve.TypeMismatches, sve.ExpectedSchema, sve.ActualSchema },
                 UnsupportedTypeException ute => new { TypeName = ute.UnsupportedType.Name, ute.SuggestedAlternatives },
                 NivaraIOException nio => new { nio.FilePath, nio.OperationContext },
                 _ => new { }
@@ -455,7 +455,7 @@ public class IOExceptionTests
     public void ExceptionProperties_WithNullCollections_HandleCorrectly()
     {
         // Test that exceptions handle null collections gracefully by using empty collections instead
-        var schemaException = new SchemaValidationException("Test", Array.Empty<string>(), "expected", "actual");
+        var schemaException = new DataSchemaValidationException("Test", Array.Empty<string>(), "expected", "actual");
         Assert.That(schemaException.TypeMismatches, Is.Not.Null);
         Assert.That(schemaException.TypeMismatches, Is.Empty);
 
@@ -472,7 +472,7 @@ public class IOExceptionTests
     public void ExceptionProperties_AreReadOnly_AfterInitialization()
     {
         var unsupportedException = new UnsupportedTypeException(typeof(Guid), new[] { "string" });
-        var schemaException = new SchemaValidationException("Test", new[] { "mismatch" }, "expected", "actual");
+        var schemaException = new DataSchemaValidationException("Test", new[] { "mismatch" }, "expected", "actual");
         var corruptionException = new DataCorruptionException("Test", new[] { "col1" }, new Range(0, 10));
 
         // Verify that collections are read-only (IReadOnlyList)

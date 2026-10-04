@@ -53,7 +53,7 @@ public class ColumnExpressionTests
     {
         var colRef = new ColumnReference("NonExistent");
 
-        var ex = Assert.Throws<SchemaValidationException>(() => colRef.Validate(testSchema));
+        var ex = Assert.Throws<QuerySchemaValidationException>(() => colRef.Validate(testSchema));
         Assert.That(ex.Message, Does.Contain("Column 'NonExistent' not found in schema"));
         Assert.That(ex.Message, Does.Contain("Available columns: Name, Age, Salary, IsActive"));
     }
@@ -63,7 +63,7 @@ public class ColumnExpressionTests
     {
         var colRef = new ColumnReference("Age", typeof(string)); // Age is int, not string
 
-        var ex = Assert.Throws<SchemaValidationException>(() => colRef.Validate(testSchema));
+        var ex = Assert.Throws<QuerySchemaValidationException>(() => colRef.Validate(testSchema));
         Assert.That(ex.Message, Does.Contain("Column 'Age' has type Int32 but expected String"));
     }
 
@@ -237,7 +237,7 @@ public class ColumnExpressionTests
 
         var expr = new BinaryExpression(BinaryOperator.Add, validLeft, invalidRight);
 
-        var ex = Assert.Throws<SchemaValidationException>(() => expr.Validate(testSchema));
+        var ex = Assert.Throws<QuerySchemaValidationException>(() => expr.Validate(testSchema));
         Assert.That(ex.Message, Does.Contain("NonExistent"));
     }
 
@@ -249,7 +249,7 @@ public class ColumnExpressionTests
 
         var expr = new ComparisonExpression(ComparisonOperator.Equal, validLeft, invalidRight);
 
-        var ex = Assert.Throws<SchemaValidationException>(() => expr.Validate(testSchema));
+        var ex = Assert.Throws<QuerySchemaValidationException>(() => expr.Validate(testSchema));
         Assert.That(ex.Message, Does.Contain("NonExistent"));
     }
 
@@ -260,7 +260,7 @@ public class ColumnExpressionTests
 
         var expr = new ScalarExpression(BinaryOperator.Add, invalidColumn, 5);
 
-        var ex = Assert.Throws<SchemaValidationException>(() => expr.Validate(testSchema));
+        var ex = Assert.Throws<QuerySchemaValidationException>(() => expr.Validate(testSchema));
         Assert.That(ex.Message, Does.Contain("NonExistent"));
     }
 

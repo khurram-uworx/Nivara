@@ -58,19 +58,19 @@ internal static class TypedLinqMetadata
     /// </summary>
     /// <param name="rowType">The row type to validate</param>
     /// <param name="schema">The schema the row type must map to</param>
-    /// <exception cref="SchemaValidationException">Thrown when the row type is invalid</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when the row type is invalid</exception>
     public static void ValidateRowType(Type rowType, Schema schema)
     {
         ArgumentNullException.ThrowIfNull(rowType);
         ArgumentNullException.ThrowIfNull(schema);
 
         if (rowType == typeof(string) || rowType.IsPrimitive || rowType.IsValueType || rowType.IsInterface)
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Row type '{rowType.Name}' must be a non-primitive class with at least one readable public property.");
 
         var readable = GetReadableProperties(rowType);
         if (readable.Length == 0)
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Row type '{rowType.Name}' has no readable public properties; a typed query requires at least one mapping property.");
 
         var columnLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -80,13 +80,13 @@ internal static class TypedLinqMetadata
         foreach (var property in readable)
         {
             if (!columnLookup.TryGetValue(property.Name, out var columnName))
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Property '{property.Name}' on row type '{rowType.Name}' does not map to any column in the frame schema. " +
                     $"Available columns: {string.Join(", ", schema.ColumnNames)}.");
 
             var columnType = schema.GetColumnType(columnName);
             if (!ArePropertyTypesCompatible(property.PropertyType, columnType))
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Property '{property.Name}' of type '{property.PropertyType.Name}' is incompatible with column '{columnName}' " +
                     $"of type '{columnType.Name}'. Properties must match the column type exactly or differ only by nullability.");
         }

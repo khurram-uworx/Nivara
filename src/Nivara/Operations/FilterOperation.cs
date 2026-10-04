@@ -38,9 +38,9 @@ sealed class FilterOperation : IQueryOperation
         {
             Condition.Validate(inputSchema);
         }
-        catch (SchemaValidationException ex)
+        catch (QuerySchemaValidationException ex)
         {
-            throw new SchemaValidationException($"Filter condition validation failed: {ex.Message}");
+            throw new QuerySchemaValidationException($"Filter condition validation failed: {ex.Message}");
         }
 
         // Filter doesn't change the schema structure, only the number of rows

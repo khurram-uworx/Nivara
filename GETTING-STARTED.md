@@ -47,7 +47,7 @@ Nulls are tracked explicitly using validity masks, not sentinel values:
 ```csharp
 // Create column with nullable data
 var data = new int?[] { 1, null, 3 };
-var column = NivaraColumn.CreateFromNullable(data);
+var column = NivaraColumnFactory.CreateFromNullable(data);
 
 Console.WriteLine(column.HasNulls);   // True
 Console.WriteLine(column.NullCount);  // 1
@@ -57,7 +57,7 @@ Console.WriteLine(column.IsNull(1));  // True (index 1 is null)
 Null-aware operations behave predictably:
 
 <!-- gate
-locals: NivaraColumn<int> column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
+locals: NivaraColumn<int> column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
 -->
 ```csharp
 var filled = column.FillNull(0);  // [1, 0, 3]
@@ -99,7 +99,7 @@ NivaraSeries<float> scores = [0.8f, 0.5f, 0.9f];
 var strings = NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C" });
 
 // From nullable arrays
-var nullableInts = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
+var nullableInts = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
 ```
 
 ### Column Operations
@@ -125,7 +125,7 @@ var max = numbers.Max();             // 5
 
 ```csharp
 var data = new int?[] { 1, null, 3, null, 5 };
-var column = NivaraColumn.CreateFromNullable(data);
+var column = NivaraColumnFactory.CreateFromNullable(data);
 
 // Check for nulls
 Console.WriteLine(column.HasNulls);              // True
@@ -545,7 +545,7 @@ The row type carries the nullability, so the ordering below is expressed in term
 ```csharp
 var frameWithNulls = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
-    ("Score", NivaraColumn.CreateFromNullable(new int?[] { 85, null, 92 }))
+    ("Score", NivaraColumnFactory.CreateFromNullable(new int?[] { 85, null, 92 }))
 );
 
 // Nulls first
@@ -658,7 +658,7 @@ var nameOnly = frame.Exclude("Age", "Salary");
 
 ```csharp
 var nullableData = new int?[] { 1, null, 3, null, 5 };
-var column = NivaraColumn.CreateFromNullable(nullableData);
+var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 var frame = NivaraFrame.Create(("Numbers", column));
 
 // Transform with null propagation
@@ -672,8 +672,8 @@ var doubled = frame.WithTransformedColumn<int, int>(
 
 // Multi-column with null propagation
 var frameWithNulls = NivaraFrame.Create(
-    ("A", NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 })),
-    ("B", NivaraColumn.CreateFromNullable(new int?[] { 2, 4, null }))
+    ("A", NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 })),
+    ("B", NivaraColumnFactory.CreateFromNullable(new int?[] { 2, 4, null }))
 );
 
 var sum = frameWithNulls.WithComputedColumn<int, int, int>(
@@ -989,7 +989,7 @@ var sum = floats.Sum(); // Uses TensorPrimitives.Sum for performance
 
 // Null-aware aggregation
 var nullableData = new int?[] { 1, null, 3, null, 5 };
-var column = NivaraColumn.CreateFromNullable(nullableData);
+var column = NivaraColumnFactory.CreateFromNullable(nullableData);
 var series = new NivaraSeries<int>(column);
 
 Console.WriteLine(series.Sum());     // 9 (ignores nulls)
@@ -1133,7 +1133,7 @@ Nivara provides tensor interop for moving tabular data into platform tensor APIs
 ```csharp
 using Nivara.Tensors;
 
-var column = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+var column = NivaraColumnFactory.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
 NullableTensor<float> tensor = column.ToNullableTensor();
 
 Console.WriteLine(tensor.Data.Lengths[0]);       // 3

@@ -207,7 +207,7 @@ public class RankFunctionsFrameTests
     public void RowNumber_WithSpec_NullOrderKey_NumberedLast()
     {
         var frame = FrameWith(
-            ("t", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 1, null })),
+            ("t", NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 1, null })),
             ("v", IntColumn(10, 20, 30, 40)));
 
         var spec = frame.Over().OrderBy("t");

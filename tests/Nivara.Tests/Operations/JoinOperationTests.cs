@@ -28,7 +28,7 @@ public class JoinOperationTests
     private NivaraFrame CreateLeftFrameWithNulls()
     {
         return NivaraFrame.Create(
-            ("Id", NivaraColumn.CreateFromNullable(new int?[] { 1, 2, null, 4 })),
+            ("Id", NivaraColumnFactory.CreateFromNullable(new int?[] { 1, 2, null, 4 })),
             ("Name", NivaraColumn<string>.CreateForReferenceType(new string?[] { "Alice", "Bob", null, "David" }!))
         );
     }
@@ -36,7 +36,7 @@ public class JoinOperationTests
     private NivaraFrame CreateRightFrameWithNulls()
     {
         return NivaraFrame.Create(
-            ("Id", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, 5 })),
+            ("Id", NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 4, 5 })),
             ("Department", NivaraColumn<string>.CreateForReferenceType(new string?[] { "HR", null, "Finance", "Marketing" }!))
         );
     }
@@ -276,7 +276,7 @@ public class JoinOperationTests
         );
 
         // Act & Assert
-        Assert.Throws<SchemaValidationException>(() => left.InnerJoin(right, "Id"),
+        Assert.Throws<QuerySchemaValidationException>(() => left.InnerJoin(right, "Id"),
             "Should throw exception when join key types are incompatible");
     }
 
@@ -288,7 +288,7 @@ public class JoinOperationTests
         var right = CreateRightFrame();
 
         // Act & Assert
-        Assert.Throws<SchemaValidationException>(() => left.InnerJoin(right, "NonExistentColumn"),
+        Assert.Throws<QuerySchemaValidationException>(() => left.InnerJoin(right, "NonExistentColumn"),
             "Should throw exception when join key doesn't exist");
     }
 
@@ -331,7 +331,7 @@ public class JoinOperationTests
         );
 
         // Act & Assert
-        Assert.Throws<SchemaValidationException>(() =>
+        Assert.Throws<QuerySchemaValidationException>(() =>
             left.InnerJoin(right, "Id", ColumnDisambiguationStrategy.Error),
             "Should throw exception when column names conflict and error strategy is used");
     }

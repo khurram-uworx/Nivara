@@ -25,7 +25,7 @@ public class NivaraSeriesIsValidTests
     {
         // Arrange
         var nullableData = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableData);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableData);
         var series = new NivaraSeries<int>(column);
 
         // Act & Assert

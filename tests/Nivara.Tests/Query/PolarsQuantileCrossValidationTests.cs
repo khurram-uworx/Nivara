@@ -40,7 +40,7 @@ public class PolarsQuantileCrossValidationTests
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
                 .ToArray();
 
-            using var series = new NivaraSeries<double>(NivaraColumn.CreateFromNullable(values));
+            using var series = new NivaraSeries<double>(NivaraColumnFactory.CreateFromNullable(values));
 
             if (kind == "quantile")
             {
@@ -71,7 +71,7 @@ public class PolarsQuantileCrossValidationTests
     static void AssertPartitionedMedians(
         string name, string?[] partition, double?[] values, JsonElement groupsEl)
     {
-        var vColumn = NivaraColumn.CreateFromNullable(values);
+        var vColumn = NivaraColumnFactory.CreateFromNullable(values);
         var aggregation = AggregationFunctions.Median();
 
         var groupIndexes = new Dictionary<string, List<int>>();

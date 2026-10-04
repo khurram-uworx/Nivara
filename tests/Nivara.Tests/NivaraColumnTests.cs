@@ -460,7 +460,7 @@ public class NivaraColumnTests
     public void NullMaskMaintenance_ScalarAndReverseArithmetic_PreservesNullPositions()
     {
         var values = new double?[] { 1.0, null, 3.0 };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
 
         var addResult = column.Add(5.0);
         var subtractResult = column.Subtract(5.0);
@@ -769,7 +769,7 @@ public class NivaraColumnTests
     public void ArithmeticOperations_OnBFloat16Column_PreservesNullMask()
     {
         var values = new BFloat16?[] { (BFloat16)1.5f, null, (BFloat16)3.5f };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
 
         var result = column.Multiply((BFloat16)2.0f);
         for (int i = 0; i < values.Length; i++)
@@ -866,7 +866,7 @@ public class NivaraColumnTests
     public void NullMaskMaintenance_ExtendedDomainArithmetic_PreservesNullPositions()
     {
         var decimalValues = new decimal?[] { 1.5m, null, 3.5m };
-        var decimalColumn = NivaraColumn.CreateFromNullable(decimalValues);
+        var decimalColumn = NivaraColumnFactory.CreateFromNullable(decimalValues);
         var decimalResult = decimalColumn.Multiply(2m);
         for (int i = 0; i < decimalValues.Length; i++)
             Assert.That(decimalResult.IsNull(i), Is.EqualTo(decimalValues[i] == null));
@@ -874,15 +874,15 @@ public class NivaraColumnTests
         Assert.That(decimalResult[2], Is.EqualTo(7.0m));
 
         var halfValues = new Half?[] { (Half)1.5f, null, (Half)3.5f };
-        var halfColumn = NivaraColumn.CreateFromNullable(halfValues);
+        var halfColumn = NivaraColumnFactory.CreateFromNullable(halfValues);
         var halfResult = halfColumn.Multiply((Half)2.0f);
         for (int i = 0; i < halfValues.Length; i++)
             Assert.That(halfResult.IsNull(i), Is.EqualTo(halfValues[i] == null));
 
         var leftValues = new Int128?[] { 5, null, 9 };
         var rightValues = new Int128?[] { null, 3, 4 };
-        var leftColumn = NivaraColumn.CreateFromNullable(leftValues);
-        var rightColumn = NivaraColumn.CreateFromNullable(rightValues);
+        var leftColumn = NivaraColumnFactory.CreateFromNullable(leftValues);
+        var rightColumn = NivaraColumnFactory.CreateFromNullable(rightValues);
         var sumResult = leftColumn.Add(rightColumn);
         for (int i = 0; i < leftValues.Length; i++)
             Assert.That(sumResult.IsNull(i), Is.EqualTo(leftValues[i] == null || rightValues[i] == null));
@@ -1977,7 +1977,7 @@ public class NivaraColumnTests
     {
         // Test with nullable integers
         var nullableInts = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableInts);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableInts);
 
         Assert.That(column, Is.Not.Null, "Column should be created from nullable array");
         Assert.That(column.Length, Is.EqualTo(5), "Column should have correct length");
@@ -2004,7 +2004,7 @@ public class NivaraColumnTests
     {
         // Test with nullable doubles
         var nullableDoubles = new double?[] { 1.5, null, 3.14 };
-        var doubleColumn = NivaraColumn.CreateFromNullable(nullableDoubles);
+        var doubleColumn = NivaraColumnFactory.CreateFromNullable(nullableDoubles);
 
         Assert.That(doubleColumn.Length, Is.EqualTo(3));
         Assert.That(doubleColumn.HasNulls, Is.True);
@@ -2014,7 +2014,7 @@ public class NivaraColumnTests
 
         // Test with nullable booleans
         var nullableBools = new bool?[] { true, null, false, null };
-        var boolColumn = NivaraColumn.CreateFromNullable(nullableBools);
+        var boolColumn = NivaraColumnFactory.CreateFromNullable(nullableBools);
 
         Assert.That(boolColumn.Length, Is.EqualTo(4));
         Assert.That(boolColumn.HasNulls, Is.True);
@@ -2033,7 +2033,7 @@ public class NivaraColumnTests
     {
         // Test null array
         Assert.Throws<ArgumentNullException>(() =>
-            NivaraColumn.CreateFromNullable<int>(null!));
+            NivaraColumnFactory.CreateFromNullable<int>(null!));
     }
 
     /// <summary>
@@ -2044,7 +2044,7 @@ public class NivaraColumnTests
     public void AdvancedNullHandling_ShouldWorkCorrectly()
     {
         var nullableInts = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn.CreateFromNullable(nullableInts);
+        var column = NivaraColumnFactory.CreateFromNullable(nullableInts);
 
         // Test FillNull
         var filled = column.FillNull(0);
@@ -2075,11 +2075,11 @@ public class NivaraColumnTests
     public void NullFillOperations_ShouldHandleEdgeCases()
     {
         // Test forward fill with leading null (should throw)
-        var leadingNullColumn = NivaraColumn.CreateFromNullable(new int?[] { null, 2, 3 });
+        var leadingNullColumn = NivaraColumnFactory.CreateFromNullable(new int?[] { null, 2, 3 });
         Assert.Throws<InvalidOperationException>(() => leadingNullColumn.FillNullForward());
 
         // Test backward fill with trailing null (should throw)
-        var trailingNullColumn = NivaraColumn.CreateFromNullable(new int?[] { 1, 2, null });
+        var trailingNullColumn = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, 2, null });
         Assert.Throws<InvalidOperationException>(() => trailingNullColumn.FillNullBackward());
 
         // Test operations on empty column
@@ -2089,14 +2089,14 @@ public class NivaraColumnTests
     }
 
     /// <summary>
-    /// The non-generic static factory <see cref="NivaraColumn.CreateFromNullable{T}"/> must
+    /// The non-generic static factory <see cref="NivaraColumnFactory.CreateFromNullable{T}"/> must
     /// produce the expected values and null mask for nullable value-type input.
     /// </summary>
     [Test]
     public void StaticFactory_CreateFromNullable_ProducesExpectedValuesAndMask()
     {
         int?[] intValues = [1, null, 3, null, 5];
-        var factoryColumn = NivaraColumn.CreateFromNullable(intValues);
+        var factoryColumn = NivaraColumnFactory.CreateFromNullable(intValues);
 
         Assert.That(factoryColumn.ToArray(), Is.EqualTo(new[] { 1, 0, 3, 0, 5 }));
         Assert.That(factoryColumn.HasNulls, Is.True);
@@ -2105,7 +2105,7 @@ public class NivaraColumnTests
             Assert.That(factoryColumn.IsNull(i), Is.EqualTo(intValues[i] == null));
 
         double?[] doubleValues = [1.5, null, 3.14];
-        var doubleColumn = NivaraColumn.CreateFromNullable(doubleValues);
+        var doubleColumn = NivaraColumnFactory.CreateFromNullable(doubleValues);
         Assert.That(doubleColumn.Length, Is.EqualTo(3));
         Assert.That(doubleColumn.HasNulls, Is.True);
         Assert.That(doubleColumn[0], Is.EqualTo(1.5));
@@ -2120,11 +2120,11 @@ public class NivaraColumnTests
     [Test]
     public void StaticFactory_CreateFromNullable_HandlesEmptyAndNullArrays()
     {
-        var emptyColumn = NivaraColumn.CreateFromNullable(Array.Empty<int?>());
+        var emptyColumn = NivaraColumnFactory.CreateFromNullable(Array.Empty<int?>());
         Assert.That(emptyColumn.Length, Is.EqualTo(0));
         Assert.That(emptyColumn.HasNulls, Is.False);
 
-        Assert.Throws<ArgumentNullException>(() => NivaraColumn.CreateFromNullable<int>(null!));
+        Assert.Throws<ArgumentNullException>(() => NivaraColumnFactory.CreateFromNullable<int>(null!));
     }
 
     /// <summary>
@@ -2135,14 +2135,14 @@ public class NivaraColumnTests
     public void StaticFactory_CreateFromNullable_SupportsExtendedDomain()
     {
         decimal?[] decimalValues = [1.5m, null, 3.5m];
-        var decimalColumn = NivaraColumn.CreateFromNullable(decimalValues);
+        var decimalColumn = NivaraColumnFactory.CreateFromNullable(decimalValues);
         Assert.That(decimalColumn.HasNulls, Is.True);
         Assert.That(decimalColumn[0], Is.EqualTo(1.5m));
         Assert.That(decimalColumn.IsNull(1), Is.True);
         Assert.That(decimalColumn[2], Is.EqualTo(3.5m));
 
         Half?[] halfValues = [(Half)1.5f, null, (Half)3.5f];
-        var halfColumn = NivaraColumn.CreateFromNullable(halfValues);
+        var halfColumn = NivaraColumnFactory.CreateFromNullable(halfValues);
         Assert.That(halfColumn.HasNulls, Is.True);
         Assert.That(halfColumn[0], Is.EqualTo((Half)1.5f));
         Assert.That(halfColumn.IsNull(1), Is.True);
@@ -2169,7 +2169,7 @@ public class NivaraColumnTests
     [Test]
     public void TryGetSpan_WithNulls_ReturnsFalse()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
 
         var result = column.TryGetSpan(out var span);
 
@@ -2200,7 +2200,7 @@ public class NivaraColumnTests
     [Test]
     public void CopyTo_FillValue_ReplacesNullsCorrectly()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
         var dest = new int[5];
 
         column.CopyTo(dest.AsSpan(), -1);
@@ -2232,7 +2232,7 @@ public class NivaraColumnTests
     [Test]
     public void CopyTo_WithMask_OutputsCorrectMaskAndFillValues()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 10, null, 30, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 10, null, 30, null });
         var dest = new int[4];
         var mask = new bool[4];
 
@@ -2245,7 +2245,7 @@ public class NivaraColumnTests
     [Test]
     public void CopyTo_WithMask_ThrowsOnShortMask()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
         var dest = new int[3];
         var mask = new bool[2];
 
@@ -2278,7 +2278,7 @@ public class NivaraColumnTests
     [Test]
     public void TryGetNullMask_WithNulls_ReturnsTrueAndMask()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
 
         var result = column.TryGetNullMask(out var mask);
 
@@ -2327,7 +2327,7 @@ public class NivaraColumnTests
     [Test]
     public void Select_WithNulls_NullsPreserved()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
         var result = column.Select(x => x * 10);
 
         Assert.That(result.IsNull(0), Is.False);
@@ -2367,8 +2367,8 @@ public class NivaraColumnTests
     [Test]
     public void Zip_NullPropagation_NullsPreserved()
     {
-        var left = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
-        var right = NivaraColumn.CreateFromNullable(new int?[] { null, 20, 30 });
+        var left = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
+        var right = NivaraColumnFactory.CreateFromNullable(new int?[] { null, 20, 30 });
         var result = left.Zip(right, (a, b) => a + b);
 
         Assert.That(result.Length, Is.EqualTo(3));
@@ -2403,14 +2403,14 @@ public class NivaraColumnTests
     [Test]
     public void Sum_WithNulls_NullsSkipped()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
         Assert.That(column.Sum(), Is.EqualTo(9));
     }
 
     [Test]
     public void Sum_AllNull_ReturnsZero()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
         Assert.That(column.Sum(), Is.EqualTo(0));
     }
 
@@ -2431,14 +2431,14 @@ public class NivaraColumnTests
     [Test]
     public void Mean_WithNulls_NullsSkipped()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 1.0, null, 3.0 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 1.0, null, 3.0 });
         Assert.That(column.Mean(), Is.EqualTo(2.0));
     }
 
     [Test]
     public void Mean_AllNull_ReturnsNaN()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null });
         Assert.That(double.IsNaN(column.Mean()), Is.True);
     }
 
@@ -2453,7 +2453,7 @@ public class NivaraColumnTests
     [Test]
     public void Min_Max_WithNulls_NullsSkipped()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, 3, null, 1, null, 5 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, 3, null, 1, null, 5 });
         Assert.That(column.Min(), Is.EqualTo(1));
         Assert.That(column.Max(), Is.EqualTo(5));
     }
@@ -2461,7 +2461,7 @@ public class NivaraColumnTests
     [Test]
     public void Min_Max_AllNull_ThrowsInvalidOperationException()
     {
-        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null });
         Assert.Throws<InvalidOperationException>(() => column.Min());
         Assert.Throws<InvalidOperationException>(() => column.Max());
     }

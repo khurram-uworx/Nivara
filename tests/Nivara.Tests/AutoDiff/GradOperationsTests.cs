@@ -1186,8 +1186,8 @@ public class GradOperationsTests
         var meanValues = new float?[] { 1f, null, 3f };
         var logVarValues = new float?[] { 0f, 1f, null };
 
-        var meanCol = NivaraColumn.CreateFromNullable(meanValues).WithoutNulls();
-        var logVarCol = NivaraColumn.CreateFromNullable(logVarValues).WithoutNulls();
+        var meanCol = NivaraColumnFactory.CreateFromNullable(meanValues).WithoutNulls();
+        var logVarCol = NivaraColumnFactory.CreateFromNullable(logVarValues).WithoutNulls();
 
         var mean = new ReverseGradTensor<float>(meanCol, requiresGrad: true);
         var logVar = new ReverseGradTensor<float>(logVarCol, requiresGrad: true);
@@ -1338,8 +1338,8 @@ public class GradOperationsTests
         var meanValues = new float?[] { 1f, null };
         var logVarValues = new float?[] { 0f, 0f };
 
-        var meanCol = NivaraColumn.CreateFromNullable(meanValues).WithoutNulls();
-        var logVarCol = NivaraColumn.CreateFromNullable(logVarValues).WithoutNulls();
+        var meanCol = NivaraColumnFactory.CreateFromNullable(meanValues).WithoutNulls();
+        var logVarCol = NivaraColumnFactory.CreateFromNullable(logVarValues).WithoutNulls();
 
         var mean = new ReverseGradTensor<float>(meanCol, requiresGrad: true);
         var logVar = new ReverseGradTensor<float>(logVarCol, requiresGrad: true);

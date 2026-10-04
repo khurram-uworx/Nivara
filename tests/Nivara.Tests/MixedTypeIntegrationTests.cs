@@ -256,9 +256,9 @@ public class MixedTypeIntegrationTests
     public void NullHandling_InMixedTypeOperations_WorksCorrectly()
     {
         // Arrange - Create mixed-type data with nulls
-        var intColumn = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var intColumn = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
         var stringColumn = NivaraColumn<string>.CreateForReferenceType(new string?[] { "A", null, "C", null, "E" }!);
-        var doubleColumn = NivaraColumn.CreateFromNullable(new double?[] { 1.1, 2.2, null, 4.4, null });
+        var doubleColumn = NivaraColumnFactory.CreateFromNullable(new double?[] { 1.1, 2.2, null, 4.4, null });
 
         var frame = NivaraFrame.Create(
             ("Integers", intColumn),

@@ -151,7 +151,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
         {
             if (!inputSchema.HasColumn(sortKey.ColumnName))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Sort key column '{sortKey.ColumnName}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
             }
 
@@ -159,7 +159,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
             var columnType = inputSchema.GetColumnType(sortKey.ColumnName);
             if (!IsComparableType(columnType))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Column '{sortKey.ColumnName}' of type '{columnType.Name}' is not comparable and cannot be used for sorting");
             }
         }

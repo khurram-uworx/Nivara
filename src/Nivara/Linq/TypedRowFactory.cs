@@ -21,7 +21,7 @@ internal static class TypedRowFactory<T>
     /// </summary>
     /// <param name="schema">The result schema</param>
     /// <returns>A delegate that materializes a row from an aligned column array and a row index</returns>
-    /// <exception cref="SchemaValidationException">Thrown when the row type cannot be materialized from the schema</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when the row type cannot be materialized from the schema</exception>
     public static Func<IColumn[], int, T> GetFactory(Schema schema)
     {
         ArgumentNullException.ThrowIfNull(schema);
@@ -49,13 +49,13 @@ internal static class TypedRowFactory<T>
         foreach (var property in readable)
         {
             if (!columnLookup.TryGetValue(property.Name, out var index))
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Property '{property.Name}' on row type '{type.Name}' does not map to any column in the result schema. " +
                     $"Available columns: {string.Join(", ", schema.ColumnNames)}.");
 
             var columnType = schema.GetColumnType(schema.ColumnNames[index]);
             if (!TypedLinqMetadata.ArePropertyTypesCompatible(property.PropertyType, columnType))
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Property '{property.Name}' of type '{property.PropertyType.Name}' is incompatible with column " +
                     $"'{schema.ColumnNames[index]}' of type '{columnType.Name}'.");
 
@@ -86,7 +86,7 @@ internal static class TypedRowFactory<T>
         else
         {
             var defaultConstructor = type.GetConstructor(BindingFlags.Public | BindingFlags.Instance, binder: null, Type.EmptyTypes, modifiers: null)
-                ?? throw new SchemaValidationException(
+                ?? throw new QuerySchemaValidationException(
                     $"Row type '{type.Name}' has no parameterless constructor and no constructor whose parameters map to the result columns; " +
                     "it cannot be materialized from a query result.");
 
@@ -100,7 +100,7 @@ internal static class TypedRowFactory<T>
                 .ToArray();
 
             if (bindings.Length == 0)
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Row type '{type.Name}' has no settable properties that map to the result schema; it cannot be materialized from a query result.");
 
             body = Expression.MemberInit(instance, bindings);
@@ -154,7 +154,7 @@ internal static class TypedRowFactory<T>
         if (value is null)
         {
             if (typeof(TResult).IsValueType && Nullable.GetUnderlyingType(typeof(TResult)) is null)
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Column '{columnName}' contains a null value that cannot be assigned to the non-nullable property type '{typeof(TResult)}'.");
 
             return default!;

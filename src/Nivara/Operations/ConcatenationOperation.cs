@@ -134,7 +134,7 @@ sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOpe
             var firstSchema = schemas[0];
             for (int i = 1; i < schemas.Count; i++)
                 if (!firstSchema.IsCompatibleWith(schemas[i], requireExactMatch: true))
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Schema mismatch in vertical concatenation at source {i}. " +
                         $"Expected: {firstSchema}, Actual: {schemas[i]}",
                         firstSchema,
@@ -162,7 +162,7 @@ sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOpe
             {
                 var columnType = schema.ColumnTypes[columnName];
                 if (seenColumns.Contains(columnName))
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Column name conflict in horizontal concatenation: '{columnName}' appears in multiple sources",
                         schemas[0],
                         schema);
@@ -188,7 +188,7 @@ sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOpe
                 if (allColumns.TryGetValue(columnName, out var existingType))
                     // Validate type compatibility
                     if (existingType != columnType)
-                        throw new SchemaValidationException(
+                        throw new QuerySchemaValidationException(
                             $"Type mismatch for column '{columnName}': {existingType.Name} vs {columnType.Name}",
                             schemas[0],
                             schema);
@@ -244,7 +244,7 @@ sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOpe
                     }
                 }
                 else
-                    throw new SchemaValidationException(
+                    throw new QuerySchemaValidationException(
                         $"Column '{columnName}' is missing from one of the sources and MismatchHandling is set to Error");
             }
 

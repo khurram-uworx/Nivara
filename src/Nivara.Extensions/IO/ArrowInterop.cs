@@ -949,7 +949,7 @@ public static class ArrowInterop
             }
         }
 
-        return NivaraColumn.CreateFromNullable(values.ToArray());
+        return NivaraColumnFactory.CreateFromNullable(values.ToArray());
     }
 
     /// <summary>
@@ -1066,7 +1066,7 @@ public static class ArrowInterop
         {
             nullableArray[i] = values[i] == null ? null : (T)values[i]!;
         }
-        return NivaraColumn.CreateFromNullable(nullableArray);
+        return NivaraColumnFactory.CreateFromNullable(nullableArray);
     }
 
     /// <summary>

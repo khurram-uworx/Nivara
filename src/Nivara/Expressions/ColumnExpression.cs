@@ -51,7 +51,7 @@ public abstract class ColumnExpression
     /// Validates this expression against the provided schema
     /// </summary>
     /// <param name="schema">The schema to validate against</param>
-    /// <exception cref="SchemaValidationException">Thrown when the expression is invalid for the schema</exception>
+    /// <exception cref="QuerySchemaValidationException">Thrown when the expression is invalid for the schema</exception>
     public abstract void Validate(Schema schema);
 
     /// <summary>
@@ -361,7 +361,7 @@ internal sealed class ColumnReference : ColumnExpression
         if (!schema.HasColumn(ColumnName))
         {
             var availableColumns = string.Join(", ", schema.ColumnNames);
-            throw new SchemaValidationException($"Column '{ColumnName}' not found in schema. Available columns: {availableColumns}");
+            throw new QuerySchemaValidationException($"Column '{ColumnName}' not found in schema. Available columns: {availableColumns}");
         }
 
         var actualType = schema.GetColumnType(ColumnName);
@@ -373,7 +373,7 @@ internal sealed class ColumnReference : ColumnExpression
         }
         else if (ResultType != actualType)
         {
-            throw new SchemaValidationException($"Column '{ColumnName}' has type {actualType.Name} but expected {ResultType.Name}");
+            throw new QuerySchemaValidationException($"Column '{ColumnName}' has type {actualType.Name} but expected {ResultType.Name}");
         }
     }
 
@@ -482,7 +482,7 @@ internal sealed class BinaryExpression : ColumnExpression
         {
             if (!TypeCompatibilityValidator.AreArithmeticCompatible(Left.ResultType, Right.ResultType))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Binary {Operator} operation requires arithmetic-compatible types. " +
                     $"Left operand type: {Left.ResultType.Name}, Right operand type: {Right.ResultType.Name}");
             }
@@ -598,20 +598,20 @@ internal sealed class ComparisonExpression : ColumnExpression
 
         if (!compatible)
         {
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Comparison {Operator} operation requires compatible types. Left operand type: {Left.ResultType.Name}, Right operand type: {Right.ResultType.Name}");
         }
 
         // Validate that both operand types support comparison
         if (!TypeCompatibilityValidator.SupportsComparison(Left.ResultType))
         {
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Comparison {Operator} operation: Left operand type {Left.ResultType.Name} does not support comparison operations");
         }
 
         if (!TypeCompatibilityValidator.SupportsComparison(Right.ResultType))
         {
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Comparison {Operator} operation: Right operand type {Right.ResultType.Name} does not support comparison operations");
         }
     }
@@ -687,7 +687,7 @@ internal sealed class ScalarExpression : ColumnExpression
         {
             if (!TypeCompatibilityValidator.AreArithmeticCompatible(Column.ResultType, Scalar.GetType()))
             {
-                throw new SchemaValidationException(
+                throw new QuerySchemaValidationException(
                     $"Scalar {Operator} operation requires arithmetic-compatible types. " +
                     $"Column type: {Column.ResultType.Name}, Scalar type: {Scalar.GetType().Name}");
             }
@@ -750,7 +750,7 @@ internal sealed class NotExpression : ColumnExpression
 
         if (Operand.ResultType != typeof(bool))
         {
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Not operation requires a boolean operand, got {Operand.ResultType.Name}");
         }
     }
@@ -810,7 +810,7 @@ internal sealed class ConditionalExpression : ColumnExpression
 
         if (Test.ResultType != typeof(bool))
         {
-            throw new SchemaValidationException(
+            throw new QuerySchemaValidationException(
                 $"Conditional test expression must be boolean, got {Test.ResultType.Name}");
         }
 

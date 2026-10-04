@@ -807,7 +807,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithNullValues_IgnoresNulls()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
             var indices = new List<int> { 0, 1, 2, 3, 4 };
             var aggregation = AggregationFunctions.Quantile(0.25);
 
@@ -833,7 +833,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithAllNullValues_ReturnsNull()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null });
             var indices = new List<int> { 0, 1 };
             var aggregation = AggregationFunctions.Quantile(0.5);
 
@@ -927,7 +927,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithNullValues_IgnoresNulls()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
             var indices = new List<int> { 0, 1, 2, 3, 4 };
             var aggregation = AggregationFunctions.Median();
 
@@ -949,7 +949,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithAllNullValues_ReturnsNull()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null });
             var indices = new List<int> { 0, 1 };
             var aggregation = AggregationFunctions.Median();
 
@@ -995,7 +995,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithNullValues_IgnoresNulls()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
             var indices = new List<int> { 0, 1, 2, 3, 4 };
             var aggregation = AggregationFunctions.StdDev();
 
@@ -1015,7 +1015,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithAllNullValues_ReturnsNull()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null });
             var indices = new List<int> { 0, 1 };
             var aggregation = AggregationFunctions.StdDev();
 
@@ -1097,7 +1097,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithNullValues_IgnoresNulls()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
             var indices = new List<int> { 0, 1, 2, 3, 4 };
             var aggregation = AggregationFunctions.Variance();
 
@@ -1107,7 +1107,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithAllNullValues_ReturnsNull()
         {
-            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var column = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null });
             var indices = new List<int> { 0, 1 };
             var aggregation = AggregationFunctions.Variance();
 

@@ -110,7 +110,7 @@ public class RankOperationTests
     {
         var op = new RankOperation("rnk", RankKind.Rank, new[] { new SortKey("v") }, new[] { "missing" });
 
-        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
+        Assert.Throws<QuerySchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
     }
 
     [Test]
@@ -118,7 +118,7 @@ public class RankOperationTests
     {
         var op = new RankOperation("rnk", RankKind.Rank, new[] { new SortKey("missing") });
 
-        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
+        Assert.Throws<QuerySchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
     }
 
     [Test]
@@ -126,7 +126,7 @@ public class RankOperationTests
     {
         var op = new RankOperation("rnk", RankKind.Rank, new[] { new SortKey("name") });
 
-        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("name", typeof(object)))));
+        Assert.Throws<QuerySchemaValidationException>(() => op.TransformSchema(SchemaOf(("name", typeof(object)))));
     }
 
     [Test]
@@ -236,7 +236,7 @@ public class RankOperationTests
     public void QueryFrame_RowNumber_NullOrderKey_NumberedLast()
     {
         using var frame = FrameWith(
-            ("t", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 1, null })),
+            ("t", NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 1, null })),
             ("v", IntColumn(10, 20, 30, 40)));
         using var result = frame.AsQueryFrame()
             .RowNumber("rn", null, new[] { new SortKey("t") })
@@ -338,7 +338,7 @@ public class RankOperationTests
     {
         var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().PartitionBy("missing").OrderBy("v"));
 
-        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
+        Assert.Throws<QuerySchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
     }
 
     [Test]
@@ -346,7 +346,7 @@ public class RankOperationTests
     {
         var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().OrderBy("missing"));
 
-        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
+        Assert.Throws<QuerySchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
     }
 
     [Test]
@@ -354,7 +354,7 @@ public class RankOperationTests
     {
         var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().OrderBy("name"));
 
-        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("name", typeof(object)))));
+        Assert.Throws<QuerySchemaValidationException>(() => op.TransformSchema(SchemaOf(("name", typeof(object)))));
     }
 
     [Test]

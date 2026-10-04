@@ -47,7 +47,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 - **15 documentation call sites used the removed `NivaraColumn<T>.CreateFromNullable` shape (#520)** -
   the docs had drifted, not the API. `NivaraColumn<T>.CreateFromNullable(Array)` was deleted
   deliberately in #222 because it boxed per element via `Array.GetValue`; the replacement
-  `NivaraColumn.CreateFromNullable<T>(T?[])` moved to the non-generic class so that `where T : struct`
+  `NivaraColumnFactory.CreateFromNullable<T>(T?[])` moved to the non-generic class so that `where T : struct`
   can reject reference-type arguments at compile time instead of throwing
   `InvalidOperationException` at runtime, and it is documented as *the single entry point*. The code
   migration completed; the documentation never followed.
@@ -799,7 +799,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - **ML.NET float conversion is no longer silently lossy (#190)** — `MLNetInterop.ConvertToFloat` (used by `ToDataView`, `ToFeatureVectors`, `CreateFeatureMatrix`) throws `InvalidOperationException` for non-numeric values (string, bool, DateTime, Guid, …) instead of returning `0f`. Extended numeric types (`uint`, `ulong`, `ushort`, `sbyte`, `nint`, `nuint`, `Half`) are now converted. `null` still maps to `0f` per the ML feature-vector contract.
 
-- **Removed `NivaraColumn<T>.CreateFromNullable(Array)` (breaking, #222)** — the generic-class Array overload is deleted; `NivaraColumn.CreateFromNullable<T>(T?[])` is the single entry point for nullable value-type columns (all internal dispatch and every call site now use it). Migration: `NivaraColumn<T>.CreateFromNullable(values)` becomes `NivaraColumn.CreateFromNullable(values)` — the factory resolves `T` by inference; use an explicit type argument for `null` arrays (`NivaraColumn.CreateFromNullable<int>(null!)`). Reference-type arguments are now rejected at compile time by the `where T : struct` constraint instead of a runtime `InvalidOperationException`.
+- **Removed `NivaraColumn<T>.CreateFromNullable(Array)` (breaking, #222)** — the generic-class Array overload is deleted; `NivaraColumnFactory.CreateFromNullable<T>(T?[])` is the single entry point for nullable value-type columns (all internal dispatch and every call site now use it). Migration: `NivaraColumn<T>.CreateFromNullable(values)` becomes `NivaraColumnFactory.CreateFromNullable(values)` — the factory resolves `T` by inference; use an explicit type argument for `null` arrays (`NivaraColumn.CreateFromNullable<int>(null!)`). Reference-type arguments are now rejected at compile time by the `where T : struct` constraint instead of a runtime `InvalidOperationException`.
 
 ### Fixed
 

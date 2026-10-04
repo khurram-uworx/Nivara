@@ -53,7 +53,7 @@ public class BroadcastAggregateExpressionTests
     [Test]
     public void Evaluate_QuantileExpression_WithNulls_IgnoresNulls()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { 1.0, null, 3.0, 4.0 });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { 1.0, null, 3.0, 4.0 });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
 
         using var series = new NivaraSeries<double>(column);
@@ -86,7 +86,7 @@ public class BroadcastAggregateExpressionTests
     [Test]
     public void Evaluate_QuantileExpression_AllNullSource_ProducesAllNullColumn()
     {
-        var column = NivaraColumn.CreateFromNullable(new double?[] { null, null, null });
+        var column = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null, null });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
 
         var result = Evaluate(ColumnExpressions.Quantile(ColumnExpressions.Col("A"), 0.5), input);
@@ -156,7 +156,7 @@ public class BroadcastAggregateExpressionTests
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
                 .ToArray();
 
-            using var frame = NivaraFrame.Create(("v", NivaraColumn.CreateFromNullable(values)));
+            using var frame = NivaraFrame.Create(("v", NivaraColumnFactory.CreateFromNullable(values)));
 
             if (kind == "quantile")
             {

@@ -12,7 +12,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_DateOnlyColumn_PreservesValuesAndNulls()
     {
         var values = new DateOnly?[] { new(2023, 1, 15), null, new(2024, 12, 31) };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("DateColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -30,7 +30,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_GuidColumn_PreservesValuesAndNulls()
     {
         var values = new Guid?[] { Guid.NewGuid(), null, Guid.NewGuid() };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("GuidColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -48,7 +48,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_HalfColumn_PreservesValuesAndNulls()
     {
         var values = new Half?[] { (Half)1.5f, null, (Half)2.25f, (Half)(-3.5f) };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("HalfColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -66,7 +66,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_TimeOnlyColumn_PreservesValuesAndNulls()
     {
         var values = new TimeOnly?[] { new(14, 30, 45, 123), null, new(0, 0, 0) };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("TimeColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -84,7 +84,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_TimeSpanColumn_PreservesValuesAndNulls()
     {
         var values = new TimeSpan?[] { TimeSpan.FromTicks(123456789L), null, TimeSpan.Zero, TimeSpan.FromDays(2) };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("SpanColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -102,7 +102,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_NIntColumn_RestoresOriginalTypeViaMetadata()
     {
         var values = new nint?[] { (nint)42, null, (nint)(-17), nint.MinValue };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("NIntColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -120,7 +120,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_NUIntColumn_RestoresOriginalTypeViaMetadata()
     {
         var values = new nuint?[] { (nuint)99, null, (nuint)0 };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("NUIntColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -138,7 +138,7 @@ public class ArrowExtendedDomainRoundTripTests
     public void RoundTrip_CharColumn_RestoresOriginalTypeViaMetadata()
     {
         var values = new char?[] { 'A', null, 'Ω', '€' };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("CharColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));
@@ -161,7 +161,7 @@ public class ArrowExtendedDomainRoundTripTests
             null,
             new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };
-        var column = NivaraColumn.CreateFromNullable(values);
+        var column = NivaraColumnFactory.CreateFromNullable(values);
         var frame = NivaraFrame.Create(("OffsetColumn", column));
 
         var result = ArrowInterop.FromArrowTable(ArrowInterop.ToArrowTable(frame));

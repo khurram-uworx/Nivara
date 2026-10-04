@@ -157,7 +157,7 @@ public class QueryPlanTests
     [Test]
     public void SchemaComputationFailure_ThrowsSchemaValidationException()
     {
-        Assert.Throws<SchemaValidationException>(() =>
+        Assert.Throws<QuerySchemaValidationException>(() =>
             new QueryPlan(new StubQuerySource(), new IQueryOperation[]
             {
                 new FailingTransformSchemaOperation(),
