@@ -141,6 +141,51 @@ the shipped assembly before assuming:
 - **Kernel strings**: Keep simple and deterministic. For parity with SimdProbe, match the same reference logic (row-major indexing, same shapes).
 - **Build logs**: On build failure, fetch `CL_PROGRAM_BUILD_LOG` via `cl.GetProgramBuildInfo` — invaluable for Intel/AMD driver diagnostics.
 
+### Native BF16 on this iGPU: conversion yes, arithmetic no
+
+The leg now reports `CL_DEVICE_EXTENSIONS` (71 advertised on the Arc 140T, 1 BF16) because
+the kernels take BF16 as a wire format and widen to f32 in-shader, and whether the widening
+was avoidable was an open question. It is worth writing the answer down precisely, because
+"native BF16" means two different things and only one of them exists here.
+
+**`cl_intel_bfloat16_conversions` is advertised**, and it gives a **native BF16 → F32
+conversion**:
+
+```c
+float  intel_convert_as_bfloat16_float(ushort source);          // + ushort2/4/8/16 vector forms
+ushort intel_convert_bfloat16_as_ushort(float source);           // + vector forms
+```
+
+Per the Khronos registry spec (v1.0.0), this is backed by `OpConvertBF16ToFINTEL` /
+`OpConvertFToBF16INTEL` and SPIR-V capability `Bfloat16ConversionINTEL` — **the same
+instruction `SpvKernels.Bf16Native` hand-authors for the Level Zero leg**. BF16 is carried in
+a `ushort`; the extension explicitly does *not* add a `bfloat16` type, and conversions are
+lossless in the BF16 → float direction.
+
+**But it is conversion-only.** The extension adds no arithmetic — no BF16 multiply, no BF16
+FMA, no BF16 dot product. Every one of its functions is `float ↔ bfloat16`. So:
+
+- The `as_float` shift-and-mask in `Widen` **can** be replaced by the native convert
+  instruction, and being documented lossless it should be bit-identical — a usable
+  correctness cross-check of the native path against the transport the other legs share.
+- `dot16` **cannot** become a packed BF16 dot on this device. The multiply has to stay f32
+  no matter which conversion is used, because no BF16 arithmetic exists to move it into.
+
+That is the important consequence: the f32 widening in this leg is a **property of the
+platform, not a limitation of Silk.NET or of the binding**. A "packed BF16 dot" would need a
+different toolchain (HLSL `__bf16` on DX12, or SYCL's `bf16`) — and the DX12 leg is the place
+to check whether that comparison is even available.
+
+**Naming trap.** A substring search for `bf16` reports this device as having *no* BF16
+support, because Intel spells the extension `bfloat16`. The matcher in the leg therefore
+tests both `bf16` and `bfloat`, and the leg prints the **full** extension list rather than
+just a count — a spelling variant should not be able to hide a capability silently.
+
+Other capability entries worth knowing for future kernel work, all advertised here:
+`cl_khr_fp16` (native f16), `cl_khr_integer_dot_product` (integer dot — an int8 route, not
+BF16), and `cl_intel_subgroup_subgroup_matrix_multiply_accumulate` (subgroup MMA, i.e. a
+cooperative-matrix path and a plausible `gemv` lever).
+
 ---
 
 ## 6. Parity status
@@ -194,6 +239,9 @@ Silk.NET gives the "true OpenCL" baseline: launch cost, buffer transfers, and ke
   236 ms and ~500 ms across runs on the same machine and driver — the driver's JIT cache
   state dominates. Steady-state kernel timings are stable (±15%); build time is not, so it
   is reported separately and should not be compared across runs.
+- **An advertised extension is not a working kernel**: `cl_intel_bfloat16_conversions` being
+  present means the builtins exist, not that a kernel using them compiles and runs. Only a
+  real build-and-gate proves it.
 - **Global size rounding**: OpenCL requires `global_work_size` to be a multiple of
   `local_work_size`, so `silu` (576 elements) dispatches 768 work-items and the extra
   ones return early. This is inside the kernel, not host-side padding.

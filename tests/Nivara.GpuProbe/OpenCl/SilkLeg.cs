@@ -58,6 +58,7 @@ internal static class SilkLeg
             return null;
         }
         Console.WriteLine($"  device: {deviceName} ({vendor}) | max WG {maxWorkGroupSize} | OpenCL {DeviceVersion(cl, device)}");
+        PrintExtensions(cl, device);
 
         // Explicitly re-assert GPU-ness: the enumeration above asked for GPUs, and a
         // driver that answers with something else must fail loudly rather than silently
@@ -446,6 +447,52 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
         }
         return fallback;
     }
+
+    /// <summary>Reports <c>CL_DEVICE_EXTENSIONS</c>, marking BF16 entries with <c>*</c>.
+    /// This leg's kernels take BF16 as a wire format and widen to f32 in-shader (see
+    /// <see cref="Widen"/>), so whether the driver offers a native BF16 type decides whether
+    /// that widening is avoidable. The full list is printed because a BF16 extension can be
+    /// spelled either way — this device ships <c>cl_intel_bfloat16_conversions</c>, which a
+    /// substring search for "bf16" alone misses entirely and reports as absent.</summary>
+    private static unsafe void PrintExtensions(CL cl, nint device)
+    {
+        string extensions = InfoString(cl, device, DeviceInfo.Extensions);
+        var list = extensions.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (list.Length == 0)
+        {
+            Console.WriteLine("  extensions: (none reported)");
+            return;
+        }
+
+        int bf16Count = 0;
+        foreach (string e in list)
+            if (IsBf16Extension(e))
+                bf16Count++;
+
+        Console.WriteLine($"  extensions: {list.Length} advertised, {bf16Count} BF16 (* marks them)");
+        // Full list, wrapped: a native BF16 could in principle be advertised under a token
+        // spelling neither "bf16" nor "bfloat", so counting matches alone cannot rule one out.
+        const int Width = 96;
+        string line = "   ";
+        foreach (string e in list)
+        {
+            string token = IsBf16Extension(e) ? "*" + e : e;
+            if (line.Length + token.Length + 1 > Width)
+            {
+                Console.WriteLine(line);
+                line = "   ";
+            }
+            line += token + " ";
+        }
+        if (line.Length > 3)
+            Console.WriteLine(line);
+    }
+
+    /// <summary>Matches both spellings: Intel ships <c>cl_intel_bfloat16_conversions</c>, so
+    /// a "bf16"-only match reports this device as having no BF16 support when it does.</summary>
+    private static bool IsBf16Extension(string extension)
+        => extension.Contains("bf16", StringComparison.OrdinalIgnoreCase)
+        || extension.Contains("bfloat", StringComparison.OrdinalIgnoreCase);
 
     private static unsafe bool IsGpu(CL cl, nint device)
     {
