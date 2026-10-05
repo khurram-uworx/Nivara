@@ -108,51 +108,58 @@ internal static class SilkLeg
                 Console.WriteLine($"  program: OpenCL C built in-process | build {buildUs,8:F0} µs");
 
                 // Persistent buffers, allocated once and reused across every timed
-                // iteration (the D3D12 one-shot-transient lesson — see DX12.md).
+                // iteration (the D3D12 one-shot-transient lesson — see DX12.md). They are
+                // created *inside* the try so that a partial failure still releases the
+                // buffers that were already created.
                 uint[] dot16Input = PackConcat(fixtures.Dot16A, fixtures.Dot16B);
                 uint[] siluInput = GemvKernels.PackBf16(fixtures.SiluX);
                 uint[] gemvInput = PackConcat(fixtures.GemvW, fixtures.GemvX);
 
-                nint dot16In = Upload(cl, context, queue, dot16Input, out err);
-                nint siluIn = Upload(cl, context, queue, siluInput, out err);
-                nint gemvIn = Upload(cl, context, queue, gemvInput, out err);
-                nint dot16Out = Output(cl, context, 1, out err);
-                nint siluOut = Output(cl, context, KernelFixtures.HiddenSize, out err);
-                nint gemvOut = Output(cl, context, KernelFixtures.IntermediateSize, out err);
-                if (err != 0)
-                {
-                    Console.WriteLine($"  [FAIL] buffer creation: {err}");
-                    return null;
-                }
-
+                nint dot16In = 0, siluIn = 0, gemvIn = 0, dot16Out = 0, siluOut = 0, gemvOut = 0;
                 try
                 {
+                    // Each status is checked where it is produced: these all write to the
+                    // same `err` slot, so a single check at the end would let the last
+                    // call overwrite an earlier failure and the leg would proceed on a
+                    // half-created set of buffers.
+                    dot16In = Upload(cl, context, queue, dot16Input, out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] dot16 input upload: {err}"); return null; }
+                    siluIn = Upload(cl, context, queue, siluInput, out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] silu input upload: {err}"); return null; }
+                    gemvIn = Upload(cl, context, queue, gemvInput, out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] gemv input upload: {err}"); return null; }
+
+                    dot16Out = Output(cl, context, 1, out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] dot16 output buffer: {err}"); return null; }
+                    siluOut = Output(cl, context, KernelFixtures.HiddenSize, out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] silu output buffer: {err}"); return null; }
+                    gemvOut = Output(cl, context, KernelFixtures.IntermediateSize, out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] gemv output buffer: {err}"); return null; }
+
                     nint dot16Kernel = CreateKernel(cl, program, "dot16", out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] clCreateKernel(dot16): {err}"); return null; }
                     nint siluKernel = CreateKernel(cl, program, "silu", out err);
+                    if (err != 0) { Console.WriteLine($"  [FAIL] clCreateKernel(silu): {err}"); return null; }
                     nint gemvKernel = CreateKernel(cl, program, "gemv", out err);
-                    if (err != 0)
-                    {
-                        Console.WriteLine($"  [FAIL] clCreateKernel: {err}");
-                        return null;
-                    }
+                    if (err != 0) { Console.WriteLine($"  [FAIL] clCreateKernel(gemv): {err}"); return null; }
 
                     try
                     {
                         var dot16 = Measure(stopwatch, "dot16",
                             () => Dispatch(cl, queue, dot16Kernel, dot16In, dot16Out, 1u, 1, [dot16Length]),
-                            () => Download(cl, queue, dot16Out, 1), out double dot16FirstUs, out double dot16Us);
+                            () => Download(cl, queue, dot16Out, 1, "dot16"), out double dot16FirstUs, out double dot16Us);
                         if (dot16 is null) return null;
                         Console.WriteLine($"  [dot16] first {dot16FirstUs,8:F0} µs | steady {dot16Us,8:F1} µs");
 
                         var silu = Measure(stopwatch, "silu",
                             () => Dispatch(cl, queue, siluKernel, siluIn, siluOut, hidden, local, [hidden]),
-                            () => Download(cl, queue, siluOut, KernelFixtures.HiddenSize), out double siluFirstUs, out double siluUs);
+                            () => Download(cl, queue, siluOut, KernelFixtures.HiddenSize, "silu"), out double siluFirstUs, out double siluUs);
                         if (silu is null) return null;
                         Console.WriteLine($"  [silu]  first {siluFirstUs,8:F0} µs | steady {siluUs,8:F1} µs");
 
                         var gemv = Measure(stopwatch, "gemv",
                             () => Dispatch(cl, queue, gemvKernel, gemvIn, gemvOut, rows, local, [rows, cols]),
-                            () => Download(cl, queue, gemvOut, KernelFixtures.IntermediateSize), out double gemvFirstUs, out double gemvUs);
+                            () => Download(cl, queue, gemvOut, KernelFixtures.IntermediateSize, "gemv"), out double gemvFirstUs, out double gemvUs);
                         if (gemv is null) return null;
                         Console.WriteLine($"  [gemv]  first {gemvFirstUs,8:F0} µs | steady {gemvUs,8:F1} µs");
 
@@ -160,19 +167,21 @@ internal static class SilkLeg
                     }
                     finally
                     {
-                        cl.ReleaseKernel(dot16Kernel);
-                        cl.ReleaseKernel(siluKernel);
-                        cl.ReleaseKernel(gemvKernel);
+                        if (dot16Kernel != 0) cl.ReleaseKernel(dot16Kernel);
+                        if (siluKernel != 0) cl.ReleaseKernel(siluKernel);
+                        if (gemvKernel != 0) cl.ReleaseKernel(gemvKernel);
                     }
                 }
                 finally
                 {
-                    cl.ReleaseMemObject(dot16In);
-                    cl.ReleaseMemObject(siluIn);
-                    cl.ReleaseMemObject(gemvIn);
-                    cl.ReleaseMemObject(dot16Out);
-                    cl.ReleaseMemObject(siluOut);
-                    cl.ReleaseMemObject(gemvOut);
+                    // Handles can legitimately be 0 here: a failed allocation or a failed
+                    // clCreateKernel returns before all of them were created.
+                    if (dot16In != 0) cl.ReleaseMemObject(dot16In);
+                    if (siluIn != 0) cl.ReleaseMemObject(siluIn);
+                    if (gemvIn != 0) cl.ReleaseMemObject(gemvIn);
+                    if (dot16Out != 0) cl.ReleaseMemObject(dot16Out);
+                    if (siluOut != 0) cl.ReleaseMemObject(siluOut);
+                    if (gemvOut != 0) cl.ReleaseMemObject(gemvOut);
                 }
             }
             finally
@@ -273,7 +282,7 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
     /// status from any dispatch aborts the measurement and yields <c>null</c> — the leg
     /// reports UNBUILT rather than gating a value the driver never produced.</summary>
     private static float[]? Measure(Stopwatch sw, string name, Func<int> dispatch,
-        Func<float[]> read, out double firstUs, out double bestUs)
+        Func<float[]?> read, out double firstUs, out double bestUs)
     {
         bestUs = 0;
         sw.Restart();
@@ -311,24 +320,34 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
     private static unsafe nint CreateKernel(CL cl, nint program, string name, out int err)
         => cl.CreateKernel(program, name, out err);
 
-    /// <summary>Uploads one packed-uint buffer and returns the mem object.</summary>
+    /// <summary>Uploads one packed-uint buffer and returns the mem object. The handle is
+    /// returned even when the write fails, so the caller's finally still releases it.</summary>
     private static unsafe nint Upload(CL cl, nint context, nint queue, uint[] data, out int err)
     {
         nint buffer = cl.CreateBuffer(context, MemFlags.ReadOnly, (nuint)(data.Length * sizeof(uint)), null, out err);
         if (err != 0) return 0;
         fixed (uint* p = data)
-            err |= cl.EnqueueWriteBuffer(queue, buffer, true, 0, (nuint)(data.Length * sizeof(uint)), p, 0, null, null);
+            err = cl.EnqueueWriteBuffer(queue, buffer, true, 0, (nuint)(data.Length * sizeof(uint)), p, 0, null, null);
         return buffer;
     }
 
     private static unsafe nint Output(CL cl, nint context, int count, out int err)
         => cl.CreateBuffer(context, MemFlags.ReadWrite, (nuint)(count * sizeof(float)), null, out err);
 
-    private static unsafe float[] Download(CL cl, nint queue, nint buffer, int count)
+    /// <summary>Blocking readback. Returns <c>null</c> on failure rather than throwing:
+    /// <see cref="Kernels.KernelGate"/> does not guard its legs, so an escaping exception
+    /// would abort the whole multi-leg run instead of marking this leg UNBUILT.</summary>
+    private static unsafe float[]? Download(CL cl, nint queue, nint buffer, int count, string name)
     {
         var values = new float[count];
+        int err;
         fixed (float* p = values)
-            cl.EnqueueReadBuffer(queue, buffer, true, 0, (nuint)(count * sizeof(float)), p, 0, null, null);
+            err = cl.EnqueueReadBuffer(queue, buffer, true, 0, (nuint)(count * sizeof(float)), p, 0, null, null);
+        if (err != 0)
+        {
+            Console.WriteLine($"  [FAIL] {name} readback: {err}");
+            return null;
+        }
         return values;
     }
 
@@ -380,6 +399,7 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
                 return 0;
 
         nint fallback = 0;
+        string? owner = null; // platform that supplied the current `name`/`fallback`
         foreach (nint platform in platforms)
         {
             string platformName = InfoString(cl, 0, PlatformInfo.Name, platform);
@@ -404,6 +424,7 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
                 if (preferred || fallback == 0)
                 {
                     fallback = device;
+                    owner = platformName;
                     name = InfoString(cl, device, DeviceInfo.Name);
                     vendor = deviceVendor;
                     ulong wg = 0;
@@ -415,8 +436,10 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
                     break;
             }
 
-            string selected = platformPreferred || fallback != 0 ? $"* {name}" : name;
-            Console.WriteLine($"  platform: {platformName} | GPU devices {deviceCount} | selected: {selected}");
+            // Mark the pick only on the platform that actually owns it — a later
+            // non-preferred platform must not inherit the earlier platform's name.
+            string label = platformPreferred || owner == platformName ? $"* {name}" : "(not selected)";
+            Console.WriteLine($"  platform: {platformName} | GPU devices {deviceCount} | best: {label}");
 
             if (platformPreferred)
                 return fallback;

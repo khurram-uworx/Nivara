@@ -64,7 +64,7 @@ Expected (on Intel Arc 140T) for `silk`:
 
 ```
 --- Silk.NET OpenCL leg (managed bindings, in-process OpenCL C compile) ---
-  platform: Intel(R) OpenCL Graphics | GPU devices 1 | selected: * Intel(R) Graphics
+  platform: Intel(R) OpenCL Graphics | GPU devices 1 | best: * Intel(R) Graphics
   device: Intel(R) Graphics (Intel(R) Corporation) | max WG 1024 | OpenCL OpenCL 3.0 NEO
   program: OpenCL C built in-process | build    4715 µs
   [dot16] first      415 µs | steady      6.8 µs
@@ -165,6 +165,14 @@ Silk.NET gives the "true OpenCL" baseline: launch cost, buffer transfers, and ke
   kernel that reads uninitialized scalars — a *fast* wrong answer rather than a failure.
   Every status in this leg is checked and a bad dispatch aborts the measurement (the leg
   then reports UNBUILT instead of gating a value the driver never produced).
+- **One shared `err` slot**: the buffer/kernel creation helpers all write to the same
+  status out-param, so checking only after the last of them silently discards an earlier
+  failure — the leg would then run on a half-created set of buffers. Each status is
+  checked where it is produced. For the same reason statuses are never OR'd together
+  (CL codes are not a bitmask; OR'ing two failures yields a number that names neither).
+- **Failure paths must not throw**: `KernelGate` does not guard its legs, so an exception
+  escaping a leg aborts the whole multi-leg `kernels` run instead of marking one leg
+  UNBUILT. Readback failure therefore returns `null` and prints a `[FAIL]` line.
 - **Build time is highly variable**: the in-process `clBuildProgram` measured 4.7 ms,
   236 ms and ~500 ms across runs on the same machine and driver — the driver's JIT cache
   state dominates. Steady-state kernel timings are stable (±15%); build time is not, so it
