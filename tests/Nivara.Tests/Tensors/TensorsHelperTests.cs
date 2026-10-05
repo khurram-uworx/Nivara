@@ -399,6 +399,7 @@ public class TensorsHelperTests
     }
 
     [Test]
+    [Category("Performance")]
     public void MultiplyCore_Float_SingleRowTransposedB_FastPathAllocatesNothing()
     {
         // JIT the MultiplyCore<float> instantiation with a small shape first so the

@@ -1,3 +1,4 @@
+using Nivara.Tests;
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Numerics;
@@ -948,8 +949,11 @@ public class TensorInteropTests
     #region Performance and Memory Tests
 
     [Test]
+    [Category("Performance")]
     public void TensorSpanConversion_IsEfficient_ForLargeData()
     {
+        TimingGuards.RequireOptimizedBuildForTiming();
+
         // This test verifies that TensorSpan conversion is efficient
         // We can't easily test true zero-copy without internal access,
         // but we can verify the operation completes quickly for large data

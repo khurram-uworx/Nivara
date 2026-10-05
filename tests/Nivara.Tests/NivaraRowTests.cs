@@ -269,6 +269,7 @@ public class NivaraRowTests
     }
 
     [Test]
+    [Category("Performance")]
     public void Where_NullableElementColumn_GetValue_AllocatesLikeFilterOnly()
     {
         var values = new int?[10_000];

@@ -9,6 +9,7 @@ using System.Diagnostics;
 namespace Nivara.Tests.AutoDiff;
 
 [TestFixture]
+[Category("Performance")]
 public class PerfTests
 {
     [Test]

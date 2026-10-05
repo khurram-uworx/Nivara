@@ -5,6 +5,7 @@ using System.Diagnostics;
 namespace Nivara.Tests.IO;
 
 [TestFixture]
+[Category("Performance")]
 public class ArrowInteropPerfTests
 {
     [Test]

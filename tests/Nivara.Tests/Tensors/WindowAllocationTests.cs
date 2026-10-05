@@ -12,6 +12,7 @@ namespace Nivara.Tests.Tensors;
 /// (e.g. reintroducing per-row boxing or dropping the pooled prefix path).
 /// </summary>
 [TestFixture]
+[Category("Performance")]
 public class WindowAllocationTests
 {
     /// <summary>

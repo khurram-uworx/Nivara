@@ -229,6 +229,7 @@ public class LlamaCausalAttentionTests
     }
 
     [Test]
+    [Category("Performance")]
     public void DecodeAttention_SteadyState_AllocatesNothing()
     {
         // The fused decode kernel must not copy the cached prefix: steady-state (pooled scores
