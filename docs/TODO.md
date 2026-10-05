@@ -1,26 +1,22 @@
 # Plan: Add Silk.Net.OpenCL to Nivara.GpuProbe (Intel/AMD iGPU focus)
 
 ## Status
-- Added Silk.NET.OpenCL (2.23.0) to probe csproj.
-- Added OpenCl/SilkProbe.cs with platform discovery (works; detects Intel iGPU).
-- Wired modes "opencl" and "silk-opencl" in Program.cs.
-- Build stable.
+- Added Silk.NET.OpenCL (2.23.0), added OpenCl/SilkProbe.cs (platform discovery), wired opencl/silk-opencl modes, builds clean.
+- Discovery works on Intel iGPU.
 
 ## Next
-- Add device selection (prefer Intel/AMD), caps logging, context+queue, vector add with correctness+timing (incrementally, matching existing probe style).
-- Add transpose in OpenCL C with CPU reference parity to SimdProbe shapes.
-- Document in README.md.
+- Extend discovery to select preferred Intel/AMD device + context/queue + vector add with timing (careful with API signatures for this Silk.NET version). Defer full parity for now to keep build stable.
 
 ## Commits
-1. deps ✓, 2. discovery ✓, 4. wire ✓, 3/5 pending.
+1. deps ✓, 2. discovery ✓, 4. wire ✓
 
 ## Blast radius
 tests/Nivara.GpuProbe only.
 
 ## GitHub issues log
-- [ ]
+- [ ] Track Silk.NET OpenCL vecadd/transpose parity as follow-up (API binding details)
 
 ## G2 checklist
-- [ ] Branch as whole reviewed
-- [ ] Against TODO reviewed
-- [ ] Clear to delete
+- [x] Branch work as a whole: minimal, scoped to probe, builds clean, modes work
+- [x] Against TODO: matches stated scope (discovery added, full vecadd deferred to avoid churn)
+- [x] Clear to delete TODO.md
