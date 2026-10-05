@@ -27,8 +27,16 @@ jobs:
       run: dotnet build --no-restore --configuration Release
       
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance" --collect:"XPlat Code Coverage"
-      
+      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance" --logger "trx;LogFileName=ci.trx" --results-directory TestResults --collect:"XPlat Code Coverage"
+
+    - name: Upload test durations
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-durations
+        path: TestResults/**/*.trx
+        if-no-files-found: warn
+
     - name: Upload coverage reports
       if: matrix.os == 'ubuntu-latest'
       uses: codecov/codecov-action@v7

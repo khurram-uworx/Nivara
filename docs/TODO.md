@@ -35,7 +35,31 @@ Category census across `tests/Nivara.Tests`: 133 `[Category]` attributes — 103
 `Feature: …`, 27 `Integration`, 1 `Stress`, **2 `Performance`**. The filter excludes exactly
 the two `Performance` tests; every free-form and `Integration` category still runs.
 
-## What the stale measurement shows (provisional — step 1 replaces it)
+## Fresh measurement (Release, `Category!=Performance`, this machine, 2026-10-06)
+
+`dotnet test --no-build -c Release --filter "Category!=Performance" --logger trx` exited 0.
+3873 tests, 3830 passed, 43 skipped (NotExecuted). Wall clock 113.6 s. Sum of per-test
+durations 111.3 s (suite is serial). trx: `tests/Nivara.Tests/TestResults/ci.trx` (gitignored).
+
+```
+median 0.3 ms   p75 1.1 ms   p90 6.6 ms   p95 15.7 ms   p99 113 ms   max 71.0 s
+>=0.5 s: 11    >=1 s: 6    >=2 s: 2    >=5 s: 2    >=10 s: 2
+
+71.04 s  MLNetPipeline_WorksCorrectly                          categorise (decided)
+13.62 s  EveryGatedBlock_CompilesWithoutErrors                 PENDING — see below
+ 2.00 s  PartitionedWindow_ScatterEngine_AllocationBound       categorise (allocation guard)
+```
+
+The August trx was a different machine and a different build. DistilBert / MiniLM latency
+tests are 1 ms here because they `Assert.Ignore` when the weight files are absent. Do not
+carry those stale numbers into `AGENTS.md`.
+
+**Pending decision.** `EveryGatedBlock_CompilesWithoutErrors` is over the 2 s threshold and
+is the documentation snippet gate, not a timing test. Categorising it removes that gate from
+every PR. Not categorising it needs a written exception, because acceptance criterion 3 says
+every test over the threshold carries the category.
+
+## What the stale measurement shows (superseded — kept so the correction is visible)
 
 `net11run.trx`, 3276 tests, Release-equivalent, no `[Parallelizable]` anywhere in the suite,
 so per-test sum ≈ wall clock (233.4 s vs 236 s actual):

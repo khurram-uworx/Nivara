@@ -39,7 +39,7 @@ jobs:
       run: dotnet build --no-restore --configuration Release -p:GeneratePackageOnBuild=false
 
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance"
+      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance" --logger "trx;LogFileName=ci.trx" --results-directory TestResults
 
     - name: Pack Nivara
       run: dotnet pack src/Nivara/Nivara.csproj --no-build --configuration Release -p:PackageVersion=${{ env.VERSION }}
