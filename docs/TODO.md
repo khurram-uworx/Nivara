@@ -54,10 +54,9 @@ The August trx was a different machine and a different build. DistilBert / MiniL
 tests are 1 ms here because they `Assert.Ignore` when the weight files are absent. Do not
 carry those stale numbers into `AGENTS.md`.
 
-**Pending decision.** `EveryGatedBlock_CompilesWithoutErrors` is over the 2 s threshold and
-is the documentation snippet gate, not a timing test. Categorising it removes that gate from
-every PR. Not categorising it needs a written exception, because acceptance criterion 3 says
-every test over the threshold carries the category.
+**Decision (human).** `EveryGatedBlock_CompilesWithoutErrors` stays in the filtered suite.
+It is the documentation snippet gate, not a timing test. The exception is written in
+`AGENTS.md` and on #545, which is what acceptance criterion 3 allows in place of the category.
 
 ## What the stale measurement shows (superseded — kept so the correction is visible)
 
