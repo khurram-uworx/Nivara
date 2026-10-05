@@ -2,10 +2,12 @@
 
 Probe: can .NET access Intel GPU compute? Pure P/Invoke — **no packages, no
 bindings, no CUDA, no toolchain** — with two deliberate exceptions: the phase-4a
-ILGPU leg (issue #431) and the phase-4b ComputeSharp leg (issue #432) are the
-probe's only NuGet references, because there the package *is* the toolchain
-(pure-managed C#→OpenCL and C#→HLSL→DXIL JIT runtimes). The probe
-drives the same SmolLM-shaped BF16 kernels (dot16 · silu · gemv) through **seven
+ILGPU leg (issue #431) and the phase-4b ComputeSharp leg (issue #432) are among
+the probe's only NuGet references, because there the package *is* the toolchain
+(pure-managed C#→OpenCL and C#→HLSL→DXIL JIT runtimes); the Silk.NET OpenCL leg
+adds `Silk.NET.OpenCL 2.23.0`, which is a thin managed binding over the in-box
+ICD rather than a toolchain. The probe
+drives the same SmolLM-shaped BF16 kernels (dot16 · silu · gemv) through **eight
 independent GPU paths**, each gated against the production Nivara CPU kernels:
 
 | path | route | verdict (Arc 140T) |
@@ -16,6 +18,7 @@ independent GPU paths**, each gated against the production Nivara CPU kernels:
 | **OpenVINO** | pip-installed `openvino_c.dll` + tuned GPU plugin, IR v11 models | **proven PASS** — first-party, zero compiler, ~26–34× CPU on gemv; BF16 silu honestly F16-tier |
 | **ILGPU (phase 4a)** | NuGet `ILGPU 1.5.3` — pure-managed JIT of C# kernels to OpenCL C (in-box ICD + Intel driver) | **proven PASS** — all three gates on the real iGPU, no CPU fallback; fastest GPU leg on silu (see [docs/ILGPU.md](../../docs/ILGPU.md)) |
 | **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md)) |
+| **Silk.NET OpenCL** | NuGet `Silk.NET.OpenCL 2.23.0` — hand-authored OpenCL C, compiled **in-process** by the driver (`clCreateProgramWithSource` + `clBuildProgram`), no toolchain | **proven PASS** — all three gates on the real iGPU, `dot16` bit-exact (0.0 ULP), no CPU fallback; the fastest OpenCL row and the lowest-overhead baseline (see [SILK.md](SILK.md)) |
 
 The Level Zero leg got this series started by proving the harness end-to-end
 (module load, launch, readback, verifiable results) and then isolating a
@@ -122,7 +125,8 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gate
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ov      # OpenVINO availability (runtime + GPU readback) + both precision configs' gates
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ilgpu  # ILGPU availability (OpenCL devices + accelerator) + gates (phase 4a)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- computesharp # ComputeSharp availability (default D3D12 device) + gates (phase 4b; Windows build only — see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # seven-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + ComputeSharp (exit = failed cells)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # eight-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + Silk.NET + ComputeSharp (exit = failed cells)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- silk    # Silk.NET OpenCL leg alone (exit 0 = all three gates pass)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12 + openvino + computesharp
 ```
 
@@ -130,8 +134,10 @@ The ComputeSharp leg is **compile-gated to Windows hosts** (`WINDOWS`
 symbol + conditioned package refs in the csproj): its source generator cannot
 run on a non-Windows SDK (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) §1). On a
 Linux/macOS build of the probe the `computesharp` mode, its `kernels` row, and
-its default-mode chain are omitted (seven-way → six-way) so the rest of the
-probe still compiles there.
+its default-mode chain are omitted (eight-way → seven-way) so the rest of the
+probe still compiles there. The Silk.NET OpenCL leg is **not** gated this way —
+`Silk.NET.OpenCL` is a managed binding with a loader for every RID, so it builds
+and runs on Linux/macOS too where an OpenCL ICD is installed.
 
 `kernels` (and `sycl`/`ov`/`ilgpu`/`computesharp`, which route through the same
 harness) is the
@@ -268,8 +274,8 @@ wait per iteration, 1 warmup + 3 timed best-of-3 — the same methodology as the
 SYCL leg. This bypasses the buggy IGC OpenCL/SPIR-V frontend entirely (HLSL →
 DXBC/DXIL → the driver's compute pipeline), so real GEMM/attention kernels are
 expressible while the Level Zero access-chain ICE (bug #1 above) remains
-unfixed on this driver. The `kernels` mode runs the **seven-way** CPU·SYCL·DX12·
-OV·ILGPU·ComputeSharp gate table with a per-GPU-leg timing column; full workflow notes in
+unfixed on this driver. The `kernels` mode runs the **eight-way** CPU·SYCL·DX12·
+OV·ILGPU·Silk.NET·ComputeSharp gate table with a per-GPU-leg timing column; full workflow notes in
 [DX12.md](DX12.md).
 
 ### Kernel binary export (follow-up)
@@ -529,8 +535,8 @@ entry points by name from `ze_loader.dll`.
 - `Kernels/KernelGate.cs` — the multi-leg correctness gate harness: CPU gold +
   every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, and a
   CPU-vs-GPU timing table (µs); exit code = failed cells. `kernels` CLI mode
-  runs it seven-way (SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + ComputeSharp; SYCL
-  row prints UNBUILT on this machine).
+  runs it eight-way (SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + Silk.NET +
+  ComputeSharp; SYCL row prints UNBUILT on this machine).
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
   gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
   (aRows=1 → the allocation-free BLAS2 GEMV path the fused Llama head runs),
