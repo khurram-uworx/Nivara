@@ -2,7 +2,7 @@
 
 > **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
 
-All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU, driver **1.15.37858**) running Windows 10.0.26200 and .NET 11.0. The Silk.NET OpenCL leg of `tests/Nivara.GpuProbe` uses **Silk.NET.OpenCL 2.23.0** (thin .NET Foundation bindings to the OpenCL C API) to discover platforms/devices and to run OpenCL C kernels directly on the in-box OpenCL ICD + Intel driver. The goal is a vendor-neutral baseline (especially Intel/AMD iGPUs) for apples-to-apples comparisons with other backends.
+All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU, driver **1.15.37858**) running Windows 10.0.26200 and .NET 11.0. The Silk.NET OpenCL leg of `tests/Nivara.GpuProbe` uses **Silk.NET.OpenCL 2.23.0** (thin .NET Foundation bindings to the OpenCL C API) to discover platforms/devices and to run OpenCL C kernels directly on the in-box OpenCL ICD + Intel driver. The goal is a vendor-neutral baseline (especially Intel/AMD iGPUs) for apples-to-apples comparisons with other backends. Whether this device can do native BF16 or FP16 arithmetic — and whether FP16 is faster — is measured in [Precision on this iGPU](#precision-on-this-igpu-bf16-and-fp16), not inferred from the extension string.
 
 ---
 
@@ -141,80 +141,100 @@ the shipped assembly before assuming:
 - **Kernel strings**: Keep simple and deterministic. For parity with SimdProbe, match the same reference logic (row-major indexing, same shapes).
 - **Build logs**: On build failure, fetch `CL_PROGRAM_BUILD_LOG` via `cl.GetProgramBuildInfo` — invaluable for Intel/AMD driver diagnostics.
 
-### Native BF16 on this iGPU: conversion yes, arithmetic no
+## Precision on this iGPU (BF16 and FP16)
 
-The leg now reports `CL_DEVICE_EXTENSIONS` (71 advertised on the Arc 140T, 1 BF16) because
-the kernels take BF16 as a wire format and widen to f32 in-shader, and whether the widening
-was avoidable was an open question. It is worth writing the answer down precisely, because
-"native BF16" means two different things and only one of them exists here.
+This is the section to read before trying a lower-precision path through raw OpenCL on this
+device. Both answers were measured on the Arc 140T (8086:7DD1, driver 1.15.37858), not
+inferred from the extension string. The leg prints the full `CL_DEVICE_EXTENSIONS` list
+(71 entries here) because a count is not enough — see the naming trap below.
 
-**`cl_intel_bfloat16_conversions` is advertised**, and it gives a **native BF16 → F32
-conversion**:
+| | BF16 | FP16 (`half`) |
+|---|---|---|
+| Extension | `cl_intel_bfloat16_conversions` | `cl_khr_fp16` |
+| Advertised here | yes | yes |
+| Type | **no** `bfloat16` type; value rides in a `ushort` | **yes**, `half` / `half2` / `half4` / … |
+| Convert | yes, lossless BF16→f32 (`intel_convert_as_bfloat16_float`, plus vector forms) | yes (`half` load, or `vload_half`) |
+| Arithmetic | **no** — every function is `float ↔ bfloat16` | **yes** — mul/add/div/`exp` on `half` |
+| Proved on this device | extension string + Khronos spec v1.0.0 | program built and ran; see below |
+| Faster than the f32 kernels at these shapes | not reachable | **no** — tie, 0.97–1.07× |
+
+### BF16: conversion yes, arithmetic no
 
 ```c
-float  intel_convert_as_bfloat16_float(ushort source);          // + ushort2/4/8/16 vector forms
-ushort intel_convert_bfloat16_as_ushort(float source);           // + vector forms
+float  intel_convert_as_bfloat16_float(ushort source);   // + ushort2/4/8/16
+ushort intel_convert_bfloat16_as_ushort(float source);
 ```
 
-Per the Khronos registry spec (v1.0.0), this is backed by `OpConvertBF16ToFINTEL` /
-`OpConvertFToBF16INTEL` and SPIR-V capability `Bfloat16ConversionINTEL` — **the same
-instruction `SpvKernels.Bf16Native` hand-authors for the Level Zero leg**. BF16 is carried in
-a `ushort`; the extension explicitly does *not* add a `bfloat16` type, and conversions are
-lossless in the BF16 → float direction.
+Backed by `OpConvertBF16ToFINTEL` / `OpConvertFToBF16INTEL` and SPIR-V capability
+`Bfloat16ConversionINTEL` — the same instruction `SpvKernels.Bf16Native` hand-authors for the
+Level Zero leg. Conversions are lossless in the BF16→float direction. There is no BF16
+multiply, FMA, or dot product.
 
-**But it is conversion-only.** The extension adds no arithmetic — no BF16 multiply, no BF16
-FMA, no BF16 dot product. Every one of its functions is `float ↔ bfloat16`. So:
+Consequences, so they don't get re-derived:
 
-- The `as_float` shift-and-mask in `Widen` **can** be replaced by the native convert
-  instruction, and being documented lossless it should be bit-identical — a usable
-  correctness cross-check of the native path against the transport the other legs share.
-- `dot16` **cannot** become a packed BF16 dot on this device. The multiply has to stay f32
-  no matter which conversion is used, because no BF16 arithmetic exists to move it into.
+- The `as_float` shift in `Widen` can be swapped for the native convert. It should be
+  bit-identical, which makes it a correctness cross-check, not a speed path. **Not done** —
+  the production kernels keep the shift so the transport stays byte-identical with DX12,
+  ILGPU, and ComputeSharp.
+- `dot16` cannot become a packed BF16 dot on this device. The multiply stays f32 whichever
+  convert is used. A packed BF16 dot needs a different toolchain (HLSL `__bf16` on DX12, or
+  SYCL `bf16`). OpenVINO's GPU plugin does reach Xe2 DPAS BF16 for GEMM; that is a closed
+  tuned kernel, not something this leg can author, and the same bf16 IR leg fails `silu`
+  402/576.
+- The f32 widening in this leg is a property of the platform, not of Silk.NET.
 
-That is the important consequence: the f32 widening in this leg is a **property of the
-platform, not a limitation of Silk.NET or of the binding**. A "packed BF16 dot" would need a
-different toolchain (HLSL `__bf16` on DX12, or SYCL's `bf16`) — and the DX12 leg is the place
-to check whether that comparison is even available.
+**Naming trap.** A substring search for `bf16` reports this device as having no BF16 support,
+because Intel spells it `bfloat16`. The first version of the detector did exactly that and
+printed "0 mentioning bf16". The matcher tests both `bf16` and `bfloat`, and the leg prints
+the full extension list so a spelling variant cannot hide a capability.
 
-**Naming trap.** A substring search for `bf16` reports this device as having *no* BF16
-support, because Intel spells the extension `bfloat16`. The matcher in the leg therefore
-tests both `bf16` and `bfloat`, and the leg prints the **full** extension list rather than
-just a count — a spelling variant should not be able to hide a capability silently.
+### FP16: arithmetic yes, no speed win at these shapes
 
-Other capability entries worth knowing for future kernel work, all advertised here:
-`cl_khr_fp16` (native f16), `cl_khr_integer_dot_product` (integer dot — an int8 route, not
-BF16), and `cl_intel_subgroup_subgroup_matrix_multiply_accumulate` (subgroup MMA, i.e. a
-cooperative-matrix path and a plausible `gemv` lever).
+`cl_khr_fp16` adds a real `half` type, which the BF16 extension does not. `silk` builds a
+**separate** translation unit so the f32 kernels are untouched:
 
----
+```c
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+#pragma OPENCL FP_CONTRACT off
+```
 
-### Native FP16 on this iGPU: arithmetic yes, no speed win at these shapes
-
-`cl_khr_fp16` is advertised, and unlike the BF16 extension it adds a real `half` type with
-arithmetic. A separate translation unit (`#pragma OPENCL EXTENSION cl_khr_fp16 : enable`,
-`FP_CONTRACT off`, not mixed into the f32 kernels) builds and runs `silu_f16` and `gemv_f16`
-on the Arc 140T. This is a diagnostic printed by `silk`, not a gate row — half numerics
-cannot pass the f32 `1e-6` bound, and a failure here does not fail the leg.
+`FP_CONTRACT off` is there so a contraction cannot hide a promotion. This is a diagnostic,
+not a gate row: half numerics cannot pass the f32 `1e-6` bound, and a build or dispatch
+failure here is printed and swallowed. `silk` still exits 0 if only the f32 gates pass.
 
 The compiler did **not** promote the arithmetic back to f32. `gemv_f16` matched a CPU
 `System.Half` accumulator at **0 half-ULP across all 1536 rows**, and sat **32427 half-ULP**
 from the same products accumulated in f32 and rounded once. That gap is the accumulator
-width, and the GPU is on the half side of it. `silu_f16` is 2 half-ULP from the f32 `exp`
-rounded to half; the BCL has no `Half` exp, so that kernel cannot separate promotion from
-native half the way gemv can.
+width, and the GPU is on the half side of it. `silu_f16` is 2 half-ULP from f32 `exp`
+rounded to half. The BCL has no `Half` exp, so silu cannot separate promotion from native
+half; gemv can, and it says native.
 
-It is not faster. Two runs, same session as the f32 kernels:
+Two runs, each f16 dispatch timed in the same process as the f32 kernel above it:
 
 | kernel | f32 steady | f16 steady | ratio |
 |---|---|---|---|
 | silu (576) | 6.5 / 7.6 µs | 6.7 / 7.4 µs | 1.03× / 0.97× |
 | gemv (1536×576) | 97.8 / 112.9 µs | 104.8 / 109.2 µs | 1.07× / 0.97× |
 
-The ratio flips across the run-to-run band, so this is a tie, not a win and not a regression.
-These kernels are launch-bound (silu) or a naive serial dot (gemv); half the traffic does not
-show up until the kernel is bandwidth-bound, which a one-thread-per-row loop over 576 is not.
-Native FP16 is reachable from raw OpenCL. It is not, on this evidence, a reason to leave f32
-for these shapes.
+The ratio flips across the run-to-run band, so this is a tie. silu is launch-bound. gemv is
+a one-thread-per-row loop over 576, which is not bandwidth-bound, so halving the traffic
+does not show up. Native FP16 is reachable from raw OpenCL. It is not, on this evidence, a
+reason to leave f32 for these shapes.
+
+ILGPU 1.5.3 cannot drive this. Its `Half` type is software-emulated, and its OpenCL path
+does not enable `cl_khr_fp16`. That is a binding limitation, not a device one — the opposite
+of the BF16 situation, where the device itself has no arithmetic to drive.
+
+### Still advertised, not measured
+
+`cl_khr_integer_dot_product` (an int8 route, not BF16) and
+`cl_intel_subgroup_matrix_multiply_accumulate` (subgroup MMA, a plausible gemv lever) are
+both in the extension list. Neither has a kernel here. Do not treat "advertised" as
+"usable" — the BF16 string was advertised and still has no arithmetic, and the FP16 string
+was only believed once a program built and matched a half accumulator.
+
+Timings in this section are one host, two runs. They are not the cross-host ordering.
+That profile is #552 (this Arc 140T) and #553 (Iris Xe).
 
 ## 6. Parity status
 
