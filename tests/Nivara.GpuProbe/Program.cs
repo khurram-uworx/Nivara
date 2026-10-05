@@ -39,6 +39,8 @@ internal class Program
             "run" => L0Run.Run(),
             "spv" => SpvDump.Run(),
             "ocl" => OclProbe.Run(),
+            "opencl" => OpenCl.SilkProbe.Run(),
+            "silk-opencl" => OpenCl.SilkProbe.Run(),
             "dx12" => D3d12Check.Run() + D3d12.D3d12Compute.Run(),
             "sycl" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
             "ov" => OpenVino.Availability.Run() + OVRun(),
