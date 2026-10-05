@@ -15,7 +15,7 @@ independent GPU paths**, each gated against the production Nivara CPU kernels:
 | **DX12** | hand-rolled HLSL `cs_5_1` via inbox `d3dcompiler_47.dll` | **proven PASS** — FL 12_2 / SM 6.8, no external tooling |
 | **OpenVINO** | pip-installed `openvino_c.dll` + tuned GPU plugin, IR v11 models | **proven PASS** — first-party, zero compiler, ~26–34× CPU on gemv; BF16 silu honestly F16-tier |
 | **ILGPU (phase 4a)** | NuGet `ILGPU 1.5.3` — pure-managed JIT of C# kernels to OpenCL C (in-box ICD + Intel driver) | **proven PASS** — all three gates on the real iGPU, no CPU fallback; fastest GPU leg on silu (see [docs/ILGPU.md](../../docs/ILGPU.md)) |
-| **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [COMPUTESHARP.md](COMPUTESHARP.md)) |
+| **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md)) |
 
 The Level Zero leg got this series started by proving the harness end-to-end
 (module load, launch, readback, verifiable results) and then isolating a
@@ -23,7 +23,7 @@ The Level Zero leg got this series started by proving the harness end-to-end
 access-chain ICE) that only affects hand-authored bytecode — the reason real
 math pivoted to the compiler-backed and driver-backed paths above. Full write-ups
 in [SPIRV.md](SPIRV.md) · [SYCL.md](SYCL.md) · [DX12.md](DX12.md) · [OPENVINO.md](OPENVINO.md) ·
-[docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md).
+[docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md).
 
 Host: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 (128 EU, PCI 8086:7DD1) and an on-package **Intel AI Boost NPU** (8086:7D1D).
@@ -40,7 +40,7 @@ OpenVINO leg, C# device methods for the ILGPU leg, and C# shader structs
 (source-gen HLSL) for the ComputeSharp leg, per the case-study docs [SPIRV.md](SPIRV.md)
 (L0), [SYCL.md](SYCL.md) (oneAPI/SYCL), [DX12.md](DX12.md) (DX12),
 [OPENVINO.md](OPENVINO.md) (OpenVINO), [docs/ILGPU.md](../../docs/ILGPU.md) (ILGPU phase 4a), and
-[COMPUTESHARP.md](COMPUTESHARP.md) (ComputeSharp phase 4b):
+[COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) (ComputeSharp phase 4b):
 
 - `src/Nivara` — `LlamaFusedKernels.MatMulTransposedB<T>` (the production SmolLM
   GEMV kernel — dot and GEMV both run through it, in the exact fused-head call
@@ -128,7 +128,7 @@ dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12
 
 The ComputeSharp leg is **compile-gated to Windows hosts** (`WINDOWS`
 symbol + conditioned package refs in the csproj): its source generator cannot
-run on a non-Windows SDK (see [COMPUTESHARP.md](COMPUTESHARP.md) §1). On a
+run on a non-Windows SDK (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) §1). On a
 Linux/macOS build of the probe the `computesharp` mode, its `kernels` row, and
 its default-mode chain are omitted (seven-way → six-way) so the rest of the
 probe still compiles there.
@@ -348,7 +348,7 @@ production native `.dll` with a long-lived queue eliminates it entirely. Full
 notes in [SYCL.md](SYCL.md); the DX12 workflow lives in [DX12.md](DX12.md);
 the L0/hand-authored-SPIR-V verdict and safe subset live in [SPIRV.md](SPIRV.md).
 Together these six case-study docs — [SPIRV.md](SPIRV.md) · [SYCL.md](SYCL.md) ·
-[DX12.md](DX12.md) · [OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) — are Nivara's GPU-backend
+[DX12.md](DX12.md) · [OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) — are Nivara's GPU-backend
 decision records.
 
 ## DX12 compute leg (commit 8 — hand-rolled, proven)
@@ -503,11 +503,11 @@ BF16 rides the same packed-2-per-uint transport as DX12/ILGPU (in-shader expand
 via `Hlsl.AsFloat`, the managed `asfloat`). The leg was validated live on a
 **second machine** (Intel Iris Xe iGPU, D3D12 — not this doc's Arc 140T host):
 3/3 gates PASS, no CPU fallback; an honest case-study in
-[COMPUTESHARP.md](COMPUTESHARP.md) records that run's measured
+[COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) records that run's measured
 µs (gemv 624.2 µs vs 2824.8 µs CPU on the same run) **clearly labeled as
 non-Arc-140T**, with the Arc 140T steady-state figures _pending_ until a
 `kernels` run happens on that machine. Full notes in
-[COMPUTESHARP.md](COMPUTESHARP.md).
+[COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md).
 
 ## Level Zero P/Invoke surface
 
