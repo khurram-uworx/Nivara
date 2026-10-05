@@ -292,11 +292,9 @@ No `src/` file is touched. No public API changes. Nothing here can affect a ship
 ## GitHub issues log
 
 - [ ] #545 — this work.
-- [ ] (to create during step 3) — the ML.NET integration correctness check no longer runs on PRs
-  after `MLNetPipeline_WorksCorrectly` is categorised; track re-establishing it in a cheaper form.
-- [ ] (to create during step 1) — if the fresh measurement shows a test whose cost is first-use
-  JIT / native load rather than real work, track moving that cost to a `[OneTimeSetUp]` warm-up
-  so the test can stay in CI.
+- [x] #554 — ML.NET integration check no longer runs under `Category!=Performance`
+  (created while categorising `MLNetPipeline_WorksCorrectly`; the first-use-load follow-up
+  is the same issue, not a second one).
 
 Reminder: as each task executes, if deferred work or a concern appears that is outside this plan,
 create the issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record the number
