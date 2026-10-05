@@ -1,3 +1,4 @@
+using Nivara.Tests;
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Diagnostics;
@@ -133,7 +134,7 @@ public class TensorsHelperTests
     [Category("Performance")]
     public void PropagateNullMask_PerformanceProbe_IsFasterThanReferenceTripleLoopForSparseMasks()
     {
-        RequireOptimizedBuildForTiming();
+        TimingGuards.RequireOptimizedBuildForTiming();
 
         const int size = 160;
         var aMask = new bool[size * size];
@@ -480,7 +481,7 @@ public class TensorsHelperTests
         // ran by default in Debug, where this assembly is unoptimized while the BCL
         // Tensor code stays ReadyToRun, collapsing both routes to parity. It now warms up,
         // interleaves the routes with alternating order, and asserts on the median ratio.
-        RequireOptimizedBuildForTiming();
+        TimingGuards.RequireOptimizedBuildForTiming();
 
         const int rows = 1024, cols = 1024;
         var src = FillRowMajor(rows, cols, seed: 42);
@@ -694,26 +695,6 @@ public class TensorsHelperTests
                 rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
                 new float[1], new bool[1], rows: 1, cols: 0),
             Throws.ArgumentException);
-    }
-
-    /// <summary>
-    /// Timing probes are only meaningful in an optimized build. This assembly is compiled
-    /// with the configuration it is tested in, but <c>System.Numerics.Tensors</c> ships
-    /// ReadyToRun and stays optimized regardless — so a Debug build compares an unoptimized
-    /// handwritten kernel against optimized framework code, collapsing both routes to parity
-    /// and reporting a false regression. See the <c>transpose</c> mode in
-    /// <c>tests/Nivara.SimdProbe</c> (#482).
-    /// </summary>
-    static void RequireOptimizedBuildForTiming()
-    {
-        bool isOptimized = typeof(TensorsHelperTests).Assembly
-            .GetCustomAttributes(typeof(DebuggableAttribute), false)
-            .Cast<DebuggableAttribute>()
-            .Any(a => !a.IsJITOptimizerDisabled);
-
-        if (!isOptimized)
-            Assert.Ignore("Timing probe skipped: this is an unoptimized (Debug) build, where the "
-                          + "comparison against ReadyToRun framework code is void. Run with -c Release.");
     }
 
     static long MeasureOnce(Action action)
