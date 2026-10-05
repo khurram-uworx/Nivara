@@ -170,6 +170,33 @@ Scan `tests/Nivara.Tests/**/*.cs` for `[Test]`-attributed methods whose body tou
 `Stopwatch`, `ElapsedMilliseconds` / `ElapsedTicks` / `GetTotalMilliseconds`, or
 `GC.GetAllocatedBytes`, and fail when such a method lacks `[Category("Performance")]`.
 
+#### Grounded requirements for the scan (NUnit docs, G1)
+
+Two facts from <https://docs.nunit.org/articles/nunit/writing-tests/attributes/category.html>
+change how this must be implemented:
+
+1. **"Categories are inherited — a test inherits all categories from its fixture and assembly."**
+   So a fixture-level or assembly-level `[Category("Performance")]` excludes every test beneath
+   it. The scan must therefore resolve the *effective* category set — method-level **plus**
+   enclosing type **plus** assembly-level — and only report a violation when `Performance` is
+   absent from all three. A method-level-only scan would produce false positives the moment
+   someone sensibly puts the attribute on a whole fixture.
+   Today the repo has 237 `[TestFixture]`s, 133 method-level `[Category]`s and **0**
+   assembly-level ones, so the inherited path is currently unexercised — which is exactly why
+   the negative control has to drive it rather than trust it.
+
+2. **Category names may not contain `,`, `+`, `-` or `!`** — these are operator characters in
+   NUnit's own `cat == …` expression language. This explains the repo's free-form
+   `Feature: …, Property: …` categories: they are inert with respect to VSTest's `Category!=`
+   filter, which is why the 103 of them never exclude anything. No action needed, but the
+   fixture's remarks should say the gate is not asserting those categories mean anything.
+
+**Use Roslyn, not regex.** `Microsoft.CodeAnalysis.CSharp` 5.9.0 is already referenced by
+`Nivara.Tests.csproj` (added for `DocSnippetCompiler`), so a real syntax tree costs no new
+dependency. A regex over `.cs` text would have to re-implement attribute scoping and would be
+fooled by `[Category("…")]` appearing in a comment or a string literal — the same class of
+"the doc names an API that does not exist" defect that issues #524–#532 record.
+
 **Stated coverage limit, to be written in the fixture's remarks:** this gate is
 construct-driven, so it cannot catch a slow test that measures nothing — which is exactly the
 `MLNetPipeline_WorksCorrectly` case. The duration rule in step 2 plus the trx artefact from step 1
@@ -207,6 +234,13 @@ Three ways forward, and the plan as written above assumes the first pending your
    *category* rule. Most faithful to the distinction, but the gate then has two rules to state.
 
 ## Blast radius
+
+**Filter semantics, grounded (G1).** Per Microsoft's `dotnet test` docs, for NUnit `Category`
+and `TestCategory` are equivalent and `!=` is "not exact match", so `Category!=Performance`
+excludes a test whenever `Performance` is in its *effective* category set — including via
+inheritance. VSTest lookups are case-insensitive; NUnit category names themselves are
+case-sensitive. Verified empirically on `main` by diffing `--list-tests` with and without the
+filter: exactly 2 of 3877 tests are excluded.
 
 | Change | Blast radius |
 |---|---|
