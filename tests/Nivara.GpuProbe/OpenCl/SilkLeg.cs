@@ -3,6 +3,7 @@ using Nivara.GpuProbe.Kernels;
 using Silk.NET.OpenCL;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Nivara.GpuProbe.OpenCl;
@@ -164,6 +165,10 @@ internal static class SilkLeg
                         if (gemv is null) return null;
                         Console.WriteLine($"  [gemv]  first {gemvFirstUs,8:F0} µs | steady {gemvUs,8:F1} µs");
 
+                        // Diagnostic only: a failure here must not null the f32 gate. Half
+                        // numerics cannot pass the f32 1e-6 bound, so this is not a gate row.
+                        ProbeFp16(cl, context, device, queue, fixtures, local, stopwatch, siluUs, gemvUs);
+
                         return new LegResults(dot16[0], silu, gemv, dot16Us, siluUs, gemvUs);
                     }
                     finally
@@ -245,9 +250,9 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
 
     /// <summary>Compiles the OpenCL C source in-process; prints the driver build log on
     /// failure (the single most useful diagnostic for Intel/AMD driver problems).</summary>
-    private static unsafe nint BuildProgram(CL cl, nint context, nint device, string body)
+    private static unsafe nint BuildProgram(CL cl, nint context, nint device, string body, bool prependWiden = true)
     {
-        string source = Widen + body;
+        string source = prependWiden ? Widen + body : body;
         int err = 0;
         nint program = cl.CreateProgramWithSource(context, 1, [source], null, out err);
         if (err != 0 || program == 0)
@@ -529,6 +534,244 @@ __kernel void gemv(__global const uint* gIn, __global float* gOut, const uint ro
     }
 
     private static unsafe string DeviceVersion(CL cl, nint device) => InfoString(cl, device, DeviceInfo.Version);
+
+    /// <summary>
+    /// Native FP16 check. <c>cl_khr_fp16</c> is the extension that actually adds a <c>half</c>
+    /// type and arithmetic — unlike <c>cl_intel_bfloat16_conversions</c>, which is convert-only.
+    /// Advertising the string is not the same as the driver accepting <c>half</c> math, and a
+    /// compiler is allowed to promote the arithmetic back to f32, so this reports three things:
+    /// whether the program builds, whether the results track a CPU <c>Half</c> accumulator or an
+    /// f32-then-round one, and whether the dispatch is faster than the f32 kernel above.
+    /// A failure is printed and swallowed: this is not a gate row.
+    /// </summary>
+    private static unsafe void ProbeFp16(CL cl, nint context, nint device, nint queue,
+        KernelFixtures fixtures, int local, Stopwatch sw, double f32SiluUs, double f32GemvUs)
+    {
+        Console.WriteLine("  --- fp16 diagnostic (cl_khr_fp16, not a gate) ---");
+        const string Source = """
+            #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+            #pragma OPENCL FP_CONTRACT off
+
+            __kernel void silu_f16(__global const half* x, __global half* y, const uint n)
+            {
+                uint i = get_global_id(0);
+                if (i >= n) return;
+                half v = x[i];
+                y[i] = v / (1.0h + exp(-v));
+            }
+
+            __kernel void gemv_f16(__global const half* gIn, __global half* gOut, const uint rows, const uint cols)
+            {
+                uint row = get_global_id(0);
+                if (row >= rows) return;
+                uint weightElems = rows * cols;
+                half acc = 0.0h;
+                for (uint k = 0; k < cols; ++k)
+                    acc += gIn[(uint)row * cols + k] * gIn[weightElems + k];
+                gOut[row] = acc;
+            }
+            """;
+
+        nint program = BuildProgram(cl, context, device, Source, prependWiden: false);
+        if (program == 0)
+        {
+            Console.WriteLine("  fp16: program did not build — native half arithmetic is not usable on this device");
+            return;
+        }
+
+        int err;
+        nint siluKernel = 0, gemvKernel = 0;
+        nint siluIn = 0, siluOut = 0, gemvIn = 0, gemvOut = 0;
+        try
+        {
+            siluKernel = CreateKernel(cl, program, "silu_f16", out err);
+            if (err != 0) { Console.WriteLine($"  fp16: clCreateKernel(silu_f16): {err}"); return; }
+            gemvKernel = CreateKernel(cl, program, "gemv_f16", out err);
+            if (err != 0) { Console.WriteLine($"  fp16: clCreateKernel(gemv_f16): {err}"); return; }
+
+            ushort[] siluBits = ToHalfBits(fixtures.SiluX);
+            ushort[] gemvBits = Concat(ToHalfBits(fixtures.GemvW), ToHalfBits(fixtures.GemvX));
+            uint hidden = KernelFixtures.HiddenSize;
+            uint rows = KernelFixtures.IntermediateSize;
+            uint cols = KernelFixtures.HiddenSize;
+
+            siluIn = UploadUShort(cl, context, queue, siluBits, out err);
+            if (err != 0) { Console.WriteLine($"  fp16: silu upload: {err}"); return; }
+            siluOut = CreateBuffer(cl, context, (nuint)(hidden * sizeof(ushort)), out err);
+            if (err != 0) { Console.WriteLine($"  fp16: silu output: {err}"); return; }
+            gemvIn = UploadUShort(cl, context, queue, gemvBits, out err);
+            if (err != 0) { Console.WriteLine($"  fp16: gemv upload: {err}"); return; }
+            gemvOut = CreateBuffer(cl, context, (nuint)(rows * sizeof(ushort)), out err);
+            if (err != 0) { Console.WriteLine($"  fp16: gemv output: {err}"); return; }
+
+            ushort[]? siluGot = MeasureHalf(cl, queue, sw, "silu_f16",
+                () => Dispatch(cl, queue, siluKernel, siluIn, siluOut, hidden, local, [hidden]),
+                siluOut, (int)hidden, out double siluUs);
+            if (siluGot is null) return;
+            ushort[]? gemvGot = MeasureHalf(cl, queue, sw, "gemv_f16",
+                () => Dispatch(cl, queue, gemvKernel, gemvIn, gemvOut, rows, local, [rows, cols]),
+                gemvOut, (int)rows, out double gemvUs);
+            if (gemvGot is null) return;
+
+            ReportHalf("silu_f16", siluGot, HalfSiluReference(siluBits), siluUs, f32SiluUs);
+            ReportHalf("gemv_f16", gemvGot, HalfGemvReference(gemvBits, (int)rows, (int)cols), gemvUs, f32GemvUs);
+        }
+        finally
+        {
+            if (siluKernel != 0) cl.ReleaseKernel(siluKernel);
+            if (gemvKernel != 0) cl.ReleaseKernel(gemvKernel);
+            if (siluIn != 0) cl.ReleaseMemObject(siluIn);
+            if (siluOut != 0) cl.ReleaseMemObject(siluOut);
+            if (gemvIn != 0) cl.ReleaseMemObject(gemvIn);
+            if (gemvOut != 0) cl.ReleaseMemObject(gemvOut);
+            cl.ReleaseProgram(program);
+        }
+    }
+
+    /// <summary>CPU reference that accumulates in <see cref="Half"/>, plus the f32-then-round
+    /// alternative, so a driver that promoted the loop to f32 is visible as matching the
+    /// wrong reference.</summary>
+    private static void ReportHalf(string name, ushort[] got, (ushort[] HalfAcc, ushort[] F32Round) expected,
+        double us, double f32Us)
+    {
+        (int halfUlp, int halfAt) = WorstHalfUlp(got, expected.HalfAcc);
+        (int f32Ulp, int f32At) = WorstHalfUlp(got, expected.F32Round);
+        bool refsDiffer = false;
+        for (int i = 0; i < expected.HalfAcc.Length; i++)
+            if (expected.HalfAcc[i] != expected.F32Round[i]) { refsDiffer = true; break; }
+        // Silu has no Half exp in the BCL, so its two references are identical and cannot
+        // tell promotion from native half. Only gemv, where the accumulator width differs, can.
+        string closer = !refsDiffer
+            ? "references identical (elementwise; no Half exp to compare against)"
+            : halfUlp < f32Ulp ? "tracks half-accumulate (not promoted)"
+            : halfUlp > f32Ulp ? "tracks f32-then-round (promoted)"
+            : "equally close to both references";
+        double ratio = f32Us > 0 ? us / f32Us : double.NaN;
+        Console.WriteLine($"  [{name}] steady {us,8:F1} µs | vs f32 {ratio,4:F2}× | worst {halfUlp} half-ULP vs half-acc @ {halfAt}, {f32Ulp} vs f32-round @ {f32At} | {closer}");
+    }
+
+    private static (int Ulp, int Index) WorstHalfUlp(ushort[] got, ushort[] expected)
+    {
+        int worst = 0, at = -1;
+        int n = Math.Min(got.Length, expected.Length);
+        for (int i = 0; i < n; i++)
+        {
+            int ulp = HalfUlpDistance(got[i], expected[i]);
+            if (ulp > worst) { worst = ulp; at = i; }
+        }
+        return (worst, at);
+    }
+
+    /// <summary>Ordered distance in the half lattice. Sign-magnitude bits are mapped to a
+    /// two's-complement order so a value and its neighbour differ by 1, including across zero.</summary>
+    private static int HalfUlpDistance(ushort a, ushort b)
+    {
+        static int Ordered(ushort bits) => (bits & 0x8000) != 0 ? 0x8000 - (bits & 0x7FFF) : bits;
+        return Math.Abs(Ordered(a) - Ordered(b));
+    }
+
+    private static (ushort[] HalfAcc, ushort[] F32Round) HalfSiluReference(ushort[] xBits)
+    {
+        var halfAcc = new ushort[xBits.Length];
+        var f32Round = new ushort[xBits.Length];
+        for (int i = 0; i < xBits.Length; i++)
+        {
+            Half x = BitConverter.UInt16BitsToHalf(xBits[i]);
+            float xf = (float)x;
+            float yf = xf / (1f + MathF.Exp(-xf));
+            f32Round[i] = BitConverter.HalfToUInt16Bits((Half)yf);
+            // No Half exp in the BCL. The half-acc reference for this elementwise kernel is the
+            // same formula evaluated in f32 and rounded once — identical to f32Round. The
+            // distinction only exists for gemv, where the accumulator width differs.
+            halfAcc[i] = f32Round[i];
+        }
+        return (halfAcc, f32Round);
+    }
+
+    private static (ushort[] HalfAcc, ushort[] F32Round) HalfGemvReference(ushort[] packed, int rows, int cols)
+    {
+        var halfAcc = new ushort[rows];
+        var f32Round = new ushort[rows];
+        int weightElems = rows * cols;
+        for (int r = 0; r < rows; r++)
+        {
+            Half h = Half.Zero;
+            float f = 0f;
+            for (int k = 0; k < cols; k++)
+            {
+                Half w = BitConverter.UInt16BitsToHalf(packed[r * cols + k]);
+                Half x = BitConverter.UInt16BitsToHalf(packed[weightElems + k]);
+                h += w * x;
+                f += (float)w * (float)x;
+            }
+            halfAcc[r] = BitConverter.HalfToUInt16Bits(h);
+            f32Round[r] = BitConverter.HalfToUInt16Bits((Half)f);
+        }
+        return (halfAcc, f32Round);
+    }
+
+    private static ushort[] ToHalfBits(BFloat16[] values)
+    {
+        var bits = new ushort[values.Length];
+        ReadOnlySpan<ushort> bf = MemoryMarshal.Cast<BFloat16, ushort>(values);
+        for (int i = 0; i < values.Length; i++)
+            bits[i] = BitConverter.HalfToUInt16Bits((Half)BitConverter.UInt32BitsToSingle((uint)bf[i] << 16));
+        return bits;
+    }
+
+    private static ushort[] Concat(ushort[] first, ushort[] second)
+    {
+        var all = new ushort[first.Length + second.Length];
+        first.CopyTo(all, 0);
+        second.CopyTo(all, first.Length);
+        return all;
+    }
+
+    private static unsafe nint UploadUShort(CL cl, nint context, nint queue, ushort[] data, out int err)
+    {
+        nint buffer = cl.CreateBuffer(context, MemFlags.ReadOnly, (nuint)(data.Length * sizeof(ushort)), null, out err);
+        if (err != 0) return 0;
+        fixed (ushort* p = data)
+            err = cl.EnqueueWriteBuffer(queue, buffer, true, 0, (nuint)(data.Length * sizeof(ushort)), p, 0, null, null);
+        return buffer;
+    }
+
+    private static unsafe nint CreateBuffer(CL cl, nint context, nuint bytes, out int err)
+        => cl.CreateBuffer(context, MemFlags.ReadWrite, bytes, null, out err);
+
+    private static unsafe ushort[]? MeasureHalf(CL cl, nint queue, Stopwatch sw, string name,
+        Func<int> dispatch, nint output, int count, out double bestUs)
+    {
+        bestUs = 0;
+        int err = dispatch();
+        if (err != 0) { Console.WriteLine($"  fp16: {name} dispatch: {err}"); return null; }
+        err = dispatch();
+        if (err != 0) { Console.WriteLine($"  fp16: {name} warmup: {err}"); return null; }
+        bestUs = double.PositiveInfinity;
+        for (int i = 0; i < TimingPasses; i++)
+        {
+            sw.Restart();
+            err = dispatch();
+            sw.Stop();
+            if (err != 0) { Console.WriteLine($"  fp16: {name} timed pass {i}: {err}"); return null; }
+            bestUs = Math.Min(bestUs, sw.Elapsed.TotalMicroseconds);
+        }
+        return DownloadUShort(cl, queue, output, count, name);
+    }
+
+    private static unsafe ushort[]? DownloadUShort(CL cl, nint queue, nint buffer, int count, string name)
+    {
+        var values = new ushort[count];
+        int err;
+        fixed (ushort* p = values)
+            err = cl.EnqueueReadBuffer(queue, buffer, true, 0, (nuint)(count * sizeof(ushort)), p, 0, null, null);
+        if (err != 0)
+        {
+            Console.WriteLine($"  fp16: {name} readback: {err}");
+            return null;
+        }
+        return values;
+    }
 
     /// <summary>Concatenates BF16 fixtures, then packs 2-per-uint so element parity is
     /// preserved across the boundary (the kernels widen by absolute element index).</summary>

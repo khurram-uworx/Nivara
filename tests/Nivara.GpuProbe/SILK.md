@@ -188,6 +188,34 @@ cooperative-matrix path and a plausible `gemv` lever).
 
 ---
 
+### Native FP16 on this iGPU: arithmetic yes, no speed win at these shapes
+
+`cl_khr_fp16` is advertised, and unlike the BF16 extension it adds a real `half` type with
+arithmetic. A separate translation unit (`#pragma OPENCL EXTENSION cl_khr_fp16 : enable`,
+`FP_CONTRACT off`, not mixed into the f32 kernels) builds and runs `silu_f16` and `gemv_f16`
+on the Arc 140T. This is a diagnostic printed by `silk`, not a gate row — half numerics
+cannot pass the f32 `1e-6` bound, and a failure here does not fail the leg.
+
+The compiler did **not** promote the arithmetic back to f32. `gemv_f16` matched a CPU
+`System.Half` accumulator at **0 half-ULP across all 1536 rows**, and sat **32427 half-ULP**
+from the same products accumulated in f32 and rounded once. That gap is the accumulator
+width, and the GPU is on the half side of it. `silu_f16` is 2 half-ULP from the f32 `exp`
+rounded to half; the BCL has no `Half` exp, so that kernel cannot separate promotion from
+native half the way gemv can.
+
+It is not faster. Two runs, same session as the f32 kernels:
+
+| kernel | f32 steady | f16 steady | ratio |
+|---|---|---|---|
+| silu (576) | 6.5 / 7.6 µs | 6.7 / 7.4 µs | 1.03× / 0.97× |
+| gemv (1536×576) | 97.8 / 112.9 µs | 104.8 / 109.2 µs | 1.07× / 0.97× |
+
+The ratio flips across the run-to-run band, so this is a tie, not a win and not a regression.
+These kernels are launch-bound (silu) or a naive serial dot (gemv); half the traffic does not
+show up until the kernel is bandwidth-bound, which a one-thread-per-row loop over 576 is not.
+Native FP16 is reachable from raw OpenCL. It is not, on this evidence, a reason to leave f32
+for these shapes.
+
 ## 6. Parity status
 
 **Achieved:** the three production SmolLM kernels (`dot16`, `silu`, `gemv`) run on the
