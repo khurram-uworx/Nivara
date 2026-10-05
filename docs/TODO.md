@@ -207,31 +207,16 @@ assertion on a shared runner, which is the flake factory AGENTS.md warns about.
 
 Post the serialisation numbers on the issue and close it as measured-negative.
 
-## Open decision for the human (raised at G1, not resolved by assumption)
+## Decision (human, after G1)
 
-**Categorising the allocation-bound guards removes real regression coverage from CI.**
+**Categorise the allocation-bound guards `Performance`.** One uniform rule for every
+measurement-bearing test. `WindowAllocationTests` (the #251 pooled-scratch / typed-kernel
+allocation reduction) leaves PR runs. It still runs locally and in any unfiltered run. The
+guards assert `GC.GetAllocatedBytesForCurrentThread` deltas, not wall-clock, so they get the
+category and **not** `RequireOptimizedBuildForTiming()` — that guard exists for timing
+assertions, which these are not.
 
-`WindowAllocationTests` (5 tests, ~36 s combined) guards the #251 pooled-scratch / typed-kernel
-allocation reduction. Its assertions are `GC.GetAllocatedBytesForCurrentThread` deltas, not
-wall-clock. Allocation counts are deterministic — they do not vary with machine load, and unlike
-wall-clock they do not vary with JIT optimisation, so they need no `RequireOptimizedBuildForTiming()`
-guard and are not the flake source `Category!=Performance` exists to suppress.
-
-Categorising them trades ~36 s of shared-runner time for the loss of a #251 regression gate on
-every PR. The alternative is to keep them in CI and cut their cost — `MeasureBestOf(samples: 5)`
-wraps `MeasureOnce`, which itself runs 3 warmups, so each test performs ~20 invocations. Reducing
-the sample count is a change to a test's inputs, so it needs its own commit with its own measured
-justification, per AGENTS.md "One commit, one reason".
-
-Three ways forward, and the plan as written above assumes the first pending your call:
-
-1. **Keep allocation guards in CI, cut their sample count** so they fit under the 2 s threshold.
-   Preserves coverage; needs a measurement to justify the new sample count.
-2. **Categorise them `Performance`.** Simplest and consistent with a single rule, but drops the
-   #251 gate from PRs.
-3. **Split the rule**: `Category!=Performance` excludes wall-clock assertion tests; allocation
-   guards stay uncategorised and are held to the 2 s threshold as a *cost* rule rather than a
-   *category* rule. Most faithful to the distinction, but the gate then has two rules to state.
+Conditional commit 7 (cut the sample count) is dropped.
 
 ## Blast radius
 
