@@ -24,13 +24,30 @@ An earlier revision of this branch had a separate minimal `OpenCl/SilkProbe.cs` 
 
 ### Measured results (Arc 140T, `kernels` mode)
 
-| kernel | CPU (production Nivara) | Silk.NET OpenCL | gate |
-|---|---|---|---|
-| dot16 | 1.6 µs | **6.8 µs** | PASS — bit-exact, 0.0 ULP |
-| silu | 32.4 µs | **6.1 µs** | PASS — 576/576, worst 4.0 ULP |
-| gemv | 2963.6 µs | **90.0 µs** | PASS — 1536/1536 |
+Ranges across two eight-way runs on the same machine and fixtures; the legs are internally
+best-of-25, but single-run figures move (the CPU `gemv` column alone spanned 2785–4158 µs),
+so ranges are the honest unit here.
 
-Silk.NET is the fastest OpenCL/OpenCL-C row in the gate (ILGPU 10.4 / 7.0 / 135.9 µs on the same run) because it is the only leg that dispatches the compiled binary directly — no ILGPU runtime abstraction between the NDRange and the queue. Build cost is ~5–6 ms (in-process, driver JIT); first dispatch adds 62–415 µs.
+| kernel | CPU (production Nivara) | Silk.NET OpenCL | next best | gate |
+|---|---|---|---|---|
+| dot16 | 1.5–1.7 µs | **6.4–6.7 µs** | ILGPU 10.0–11.6 | PASS — bit-exact, 0.0 ULP |
+| silu | 31.2–41.6 µs | **6.1–7.1 µs** | ILGPU 7.0 (tie) | PASS — 576/576, worst 4.0 ULP |
+| gemv | 2785–4158 µs | 90.1–100.1 µs | **OV bf16 87.9–93.4** | PASS — 1536/1536 |
+
+Silk.NET is the fastest **hand-authored-kernel** leg, and the fastest row on the launch-bound
+`dot16` (~1.5x faster than ILGPU, the nearest hand-authored competitor). It ties ILGPU on
+`silu`. On `gemv` it is **second**, behind OpenVINO's precompiled tuned bf16 kernel
+(90–100 µs vs 88–93 µs) — that is a tuned GEMM beating a naive one, not a binding overhead
+difference.
+
+Careful with "fastest OpenCL row": `OV (bf16)` and `OV (f32)` are themselves OpenCL rows.
+OPENVINO.md records the GPU plugin as OpenCL/IGC-frontened, running on the same Intel ICD,
+so counting them as non-OpenCL to flatter this leg would be dishonest. Against every OpenCL
+row, Silk.NET leads on `dot16`, ties on `silu`, and trails OV-bf16 on `gemv`.
+
+Why it leads the hand-authored legs: it is the only one that dispatches the compiled binary
+directly, with no ILGPU runtime abstraction between the NDRange and the queue. Build cost is
+~4.4–5.2 ms (in-process, driver JIT, highly variable); first dispatch adds 66–498 µs.
 
 **Note on the observed ULP figures:** `gemv`'s worst-case 14336 ULP and `silu`'s 4.0 ULP are *not* Silk.NET-specific — the DX12, OV-f32, ILGPU and ComputeSharp legs report identical values, because it is f32 rounding at those magnitudes against a slightly different summation order, not a kernel difference. `|diff|` is ~1.6e-09 for gemv and ~3.7e-09 for silu, both far inside the `1e-6 + 1e-5·|ref|` gate. `OV (bf16 IR)` is the only silu leg that genuinely fails (402/576) — a real OpenVINO bf16 IR precision issue, pre-existing and tracked separately.
 

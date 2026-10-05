@@ -18,7 +18,7 @@ independent GPU paths**, each gated against the production Nivara CPU kernels:
 | **OpenVINO** | pip-installed `openvino_c.dll` + tuned GPU plugin, IR v11 models | **proven PASS** — first-party, zero compiler, ~26–34× CPU on gemv; BF16 silu honestly F16-tier |
 | **ILGPU (phase 4a)** | NuGet `ILGPU 1.5.3` — pure-managed JIT of C# kernels to OpenCL C (in-box ICD + Intel driver) | **proven PASS** — all three gates on the real iGPU, no CPU fallback; fastest GPU leg on silu (see [docs/ILGPU.md](../../docs/ILGPU.md)) |
 | **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md)) |
-| **Silk.NET OpenCL** | NuGet `Silk.NET.OpenCL 2.23.0` — hand-authored OpenCL C, compiled **in-process** by the driver (`clCreateProgramWithSource` + `clBuildProgram`), no toolchain | **proven PASS** — all three gates on the real iGPU, `dot16` bit-exact (0.0 ULP), no CPU fallback; the fastest OpenCL row and the lowest-overhead baseline (see [SILK.md](SILK.md)) |
+| **Silk.NET OpenCL** | NuGet `Silk.NET.OpenCL 2.23.0` — hand-authored OpenCL C, compiled **in-process** by the driver (`clCreateProgramWithSource` + `clBuildProgram`), no toolchain | **proven PASS** — all three gates on the real iGPU, `dot16` bit-exact (0.0 ULP), no CPU fallback; fastest hand-authored leg and fastest row on `dot16`, second to OpenVINO's tuned bf16 kernel on `gemv` (see [SILK.md](SILK.md)) |
 
 The Level Zero leg got this series started by proving the harness end-to-end
 (module load, launch, readback, verifiable results) and then isolating a
