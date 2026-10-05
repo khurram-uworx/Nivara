@@ -14,7 +14,9 @@ namespace Nivara.GpuProbe;
 /// hand-authored SPIR-V kernels; the DX12 leg runs a hand-rolled compute pipeline;
 /// the OpenVINO leg loads the pip-installed openvino_c.dll and drives IR models on
 /// GPU; the ILGPU leg JIT-compiles C# kernels to OpenCL C; the ComputeSharp leg
-/// source-generates HLSL from C# kernels and runs them through D3D12.
+/// source-generates HLSL from C# kernels and runs them through D3D12; the
+/// Silk.NET OpenCL leg compiles hand-authored OpenCL C in-process through
+/// Silk.NET's managed bindings to the in-box ICD (no external toolchain).
 /// Each GPU backend runs the same SmolLM-shaped kernel fixtures, gated against
 /// the production Nivara CPU kernels (`kernels` mode).
 /// </summary>
@@ -39,6 +41,7 @@ internal class Program
             "run" => L0Run.Run(),
             "spv" => SpvDump.Run(),
             "ocl" => OclProbe.Run(),
+            "silk" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "Silk.NET OpenCL", OpenCl.SilkLeg.RunLeg),
             "dx12" => D3d12Check.Run() + D3d12.D3d12Compute.Run(),
             "sycl" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
             "ov" => OpenVino.Availability.Run() + OVRun(),
@@ -51,7 +54,8 @@ internal class Program
                 ("DX12 (hand-rolled)", D3d12.D3d12Compute.RunLeg),
                 ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16),
                 ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32),
-                ("ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg)
+                ("ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg),
+                ("Silk.NET OpenCL", OpenCl.SilkLeg.RunLeg)
 #if WINDOWS
                 , ("ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)
 #endif

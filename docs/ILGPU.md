@@ -171,12 +171,17 @@ ILGPU v2.0.
 ## 5. Setup vs steady state (the honest split)
 
 The three timings that matter, measured on the Arc 140T (µs; six-way `kernels`
-run unless noted):
+run unless noted — Silk.NET and ComputeSharp were not in that run). The
+"fastest GPU leg" margins below were true **of that run**; a later same-host
+eight-way run put Silk.NET ahead on `dot16` (6.4–6.7 µs vs 10.0–11.6) and
+tied on `silu` (6.1–7.1 vs 7.0). Those later figures are single-session, not
+the repeated same-host profile tracked in #552 (Arc 140T) and #553 (Iris Xe),
+so they correct the ordering claim without replacing this table's numbers.
 
 | kernel | jit (load + first dispatch) | steady (1 warmup + best-of-25) | CPU (production Nivara) | margin |
 |---|---|---|---|---|
 | `dot16` (K=16) | 2668 | **11.4** | 1.2–4.8 | launch-bound — CPU still wins; ~3–6× faster than the other GPU legs (32–560 µs) |
-| `silu` (576) | 1317 | **6.9** | 29–99 | **~4.6–14× GPU — fastest GPU leg measured on silu** |
+| `silu` (576) | 1317 | **6.9** | 29–99 | **~4.6–14× GPU** — fastest in this run; later tied by Silk.NET (see note above) |
 | `gemv` (1536×576) | 1371 | **133.4** | 2291–4745 | **~17–35× GPU** |
 
 Context creation and accelerator creation are timed as part of the leg's setup
@@ -207,7 +212,7 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 | **BF16** | no native BF16 kernel type in 1.5.3 (PR #1221 open) → packed-2-per-uint + in-shader widen, byte-identical to DX12 transport |
 | **correctness** | dot16 **0.0 ULP** · silu worst 4.0 ULP · gemv within gate — **3/3 PASS** |
 | **setup cost** | ~9 ms accelerator creation + first sync (context costs a one-time few-ms more); ~1.3–3.8 ms kernel JIT each |
-| **steady state** | dot16 **11.4 µs** · silu **6.9 µs** (fastest GPU leg) · gemv **133.4 µs** |
+| **steady state** | dot16 **11.4 µs** · silu **6.9 µs** (fastest in this run; later tied by Silk.NET) · gemv **133.4 µs** |
 | **footprint** | +3.4 MB (ILGPU 1946 KB + Algorithms 1502 KB); BCL transitives inbox on net11 |
 | **risk** | JIT + ICD layer = two moving compilers (ILGPU → OpenCL C → IGC); no native BF16 today; OpenCL ICD required at runtime |
 | **gotchas (hit during the leg)** | `Index1D` naming (not `Index1`); implicit grouping pads the grid → **bounds-check every kernel**; `CLDeviceType` uses `CL_DEVICE_TYPE_*` names; `XMath.Exp` requires the Algorithms package (core has no exp); readback via `AsContiguous().GetAsArray()` (generic inference skips the implicit view conversion); device-select assert (`CL_DEVICE_TYPE_GPU`) prevents silent CPU fallback; **at most one `SharedMemory` allocation per kernel** — two `Allocate2D` calls with disagreeing extents get the second tile mis-placed by the OpenCL lowering (#468), and the 1-D `Allocate<float>` form costs 10–20% against one wide `Allocate2D` |
@@ -220,8 +225,11 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 - ILGPU is the **lowest-friction compiled path**: `dotnet restore` is the whole
   install; kernels are plain C# (the same language as the host), high-level
   launchers avoid boxing, and BF16 rides the proven packed-widen transport.
-- It is also the **fastest measured GPU leg on silu** (6.9 µs, ~5–14× CPU) and
-  within 1.5× of OpenVINO's tuned gemv with a naive kernel shape.
+- On the six-way run it was the **fastest measured GPU leg on silu** (6.9 µs,
+  ~5–14× CPU) and within 1.5× of OpenVINO's tuned gemv with a naive kernel
+  shape. A later same-host run (Silk.NET present) ties it on silu and beats it
+  on dot16; #552 / #553 are the repeated two-host profile that replaces both
+  readings as an ordering.
 - As a promotion candidate for a managed `src/Nivara.Gpu`, ILGPU's trade is
   **open source + managed kernels vs OpenVINO's closed tuned runtime**; the
   deciding measure for real workloads will be a tiled gemv (next step), where

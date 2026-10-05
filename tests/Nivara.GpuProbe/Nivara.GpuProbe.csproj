@@ -39,6 +39,12 @@
     <PackageReference Include="ComputeSharp.Dxc" Version="3.2.0" />
   </ItemGroup>
 
+  <!-- Phase 5 (Silk.NET OpenCL): thin bindings for OpenCL to target Intel/AMD iGPUs.
+       Probe-scoped only, no src changes. -->
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.OpenCL" Version="2.23.0" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\samples\Nivara.Samples\Nivara.Samples.csproj" />
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
