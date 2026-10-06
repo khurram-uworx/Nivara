@@ -178,8 +178,11 @@ public class SortingIntegrationTests
     }
 
     [Test]
+    [Category("Performance")]
     public void SortingPerformance_LargeDataset_ShouldCompleteReasonably()
     {
+        TimingGuards.RequireOptimizedBuildForTiming();
+
         // Arrange - Create a larger dataset for performance testing
         const int rowCount = 10000;
         var random = new Random(42); // Fixed seed for reproducible results

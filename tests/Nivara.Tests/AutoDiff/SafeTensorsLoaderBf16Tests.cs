@@ -93,6 +93,7 @@ public class SafeTensorsLoaderBf16Tests
     }
 
     [Test]
+    [Category("Performance")]
     public void ReadFloat_OnQwenCheckpoint_LoadsAll290TensorsWithExpectedShapes()
     {
         var safetensors = Path.Combine(ModelDir, "model.safetensors");

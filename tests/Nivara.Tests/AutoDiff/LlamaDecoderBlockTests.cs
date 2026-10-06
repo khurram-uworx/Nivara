@@ -258,6 +258,7 @@ public class LlamaDecoderBlockTests
     }
 
     [Test]
+    [Category("Performance")]
     public void ForwardCachedFused_SteadyState_AllocatesNothing()
     {
         // Qwen2.5-0.5B block shapes: the fused kernel must be allocation-free per call in

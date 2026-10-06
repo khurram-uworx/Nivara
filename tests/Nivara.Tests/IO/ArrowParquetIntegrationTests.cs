@@ -1,4 +1,5 @@
 using Nivara.IO;
+using Nivara.Tests;
 using NUnit.Framework;
 
 namespace Nivara.Tests.IO;
@@ -385,8 +386,11 @@ public class ArrowParquetIntegrationTests
     }
 
     [Test]
+    [Category("Performance")]
     public void LargeDataset_Integration_PerformanceTest()
     {
+        TimingGuards.RequireOptimizedBuildForTiming();
+
         // Arrange - Create a larger dataset to test performance and memory handling
         const int rowCount = 10000;
         var intData = Enumerable.Range(1, rowCount).ToArray();
