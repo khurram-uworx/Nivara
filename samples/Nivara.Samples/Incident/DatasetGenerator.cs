@@ -34,7 +34,7 @@ public static class DatasetGenerator
     public static void Generate(string datasetPath, string scenarioId, int scale)
         => GenerateFromRecordCount(datasetPath, scenarioId, 10_000_000L * scale);
 
-    public static void GenerateFromRecordCount(string datasetPath, string scenarioId, long totalRecords)
+    public static void GenerateFromRecordCount(string datasetPath, string scenarioId, long totalRecords, int rowGroupSize = 10_000)
     {
         var scenario = Scenarios.Get(scenarioId);
         Directory.CreateDirectory(datasetPath);
@@ -232,7 +232,7 @@ public static class DatasetGenerator
             ("TraceId", NivaraColumn<string>.Create(traceIdData)),
             ("IsRetry", NivaraColumn<bool>.Create(isRetryData)));
 
-        var parquetOptions = ParquetWriteOptions.Default.With(rowGroupSize: 10_000);
+        var parquetOptions = ParquetWriteOptions.Default.With(rowGroupSize: rowGroupSize);
         requestFrame.ToParquet(Path.Combine(datasetPath, "requests.parquet"), parquetOptions);
 
         WriteCsv(Path.Combine(datasetPath, "requests.csv"),
