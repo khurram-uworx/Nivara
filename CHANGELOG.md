@@ -104,6 +104,16 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`DatasetGenerator` wrote trailing default rows (#563)** — `GenerateFromRecordCount` sized
+  every request array to the requested record count but filled only `floor(totalRecords / 30) * 30`
+  slots, leaving the trailing `totalRecords % 30` rows at their defaults (`Timestamp 0`, null
+  `Service`/`Endpoint`/`Region`/`TraceId`, `StatusCode 0`, `DurationMs 0`) and writing them to both
+  the Parquet and CSV outputs — a 10,000-record request carried 10 default rows. The per-minute
+  remainder is now distributed across the leading minutes so exactly the requested number of fully
+  populated rows is written, and the silent tail-truncation guard is removed. Sample generator only
+  — no `src/Nivara` change; `DatasetGeneratorTests` pins the row count, the per-minute distribution,
+  and the absence of defaults.
+
 - **Unparseable integer and precision options rejected in `NivaraInference` (#479)** —
   `--teacher-examples` and `--seed` parsed their value with the parameterless `int.TryParse` and
   threw the result away, so `--teacher-examples abc` silently became `0` (the "all" default) and
