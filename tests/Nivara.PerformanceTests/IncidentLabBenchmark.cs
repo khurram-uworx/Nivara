@@ -103,15 +103,9 @@ static class IncidentLabBenchmark
             var regionCol = frame.GetColumn<string>("Region");
 
             var regions = new HashSet<string>();
-            int defaultValueCount = 0;
             for (int i = 0; i < frame.RowCount; i++)
             {
                 int sc = (int)statusCol.GetValue(i)!;
-                if (sc == 0)
-                {
-                    defaultValueCount++;
-                    continue;
-                }
                 if (sc < 200 || sc > 503)
                     throw new InvalidOperationException(
                         $"FieldRanges test failed: StatusCode {sc} out of range [200,503]");
@@ -130,8 +124,6 @@ static class IncidentLabBenchmark
             if (regions.Count != 10)
                 throw new InvalidOperationException(
                     $"FieldRanges test failed: expected 10 regions, got {regions.Count}");
-            if (defaultValueCount > 0)
-                Console.Write($"({defaultValueCount} trailing default rows) ");
             Console.WriteLine($"{regions.Count} regions OK");
         }
         finally
@@ -214,6 +206,7 @@ static class IncidentLabBenchmark
 
         int totalRequests = 5000;
         int requestsPerMinute = totalRequests / 30;
+        int remainderRequests = totalRequests - requestsPerMinute * 30;
 
         var timestampData = new long[totalRequests];
         var serviceData = new string[totalRequests];
@@ -228,9 +221,10 @@ static class IncidentLabBenchmark
         var regions = new[] { "us-east-1", "us-west-2", "eu-west-1", "ap-south-1" };
 
         int idx = 0;
-        for (int minute = 0; minute < 30 && idx < totalRequests; minute++)
+        for (int minute = 0; minute < 30; minute++)
         {
-            for (int r = 0; r < requestsPerMinute && idx < totalRequests; r++, idx++)
+            int minuteRequests = requestsPerMinute + (minute < remainderRequests ? 1 : 0);
+            for (int r = 0; r < minuteRequests; r++, idx++)
             {
                 timestampData[idx] = baseTime.AddMinutes(minute).AddMilliseconds(rng.NextDouble() * 60_000).Ticks;
                 serviceData[idx] = services[rng.Next(services.Length)];
