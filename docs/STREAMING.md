@@ -7,7 +7,9 @@ Public entry points for chunked, lazy processing of query frames:
 | `QueryFrame.AsStream(int chunkSize = 10000, CancellationToken ct = default)` | `src/Nivara/Query/QueryFrame.cs` |
 | `QueryFrame.AsStream(NivaraExecutionContext context, CancellationToken ct = default)` | `src/Nivara/Query/QueryFrame.cs` |
 | `QueryFrame.AsStream(NivaraExecutionContext context, int chunkSize, CancellationToken ct = default)` | `src/Nivara/Query/QueryFrame.cs` |
-| `NivaraQuery<T>.AsStream(...)` — passthrough | `src/Nivara/Linq/NivaraQuery.cs` |
+| `NivaraQuery<T>.AsStream(int chunkSize = 10000, CancellationToken ct = default)` | `src/Nivara/Linq/NivaraQuery.cs` |
+| `NivaraQuery<T>.AsStream(NivaraExecutionContext context, CancellationToken ct = default)` | `src/Nivara/Linq/NivaraQuery.cs` |
+| `NivaraQuery<T>.AsStream(NivaraExecutionContext context, int chunkSize, CancellationToken ct = default)` | `src/Nivara/Linq/NivaraQuery.cs` |
 | `NivaraFrame.AsQueryFrame()` / `NivaraQuery<T>.AsQueryFrame()` | `src/Nivara/NivaraFrame.cs` / `src/Nivara/Linq/NivaraQuery.cs` |
 | `Csv.ScanAsQueryFrame(string, CsvOptions?)` | `src/Nivara.Extensions/IO/CsvExtensions.cs` |
 | `Json.ScanAsQueryFrame(string, JsonOptions?)` | `src/Nivara/IO/JsonExtensions.cs` |
@@ -189,7 +191,9 @@ leave `ChunkSize` null, e.g.
 to `AsStream(context)` — a 64 MB budget derives a 67,108-row chunk. The context is cloned
 before execution, so the caller's instance is not mutated. An explicit chunk size — the
 `AsStream(context, chunkSize)` overload or a populated
-`NivaraExecutionContext.ChunkSize` — always wins over the derived value.
+`NivaraExecutionContext.ChunkSize` — always wins over the derived value. The typed-LINQ wrapper
+`NivaraQuery<T>.AsStream` mirrors the same three overloads and forwards the context verbatim,
+so the route is available from the LINQ DSL without an `AsQueryFrame()` hop.
 
 ## Example
 
