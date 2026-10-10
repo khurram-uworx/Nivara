@@ -124,7 +124,7 @@ See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null
 - **Compare distributions, not single estimates.** Warm up both routes, interleave A/B rounds, alternate which side is measured first so load drift cannot systematically penalise the first-measured route, then assert on the median ratio with a bound set well above the observed noise floor. Best-of-N taken separately per route and compared once is what made #482 flaky even in Release. The reusable implementation is `TransposeKernelProbe` (`transpose` mode) in `tests/Nivara.SimdProbe`.
 - **Buffer pooling threshold**: rent arrays >1024 elements from `BufferPool` (in Extensions).
 - **Default memory budget**: 1 GB (`1024 * 1024 * 1024`, `NivaraExecutionContext.cs:17`) for the core query pipeline, pinned by `ExecutionContextTests.Constructor_DefaultValues_SetsExpectedDefaults`. Do not confuse it with the 256 MB default owned by the IO-layer `StreamingBufferManager` (`Nivara.Extensions`), which is intentionally not wired into query execution.
-- **Streaming chunk size**: `AsStream` defaults to 10,000 rows (its own parameter default, not budget-derived). The budget-derived fallback `clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)` applies only when `NivaraExecutionContext.ChunkSize` is null — on the public API that means `ExecutionEngine.Execute(plan, context)` with `Strategy = Streaming`. Row-group aligned for Parquet. Full contract in `docs/STREAMING.md`.
+- **Streaming chunk size**: `AsStream` defaults to 10,000 rows (its own parameter default). The budget-derived fallback `clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)` applies when `NivaraExecutionContext.ChunkSize` is null — reachable on the public API via `AsStream(NivaraExecutionContext)` (ADR-006) or `ExecutionEngine.Execute(plan, context)` with `Strategy = Streaming`. Row-group aligned for Parquet. Full contract in `docs/STREAMING.md`.
 - **Vectorization overhead threshold**: prefer only when `Length >= vectorSize * 4` (heuristic).
 - **Fused expression engine**: primary path compiles `ColumnExpression` AST to cached delegates (SIMD auto-vectorized). `FusedKernel` fallback for non-compilable expressions. No boxed fallback — non-fusible expressions throw.
 - **FlattenTo**: cache flattened tensor data if multiple accesses needed; use single `FlattenTo` for one-time access.
@@ -168,6 +168,7 @@ See `docs/adr/` for recorded decisions:
 - **ADR-003** (`docs/adr/003-batch-fused-ops-not-rank-n-primitives.md`): Batch fused ops preferred over rank-N primitives.
 - **ADR-004** (`docs/adr/004-fused-expression-engine-kernel-ir-span-backends.md`): Fused expression engine uses kernel IR with span backends.
 - **ADR-005** (`docs/adr/005-snippet-gate-authoring-contract.md`): Read before editing a fenced ```csharp block in a gated doc, or adding one. Each fence compiles alone; `<!-- gate -->` keys are `mode`/`preamble`/`locals`/`exclude`/`reason`; `preamble:` is a label, not a resolver.
+- **ADR-006** (`docs/adr/006-streaming-memory-budget-exposure.md`): The streaming memory budget is exposed through a context-taking `AsStream(NivaraExecutionContext)` overload (the strategy stays internal); the bare `AsStream()` keeps its 10,000-row default, and the caller's context is cloned before execution.
 
 ## Agent Framework Workflow Patterns
 

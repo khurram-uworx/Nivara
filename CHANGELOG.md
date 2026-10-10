@@ -6,6 +6,20 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Reachable streaming memory budget: `AsStream(NivaraExecutionContext)` (#514)** — `QueryFrame.AsStream`
+  built its own execution context, so `NivaraExecutionContext.MemoryBudget` could never reach
+  `StreamingExecutionStrategy` and the budget-to-chunk-size derivation (`CalculateChunkSize`) stayed
+  unreachable from the chunked stream path. New overloads `AsStream(NivaraExecutionContext)` and
+  `AsStream(NivaraExecutionContext, int chunkSize)` carry a caller's context in; the context is cloned
+  before execution so the caller's instance is not mutated, and an explicit chunk size always wins over
+  the budget-derived value. The bare `AsStream()` default is restored to the documented 10,000 rows (an
+  earlier `int?`/nullable-context overload had silently derived 100,000 from the 1 GB default, disagreeing
+  with `NivaraQuery<T>.AsStream`). The redundant `AsStream(int chunkSize, long memoryBudget)` overload is
+  removed — it forced `ChunkSize`, so its budget was inert on the stream path. Recorded as
+  `docs/adr/006-streaming-memory-budget-exposure.md`; `docs/STREAMING.md` and `docs/ACCELERATION.md` are
+  corrected, including the claim that the bounded channel enforces the budget on the `AsStream` path (that
+  channel belongs to the materializing path).
+
 - **Snippet-gate authoring contract recorded as ADR-005, plus a gate on the ADR index (#538)** —
   the contract for writing a fenced `csharp` block that passes `DocumentationSnippetTests` lived
   only in `tests/Nivara.Tests/Docs/`, and the reasoning behind it only in a `docs/TODO.md` that
@@ -123,7 +137,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
   **Behaviour change:** budgets above ~2.1 TB now yield the ceiling (100,000 rows; capacity 16)
   instead of collapsing to the floor. No reachable path is affected — the budget-derived chunk
-  size and the channel are not settable from the public API (#514) — and every budget below the
+  size was not settable from the public API before #514 — and every budget below the
   wrap region is byte-identical to before. `StreamingStrategy_MemoryBudgetMaxValue_Works` passes
   `long.MaxValue` but only asserted `RowCount`, so it never observed the chunk size; the new
   `StreamingChunkSizeTests` covers the formula directly. `calculateChunkSize` is renamed
