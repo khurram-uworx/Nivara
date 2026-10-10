@@ -33,6 +33,23 @@ Sources re-checked: `docs/TENSORS.md` §"The zero-copy `AsTensorView()` surface"
 (107–122); `docs/plan/AISTACK-ROADMAP.md:125` ("immutability is convention, not a
 `ReadOnlyTensorSpan<T>` type").
 
+## Grounding (G1)
+
+- **Microsoft Learn** confirms the premise from the official API surface, not only the probe:
+  `Tensor.Create<T>(T[] array, …)` returns "a new tensor that **uses `array` as its backing
+  buffer**" ([Tensor.Create](https://learn.microsoft.com/dotnet/api/system.numerics.tensors.tensor.create?view=net-11.0-pp)),
+  and `Tensor<T>.TryGetSpan(ReadOnlySpan<IntPtr>, Int32, out Span<T>)` hands back a **writable**
+  `Span<T>` — so a hosted view is genuinely corruptible, and the identity check must compare a
+  `Span<T>`, not a `ReadOnlySpan<T>`.
+- **code-memory blast radius** (`RelationshipRecord`): `ColumnStorage<T>.AsTensor()` has exactly
+  one production caller — `NivaraColumn<T>.AsTensorView()` (`NivaraColumn.cs:1239`). Public
+  aliasing entries are `NivaraColumn/NivaraSeries.AsTensorView()` and `GradTensor.AsTensor()`.
+  `AsWritableSpan()` production callers are only `Adam.applyAdam`, `AdamW.applyAdamW` and
+  `SGD.Step()` (via `NivaraColumn<T>.AsWritableSpan()`), matching the write-path caveat above.
+- **Decision raised and cleared by the human**: document the invariant as "no read path writes;
+  `AsWritableSpan()` is the sole, internal write path" and correct the `AsTensorView()`
+  "immutable" wording. No further blocking decisions.
+
 ## Proposed changes
 
 ### 1. Pin the invariant with a test (`tests/Nivara.Tests/Storage/ColumnStorageTests.cs`)
