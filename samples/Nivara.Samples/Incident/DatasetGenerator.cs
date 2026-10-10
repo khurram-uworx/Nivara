@@ -47,6 +47,7 @@ public static class DatasetGenerator
 
         int totalRequests = (int)totalRecords;
         int requestsPerMinute = (int)(totalRequests / durationMinutes);
+        int remainderRequests = totalRequests - requestsPerMinute * (int)durationMinutes;
 
         var affectedRegion = scenarioId == "D" ? "ap-south-1" : null;
 
@@ -70,7 +71,8 @@ public static class DatasetGenerator
             var minuteEnd = baseTime.AddMinutes(minute + 1);
             bool inIncident = minuteStart >= incidentStart && minuteStart < incidentEnd;
 
-            for (int r = 0; r < requestsPerMinute && requestIdx < totalRequests; r++, requestIdx++)
+            int minuteRequests = requestsPerMinute + (minute < remainderRequests ? 1 : 0);
+            for (int r = 0; r < minuteRequests; r++, requestIdx++)
             {
                 var timestamp = minuteStart.AddMilliseconds(rng.NextDouble() * 60_000);
                 var service = Services[rng.Next(Services.Length)];
