@@ -170,12 +170,18 @@ Prioritized for the next iterations of the GPU journey (see also [ROADMAP-SUGGES
 
 # Streaming Memory-Budget Enforcement
 
-> **Status: design proposal — not implemented.** Nothing in this section ships. The
-> `BudgetEnforcement` enum, the `MemoryBudget` class, and an `enforced:` parameter on
-> `QueryFrame.AsStream` do not exist anywhere in `src/`; the whole signature is
-> `AsStream(int chunkSize = 10000, CancellationToken ct = default)` (`QueryFrame.cs:461`).
-> Every code block below is the *proposed* shape, not something a reader can call. For the
-> streaming contract that does ship, see [`docs/STREAMING.md`](STREAMING.md).
+> **Status: design proposal — not implemented.** The `BudgetEnforcement` enum, the
+> `MemoryBudget` class (the accounting primitive, distinct from the existing
+> `NivaraExecutionContext.MemoryBudget` byte count), and an `enforced:` parameter on
+> `QueryFrame.AsStream` do not exist anywhere in `src/`. Every code block below is the
+> *proposed* shape, not something a reader can call. For the streaming contract that does
+> ship, see [`docs/STREAMING.md`](STREAMING.md).
+>
+> One part of the old blocker is gone: the memory budget is now reachable through the
+> context-taking `AsStream` overload ([ADR-006](adr/006-streaming-memory-budget-exposure.md)),
+> so "there is nowhere for the configuration to go" no longer holds for the *budget* itself.
+> What remains unimplemented is the **enforcement** — a public mode that turns the budget
+> into a hard in-flight ceiling.
 >
 > It also no longer matches the issue it names. #325 proposes **spill-to-disk** for boundary
 > operators (`SpillDirectory` on the context, spill then reconstruct); what is described here
@@ -207,23 +213,20 @@ The budget behavior is **configurable** and defaults to the current advisory mod
 
 ### Configuration
 
-**Today there is no knob for any of this.** `QueryFrame.AsStream` builds its own
-`NivaraExecutionContext(ExecutionStrategy.Streaming)` internally (`QueryFrame.cs:461-478`)
-and sets only `CancellationToken`, `ChunkSize`, and `ExecutionDiagnostics`;
-`MemoryBudget` is left at its 1 GB constructor default (`NivaraExecutionContext.cs:17`) and
-no overload accepts a context. The one sizing knob a caller can reach is `AsStream(chunkSize:)`.
-`StreamingExecutionStrategy` is internal, so its
-`StreamChunksAsync(QueryPlan, NivaraExecutionContext, CancellationToken)` cannot be called
-from outside the assembly either; the only public route to a custom context is
-`ExecutionEngine.Execute(plan, context)`, which materializes one whole frame and yields no
-chunks at all. So the old sentence here — "mode is set via `NivaraExecutionContext` or at
-strategy construction time" — described an object that never reaches `AsStream`, and a
-strategy constructor that takes no arguments.
+**No enforcement knob exists.** `MemoryBudget` can now be set for a chunked stream —
+`AsStream(NivaraExecutionContext)` ([ADR-006](adr/006-streaming-memory-budget-exposure.md)) —
+so the budget reaches `StreamingExecutionStrategy.CalculateChunkSize`
+(`StreamingExecutionStrategy.cs:24`). But there is still no
+mode that turns that budget into a hard ceiling: `StreamingExecutionStrategy` remains
+internal, and the `AsStream` path (`StreamChunksAsync`, `StreamingExecutionStrategy.cs:501`)
+has no bounded channel at all, so
+`CalculateChannelCapacity` is reached only by `ExecutionEngine.Execute(plan, context)`, which
+materializes one whole frame and yields no chunks.
 
-What actually bounds streaming memory today is the bounded producer/consumer channel, with
-`StreamingBudgetTracker` warning on top — not a byte budget. See `docs/STREAMING.md`
-§"Memory budget → chunk size" and §"AC3 resolution (memory budget enforcement)", and
-`StreamingBackpressureTests`.
+What bounds streaming memory on the chunked path today is the consumer's own pace (pull-based
+`IAsyncEnumerable`), with `StreamingBudgetTracker` warning on top — not a byte budget. See
+`docs/STREAMING.md` §"Memory budget → chunk size" and §"AC3 resolution (memory budget
+enforcement)", and `StreamingBackpressureTests`.
 
 ```csharp
 // What is settable today: the chunk size, on AsStream.
@@ -253,16 +256,16 @@ var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
 };
 ```
 
-Implementing it would need a public route for the context to reach the strategy — tracked
-as #514.
+Implementing it no longer needs a public route for the context to reach the strategy — that
+landed as [ADR-006](adr/006-streaming-memory-budget-exposure.md). What is still missing is
+the `BudgetEnforcement` flag and the in-memory gate it selects.
 
-Two properties of the proposal, neither of which holds today:
+The proposal now rests on one additive change rather than two:
 
-- `AsStream` takes `(int chunkSize = 10000, CancellationToken ct = default)` and no context.
-  Enforcement would have to travel on the execution context, and nothing public currently
-  carries a caller's context into the streaming strategy.
-- Both `MemoryBudget` and the `BudgetEnforcement` flag would be additive to
-  `NivaraExecutionContext`, which today has neither.
+- The context route exists: `AsStream(NivaraExecutionContext)` carries a caller's context
+  into the streaming strategy.
+- `BudgetEnforcement` would be additive to `NivaraExecutionContext`, which does not have it.
+  (`MemoryBudget` is already there.)
 
 When `BudgetEnforcement` is `Advisory` (the proposed default), the pipeline behaves
 identically to today: `StreamingBudgetTracker` records and warns, but reads are never
@@ -460,8 +463,8 @@ No `MemoryBudget` primitive is created. No blocking. Identical to today.
 | Source readers (`CsvLazySource`, `ParquetLazySource`, `JsonLazySource`) | ✓ | They read `chunkSize` rows as requested. Budget gating happens at the *caller*, not inside the reader. |
 | `NivaraExecutionContext.MemoryBudget` | ✓ | Still a `long` in bytes. Default 1 GB. |
 | `StreamingExecutionStrategy.CalculateChannelCapacity` | ✓ | Channel capacity formula is unchanged. |
-| `QueryFrame.AsStream()` | ✓ | Public API unchanged by this proposal — it would *gain* an `enforced:` parameter, since it has none today. Reaching the strategy from that parameter is the open part: `StreamingExecutionStrategy` is internal and `AsStream` takes no context. |
-| Streamix bridge (`NivaraFlux`) | ✓ | Uses `AsStream` under the hood, so Enforced mode would flow through — conditional on the same missing route as the row above. |
+| `QueryFrame.AsStream()` | ✓ | Now has a context overload ([ADR-006](adr/006-streaming-memory-budget-exposure.md)); enforcement would add an `enforced:` parameter on top of it. The strategy stays internal, but the context route exists. |
+| Streamix bridge (`NivaraFlux`) | ✓ | Uses `AsStream` under the hood, so Enforced mode would flow through once the `BudgetEnforcement` flag exists. |
 
 ## Migration path
 
@@ -515,6 +518,7 @@ No `MemoryBudget` primitive is created. No blocking. Identical to today.
 
 ## Streaming memory budget
 
+0. ~~**#514 — reachable streaming memory budget.**~~ **Done** 2026-10-10 (`khurram/514`): `AsStream(NivaraExecutionContext)` carries `MemoryBudget` to `CalculateChunkSize`; recorded as [ADR-006](adr/006-streaming-memory-budget-exposure.md). Enforcement below is still unimplemented.
 1. **Phase 2 — spill-to-disk for boundary operators.** Only makes sense after sources obey backpressure.
 2. **External sort / hash join.** Requires operator-level spill abstraction.
 3. **Hard process-level memory limits.** Needs OS/container enforcement.

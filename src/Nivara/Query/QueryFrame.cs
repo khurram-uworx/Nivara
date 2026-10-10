@@ -444,62 +444,78 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <para>
     /// <paramref name="chunkSize"/> is the target number of rows per chunk. It is honored
     /// by row-oriented sources (CSV, JSON); for columnar sources such as Parquet the value
-    /// is advisory and chunks are aligned to native row-group boundaries. The default is
-    /// 10,000 rows. When no explicit chunk size is supplied anywhere in the execution
-    /// context, the streaming strategy derives one from the memory budget:
-    /// <c>budget / 10 ÷ 100 estimated bytes/row</c>, clamped to the range
-    /// [1000, 100,000] rows. An explicit <paramref name="chunkSize"/> always wins over the
-    /// budget-derived default.
+    /// is advisory and chunks are aligned to native row-group boundaries.
     /// </para>
     /// </remarks>
-    /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
-    /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
-    /// chunks are aligned to native row-group boundaries.</param>
+    /// <param name="chunkSize">The target number of rows per chunk. Defaults to 10,000.
+    /// Honored by row-oriented sources (CSV, JSON); for columnar sources such as Parquet
+    /// the value is advisory and chunks are aligned to native row-group boundaries.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext? context = null, int? chunkSize = null, CancellationToken ct = default)
+    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
+        => asStreamCore(null, chunkSize, ct);
+
+    /// <summary>
+    /// Streams processed chunks from the query as an async enumerable, using the supplied
+    /// execution context for the memory budget, progress, diagnostics, and cancellation.
+    /// </summary>
+    /// <remarks>
+    /// When <see cref="NivaraExecutionContext.ChunkSize"/> is left null, the streaming
+    /// strategy derives the chunk size from <see cref="NivaraExecutionContext.MemoryBudget"/>:
+    /// <c>budget / 10 ÷ 100 estimated bytes/row</c>, clamped to the range [1000, 100,000]
+    /// rows. This is the public route by which a caller sets a streaming memory budget; an
+    /// explicit <see cref="NivaraExecutionContext.ChunkSize"/> always wins over the
+    /// budget-derived value. The context is cloned before execution, so the caller's
+    /// instance is not mutated.
+    /// </remarks>
+    /// <param name="context">The execution context carrying the memory budget and, optionally,
+    /// an explicit <see cref="NivaraExecutionContext.ChunkSize"/>.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
+    public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return asStreamCore(context, null, ct);
+    }
+
+    /// <summary>
+    /// Streams processed chunks from the query as an async enumerable, using the supplied
+    /// execution context and an explicit chunk size.
+    /// </summary>
+    /// <param name="context">The execution context carrying the memory budget, progress, and
+    /// diagnostics.</param>
+    /// <param name="chunkSize">The target number of rows per chunk; overrides
+    /// <see cref="NivaraExecutionContext.ChunkSize"/>.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
+    public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, int chunkSize, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return asStreamCore(context, chunkSize, ct);
+    }
+
+    /// <summary>
+    /// Runs the streaming strategy over this query's plan using a cloned execution context.
+    /// </summary>
+    /// <param name="context">The caller's context, or null to start from defaults.</param>
+    /// <param name="chunkSize">An explicit chunk size, or null to keep the context's value
+    /// (which the strategy derives from the memory budget when null).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    IAsyncEnumerable<NivaraFrame> asStreamCore(NivaraExecutionContext? context, int? chunkSize, CancellationToken ct)
     {
         ObjectDisposedException.ThrowIf(handle.Released, this);
 
         var queryPlan = new QueryPlan(handle.Source, operations);
         var engine = new ExecutionEngine();
-        var diagnostics = context?.ExecutionDiagnostics ?? new ExecutionDiagnostics();
-        var streamingContext = context ?? new NivaraExecutionContext(ExecutionStrategy.Streaming);
+        var streamingContext = (context ?? new NivaraExecutionContext()).Clone();
         streamingContext.Strategy = ExecutionStrategy.Streaming;
-        if (streamingContext.ExecutionDiagnostics == null) streamingContext.ExecutionDiagnostics = diagnostics;
-        if (chunkSize.HasValue) streamingContext.ChunkSize = chunkSize.Value;
         streamingContext.CancellationToken = ct;
+        streamingContext.ExecutionDiagnostics ??= new ExecutionDiagnostics();
+        if (chunkSize.HasValue) streamingContext.ChunkSize = chunkSize.Value;
 
         var strategy = engine.GetStrategy(ExecutionStrategy.Streaming) as StreamingExecutionStrategy
             ?? throw new QueryExecutionException("Streaming execution strategy is not registered");
         return captureDiagnosticsOnComplete(strategy.StreamChunksAsync(queryPlan, streamingContext, streamingContext.CancellationToken), streamingContext.ExecutionDiagnostics);
-    }
-
-    /// <summary>
-    /// Streams processed chunks from the query as an async enumerable.
-    /// </summary>
-    /// <param name="chunkSize">The target number of rows per chunk.</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize, CancellationToken ct = default)
-        => AsStream((NivaraExecutionContext?)null, chunkSize, ct);
-
-    /// <summary>
-    /// Streams processed chunks from the query as an async enumerable.
-    /// </summary>
-    /// <param name="chunkSize">The target number of rows per chunk.</param>
-    /// <param name="memoryBudget">Optional memory budget in bytes.</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize, long memoryBudget, CancellationToken ct = default)
-    {
-        var streamingContext = new NivaraExecutionContext(ExecutionStrategy.Streaming)
-        {
-            MemoryBudget = memoryBudget,
-            ChunkSize = chunkSize,
-            CancellationToken = ct
-        };
-        return AsStream(streamingContext, chunkSize, ct);
     }
 
     /// <summary>
