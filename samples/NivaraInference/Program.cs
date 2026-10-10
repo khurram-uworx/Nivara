@@ -47,8 +47,14 @@ class Program
         bool isQwen = modelType == "qwen";
         for (int i = 1; i < args.Length; i++)
         {
-            if (args[i] == "--precision" && i + 1 < args.Length)
+            if (args[i] == "--precision")
             {
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--precision needs a value (f32|bf16|fp16).");
+                    return 1;
+                }
+
                 precision = args[i + 1].ToLowerInvariant() switch
                 {
                     "f32" or "float" => "f32",
@@ -56,6 +62,12 @@ class Program
                     "fp16" or "f16" or "half" => "fp16",
                     var other => other
                 };
+
+                if (precision is not ("f32" or "bf16" or "fp16"))
+                {
+                    Console.Error.WriteLine($"--precision expects f32, bf16 or fp16; got '{args[i + 1]}'.");
+                    return 1;
+                }
                 i++;
             }
             else if (args[i] is "bf16" or "bfloat16")
@@ -72,14 +84,24 @@ class Program
                 noKvCache = true;
             else if (args[i] == "--force")
                 force = true;
-            else if (args[i] == "--teacher-examples" && i + 1 < args.Length)
+            else if (args[i] is "--teacher-examples" or "--seed")
             {
-                int.TryParse(args[i + 1], out teacherExamples);
-                i++;
-            }
-            else if (args[i] == "--seed" && i + 1 < args.Length)
-            {
-                int.TryParse(args[i + 1], out seed);
+                // The value is consumed even when it is nonsense, so the flag's value can never
+                // fall through to the positional-mode branch below and be read as a mode name.
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine($"{args[i]} needs a value.");
+                    return 1;
+                }
+
+                if (!TryParseCount(args[i + 1], out int parsed))
+                {
+                    Console.Error.WriteLine($"{args[i]} expects an integer; got '{args[i + 1]}'.");
+                    return 1;
+                }
+
+                if (args[i] == "--teacher-examples") teacherExamples = parsed;
+                else seed = parsed;
                 i++;
             }
             else if (args[i] == "--synthetic-weights")
