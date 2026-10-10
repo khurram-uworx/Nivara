@@ -156,15 +156,12 @@ knob.
 
 ## GitHub issues log
 
-- [ ] Potential follow-up: `StreamChunksAsync` has no bounded channel, so
-      `MemoryBudget` cannot bound in-flight rows on the `AsStream` path (only chunk
-      size + advisory warning). Out of scope for #514; create an issue if the docs
-      correction confirms the gap is worth closing.
-- [ ] Potential follow-up: chunked-source streaming currently relies on
-      `plan.Source.ToAsyncEnumerable` pull semantics rather than the
-      `CalculateChannelCapacity` bound; the §"AC3 resolution" doc claim needs to be
-      split by path. Covered by the docs commit; no issue unless the code gap is
-      judged a defect.
+- [ ] #556 — `AsStream`/`StreamChunksAsync` has no bounded channel, so `MemoryBudget`
+      cannot cap in-flight rows on the chunked path (created while working on #514;
+      this is the `CalculateChannelCapacity` half of #514's acceptance criterion).
+- [x] #514 AC half 1 (budget → `CalculateChunkSize`) — landed in `khurram/514`; the
+      §"AC3 resolution" phrase about the channel is corrected to say it belongs to the
+      materializing path. No separate issue needed — folded into #556.
 
 ## Probe / harness lifecycle
 
