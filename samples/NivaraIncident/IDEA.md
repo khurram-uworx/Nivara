@@ -673,7 +673,7 @@ Dataset       4.2 GB
 Rows          48,921,332
 Duration      2.14 s
 Streamed      48,921,332 (3 chunks)
-Backpressure  4 chunks in flight (bounded channel)
+Backpressure  pull-based (1 chunk in flight)
 
 TOP IMPACTED SERVICES
 
@@ -853,8 +853,8 @@ This becomes the primary forcing function for Phase 4.
 
 With Phase 4 complete, `ParquetLazySource` provides row-group chunk boundaries for
 historical Parquet replay, `CsvLazySource` and `JsonLazySource` provide row-based
-chunking, and `AsStream()` yields processed chunks through a bounded channel with
-backpressure. Cancellation flows end-to-end.
+chunking, and `AsStream()` yields processed chunks with pull-based backpressure
+(at most one chunk frame in flight per consumer pull). Cancellation flows end-to-end.
 
 ---
 
