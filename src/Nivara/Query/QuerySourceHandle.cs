@@ -79,7 +79,8 @@ internal sealed class QuerySourceHandle
     }
 
     /// <summary>
-    /// Releases the source asynchronously. Idempotent; disposal errors propagate.
+    /// Releases the source asynchronously. Idempotent; disposal errors are swallowed, mirroring
+    /// <see cref="Release"/> and the abandoned-resource cleanup path so neither disposal path throws.
     /// </summary>
     internal async ValueTask ReleaseAsync()
     {
@@ -87,9 +88,16 @@ internal sealed class QuerySourceHandle
 
         NivaraResourceManager.UntrackResource(this);
 
-        if (source is IAsyncDisposable asyncDisposable)
-            await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-        else
-            source.Dispose();
+        try
+        {
+            if (source is IAsyncDisposable asyncDisposable)
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            else
+                source.Dispose();
+        }
+        catch
+        {
+            // Ignore disposal errors, mirroring Release() and the abandoned-resource cleanup path.
+        }
     }
 }
