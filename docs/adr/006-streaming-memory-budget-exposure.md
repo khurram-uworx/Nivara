@@ -72,6 +72,14 @@ public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, in
 - A caller wanting the derivation must pass a context rather than a scalar; the
   older "just pass `memoryBudget`" shorthand is deliberately not offered.
 
+## Addendum (2026-10-11, #557)
+
+`NivaraQuery<T>.AsStream` (the typed-LINQ wrapper, `src/Nivara/Linq/NivaraQuery.cs`) mirrors the
+same three overloads as passthroughs to `frame.AsStream(...)`, so the DSL surface matches
+`QueryFrame` and the budget route needs no `AsQueryFrame()` hop. Purely surface parity: the null
+guard, context cloning, and chunk-size resolution stay in `QueryFrame`. Pinned by
+`AsStreamBudgetTests.NivaraQuery_T_AsStream_*`.
+
 ## Addendum (2026-10-10, #556)
 
 The `CalculateChannelCapacity` half of #514's acceptance criterion is resolved by documentation and

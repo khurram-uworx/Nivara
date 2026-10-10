@@ -1,4 +1,5 @@
 using Nivara.Execution;
+using Nivara.Linq;
 using Nivara.Query;
 using NUnit.Framework;
 
@@ -67,6 +68,42 @@ public class AsStreamBudgetTests
         Assert.That(() => query.AsStream((NivaraExecutionContext)null!), Throws.ArgumentNullException);
     }
 
+    [Test]
+    public async Task NivaraQuery_T_AsStream_ContextWithMemoryBudget_DerivesChunkSizeFromBudget()
+    {
+        const long budget = 2_000_000;
+        var expectedChunkSize = StreamingExecutionStrategy.CalculateChunkSize(budget);
+        Assert.That(expectedChunkSize, Is.EqualTo(2_000), "precondition: a 2 MB budget derives 2,000-row chunks");
+
+        using var query = NivaraTypedLinqExtensions.FromFrame<IntRow>(new QueryFrame(new ChunkedIntSource(totalRows: 10_000)));
+        var context = new NivaraExecutionContext(ExecutionStrategy.Streaming) { MemoryBudget = budget };
+
+        var sizes = await CollectChunkSizes(query.AsStream(context));
+
+        Assert.That(sizes, Is.EqualTo(new[] { 2_000, 2_000, 2_000, 2_000, 2_000 }),
+            "the LINQ wrapper must forward the context, so MemoryBudget reaches the chunk-size derivation");
+    }
+
+    [Test]
+    public async Task NivaraQuery_T_AsStream_ContextWithExplicitChunkSize_UsesChunkSizeNotBudget()
+    {
+        using var query = NivaraTypedLinqExtensions.FromFrame<IntRow>(new QueryFrame(new ChunkedIntSource(totalRows: 6_000)));
+        var context = new NivaraExecutionContext(ExecutionStrategy.Streaming) { MemoryBudget = 2_000_000 };
+
+        var sizes = await CollectChunkSizes(query.AsStream(context, 3_000));
+
+        Assert.That(sizes, Is.EqualTo(new[] { 3_000, 3_000 }),
+            "an explicit chunk size wins over the context's budget-derived value through the wrapper too");
+    }
+
+    [Test]
+    public void NivaraQuery_T_AsStream_NullContext_ThrowsArgumentNullException()
+    {
+        using var query = NivaraTypedLinqExtensions.FromFrame<IntRow>(new QueryFrame(new ChunkedIntSource(totalRows: 10)));
+
+        Assert.That(() => query.AsStream((NivaraExecutionContext)null!), Throws.ArgumentNullException);
+    }
+
     static async Task<int[]> CollectChunkSizes(IAsyncEnumerable<NivaraFrame> chunks)
     {
         var sizes = new List<int>();
@@ -76,6 +113,11 @@ public class AsStreamBudgetTests
             chunk.Dispose();
         }
         return sizes.ToArray();
+    }
+
+    sealed class IntRow
+    {
+        public int A { get; set; }
     }
 
     sealed class ChunkedIntSource(int totalRows) : IQuerySource

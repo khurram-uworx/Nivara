@@ -20,6 +20,15 @@ All notable changes to Nivara are documented here. Released versions are publish
   corrected, including the claim that the bounded channel enforces the budget on the `AsStream` path (that
   channel belongs to the materializing path).
 
+- **`NivaraQuery<T>.AsStream` context overloads — LINQ DSL surface parity (#557)** — #514 added the
+  context-taking `AsStream(NivaraExecutionContext)` route to `QueryFrame` but left the typed-LINQ
+  wrapper `NivaraQuery<T>.AsStream` a bare `int`-chunk passthrough, so a DSL caller could not set
+  `NivaraExecutionContext.MemoryBudget` without converting via `AsQueryFrame()`. `NivaraQuery<T>`
+  now mirrors all three `QueryFrame` overloads — `AsStream(context)` and `AsStream(context, chunkSize)`
+  — as passthroughs delegating to `frame.AsStream(...)`, with `QueryFrame`'s XML docs. No behavior
+  change: the null guard, context cloning, and budget-to-chunk-size derivation stay in `QueryFrame`.
+  Covered by `AsStreamBudgetTests.NivaraQuery_T_AsStream_*`.
+
 - **Snippet-gate authoring contract recorded as ADR-005, plus a gate on the ADR index (#538)** —
   the contract for writing a fenced `csharp` block that passes `DocumentationSnippetTests` lived
   only in `tests/Nivara.Tests/Docs/`, and the reasoning behind it only in a `docs/TODO.md` that
