@@ -8,10 +8,10 @@ public class IngestionTests
 {
     string tempDir = null!;
 
-    // GenerateFromRecordCount sizes the request arrays to the requested record count and never
-    // trims the per-minute remainder, so a 10,000-record request yields a 10,000-row file. Only
-    // (10_000 / 30) * 30 = 9,990 of those rows are populated; the last 10 are trailing defaults
-    // (StatusCode 0, null Service and Region). The row count is the request, not 9,990.
+    // GenerateFromRecordCount fills exactly the requested record count, distributing the 10,000 / 30
+    // remainder across the leading minutes, so a 10,000-record request yields a 10,000-row file with
+    // no trailing defaults. The generator's own row-count and distribution guarantees are pinned by
+    // DatasetGeneratorTests.
     const int TotalRows = 10_000;
     const int RowGroupSize = 100;
 
