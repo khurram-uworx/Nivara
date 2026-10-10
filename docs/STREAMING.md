@@ -134,7 +134,8 @@ budget (`StreamingExecutionStrategy.CalculateChannelCapacity`):
 capacity = clamp(memoryBudget / (chunkSize * 100 bytes-per-row), 2, 16)
 ```
 
-This bounds how many chunk frames are in flight, keeping peak memory inside the budget.
+This bounds how many chunk frames are in flight **on the materializing path**, keeping peak
+in-flight memory there inside the budget.
 
 The channel is built on the **materializing path** — `ExecutionEngine.Execute`/`ExecuteAsync`
 with `Strategy = Streaming`, which returns one frame — via `CreateBoundChannel`. At the 1 GB
@@ -148,6 +149,14 @@ falls below 16,000,000 bytes (~15.3 MiB), and it reaches the floor of 2 at 2,000
 pull-based `IAsyncEnumerable` semantics, not `CalculateChannelCapacity`. On the `AsStream`
 path the budget's observable effects are the derived chunk size (§"Memory budget → chunk
 size") and the advisory `StreamingBudgetTracker` warning.
+
+`ToAsyncEnumerable` is a plain pull iterator — it calls the source's `ReadChunkAsync` once per
+`MoveNextAsync` and nothing runs ahead — so the chunked path holds **at most one chunk frame in
+flight** between consumer pulls. That is a bound strictly tighter than the channel's `[2, 16]`,
+which is why `AsStream` needs no channel to keep memory bounded: adding one would let the producer
+run up to `capacity` frames ahead of the consumer and would invert the pull semantics. Pinned by
+`StreamingBackpressureTests.StreamChunksAsync_PullBased_ProducerNeverRunsAheadOfConsumer`
+([#556](https://github.com/khurram-uworx/Nivara/issues/556)).
 
 ### AC3 resolution (memory budget enforcement)
 
@@ -252,8 +261,9 @@ await foreach (var frame in sorted.AsStream())
   `ObjectDisposedException`. Tie the frame to whatever actually owns the subscription — for a
   response, `HttpContext.Response.RegisterForDispose(frame)`; see the `Publish` and
   `FluxResult` examples below.
-- Cancellation (via `ct`) propagates into the source reader and the producer loop; the
-  channel is completed on normal exit and faulted on error.
+- Cancellation (via `ct`) propagates into the source reader; a cancelled enumeration stops
+  pulling and the in-flight `ReadChunkAsync` is cancelled. There is no channel on this path to
+  complete or fault — see §"Channel capacity (async pipeline)".
 
 ## Streamix bridge (`NivaraFlux`)
 

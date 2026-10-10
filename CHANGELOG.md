@@ -82,6 +82,18 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **The bounded channel is documented as materializing-path only; the `AsStream` chunked path's
+  in-flight bound is one frame (#556)** — #514 exposed `MemoryBudget` through
+  `AsStream(NivaraExecutionContext)`; #556 was then filed to also reach `CalculateChannelCapacity`
+  by adding a bounded channel to `StreamChunksAsync`. That prescription would loosen, not tighten,
+  the bound: the chunked path enumerates the source through a pull-based async iterator
+  (`IQuerySource.ToAsyncEnumerable`), so at most one chunk frame is in flight between consumer
+  pulls — strictly tighter than the channel's `[2, 16]`, and adding a channel would invert the
+  documented pull-based backpressure. `docs/STREAMING.md` and `docs/ACCELERATION.md` now scope the
+  channel to the materializing path and state the one-frame bound, ADR-006 records the resolution,
+  and `StreamingBackpressureTests.StreamChunksAsync_PullBased_ProducerNeverRunsAheadOfConsumer`
+  pins it. **No source change.**
+
 - **15 documentation call sites used the removed `NivaraColumn<T>.CreateFromNullable` shape (#520)** -
   the docs had drifted, not the API. `NivaraColumn<T>.CreateFromNullable(Array)` was deleted
   deliberately in #222 because it boxed per element via `Array.GetValue`; the replacement

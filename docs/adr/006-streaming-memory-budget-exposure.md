@@ -71,3 +71,15 @@ public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, in
   `IAsyncEnumerable` semantics.
 - A caller wanting the derivation must pass a context rather than a scalar; the
   older "just pass `memoryBudget`" shorthand is deliberately not offered.
+
+## Addendum (2026-10-10, #556)
+
+The `CalculateChannelCapacity` half of #514's acceptance criterion is resolved by documentation and
+a test, not by a code change. The chunked `AsStream` path enumerates the source through a pull-based
+async iterator, so at most one chunk frame is in flight between consumer pulls — a bound strictly
+tighter than the channel's `[2, 16]`. Adding a channel there would loosen that bound from one frame
+to up to `capacity` frames and invert the pull-based backpressure without improving enforcement, and
+it would apply to only the per-chunk branches (the partition-streamer and materialization branches
+buffer the whole dataset by design). The chunked path's one-frame bound is stated in
+`docs/STREAMING.md` §"Channel capacity (async pipeline)" and pinned by
+`StreamingBackpressureTests.StreamChunksAsync_PullBased_ProducerNeverRunsAheadOfConsumer`.
