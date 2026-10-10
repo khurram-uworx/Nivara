@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Nivara.Storage;
 using NUnit.Framework;
 
@@ -422,6 +424,68 @@ public class ColumnStorageTests
 
         Assert.That(ReferenceEquals(first, second), Is.True,
             "AsTensor() should return the cached view on repeated access");
+    }
+
+    [Test]
+    public void ColumnStorage_AsTensor_ViewAliasesSoleOwnerArray_AndSurvivesReadPaths()
+    {
+        // AsTensor() hands out a memoised view over the sole-owner array. Nothing in the type
+        // writes that array on a read path, and that is the only thing keeping every hosted view
+        // correct. Pin both halves: the view aliases the array (identity, not a copy), and the
+        // cache stays consistent across read-only operations. Issue #536.
+        var sourceArray = new[] { 1, 2, 3, 4, 5 };
+        var storage = new ColumnStorage<int>(sourceArray);
+        var snapshot = (int[])sourceArray.Clone();
+
+        var tensor = storage.AsTensor();
+        Assert.That(tensor.TryGetSpan(new nint[] { 0 }, (int)tensor.FlattenedLength, out Span<int> viewSpan), Is.True);
+
+        // Identity, not span equality: the view must begin at the same address as the sole-owner
+        // array, so a future AsTensor() that copies (e.g. into a pooled buffer) fails here.
+        Assert.That(Unsafe.AreSame(ref MemoryMarshal.GetReference(viewSpan), ref sourceArray[0]), Is.True,
+            "AsTensor() must hand out a view over the sole-owner array, not a copy");
+
+        // Negative control: writing through the view must be visible in the array, otherwise the
+        // identity assertion above is tautological. Restored immediately so the snapshot holds.
+        int sentinel = sourceArray[0];
+        viewSpan[0] = sentinel + 99;
+        bool aliased = sourceArray[0] == sentinel + 99;
+        sourceArray[0] = sentinel;
+        Assert.That(aliased, Is.True,
+            "writing through the tensor view must be visible in the sole-owner array (aliasing control)");
+
+        // Every read-only path must leave the backing array untouched.
+        _ = storage[2];
+        _ = storage.Data;
+        _ = storage.NullMask;
+        ((IColumnStorage<int>)storage).AsSpan();
+        Assert.That(((IColumnStorage<int>)storage).TryGetSpan(out _), Is.True);
+
+        var slice = storage.Slice(1, 2);
+        Assert.That(slice[0], Is.EqualTo(2), "the slice must read through the shared backing array");
+
+        Assert.That(ReferenceEquals(storage.AsTensor(), tensor), Is.True,
+            "AsTensor() must keep returning the same cached view across read-only operations");
+        Assert.That(viewSpan.SequenceEqual(snapshot), Is.True,
+            "no read path may write the sole-owner array out from under a cached tensor view");
+        Assert.That(sourceArray.SequenceEqual(snapshot), Is.True);
+    }
+
+    [Test]
+    public void ColumnStorage_AsTensor_ViewTracksWritesThroughWritableSpan()
+    {
+        // The one sanctioned write path is the internal writable span (the AutoDiff optimizers'
+        // in-place parameter updates). It aliases the same array, so a view already handed out
+        // tracks the write — this pins the exception to the read-path immutability invariant.
+        // Issue #536.
+        var storage = new ColumnStorage<int>(new[] { 10, 20, 30 });
+        var tensor = storage.AsTensor();
+        Assert.That(tensor.TryGetSpan(new nint[] { 0 }, (int)tensor.FlattenedLength, out Span<int> viewSpan), Is.True);
+
+        ((IColumnStorage<int>)storage).AsWritableSpan()[1] = 99;
+
+        Assert.That(viewSpan[1], Is.EqualTo(99),
+            "a write through AsWritableSpan() must be visible through a cached tensor view");
     }
 
     [Test]

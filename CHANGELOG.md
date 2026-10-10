@@ -89,6 +89,19 @@ All notable changes to Nivara are documented here. Released versions are publish
   float/double type-switch claim while those lines hold `getTypeSize` — perfectly resolvable, and
   still wrong. That one needs a reader.
 
+- **`ColumnStorage<T>` tensor-view aliasing invariant pinned (#536)** — `AsTensor()` hands out a
+  memoised, zero-copy `Tensor<T>` over the storage's sole-owner `T[]`. `Tensor.Create` uses the
+  array as its backing buffer (it does not copy) and `Tensor<T>` exposes a writable `Span<T>`
+  indexer, so any in-place write to the array would silently corrupt every view already handed
+  out — and nothing asserted that the read paths leave the array untouched. Added
+  `ColumnStorage_AsTensor_ViewAliasesSoleOwnerArray_AndSurvivesReadPaths`, which asserts reference
+  identity of the view against the sole-owner array, exercises the read surface against a snapshot,
+  and includes a write-through negative control so the identity check is not tautological. The
+  invariant is now stated on `ColumnStorage<T>` and in `docs/TENSORS.md`, and the over-strong
+  "column remains immutable" wording on `NivaraColumn<T>.AsTensorView()` and
+  `GradTensor<T>.AsTensor()` is corrected — the view is live, and AutoDiff optimizer steps write in
+  place through the internal `AsWritableSpan()`. No behavior change.
+
 ### Fixed
 
 - **`QueryFrame.DisposeAsync` no longer propagates source-disposal errors (#508)** — `Dispose()`
