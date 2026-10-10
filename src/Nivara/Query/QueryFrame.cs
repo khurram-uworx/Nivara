@@ -1117,13 +1117,32 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         return new QueryFrame(handle, operations.Concat(new[] { operation }));
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the shared query source behind this frame's chain.
+    /// </summary>
+    /// <remarks>
+    /// Exactly one handle exists per source and every frame in the chain shares it, so releasing
+    /// any frame releases the source for the whole chain (the same one-source-one-release contract
+    /// as <see cref="System.IO.FileStream"/>). The call is idempotent — repeated calls are no-ops.
+    /// Source-disposal errors are <b>swallowed</b>, so <c>using</c> cleanup never throws; this
+    /// matches <see cref="DisposeAsync"/> and the abandoned-resource cleanup path.
+    /// </remarks>
     public void Dispose()
     {
         handle.Release();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Releases the shared query source behind this frame's chain, awaiting an
+    /// <see cref="IAsyncDisposable"/> source when it provides one.
+    /// </summary>
+    /// <remarks>
+    /// Shares the ownership contract of <see cref="Dispose"/>: one source, one release, idempotent
+    /// — and source-disposal errors are <b>swallowed</b> on this path too, so <c>await using</c>
+    /// cleanup behaves identically to <c>using</c> and never throws. When the source does not
+    /// implement <see cref="IAsyncDisposable"/> this falls back to its synchronous
+    /// <see cref="IDisposable.Dispose"/>.
+    /// </remarks>
     public ValueTask DisposeAsync()
     {
         return handle.ReleaseAsync();
