@@ -173,8 +173,9 @@ core pipeline's default is the 1 GB in `NivaraExecutionContext.cs:17`.
 
 The derivation in §"Memory budget → chunk size" is reachable through the context-taking
 `AsStream` overload (recorded as
-[ADR-006](adr/006-streaming-memory-budget-exposure.md)). Pass a context and leave
-`ChunkSize` null, e.g.
+[ADR-006](adr/006-streaming-memory-budget-exposure.md)). Set
+`NivaraExecutionContext.MemoryBudget` (`NivaraExecutionContext.cs:43`), pass the context, and
+leave `ChunkSize` null, e.g.
 `new NivaraExecutionContext(ExecutionStrategy.Streaming) { MemoryBudget = 64 * 1024 * 1024 }`
 to `AsStream(context)` — a 64 MB budget derives a 67,108-row chunk. The context is cloned
 before execution, so the caller's instance is not mutated. An explicit chunk size — the

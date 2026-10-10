@@ -215,9 +215,11 @@ The budget behavior is **configurable** and defaults to the current advisory mod
 
 **No enforcement knob exists.** `MemoryBudget` can now be set for a chunked stream —
 `AsStream(NivaraExecutionContext)` ([ADR-006](adr/006-streaming-memory-budget-exposure.md)) —
-so the budget reaches `StreamingExecutionStrategy.CalculateChunkSize`. But there is still no
+so the budget reaches `StreamingExecutionStrategy.CalculateChunkSize`
+(`StreamingExecutionStrategy.cs:24`). But there is still no
 mode that turns that budget into a hard ceiling: `StreamingExecutionStrategy` remains
-internal, and the `AsStream` path (`StreamChunksAsync`) has no bounded channel at all, so
+internal, and the `AsStream` path (`StreamChunksAsync`, `StreamingExecutionStrategy.cs:501`)
+has no bounded channel at all, so
 `CalculateChannelCapacity` is reached only by `ExecutionEngine.Execute(plan, context)`, which
 materializes one whole frame and yields no chunks.
 

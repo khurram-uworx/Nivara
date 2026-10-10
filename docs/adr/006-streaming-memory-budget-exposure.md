@@ -31,7 +31,7 @@ Three directions were considered:
 
 `QueryFrame` now exposes:
 
-```csharp
+```text
 public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
 public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, CancellationToken ct = default)
 public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, int chunkSize, CancellationToken ct = default)

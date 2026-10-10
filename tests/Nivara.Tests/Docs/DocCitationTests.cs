@@ -20,12 +20,12 @@ public class DocCitationTests
     const int ExpectedCitedDocumentCount = 16;
 
     /// <summary>
-    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 38 under
+    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 39 under
     /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
-    /// <c>docs/TODO.md</c> does <em>not</em> make this 48 — excluding it is the point, and it is what
-    /// keeps the number stable across a workflow that commits one.
+    /// <c>docs/TODO.md</c> does <em>not</em> increase this number — excluding it is the point, and it is
+    /// what keeps the count stable across a workflow that commits one.
     /// </summary>
-    const int ExpectedDocumentCount = 47;
+    const int ExpectedDocumentCount = 48;
 
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()
