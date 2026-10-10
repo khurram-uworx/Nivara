@@ -90,4 +90,27 @@ artifact is created.
 
 ## G1 grounding
 
-(Filled in the commit immediately after this plan.)
+- **microsoft-learn** — `Random(Int32)` is documented as initializing "using the specified seed
+  value" (learn.microsoft.com/dotnet/api/system.random.-ctor). Both the deleted helper and the
+  canonical `GenerateFromRecordCount` seed `new Random(42)`, so swapping them preserves
+  determinism in kind. `TestParquetRowGroups` compares no bytes (it counts row groups), so no
+  golden fixture depends on the swap. No Tensor/Vector or new API surface is touched — the change
+  is deleting a helper and calling an existing one.
+- **code-memory** — `RelationshipRecord` holds no edge for `GenerateSmallWithRowGroupSize`
+  (private static, same-file caller not captured as a symbol relationship), so the single caller
+  `TestParquetRowGroups` was confirmed by grep. `get_symbol_history` shows the file's last change
+  is `078d91d6` ("tighten the incident field-range gate and its duplicate generator") — the `#563`
+  fix that corrected this copy in place and that `#564` now supersedes.
+- **Blast radius (confirmed)** — `GenerateSmallWithRowGroupSize` is referenced only at line 142
+  of `IncidentLabBenchmark.cs`; the file is invoked only by `--dataset-test`
+  (`Program.cs:45`), which CI never runs (`.github/` has no reference). No production code path.
+
+### Decisions / red flags
+
+- **Resolved:** the earlier plan (`docs/TODO.md` on `khurram/563`) said to fix the duplicate in
+  place; `#563` did exactly that and merged (#573). `#564` therefore deletes a
+  correct-but-divergent copy rather than a defective one. No churn remains.
+- **Open, to raise at measurement time:** the issue asks for a `--dataset-test` runtime before and
+  after. The "before" must be captured on pre-change code, and one full run generates ~40M rows
+  across the other four legs, so the ~34k extra rows this change adds to `TestParquetRowGroups`
+  are expected to fall inside run-to-run noise. The human will be asked before either heavy run.
