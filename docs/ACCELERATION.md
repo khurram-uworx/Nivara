@@ -226,7 +226,10 @@ materializes one whole frame and yields no chunks.
 What bounds streaming memory on the chunked path today is the consumer's own pace (pull-based
 `IAsyncEnumerable`), with `StreamingBudgetTracker` warning on top — not a byte budget. See
 `docs/STREAMING.md` §"Memory budget → chunk size" and §"AC3 resolution (memory budget
-enforcement)", and `StreamingBackpressureTests`.
+enforcement)", and `StreamingBackpressureTests`. That path holds **at most one chunk frame in
+flight** — tighter than the materializing channel's `[2, 16]` — pinned by
+`StreamingBackpressureTests.StreamChunksAsync_PullBased_ProducerNeverRunsAheadOfConsumer`
+([#556](https://github.com/khurram-uworx/Nivara/issues/556)).
 
 ```csharp
 // What is settable today: the chunk size, on AsStream.

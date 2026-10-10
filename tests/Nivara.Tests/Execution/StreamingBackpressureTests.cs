@@ -122,6 +122,35 @@ public class StreamingBackpressureTests
     }
 
     [Test]
+    public async Task StreamChunksAsync_PullBased_ProducerNeverRunsAheadOfConsumer()
+    {
+        const int totalRows = 8;
+        var source = new StubChunkedQuerySource(totalRows);
+        var plan = new QueryPlan(
+            source,
+            new IQueryOperation[] { new StubQueryOperation(OperationType.Filter) });
+        var context = new NivaraExecutionContext(ExecutionStrategy.Streaming) { ChunkSize = 1 };
+
+        var strategy = new StreamingExecutionStrategy();
+
+        var consumed = 0;
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+        {
+            consumed++;
+
+            // Pull-based: the source has been asked for exactly the chunk just delivered and no
+            // more. This is the chunked path's in-flight bound (one frame) — strictly tighter
+            // than the materializing channel's [2, 16]. A channel here would let it climb ahead.
+            Assert.That(source.ChunksRead.Count, Is.EqualTo(consumed),
+                "producer advanced past the consumer");
+
+            frame.Dispose();
+        }
+
+        Assert.That(consumed, Is.EqualTo(totalRows));
+    }
+
+    [Test]
     public async Task ExecuteAsync_ChunkedSource_TinyBudget_ReturnsFullResult()
     {
         var strategy = new StreamingExecutionStrategy();
