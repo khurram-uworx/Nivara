@@ -145,7 +145,9 @@ is verified by the NUnit suite and the existing `--dataset-test` mode. No temp h
 
 ## GitHub issues log
 
-- [ ] #504 — IngestionTests duplicate generator / wrong row count; body to be corrected as part of #563.
+- [x] #504 — IngestionTests duplicate generator / wrong row count; body corrected on 2026-10-11 via
+  `gh issue edit 504` to remove the wrong "9,990 rows" claim and record the resolution (`8532bf01`,
+  `654947be`). No new issues were discovered during execution.
 
 ## G1 grounding
 
