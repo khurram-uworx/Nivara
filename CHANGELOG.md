@@ -82,6 +82,16 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`QueryFrame.DisposeAsync` no longer propagates source-disposal errors (#508)** — `Dispose()`
+  swallowed them while `DisposeAsync()` did not, so a caller using `await using` could get an
+  exception from cleanup that the synchronous `using` form silently swallowed. The fork lived in
+  `QuerySourceHandle.ReleaseAsync`, which wrapped neither its awaited `IAsyncDisposable` branch nor
+  its synchronous fallback in a catch. Both now swallow, mirroring `Release()` and the
+  abandoned-resource cleanup path, and the XML docs on `QueryFrame.Dispose`/`DisposeAsync` state the
+  shared contract explicitly: one source, one release, idempotent, and neither path throws.
+  `QuerySourceHandleTests` pins the parity, including the awaited branch, which was previously dead
+  (no `IQuerySource` implementation is `IAsyncDisposable`).
+
 - **The bounded channel is documented as materializing-path only; the `AsStream` chunked path's
   in-flight bound is one frame (#556)** — #514 exposed `MemoryBudget` through
   `AsStream(NivaraExecutionContext)`; #556 was then filed to also reach `CalculateChannelCapacity`
