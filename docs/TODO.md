@@ -149,4 +149,16 @@ is verified by the NUnit suite and the existing `--dataset-test` mode. No temp h
 
 ## G1 grounding
 
-- (to be filled after the grounding pass)
+- **microsoft-learn** — `Random(Int32)` is documented as generating "a reproducible sequence of
+  pseudo-random numbers" (learn.microsoft.com/dotnet/api/system.random.-ctor). The fix preserves
+  determinism as a property for a fixed seed; the tests compare two fresh runs, not fixed output,
+  so a future .NET `Random` algorithm change cannot silently break the gate. No Tensor/Vector or
+  new API surface is touched — the change is plain integer arithmetic and array fill.
+- **code-memory** — `GenerateFromRecordCount` has 4 commits (last `db2af4a3` "expose rowGroupSize");
+  `Generate` is its only in-file caller. No `GenerateSmallDataset` symbol remains (the #504 swap
+  `8532bf01` landed), and `GenerateSmallWithRowGroupSize` is the single duplicate.
+- **Blast radius (confirmed)** — external call sites are cross-project and not captured as symbol
+  relationships, so confirmed by grep: CLI `samples/NivaraIncident/NivaraIncident.Cli/Program.cs:73`;
+  tests `StreamixScenarioTests`, `IngestionTests`, `IncidentSurfaceTests`, `AnalysisTests`,
+  `AnalysisResourceTests`; harness `IncidentLabBenchmark`. Matches the blast-radius table above.
+- **Decisions / red flags** — none surfaced. Implementation proceeds as written.
