@@ -82,15 +82,22 @@ observed chunking shape (100 chunks) without inflating the fixture.
 1. `docs: plan #504 IngestionTests generator swap in TODO.md` (`a21cf6a2`)
 2. `feat(incident): expose rowGroupSize on GenerateFromRecordCount` (`db2af4a3`)
 3. `test(incident): generate IngestionTests fixtures with DatasetGenerator` (`8532bf01`)
-4. `docs: correct the #504 plan — the counts do not move`
-5. `docs: remove TODO.md — plan executed`
+4. `docs: correct the #504 plan — the counts do not move` (`654947be`)
+5. `docs: record the #504 follow-up issues` (this commit)
+6. `docs: remove TODO.md — plan executed`
 
-Deferred (out of #504's scope, not done here): folding
+Deferred with the human's agreement (out of #504's scope): folding
 `IncidentLabBenchmark.GenerateSmallWithRowGroupSize` into `GenerateFromRecordCount`
-(`GenerateFromRecordCount(dir, "A", 5_000, rowGroupSize)` → 4,980 populated + defaults, 5 groups).
+(`GenerateFromRecordCount(dir, "A", 5_000, rowGroupSize)` → 4,980 populated + defaults, 5 groups)
+is tracked as #564, because it changes what that benchmark writes and so needs its own
+measurement rather than riding on a test re-baseline.
 
 ## GitHub issues log
 
 - [x] #563 — DatasetGenerator emits trailing default-valued rows and its generated count is
       misreported (created while working on #504; the 9,990 claim in #504 and in the #499 commit
       body is wrong).
+- [x] #564 — IncidentLabBenchmark still carries a fourth copy of the dataset generator
+      (created while working on #504; deferred by agreement rather than bundled in).
+- [x] Comment posted on #504 correcting the 9,990 premise
+      (https://github.com/khurram-uworx/Nivara/issues/504#issuecomment-6101484155).
