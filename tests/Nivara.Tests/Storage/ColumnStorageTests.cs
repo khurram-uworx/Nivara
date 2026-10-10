@@ -472,6 +472,23 @@ public class ColumnStorageTests
     }
 
     [Test]
+    public void ColumnStorage_AsTensor_ViewTracksWritesThroughWritableSpan()
+    {
+        // The one sanctioned write path is the internal writable span (the AutoDiff optimizers'
+        // in-place parameter updates). It aliases the same array, so a view already handed out
+        // tracks the write — this pins the exception to the read-path immutability invariant.
+        // Issue #536.
+        var storage = new ColumnStorage<int>(new[] { 10, 20, 30 });
+        var tensor = storage.AsTensor();
+        Assert.That(tensor.TryGetSpan(new nint[] { 0 }, (int)tensor.FlattenedLength, out Span<int> viewSpan), Is.True);
+
+        ((IColumnStorage<int>)storage).AsWritableSpan()[1] = 99;
+
+        Assert.That(viewSpan[1], Is.EqualTo(99),
+            "a write through AsWritableSpan() must be visible through a cached tensor view");
+    }
+
+    [Test]
     public void ColumnStorage_AsTensor_ThrowsForReferenceContainingTypes()
     {
         var storage = new ColumnStorage<string>(new[] { "a", "b" }, detectNulls: true);
