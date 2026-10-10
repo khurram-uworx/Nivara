@@ -1,4 +1,3 @@
-using Nivara.IO;
 using Nivara.Samples.Incident;
 using NUnit.Framework;
 
@@ -8,15 +7,24 @@ namespace Nivara.Tests.Incident;
 public class IngestionTests
 {
     string tempDir = null!;
+
+    // GenerateFromRecordCount sizes the request arrays to the requested record count and never
+    // trims the per-minute remainder, so a 10,000-record request yields a 10,000-row file. Only
+    // (10_000 / 30) * 30 = 9,990 of those rows are populated; the last 10 are trailing defaults
+    // (StatusCode 0, null Service and Region). The row count is the request, not 9,990.
     const int TotalRows = 10_000;
     const int RowGroupSize = 100;
+
+    // Parquet chunks align to native row groups and the chunkSize argument is advisory, so the
+    // chunk count is the row-group count: ceil(10,000 / 100) = 100.
+    const int ExpectedChunks = (TotalRows + RowGroupSize - 1) / RowGroupSize;
 
     [OneTimeSetUp]
     public void OneTimeSetUp()
     {
         tempDir = Path.Combine(Path.GetTempPath(), $"inc-ingestion-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
-        GenerateSmallDataset(tempDir, "A");
+        DatasetGenerator.GenerateFromRecordCount(tempDir, "A", TotalRows, RowGroupSize);
     }
 
     [OneTimeTearDown]
@@ -60,17 +68,25 @@ public class IngestionTests
     }
 
     [Test]
-    public async Task StreamChunks_YieldsExpectedChunkCount()
+    public async Task StreamChunks_YieldsRowGroupAlignedChunks()
     {
         int chunkCount = 0;
+        long rowsStreamed = 0;
         await foreach (var chunk in Ingestion.StreamChunks(
             Path.Combine(tempDir, "requests.parquet"), RowGroupSize))
         {
             chunkCount++;
+            rowsStreamed += chunk.RowCount;
             chunk.Dispose();
         }
 
-        Assert.That(chunkCount, Is.EqualTo(TotalRows / RowGroupSize));
+        Assert.Multiple(() =>
+        {
+            Assert.That(chunkCount, Is.EqualTo(ExpectedChunks),
+                "chunks align to parquet row groups, so the count is ceil(totalRows / rowGroupSize)");
+            Assert.That(rowsStreamed, Is.EqualTo(TotalRows),
+                "every request row should appear in exactly one chunk");
+        });
     }
 
     [Test]
@@ -113,157 +129,5 @@ public class IngestionTests
         }
 
         Assert.That(chunkCount, Is.EqualTo(cancelAfter));
-    }
-
-    static void GenerateSmallDataset(string dir, string scenarioId)
-    {
-        var scenario = Scenarios.Get(scenarioId);
-        var rng = new Random(42);
-        var baseTime = new DateTimeOffset(2025, 6, 15, 14, 0, 0, TimeSpan.Zero);
-
-        var services = new[] { "gateway", "catalog", "inventory", "orders", "checkout", "payments", "notifications", "identity" };
-        var regions = new[] { "us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-south-1" };
-        var endpoints = new[] { "/api/v1/health", "/api/v1/products", "/api/v1/orders/create", "/api/v1/checkout/process", "/api/v1/payments/process" };
-
-        int requestsPerMinute = TotalRows / 30;
-
-        var timestampData = new long[TotalRows];
-        var serviceData = new string[TotalRows];
-        var endpointData = new string[TotalRows];
-        var durationMsData = new double[TotalRows];
-        var statusCodeData = new int[TotalRows];
-        var regionData = new string[TotalRows];
-        var traceIdData = new string[TotalRows];
-        var isRetryData = new bool[TotalRows];
-
-        int idx = 0;
-        for (int minute = 0; minute < 30 && idx < TotalRows; minute++)
-        {
-            var minuteStart = baseTime.AddMinutes(minute);
-            bool inIncident = minuteStart >= scenario.IncidentStart && minuteStart < scenario.IncidentEnd;
-
-            for (int r = 0; r < requestsPerMinute && idx < TotalRows; r++, idx++)
-            {
-                var timestamp = minuteStart.AddMilliseconds(rng.NextDouble() * 60_000);
-                var service = services[rng.Next(services.Length)];
-                var isAffected = scenario.AffectedServices.Contains(service);
-                bool degradeThisMinute = inIncident && isAffected;
-
-                timestampData[idx] = timestamp.Ticks;
-                serviceData[idx] = service;
-                endpointData[idx] = endpoints[rng.Next(endpoints.Length)];
-                durationMsData[idx] = Math.Round(Math.Max(1.0, rng.NextDouble() * 100), 2);
-                regionData[idx] = regions[rng.Next(regions.Length)];
-                traceIdData[idx] = $"trace-{idx:X8}";
-
-                if (degradeThisMinute)
-                {
-                    var errorRoll = rng.NextDouble();
-                    statusCodeData[idx] = errorRoll switch
-                    {
-                        < 0.40 => 500,
-                        < 0.60 => 503,
-                        < 0.75 => 429,
-                        < 0.85 => 502,
-                        _ => 200,
-                    };
-                    isRetryData[idx] = rng.NextDouble() < 0.35;
-                }
-                else
-                {
-                    var normalRoll = rng.NextDouble();
-                    statusCodeData[idx] = normalRoll switch
-                    {
-                        < 0.02 => 429,
-                        < 0.03 => 500,
-                        < 0.035 => 503,
-                        _ => 200,
-                    };
-                    isRetryData[idx] = rng.NextDouble() < 0.02;
-                }
-            }
-        }
-
-        var requestFrame = NivaraFrame.Create(
-            ("Timestamp", NivaraColumn<long>.Create(timestampData)),
-            ("Service", NivaraColumn<string>.Create(serviceData)),
-            ("Endpoint", NivaraColumn<string>.Create(endpointData)),
-            ("DurationMs", NivaraColumn<double>.Create(durationMsData)),
-            ("StatusCode", NivaraColumn<int>.Create(statusCodeData)),
-            ("Region", NivaraColumn<string>.Create(regionData)),
-            ("TraceId", NivaraColumn<string>.Create(traceIdData)),
-            ("IsRetry", NivaraColumn<bool>.Create(isRetryData)));
-
-        var parquetOptions = ParquetWriteOptions.Default.With(rowGroupSize: RowGroupSize);
-        requestFrame.ToParquet(Path.Combine(dir, "requests.parquet"), parquetOptions);
-
-        using (var writer = new StreamWriter(Path.Combine(dir, "requests.csv")))
-        {
-            writer.WriteLine("Timestamp,Service,Endpoint,DurationMs,StatusCode,Region,TraceId,IsRetry");
-            for (int i = 0; i < TotalRows; i++)
-            {
-                var ts = new DateTimeOffset(timestampData[i], TimeSpan.Zero);
-                writer.WriteLine($"{ts:O},{serviceData[i]},{endpointData[i]},{durationMsData[i]:F2},{statusCodeData[i]},{regionData[i]},{traceIdData[i]},{isRetryData[i]}");
-            }
-        }
-
-        int deploymentCount = 10;
-        var deployTimestamps = new long[deploymentCount];
-        var deployServices = new string[deploymentCount];
-        var deployVersions = new string[deploymentCount];
-        var deployRegions = new string[deploymentCount];
-
-        for (int i = 0; i < deploymentCount; i++)
-        {
-            deployTimestamps[i] = baseTime.AddMinutes(rng.Next(30)).Ticks;
-            deployServices[i] = services[rng.Next(services.Length)];
-            deployVersions[i] = $"v{4 + rng.Next(3)}.{rng.Next(50)}";
-            deployRegions[i] = regions[rng.Next(regions.Length)];
-        }
-
-        var deployFrame = NivaraFrame.Create(
-            ("Timestamp", NivaraColumn<long>.Create(deployTimestamps)),
-            ("Service", NivaraColumn<string>.Create(deployServices)),
-            ("Version", NivaraColumn<string>.Create(deployVersions)),
-            ("Region", NivaraColumn<string>.Create(deployRegions)));
-        deployFrame.ToParquet(Path.Combine(dir, "deployments.parquet"), parquetOptions);
-
-        int instanceCount = services.Length * 5 * regions.Length;
-        var instTimestamps = new long[instanceCount];
-        var instServices = new string[instanceCount];
-        var instIds = new string[instanceCount];
-        var instRegions = new string[instanceCount];
-        var instActiveReqs = new int[instanceCount];
-        var instQueueDepth = new int[instanceCount];
-
-        int instIdx = 0;
-        foreach (var svc in services)
-        {
-            foreach (var region in regions)
-            {
-                for (int i = 0; i < 5; i++)
-                {
-                    bool inIncident = scenario.AffectedServices.Contains(svc);
-                    instTimestamps[instIdx] = (inIncident
-                        ? scenario.IncidentStart.AddMinutes(rng.NextDouble() * (scenario.IncidentEnd - scenario.IncidentStart).TotalMinutes)
-                        : baseTime.AddMinutes(rng.NextDouble() * 30)).Ticks;
-                    instServices[instIdx] = svc;
-                    instIds[instIdx] = $"{svc}-{region}-{i:D3}";
-                    instRegions[instIdx] = region;
-                    instActiveReqs[instIdx] = rng.Next(10, 200);
-                    instQueueDepth[instIdx] = inIncident ? 50 + rng.Next(50) : rng.Next(1, 10);
-                    instIdx++;
-                }
-            }
-        }
-
-        var instanceFrame = NivaraFrame.Create(
-            ("Timestamp", NivaraColumn<long>.Create(instTimestamps)),
-            ("Service", NivaraColumn<string>.Create(instServices)),
-            ("InstanceId", NivaraColumn<string>.Create(instIds)),
-            ("Region", NivaraColumn<string>.Create(instRegions)),
-            ("ActiveRequests", NivaraColumn<int>.Create(instActiveReqs)),
-            ("QueueDepth", NivaraColumn<int>.Create(instQueueDepth)));
-        instanceFrame.ToParquet(Path.Combine(dir, "instances.parquet"), parquetOptions);
     }
 }
