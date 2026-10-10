@@ -128,7 +128,7 @@ class Program
             Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
-            Console.WriteLine("GPU (distilbert / distilbert_sst / minilm only, this phase):");
+            Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine();

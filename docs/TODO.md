@@ -90,4 +90,4 @@ are attached to the **F32-only** claim, not to coverage, so they stay.
 
 ## GitHub issues log
 
-- [ ] Filed during execution: `--gpu` silently ignored for mobilenet_v2/resnet18/smollm/qwen
+- [ ] #568 — `--gpu` silently ignored for mobilenet_v2/resnet18/smollm/qwen (created while working on #478)

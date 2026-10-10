@@ -104,6 +104,13 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraInference --help` lists the models that accept `--gpu` today (#478)** — the top-level
+  help block named `distilbert / distilbert_sst / minilm only, this phase`, but the dispatch switch
+  has a `useGpu` branch for five models and `docs/ACCELERATION.md` publishes GPU tables for `laya`
+  and `modernbert`. The heading now reads `minilm / distilbert / distilbert_sst / modernbert / laya`;
+  the stale `this phase` qualifier is dropped because the line below it already carries the F32-only
+  fact. Help text only — no dispatch or behavior change.
+
 - **`QueryFrame.DisposeAsync` no longer propagates source-disposal errors (#508)** — `Dispose()`
   swallowed them while `DisposeAsync()` did not, so a caller using `await using` could get an
   exception from cleanup that the synchronous `using` form silently swallowed. The fork lived in
