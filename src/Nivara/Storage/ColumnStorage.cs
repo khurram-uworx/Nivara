@@ -13,6 +13,20 @@ namespace Nivara.Storage;
 /// <see cref="Tensor{T}"/> view for unmanaged element types.
 /// </summary>
 /// <typeparam name="T">The type of elements to store</typeparam>
+/// <remarks>
+/// <para><b>Immutability invariant.</b> No member of this type writes <c>data</c> after
+/// construction on a read path, and <see cref="AsTensor"/> depends on that. It aliases
+/// <c>data</c> (or a slice of it) — <see cref="Tensor{T}"/>'s create overloads use the array
+/// as the backing buffer and do not copy — and memoises the result in <c>tensorView</c>, so
+/// the same view is handed to every caller for the lifetime of the storage.
+/// <see cref="Tensor{T}"/> exposes a writable <c>Span&lt;T&gt;</c> indexer, so an in-place
+/// write to <c>data</c> would silently corrupt every view already handed out.</para>
+/// <para>Any future in-place kernel (sort, compaction/dedup, in-place fill, <c>ArrayPool</c>
+/// reuse) must therefore copy first or invalidate the cache (<c>tensorView = null</c>). The
+/// internal <c>AsWritableSpan()</c> is the deliberate exception: it exposes <c>data</c>
+/// writable for the AutoDiff optimizers' in-place parameter updates and does not invalidate
+/// the cache — callers of that span accept that every hosted view tracks the writes.</para>
+/// </remarks>
 sealed class ColumnStorage<T> : IColumnStorage<T>
 {
     readonly T[] data;
@@ -212,6 +226,8 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     /// </summary>
     /// <remarks>
     /// The view shares the underlying array (verified via <see cref="Tensor{T}.TryGetSpan"/>).
+    /// It aliases the sole-owner <c>data</c> and is memoised, so the same view is returned on
+    /// every call — see the class remarks for the immutability invariant this depends on.
     /// Callers must check <see cref="HasNulls"/> first; null positions hold <c>default(T)</c>.
     /// Requires unmanaged <typeparamref name="T"/>; reference-containing types throw.
     /// </remarks>

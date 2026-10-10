@@ -1231,8 +1231,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 
     /// <summary>
     /// Gets a zero-copy <see cref="Tensor{T}"/> view over the column data that shares
-    /// the underlying array. The column remains immutable; mutating the returned tensor
-    /// would corrupt the column, so callers must treat it as read-only.
+    /// the underlying array. No read path mutates the backing array, but the view is live:
+    /// AutoDiff optimizer steps write in place through the internal writable span, so a view
+    /// taken over a training parameter observes those updates. Mutating the returned tensor
+    /// corrupts the column, so callers must treat it as read-only.
     /// </summary>
     /// <returns>A Tensor&lt;T&gt; view sharing the column's backing storage</returns>
     /// <exception cref="InvalidOperationException">Thrown when the column contains null values or the element type is not unmanaged</exception>

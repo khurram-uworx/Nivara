@@ -147,7 +147,8 @@ public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754
 
     /// <summary>
     /// Gets a zero-copy tensor view of the data for operations requiring tensor semantics.
-    /// The view shares the tensor's backing array; the column remains immutable.
+    /// The view shares the tensor's backing array and is live: reads do not mutate the column,
+    /// but optimizer steps write in place, so a view over a training parameter tracks the update.
     /// </summary>
     /// <returns>A Tensor&lt;T&gt; view of the data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the data contains null values</exception>

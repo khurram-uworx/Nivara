@@ -109,8 +109,9 @@ Interop
 The one tensor interop surface core Nivara exposes is a **lazy zero-copy `Tensor<T>` view**:
 
 - `ColumnStorage<T>.AsTensor()` — internal; wraps the storage's sole-owner `T[]` with
-  `Tensor.Create(data, [length])` (slices use `Tensor.Create(data, start, lengths, strides)`),
-  no copy, no flattened cache. Unmanaged `T` only
+  `Tensor.Create(data, dataStart, [length], [1])` (a slice passes its own `dataStart`),
+  no copy, no flattened cache. `Tensor.Create` uses the array as its backing buffer rather than
+  copying. Unmanaged `T` only
   (`RuntimeHelpers.IsReferenceOrContainsReferences<T>()` guard); `Half` passes, reference types throw.
 - `NivaraColumn<T>.AsTensorView()` and `NivaraSeries<T>.AsTensorView()` — **public** guarded entries
   (throw on null-containing columns or reference element types).
@@ -120,6 +121,16 @@ This is the intended way to hand a dense, non-null, contiguous column to
 `System.Numerics.Tensors` consumers. The view shares the backing array, so callers must not
 mutate it. Reserve `Tensor.FlattenTo` for non-contiguous/multi-dim tensors — a contiguous column
 already *is* its `Tensor<T>`.
+
+**Aliasing invariant (#536).** `AsTensor()` memoises the view, so the same `Tensor<T>` is handed
+to every caller for the lifetime of the storage, and `Tensor<T>` exposes a writable `Span<T>`
+indexer. Anything that writes the column's `data` array in place would therefore corrupt every
+view already handed out. No read path does that today, and the invariant is pinned by
+`ColumnStorage_AsTensor_ViewAliasesSoleOwnerArray_AndSurvivesReadPaths`. A future in-place kernel
+(sort, compaction/dedup, in-place fill, `ArrayPool` reuse) must copy first or invalidate the
+cached view. The one sanctioned write path is the internal `AsWritableSpan()` used by the AutoDiff
+optimizers for in-place parameter updates — it deliberately does not invalidate the cache, so a
+live view over a training parameter observes those updates.
 
 Columns otherwise interop with BCL tensors element-wise via `TensorInteropExtensions`
 (`Series`/`Frame` ↔ `Tensor<T>`), never by pretending columnar ops are tensor ops.
