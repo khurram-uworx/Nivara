@@ -104,6 +104,20 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **Unparseable integer and precision options rejected in `NivaraInference` (#479)** —
+  `--teacher-examples` and `--seed` parsed their value with the parameterless `int.TryParse` and
+  threw the result away, so `--teacher-examples abc` silently became `0` (the "all" default) and
+  `--seed xyz` silently became `0` rather than the `42` default; an unrecognised `--precision`
+  fell through `var other => other` and was then used as a precision label. Each now rejects an
+  unparseable or unrecognised value with a message naming the flag and the offending token and exits
+  `1`. The two integers parse through the same invariant-culture `TryParseCount` helper `--seq`
+  already uses (`NumberStyles.Integer` + `CultureInfo.InvariantCulture`), which also makes a leading
+  `+` portable across cultures (`ar-SA`/`fa-IR` spell the positive sign differently, so the
+  parameterless overload rejected `+42` there); `--precision` accepts only `f32|bf16|fp16` plus the
+  existing `float|bfloat16|f16|half` synonyms. A flag whose value is missing now reports
+  "needs a value" instead of letting the token fall through to the positional-mode branch. Sample
+  CLI only — no `src/Nivara` change.
+
 - **`NivaraInference --help` lists the models that accept `--gpu` today (#478)** — the top-level
   help block named `distilbert / distilbert_sst / minilm only, this phase`, but the dispatch switch
   has a `useGpu` branch for five models and `docs/ACCELERATION.md` publishes GPU tables for `laya`
