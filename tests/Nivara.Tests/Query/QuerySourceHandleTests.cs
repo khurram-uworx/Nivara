@@ -126,6 +126,89 @@ public class QuerySourceHandleTests
         });
     }
 
+    // ── Disposal-error contract (#508) ──
+
+    [Test]
+    public void Release_SourceDisposeThrows_DoesNotPropagate()
+    {
+        var source = new ThrowingSource();
+        var handle = new QuerySourceHandle(source);
+
+        Assert.DoesNotThrow(() => handle.Release(),
+            "Dispose must not throw; the source-disposal error is swallowed");
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle.Released, Is.True);
+            Assert.That(source.DisposeCount, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task ReleaseAsync_SourceDisposeThrows_DoesNotPropagate()
+    {
+        // A source implementing only IDisposable takes ReleaseAsync's synchronous fallback branch;
+        // the fallback must swallow just as Release does.
+        var source = new ThrowingSource();
+        var handle = new QuerySourceHandle(source);
+
+        await Assert.DoesNotThrowAsync(async () => await handle.ReleaseAsync(),
+            "DisposeAsync must not throw; the synchronous fallback swallows like Release");
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle.Released, Is.True);
+            Assert.That(source.DisposeCount, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task ReleaseAsync_AsyncDisposableThrows_DoesNotPropagate()
+    {
+        // Exercises the awaited IAsyncDisposable branch. No production IQuerySource implements
+        // IAsyncDisposable, so this is the only place that branch is executed.
+        var source = new RecordingAsyncSource(throwOnDispose: true);
+        var handle = new QuerySourceHandle(source);
+
+        await Assert.DoesNotThrowAsync(async () => await handle.ReleaseAsync(),
+            "DisposeAsync must not throw when the awaited source disposal faults");
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle.Released, Is.True);
+            Assert.That(source.DisposeAsyncCount, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task ReleaseAsync_AsyncDisposable_DisposesViaAsyncPath()
+    {
+        var source = new RecordingAsyncSource(throwOnDispose: false);
+        var handle = new QuerySourceHandle(source);
+
+        await handle.ReleaseAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(source.DisposeAsyncCount, Is.EqualTo(1));
+            Assert.That(source.DisposeCount, Is.Zero,
+                "the synchronous fallback must not run when the source is IAsyncDisposable");
+        });
+    }
+
+    [Test]
+    public async Task ReleaseAsync_CalledTwice_DisposesSourceOnceAndDoesNotThrow()
+    {
+        var source = new RecordingAsyncSource(throwOnDispose: false);
+        var handle = new QuerySourceHandle(source);
+
+        await handle.ReleaseAsync();
+        await handle.ReleaseAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle.Released, Is.True);
+            Assert.That(source.DisposeAsyncCount, Is.EqualTo(1));
+        });
+    }
+
     /// <summary>
     /// Builds a two-step chain, discarding the intermediate frame, and returns the leaf.
     /// Kept in its own method so the intermediate is provably unreachable on return.
@@ -169,5 +252,46 @@ public class QuerySourceHandleTests
         }
 
         public void Dispose() => DisposeCount++;
+    }
+
+    sealed class ThrowingSource : IQuerySource
+    {
+        public Schema Schema { get; } = new(new[] { ("A", typeof(int)) });
+        public bool IsLazy => true;
+        public int DisposeCount { get; private set; }
+
+        public IReadOnlyDictionary<string, IColumn> Execute() =>
+            new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+
+        public void Dispose()
+        {
+            DisposeCount++;
+            throw new InvalidOperationException("disposal failed");
+        }
+    }
+
+    sealed class RecordingAsyncSource : IQuerySource, IAsyncDisposable
+    {
+        readonly bool throwOnDispose;
+
+        public RecordingAsyncSource(bool throwOnDispose) => this.throwOnDispose = throwOnDispose;
+
+        public Schema Schema { get; } = new(new[] { ("A", typeof(int)) });
+        public bool IsLazy => true;
+        public int DisposeCount { get; private set; }
+        public int DisposeAsyncCount { get; private set; }
+
+        public IReadOnlyDictionary<string, IColumn> Execute() =>
+            new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+
+        public void Dispose() => DisposeCount++;
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeAsyncCount++;
+            return throwOnDispose
+                ? ValueTask.FromException(new InvalidOperationException("async disposal failed"))
+                : ValueTask.CompletedTask;
+        }
     }
 }
