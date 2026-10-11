@@ -1,6 +1,6 @@
 # ComputeSharp on the Arc 140T from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · **ComputeSharp**
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp**
 
 This is the sixth GPU-backend case-study doc and the deliverable for issue #432
 (GPU probe phase 4b). The previous phases proved four compile/driver paths

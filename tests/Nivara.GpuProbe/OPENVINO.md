@@ -1,6 +1,6 @@
 # Intel OpenVINO GPU Compute from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
 
 This is the fourth GPU-backend case-study doc (after [SPIR-V / Level Zero](SPIRV.md),
 [SYCL / oneAPI](SYCL.md), [DX12](DX12.md)) and the deliverable for issue #428: the

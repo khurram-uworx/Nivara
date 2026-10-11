@@ -1,6 +1,6 @@
 # Silk.NET OpenCL GPU Probe — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
 
 All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU; the reported driver **1.15.37858** is the Level Zero `driverVersion`, not a Windows GPU driver) running Windows 10.0.26200 and .NET 11.0. The Silk.NET OpenCL leg of `tests/Nivara.GpuProbe` uses **Silk.NET.OpenCL 2.23.0** (thin .NET Foundation bindings to the OpenCL C API) to discover platforms/devices and to run OpenCL C kernels directly on the in-box OpenCL ICD + Intel driver. The goal is a vendor-neutral baseline (especially Intel/AMD iGPUs) for apples-to-apples comparisons with other backends. Whether this device can do native BF16 or FP16 arithmetic — and whether FP16 is faster — is measured in [Precision on this iGPU](#precision-on-this-igpu-bf16-and-fp16), not inferred from the extension string.
 
@@ -342,4 +342,4 @@ row's own PASS lines, not just the process exit code.
 - [Silk.NET OpenCL](https://github.com/dotnet/Silk.NET)
 - [OpenCL 1.2 Specification](https://registry.khronos.org/OpenCL/specs/opencl-1.2.pdf)
 - [Khronos OpenCL](https://www.khronos.org/opencl/)
-- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
+- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
