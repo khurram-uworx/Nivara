@@ -66,14 +66,14 @@ static CliResult Run(params string[] args)
     foreach (var a in args) psi.ArgumentList.Add(a);
 
     using var process = Process.Start(psi)!;
-    string stdout = process.StandardOutput.ReadToEnd();
-    string stderr = process.StandardError.ReadToEnd();
+    Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+    Task<string> stderr = process.StandardError.ReadToEndAsync();
     if (!process.WaitForExit(30_000))
     {
         process.Kill(entireProcessTree: true);
         Assert.Fail($"NivaraInference {string.Join(' ', args)} did not exit within 30 s");
     }
-    return new CliResult(process.ExitCode, stdout, stderr);
+    return new CliResult(process.ExitCode, stdout.GetAwaiter().GetResult(), stderr.GetAwaiter().GetResult());
 }
 
 static void AssertRejected(CliResult result, string message)
@@ -125,6 +125,32 @@ the weight load"; deeper `qwen distill` determinism is #577, out of scope.
 - CI (`.github/workflows/ci.yml`) builds the whole solution and runs `dotnet test --no-build
   --configuration Release --filter "Category!=Performance"`; the new fixture is picked up and
   runs on ubuntu-latest. Estimated added runtime < 2 s total (reject paths ~50 ms each).
+
+## G1 grounding (microsoft-learn MCP + code-memory MCP)
+
+- **MSBuild `ProjectReference` semantics confirmed** — official docs
+  (<https://learn.microsoft.com/visualstudio/msbuild/common-msbuild-project-items#projectreference>):
+  `ReferenceOutputAssembly` defaults to `true`, so the referenced project is built first and its
+  output becomes a reference that is copied to the referencing project's output folder. This is
+  exactly the mechanism the plan relies on (build ordering **and** `NivaraInference.dll` +
+  `runtimeconfig.json` + `deps.json` present in `AppContext.BaseDirectory`); the
+  `ReferenceOutputAssembly=false` variant is documented as build-dependency-only, which is why it
+  is **not** used here.
+- **Process redirection — plan refined.** The official `Process`/`ProcessStartInfo` samples warn that
+  redirecting both streams and reading them synchronously risks deadlock, and recommend reading one
+  asynchronously. The plan's `ReadToEnd()`-then-`ReadToEnd()` sketch is therefore replaced with a
+  `ReadToEndAsync()` on **both** streams, then `WaitForExit(timeout)`, then awaiting the two reads.
+  The child's output is only a few hundred bytes, but the async form is correct unconditionally.
+- **`dotnet test --filter` for NUnit confirmed**
+  (<https://learn.microsoft.com/dotnet/core/testing/selective-unit-tests#nunit-examples>):
+  `FullyQualifiedName~` and `Category`/`TestCategory` are supported, so the verification commands
+  are valid.
+- **Blast radius re-checked via code-memory**: `samples/NivaraInference/Program.cs` holds 68
+  symbols; `NivaraInference.Program.Main` (lines 21–475) is the only validation surface, and no
+  symbol under `src/` is downstream of this change. The only new cross-project edge is
+  `tests/Nivara.Tests` → `samples/NivaraInference`.
+- **Decisions / red flags: none.** Grounding surfaced no item that needs a human decision. The one
+  refinement (async reads) is an improvement, not a design change.
 
 ## Verification
 
