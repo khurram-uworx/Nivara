@@ -91,6 +91,22 @@ The README distill line does not mention `--seed`, so no README change.
 
 Entry naming #570, in the style of the adjacent #568/#479 entries.
 
+## G1 grounding (recorded before implementation)
+
+- **Microsoft Learn** — `System.Random(Int32)`: "the same sequence is generated when the
+  Random object is created again with the constructor and seed parameter" (reproducible within a
+  runtime; only cross-major-version sequence stability is not guaranteed), and "If a negative
+  number is specified, the absolute value of the number is used". Both support a seeded
+  `Random` as the determinism source.
+- **code-memory** — relationship graph confirms `SentimentMLP`, `LinearBaseline`, and
+  `RunDistill` have no referrers outside `samples/NivaraInference/Qwen.cs` (only the `Head`/
+  `Hidden` fields and the two constructors reference `Linear`); `RunDistill` is called from
+  `Program.cs:444` only. No other sample or `src/Nivara` symbol is affected.
+- **Red flag (escalated, accepted)** — with A2 the fix has no automated NUnit gate
+  (`RunDistill` needs the absent teacher checkpoint; the student types are private to the
+  sample exe). Recorded under "Known coverage limitation" above. The human chose A2 with this
+  known.
+
 ## Blast radius
 
 - `samples/NivaraInference/Qwen.cs` — new private nested type; two nested class constructors
