@@ -131,7 +131,7 @@ Honest delta between the assessment's expectations and the measured outcome:
 - **E2E landed at ~65 ms vs the estimated ~15–25 ms.** The GEMM extrapolation was right (Row4 rates × 5.44 GMAC ≈ 20–30 ms); the miss was the *unmeasured* portion — attention + elementwise legs **plus per-dispatch overhead × ~100 dispatches**, first over-estimated at ~0.4–0.7 ms/launch. M2 measured the truth: **~30 µs/dependent kernel**, so the ~70 dispatches fusion removed (MiniLM 26.8 → 24.3 ms) matched the corrected model, and the remaining gap is kernel throughput — not a launch-count problem fusion can fix.
 - **M2's >2× acceptance was not reachable.** The #437 ">2× MiniLM" target (~13.4 ms) assumed ~0.19 ms/launch; at the measured ~30 µs it would need ~420 fewer dispatches than exist. Re-scoped to honest ~1.1× with the GEMM-throughput item promoted to the leading GPU follow-up.
 - **The "clear win vs PyTorch CPU 35 ms" did not materialize.** The iGPU is ~1.9× *behind* PyTorch's MKL-backed CPU path here (PyTorch starts ~5.6× ahead of Nivara-CPU). We still won ~3.0× over our own CPU, which was the scenario's actual goal — but the assessment's PyTorch-vs-GPU framing was optimistic for a 128-EU iGPU.
-- **The keystone GEMM decision gate held exactly as designed**: Row4 measured 303–379 GMAC/s (inside the 0.6–1.6 T MAC/s *good* window) and the OpenVINO fallback was never needed.
+- **The keystone GEMM decision gate held exactly as designed**: Row4 measured 303–379 GMAC/s (0.61–0.76 TFLOP/s), inside the 0.6–1.6 TFLOP/s *good* window, and the OpenVINO fallback was never needed.
 
 ## 5. GPU suggestions & follow-ups
 
