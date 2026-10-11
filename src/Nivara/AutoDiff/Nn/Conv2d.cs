@@ -133,12 +133,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         int fanIn = cPerGroup * kernelSize * kernelSize;
         var weightData = new T[outChannels * cPerGroup * kernelSize * kernelSize];
         if (weightInitializer is null)
-        {
-            var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
-            var rng = new Random(42);
-            for (int i = 0; i < weightData.Length; i++)
-                weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
-        }
+            DefaultConvInitialization.Fill(weightData, fanIn);
 
         weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, outChannels, cPerGroup * kernelSize * kernelSize, requiresGrad: true));
@@ -766,12 +761,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
         int fanIn = inChannels * kernelSize * kernelSize;
         var weightData = new T[inChannels * outChannels * kernelSize * kernelSize];
         if (weightInitializer is null)
-        {
-            var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
-            var rng = new Random(42);
-            for (int i = 0; i < weightData.Length; i++)
-                weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
-        }
+            DefaultConvInitialization.Fill(weightData, fanIn);
 
         weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, inChannels, outChannels * kernelSize * kernelSize, requiresGrad: true));
