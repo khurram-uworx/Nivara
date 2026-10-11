@@ -684,7 +684,13 @@ public class NnTests
     [Test]
     public void VAE_Training_ReducesLoss()
     {
-        using var vae = new VAE<float>(4, 2, 8);
+        // Seeded Kaiming, not the unseeded default: the last<first loss assertion below depends
+        // on the starting weights, which Random.Shared would otherwise vary per process. A fixed
+        // seed makes the trajectory reproducible while keeping the fan-in scaling that prevents
+        // the stacked encoder/decoder activations from exploding (DeterministicInit's 0.05*(i+1)
+        // ramp pushes exp(0.5*logVar) to +Inf here). Reparameterize is seeded below for the same
+        // reason — its sampling otherwise drains Random.Shared.
+        using var vae = new VAE<float>(4, 2, 8, weightInitializer: new KaimingUniformInitializer<float>(seed: 42));
         var raw = new float[16];
         for (int i = 0; i < raw.Length; i++)
             raw[i] = (i % 4) + 1;
@@ -698,7 +704,7 @@ public class NnTests
         float ComputeLoss()
         {
             var (mu, logVar) = vae.Encode(data);
-            var z = vae.Reparameterize(mu, logVar);
+            var z = vae.Reparameterize(mu, logVar, seed: 42);
             var recon = vae.Decode(z);
             var l = vae.ElboLoss(recon, data, mu, logVar);
             return l[0];
@@ -710,7 +716,7 @@ public class NnTests
         {
             optimizer.ZeroGrad();
             var (mu, logVar) = vae.Encode(data);
-            var z = vae.Reparameterize(mu, logVar);
+            var z = vae.Reparameterize(mu, logVar, seed: 42);
             var recon = vae.Decode(z);
             var loss = vae.ElboLoss(recon, data, mu, logVar);
             loss.Backward();

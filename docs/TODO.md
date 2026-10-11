@@ -79,10 +79,18 @@ tests unchanged (they assert `Loss > 0` / `GradientNorm > 0`, independent of the
 
 ### 3. Tests — `tests/Nivara.Tests/AutoDiff/NnTests.cs`, `VAE_Training_ReducesLoss`
 
-- Model (line 687) → `new VAE<float>(4, 2, 8, weightInitializer: new DeterministicInit<float>())`.
+- Model (line 687) → `new VAE<float>(4, 2, 8, weightInitializer: new KaimingUniformInitializer<float>(seed: 42))`.
 - Add `seed: 42` to both `vae.Reparameterize(mu, logVar)` call sites (lines 701 and 713),
   so `initialLoss` and `finalLoss` use identical epsilon. Keep the exact
   `finalLoss < initialLoss` assertion.
+
+> **Deviation (found in execution):** the original plan used `DeterministicInit<float>()`
+> for the VAE. Applied to the six stacked encoder/decoder layers it is *not* neutral:
+> its `0.05*(i+1)` ramp compounds across layers and drives `exp(0.5*logVar)` to `+Inf`,
+> so both `initialLoss` and `finalLoss` came out `NaN` (observed: `Expected: less than NaN,
+> But was: NaN`). Switched to the seedable, fan-in-scaled `KaimingUniformInitializer<float>(seed: 42)`
+> (added in #577), which is equally deterministic but keeps activations bounded. The pitfall
+> was recorded in an XML `<remarks>` on `DeterministicInit` so it is not repeated.
 
 ### 4. Tests — `tests/Nivara.Tests/AutoDiff/BFloat16Tests.cs` (line 147)
 
@@ -120,6 +128,11 @@ is unaffected.
    does not: more epochs / slightly higher lr — not loosening the assertion.
 3. Full suite only with explicit human confirmation, always with `--filter "Category!=Performance"`.
 
+**Results (2026-10-11, Release):** the combined filter
+(`~DataParallelTests|~VAE_Training_ReducesLoss|~LinearModule_BFloat16SgdTraining_LossDecreases`)
+ran 8× consecutively: 13 passed / 0 failed every run (`Duration: ~90 ms`). The VAE test
+passed on its own after the init change. Full suite not run (requires human confirmation).
+
 ## Planned commits
 
 1. `feat(autodiff): add optional weight/bias initializers to VAE<T> constructor`
@@ -128,4 +141,5 @@ is unaffected.
 
 ## GitHub issues log
 
-- [ ] (none yet)
+- [ ] #594 — `ConvVAE<T>` has no weight/bias initializer hook (asymmetry with `VAE<T>`); discovered while implementing #583.
+
