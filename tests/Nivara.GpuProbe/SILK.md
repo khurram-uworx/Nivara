@@ -2,7 +2,7 @@
 
 > **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
 
-All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU, driver **1.15.37858**) running Windows 10.0.26200 and .NET 11.0. The Silk.NET OpenCL leg of `tests/Nivara.GpuProbe` uses **Silk.NET.OpenCL 2.23.0** (thin .NET Foundation bindings to the OpenCL C API) to discover platforms/devices and to run OpenCL C kernels directly on the in-box OpenCL ICD + Intel driver. The goal is a vendor-neutral baseline (especially Intel/AMD iGPUs) for apples-to-apples comparisons with other backends. Whether this device can do native BF16 or FP16 arithmetic — and whether FP16 is faster — is measured in [Precision on this iGPU](#precision-on-this-igpu-bf16-and-fp16), not inferred from the extension string.
+All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU; the reported driver **1.15.37858** is the Level Zero `driverVersion`, not a Windows GPU driver) running Windows 10.0.26200 and .NET 11.0. The Silk.NET OpenCL leg of `tests/Nivara.GpuProbe` uses **Silk.NET.OpenCL 2.23.0** (thin .NET Foundation bindings to the OpenCL C API) to discover platforms/devices and to run OpenCL C kernels directly on the in-box OpenCL ICD + Intel driver. The goal is a vendor-neutral baseline (especially Intel/AMD iGPUs) for apples-to-apples comparisons with other backends. Whether this device can do native BF16 or FP16 arithmetic — and whether FP16 is faster — is measured in [Precision on this iGPU](#precision-on-this-igpu-bf16-and-fp16), not inferred from the extension string.
 
 ---
 
@@ -28,28 +28,37 @@ Ranges across two eight-way runs on the same machine and fixtures; the legs are 
 best-of-25, but single-run figures move (the CPU `gemv` column alone spanned 2785–4158 µs),
 so ranges are the honest unit here.
 
+**Two-host supersession (#599):** the repeated five-sweep profiles #552 (Arc 140T) and
+#553 (Iris Xe) are the authoritative source for Silk's steady-state orderings — Arc medians
+dot16 7.0 · silu 6.7 · gemv 100.6 µs, Iris Xe 71.4 · 69.2 · 486.2 µs, with every leg's bands
+in [tests/Nivara.GpuProbe/README.md](../tests/Nivara.GpuProbe/README.md) → "Backend comparison — the numbers, side by
+side". Where a claim in this section came from the two eight-way runs only, the two-host read
+wins.
+
 | kernel | CPU (production Nivara) | Silk.NET OpenCL | next best | gate |
 |---|---|---|---|---|
 | dot16 | 1.5–1.7 µs | **6.4–6.7 µs** | ILGPU 10.0–11.6 | PASS — bit-exact, 0.0 ULP |
 | silu | 31.2–41.6 µs | **6.1–7.1 µs** | ILGPU 7.0 (tie) | PASS — 576/576, worst 4.0 ULP |
-| gemv | 2785–4158 µs | 90.1–100.1 µs | **OV bf16 87.9–93.4** | PASS — 1536/1536 |
+| gemv | 2785–4158 µs | 90.1–100.1 µs | **OV bf16 87.9–93.4** (tie on the #552 profile) | PASS — 1536/1536 |
 
 Silk.NET is the fastest **hand-authored-kernel** leg, and the fastest row on the launch-bound
 `dot16` (~1.5x faster than ILGPU, the nearest hand-authored competitor). It ties ILGPU on
-`silu`. On `gemv` it is **second**, behind OpenVINO's precompiled tuned bf16 kernel
-(90–100 µs vs 88–93 µs) — that is a tuned GEMM beating a naive one, not a binding overhead
-difference.
+`silu`. On `gemv` it **ties OpenVINO's tuned bf16 kernel** on the #552 profile (Silk band
+90.3–103.7 µs, median 100.6, vs OV bf16 92.8–201.0 µs, median 114.0 — overlapping bands);
+the earlier single-run "second, behind OV bf16" reading is retired, and since a naive OpenCL
+gemm matches a tuned one there is no binding-overhead question to answer.
 
 Careful with "fastest OpenCL row": `OV (bf16)` and `OV (f32)` are themselves OpenCL rows.
 OPENVINO.md records the GPU plugin as OpenCL/IGC-frontened, running on the same Intel ICD,
 so counting them as non-OpenCL to flatter this leg would be dishonest. Against every OpenCL
-row, Silk.NET leads on `dot16`, ties on `silu`, and trails OV-bf16 on `gemv`.
+row, Silk.NET leads on `dot16`, ties on `silu`, and ties OV-bf16 on `gemv` on the #552
+profile (bands overlap; medians 100.6 vs 114.0).
 
 Why it leads the hand-authored legs: it is the only one that dispatches the compiled binary
 directly, with no ILGPU runtime abstraction between the NDRange and the queue. Build cost is
 ~4.4–5.2 ms (in-process, driver JIT, highly variable); first dispatch adds 66–498 µs.
 
-**Note on the observed ULP figures:** `gemv`'s worst-case 14336 ULP and `silu`'s 4.0 ULP are *not* Silk.NET-specific — the DX12, OV-f32, ILGPU and ComputeSharp legs report identical values, because it is f32 rounding at those magnitudes against a slightly different summation order, not a kernel difference. `|diff|` is ~1.6e-09 for gemv and ~3.7e-09 for silu, both far inside the `1e-6 + 1e-5·|ref|` gate. `OV (bf16 IR)` is the only silu leg that genuinely fails (402/576) — a real OpenVINO bf16 IR precision issue, pre-existing and tracked separately.
+**Note on the observed ULP figures:** `gemv`'s worst-case 14336 ULP and `silu`'s 4.0 ULP are *not* Silk.NET-specific — the DX12, OV-f32, ILGPU and ComputeSharp legs report identical values, because it is f32 rounding at those magnitudes against a slightly different summation order, not a kernel difference. `|diff|` is ~1.6e-09 for gemv and ~3.7e-09 for silu, both far inside the `1e-6 + 1e-5·|ref|` gate. `OV (bf16 IR)` is the only silu leg that genuinely fails (402/576) — a real OpenVINO bf16 IR precision issue, pre-existing; filed as issue **#606**.
 
 ---
 
