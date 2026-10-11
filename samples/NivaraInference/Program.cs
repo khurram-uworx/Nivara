@@ -153,6 +153,7 @@ class Program
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
+            Console.WriteLine("                     Any other model rejects --gpu (no GPU path).");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
@@ -223,6 +224,12 @@ class Program
                 Console.Error.WriteLine($"--iters expects a positive integer; got '{itersArg}'.");
                 return 1;
             }
+        }
+
+        if (useGpu && modelType is not ("minilm" or "distilbert" or "distilbert_sst" or "modernbert" or "laya"))
+        {
+            Console.Error.WriteLine($"--gpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            return 1;
         }
 
         string modelDir = Path.Combine("samples", "data", resolvedType);

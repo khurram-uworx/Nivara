@@ -104,6 +104,15 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraInference` rejects `--gpu` for models with no GPU path (#568)** — `--gpu` was parsed
+  unconditionally but read only by the five `switch (modelType)` cases that have a `useGpu` branch,
+  so `mobilenet_v2`/`resnet18`/`smollm`/`qwen` accepted the flag and silently ran on the CPU: the one
+  option on this surface that could be passed and do nothing. Every other rejected option fails
+  loudly. The parser now rejects it, before the weight file is touched, for any model outside
+  `minilm / distilbert / distilbert_sst / modernbert / laya`, naming the GPU-capable set and exiting
+  `1`. The guard is a positive allow-list, so it stays in step with the dispatch switch, and the
+  `--gpu` help block gains a line stating the negative. Sample CLI only — no `src/Nivara` change.
+
 - **`DatasetGenerator` wrote trailing default rows (#563)** — `GenerateFromRecordCount` sized
   every request array to the requested record count but filled only `floor(totalRecords / 30) * 30`
   slots, leaving the trailing `totalRecords % 30` rows at their defaults (`Timestamp 0`, null
