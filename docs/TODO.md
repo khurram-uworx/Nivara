@@ -118,7 +118,7 @@ and is neither named nor pinned by a test. `docs/AUTODIFF.md:668` also documents
 
 ## GitHub issues log
 
-- [ ] (pending) — `ConvTranspose2d` default fanIn uses `inChannels·k²` (weight is
-  `[inChannels, outChannels·k²]`); PyTorch uses `shape[1]·k²`. Verify intent; file during execution.
-- [ ] (pending) — conv default uses `√(2/fanIn)` uniform (non-standard); consider standardizing to
-  He-uniform `√(6/fanIn)`. File during execution; do not change here.
+- [x] #604 — `ConvTranspose2d` default fanIn uses `inChannels·k²` (weight is
+  `[inChannels, outChannels·k²]`); PyTorch uses `shape[1]·k²`. Verify intent. (created while working on #596)
+- [x] #603 — conv default uses `√(2/fanIn)` uniform (non-standard); consider standardizing to
+  He-uniform `√(6/fanIn)`. Do not change in #596. (created while working on #596)
