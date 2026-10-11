@@ -1,6 +1,6 @@
 # Hand-authored SPIR-V on Intel Level Zero — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](../../docs/SILK.md)
 
 This is the first of the GPU-backend case-study docs. It documents what the
 `tests/Nivara.GpuProbe` L0 leg (commits 1–4 of the kernel-probe phase) found
@@ -154,4 +154,4 @@ access that any real GEMM needs. The design decision this data forced:
 - [SPIR-V 1.0 core grammar](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html)
 - [SPV_INTEL_bfloat16_conversion extension (Khronos)](https://github.com/KhronosGroup/SPIRV-Registry/blob/main/extensions/INTEL/SPV_INTEL_bfloat16_conversion.asciidoc)
 - [IGCIT #1144 — Blender access violation on Arc B580 (driver bug class)](https://github.com/intel/intel-graphics-compiler/issues/1144)
-- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) — the GPU-backend case-study series
+- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](../../docs/SILK.md) — the GPU-backend case-study series
