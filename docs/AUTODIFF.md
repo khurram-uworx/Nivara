@@ -610,7 +610,7 @@ Pre-built per-token classification pipeline: `Embedding → Linear(hidden) → R
 
 ```csharp
 public sealed class VAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new VAE<T>(inputDim, latentDim, hiddenDim, decoderHiddenDim?, activation?, beta: 1.0f)
+// new VAE<T>(inputDim, latentDim, hiddenDim, decoderHiddenDim?, activation?, beta: 1.0f, conditionDim: 0, weightInitializer?, biasInitializer?)
 ```
 
 Variational Autoencoder with encoder → reparameterization trick → decoder.
@@ -624,6 +624,8 @@ Variational Autoencoder with encoder → reparameterization trick → decoder.
 | `ElboLoss(recon, original, mu, logVar, lossType)` | Reconstruction + KL divergence loss |
 
 `ElboLossType`: `KldBeta` (weighted KL via learned `Beta` parameter) or `KldAnnealing` (unweighted KL for annealing schedules).
+
+The constructor accepts optional `weightInitializer` / `biasInitializer` applied to every encoder and decoder layer (e.g. a seeded `KaimingUniformInitializer<T>(seed: ...)` for reproducible runs); both default to the standard unseeded initialization.
 
 ### TransformerBlock\<T\>
 
