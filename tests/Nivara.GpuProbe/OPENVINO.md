@@ -127,8 +127,10 @@ reductions and exactly wrong for the nonlinearity:
   F32 CPU gold (13.5k ULP at F16 precision on that row) — legitimately outside
   the tight F32 gate. This is **not a miscode**: the BF16-declared model did
   exactly what it declared, sigmoid/multiply just aren't F32-tier when executed
-  in F16. It is reported as the honest gap the issue's BF16 row always implied.
-  The f32 config (direct IGC-class proof) passes all three kernels.
+  in F16. It is reported as the honest gap the issue's BF16 row always implied
+  and tracked as issue **#606** — the 402/576 gate failure, filed as a precision
+  defect rather than a timing one. The f32 config (direct IGC-class proof)
+  passes all three kernels.
 
 **Read: the plugin, precision-declared properly, is correct on both configs; a
 BF16-rounded sigmoid is a *precision* finding, not a correctness one.** For a
@@ -217,13 +219,22 @@ violate the gate's whole premise and is impossible here by construction.
 **All measured figures now live in the probe README's consolidated side-by-side
 table** ([tests/Nivara.GpuProbe/README.md](../tests/Nivara.GpuProbe/README.md) → "Backend comparison — the numbers,
 side by side"), which gathers the SYCL, DX12 and OpenVINO numbers into one view.
-For this leg (Release `kernels` run; OV infer = best-of-25 steady-state) gemv
-ran **137.9 µs (bf16) / 181.7 µs (f32)** — the ~26–34× CPU win over this run's
-4,745 µs CPU measurement; dot16 is 68.5–75.8 µs, silu 51.2–58.9 µs.
+OpenVINO is **Arc 140T-only** in this probe — it has no runtime on the Iris Xe
+host (`openvino_c.dll` not installed) — so every figure below is Arc-only and
+must not be assumed to transfer. On the #552 Arc profile (Release `kernels`
+run; OV infer = best-of-25 steady-state) gemv runs **114.0 µs (bf16) / 164.2 µs
+(f32)** — a **~21× (bf16) / ~14× (f32) CPU win** over the Arc CPU median 2348.9
+µs — and dot16 44.4 / 39.8 µs, silu 28.3 / 33.8 µs. The leg's original
+single-run 137.9 / 181.7 µs gemv and 68.5–75.8 µs dot16 / 51.2–58.9 µs silu are
+superseded by that profile.
 
 Reading: dot16 stays launch-bound everywhere (its only role is the smallest
-correctness probe). gemv — the dominating SmolLM decode shape — runs at
-**~26–34× the CPU** on the OV plugin; silu is ~1.7–1.9× CPU-competitive even on
+correctness probe). gemv — the dominating SmolLM decode shape — is a **~21× (bf16)
+/ ~14× (f32) CPU win** on the OV plugin (Arc host); under the two-host band rule
+the bf16 row **ties every other GPU leg** on the Arc (band 92.8–201.0 µs
+overlaps each), so OpenVINO's tuned gemm beats the CPU, not the other GPU legs.
+silu is at best CPU-competitive on the Arc: bf16 28.3 µs and f32 33.8 µs both
+overlap the CPU band (16.1–50.2), with no ~1.7–1.9× CPU-class margin left on
 the honest elementwise outer loop. Hints observed: `f16` (bf16 row), `f32`
 (f32 row), `exec GPU.0`.
 
@@ -233,19 +244,21 @@ the honest elementwise outer loop. Hints observed: `f16` (bf16 row), `f32`
 |---|---|---|---|---|
 | L0 hand-authored SPIR-V | none (hand bytes) | none | n/a | **dead end** — IGC miscompiles `OpFMul`/`OpFDiv`; access-chain ICE ([SPIR-V / Level Zero](SPIRV.md)) |
 | SYCL/oneAPI DPC++ | icpx+VS Build Tools | none (runtime loaded) | ~170–198 µs | **proven**, compiler-backed; footprint = oneAPI SDK, subprocess/`setvars` (toolchain removed on this machine — row UNBUILT) |
-| DX12 HLSL `cs_5_1` | none (in-process `d3dcompiler_47`) | none | ~152–525 µs | **proven**, fully managed; per-dispatch overhead highest, no external tooling at all |
-| OpenVINO GPU plugin | none | `pip install openvino` | **138–182 µs** | **proven first-party**: no compiler, tuned kernels, byte-exact dot16, gemv ~26–34× CPU; bf16 silu honestly F16-tier |
+| DX12 HLSL `cs_5_1` | none (in-process `d3dcompiler_47`) | none | 250.4 µs (Arc median) | **proven**, fully managed; per-dispatch overhead highest, no external tooling at all |
+| OpenVINO GPU plugin | none | `pip install openvino` | **114.0 / 164.2 µs** (bf16/f32, Arc medians) | **proven first-party** (Arc-only — no runtime on the Iris Xe): no compiler, tuned kernels, byte-exact dot16, gemv ~21× bf16 / ~14× f32 CPU; bf16 silu honestly F16-tier |
 | oneMKL (dismissed) | DPC++ (gated) | oneMKL | n/a | not a path: SYCL-only ABI, no silu/sigmoid, toolchain-gated |
 
 **Rough end-to-end estimate (labeled an estimate):** SmolLM-135M decode is
 dominated by `[1536×576]·[576]` GEMVs (~270 MFLOP/token in the plan's model).
-At the measured OV gemv-only rate of **~9.7 GFLOP/s f32 / ~12.8 GFLOP/s bf16**
-(1.77 MFLOP per gemv ÷ best infer time), the *gemv-only* floor is ~21–28 ms/token
-(≈36–48 tok/s); a realistic whole-model number is lower once attention, norm and
-elementwise ops run through the same plugin request (the plan's headline
-estimate of **~33 tok/s @ ~8.9 GFLOP/s** sits inside that band). These are
-directional — the probe measures kernels, not a full graph — and the honest
-label is: first-party, compiler-free, and within striking distance of the
+At the #552 profile's gemv-only rates — **~15.5 GFLOP/s bf16 / ~10.8 GFLOP/s
+f32** (1.77 MFLOP per gemv ÷ the profile's steady medians 114.0 / 164.2 µs) —
+the *gemv-only* floor is ~17–25 ms/token (≈40–58 tok/s); the earlier
+single-run-derived ~9.7 / 12.8 GFLOP/s and ~21–28 ms/token figures are
+superseded by that profile. A realistic whole-model number is lower once
+attention, norm and elementwise ops run through the same plugin request, so the
+plan's original ~33 tok/s @ ~8.9 GFLOP/s headline now reads as conservative.
+These are directional — the probe measures kernels, not a full graph — and the
+honest label is: first-party, compiler-free, and within striking distance of the
 SYCL/DX12 figures from [SYCL / oneAPI](SYCL.md) §4 / [DX12](DX12.md) §5.
 
 ## Verdict
@@ -255,10 +268,12 @@ probe series: a first-party solver with zero compiler and zero packages.** On
 the Arc 140T its tuned GPU plugin does *not* carry the hand-authored SPIR-V bug
 class — the F32-declared config passes all three production kernels (dot16
 bit-exact, silu 4 ULP, gemv 1.6e-9), and the BF16-declared row keeps the F32-tier
-matmul win (~26–34× CPU) while honestly surfacing the F16-elementwise sigmoid
-rounding the BF16 row always implied. If Nivara ships a managed GPU backend,
-OpenVINO's P/Invoke surface, `pip install` distribution and precompiled plugin
-make it the lowest-infrastructure candidate on the table.
+matmul win (~21× bf16 / ~14× f32 CPU) while honestly surfacing the
+F16-elementwise sigmoid rounding the BF16 row always implied (tracked as #606).
+The probe's OpenVINO numbers are **Arc-only** — the plugin does not run on the
+Iris Xe leg — so none of its orderings transfer to that host. If Nivara ships a
+managed GPU backend, OpenVINO's P/Invoke surface, `pip install` distribution and
+precompiled plugin make it the lowest-infrastructure candidate on the table.
 
 ## Reproducibility
 
@@ -284,5 +299,5 @@ OS:       Windows 10.0.26200   .NET: 11.0 (Release)
 - [OpenVINO C API (Intel)](https://docs.openvino.ai/2026/api/c_cpp_api/group__ov__c__api.html)
 - [OpenVINO GPU plugin / properties (INFERENCE_PRECISION_HINT, EXECUTION_DEVICES, CACHE_DIR)](https://docs.openvino.ai/2026/openvino-workflow/running-inference/inference-devices-and-modes/gpu-device.html)
 - [OpenVINO IR v11 element names / opset1](https://docs.openvino.ai/2026/documentation/openvino-ir-format.html)
-- [System.Numerics.Tensors / .NET 11 BFloat16 (Microsoft Learn)](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/numeric-guidelines)
+- [System.Numerics.Tensors — TensorPrimitives API (Microsoft Learn)](https://learn.microsoft.com/en-us/dotnet/api/system.numerics.tensors.tensorprimitives?view=net-11.0)
 - Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) — the GPU-backend case-study series
