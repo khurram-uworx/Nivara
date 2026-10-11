@@ -15,7 +15,7 @@ Related: probe verdicts in [docs/ILGPU.md](ILGPU.md), backend case studies in `t
 
 # GPU Acceleration — ILGPU on Intel Arc
 
-Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436, MiniLM via `khurram/minilm-gpu`, ModernBERT via issue #449 on `khurram/449`).
+Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436, MiniLM via `khurram/minilm-gpu`, ModernBERT via issue #449 on `khurram/449`). A second, hand-authored OpenCL backend (`--silk`, Silk.NET) covers MiniLM only and is gated but not yet measured — see "Second OpenCL backend" under §1.
 
 ## 1. Measured results
 
@@ -80,6 +80,39 @@ Those rows use **1 warmup + 3 timed passes, median reported**, not the 3 + 10 of
 
 **The Laya head was out of scope for #449.** It has since landed on CPU as issue **#460** — `LayaDecisionHead<T>`, gated against the `laya==0.3.20` wheel, reflection in [docs/LAYA.md](LAYA.md). It reached the GPU as issue **#462** (2026-09-29, `khurram/462`): the "zero new kernels" claim held, and it is gated GPU-vs-CPU against the CPU head rather than against PyTorch directly — `laya compare` already pinned the CPU path to the wheel, so pinning the GPU runner to it pins the GPU runner transitively, at no second wheel run. The seam onto this runner is additive: `ForwardOnDevice` plus `HiddenOnDevice`/`HiddenRows`, leaving the three existing `modernbert` call sites untouched.
 
+### Second OpenCL backend: `--silk` (Silk.NET, hand-authored kernels)
+
+A second GPU path runs the MiniLM encoder through OpenCL C written by hand and compiled in-process
+by the driver (`Silk.NET.OpenCL` 2.23.0), reached with `--silk` instead of `--ilgpu`. It exists to
+evaluate a vendor-neutral, non-ILGPU route — the same shore the `tests/Nivara.GpuProbe` Silk.NET leg
+probes — on a real model rather than on microkernels.
+
+- **Scope.** MiniLM only, F32 only, modes `default` / `benchmark` / `compare`. `--silk` and `--ilgpu`
+  are mutually exclusive, and `--silk --precision bf16|fp16` is rejected with the same F32-only
+  contract the ILGPU path uses. A checkpoint that ships `pre_classifier`/`classifier` head weights is
+  rejected at runner construction: the head needs a gather + ReLU kernel the set does not carry, and
+  answering with the encoder hidden state instead would be silent wrong output.
+- **The kernel set** is six kernels in `samples/Nivara.Samples/Gpu/SilkKernels.cs`, one per operation
+  MiniLM needs: `embed_sum`, `layer_norm_residual`, the three Row4 GEMM epilogues (`gemm_row4_bias`,
+  `gemm_row4_gelu`, `gemm_row4_qkv`) and `batched_attention`. They are ports of the ILGPU kernels of
+  the same shape — same K-reduction order, same tile geometry, same fused epilogues — and the three
+  GEMMs share one accumulation macro so their f32 text cannot diverge. `#pragma OPENCL FP_CONTRACT OFF`
+  is load-bearing: ILGPU does not fuse `acc += a*b`, the OpenCL driver fuses by default, so without the
+  pragma the Silk side computes the fma model and diverges at rounding scale.
+- **Host side** is `SilkKernels.cs` (source + geometry), `SilkRuntime.cs` (device select, in-process
+  compile with the build log decoded on failure, buffers, dispatch) and `SilkBertEncoderRunner.cs`.
+  Both runners implement `IBertEncoderRunner`, so MiniLM's three entry points are written once and pick
+  a backend at construction; the weight-layout maths (`GpuBuffers`) and the launch geometry
+  (`SilkKernels`) are shared rather than re-derived per backend.
+- **q/k/v reach attention as read-only sub-buffers** (`clCreateSubBuffer`, the OpenCL analogue of
+  ILGPU's `SubView`), created once per forward, so the already-gated fused attention kernel is
+  untouched.
+- **Gates.** `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels` holds
+  the three GEMMs to byte-identity against ILGPU and the remaining kernels to the model's numeric
+  bound; `minilm --silk compare` is the end-to-end gate (`Silk` hidden vs the same in-process CPU
+  forward at the `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` bound, plus pooled-embedding cosine ≥ 0.9999).
+  `InferenceCliArgumentTests` pins the new rejects. No performance figures are claimed here yet.
+
 ## 2. What shipped — architecture and decisions
 
 All GPU code lives in `samples/Nivara.Samples/Gpu/`:
@@ -91,6 +124,7 @@ All GPU code lives in `samples/Nivara.Samples/Gpu/`:
 | `AttentionKernels.cs` | fused 12-head score+scale+mask+row-softmax+weighted-V (`XMath.Exp`) — unchanged by M2 (consumes the q/k/v SubViews as dense row-major views) |
 | `ElementwiseKernels.cs` | LayerNorm row-reduce, GELU (direct A–S 7.1.26 erf poly port of `GradKernels.Erf`, `XMath.Exp`), bias/residual adds, embedding gather. M2 added `LayerNormResidual1D` (residual folded into the LN row-reduction) and `EmbeddingSum` (word/position/token-type gathers + sum in one launch) |
 | `BertEncoderGpuRunner.cs` (was `DistilBertGpuRunner.cs`) | uploads weights (transposed once at ctor) by the loader key set — naming/role-resolved via `BertGpuNaming` (`DistilBert` | `Bert`), config-driven from `BertConfig`; runs the full BERT-family encoder forward + optional SST-2 head; returns per-stage readbacks for gating. M2: every projection through a fused epilogue launch, `q/k/v` one packed GEMM (`Wqkv`/`Bqkv` uploads), posIds cached per seqLen, `Add`/`AddBias` launches removed |
+| `SilkKernels.cs`, `SilkRuntime.cs`, `SilkBertEncoderRunner.cs`, `IBertEncoderRunner.cs` | the `--silk` backend: hand-authored OpenCL C compiled in-process by the driver, the host plumbing around it, and the MiniLM runner. `IBertEncoderRunner` is the seam the MiniLM entry points share with `BertEncoderGpuRunner`, and `GpuBuffers` carries the weight-layout maths for both. Scope and gates are in the `--silk` subsection above |
 
 Design decisions (deliberate, and worth keeping for the next model):
 - **Correctness-first runner**: one kernel launch per operation, everything on one stream, one device sync before readbacks. Fusion/stream tricks were deliberately deferred — the first milestone had to be trivially verifiable.

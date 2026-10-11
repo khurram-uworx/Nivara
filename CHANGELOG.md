@@ -6,6 +6,21 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`minilm --silk`: a second OpenCL backend, hand-authored OpenCL C (#616)** — the GPU flag was
+  renamed `--gpu` → `--ilgpu` (the old spelling is rejected with the new name rather than aliased,
+  so an old invocation cannot quietly keep running ILGPU), and a new `--silk` path runs the MiniLM
+  encoder through six hand-written OpenCL C kernels compiled in-process by the driver via
+  `Silk.NET.OpenCL` 2.23.0. `q`/`k`/`v` reach the unchanged fused attention kernel as read-only
+  sub-buffers (`clCreateSubBuffer`, the OpenCL analogue of ILGPU's `SubView`); both backends share one
+  `IBertEncoderRunner` seam, one weight-layout routine (`GpuBuffers`) and one launch geometry
+  (`SilkKernels`), so the two cannot drift. Scope is the MiniLM encoder only: `--silk` is MiniLM-only,
+  F32-only, and mutually exclusive with `--ilgpu`, and a checkpoint that ships
+  `pre_classifier`/`classifier` head weights is rejected at construction rather than answered with the
+  encoder hidden state. The three Row4 GEMMs are held to byte-identity against ILGPU and the remaining
+  kernels to the model's numeric bound by `dotnet run --project tests/Nivara.PerformanceTests --
+  --silk-kernels`; `minilm --silk compare` is the end-to-end gate; `InferenceCliArgumentTests` pins the
+  new rejects. Sample-side only — no `src/Nivara` change.
+
 - **`VAE<T>` accepts custom weight/bias initializers (#583)** — the constructor gained optional
   `IInitializer<T>? weightInitializer` / `biasInitializer` parameters, forwarded to every encoder and
   decoder layer, so a VAE can be initialized reproducibly (e.g. a seeded `KaimingUniformInitializer<T>`)
