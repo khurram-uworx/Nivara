@@ -99,7 +99,5 @@ failure band.
 ## GitHub issues log
 
 - [ ] #574 — TrainingLoop convergence flake from unseeded Kaiming init (this fix).
-- Out of scope, tracked separately by the issue author/repo:
-  - `DataParallelTests` (`Run_MultipleChunks_LossDecreases`, `Run_Convergence_LinearRegression`)
-    share the default-init + last<first pattern (Adam-based — low risk).
-  - `NnTests` VAE `finalLoss < initialLoss` randomness.
+- [ ] #583 — Same flake class as #574 in DataParallelTests (3 tests) and NnTests VAE ELBO
+      assertion; deliberately left out of this change, tracked for a follow-up.
