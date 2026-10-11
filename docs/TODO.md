@@ -82,4 +82,5 @@ per-cell **median + min–max band** — a statistic the harness cannot currentl
 
 ## GitHub issues log
 
-- [ ] Create follow-up: land the joint #552+#553 doc correction once both hosts are measured.
+- [x] #599 — land the joint #552/#553 doc correction (both hosts side by side) once both
+  hosts are measured. Created while working on #553; blocks the shared doc edits.
