@@ -5,7 +5,6 @@ Code patterns for AI agents when generating tensor-aware code in Nivara.
 ## Zero-copy tensor kernel (safe path)
 
 <!-- gate
-preamble: agent-tensor-kernel
 locals: NivaraColumn<float> column = NivaraColumn<float>.Create(new[] { 1f, 2f, 3f }); Span<float> otherSpan = new[] { 1f, 1f, 1f }; Span<float> destinationSpan = new float[3];
 -->
 ```csharp
@@ -20,7 +19,6 @@ TensorPrimitives.Add(span, otherSpan, destinationSpan);
 
 <!-- gate
 mode: GenericLocal
-preamble: agent-null-tensor
 locals: int len = 4; T?[] values = new T?[] { null, null, null, null }; bool hasNulls = true;
 -->
 ```csharp

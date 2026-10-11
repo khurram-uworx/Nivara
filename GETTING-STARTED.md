@@ -503,6 +503,7 @@ var slice = frame.Slice(1, 2); // Start at index 1, take 2 rows
 ### Sorting
 
 <!-- gate
+preamble: row-types
 locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
 -->
 ```csharp
@@ -542,6 +543,9 @@ public sealed class Player
 
 The row type carries the nullability, so the ordering below is expressed in terms of `Player`:
 
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 var frameWithNulls = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
@@ -1013,6 +1017,9 @@ public sealed class Contestant
 
 Chaining stays typed end to end:
 
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 using Nivara.Linq;
 using Nivara.Operations;
@@ -1072,6 +1079,7 @@ Console.WriteLine(query.ExplainPlan());
 ### Execution
 
 <!-- gate
+preamble: row-types
 locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
 -->
 ```csharp
@@ -1090,6 +1098,7 @@ var result = query.Collect();
 ### Error Handling and Diagnostics
 
 <!-- gate
+preamble: row-types
 locals: var leftFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B" }))); var rightFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y" }))); var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
 -->
 ```csharp
@@ -1579,6 +1588,9 @@ NivaraParquetWriter.WriteParquetBatch(frames, "batch.parquet", parquetOptions);
 
 Nivara's performance tuning is built into the core APIs:
 
+<!-- gate
+preamble: row-types
+-->
 ```csharp
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),

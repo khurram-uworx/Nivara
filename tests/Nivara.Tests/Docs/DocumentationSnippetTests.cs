@@ -37,6 +37,39 @@ public class DocumentationSnippetTests
     }
 
     [Test]
+    public void PreambleNamespaces_AreDeclaredAndNonEmpty()
+    {
+        // The mapping is only a contract if the namespaces it names actually exist and carry types.
+        // Without this, a preamble can resolve to an empty namespace and every annotated block fails
+        // with a cascade of CS0246 the reader cannot act on - which is exactly the state #546 fixed.
+        const string flatNamespace = "Nivara.Tests.Docs.Preambles";
+
+        var mapped = DocSnippetExtractor.Preambles.ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mapped.Select(pair => pair.Value.Namespace).Distinct(StringComparer.Ordinal).Count(),
+                Is.EqualTo(mapped.Length),
+                "preamble names must not share a namespace, or the name stops selecting a bundle");
+
+            Assert.That(DocSnippetExtractor.TypeNamespaces, Does.Not.Contain(flatNamespace),
+                $"no stub may be left in the flat namespace '{flatNamespace}': a type there is reachable "
+                + "from every block through the enclosing-namespace lookup, which is the shadowing #546 removed");
+
+            foreach (var (name, import) in mapped)
+            {
+                Assert.That(DocSnippetExtractor.TypeNamespaces, Does.Contain(import.Namespace),
+                    $"preamble '{name}' maps to '{import.Namespace}', which declares no types");
+
+                foreach (var staticType in import.StaticImports)
+                    Assert.That(typeof(DocSnippetExtractor).Assembly.GetType(staticType, throwOnError: false),
+                        Is.Not.Null,
+                        $"preamble '{name}' imports '{staticType}' with `using static`, but that type does not exist");
+            }
+        });
+    }
+
+    [Test]
     public void ScanExclusions_AreTheSingleTransientPlanDocument()
     {
         Assert.That(DocSnippetExtractor.ScanExcludedDocuments, Is.EqualTo(new[] { "docs/TODO.md" }),
