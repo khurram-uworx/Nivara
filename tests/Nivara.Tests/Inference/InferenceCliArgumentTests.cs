@@ -22,7 +22,7 @@ namespace Nivara.Tests.Inference;
 [TestFixture]
 public class InferenceCliArgumentTests
 {
-    readonly record struct CliResult(int ExitCode, string StdOut, string StdErr);
+    readonly record struct CliResult(int ExitCode, string StdErr);
 
     const int ProcessTimeoutMs = 30_000;
     const string ModelLookupMessage = "Model file not found";
@@ -176,7 +176,9 @@ public class InferenceCliArgumentTests
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start 'dotnet'.");
 
-        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        // Drain both pipes asynchronously: the process-API docs warn that reading the two streams
+        // synchronously can deadlock. Only stderr is asserted; stdout is drained so it cannot block.
+        Task stdout = process.StandardOutput.ReadToEndAsync();
         Task<string> stderr = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(ProcessTimeoutMs))
         {
@@ -184,10 +186,8 @@ public class InferenceCliArgumentTests
             Assert.Fail($"NivaraInference {string.Join(' ', args)} did not exit within {ProcessTimeoutMs / 1000} s.");
         }
 
-        return new CliResult(
-            process.ExitCode,
-            stdout.GetAwaiter().GetResult(),
-            stderr.GetAwaiter().GetResult());
+        stdout.GetAwaiter().GetResult();
+        return new CliResult(process.ExitCode, stderr.GetAwaiter().GetResult());
     }
 
     static string FindRepoRoot()
