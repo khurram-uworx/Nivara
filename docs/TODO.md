@@ -150,10 +150,24 @@ names the three flags, the `qwen distill` requirement, that the guard precedes t
   resolved with the human before the plan was written: `--force` is included. The remaining inert
   flags are filed as #580.
 
+## Verification result (2026-10-11, khurram/571 bf375b46)
+
+- Build: `dotnet build samples/NivaraInference -c Release` → 0 warnings, 0 errors.
+- Model-scope reject (exit 1, new message) for `minilm --seed 7`, `minilm --force`,
+  `minilm --teacher-examples 3`, `modernbert benchmark --seed 7`, `smollm --seed 7`.
+- Mode-scope reject (exit 1, new message) for `qwen --seed 7` ("got 'qwen'") and
+  `qwen benchmark --force` ("got 'qwen benchmark'").
+- No misfire: `qwen distill --seed 7 --teacher-examples 3 --force` → guard passes → "Model file not
+  found"; `qwen tools`, bare `qwen`, and `qwen distill` likewise reach the disk.
+- Precedence: `qwen --seed abc` → #479 "expects an integer"; `-h` renders the new scoping line.
+- No `dotnet test` run: the sample is not referenced by any test project, so no suite reaches `Main`.
+
 ## GitHub issues log
 
 - [x] #580 — reject Qwen-only `--plain` / `--no-kv-cache` / `--text` and SmolLM-only `--simd-widen`
       outside the paths that consume them (created while working on #571).
+- [x] #581 — no automated gate covers the `NivaraInference` CLI argument validation (created during
+      the #571 branch review).
 
 > As each task executes, any deferred work or concern is filed immediately via
 > `gh issue create --repo khurram-uworx/Nivara` and recorded here — not held in memory, because
