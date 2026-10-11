@@ -3353,7 +3353,6 @@ public class NnTests
 
         var optimizer = new Adam<float>();
         optimizer.AddParameterGroup(cvae.GetParameters().Values, 0.001f);
-        var rng = new Random(42);
 
         var target = new float[1 * 1 * 8 * 8];
         for (int i = 0; i < target.Length; i++)
@@ -3372,7 +3371,7 @@ public class NnTests
             input.Reshape(1, 1, 8, 8);
 
             var (mu, logVar) = cvae.Encode(input);
-            var z = cvae.Reparameterize(mu, logVar);
+            var z = cvae.Reparameterize(mu, logVar, seed: 42);
             var recon = cvae.Decode(z);
             var loss = cvae.ElboLoss(recon, input, mu, logVar);
 
@@ -3393,11 +3392,14 @@ public class NnTests
         finalInput.Reshape(1, 1, 8, 8);
 
         var (fMu, fLogVar) = cvae.Encode(finalInput);
-        var fZ = cvae.Reparameterize(fMu, fLogVar);
+        var fZ = cvae.Reparameterize(fMu, fLogVar, seed: 42);
         var fRecon = cvae.Decode(fZ);
         var finalLoss = cvae.ElboLoss(fRecon, finalInput, fMu, fLogVar);
 
-        Assert.That(finalLoss[0], Is.LessThan(firstLoss * 2.0f + 0.5f));
+        // The conv weights use the fixed-seed He draw and both Reparameterize calls take seed 42,
+        // so this trajectory is fully reproducible. Assert a real decrease instead of the former
+        // 2x + 0.5 slack, which a non-converging run could also satisfy.
+        Assert.That(finalLoss[0], Is.LessThan(firstLoss));
     }
 
     [Test]
@@ -3406,6 +3408,64 @@ public class NnTests
         Assert.Throws<ArgumentException>(() => new ConvVAE<float>(1, [], 8, 8));
         Assert.Throws<ArgumentOutOfRangeException>(() => new ConvVAE<float>(1, [16], -1, 8));
         Assert.Throws<ArgumentOutOfRangeException>(() => new ConvVAE<float>(1, [16], 8, 0));
+    }
+
+    [Test]
+    public void Conv2d_CustomWeightInit_UsesInitializer()
+    {
+        using var conv = new Conv2d<float>(2, 3, kernelSize: 3, padding: 1,
+            weightInitializer: new DeterministicInit<float>());
+
+        var w = conv.Weight!.Tensor;
+        Assert.That(w.Length, Is.EqualTo(3 * 2 * 3 * 3));
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(w[i], Is.EqualTo(0.05f * (i + 1)).Within(1e-6f));
+    }
+
+    [Test]
+    public void ConvTranspose2d_CustomWeightInit_UsesInitializer()
+    {
+        using var conv = new ConvTranspose2d<float>(2, 3, kernelSize: 3,
+            weightInitializer: new DeterministicInit<float>());
+
+        var w = conv.Weight!.Tensor;
+        Assert.That(w.Length, Is.EqualTo(2 * 3 * 3 * 3));
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(w[i], Is.EqualTo(0.05f * (i + 1)).Within(1e-6f));
+    }
+
+    [Test]
+    public void ConvVAE_CustomWeightInit_ForwardsToEveryLayer()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 1,
+            encoderChannels: [16],
+            latentChannels: 4,
+            spatialSize: 8,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1,
+            weightInitializer: new DeterministicInit<float>());
+
+        int weightCount = 0;
+        foreach (var (name, parameter) in cvae.GetParameters())
+        {
+            var data = parameter.Tensor;
+            if (name.EndsWith("Weight"))
+            {
+                weightCount++;
+                for (int i = 0; i < data.Length; i++)
+                    Assert.That(data[i], Is.EqualTo(0.05f * (i + 1)).Within(1e-6f));
+            }
+            else
+            {
+                for (int i = 0; i < data.Length; i++)
+                    Assert.That(data[i], Is.EqualTo(0f));
+            }
+        }
+
+        // encoder conv + mu head + logVar head + decoder conv + reconstruction conv
+        Assert.That(weightCount, Is.EqualTo(5));
     }
 
     [Test]
