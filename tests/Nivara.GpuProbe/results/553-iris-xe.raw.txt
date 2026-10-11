@@ -1,0 +1,337 @@
+=== Intel GPU Compute Probe (Level Zero / DX12 / OpenVINO / SYCL / ILGPU / ComputeSharp) ===
+Runtime: 11.0.0  Platform: X64  OS: Microsoft Windows 10.0.26200
+
+
+--- kernel gates vs CPU (production Nivara kernels) ---
+
+--- round 1/5 (leg order rotates so no leg is systematically first/last) ---
+  CPU (production Nivara)      dot16 0.0 ULP | silu 0/0 failed | gemv 0/0 failed
+[sycl] sycl_runner.exe not found. Build it first:
+       E:\khurram-uworx\Nivara\tests\Nivara.GpuProbe\bin\Release\net11.0\..\..\..\..\..\tests\Nivara.GpuProbe\Sycl\build.cmd
+
+  SYCL (oneAPI)                UNBUILT / UNAVAILABLE (3 kernels failed)
+--- DX12 compute leg (hand-rolled P/Invoke: d3d12.dll + dxgi.dll + d3dcompiler_47.dll) ---
+  device: Intel(R) Iris(R) Xe Graphics
+
+  DX12 (hand-rolled)           dot16 -0.00789661147 vs CPU -0.00789661147 -> PASS (0.0 ULP)
+  DX12 (hand-rolled)           silu 576/576 within gate (0 failed), worst 4.0 ULP @ index 410 (leg -0.0152034638 vs CPU -0.0152034601, gate 1.15E-06, |diff| 3.73E-09)
+  DX12 (hand-rolled)           gemv 1536/1536 within gate (0 failed), worst 12288.0 ULP @ index 1508 (leg -1.27637759E-06 vs CPU -1.27777457E-06, gate 1E-06, |diff| 1.4E-09)
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+
+  OV (bf16 IR)                 UNBUILT / UNAVAILABLE (3 kernels failed)
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+
+  OV (f32 + hint)              UNBUILT / UNAVAILABLE (3 kernels failed)
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | type CL_DEVICE_TYPE_GPU | acc setup    20658 ┬╡s
+  [dot16] jit     4718 ┬╡s | steady     77.7 ┬╡s
+  [silu]  jit     3882 ┬╡s | steady     76.5 ┬╡s
+  [gemv]  jit     5188 ┬╡s | steady   1212.0 ┬╡s
+
+  ILGPU (OpenCL)               dot16 -0.00789661147 vs CPU -0.00789661147 -> PASS (0.0 ULP)
+  ILGPU (OpenCL)               silu 576/576 within gate (0 failed), worst 4.0 ULP @ index 410 (leg -0.0152034638 vs CPU -0.0152034601, gate 1.15E-06, |diff| 3.73E-09)
+  ILGPU (OpenCL)               gemv 1536/1536 within gate (0 failed), worst 12288.0 ULP @ index 1508 (leg -1.27637759E-06 vs CPU -1.27777457E-06, gate 1E-06, |diff| 1.4E-09)
+--- Silk.NET OpenCL leg (managed bindings, in-process OpenCL C compile) ---
+  platform: Intel(R) OpenCL Graphics | GPU devices 1 | best: * Intel(R) Iris(R) Xe Graphics
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | max WG 512 | OpenCL OpenCL 3.0 NEO 
+  extensions: 63 advertised, 0 BF16 (* marks them)
+   cl_khr_byte_addressable_store cl_khr_device_uuid cl_khr_fp16 
+   cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd 
+   cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics 
+   cl_intel_command_queue_families cl_intel_subgroups cl_intel_required_subgroup_size 
+   cl_intel_subgroups_short cl_khr_spir cl_intel_accelerator cl_intel_driver_diagnostics 
+   cl_khr_priority_hints cl_khr_throttle_hints cl_khr_create_command_queue 
+   cl_intel_subgroups_char cl_intel_subgroups_long cl_khr_il_program 
+   cl_intel_mem_force_host_memory cl_khr_subgroup_extended_types 
+   cl_khr_subgroup_non_uniform_vote cl_khr_subgroup_ballot 
+   cl_khr_subgroup_non_uniform_arithmetic cl_khr_subgroup_shuffle 
+   cl_khr_subgroup_shuffle_relative cl_khr_subgroup_clustered_reduce 
+   cl_intel_device_attribute_query cl_khr_suggested_local_work_size 
+   cl_intel_split_work_group_barrier cl_intel_spirv_media_block_io cl_intel_spirv_subgroups 
+   cl_khr_spirv_linkonce_odr cl_khr_spirv_no_integer_wrap_decoration 
+   cl_intel_unified_shared_memory cl_khr_mipmap_image cl_khr_mipmap_image_writes 
+   cl_ext_float_atomics cl_khr_external_memory cl_intel_planar_yuv cl_intel_packed_yuv 
+   cl_khr_int64_base_atomics cl_khr_int64_extended_atomics cl_khr_image2d_from_buffer 
+   cl_khr_depth_images cl_khr_3d_image_writes cl_intel_media_block_io 
+   cl_intel_subgroup_local_block_io cl_khr_integer_dot_product cl_khr_gl_sharing 
+   cl_khr_gl_depth_images cl_khr_gl_event cl_khr_gl_msaa_sharing cl_intel_dx9_media_sharing 
+   cl_khr_dx9_media_sharing cl_khr_d3d10_sharing cl_khr_d3d11_sharing 
+   cl_intel_d3d11_nv12_media_sharing cl_intel_sharing_format_query cl_khr_pci_bus_info 
+   cl_intel_simultaneous_sharing 
+  program: OpenCL C built in-process | build    10306 ┬╡s
+  [dot16] first     1137 ┬╡s | steady     72.2 ┬╡s
+  [silu]  first      366 ┬╡s | steady     71.8 ┬╡s
+  [gemv]  first     1128 ┬╡s | steady    583.9 ┬╡s
+  --- fp16 diagnostic (cl_khr_fp16, not a gate) ---
+  [silu_f16] steady     74.0 ┬╡s | vs f32 1.03├ù | worst 2 half-ULP vs half-acc @ 46, 2 vs f32-round @ 46 | references identical (elementwise; no Half exp to compare against)
+  [gemv_f16] steady    550.8 ┬╡s | vs f32 0.94├ù | worst 0 half-ULP vs half-acc @ -1, 32427 vs f32-round @ 1508 | tracks half-accumulate (not promoted)
+
+  Silk.NET OpenCL              dot16 -0.00789661147 vs CPU -0.00789661147 -> PASS (0.0 ULP)
+  Silk.NET OpenCL              silu 576/576 within gate (0 failed), worst 4.0 ULP @ index 410 (leg -0.0152034638 vs CPU -0.0152034601, gate 1.15E-06, |diff| 3.73E-09)
+  Silk.NET OpenCL              gemv 1536/1536 within gate (0 failed), worst 12288.0 ULP @ index 1508 (leg -1.27637759E-06 vs CPU -1.27777457E-06, gate 1E-06, |diff| 1.4E-09)
+--- ComputeSharp leg (C# ΓåÆ HLSL source-gen ΓåÆ DXIL via bundled DXC on D3D12) ---
+  device: Intel(R) Iris(R) Xe Graphics
+  [dot16] dxc    14771 ┬╡s | steady    128.3 ┬╡s
+  [silu]  dxc     4652 ┬╡s | steady    134.6 ┬╡s
+  [gemv]  dxc     4496 ┬╡s | steady    628.2 ┬╡s
+
+  ComputeSharp (DXIL)          dot16 -0.00789661147 vs CPU -0.00789661147 -> PASS (0.0 ULP)
+  ComputeSharp (DXIL)          silu 576/576 within gate (0 failed), worst 4.0 ULP @ index 410 (leg -0.0152034638 vs CPU -0.0152034601, gate 1.15E-06, |diff| 3.73E-09)
+  ComputeSharp (DXIL)          gemv 1536/1536 within gate (0 failed), worst 12288.0 ULP @ index 1508 (leg -1.27637759E-06 vs CPU -1.27777457E-06, gate 1E-06, |diff| 1.4E-09)
+
+--- round 2/5 (leg order rotates so no leg is systematically first/last) ---
+--- DX12 compute leg (hand-rolled P/Invoke: d3d12.dll + dxgi.dll + d3dcompiler_47.dll) ---
+  device: Intel(R) Iris(R) Xe Graphics
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | type CL_DEVICE_TYPE_GPU | acc setup     1348 ┬╡s
+  [dot16] jit     6815 ┬╡s | steady     79.1 ┬╡s
+  [silu]  jit     5986 ┬╡s | steady     72.9 ┬╡s
+  [gemv]  jit     4179 ┬╡s | steady    866.2 ┬╡s
+--- Silk.NET OpenCL leg (managed bindings, in-process OpenCL C compile) ---
+  platform: Intel(R) OpenCL Graphics | GPU devices 1 | best: * Intel(R) Iris(R) Xe Graphics
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | max WG 512 | OpenCL OpenCL 3.0 NEO 
+  extensions: 63 advertised, 0 BF16 (* marks them)
+   cl_khr_byte_addressable_store cl_khr_device_uuid cl_khr_fp16 
+   cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd 
+   cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics 
+   cl_intel_command_queue_families cl_intel_subgroups cl_intel_required_subgroup_size 
+   cl_intel_subgroups_short cl_khr_spir cl_intel_accelerator cl_intel_driver_diagnostics 
+   cl_khr_priority_hints cl_khr_throttle_hints cl_khr_create_command_queue 
+   cl_intel_subgroups_char cl_intel_subgroups_long cl_khr_il_program 
+   cl_intel_mem_force_host_memory cl_khr_subgroup_extended_types 
+   cl_khr_subgroup_non_uniform_vote cl_khr_subgroup_ballot 
+   cl_khr_subgroup_non_uniform_arithmetic cl_khr_subgroup_shuffle 
+   cl_khr_subgroup_shuffle_relative cl_khr_subgroup_clustered_reduce 
+   cl_intel_device_attribute_query cl_khr_suggested_local_work_size 
+   cl_intel_split_work_group_barrier cl_intel_spirv_media_block_io cl_intel_spirv_subgroups 
+   cl_khr_spirv_linkonce_odr cl_khr_spirv_no_integer_wrap_decoration 
+   cl_intel_unified_shared_memory cl_khr_mipmap_image cl_khr_mipmap_image_writes 
+   cl_ext_float_atomics cl_khr_external_memory cl_intel_planar_yuv cl_intel_packed_yuv 
+   cl_khr_int64_base_atomics cl_khr_int64_extended_atomics cl_khr_image2d_from_buffer 
+   cl_khr_depth_images cl_khr_3d_image_writes cl_intel_media_block_io 
+   cl_intel_subgroup_local_block_io cl_khr_integer_dot_product cl_khr_gl_sharing 
+   cl_khr_gl_depth_images cl_khr_gl_event cl_khr_gl_msaa_sharing cl_intel_dx9_media_sharing 
+   cl_khr_dx9_media_sharing cl_khr_d3d10_sharing cl_khr_d3d11_sharing 
+   cl_intel_d3d11_nv12_media_sharing cl_intel_sharing_format_query cl_khr_pci_bus_info 
+   cl_intel_simultaneous_sharing 
+  program: OpenCL C built in-process | build     1168 ┬╡s
+  [dot16] first      545 ┬╡s | steady     77.4 ┬╡s
+  [silu]  first      340 ┬╡s | steady     94.3 ┬╡s
+  [gemv]  first     1116 ┬╡s | steady    469.4 ┬╡s
+  --- fp16 diagnostic (cl_khr_fp16, not a gate) ---
+  [silu_f16] steady     60.3 ┬╡s | vs f32 0.64├ù | worst 2 half-ULP vs half-acc @ 46, 2 vs f32-round @ 46 | references identical (elementwise; no Half exp to compare against)
+  [gemv_f16] steady    479.6 ┬╡s | vs f32 1.02├ù | worst 0 half-ULP vs half-acc @ -1, 32427 vs f32-round @ 1508 | tracks half-accumulate (not promoted)
+--- ComputeSharp leg (C# ΓåÆ HLSL source-gen ΓåÆ DXIL via bundled DXC on D3D12) ---
+  device: Intel(R) Iris(R) Xe Graphics
+  [dot16] dxc      842 ┬╡s | steady    151.2 ┬╡s
+  [silu]  dxc      800 ┬╡s | steady    122.4 ┬╡s
+  [gemv]  dxc      984 ┬╡s | steady    536.3 ┬╡s
+[sycl] sycl_runner.exe not found. Build it first:
+       E:\khurram-uworx\Nivara\tests\Nivara.GpuProbe\bin\Release\net11.0\..\..\..\..\..\tests\Nivara.GpuProbe\Sycl\build.cmd
+
+--- round 3/5 (leg order rotates so no leg is systematically first/last) ---
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | type CL_DEVICE_TYPE_GPU | acc setup     1496 ┬╡s
+  [dot16] jit     7977 ┬╡s | steady     78.8 ┬╡s
+  [silu]  jit     7461 ┬╡s | steady     70.8 ┬╡s
+  [gemv]  jit     7934 ┬╡s | steady    845.5 ┬╡s
+--- Silk.NET OpenCL leg (managed bindings, in-process OpenCL C compile) ---
+  platform: Intel(R) OpenCL Graphics | GPU devices 1 | best: * Intel(R) Iris(R) Xe Graphics
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | max WG 512 | OpenCL OpenCL 3.0 NEO 
+  extensions: 63 advertised, 0 BF16 (* marks them)
+   cl_khr_byte_addressable_store cl_khr_device_uuid cl_khr_fp16 
+   cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd 
+   cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics 
+   cl_intel_command_queue_families cl_intel_subgroups cl_intel_required_subgroup_size 
+   cl_intel_subgroups_short cl_khr_spir cl_intel_accelerator cl_intel_driver_diagnostics 
+   cl_khr_priority_hints cl_khr_throttle_hints cl_khr_create_command_queue 
+   cl_intel_subgroups_char cl_intel_subgroups_long cl_khr_il_program 
+   cl_intel_mem_force_host_memory cl_khr_subgroup_extended_types 
+   cl_khr_subgroup_non_uniform_vote cl_khr_subgroup_ballot 
+   cl_khr_subgroup_non_uniform_arithmetic cl_khr_subgroup_shuffle 
+   cl_khr_subgroup_shuffle_relative cl_khr_subgroup_clustered_reduce 
+   cl_intel_device_attribute_query cl_khr_suggested_local_work_size 
+   cl_intel_split_work_group_barrier cl_intel_spirv_media_block_io cl_intel_spirv_subgroups 
+   cl_khr_spirv_linkonce_odr cl_khr_spirv_no_integer_wrap_decoration 
+   cl_intel_unified_shared_memory cl_khr_mipmap_image cl_khr_mipmap_image_writes 
+   cl_ext_float_atomics cl_khr_external_memory cl_intel_planar_yuv cl_intel_packed_yuv 
+   cl_khr_int64_base_atomics cl_khr_int64_extended_atomics cl_khr_image2d_from_buffer 
+   cl_khr_depth_images cl_khr_3d_image_writes cl_intel_media_block_io 
+   cl_intel_subgroup_local_block_io cl_khr_integer_dot_product cl_khr_gl_sharing 
+   cl_khr_gl_depth_images cl_khr_gl_event cl_khr_gl_msaa_sharing cl_intel_dx9_media_sharing 
+   cl_khr_dx9_media_sharing cl_khr_d3d10_sharing cl_khr_d3d11_sharing 
+   cl_intel_d3d11_nv12_media_sharing cl_intel_sharing_format_query cl_khr_pci_bus_info 
+   cl_intel_simultaneous_sharing 
+  program: OpenCL C built in-process | build      988 ┬╡s
+  [dot16] first      339 ┬╡s | steady     67.9 ┬╡s
+  [silu]  first      175 ┬╡s | steady     66.9 ┬╡s
+  [gemv]  first      631 ┬╡s | steady    470.0 ┬╡s
+  --- fp16 diagnostic (cl_khr_fp16, not a gate) ---
+  [silu_f16] steady     82.7 ┬╡s | vs f32 1.24├ù | worst 2 half-ULP vs half-acc @ 46, 2 vs f32-round @ 46 | references identical (elementwise; no Half exp to compare against)
+  [gemv_f16] steady    477.6 ┬╡s | vs f32 1.02├ù | worst 0 half-ULP vs half-acc @ -1, 32427 vs f32-round @ 1508 | tracks half-accumulate (not promoted)
+--- ComputeSharp leg (C# ΓåÆ HLSL source-gen ΓåÆ DXIL via bundled DXC on D3D12) ---
+  device: Intel(R) Iris(R) Xe Graphics
+  [dot16] dxc     1285 ┬╡s | steady    152.0 ┬╡s
+  [silu]  dxc      633 ┬╡s | steady    134.6 ┬╡s
+  [gemv]  dxc      935 ┬╡s | steady    549.5 ┬╡s
+[sycl] sycl_runner.exe not found. Build it first:
+       E:\khurram-uworx\Nivara\tests\Nivara.GpuProbe\bin\Release\net11.0\..\..\..\..\..\tests\Nivara.GpuProbe\Sycl\build.cmd
+--- DX12 compute leg (hand-rolled P/Invoke: d3d12.dll + dxgi.dll + d3dcompiler_47.dll) ---
+  device: Intel(R) Iris(R) Xe Graphics
+
+--- round 4/5 (leg order rotates so no leg is systematically first/last) ---
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | type CL_DEVICE_TYPE_GPU | acc setup     2044 ┬╡s
+  [dot16] jit     9776 ┬╡s | steady     70.9 ┬╡s
+  [silu]  jit     3105 ┬╡s | steady     74.9 ┬╡s
+  [gemv]  jit     8314 ┬╡s | steady    855.3 ┬╡s
+--- Silk.NET OpenCL leg (managed bindings, in-process OpenCL C compile) ---
+  platform: Intel(R) OpenCL Graphics | GPU devices 1 | best: * Intel(R) Iris(R) Xe Graphics
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | max WG 512 | OpenCL OpenCL 3.0 NEO 
+  extensions: 63 advertised, 0 BF16 (* marks them)
+   cl_khr_byte_addressable_store cl_khr_device_uuid cl_khr_fp16 
+   cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd 
+   cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics 
+   cl_intel_command_queue_families cl_intel_subgroups cl_intel_required_subgroup_size 
+   cl_intel_subgroups_short cl_khr_spir cl_intel_accelerator cl_intel_driver_diagnostics 
+   cl_khr_priority_hints cl_khr_throttle_hints cl_khr_create_command_queue 
+   cl_intel_subgroups_char cl_intel_subgroups_long cl_khr_il_program 
+   cl_intel_mem_force_host_memory cl_khr_subgroup_extended_types 
+   cl_khr_subgroup_non_uniform_vote cl_khr_subgroup_ballot 
+   cl_khr_subgroup_non_uniform_arithmetic cl_khr_subgroup_shuffle 
+   cl_khr_subgroup_shuffle_relative cl_khr_subgroup_clustered_reduce 
+   cl_intel_device_attribute_query cl_khr_suggested_local_work_size 
+   cl_intel_split_work_group_barrier cl_intel_spirv_media_block_io cl_intel_spirv_subgroups 
+   cl_khr_spirv_linkonce_odr cl_khr_spirv_no_integer_wrap_decoration 
+   cl_intel_unified_shared_memory cl_khr_mipmap_image cl_khr_mipmap_image_writes 
+   cl_ext_float_atomics cl_khr_external_memory cl_intel_planar_yuv cl_intel_packed_yuv 
+   cl_khr_int64_base_atomics cl_khr_int64_extended_atomics cl_khr_image2d_from_buffer 
+   cl_khr_depth_images cl_khr_3d_image_writes cl_intel_media_block_io 
+   cl_intel_subgroup_local_block_io cl_khr_integer_dot_product cl_khr_gl_sharing 
+   cl_khr_gl_depth_images cl_khr_gl_event cl_khr_gl_msaa_sharing cl_intel_dx9_media_sharing 
+   cl_khr_dx9_media_sharing cl_khr_d3d10_sharing cl_khr_d3d11_sharing 
+   cl_intel_d3d11_nv12_media_sharing cl_intel_sharing_format_query cl_khr_pci_bus_info 
+   cl_intel_simultaneous_sharing 
+  program: OpenCL C built in-process | build      656 ┬╡s
+  [dot16] first      316 ┬╡s | steady     71.4 ┬╡s
+  [silu]  first      245 ┬╡s | steady     66.2 ┬╡s
+  [gemv]  first      920 ┬╡s | steady    486.2 ┬╡s
+  --- fp16 diagnostic (cl_khr_fp16, not a gate) ---
+  [silu_f16] steady     77.9 ┬╡s | vs f32 1.18├ù | worst 2 half-ULP vs half-acc @ 46, 2 vs f32-round @ 46 | references identical (elementwise; no Half exp to compare against)
+  [gemv_f16] steady    473.1 ┬╡s | vs f32 0.97├ù | worst 0 half-ULP vs half-acc @ -1, 32427 vs f32-round @ 1508 | tracks half-accumulate (not promoted)
+--- ComputeSharp leg (C# ΓåÆ HLSL source-gen ΓåÆ DXIL via bundled DXC on D3D12) ---
+  device: Intel(R) Iris(R) Xe Graphics
+  [dot16] dxc      740 ┬╡s | steady    142.8 ┬╡s
+  [silu]  dxc      446 ┬╡s | steady    131.8 ┬╡s
+  [gemv]  dxc     1402 ┬╡s | steady    585.6 ┬╡s
+[sycl] sycl_runner.exe not found. Build it first:
+       E:\khurram-uworx\Nivara\tests\Nivara.GpuProbe\bin\Release\net11.0\..\..\..\..\..\tests\Nivara.GpuProbe\Sycl\build.cmd
+--- DX12 compute leg (hand-rolled P/Invoke: d3d12.dll + dxgi.dll + d3dcompiler_47.dll) ---
+  device: Intel(R) Iris(R) Xe Graphics
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+
+--- round 5/5 (leg order rotates so no leg is systematically first/last) ---
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | type CL_DEVICE_TYPE_GPU | acc setup     1387 ┬╡s
+  [dot16] jit     4106 ┬╡s | steady    106.3 ┬╡s
+  [silu]  jit     4901 ┬╡s | steady     72.3 ┬╡s
+  [gemv]  jit     5424 ┬╡s | steady    859.7 ┬╡s
+--- Silk.NET OpenCL leg (managed bindings, in-process OpenCL C compile) ---
+  platform: Intel(R) OpenCL Graphics | GPU devices 1 | best: * Intel(R) Iris(R) Xe Graphics
+  device: Intel(R) Iris(R) Xe Graphics (Intel(R) Corporation) | max WG 512 | OpenCL OpenCL 3.0 NEO 
+  extensions: 63 advertised, 0 BF16 (* marks them)
+   cl_khr_byte_addressable_store cl_khr_device_uuid cl_khr_fp16 
+   cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics cl_khr_icd 
+   cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics 
+   cl_intel_command_queue_families cl_intel_subgroups cl_intel_required_subgroup_size 
+   cl_intel_subgroups_short cl_khr_spir cl_intel_accelerator cl_intel_driver_diagnostics 
+   cl_khr_priority_hints cl_khr_throttle_hints cl_khr_create_command_queue 
+   cl_intel_subgroups_char cl_intel_subgroups_long cl_khr_il_program 
+   cl_intel_mem_force_host_memory cl_khr_subgroup_extended_types 
+   cl_khr_subgroup_non_uniform_vote cl_khr_subgroup_ballot 
+   cl_khr_subgroup_non_uniform_arithmetic cl_khr_subgroup_shuffle 
+   cl_khr_subgroup_shuffle_relative cl_khr_subgroup_clustered_reduce 
+   cl_intel_device_attribute_query cl_khr_suggested_local_work_size 
+   cl_intel_split_work_group_barrier cl_intel_spirv_media_block_io cl_intel_spirv_subgroups 
+   cl_khr_spirv_linkonce_odr cl_khr_spirv_no_integer_wrap_decoration 
+   cl_intel_unified_shared_memory cl_khr_mipmap_image cl_khr_mipmap_image_writes 
+   cl_ext_float_atomics cl_khr_external_memory cl_intel_planar_yuv cl_intel_packed_yuv 
+   cl_khr_int64_base_atomics cl_khr_int64_extended_atomics cl_khr_image2d_from_buffer 
+   cl_khr_depth_images cl_khr_3d_image_writes cl_intel_media_block_io 
+   cl_intel_subgroup_local_block_io cl_khr_integer_dot_product cl_khr_gl_sharing 
+   cl_khr_gl_depth_images cl_khr_gl_event cl_khr_gl_msaa_sharing cl_intel_dx9_media_sharing 
+   cl_khr_dx9_media_sharing cl_khr_d3d10_sharing cl_khr_d3d11_sharing 
+   cl_intel_d3d11_nv12_media_sharing cl_intel_sharing_format_query cl_khr_pci_bus_info 
+   cl_intel_simultaneous_sharing 
+  program: OpenCL C built in-process | build      853 ┬╡s
+  [dot16] first      266 ┬╡s | steady     66.8 ┬╡s
+  [silu]  first      187 ┬╡s | steady     69.2 ┬╡s
+  [gemv]  first      776 ┬╡s | steady    489.8 ┬╡s
+  --- fp16 diagnostic (cl_khr_fp16, not a gate) ---
+  [silu_f16] steady     69.0 ┬╡s | vs f32 1.00├ù | worst 2 half-ULP vs half-acc @ 46, 2 vs f32-round @ 46 | references identical (elementwise; no Half exp to compare against)
+  [gemv_f16] steady    470.8 ┬╡s | vs f32 0.96├ù | worst 0 half-ULP vs half-acc @ -1, 32427 vs f32-round @ 1508 | tracks half-accumulate (not promoted)
+--- ComputeSharp leg (C# ΓåÆ HLSL source-gen ΓåÆ DXIL via bundled DXC on D3D12) ---
+  device: Intel(R) Iris(R) Xe Graphics
+  [dot16] dxc     1197 ┬╡s | steady    146.1 ┬╡s
+  [silu]  dxc      722 ┬╡s | steady    164.6 ┬╡s
+  [gemv]  dxc     1085 ┬╡s | steady    574.0 ┬╡s
+[sycl] sycl_runner.exe not found. Build it first:
+       E:\khurram-uworx\Nivara\tests\Nivara.GpuProbe\bin\Release\net11.0\..\..\..\..\..\tests\Nivara.GpuProbe\Sycl\build.cmd
+--- DX12 compute leg (hand-rolled P/Invoke: d3d12.dll + dxgi.dll + d3dcompiler_47.dll) ---
+  device: Intel(R) Iris(R) Xe Graphics
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+[openvino] openvino_c.dll not found. Install the runtime with:
+           python -m pip install openvino==2026.2.1
+           (or set NIVARA_OPENVINO_DIR to the folder containing openvino_c.dll)
+
+  kernel timings over all sweeps (┬╡s per invocation, kernel-only; median[minΓÇômax]):
+
+    [dot16]
+      CPU (production Nivara)          7.1 [4.6ΓÇô11.5]  (n=5)
+      SYCL (oneAPI)              unavailable on this host
+      DX12 (hand-rolled)             219.5 [140.9ΓÇô249.0]  (n=5)
+      OV (bf16 IR)               unavailable on this host
+      OV (f32 + hint)            unavailable on this host
+      ILGPU (OpenCL)                  78.8 [70.9ΓÇô106.3]  (n=5)
+      Silk.NET OpenCL                 71.4 [66.8ΓÇô77.4]  (n=5)
+      ComputeSharp (DXIL)            146.1 [128.3ΓÇô152.0]  (n=5)
+
+    [silu]
+      CPU (production Nivara)         45.7 [27.7ΓÇô3233.7]  (n=5)
+      SYCL (oneAPI)              unavailable on this host
+      DX12 (hand-rolled)             182.7 [121.3ΓÇô208.7]  (n=5)
+      OV (bf16 IR)               unavailable on this host
+      OV (f32 + hint)            unavailable on this host
+      ILGPU (OpenCL)                  72.9 [70.8ΓÇô76.5]  (n=5)
+      Silk.NET OpenCL                 69.2 [66.2ΓÇô94.3]  (n=5)
+      ComputeSharp (DXIL)            134.6 [122.4ΓÇô164.6]  (n=5)
+
+    [gemv]
+      CPU (production Nivara)       2203.2 [1127.7ΓÇô11229.6]  (n=5)
+      SYCL (oneAPI)              unavailable on this host
+      DX12 (hand-rolled)             705.8 [633.5ΓÇô751.9]  (n=5)
+      OV (bf16 IR)               unavailable on this host
+      OV (f32 + hint)            unavailable on this host
+      ILGPU (OpenCL)                 859.7 [845.5ΓÇô1212.0]  (n=5)
+      Silk.NET OpenCL                486.2 [469.4ΓÇô583.9]  (n=5)
+      ComputeSharp (DXIL)            574.0 [536.3ΓÇô628.2]  (n=5)
+
+  kernels mode exit: 9 failed kernel(s), 5 sweeps, 0 unexpected

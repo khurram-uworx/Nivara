@@ -7,64 +7,130 @@ namespace Nivara.GpuProbe.Kernels;
 /// <c>|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|</c>. Per-kernel rows report the worst ULP
 /// at the reference's magnitude (a *diagnostic*, not the gate) and the pass count. Exit code
 /// = number of failed kernels across every leg (0 = all gates pass).
+///
+/// <para>
+/// Timing is the repeated same-host profile (#552 Arc 140T, #553 Iris Xe): each leg's own
+/// best-of-<c>N</c> steady-state sample is taken, but the whole leg set is swept
+/// <see cref="Rounds"/> times with a rotating leg order, so the decision table reports the
+/// run-to-run <b>median</b> and <b>min–max band</b> per cell rather than a single sample.
+/// Rotating the start point keeps any one leg from being systematically first or last. The
+/// per-leg internal best-of-N is still the gauge for a single sample; the median and band are
+/// the cross-run statistic the two host issues exist to record.
+/// </para>
 /// </summary>
 internal static class KernelGate
 {
-    /// <summary>Single-leg convenience overload.</summary>
+    /// <summary>Sweeps every leg this many times (<c>#552</c>/<c>#553</c> require ≥5) with a
+    /// rotating leg order, so per-cell timing can be reported as a median + min–max band.</summary>
+    private const int Rounds = 5;
+
+    /// <summary>Single-leg convenience overload (unchanged single-sample behaviour).</summary>
     public static int Run(KernelFixtures fixtures, string gpuLegName, Func<KernelFixtures, LegResults?> gpuLeg)
         => Run(fixtures, (gpuLegName, gpuLeg));
 
-    /// <summary>Runs the CPU reference + every GPU leg and prints the gate table.</summary>
+    /// <summary>
+    /// Runs the CPU reference + every GPU leg <see cref="Rounds"/> times with a rotating order,
+    /// gates correctness once (round 0), then prints the correctness table and the median +
+    /// min–max timing table.
+    /// </summary>
     public static int Run(KernelFixtures fixtures, params (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs)
     {
         Console.WriteLine();
         Console.WriteLine("--- kernel gates vs CPU (production Nivara kernels) ---");
 
         // Warm up the production kernels once: the first call pays JIT compilation
-        // cost and would dominate the timing rows. Discard it; time the second pass.
+        // cost and would dominate the timing rows. Discard it; time every round after.
         _ = CpuLeg.ComputeLeg(fixtures);
-        LegResults cpu = CpuLeg.ComputeLeg(fixtures);
 
-        int failures = Gate(cpu, cpu, "CPU (production Nivara)");
-
-        var gpuResults = new List<(string Name, LegResults? Results)>();
-        foreach ((string name, Func<KernelFixtures, LegResults?> leg) in legs)
+        // samples[kernel][leg] = every per-round steady-state sample for that cell.
+        var samples = new Dictionary<string, Dictionary<string, List<double>>>(StringComparer.Ordinal)
         {
-            LegResults? results = leg(fixtures);
-            gpuResults.Add((name, results));
-            failures += GateLeg(name, results, cpu);
+            ["dot16"] = new(StringComparer.Ordinal) { ["CPU (production Nivara)"] = [] },
+            ["silu"] = new(StringComparer.Ordinal) { ["CPU (production Nivara)"] = [] },
+            ["gemv"] = new(StringComparer.Ordinal) { ["CPU (production Nivara)"] = [] },
+        };
+        foreach ((string name, _) in legs)
+            foreach (Dictionary<string, List<double>> byKernel in samples.Values)
+                byKernel[name] = [];
+
+        int failures = 0;
+        LegResults? cpuReference = null;
+
+        for (int round = 0; round < Rounds; round++)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"--- round {round + 1}/{Rounds} (leg order rotates so no leg is systematically first/last) ---");
+
+            LegResults cpu = CpuLeg.ComputeLeg(fixtures);
+            cpuReference ??= cpu;
+            if (round == 0)
+                failures += Gate(cpu, cpu, "CPU (production Nivara)");
+            RecordSample(samples, cpu, "CPU (production Nivara)");
+
+            foreach ((string name, Func<KernelFixtures, LegResults?> leg) in Rotate(legs, round))
+            {
+                LegResults? results = leg(fixtures);
+                if (round == 0) // correctness is deterministic; gate once, not every sweep
+                    failures += GateLeg(name, results, cpuReference);
+                if (results is not null)
+                    RecordSample(samples, results, name);
+            }
         }
 
-        Console.WriteLine();
-        PrintTimingTable(cpu, gpuResults);
+        PrintTimingTable(samples, legs);
 
-        Console.WriteLine($"  kernels mode exit: {failures} failed kernel(s), 0 unexpected");
+        Console.WriteLine();
+        Console.WriteLine($"  kernels mode exit: {failures} failed kernel(s), {Rounds} sweeps, 0 unexpected");
         return failures;
     }
 
-    /// <summary>Prints CPU vs each GPU leg's per-kernel wall time (µs). GPU times come from
-    /// the legs themselves; the CPU times are captured by <see cref="CpuLeg.ComputeLeg"/>.</summary>
-    private static void PrintTimingTable(LegResults cpu, List<(string Name, LegResults? Results)> gpus)
+    private static void RecordSample(
+        Dictionary<string, Dictionary<string, List<double>>> samples, LegResults results, string leg)
     {
-        Console.WriteLine("  kernel timings (µs per invocation, excluding process/device setup):");
-        PrintTimingRow("dot16", cpu.Dot16Us, gpus);
-        PrintTimingRow("silu", cpu.SiluUs, gpus);
-        PrintTimingRow("gemv", cpu.GemvUs, gpus);
+        samples["dot16"][leg].Add(results.Dot16Us);
+        samples["silu"][leg].Add(results.SiluUs);
+        samples["gemv"][leg].Add(results.GemvUs);
     }
 
-    private static void PrintTimingRow(string kernel, double cpuUs, List<(string Name, LegResults? Results)> gpus)
+    /// <summary>Rotates the leg list by <paramref name="offset"/> so no leg keeps the same position.</summary>
+    private static IEnumerable<(string Name, Func<KernelFixtures, LegResults?> Leg)> Rotate(
+        (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs, int offset)
     {
-        string cpuCell = $"CPU {cpuUs,8:F1} µs";
-        var gpuCells = new List<string>();
-        foreach ((string name, LegResults? results) in gpus)
+        int n = legs.Length;
+        for (int i = 0; i < n; i++)
+            yield return legs[(i + offset) % n];
+    }
+
+    /// <summary>
+    /// Prints the per-kernel decision table: each leg's median steady-state wall time and its
+    /// min–max band over all rounds. Cells that never produced a sample (unavailable on this
+    /// host) are marked so — absent is a different fact from slow.
+    /// </summary>
+    private static void PrintTimingTable(
+        Dictionary<string, Dictionary<string, List<double>>> samples,
+        (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs)
+    {
+        Console.WriteLine();
+        Console.WriteLine("  kernel timings over all sweeps (µs per invocation, kernel-only; median[min–max]):");
+        foreach (string kernel in new[] { "dot16", "silu", "gemv" })
         {
-            string shortName = name.Split(' ', '(')[0];
-            double? gpuUs = results?.UsFor(kernel);
-            gpuCells.Add(gpuUs is null or <= 0
-                ? $"{shortName,7} unavailable"
-                : $"{shortName,7} {gpuUs.Value,8:F1} µs");
+            Console.WriteLine();
+            Console.WriteLine($"    [{kernel}]");
+            Console.WriteLine($"      {"CPU (production Nivara)",-26} {Cell(samples[kernel]["CPU (production Nivara)"])}");
+            foreach ((string name, _) in legs)
+                Console.WriteLine($"      {name,-26} {Cell(samples[kernel][name])}");
         }
-        Console.WriteLine($"    {kernel.PadRight(7)} {cpuCell}   {string.Join("   ", gpuCells)}");
+    }
+
+    private static string Cell(List<double> values)
+    {
+        if (values.Count == 0)
+            return "unavailable on this host";
+        var ordered = values.OrderBy(v => v).ToArray();
+        double median = ordered.Length % 2 == 1
+            ? ordered[ordered.Length / 2]
+            : 0.5 * (ordered[ordered.Length / 2 - 1] + ordered[ordered.Length / 2]);
+        return $"{median,9:F1} [{ordered[0]:F1}–{ordered[^1]:F1}]  (n={values.Count})";
     }
 
     private static int GateLeg(string name, LegResults? results, LegResults cpu)
