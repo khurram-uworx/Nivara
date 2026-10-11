@@ -90,7 +90,7 @@ static class BertGpuKeys
 /// siblings), so bias and activation no longer dispatch separate kernels (issue #437). Config-
 /// and naming-driven so DistilBERT and MiniLM (BERT-style keys) share the runner.
 /// </summary>
-public sealed class BertEncoderGpuRunner : IDisposable
+public sealed class BertEncoderGpuRunner : IBertEncoderRunner
 {
     const string PreWKey = "pre_classifier.weight";
     const string PreBKey = "pre_classifier.bias";
@@ -384,40 +384,6 @@ public sealed class BertEncoderGpuRunner : IDisposable
 
     // ── weight upload helpers ──────────────────────────────────────
 
-    /// <summary>
-    /// Builds the packed q/k/v projection: one pre-transposed [in × 3·out] Bt buffer
-    /// [Bt_q | Bt_k | Bt_v] and one [3·out] bias [Bq | Bk | Bv], so the per-layer q/k/v
-    /// GEMMs collapse into a single launch producing [rows × 3·out]; q/k/v are then
-    /// contiguous SubViews of the result (M2, issue #437).
-    /// </summary>
-    static (MemoryBuffer1D<float, Stride1D.Dense> W, MemoryBuffer1D<float, Stride1D.Dense> Bias) UploadQkvConcat(
-        ILGPU.Runtime.Accelerator acc,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        string qKey,
-        string kKey,
-        string vKey)
-    {
-        var weights = new (float[] Data, int[] Shape)[] { GpuBuffers.Req(tensors, $"{qKey}.weight"), GpuBuffers.Req(tensors, $"{kKey}.weight"), GpuBuffers.Req(tensors, $"{vKey}.weight") };
-        int outDim = weights[0].Shape[0];
-        int inDim = weights[0].Shape[1];
-        int concat = 3 * outDim;
-        var bt = new float[inDim * concat];
-        for (int block = 0; block < 3; block++)
-            for (int r = 0; r < outDim; r++)
-                for (int c = 0; c < inDim; c++)
-                    bt[c * concat + block * outDim + r] = weights[block].Data[r * inDim + c];
-        var wBuf = GpuBuffers.Alloc(acc, bt.Length);
-        wBuf.CopyFromCPU(bt);
-
-        var bias = new float[concat];
-        Array.Copy(GpuBuffers.Req(tensors, $"{qKey}.bias").Data, bias, outDim);
-        Array.Copy(GpuBuffers.Req(tensors, $"{kKey}.bias").Data, 0, bias, outDim, outDim);
-        Array.Copy(GpuBuffers.Req(tensors, $"{vKey}.bias").Data, 0, bias, 2 * outDim, outDim);
-        var bBuf = GpuBuffers.Alloc(acc, bias.Length);
-        bBuf.CopyFromCPU(bias);
-        return (wBuf, bBuf);
-    }
-
     sealed class LayerGpuWeights : IDisposable
     {
         public readonly MemoryBuffer1D<float, Stride1D.Dense> Wqkv;
@@ -432,7 +398,7 @@ public sealed class BertEncoderGpuRunner : IDisposable
             BertGpuNaming naming,
             int index)
         {
-            var (wqkv, bqkv) = UploadQkvConcat(acc, tensors,
+            var (wqkv, bqkv) = GpuBuffers.UploadQkvConcat(acc, tensors,
                 BertGpuKeys.Attention(naming, index, 'q'),
                 BertGpuKeys.Attention(naming, index, 'k'),
                 BertGpuKeys.Attention(naming, index, 'v'));

@@ -210,7 +210,7 @@ public static class ModernBert
             {
                 Console.WriteLine(
                     $"skipping seq={maxLength}: the CPU path's dense [L, L] mask caps the length at " +
-                    $"{ModernBertMasks.MaxDenseLength}. Run 'modernbert --gpu benchmark --seq {maxLength}' instead.");
+                    $"{ModernBertMasks.MaxDenseLength}. Run 'modernbert --ilgpu benchmark --seq {maxLength}' instead.");
                 continue;
             }
 
@@ -559,7 +559,7 @@ public static class ModernBert
     }
 
     /// <summary>
-    /// Default <c>modernbert --gpu</c> mode: the sample-sentence table on the accelerator. The
+    /// Default <c>modernbert --ilgpu</c> mode: the sample-sentence table on the accelerator. The
     /// GPU path is F32 only — the runner's kernels are <c>ArrayView&lt;float&gt;</c> — so unlike the
     /// CPU modes there is no <c>--fp16</c>/<c>--bf16</c> variant, and the CLI rejects those flags
     /// up front rather than silently ignoring them.
@@ -602,12 +602,12 @@ public static class ModernBert
 
         Console.WriteLine();
         Console.WriteLine("The encoder emits no logits — it is the trunk a masked-LM or embedding model " +
-                          "sits on. Run 'modernbert --gpu compare' for the GPU-vs-CPU parity gate.");
+                          "sits on. Run 'modernbert --ilgpu compare' for the GPU-vs-CPU parity gate.");
         return 0;
     }
 
     /// <summary>
-    /// <c>modernbert --gpu benchmark</c>. Sequence lengths go past the CPU path's
+    /// <c>modernbert --ilgpu benchmark</c>. Sequence lengths go past the CPU path's
     /// <see cref="ModernBertMasks.MaxDenseLength"/> of 2048 on purpose: that cap exists because
     /// the CPU materialises a dense <c>[L, L]</c> mask, and the GPU carries the band inside the
     /// attention kernel, so there is no such allocation to run out of. The 4096 row is the evidence.

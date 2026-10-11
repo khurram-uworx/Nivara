@@ -20,6 +20,9 @@
          and tests/Nivara.GpuProbe (docs/ILGPU.md). -->
     <PackageReference Include="ILGPU" Version="1.5.3" />
     <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
+    <!-- Silk leg of the silk-kernels gate. Re-pinned here as well as in samples (the same
+         way ILGPU is), so the gate's own reference is explicit rather than accidental-transitive. -->
+    <PackageReference Include="Silk.NET.OpenCL" Version="2.23.0" />
   </ItemGroup>
 
   <ItemGroup>

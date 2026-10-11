@@ -38,7 +38,7 @@ public sealed class IlgpuRuntime : IDisposable
         if (found is null)
         {
             throw new InvalidOperationException(
-                "--gpu requires an OpenCL GPU device (the in-box OpenCL.dll + Intel driver exposing the Arc iGPU); none was found.");
+                "--ilgpu requires an OpenCL GPU device (the in-box OpenCL.dll + Intel driver exposing the Arc iGPU); none was found.");
         }
 
         device = found;
@@ -47,7 +47,7 @@ public sealed class IlgpuRuntime : IDisposable
         if (accelerator.DeviceType != CLDeviceType.CL_DEVICE_TYPE_GPU)
         {
             throw new InvalidOperationException(
-                $"OpenCL accelerator {accelerator.Name} is not a GPU (got {accelerator.DeviceType}); --gpu has no CPU fallback.");
+                $"OpenCL accelerator {accelerator.Name} is not a GPU (got {accelerator.DeviceType}); --ilgpu has no CPU fallback.");
         }
 
         stream = accelerator.CreateStream();

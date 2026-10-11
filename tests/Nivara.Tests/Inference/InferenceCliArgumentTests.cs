@@ -12,7 +12,7 @@ namespace Nivara.Tests.Inference;
 /// <para>
 /// <b>Coverage.</b> Every reject the CLI owns is asserted here: the <c>--seq</c>/<c>--warmup</c>/
 /// <c>--iters</c> scope (#474), the <c>--precision</c>/<c>--seed</c>/<c>--teacher-examples</c> values
-/// (#479), the <c>--gpu</c> model scope (#568), the <c>--teacher-examples</c>/<c>--seed</c>/
+/// (#479), the <c>--ilgpu</c> model scope (#568), the <c>--teacher-examples</c>/<c>--seed</c>/
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
@@ -91,15 +91,15 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void Gpu_OnModelWithoutGpuPath_Rejected() =>
-        AssertRejected(Run("smollm", "--gpu"), "--gpu is not supported for 'smollm'");
+        AssertRejected(Run("smollm", "--ilgpu"), "--ilgpu is not supported for 'smollm'");
 
     [Test]
     public void Gpu_RejectedBeforeModelFileLookup()
     {
-        CliResult result = Run("qwen", "--gpu");
+        CliResult result = Run("qwen", "--ilgpu");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
-            "the --gpu guard must run before the model-file check; 'qwen' weights are never present");
-        AssertRejected(result, "--gpu is not supported for 'qwen'");
+            "the --ilgpu guard must run before the model-file check; 'qwen' weights are never present");
+        AssertRejected(result, "--ilgpu is not supported for 'qwen'");
     }
 
     [Test]
@@ -231,7 +231,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void GpuPrecisionCombination_Rejected() =>
-        AssertRejected(Run("minilm", "--gpu", "--precision", "bf16"), "--gpu is F32-only in this phase");
+        AssertRejected(Run("minilm", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
 
     [Test]
     public void GpuUnsupportedMode_Rejected()
@@ -242,6 +242,48 @@ public class InferenceCliArgumentTests
                 AssertRejected(Run(args), expected);
         });
     }
+
+    /// <summary>
+    /// The flag's migration contract: the pre-Silk name is rejected with the new name named,
+    /// not silently aliased, so an old invocation cannot quietly keep running the ILGPU path.
+    /// </summary>
+    [Test]
+    public void GpuRenamedFlag_RejectedWithNewName() =>
+        AssertRejected(Run("minilm", "--gpu"), "--gpu was renamed --ilgpu");
+
+    /// <summary>
+    /// The Silk phase: <c>--silk</c> is a second GPU backend whose model scope (MiniLM's six encoder
+    /// kernels only) and mode scope are narrower than <c>--ilgpu</c>'s, and it is F32-only. Each
+    /// rejection is pinned by message for the same reason the ILGPU scopes are: a removed guard would
+    /// fall through to a different exit-1 path and the exit code alone would still be <c>1</c>.
+    /// </summary>
+    [Test]
+    public void Silk_OnModelWithoutSilkKernels_Rejected() =>
+        AssertRejected(Run("smollm", "--silk"),
+            "--silk is not supported for 'smollm' (Silk models: minilm).");
+
+    [Test]
+    public void Silk_RejectedBeforeModelFileLookup()
+    {
+        CliResult result = Run("qwen", "--silk");
+        Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
+            "the --silk guard must run before the model-file check; 'qwen' weights are never present");
+        AssertRejected(result, "--silk is not supported for 'qwen'");
+    }
+
+    [Test]
+    public void SilkAndIlgpu_CompetingBackends_Rejected() =>
+        AssertRejected(Run("minilm", "--ilgpu", "--silk"),
+            "--ilgpu and --silk select competing GPU backends");
+
+    [Test]
+    public void SilkPrecisionCombination_Rejected() =>
+        AssertRejected(Run("minilm", "--silk", "--precision", "bf16"), "--silk is F32-only");
+
+    [Test]
+    public void SilkUnsupportedMode_Rejected() =>
+        AssertRejected(Run("minilm", "--silk", "similarity"),
+            "--silk does not support mode 'similarity' for 'minilm'");
 
     /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
@@ -333,9 +375,9 @@ public class InferenceCliArgumentTests
 
     static readonly (string[] Args, string Expected)[] GpuModeCases =
     [
-        (["minilm", "--gpu", "similarity"], "--gpu does not support mode 'similarity' for 'minilm'"),
-        (["distilbert_sst", "--gpu", "predict"], "--gpu does not support mode 'predict' for 'distilbert_sst'"),
-        (["modernbert", "--gpu", "compare_diag"], "--gpu does not support mode 'compare_diag' for 'modernbert'"),
+        (["minilm", "--ilgpu", "similarity"], "--ilgpu does not support mode 'similarity' for 'minilm'"),
+        (["distilbert_sst", "--ilgpu", "predict"], "--ilgpu does not support mode 'predict' for 'distilbert_sst'"),
+        (["modernbert", "--ilgpu", "compare_diag"], "--ilgpu does not support mode 'compare_diag' for 'modernbert'"),
     ];
 
     static readonly string[][] AcceptedQwenCases =

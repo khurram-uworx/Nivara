@@ -33,11 +33,11 @@ namespace Nivara.PerformanceTests;
 /// </para>
 ///
 /// <para>
-/// The totals are comparable to <c>modernbert --gpu benchmark</c> but **not** to
-/// <c>laya --gpu benchmark</c>: this probe times the <em>encoder</em> only, while the laya
+/// The totals are comparable to <c>modernbert --ilgpu benchmark</c> but **not** to
+/// <c>laya --ilgpu benchmark</c>: this probe times the <em>encoder</em> only, while the laya
 /// benchmark figure covers the whole model including the decision head. For laya the residual
 /// against that benchmark is dispatch, readback <em>and</em> the head, so do not read it as
-/// unattributed kernel time. <c>modernbert --gpu benchmark</c> is encoder-only and does line up.
+/// unattributed kernel time. <c>modernbert --ilgpu benchmark</c> is encoder-only and does line up.
 /// </para>
 ///
 /// <para>

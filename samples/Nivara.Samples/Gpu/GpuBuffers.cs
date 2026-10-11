@@ -235,27 +235,87 @@ internal static class GpuBuffers
     // ── CPU upload ────────────────────────────────────────────────
 
     /// <summary>
-    /// Uploads a weight as <c>Bt[in, out]</c> (the transpose of the checkpoint's
-    /// <c>[out, in]</c> row-major layout) so the GEMM reads it as plain row-major and its global
-    /// loads coalesce along K. Pre-fused weights — a checkpoint that already ships one
-    /// concatenated matrix, such as ModernBERT's <c>Wqkv</c> / <c>Wi</c> — upload through here
-    /// unchanged.
+    /// Host-side transpose of a checkpoint weight: the checkpoint stores <c>[out, in]</c> row-major
+    /// and the GEMM reads <c>Bt[in, out]</c> so its global loads coalesce along K. Pre-fused
+    /// weights — a checkpoint that already ships one concatenated matrix, such as ModernBERT's
+    /// <c>Wqkv</c> / <c>Wi</c> — come through unchanged. Split out from <see cref="UploadTransposed"/>
+    /// so a backend that uploads through its own runtime (Silk) produces byte-identical weights from
+    /// the same arithmetic rather than a second copy of it.
     /// </summary>
-    public static MemoryBuffer1D<float, Stride1D.Dense> UploadTransposed(
-        Accelerator accelerator,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        string key)
+    public static float[] Transposed(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, string backend = "--ilgpu")
     {
-        var t = Req(tensors, key);
+        var t = Req(tensors, key, backend);
         int outDim = t.Shape[0];
         int inDim = t.Shape[1];
         var bt = new float[outDim * inDim];
         for (int r = 0; r < outDim; r++)
             for (int c = 0; c < inDim; c++)
                 bt[c * outDim + r] = t.Data[r * inDim + c];
+        return bt;
+    }
+
+    public static MemoryBuffer1D<float, Stride1D.Dense> UploadTransposed(
+        Accelerator accelerator,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string key)
+    {
+        var bt = Transposed(tensors, key);
         var buffer = accelerator.Allocate1D<float>(bt.Length);
         buffer.CopyFromCPU(bt);
         return buffer;
+    }
+
+    /// <summary>
+    /// Host-side packing of the q/k/v projections: one pre-transposed <c>[in × 3·out]</c> Bt buffer
+    /// <c>[Bt_q | Bt_k | Bt_v]</c> plus one <c>[3·out]</c> bias <c>[Bq | Bk | Bv]</c>, so the
+    /// per-layer q/k/v GEMMs collapse into a single launch producing <c>[rows × 3·out]</c> and q/k/v
+    /// are contiguous blocks of the result.
+    /// </summary>
+    /// <remarks>
+    /// This layout is the contract between the packed-qkv GEMM (<c>TiledGemmKernelRow4Qkv</c> /
+    /// <c>gemm_row4_qkv</c>) and the attention that reads its three blocks, so both backends take it
+    /// from here: a private copy per runner could drift, and the drift would be a silently wrong
+    /// attention rather than a crash.
+    /// </remarks>
+    public static (float[] W, float[] Bias) QkvPacked(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string qKey, string kKey, string vKey,
+        string backend = "--ilgpu")
+    {
+        var weights = new[]
+        {
+            Req(tensors, $"{qKey}.weight", backend),
+            Req(tensors, $"{kKey}.weight", backend),
+            Req(tensors, $"{vKey}.weight", backend)
+        };
+        int outDim = weights[0].Shape[0];
+        int inDim = weights[0].Shape[1];
+        int concat = 3 * outDim;
+        var w = new float[inDim * concat];
+        for (int block = 0; block < 3; block++)
+            for (int r = 0; r < outDim; r++)
+                for (int c = 0; c < inDim; c++)
+                    w[c * concat + block * outDim + r] = weights[block].Data[r * inDim + c];
+
+        var bias = new float[concat];
+        Array.Copy(Req(tensors, $"{qKey}.bias", backend).Data, bias, outDim);
+        Array.Copy(Req(tensors, $"{kKey}.bias", backend).Data, 0, bias, outDim, outDim);
+        Array.Copy(Req(tensors, $"{vKey}.bias", backend).Data, 0, bias, 2 * outDim, outDim);
+        return (w, bias);
+    }
+
+    public static (MemoryBuffer1D<float, Stride1D.Dense> W, MemoryBuffer1D<float, Stride1D.Dense> Bias) UploadQkvConcat(
+        Accelerator accelerator,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string qKey, string kKey, string vKey)
+    {
+        var (w, bias) = QkvPacked(tensors, qKey, kKey, vKey);
+        var wBuf = accelerator.Allocate1D<float>(w.Length);
+        wBuf.CopyFromCPU(w);
+        var bBuf = accelerator.Allocate1D<float>(bias.Length);
+        bBuf.CopyFromCPU(bias);
+        return (wBuf, bBuf);
     }
 
     /// <summary>Uploads a tensor as-is (biases, LayerNorm gamma/beta, embeddings).</summary>
@@ -271,10 +331,10 @@ internal static class GpuBuffers
     }
 
     public static (float[] Data, int[] Shape) Req(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
+        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, string backend = "--ilgpu")
         => tensors.TryGetValue(key, out var t)
             ? t
-            : throw new InvalidOperationException($"Missing weight key '{key}' for the --gpu forward.");
+            : throw new InvalidOperationException($"Missing weight key '{key}' for the {backend} forward.");
 
     // ── readback ──────────────────────────────────────────────────
 
