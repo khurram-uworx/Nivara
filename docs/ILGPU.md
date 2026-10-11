@@ -170,19 +170,20 @@ ILGPU v2.0.
 
 ## 5. Setup vs steady state (the honest split)
 
-The three timings that matter, measured on the Arc 140T (µs; six-way `kernels`
-run unless noted — Silk.NET and ComputeSharp were not in that run). The
-"fastest GPU leg" margins below were true **of that run**; a later same-host
-eight-way run put Silk.NET ahead on `dot16` (6.4–6.7 µs vs 10.0–11.6) and
-tied on `silu` (6.1–7.1 vs 7.0). Those later figures are single-session, not
-the repeated same-host profile tracked in #552 (Arc 140T) and #553 (Iris Xe),
-so they correct the ordering claim without replacing this table's numbers.
+The three timings that matter, measured on the Arc 140T (µs; the six-way
+`kernels` run this leg first shipped with). The "fastest GPU leg" margins below
+were true **of that run**; the two-host profiles in #552 (Arc 140T) and #553
+(Iris Xe) supersede them as orderings: on both hosts ILGPU ties Silk.NET at the
+top of the small kernels and is disjointly slower than it on `gemv`, and its
+`gemv` rank against DX12 flips between hosts — device-dependent. This section
+keeps the leg's own six-way figures; the joint reading lives in the GpuProbe
+`README.md` two-host tables.
 
 | kernel | jit (load + first dispatch) | steady (1 warmup + best-of-25) | CPU (production Nivara) | margin |
 |---|---|---|---|---|
-| `dot16` (K=16) | 2668 | **11.4** | 1.2–4.8 | launch-bound — CPU still wins; ~3–6× faster than the other GPU legs (32–560 µs) |
-| `silu` (576) | 1317 | **6.9** | 29–99 | **~4.6–14× GPU** — fastest in this run; later tied by Silk.NET (see note above) |
-| `gemv` (1536×576) | 1371 | **133.4** | 2291–4745 | **~17–35× GPU** |
+| `dot16` (K=16) | 2668 | **11.4** | 4.1 [2.1–18.4] | launch-bound — CPU-class: ties the CPU on the Arc, loses to it on the Iris Xe (7.1 vs 78.8) |
+| `silu` (576) | 1317 | **6.9** | 28.1 [16.1–50.2] | ~4× CPU on the Arc (median 8.6 vs 28.1); ties Silk.NET on both hosts; **no GPU win** on the Iris Xe (median 72.9 vs CPU 45.7) |
+| `gemv` (1536×576) | 1371 | **133.4** | 2348.9 [817.1–2961.5] | ~23× CPU on the Arc (median 144.2 vs 2348.9); Silk.NET beats it on both hosts; DX12 rank flips between hosts |
 
 Context creation and accelerator creation are timed as part of the leg's setup
 split. Accelerator creation + first device sync measures ~8.8–9.8 ms once
@@ -190,14 +191,20 @@ split. Accelerator creation + first device sync measures ~8.8–9.8 ms once
 steady-state table). Per-kernel JIT costs
 land between ~1.3 ms (silu) and ~2.7–3.8 ms (dot16) and are one-time; steady
 state is a single `kernel(stream, extent, …)` + `stream.Synchronize()` per
-dispatch on persistent buffers. `dot16`'s 11.4 µs steady beat every other GPU leg
-(DX12 189 µs, OV 32–43 µs) despite remaining CPU-bound-class — a small,
-uniformly-sized kernel where launch round-trip dominates.
+dispatch on persistent buffers. `dot16`'s 11.4 µs steady beat every GPU leg in
+that run (DX12 189 µs, OV 32–43 µs) despite remaining CPU-bound-class — a
+small, uniformly-sized kernel where launch round-trip dominates. The two-host
+profile ties the CPU on the Arc (4.1 [2.1–18.4] vs 11.4 [8.7–17.4]) and has the
+CPU win on the Iris Xe (7.1 vs 78.8), so "CPU still wins" is host-dependent.
 
 gemv perspective: the naive shape (one thread per output row, serial K=576 f32
-accumulate — the exact production formula) runs 133.4 µs, ~1.8× faster than the
-equally-naive DX12 kernel (246 µs) and behind only OpenVINO's *tuned* gemm bf16
-row (86.8 µs). The obvious levers (thread-per-8-rows FMA loops, work-group
+accumulate — the exact production formula) ran 133.4 µs in this leg's run; the
+#552/#553 profile puts the Arc median at 144.2 µs. Against the equally-naive
+DX12 kernel the pair flips between hosts (Arc ILGPU 144.2 < DX12 250.4; Iris Xe
+DX12 705.8 < ILGPU 859.7) — device-dependent, not a property. On the Arc,
+ILGPU's gemv ties OpenVINO's *tuned* gemm bf16 row (114.0 [92.8–201.0]
+overlaps 144.2 [135.8–167.4]) rather than trailing it. The obvious levers
+(thread-per-8-rows FMA loops, work-group
 tiling, `LoadAutoGroupedKernel` group-size tuning, `v2.0`-era bf16) are all
 preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 (`MathMode.Fast` was deliberately **not** used — the gate demands honesty).
@@ -212,7 +219,7 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 | **BF16** | no native BF16 kernel type in 1.5.3 (PR #1221 open) → packed-2-per-uint + in-shader widen, byte-identical to DX12 transport |
 | **correctness** | dot16 **0.0 ULP** · silu worst 4.0 ULP · gemv within gate — **3/3 PASS** |
 | **setup cost** | ~9 ms accelerator creation + first sync (context costs a one-time few-ms more); ~1.3–3.8 ms kernel JIT each |
-| **steady state** | dot16 **11.4 µs** · silu **6.9 µs** (fastest in this run; later tied by Silk.NET) · gemv **133.4 µs** |
+| **steady state** | dot16 **11.4 µs** · silu **6.9 µs** (this leg's six-way run; the #552/#553 profile ties silu with Silk.NET on both hosts) · gemv **133.4 µs** |
 | **footprint** | +3.4 MB (ILGPU 1946 KB + Algorithms 1502 KB); BCL transitives inbox on net11 |
 | **risk** | JIT + ICD layer = two moving compilers (ILGPU → OpenCL C → IGC); no native BF16 today; OpenCL ICD required at runtime |
 | **gotchas (hit during the leg)** | `Index1D` naming (not `Index1`); implicit grouping pads the grid → **bounds-check every kernel**; `CLDeviceType` uses `CL_DEVICE_TYPE_*` names; `XMath.Exp` requires the Algorithms package (core has no exp); readback via `AsContiguous().GetAsArray()` (generic inference skips the implicit view conversion); device-select assert (`CL_DEVICE_TYPE_GPU`) prevents silent CPU fallback; **at most one `SharedMemory` allocation per kernel** — two `Allocate2D` calls with disagreeing extents get the second tile mis-placed by the OpenCL lowering (#468), and the 1-D `Allocate<float>` form costs 10–20% against one wide `Allocate2D` |
@@ -225,15 +232,19 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 - ILGPU is the **lowest-friction compiled path**: `dotnet restore` is the whole
   install; kernels are plain C# (the same language as the host), high-level
   launchers avoid boxing, and BF16 rides the proven packed-widen transport.
-- On the six-way run it was the **fastest measured GPU leg on silu** (6.9 µs,
-  ~5–14× CPU) and within 1.5× of OpenVINO's tuned gemv with a naive kernel
-  shape. A later same-host run (Silk.NET present) ties it on silu and beats it
-  on dot16; #552 / #553 are the repeated two-host profile that replaces both
+- On the six-way run it was the **fastest measured GPU leg on silu** (6.9 µs);
+  the two-host profile ties it with Silk.NET on both hosts and makes the CPU
+  comparison host-dependent: ~4× CPU on the Arc (8.6 vs 28.1), while on the
+  Iris Xe the CPU is faster than every GPU leg on silu (45.7 vs 72.9). On
+  `gemv` it is disjointly beaten by Silk.NET on both hosts and its rank against
+  DX12 flips between hosts — #552 / #553 are the profile that fixes both
   readings as an ordering.
 - As a promotion candidate for a managed `src/Nivara.Gpu`, ILGPU's trade is
   **open source + managed kernels vs OpenVINO's closed tuned runtime**; the
-  deciding measure for real workloads will be a tiled gemv (next step), where
-  OV's tuned gemm currently leads.
+  deciding measure for real workloads will be a tiled gemv (next step). On the
+  Arc, OV's tuned gemm currently *ties* ILGPU's naive kernel (band overlap) —
+  not the "leads" the six-way run implied — while on the Iris Xe ILGPU's gemv
+  at worst ties the CPU's noisy band (845.5–1212.0 vs 1127.7–11229.6).
 - Re-test after any driver update: the whole kernel surface re-measures in
   seconds via `dotnet run … -- kernels`. The IGC bug class is driver-versioned
   (see [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md)); ILGPU's OpenCL C path is equally exposed to future

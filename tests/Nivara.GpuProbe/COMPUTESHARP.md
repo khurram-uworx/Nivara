@@ -1,6 +1,6 @@
 # ComputeSharp on the Arc 140T from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](ILGPU.md) · **ComputeSharp**
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp**
 
 This is the sixth GPU-backend case-study doc and the deliverable for issue #432
 (GPU probe phase 4b). The previous phases proved four compile/driver paths
@@ -23,16 +23,18 @@ library wrapper around exactly that idea — the same `d3d12.dll`/`dxgi.dll`
 surface, reached through a NuGet package instead of hand-pinned vtable slots.
 
 **Machine status — read this before the numbers.** The measurement target this
-series documents is the **Intel Arc 140T** (8086:7DD1, 128 EU, driver
-1.15.37858). The phase-4b leg itself was validated live on a **second machine**
+series documents is the **Intel Arc 140T** (8086:7DD1, 128 EU; the reported
+driver version 1.15.37858 is the Level Zero `driverVersion`, not a Windows GPU
+driver). The phase-4b leg itself was validated live on a **second machine**
 during this phase — an **Intel Iris Xe iGPU** over D3D12, Windows 10.0.26200,
 .NET 11.0 (Release), ComputeSharp **3.2.0** + ComputeSharp.Dxc **3.2.0** from
 NuGet — where all three production-shape gates PASSed with no CPU fallback
 (WARP rejection exercised, not hit). Measured figures from that run are recorded
-below in *clearly labeled Iris Xe* rows; the Arc 140T figures remain **pending**
-until a `kernels` run happens on that machine. The two iGPUs are different
-hardware — treat the Iris Xe numbers as functional proof, not as the Arc 140T
-performance answer.
+below in *clearly labeled Iris Xe* rows; the #552 (Arc 140T) and #553 (Iris Xe)
+profiles now carry both hosts' repeated steady-state figures (the probe README's
+two-host tables: Arc medians 65.9 / 68.0 / 157.5 µs, Iris Xe 146.1 / 134.6 /
+574.0 µs for dot16 / silu / gemv). The two iGPUs are different hardware — treat
+cross-host numbers as functional proof, not as each other's performance answer.
 
 ---
 
@@ -151,20 +153,20 @@ compiler backend and shader model than `d3dcompiler_47`'s `cs_5_1` DXBC. The
 phase question: does the source-gen + bundled-DXC pipeline produce correct
 results for the three production shapes on a real Intel iGPU?
 
-**Verdict: PASS** (validated on the Iris Xe machine, §machine-status above).
-The leg ran on a real D3D12 hardware device (`device.Name` printed;
-`IsHardwareAccelerated` asserted), DXC compiled every generated shader (SM 6.x
-DXIL), and all three production-shape gates passed against the production
-Nivara CPU kernels (the multi-leg gold target,
+**Verdict: PASS** on both probe machines — the #552 Arc 140T and the #553 Iris
+Xe records (§machine-status above). The leg ran on real D3D12 hardware devices
+(`device.Name` printed; `IsHardwareAccelerated` asserted), DXC compiled every
+generated shader (SM 6.x DXIL), and all three production-shape gates passed
+against the production Nivara CPU kernels (the multi-leg gold target,
 `|leg − cpu| ≤ 1e-6 + 1e-5·|cpu|`):
 
-| kernel | gate vs CpuLeg (production Nivara) | worst (Iris Xe run, measured) | result |
-|---|---|---|---|
-| `dot16` (K=16) | tolerance gate | **0.0 ULP** (bit-exact) | PASS |
-| `silu` (576) | tolerance gate per element | 4.0 ULP @ index 410 | PASS (576/576) |
-| `gemv` (1536×576) | tolerance gate per row | 12 288 ULP @ row 1508 (`\|diff\| = 1.4e-9`, near-zero ref row) | PASS (1536/1536) |
+| kernel | gate vs CpuLeg (production Nivara) | worst (Arc 140T, measured) | worst (Iris Xe run, measured) | result |
+|---|---|---|---|---|
+| `dot16` (K=16) | tolerance gate | **0.0 ULP** (bit-exact) | **0.0 ULP** (bit-exact) | PASS |
+| `silu` (576) | tolerance gate per element | 4.0 ULP @ index 410 | 4.0 ULP @ index 410 | PASS (576/576) |
+| `gemv` (1536×576) | tolerance gate per row | 14 336 ULP @ row 1508 (`\|diff\| = 1.6e-9`) | 12 288 ULP @ row 1508 (`\|diff\| = 1.4e-9`) | PASS (1536/1536) |
 
-*Arc 140T worst-ULP values pending a `kernels` run on that machine.*
+*Worst-ULP rows measured on each host (Arc = #552 record, Iris Xe = #553 record).*
 
 Same gemv worst-ULP caveat as every other leg: the diagnostic row lands near
 zero where an f32 ULP is tiny, far inside the `1e-6` absolute gate — a
@@ -211,14 +213,15 @@ ComputeSharp counterpart of ILGPU's `XMath.Exp`).
 
 ## 5. Setup vs steady state (the honest split)
 
-**Arc 140T target figures — pending** (record from the first `kernels` run on
-that machine; the CPU reference ranges are the series-wide documented values):
+**Arc 140T — the #552 record** (µs, medians [min–max] of the 5 sweeps, n=5;
+`dxc` is the one-time per-sweep DXC compile — it runs fresh each sweep, so the
+cold first sweep dominates its range; CPU = the #552 Arc CPU medians):
 
 | kernel | dxc (HLSL→DXIL + first dispatch) | steady (1 warmup + best-of-25) | CPU (production Nivara) | margin |
 |---|---|---|---|---|
-| `dot16` (K=16) | _pending_ | _pending_ | 1.2–4.8 | _pending_ |
-| `silu` (576) | _pending_ | _pending_ | 29–99 | _pending_ |
-| `gemv` (1536×576) | _pending_ | _pending_ | 2291–4745 | _pending_ |
+| `dot16` (K=16) | 839 [732–6586] | 65.9 [62.7–82.3] | 4.1 [2.1–18.4] | launch-bound — CPU wins |
+| `silu` (576) | 247 [204–2300] | 68.0 [60.8–80.7] | 28.1 [16.1–50.2] | CPU wins |
+| `gemv` (1536×576) | 389 [302–2592] | 157.5 [136.7–174.5] | 2348.9 [817.1–2961.5] | **~15× CPU** |
 
 **Measured on the Iris Xe validation machine** (§machine-status above; µs,
 `kernels` run — CPU and ComputeSharp from the same run, so the margins are
@@ -235,7 +238,9 @@ For-probe comparison on the same machine/run: the hand-rolled DX12 leg measured
 kernels — so ComputeSharp was **fastest of the D3D12 legs on gemv** (624.2 vs
 882.1 hand-rolled DX12, 871.9 ILGPU) on this iGPU, and its managed per-dispatch
 round-trip dominates the tiny launch-bound kernels (dot16 215.7 µs vs ILGPU
-74.8 µs). None of these Iris Xe figures are the Arc 140T answer.
+74.8 µs). These Iris Xe same-run figures are the leg's own validation run; the
+#553 profile repeats the same host five times at medians 146.1 / 134.6 / 574.0
+µs — and the Arc 140T answer is the #552 table above.
 
 Device creation (`GraphicsDevice.GetDefault()`) is the one-time setup (tens of
 ms through the D3D12 runtime). Per-kernel **DXC compile is split out honestly**:
@@ -254,12 +259,12 @@ shape.
 | **delivery** | NuGet: `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` (MIT, pure C# + bundled DXIL compiler) — second package ref in the probe |
 | **toolchain** | none — source-generates HLSL from C# structs; in-process DXC (bundled `dxcompiler`/`dxil`) → DXIL → D3D12; **no d3dcompiler_47, no hand-rolled vtable dispatch** |
 | **shader model** | SM 6.x DXIL via DXC (the non-deprecated path) vs the DX12 leg's `cs_5_1` DXBC via FXC |
-| **IGC/D3D12 verdict** | **PASS** — DXIL handled correctly on a real D3D12 Intel iGPU (validated on Iris Xe: 3/3 gates; Arc 140T verdict pending its `kernels` run) |
+| **IGC/D3D12 verdict** | **PASS** — DXIL handled correctly on a real D3D12 Intel iGPU (validated on both hosts, 3/3 gates each: Arc = #552 record, Iris Xe = #553 record) |
 | **BF16** | no BF16 buffer element type → packed-2-per-uint + in-shader `Hlsl.AsFloat` widen, byte-identical to DX12/ILGPU transport |
 | **correctness** | dot16 **0.0 ULP** · silu ≤4 ULP · gemv within gate — **3/3 PASS** |
 | **setup cost** | one-time device creation; per-kernel DXC compile (the `dxc` split) then PSO — compiled once, reused (measured 11–53 ms on Iris Xe) |
-| **steady state** | Iris Xe measured: dot16 215.7 µs · silu 206.5 µs · gemv **624.2 µs (4.5× CPU)** — managed per-dispatch overhead dominates launch-bound kernels; **Arc 140T pending** |
-| **footprint** | _pending_ (ComputeSharp.dll + Core.dll + Dxc.dll + native dxcompiler/dxil win-x64 bundle) |
+| **steady state** | Arc medians (n=5): dot16 65.9 µs · silu 68.0 µs · gemv **157.5 µs (~15× CPU)**; Iris Xe medians (n=5): 146.1 / 134.6 / **574.0 µs (3.8× CPU)** — managed per-dispatch overhead dominates launch-bound kernels on both hosts |
+| **footprint** | not separately measured (ComputeSharp.dll + Core.dll + Dxc.dll + native dxcompiler/dxil win-x64 bundle) |
 | **risk** | source generator + bundled DXC = two moving compilers; per-dispatch `ComputeContext` creation is a managed overhead on tiny kernels; Windows/D3D12-only (CA1416 platform-annotated, honest) |
 | **gotchas (hit during the leg)** | `GraphicsDevice.GetDefault()` (not `GetDefaultDevice`); container type must be **`partial`** for the shader descriptor generator; `[SupportedOSPlatform("windows6.2")]` needed on the leg (ComputeSharp APIs are platform-annotated → CA1416 without it); shaders are `readonly partial struct` implementing `IComputeShader` (no mutable fields, `[AutoConstructor]` is 2.x-era); `Hlsl.AsFloat(uint)` (not `AsUInt`) is the exact asfloat intrinsic; each `For()` is a full submit+wait round-trip (timing semantics identical to ILGPU's `Synchronize`); grid padded to group-size multiples → bounds-check every kernel (`if (i >= n) return;`) |
 
@@ -267,12 +272,13 @@ shape.
 
 - **Phase question answered**: ComputeSharp's source-gen → bundled-DXC → DXIL →
   D3D12 pipeline produces correct results for all three production kernels on a
-  real Intel iGPU (validated on the Iris Xe machine) — the same gate outcome as
-  the hand-rolled DX12 leg, at a
+  real Intel iGPU (validated on both hosts — the #552 Arc 140T and the #553
+  Iris Xe records) — the same gate outcome as the hand-rolled DX12 leg, at a
   fraction of the plumbing (~100 lines of pure C# shaders vs ~460 lines of
-  vtable/descriptor/heap code). The Arc 140T perf target remains open — this
-  doc's Iris Xe figures are functional proof, and the steady-state numbers on
-  the series' target machine are re-measured via a single `kernels` run.
+  vtable/descriptor/heap code). The Arc 140T perf target is now measured too:
+  #552's medians are 65.9 / 68.0 / 157.5 µs (dot16 / silu / gemv), versus the
+  #553 Iris Xe 146.1 / 134.6 / 574.0 µs — both hosts' steady state lives in the
+  probe README's two-host tables.
 - ComputeSharp is the **lowest-friction D3D12 path**: `dotnet restore` is the
   whole install, kernels are plain C# structs in the same language as the host,
   and the bundled DXC keeps the DXIL compiler out of any external install story.
