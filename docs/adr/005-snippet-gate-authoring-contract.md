@@ -1,4 +1,4 @@
-# ADR-005: The Snippet Gate Compiles Each Fence Alone, and Preambles Are Labels Over One Namespace
+# ADR-005: The Snippet Gate Compiles Each Fence Alone, and Each Preamble Resolves to Its Own Namespace
 
 **Status:** Accepted
 **Date:** 2026-10-04
@@ -34,33 +34,46 @@ none can drift into the skip bucket unnoticed, and
 document is neither gated nor listed. That is the accepted steady state: the
 gate makes coverage legible rather than pretending to be total.
 
-### The Preambles are one namespace, and `preamble:` does nothing
+### Each preamble resolves to its own namespace
 
-This is the sharpest trap in the harness, and the one most likely to be
-"tidied up" by someone who reads the code.
+This is the sharpest part of the harness, and the one most likely to be
+"tidied up" by someone who reads the code. The section records both the mechanism
+as it stands after the #546 amendment and what it was before, because most of the
+rules below were written against the "before".
 
-There is exactly **one** preamble file and **one** preamble namespace,
-`Nivara.Tests.Docs.Preambles`. `DocSnippetCompiler` emits
-`using Nivara.Tests.Docs.Preambles;` into the prologue of **every** block,
-unconditionally. It **never reads `PreambleName`.**
+A gate comment may annotate a block with `preamble: <name>`. The name resolves
+through one mapping, `DocSnippetExtractor.Preambles`, to exactly **one** namespace
+per name, plus any `using static` imports that name needs. A block annotated
+`preamble: streaming-flux-window` imports
+`Nivara.Tests.Docs.Preambles.StreamingFluxWindow` and sees only that bundle's
+types: `Employee` is a `row-types` type and does **not** resolve there. A name that
+is not in the mapping is a harness defect, so the compiler throws
+`InvalidDataException` instead of emitting nothing and letting the snippet fail as a
+cascade of unresolved names.
 
-So the eleven names in `KnownPreambles` are **labels over subsets of one flat
-namespace**, not bundles. A block annotated `preamble: streaming-flux-window`
-may use `Employee` and still compile; the annotation constrains nothing.
-Two names (`agent-null-tensor`, `agent-tensor-kernel`) supply no types at all —
-those blocks take all of their context from `locals:`. And because
-`using static ...SnippetReport` is likewise unconditional, the `Report(...)`
-call in the streaming example resolves in *every* block.
+A preamble that would supply no types is not listed at all: a name that imports an
+empty namespace is decoration, not a bundle. Five such names existed
+(`agent-null-tensor`, `agent-tensor-kernel`, `streaming-flux-training`,
+`streaming-flux-reverse`, `streaming-flux-frame`) and their `preamble:` annotations
+were removed — those blocks take all of their context from `locals:`.
 
-Making the import conditional would restore the obvious semantics and, in the
-same commit, break every annotated snippet in the repository. The directive is
-bookkeeping; the namespace is the mechanism.
+The stub types live under `tests/Nivara.Tests/Docs/Preambles/`, **one file per
+namespace**, so a type cannot sit in the flat `Nivara.Tests.Docs.Preambles`
+namespace where the enclosing-namespace lookup would make it reachable from every
+block.
+
+**Before #546** there was exactly one preamble namespace. `DocSnippetCompiler`
+emitted its import plus `using static ...SnippetReport` into every block
+unconditionally and never read `PreambleName`, so the names were labels over subsets
+of one flat namespace and constrained nothing. Making the import conditional was
+known to break every annotated snippet in the same commit, which is why it was left
+alone until #546 did it deliberately.
 
 ## Decision
 
 **Each fence is compiled as an independent compilation unit against the full
 runtime closure, wrapped by a per-block mode, and annotated only by an adjacent
-`<!-- gate -->` comment. Preamble names are documentation, never resolution.**
+`<!-- gate -->` comment. A preamble name resolves to exactly one namespace.**
 
 1. **Each fence compiles alone.** Prose continuity is invisible to the compiler,
    so every name a block uses must be declared in that block or supplied by a
@@ -102,21 +115,26 @@ runtime closure, wrapped by a per-block mode, and annotated only by an adjacent
 5. **`locals:` supplies variables, and it is one line.** It is spliced in before
    the body, so it can only declare locals. A type there is **CS8803**.
 
-6. **`preamble:` is bookkeeping only.** It is not read by the compiler and never
-   resolves anything; the unconditional namespace import is what supplies types.
-   Stubs live in `SnippetStubs.cs` and must stay `public`, because the generated
-   `Nivara.DocSnippet` assembly holds no `InternalsVisibleTo` grant.
-   `KnownPreambles` exists so the *name* is not decorative: it is asserted against
-   actual usage in both directions, so a typo and a stale registry entry both
-   fail. Treat the name as a comment about intent, and put the type where it
-   belongs — in the stub file.
+6. **`preamble:` resolves to exactly one namespace.** The name is looked up in
+   `DocSnippetExtractor.Preambles`, which maps it to a namespace and any
+   `using static` imports, and those are emitted for that block alone. A block
+   annotated with a preamble sees that preamble's types and none from another; a
+   name not in the mapping is a harness defect and `DocSnippetCompiler.Compile`
+   throws `InvalidDataException` for it. Stubs for a name live in
+   `Preambles/<Name>.cs` under `Nivara.Tests.Docs.Preambles.<Name>` and must stay
+   `public`, because the generated `Nivara.DocSnippet` assembly holds no
+   `InternalsVisibleTo` grant. `KnownPreambles` is the mapping's keys; it is
+   asserted against actual usage in both directions, so a typo and a stale registry
+   entry both fail, and `PreambleNamespaces_AreDeclaredAndNonEmpty` proves each
+   mapped namespace exists, is non-empty, is used by exactly one name, and is not
+   the old flat namespace.
 
 7. **Row-type stubs are unions where a name is reused with different shapes
-   across sections.** One namespace cannot be overloaded by document, so the stub
-   is the union of the shapes, and the conflict must be written into the stub
-   rather than resolved silently. `Employee` is the worked example: two sections
-   disagree on `Salary`, so the union carries `double`, and the disagreement is
-   recorded in the stub's remarks.
+   across sections.** A preamble's one namespace cannot be overloaded by document,
+   so the stub is the union of the shapes, and the conflict must be written into the
+   stub rather than resolved silently. `Employee` is the worked example: two
+   sections disagree on `Salary`, so the union carries `double`, and the
+   disagreement is recorded in the stub's remarks.
 
 8. **The masked-defect rule.** A receiver with an error type suppresses member
    lookup, so fixing one error can reveal others behind it. A section is clean
@@ -203,19 +221,21 @@ reason the index is worth having.
   contradiction rather than a silent regression.
 - The coverage claim stays honest: gated, excluded and ungated counts are pinned
   and sum to a scanned total.
+- A preamble name now *is* what it reads like — a bundle of exactly one namespace —
+  so the reason to reach for the mapping when a type does not resolve is the first
+  thing a reader sees rather than the last.
 
 **Negative:**
 
 - Editing a snippet is a **two-step** change whenever a fence is split: the
   snippet, and the pin. This is deliberate friction, not overhead.
-- Preamble names that read like bundles invite the reader to expect resolution
-  that does not exist. Rule 6 exists to contain that expectation; it does not
-  remove it.
-- The stub namespace is **global**, so adding a stub can clear diagnostics in
-  unrelated sections. That coupling is invisible at the call site and is the main
-  reason the stub file's remarks are load-bearing.
-- `using static ...SnippetReport` means `Report(...)` resolves in every block,
-  which is one more piece of global coupling the harness does not intend.
+- Adding a preamble name is now a two-part change: the mapping entry and the
+  `Preambles/<Name>.cs` file. Forgetting either fails the gate rather than
+  silently widening what every block can see, which is the point.
+- A stub is reachable only from blocks annotated with its preamble, so a snippet
+  that uses a stub type without the annotation fails as **CS0246**. That is the
+  intended failure (a missing using is a real authoring mistake), but it reads like
+  a documentation defect on first encounter.
 
 ## Amendment process
 
@@ -224,6 +244,9 @@ file an issue referencing ADR-005 and update the wrapper tests in
 `tests/Nivara.Tests/Docs/DocSnippetCompilerTests.cs` in the same change. Any
 amendment must keep the negative control failing
 (`NegativeControl_TheGateStillRejectsABrokenSnippet`) — a green run that accepts
-a broken snippet means nothing. If an amendment makes the preamble import
-conditional, it must re-verify every gated block in the same change, because rule
-6's consequence is that no test currently covers the coupling.
+a broken snippet means nothing. An amendment that changes the preamble mechanism
+must keep the mapping in `DocSnippetExtractor.Preambles` the single source of
+truth, give each name its own non-empty namespace, and re-verify every gated block
+in the same change — `EveryGatedBlock_CompilesWithoutErrors` is that verification.
+#546 made the import conditional in exactly this way, and it is the reason rules 6
+and 7 and the consequences above read as they do.

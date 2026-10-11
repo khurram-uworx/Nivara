@@ -432,6 +432,22 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **Snippet-gate `preamble:` now resolves to one namespace per name (amends ADR-005, #546)** — the
+  gate's `preamble:` directive was never read: `DocSnippetCompiler` emitted
+  `using Nivara.Tests.Docs.Preambles;` (and the `SnippetReport` static import) into every block
+  unconditionally, and every stub lived in that one flat namespace, so the declared names constrained
+  nothing. `DocSnippetExtractor.KnownPreambles` is replaced by a name → (namespace, static imports)
+  mapping; `Compile` emits the imports for the block's own preamble and throws `InvalidDataException`
+  on an unknown name, so a typo fails loudly instead of surfacing as a cascade of unresolved names.
+  `SnippetStubs.cs` is split into one file per namespace under `Preambles/`, the five preambles that
+  supplied no types are dropped, and the six `row-types` blocks that had been relying on the global
+  import are annotated. No fence was added or split, so the coverage pins (106 gated / 2 excluded /
+  141 ungated / 249 total) are unchanged. New coverage: a paired negative control (a type from another
+  preamble no longer resolves), an unknown-name test, a `using static` test, and
+  `PreambleNamespaces_AreDeclaredAndNonEmpty`, which proves each mapped namespace exists, is
+  non-empty, is used by exactly one name, and is not the old flat namespace. ADR-005 rule 6 and its
+  consequences are rewritten.
+
 - **`DataFrameSchemaValidationException` removed (breaking, #542)** — the type was never thrown by
   production code and never caught by any; the only place it was constructed or asserted on was
   `DataFrameExceptionTests`. A third schema-validation exception, declared in `Nivara.Exceptions`

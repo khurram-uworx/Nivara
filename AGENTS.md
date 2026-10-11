@@ -167,7 +167,7 @@ See `docs/adr/` for recorded decisions:
 - **ADR-002** (`docs/adr/002-autodiff-span-boundary.md`): AutoDiff uses span-based boundaries. All ops are span-ified with `TensorPrimitives`.
 - **ADR-003** (`docs/adr/003-batch-fused-ops-not-rank-n-primitives.md`): Batch fused ops preferred over rank-N primitives.
 - **ADR-004** (`docs/adr/004-fused-expression-engine-kernel-ir-span-backends.md`): Fused expression engine uses kernel IR with span backends.
-- **ADR-005** (`docs/adr/005-snippet-gate-authoring-contract.md`): Read before editing a fenced ```csharp block in a gated doc, or adding one. Each fence compiles alone; `<!-- gate -->` keys are `mode`/`preamble`/`locals`/`exclude`/`reason`; `preamble:` is a label, not a resolver.
+- **ADR-005** (`docs/adr/005-snippet-gate-authoring-contract.md`): Read before editing a fenced ```csharp block in a gated doc, or adding one. Each fence compiles alone; `<!-- gate -->` keys are `mode`/`preamble`/`locals`/`exclude`/`reason`; `preamble:` resolves to exactly one namespace, one namespace per name.
 - **ADR-006** (`docs/adr/006-streaming-memory-budget-exposure.md`): The streaming memory budget is exposed through a context-taking `AsStream(NivaraExecutionContext)` overload (the strategy stays internal); the bare `AsStream()` keeps its 10,000-row default, and the caller's context is cloned before execution.
 
 ## Agent Framework Workflow Patterns
