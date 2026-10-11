@@ -7,8 +7,8 @@ public class DocSnippetCompilerTests
 {
     const string FixturePath = "tests/Nivara.Tests/Docs/Fixtures/Broken.md";
 
-    static DocBlock Block(string code, DocWrapMode mode = DocWrapMode.TopLevel, int startLine = 0, string locals = "")
-        => new("docs/INLINE.md", startLine, code, null, locals, mode, null, null);
+    static DocBlock Block(string code, DocWrapMode mode = DocWrapMode.TopLevel, int startLine = 0, string locals = "", string? preamble = null)
+        => new("docs/INLINE.md", startLine, code, preamble, locals, mode, null, null);
 
     static DocSnippetErrors Compile(DocBlock block) => new(DocSnippetCompiler.Compile(block));
 
@@ -217,6 +217,42 @@ public class DocSnippetCompilerTests
         Assert.That(errors.IsEmpty, Is.False, "the negative control must fail or the gate proves nothing");
         Assert.That(errors.Ids, Does.Contain("CS1061"));
         Assert.That(errors.Locations, Has.Some.EqualTo($"{FixturePath}:13"));
+    }
+
+    [Test]
+    public void Compile_TypeFromADifferentPreamble_IsUnresolved()
+    {
+        var errors = Compile(Block("var e = new Employee();", preamble: "nn-models"));
+
+        Assert.That(errors.Ids, Does.Contain("CS0246"),
+            "a block annotated with one preamble must not see another preamble's types");
+    }
+
+    [Test]
+    public void Compile_TypeFromItsOwnPreamble_Resolves()
+    {
+        var errors = Compile(Block("var e = new Employee();", preamble: "row-types"));
+
+        Assert.That(errors.IsEmpty, Is.True,
+            "the paired control for the test above: the same body must compile under its own preamble"
+            + errors.Describe());
+    }
+
+    [Test]
+    public void Compile_StaticImportPreamble_ExposesTheStaticMember()
+    {
+        var errors = Compile(Block("Report(1.0, 2);", preamble: "streaming-as-stream"));
+
+        Assert.That(errors.IsEmpty, Is.True,
+            "the only preamble with a `using static` must actually emit it" + errors.Describe());
+    }
+
+    [Test]
+    public void Compile_UnknownPreambleName_Throws()
+    {
+        var block = Block("var x = 1;", preamble: "not-a-preamble");
+
+        Assert.Throws<InvalidDataException>(() => DocSnippetCompiler.Compile(block));
     }
 }
 

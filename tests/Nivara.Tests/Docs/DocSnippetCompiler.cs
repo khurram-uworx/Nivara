@@ -26,6 +26,10 @@ static class DocSnippetCompiler
     /// <c>OrderBy(..., NullOrdering.NullsFirst)</c> were both reported as missing members when they
     /// exist and compile. Widening the list is what makes the diagnostics trustworthy; it cannot
     /// mask a defect, because it only affects name resolution, never whether a member is present.
+    ///
+    /// Preamble stubs are deliberately absent: they are imported per block from the block's own
+    /// preamble (see <see cref="AddPreambleImports"/>), so an annotated block sees only its
+    /// preamble's types.
     /// </summary>
     static readonly string[] BaseUsings =
     [
@@ -62,9 +66,7 @@ static class DocSnippetCompiler
         "using Nivara.Storage;",
         "using Nivara.Streamix;",
         "using Nivara.Tensors;",
-        "using Nivara.Tests.Docs.Preambles;",
         "using NUnit.Framework;",
-        "using static Nivara.Tests.Docs.Preambles.SnippetReport;",
         "using Streamix;",
     ];
 
@@ -84,6 +86,7 @@ static class DocSnippetCompiler
         var body = hoisted.Region;
 
         var generated = new List<string>(BaseUsings);
+        AddPreambleImports(generated, block);
         if (hoisted.Directives.Length > 0)
         {
             generated.AddRange(hoisted.Directives);
@@ -143,6 +146,24 @@ static class DocSnippetCompiler
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Select(d => Map(d, block, bodyStart))
             .ToArray();
+    }
+
+    /// <summary>
+    /// Adds the block's preamble imports. A preamble name resolves to exactly one namespace, so a
+    /// block annotated with a preamble sees that preamble's types and none from another. An unknown
+    /// name is a harness defect, not a snippet defect, so it throws rather than emitting a directive
+    /// that would surface as a confusing cascade of unresolved names.
+    /// </summary>
+    static void AddPreambleImports(List<string> generated, DocBlock block)
+    {
+        if (block.PreambleName is not { Length: > 0 } name)
+            return;
+
+        if (!DocSnippetExtractor.Preambles.TryGetValue(name, out var import))
+            throw new InvalidDataException($"{block.Location} unknown preamble '{name}'");
+
+        generated.Add($"using {import.Namespace};");
+        generated.AddRange(import.StaticImports.Select(s => $"using static {s};"));
     }
 
     /// <summary>

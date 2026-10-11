@@ -358,7 +358,6 @@ await telemetry.ToFluxWithTimestamp("observed_at", chunkSize: 1000)
 **Mini-batch framing for online learning:**
 
 <!-- gate
-preamble: streaming-flux-training
 locals: QueryFrame query = Csv.ScanAsQueryFrame("training.csv"); int featureCount = 8;
 -->
 ```csharp
@@ -392,9 +391,6 @@ await query
 
 **Row-level reverse terminal (collect a row stream back to a frame):**
 
-<!-- gate
-preamble: streaming-flux-reverse
--->
 ```csharp
 await using var events = Csv.ScanAsQueryFrame("events.csv");
 var fluxRows = events.ToFluxRows(chunkSize: 5000);
@@ -406,7 +402,6 @@ using var result = await fluxRows.ToNivaraFrameAsync();
 **Reverse terminal (collect a frame stream back to a frame):**
 
 <!-- gate
-preamble: streaming-flux-frame
 locals: QueryFrame queryFrame = Csv.ScanAsQueryFrame("events.csv");
 -->
 ```csharp

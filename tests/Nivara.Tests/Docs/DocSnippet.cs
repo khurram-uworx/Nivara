@@ -83,25 +83,40 @@ static partial class DocSnippetExtractor
     ];
 
     /// <summary>
-    /// Every context name a gate comment may use. The types each name supplies are compiled in
-    /// <c>Preambles/SnippetStubs.cs</c>, so they cannot rot; this list is what makes the name itself
-    /// a checked contract rather than a comment, and it is asserted against actual usage in both
-    /// directions so a typo or a stale entry fails the gate.
+    /// What a preamble name resolves to: the namespace its types are declared in, plus any
+    /// <c>using static</c> imports the block needs. Resolution is data-driven so the name cannot
+    /// drift from the namespace it names.
     /// </summary>
-    internal static readonly string[] KnownPreambles =
-    [
-        "agent-null-tensor",
-        "agent-tensor-kernel",
-        "nn-models",
-        "row-types",
-        "streaming-as-stream",
-        "streaming-flux-basic",
-        "streaming-flux-frame",
-        "streaming-flux-publish",
-        "streaming-flux-reverse",
-        "streaming-flux-training",
-        "streaming-flux-window",
-    ];
+    /// <param name="Namespace">The one namespace a block annotated with the preamble imports.</param>
+    /// <param name="StaticImports">Fully-qualified types whose static members the block uses bare.</param>
+    internal sealed record PreambleImport(string Namespace, string[] StaticImports);
+
+    /// <summary>
+    /// Every context name a gate comment may use, mapped to the one namespace that supplies its
+    /// types. Each name resolves on its own, so a block annotated with a preamble sees that
+    /// preamble's types and none from another. A preamble that would supply no types is not listed
+    /// at all: a name that imports an empty namespace is decoration, not a bundle. The stub types
+    /// live under <c>Preambles/</c>, one file per namespace. This mapping is what makes the name a
+    /// checked contract rather than a comment.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, PreambleImport> Preambles =
+        new Dictionary<string, PreambleImport>(StringComparer.Ordinal)
+        {
+            ["nn-models"] = new("Nivara.Tests.Docs.Preambles.NnModels", []),
+            ["row-types"] = new("Nivara.Tests.Docs.Preambles.RowTypes", []),
+            ["streaming-as-stream"] = new(
+                "Nivara.Tests.Docs.Preambles.StreamingAsStream",
+                ["Nivara.Tests.Docs.Preambles.StreamingAsStream.SnippetReport"]),
+            ["streaming-flux-basic"] = new("Nivara.Tests.Docs.Preambles.StreamingFluxBasic", []),
+            ["streaming-flux-publish"] = new("Nivara.Tests.Docs.Preambles.StreamingFluxPublish", []),
+            ["streaming-flux-window"] = new("Nivara.Tests.Docs.Preambles.StreamingFluxWindow", []),
+        };
+
+    /// <summary>
+    /// The declared preamble names, ordered, so a test can assert them against actual usage in both
+    /// directions.
+    /// </summary>
+    internal static string[] KnownPreambles => [.. Preambles.Keys.Order(StringComparer.Ordinal)];
 
     /// <summary>
     /// Transient working documents left out of the scan. They are not reader-facing, and the plan file
