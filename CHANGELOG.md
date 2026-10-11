@@ -118,6 +118,17 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`qwen distill` init now uses the library's seedable Kaiming initializer (#577)** — the
+  sample-local `SeededKaimingUniform` added by #570 (which duplicated `bound = sqrt(6/fanIn)`)
+  is deleted. `RunDistill` builds one `new KaimingUniformInitializer<float>(seed)` shared across
+  the student's Hidden/Head and the baseline Head, so `--seed N` still reproduces the run with the
+  same draw order — and therefore the same `--seed 42` weights. The duplication existed only
+  because the library initializer drew from `Random.Shared` with no seedable path; #577 adds
+  `int? seed`/`Random` constructors to all seven initializers and a core reproducibility gate
+  (`NnTests.Initializer_SameSeed_ProducesIdenticalWeights`), so the sample mirror and its
+  no-automated-gate caveat are gone. Sample CLI only; the library side is the #577 constructor
+  additions.
+
 - **`NivaraInference` rejects `--teacher-examples` / `--seed` / `--force` outside `qwen distill` (#571)** —
   the three flags are parsed for every model but consumed only by `Qwen.RunDistill`, so `minilm --seed 7`
   was accepted and did nothing — the silent-acceptance failure mode #474 and #568 already closed for
@@ -139,6 +150,8 @@ All notable changes to Nivara are documented here. Released versions are publish
   `Random.Shared` and cannot be seeded without a new public constructor. The fix has no automated
   gate: `RunDistill` needs the (unshipped) Qwen2.5-0.5B checkpoint and the student types are private
   to the sample exe, so it is verified by release build only — the two-run trace diff was not run.
+  (Superseded by #577: the library initializer is now seedable, so this duplication and the
+  no-automated-gate caveat no longer apply.)
 
 - **`NivaraInference` rejects `--gpu` for models with no GPU path (#568)** — `--gpu` was parsed
   unconditionally but read only by the five `switch (modelType)` cases that have a `useGpu` branch,

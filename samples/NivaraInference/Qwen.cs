@@ -743,8 +743,8 @@ static class Qwen
 
         // ---- Train the student MLP (full-batch, inside Grad scope) ----
         Console.WriteLine("Training student MLP (full-batch, Adam 1e-3, 200 epochs)...");
-        var initRandom = new Random(seed);
-        using var student = new SentimentMLP(initRandom);
+        var init = new KaimingUniformInitializer<float>(seed);
+        using var student = new SentimentMLP(init);
         using var optimizer = new Adam<float>(learningRate: 1e-3f);
         optimizer.AddParameterGroup(student.GetParameters().Values);
         var lossFn = new CrossEntropyLoss<float>();
@@ -766,7 +766,7 @@ static class Qwen
 
         // ---- Linear-only baseline (4096 -> 2) ----
         Console.WriteLine("Training linear-only baseline (Linear 4096->2, Adam 1e-3, 200 epochs)...");
-        using var baseline = new LinearBaseline(initRandom);
+        using var baseline = new LinearBaseline(init);
         using var baselineOpt = new Adam<float>(learningRate: 1e-3f);
         baselineOpt.AddParameterGroup(baseline.GetParameters().Values);
         for (int epoch = 0; epoch < 200; epoch++)
@@ -987,41 +987,13 @@ static class Qwen
         return span[1] > span[0] ? 1 : 0;
     }
 
-    // Seeded Kaiming-uniform init. Mirrors the library's KaimingUniformInitializer<float>
-    // (uniform in [-bound, bound], bound = sqrt(6/fanIn)) but draws from the run's seed so
-    // --seed fixes the student weights. It lives in the sample because the library initializer
-    // draws from Random.Shared and cannot be seeded without a new public constructor.
-    sealed class SeededKaimingUniform : IInitializer<float>
-    {
-        readonly Random random;
-
-        public SeededKaimingUniform(Random random) => this.random = random;
-
-        public void Initialize(Parameter<float> parameter)
-        {
-            var existing = parameter.Tensor;
-            var shape = existing.Shape;
-            if (shape.Length < 2) return;
-
-            var bound = (float)Math.Sqrt(6.0 / shape[1]);
-            var data = new float[existing.Length];
-            for (int i = 0; i < data.Length; i++)
-                data[i] = (float)(random.NextDouble() * 2.0 - 1.0) * bound;
-
-            var tensor = ReverseGradTensor<float>.FromArray(data, existing.RequiresGrad);
-            tensor.Reshape(shape);
-            parameter.Tensor = tensor;
-        }
-    }
-
     sealed class SentimentMLP : Module<float>
     {
         public Linear<float> Hidden { get; }
         public Linear<float> Head { get; }
 
-        public SentimentMLP(Random random)
+        public SentimentMLP(IInitializer<float> init)
         {
-            var init = new SeededKaimingUniform(random);
             Hidden = new Linear<float>(FeatureDim, 64, weightInitializer: init);
             Head = new Linear<float>(64, 2, weightInitializer: init);
             RegisterModules(Hidden, Head);
@@ -1035,9 +1007,9 @@ static class Qwen
     {
         public Linear<float> Head { get; }
 
-        public LinearBaseline(Random random)
+        public LinearBaseline(IInitializer<float> init)
         {
-            Head = new Linear<float>(FeatureDim, 2, weightInitializer: new SeededKaimingUniform(random));
+            Head = new Linear<float>(FeatureDim, 2, weightInitializer: init);
             RegisterModules(Head);
         }
 
