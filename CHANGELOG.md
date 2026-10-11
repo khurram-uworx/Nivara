@@ -6,6 +6,20 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Seedable AutoDiff initializers (#577)** — all seven initializers
+  (`KaimingUniformInitializer<T>`, `KaimingNormalInitializer<T>`, `XavierUniformInitializer<T>`,
+  `XavierNormalInitializer<T>`, `NormalInitializer<T>`, `UniformInitializer<T>`,
+  `PyTorchDefaultInitializer<T>`) now expose `int? seed` and `Random` constructors, so a caller can
+  make module initialization reproducible: the same seed produces identical weights on the same
+  runtime, a different seed differs. The default (null seed / `Random.Shared`) behaviour is
+  unchanged. A seeded initializer holds its own RNG created once in the constructor, so reusing one
+  instance across layers advances a single deterministic stream (later layers are not
+  prefix-copies); the seeded instance is not thread-safe, matching `Sampler<T>`. The contract is
+  pinned in core by `NnTests.Initializer_SameSeed_ProducesIdenticalWeights` /
+  `Initializer_DifferentSeed_ProducesDifferentWeights`. `Random(int)` sequences are per-.NET-version;
+  no cross-version guarantee is implied. Seed plumbing consolidated into
+  `RandomGeneration.Create(int?)`, which `Sampler<T>` and `GenerateStandardNormal<T>` now share.
+
 - **Reachable streaming memory budget: `AsStream(NivaraExecutionContext)` (#514)** — `QueryFrame.AsStream`
   built its own execution context, so `NivaraExecutionContext.MemoryBudget` could never reach
   `StreamingExecutionStrategy` and the budget-to-chunk-size derivation (`CalculateChunkSize`) stayed

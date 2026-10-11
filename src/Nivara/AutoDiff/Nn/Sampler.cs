@@ -1,3 +1,4 @@
+using Nivara.Helpers;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -16,7 +17,7 @@ public sealed class Sampler<T> where T : struct, IFloatingPointIeee754<T>
     /// <param name="seed">Optional RNG seed; when null, a shared non-deterministic RNG is used</param>
     public Sampler(int? seed = null)
     {
-        rng = seed.HasValue ? new Random(seed.Value) : Random.Shared;
+        rng = RandomGeneration.Create(seed);
     }
 
     /// <summary>

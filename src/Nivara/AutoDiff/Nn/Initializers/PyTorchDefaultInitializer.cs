@@ -1,3 +1,4 @@
+using Nivara.Helpers;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Initializers;
@@ -9,8 +10,35 @@ namespace Nivara.AutoDiff.Nn.Initializers;
 /// </summary>
 public sealed class PyTorchDefaultInitializer<T> : IInitializer<T> where T : struct, IFloatingPointIeee754<T>
 {
-    /// <summary>A shared singleton instance.</summary>
+    /// <summary>A shared singleton instance drawing from <see cref="Random.Shared"/>.</summary>
     public static readonly PyTorchDefaultInitializer<T> Instance = new();
+
+    readonly Random random;
+
+    /// <summary>
+    /// Creates a PyTorch default initializer. A <paramref name="seed"/> makes initialization
+    /// reproducible: the same seed produces identical weights on the same runtime. A null seed
+    /// draws from <see cref="Random.Shared"/> (the current default behavior).
+    /// </summary>
+    /// <param name="seed">Optional RNG seed; when null, draws from <see cref="Random.Shared"/></param>
+    /// <remarks>
+    /// The seeded form holds its own <see cref="Random"/> and is not thread-safe; the null-seed
+    /// default uses <see cref="Random.Shared"/> and is thread-safe.
+    /// </remarks>
+    public PyTorchDefaultInitializer(int? seed = null)
+        : this(RandomGeneration.Create(seed))
+    {
+    }
+
+    /// <summary>
+    /// Creates a PyTorch default initializer drawing from the given RNG.
+    /// </summary>
+    /// <param name="random">The RNG to draw from; must not be null</param>
+    /// <remarks>Not thread-safe: the same instance must not be used concurrently.</remarks>
+    public PyTorchDefaultInitializer(Random random)
+    {
+        this.random = random ?? throw new ArgumentNullException(nameof(random));
+    }
 
     /// <summary>Initializes the parameter in place.</summary>
     /// <param name="parameter">The parameter to initialize</param>
@@ -22,7 +50,6 @@ public sealed class PyTorchDefaultInitializer<T> : IInitializer<T> where T : str
 
         var fanIn = shape[1];
         var bound = T.CreateChecked(1.0 / Math.Sqrt(fanIn));
-        var random = Random.Shared;
         var n = tensor.Length;
         var data = new T[n];
 
