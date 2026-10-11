@@ -48,7 +48,11 @@ no-regression gate — reach for them while working on the relevant area instead
 a throwaway harness:
 
 - `--dataset-test` — DatasetGenerator determinism/row-count/field-range validator
-  (IncidentLab data sets).
+  (IncidentLab data sets). Full run ~148 s here (Release, 2026-10-11). Its row-group
+  leg writes the full five-file dataset through `DatasetGenerator.GenerateFromRecordCount`;
+  folding the deleted private helper into that call (5,000 records → 5 parquet row
+  groups) was runtime-neutral — 148.12 s → 147.74 s across single runs, inside
+  run-to-run noise, since the ~34k extra rows sit against four 10M-row legs.
 - `--safetensors-mmap [<path>]` — A/B of the safetensors string-path load (#392):
   memory-mapped `SafeTensorsLoader.Read(path)` vs copy-into-`byte[]`
   `SafeTensorsLoader.Read(File.ReadAllBytes(path))`. Reports per-load ms, sampled
