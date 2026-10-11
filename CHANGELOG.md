@@ -104,6 +104,15 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraInference` rejects `--teacher-examples` / `--seed` / `--force` outside `qwen distill` (#571)** —
+  the three flags are parsed for every model but consumed only by `Qwen.RunDistill`, so `minilm --seed 7`
+  was accepted and did nothing — the silent-acceptance failure mode #474 and #568 already closed for
+  `--seq`/`--warmup`/`--iters` and `--gpu`. The parser now rejects any of the three unless the model is
+  `qwen` and the mode is `distill`, naming the flags and the requirement, and exits `1` before the weight
+  file is touched. Presence is tracked explicitly because the defaults (`0` / `42`) are indistinguishable
+  from explicit values. The `Qwen options:` help block gains a line stating the negative. Sample CLI only —
+  no `src/Nivara` change.
+
 - **`qwen distill` init is now driven by `--seed` (#570)** — `--seed N` was parsed, stored, and
   printed, but nothing consumed it: the student MLP and the linear baseline built their `Linear`
   layers through the default initializer, which draws from `Random.Shared`, so every run started

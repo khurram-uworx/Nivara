@@ -40,6 +40,9 @@ class Program
         bool useGpu = false;
         int teacherExamples = 0;
         int seed = 42;
+        bool teacherExamplesSet = false;
+        bool seedSet = false;
+        bool forceSet = false;
         string text = "";
         string? seqArg = null;
         string? warmupArg = null;
@@ -83,7 +86,10 @@ class Program
             else if (args[i] == "--no-kv-cache")
                 noKvCache = true;
             else if (args[i] == "--force")
+            {
                 force = true;
+                forceSet = true;
+            }
             else if (args[i] is "--teacher-examples" or "--seed")
             {
                 // The value is consumed even when it is nonsense, so the flag's value can never
@@ -100,8 +106,8 @@ class Program
                     return 1;
                 }
 
-                if (args[i] == "--teacher-examples") teacherExamples = parsed;
-                else seed = parsed;
+                if (args[i] == "--teacher-examples") { teacherExamples = parsed; teacherExamplesSet = true; }
+                else { seed = parsed; seedSet = true; }
                 i++;
             }
             else if (args[i] == "--synthetic-weights")
@@ -173,6 +179,7 @@ class Program
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
             Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
+            Console.WriteLine("  (--teacher-examples / --seed / --force are 'qwen distill' only; any other model or mode rejects them)");
             Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
@@ -229,6 +236,20 @@ class Program
         if (useGpu && modelType is not ("minilm" or "distilbert" or "distilbert_sst" or "modernbert" or "laya"))
         {
             Console.Error.WriteLine($"--gpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            return 1;
+        }
+
+        // Same reasoning as --seq: a flag scoped to one model's mode is a typo elsewhere, and a typo
+        // should cost a second rather than a 1.5 GB safetensors read.
+        if ((teacherExamplesSet || seedSet || forceSet) && modelType != "qwen")
+        {
+            Console.Error.WriteLine("--teacher-examples / --seed / --force are options of 'qwen distill' only; no other model takes them.");
+            return 1;
+        }
+
+        if ((teacherExamplesSet || seedSet || forceSet) && mode != "distill")
+        {
+            Console.Error.WriteLine($"--teacher-examples / --seed / --force need the 'distill' mode; got '{modelType}{(mode.Length > 0 ? " " + mode : "")}'. Drop the flag or add 'distill'.");
             return 1;
         }
 
