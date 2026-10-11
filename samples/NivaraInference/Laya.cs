@@ -290,7 +290,7 @@ public static class Laya
         }
     }
 
-    /// <summary><c>laya --gpu</c>. Both halves of the model on the accelerator.</summary>
+    /// <summary><c>laya --ilgpu</c>. Both halves of the model on the accelerator.</summary>
     public static int RunGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
     {
         var agent = LoadAgentConfig(modelDir);
@@ -337,12 +337,12 @@ public static class Laya
         Console.WriteLine("~1.0 on the shipped checkpoint regardless of input (upstream NandhaKishorM/laya#185,");
         Console.WriteLine("documented on the model card). Do not gate anything on it.");
         Console.WriteLine();
-        Console.WriteLine("Run 'laya --gpu compare' for the GPU-vs-CPU parity gate.");
+        Console.WriteLine("Run 'laya --ilgpu compare' for the GPU-vs-CPU parity gate.");
         return 0;
     }
 
     /// <summary>
-    /// <c>laya --gpu benchmark</c>. Padded to the config's <c>max_len</c> exactly as the CPU
+    /// <c>laya --ilgpu benchmark</c>. Padded to the config's <c>max_len</c> exactly as the CPU
     /// benchmark is, so the two tables are comparable question for question: the encoder is timed
     /// and the head on the same rows the CPU head is timed on, and the head's key-padding mask makes
     /// the padding a numeric no-op.

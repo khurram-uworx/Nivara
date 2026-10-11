@@ -274,7 +274,7 @@ internal static class GpuBuffers
         Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
         => tensors.TryGetValue(key, out var t)
             ? t
-            : throw new InvalidOperationException($"Missing weight key '{key}' for the --gpu forward.");
+            : throw new InvalidOperationException($"Missing weight key '{key}' for the --ilgpu forward.");
 
     // ── readback ──────────────────────────────────────────────────
 

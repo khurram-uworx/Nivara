@@ -176,8 +176,15 @@ class Program
                 syntheticWeights = true;
             else if (args[i] == "--plain")
                 plain = true;
-            else if (args[i] == "--gpu")
+            else if (args[i] == "--ilgpu")
                 useGpu = true;
+            else if (args[i] == "--gpu")
+            {
+                // The flag was renamed when the Silk path arrived (#616). Rejected rather than aliased
+                // so an old invocation fails loudly instead of silently running the ILGPU path.
+                Console.Error.WriteLine("--gpu was renamed --ilgpu; rerun with --ilgpu.");
+                return 1;
+            }
             else if (args[i] is "--seq" or "--warmup" or "--iters")
             {
                 // The value is consumed here even when it is nonsense, so a flag's value can never
@@ -228,14 +235,14 @@ class Program
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
-            Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
-            Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
-            Console.WriteLine("                     Any other model rejects --gpu (no GPU path).");
+            Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
+            Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
+            Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
-            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --gpu. The CPU path caps a");
-            Console.WriteLine("                   length at 2048 (dense [L, L] mask); --gpu has no such cap, and the");
+            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu. The CPU path caps a");
+            Console.WriteLine("                   length at 2048 (dense [L, L] mask); --ilgpu has no such cap, and the");
             Console.WriteLine("                   4096 row is the evidence. A length below the sentence truncates it.");
             Console.WriteLine("  --warmup N       Untimed passes before timing (default 1)");
             Console.WriteLine("  --iters N        Timed passes; the median is reported (default 3)");
@@ -318,7 +325,7 @@ class Program
 
         if (useGpu && !GpuModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--gpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
             return 1;
         }
 
@@ -380,7 +387,7 @@ class Program
 
         if (useGpu && !GpuModes[modelType].Contains(mode))
         {
-            Console.Error.WriteLine($"--gpu does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (GPU modes: default, benchmark, compare).");
+            Console.Error.WriteLine($"--ilgpu does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (GPU modes: default, benchmark, compare).");
             return 1;
         }
 
@@ -410,7 +417,7 @@ class Program
 
         if (useGpu && (bf16 || fp16))
         {
-            Console.Error.WriteLine("--gpu is F32-only in this phase: the ILGPU path has no bf16/fp16 kernels yet. Drop --precision bf16|fp16 (or --gpu) and rerun.");
+            Console.Error.WriteLine("--ilgpu is F32-only in this phase: the ILGPU path has no bf16/fp16 kernels yet. Drop --precision bf16|fp16 (or --ilgpu) and rerun.");
             return 1;
         }
 
@@ -613,7 +620,7 @@ class Program
                 lengths = [];
                 error = $"--seq {length} exceeds the CPU path's dense-mask limit of {ModernBertMasks.MaxDenseLength} " +
                         "(the cost is the [L, L] allocation, not the arithmetic). " +
-                        $"Run 'modernbert --gpu benchmark --seq {length}', where the band lives inside the kernel; " +
+                        $"Run 'modernbert --ilgpu benchmark --seq {length}', where the band lives inside the kernel; " +
                         "the CPU equivalent is #473.";
                 return false;
             }

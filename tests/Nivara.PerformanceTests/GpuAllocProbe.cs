@@ -9,7 +9,7 @@ namespace Nivara.PerformanceTests;
 /// ([docs/LAYA.md](../../docs/LAYA.md), "Performance" — the memory leg).
 ///
 /// Laya's checkpoint is 421,293,830 F16 parameters, but the GPU path is F32-only
-/// (<c>--gpu</c> rejects bf16/fp16), so an F32 working set needs
+/// (<c>--ilgpu</c> rejects bf16/fp16), so an F32 working set needs
 /// <c>421,293,830 * 4 B = 1.685 GB</c> of device buffers. Every published GPU row in
 /// <c>samples/NivaraInference/README.md</c> is 66-110M parameters, i.e. 0.26-0.44 GB — so
 /// this is a 4-6x jump beyond anything already known to work on this device, and it is the

@@ -12,7 +12,7 @@ namespace Nivara.Tests.Inference;
 /// <para>
 /// <b>Coverage.</b> Every reject the CLI owns is asserted here: the <c>--seq</c>/<c>--warmup</c>/
 /// <c>--iters</c> scope (#474), the <c>--precision</c>/<c>--seed</c>/<c>--teacher-examples</c> values
-/// (#479), the <c>--gpu</c> model scope (#568), the <c>--teacher-examples</c>/<c>--seed</c>/
+/// (#479), the <c>--ilgpu</c> model scope (#568), the <c>--teacher-examples</c>/<c>--seed</c>/
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
@@ -91,15 +91,15 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void Gpu_OnModelWithoutGpuPath_Rejected() =>
-        AssertRejected(Run("smollm", "--gpu"), "--gpu is not supported for 'smollm'");
+        AssertRejected(Run("smollm", "--ilgpu"), "--ilgpu is not supported for 'smollm'");
 
     [Test]
     public void Gpu_RejectedBeforeModelFileLookup()
     {
-        CliResult result = Run("qwen", "--gpu");
+        CliResult result = Run("qwen", "--ilgpu");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
-            "the --gpu guard must run before the model-file check; 'qwen' weights are never present");
-        AssertRejected(result, "--gpu is not supported for 'qwen'");
+            "the --ilgpu guard must run before the model-file check; 'qwen' weights are never present");
+        AssertRejected(result, "--ilgpu is not supported for 'qwen'");
     }
 
     [Test]
@@ -231,7 +231,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void GpuPrecisionCombination_Rejected() =>
-        AssertRejected(Run("minilm", "--gpu", "--precision", "bf16"), "--gpu is F32-only in this phase");
+        AssertRejected(Run("minilm", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
 
     [Test]
     public void GpuUnsupportedMode_Rejected()
@@ -242,6 +242,14 @@ public class InferenceCliArgumentTests
                 AssertRejected(Run(args), expected);
         });
     }
+
+    /// <summary>
+    /// The flag's migration contract (#616): the pre-Silk name is rejected with the new name named,
+    /// not silently aliased, so an old invocation cannot quietly keep running the ILGPU path.
+    /// </summary>
+    [Test]
+    public void GpuRenamedFlag_RejectedWithNewName() =>
+        AssertRejected(Run("minilm", "--gpu"), "--gpu was renamed --ilgpu");
 
     /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
@@ -333,9 +341,9 @@ public class InferenceCliArgumentTests
 
     static readonly (string[] Args, string Expected)[] GpuModeCases =
     [
-        (["minilm", "--gpu", "similarity"], "--gpu does not support mode 'similarity' for 'minilm'"),
-        (["distilbert_sst", "--gpu", "predict"], "--gpu does not support mode 'predict' for 'distilbert_sst'"),
-        (["modernbert", "--gpu", "compare_diag"], "--gpu does not support mode 'compare_diag' for 'modernbert'"),
+        (["minilm", "--ilgpu", "similarity"], "--ilgpu does not support mode 'similarity' for 'minilm'"),
+        (["distilbert_sst", "--ilgpu", "predict"], "--ilgpu does not support mode 'predict' for 'distilbert_sst'"),
+        (["modernbert", "--ilgpu", "compare_diag"], "--ilgpu does not support mode 'compare_diag' for 'modernbert'"),
     ];
 
     static readonly string[][] AcceptedQwenCases =

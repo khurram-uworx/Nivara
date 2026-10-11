@@ -86,7 +86,7 @@ namespace Nivara.Tests.Gpu;
 /// unhostable run is a structural outcome, not a numeric one. Before this file there was no
 /// automated test that ran this kernel at all: <c>GpuElementwiseParityTests</c> calls only
 /// host-side scalar helpers and <c>SharedMemoryAllocationTests</c> reads IL, so the only real gate
-/// was end-to-end <c>modernbert --gpu compare</c>, which needs both weights and a GPU.
+/// was end-to-end <c>modernbert --ilgpu compare</c>, which needs both weights and a GPU.
 /// </para>
 /// </remarks>
 [TestFixture]

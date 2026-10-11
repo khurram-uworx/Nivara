@@ -9,7 +9,7 @@
 ## 1. Where we are — milestone 1 done
 
 DistilBERT GPU first scenario shipped on branch `khurram/distilbert-gpu`
-(**PR #436**, open): `distilbert --gpu` / `distilbert_sst --gpu` via ILGPU 1.5.3
+(**PR #436**, open): `distilbert --ilgpu` / `distilbert_sst --ilgpu` via ILGPU 1.5.3
 (F32-only), sample-scoped (no `src/Nivara` / `Nivara.Extensions` / `Nivara.Gpu`
 changes), correctness gates PASS, measured on AC power.
 
