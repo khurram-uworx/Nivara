@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn.Initializers;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -25,13 +26,15 @@ public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, IF
     /// <param name="stride">Stride of the depthwise convolution</param>
     /// <param name="padding">Zero padding of the depthwise convolution</param>
     /// <param name="useBias">Whether the pointwise stage includes a bias</param>
+    /// <param name="weightInitializer">Optional custom weight initializer forwarded to both the depthwise and pointwise convolutions (defaults to the built-in fixed-seed draw)</param>
     public DepthwiseSeparableConv2d(
         int inChannels,
         int outChannels,
         int kernelSize,
         int stride = 1,
         int padding = 0,
-        bool useBias = true)
+        bool useBias = true,
+        IInitializer<T>? weightInitializer = null)
     {
         if (inChannels <= 0) throw new ArgumentOutOfRangeException(nameof(inChannels));
         if (outChannels <= 0) throw new ArgumentOutOfRangeException(nameof(outChannels));
@@ -40,12 +43,14 @@ public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, IF
         depthwise = new Conv2d<T>(
             inChannels, inChannels, kernelSize,
             stride: stride, padding: padding,
-            bias: false, groups: inChannels);
+            bias: false, groups: inChannels,
+            weightInitializer: weightInitializer);
 
         pointwise = new Conv2d<T>(
             inChannels, outChannels, 1,
             stride: 1, padding: 0,
-            bias: useBias);
+            bias: useBias,
+            weightInitializer: weightInitializer);
 
         RegisterModules(depthwise, pointwise);
     }
