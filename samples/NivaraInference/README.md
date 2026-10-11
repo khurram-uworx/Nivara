@@ -222,6 +222,8 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu be
 
 These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --ilgpu benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1b.
 
+The MiniLM table above is the AC-powered `--ilgpu` baseline. The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+
 See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
 
 ## Sample data

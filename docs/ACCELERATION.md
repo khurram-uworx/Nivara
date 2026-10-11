@@ -15,7 +15,7 @@ Related: probe verdicts in [docs/ILGPU.md](ILGPU.md), backend case studies in `t
 
 # GPU Acceleration — ILGPU on Intel Arc
 
-Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436, MiniLM via `khurram/minilm-gpu`, ModernBERT via issue #449 on `khurram/449`). A second, hand-authored OpenCL backend (`--silk`, Silk.NET) covers MiniLM only and is gated but not yet measured — see "Second OpenCL backend" under §1.
+Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436, MiniLM via `khurram/minilm-gpu`, ModernBERT via issue #449 on `khurram/449`). A second, hand-authored OpenCL backend (`--silk`, Silk.NET) covers MiniLM only; it is gated, and given an informal battery, same-session A/B against ILGPU (no separation) — see "Second OpenCL backend" under §1.
 
 ## 1. Measured results
 
@@ -111,7 +111,17 @@ probes — on a real model rather than on microkernels.
   the three GEMMs to byte-identity against ILGPU and the remaining kernels to the model's numeric
   bound; `minilm --silk compare` is the end-to-end gate (`Silk` hidden vs the same in-process CPU
   forward at the `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` bound, plus pooled-embedding cosine ≥ 0.9999).
-  `InferenceCliArgumentTests` pins the new rejects. No performance figures are claimed here yet.
+  `InferenceCliArgumentTests` pins the new rejects.
+- **Informal A/B (battery; both legs on battery, same session).** The `--silk-kernels` gate runs the
+  ILGPU originals and the Silk kernels **in one process**, so its timing column compares the two
+  backends under one clock and one power state; a back-to-back `minilm --silk benchmark` /
+  `minilm --ilgpu benchmark` pair (same 3-warmup + 10-timed protocol) compares the whole forward.
+  Across two gate runs the per-kernel ratio (Silk / ILGPU) fell in **0.79–1.19** — no kernel was
+  consistently slower, and the two single cells that left the x0.8..x1.2 band (one per run) swap
+  sides. The whole forward averaged **29.5 ms (Silk) vs 31.4 ms (ILGPU), ≈0.94×**. Read these as
+  "no separation", not as rows to quote: they are **battery** numbers, the gate's timing column is
+  explicitly *not a verdict*, and the absolute milliseconds are not comparable to the AC-powered §1
+  table.
 
 ## 2. What shipped — architecture and decisions
 

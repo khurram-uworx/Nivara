@@ -19,7 +19,9 @@ All notable changes to Nivara are documented here. Released versions are publish
   encoder hidden state. The three Row4 GEMMs are held to byte-identity against ILGPU and the remaining
   kernels to the model's numeric bound by `dotnet run --project tests/Nivara.PerformanceTests --
   --silk-kernels`; `minilm --silk compare` is the end-to-end gate; `InferenceCliArgumentTests` pins the
-  new rejects. Sample-side only — no `src/Nivara` change.
+  new rejects. An informal **battery**, same-session A/B against ILGPU showed no separation (whole
+  forward ≈0.94×, per-kernel 0.79–1.19×, both backends measured under one clock and power state); the
+  AC-powered §1 table is unchanged. Sample-side only — no `src/Nivara` change.
 
 - **`VAE<T>` accepts custom weight/bias initializers (#583)** — the constructor gained optional
   `IInitializer<T>? weightInitializer` / `biasInitializer` parameters, forwarded to every encoder and
