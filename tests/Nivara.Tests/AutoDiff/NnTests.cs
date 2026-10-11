@@ -414,6 +414,79 @@ public class NnTests
         }
     }
 
+    [TestCaseSource(nameof(SeededInitializerFactories))]
+    public void Initializer_SameSeed_ProducesIdenticalWeights(Func<int, IInitializer<float>> factory)
+    {
+        var first = SnapshotWeights(factory(1234));
+        var second = SnapshotWeights(factory(1234));
+
+        Assert.That(second, Is.EqualTo(first));
+    }
+
+    [TestCaseSource(nameof(SeededInitializerFactories))]
+    public void Initializer_DifferentSeed_ProducesDifferentWeights(Func<int, IInitializer<float>> factory)
+    {
+        var first = SnapshotWeights(factory(1));
+        var second = SnapshotWeights(factory(2));
+
+        Assert.That(second, Is.Not.EqualTo(first));
+    }
+
+    [Test]
+    public void Initializer_SeededConstructor_MatchesExplicitRandom()
+    {
+        var seeded = SnapshotWeights(new KaimingUniformInitializer<float>(seed: 1234));
+        var random = SnapshotWeights(new KaimingUniformInitializer<float>(new Random(1234)));
+
+        Assert.That(random, Is.EqualTo(seeded));
+    }
+
+    [Test]
+    public void Initializer_SharedRandom_AdvancesSingleStreamAcrossInstances()
+    {
+        var rng = new Random(11);
+        var first = SnapshotWeights(new UniformInitializer<float>(rng));
+        var second = SnapshotWeights(new UniformInitializer<float>(rng));
+
+        // The shared RNG advances across the two initializers; the second is not a prefix-copy.
+        Assert.That(second, Is.Not.EqualTo(first));
+    }
+
+    [Test]
+    public void Initializer_ReusedInstance_ContinuesSingleStream()
+    {
+        var init = new NormalInitializer<float>(seed: 42);
+        var first = SnapshotWeights(init);
+        var second = SnapshotWeights(init);
+
+        // The RNG is created once in the constructor, so a second Initialize continues the
+        // stream instead of restarting it.
+        Assert.That(second, Is.Not.EqualTo(first));
+    }
+
+    static float[] SnapshotWeights(IInitializer<float> init)
+    {
+        var param = new Parameter<float>("weights", new float[3 * 4], requiresGrad: true);
+        param.Tensor.Reshape(3, 4);
+        init.Initialize(param);
+
+        var result = new float[param.Tensor.Length];
+        for (int i = 0; i < result.Length; i++)
+            result[i] = param.Tensor[i];
+        return result;
+    }
+
+    static IEnumerable<TestCaseData> SeededInitializerFactories()
+    {
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new KaimingUniformInitializer<float>(seed)));
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new KaimingNormalInitializer<float>(seed)));
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new XavierUniformInitializer<float>(seed)));
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new XavierNormalInitializer<float>(seed)));
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new PyTorchDefaultInitializer<float>(seed)));
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new NormalInitializer<float>(seed)));
+        yield return new TestCaseData(new Func<int, IInitializer<float>>(seed => new UniformInitializer<float>(seed)));
+    }
+
     [Test]
     public void Sequential_CustomInitForAllLayers()
     {

@@ -2,6 +2,7 @@ using Microsoft.ML.Tokenizers;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
@@ -742,7 +743,8 @@ static class Qwen
 
         // ---- Train the student MLP (full-batch, inside Grad scope) ----
         Console.WriteLine("Training student MLP (full-batch, Adam 1e-3, 200 epochs)...");
-        using var student = new SentimentMLP();
+        var init = new KaimingUniformInitializer<float>(seed);
+        using var student = new SentimentMLP(init);
         using var optimizer = new Adam<float>(learningRate: 1e-3f);
         optimizer.AddParameterGroup(student.GetParameters().Values);
         var lossFn = new CrossEntropyLoss<float>();
@@ -764,7 +766,7 @@ static class Qwen
 
         // ---- Linear-only baseline (4096 -> 2) ----
         Console.WriteLine("Training linear-only baseline (Linear 4096->2, Adam 1e-3, 200 epochs)...");
-        using var baseline = new LinearBaseline();
+        using var baseline = new LinearBaseline(init);
         using var baselineOpt = new Adam<float>(learningRate: 1e-3f);
         baselineOpt.AddParameterGroup(baseline.GetParameters().Values);
         for (int epoch = 0; epoch < 200; epoch++)
@@ -841,7 +843,7 @@ static class Qwen
         else
             Console.WriteLine("  DistilBERT    n/a   [distilbert_sst weights not present; supply samples/data/distilbert_sst to compare]");
         Console.WriteLine();
-        Console.WriteLine($"Seed (accepted for future use; Kaiming init is unseeded): {seed}");
+        Console.WriteLine($"Seed: {seed} (student + baseline Kaiming init)");
         Console.WriteLine();
         return 0;
     }
@@ -990,10 +992,10 @@ static class Qwen
         public Linear<float> Hidden { get; }
         public Linear<float> Head { get; }
 
-        public SentimentMLP()
+        public SentimentMLP(IInitializer<float> init)
         {
-            Hidden = new Linear<float>(FeatureDim, 64);
-            Head = new Linear<float>(64, 2);
+            Hidden = new Linear<float>(FeatureDim, 64, weightInitializer: init);
+            Head = new Linear<float>(64, 2, weightInitializer: init);
             RegisterModules(Hidden, Head);
         }
 
@@ -1005,9 +1007,9 @@ static class Qwen
     {
         public Linear<float> Head { get; }
 
-        public LinearBaseline()
+        public LinearBaseline(IInitializer<float> init)
         {
-            Head = new Linear<float>(FeatureDim, 2);
+            Head = new Linear<float>(FeatureDim, 2, weightInitializer: init);
             RegisterModules(Head);
         }
 

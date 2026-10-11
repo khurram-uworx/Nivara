@@ -6,6 +6,20 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Seedable AutoDiff initializers (#577)** — all seven initializers
+  (`KaimingUniformInitializer<T>`, `KaimingNormalInitializer<T>`, `XavierUniformInitializer<T>`,
+  `XavierNormalInitializer<T>`, `NormalInitializer<T>`, `UniformInitializer<T>`,
+  `PyTorchDefaultInitializer<T>`) now expose `int? seed` and `Random` constructors, so a caller can
+  make module initialization reproducible: the same seed produces identical weights on the same
+  runtime, a different seed differs. The default (null seed / `Random.Shared`) behaviour is
+  unchanged. A seeded initializer holds its own RNG created once in the constructor, so reusing one
+  instance across layers advances a single deterministic stream (later layers are not
+  prefix-copies); the seeded instance is not thread-safe, matching `Sampler<T>`. The contract is
+  pinned in core by `NnTests.Initializer_SameSeed_ProducesIdenticalWeights` /
+  `Initializer_DifferentSeed_ProducesDifferentWeights`. `Random(int)` sequences are per-.NET-version;
+  no cross-version guarantee is implied. Seed plumbing consolidated into
+  `RandomGeneration.Create(int?)`, which `Sampler<T>` and `GenerateStandardNormal<T>` now share.
+
 - **Reachable streaming memory budget: `AsStream(NivaraExecutionContext)` (#514)** — `QueryFrame.AsStream`
   built its own execution context, so `NivaraExecutionContext.MemoryBudget` could never reach
   `StreamingExecutionStrategy` and the budget-to-chunk-size derivation (`CalculateChunkSize`) stayed
@@ -103,6 +117,70 @@ All notable changes to Nivara are documented here. Released versions are publish
   place through the internal `AsWritableSpan()`. No behavior change.
 
 ### Fixed
+
+- **`NivaraInference` rejects the last four inert options: Qwen-only `--plain`/`--text`/`--no-kv-cache`
+  and F32 `--simd-widen` (#580)** — `--plain` was parsed for every model but consumed only by `qwen`;
+  `--text` and `--no-kv-cache` were read only by the qwen prompt paths (`Qwen.RunPlain` /
+  `Qwen.RunTools`); and `--simd-widen` changes only a bf16/fp16 run (`WidenPrimitives.ShouldWiden` /
+  `TensorsHelper.DotFor` gate on the narrow type). So `minilm --plain`, `minilm --text "…"`,
+  `minilm --no-kv-cache`, and `minilm --simd-widen` all accepted the flag and ran identically — the
+  silent-acceptance failure mode #474/#568/#571 already closed for `--seq`/`--warmup`/`--iters`,
+  `--gpu`, and the distill-only flags. The parser now rejects each one — naming the flag and the
+  requirement, exiting `1` before the weight file is touched — unless the consuming path is selected:
+  `--plain` needs `qwen`; `--text` / `--no-kv-cache` need the qwen prompt path (`qwen`, `qwen tools`,
+  or any non-`benchmark`/non-`distill` mode, without `--synthetic-weights`; `--no-kv-cache`
+  additionally without `--plain`); `--simd-widen` needs `--precision bf16|fp16`. The `--simd-widen`
+  scope is precision-based rather than SmolLM-only because the flag governs the widen-compute-narrow
+  kernels for every narrow-float model — including the documented `distilbert_sst --precision bf16`
+  lever. `--text` presence is now tracked explicitly (the `""` default hid an explicit value) and a
+  trailing `--text` with no value is rejected instead of falling through and being read as a mode
+  name. Both help blocks gain negative lines. Sample CLI only — no `src/Nivara` change. The two
+  adjacent silent-acceptance leftovers are tracked as #586 (vision models ignore
+  `--precision bf16|fp16`) and #587 (an unrecognised `qwen` mode silently runs the tools path).
+
+- **`qwen distill` init now uses the library's seedable Kaiming initializer (#577)** — the
+  sample-local `SeededKaimingUniform` added by #570 (which duplicated `bound = sqrt(6/fanIn)`)
+  is deleted. `RunDistill` builds one `new KaimingUniformInitializer<float>(seed)` shared across
+  the student's Hidden/Head and the baseline Head, so `--seed N` still reproduces the run with the
+  same draw order — and therefore the same `--seed 42` weights. The duplication existed only
+  because the library initializer drew from `Random.Shared` with no seedable path; #577 adds
+  `int? seed`/`Random` constructors to all seven initializers and a core reproducibility gate
+  (`NnTests.Initializer_SameSeed_ProducesIdenticalWeights`), so the sample mirror and its
+  no-automated-gate caveat are gone. Sample CLI only; the library side is the #577 constructor
+  additions.
+
+- **`NivaraInference` rejects `--teacher-examples` / `--seed` / `--force` outside `qwen distill` (#571)** —
+  the three flags are parsed for every model but consumed only by `Qwen.RunDistill`, so `minilm --seed 7`
+  was accepted and did nothing — the silent-acceptance failure mode #474 and #568 already closed for
+  `--seq`/`--warmup`/`--iters` and `--gpu`. The parser now rejects any of the three unless the model is
+  `qwen` and the mode is `distill`, naming the flags and the requirement, and exits `1` before the weight
+  file is touched. Presence is tracked explicitly because the defaults (`0` / `42`) are indistinguishable
+  from explicit values. The `Qwen options:` help block gains a line stating the negative. Sample CLI only —
+  no `src/Nivara` change.
+
+- **`qwen distill` init is now driven by `--seed` (#570)** — `--seed N` was parsed, stored, and
+  printed, but nothing consumed it: the student MLP and the linear baseline built their `Linear`
+  layers through the default initializer, which draws from `Random.Shared`, so every run started
+  from different weights while the status line claimed the seed was merely "accepted for future
+  use". `RunDistill` now creates one `Random(seed)` and passes it to a sample-local Kaiming-uniform
+  initializer for both models (same distribution as the library's `KaimingUniformInitializer<float>`:
+  uniform in `[-bound, bound]`, `bound = sqrt(6/fanIn)`), so a given `--seed` — default `42`, now
+  stated in the help — reproduces the run. Sample CLI only — no `src/Nivara` change; the Kaiming
+  formula is deliberately duplicated in the sample because the library initializer draws from
+  `Random.Shared` and cannot be seeded without a new public constructor. The fix has no automated
+  gate: `RunDistill` needs the (unshipped) Qwen2.5-0.5B checkpoint and the student types are private
+  to the sample exe, so it is verified by release build only — the two-run trace diff was not run.
+  (Superseded by #577: the library initializer is now seedable, so this duplication and the
+  no-automated-gate caveat no longer apply.)
+
+- **`NivaraInference` rejects `--gpu` for models with no GPU path (#568)** — `--gpu` was parsed
+  unconditionally but read only by the five `switch (modelType)` cases that have a `useGpu` branch,
+  so `mobilenet_v2`/`resnet18`/`smollm`/`qwen` accepted the flag and silently ran on the CPU: the one
+  option on this surface that could be passed and do nothing. Every other rejected option fails
+  loudly. The parser now rejects it, before the weight file is touched, for any model outside
+  `minilm / distilbert / distilbert_sst / modernbert / laya`, naming the GPU-capable set and exiting
+  `1`. The guard is a positive allow-list, so it stays in step with the dispatch switch, and the
+  `--gpu` help block gains a line stating the negative. Sample CLI only — no `src/Nivara` change.
 
 - **`DatasetGenerator` wrote trailing default rows (#563)** — `GenerateFromRecordCount` sized
   every request array to the requested record count but filled only `floor(totalRecords / 30) * 30`

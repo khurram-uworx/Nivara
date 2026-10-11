@@ -1,11 +1,9 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
-using System.Numerics;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -1004,18 +1002,5 @@ public class OptimizerTests
         var reloadedState = restored.StateDict();
         Assert.That(reloadedState.Keys, Is.EquivalentTo(state.Keys));
         Assert.That(reloadedState["velocity_0"], Is.EqualTo(state["velocity_0"]).Within(1e-6f));
-    }
-
-    sealed class DeterministicInit<T> : IInitializer<T> where T : struct, IFloatingPointIeee754<T>
-    {
-        public void Initialize(Parameter<T> parameter)
-        {
-            var tensor = parameter.Tensor;
-            var data = new T[tensor.Length];
-            for (int i = 0; i < data.Length; i++)
-                data[i] = T.CreateChecked(0.05) * T.CreateChecked(i + 1);
-            var column = NivaraColumn<T>.CreateFromOwnedArray(data);
-            parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, tensor.Shape);
-        }
     }
 }

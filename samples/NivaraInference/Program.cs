@@ -40,7 +40,11 @@ class Program
         bool useGpu = false;
         int teacherExamples = 0;
         int seed = 42;
+        bool teacherExamplesSet = false;
+        bool seedSet = false;
+        bool forceSet = false;
         string text = "";
+        bool textSet = false;
         string? seqArg = null;
         string? warmupArg = null;
         string? itersArg = null;
@@ -83,7 +87,10 @@ class Program
             else if (args[i] == "--no-kv-cache")
                 noKvCache = true;
             else if (args[i] == "--force")
+            {
                 force = true;
+                forceSet = true;
+            }
             else if (args[i] is "--teacher-examples" or "--seed")
             {
                 // The value is consumed even when it is nonsense, so the flag's value can never
@@ -100,8 +107,8 @@ class Program
                     return 1;
                 }
 
-                if (args[i] == "--teacher-examples") teacherExamples = parsed;
-                else seed = parsed;
+                if (args[i] == "--teacher-examples") { teacherExamples = parsed; teacherExamplesSet = true; }
+                else { seed = parsed; seedSet = true; }
                 i++;
             }
             else if (args[i] == "--synthetic-weights")
@@ -126,9 +133,18 @@ class Program
                 else itersArg = value;
                 i++;
             }
-            else if (args[i] == "--text" && i + 1 < args.Length)
+            else if (args[i] == "--text")
             {
+                // The value is consumed even when the flag is last, so a missing value can never
+                // fall through to the positional-mode branch below and be read as a mode name.
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--text needs a value.");
+                    return 1;
+                }
+
                 text = args[i + 1];
+                textSet = true;
                 i++;
             }
             else if (mode.Length == 0)
@@ -153,6 +169,7 @@ class Program
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --gpu              Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --gpu with --precision bf16|fp16 to trigger the reject path)");
+            Console.WriteLine("                     Any other model rejects --gpu (no GPU path).");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
@@ -171,7 +188,9 @@ class Program
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
-            Console.WriteLine("  --seed N           Distill: seed accepted for future use (Kaiming init is unseeded)");
+            Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
+            Console.WriteLine("  (--teacher-examples / --seed / --force are 'qwen distill' only; any other model or mode rejects them)");
+            Console.WriteLine("  (--plain / --text / --no-kv-cache are 'qwen' options only; --no-kv-cache is the 'qwen tools' path only)");
             Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
@@ -183,6 +202,7 @@ class Program
             Console.WriteLine("  --simd-widen      Enable widen-compute-narrow SIMD kernels for BFloat16/Half");
             Console.WriteLine("                    (NivaraPrimitives.UseWidenSimd). A/B against scalar: run");
             Console.WriteLine("                    once without and once with this flag, or use the 'ab' mode.");
+            Console.WriteLine("                    (a no-op for --precision f32; only a bf16/fp16 run changes)");
             return 1;
         }
 
@@ -223,6 +243,59 @@ class Program
                 Console.Error.WriteLine($"--iters expects a positive integer; got '{itersArg}'.");
                 return 1;
             }
+        }
+
+        if (useGpu && modelType is not ("minilm" or "distilbert" or "distilbert_sst" or "modernbert" or "laya"))
+        {
+            Console.Error.WriteLine($"--gpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            return 1;
+        }
+
+        // Same reasoning as --seq: a flag scoped to one model's mode is a typo elsewhere, and a typo
+        // should cost a second rather than a 1.5 GB safetensors read.
+        if ((teacherExamplesSet || seedSet || forceSet) && modelType != "qwen")
+        {
+            Console.Error.WriteLine("--teacher-examples / --seed / --force are options of 'qwen distill' only; no other model takes them.");
+            return 1;
+        }
+
+        if ((teacherExamplesSet || seedSet || forceSet) && mode != "distill")
+        {
+            Console.Error.WriteLine($"--teacher-examples / --seed / --force need the 'distill' mode; got '{modelType}{(mode.Length > 0 ? " " + mode : "")}'. Drop the flag or add 'distill'.");
+            return 1;
+        }
+
+        // #580: the last options parsed for every model but consumed on one path. Same reasoning as
+        // #571: a flag scoped to one model's mode is a typo elsewhere, and a typo should cost a
+        // second rather than a 1.5 GB safetensors read.
+        if (plain && !isQwen)
+        {
+            Console.Error.WriteLine("--plain is a 'qwen' option only: no other model has a plain-prompt surface.");
+            return 1;
+        }
+
+        // --text and --no-kv-cache ride the qwen prompt paths: RunPlain / RunTools are reached for
+        // 'qwen', 'qwen tools' and any other mode that is not 'distill' / 'benchmark'; RunTools is
+        // the only consumer of the KV-cache switch.
+        bool qwenPromptPath = isQwen && !syntheticWeights && mode is not ("distill" or "benchmark");
+        string got = $"{modelType}{(mode.Length > 0 ? " " + mode : "")}";
+
+        if (textSet && !qwenPromptPath)
+        {
+            Console.Error.WriteLine($"--text is a 'qwen' / 'qwen tools' prompt option only; got '{got}'.");
+            return 1;
+        }
+
+        if (noKvCache && (!qwenPromptPath || plain))
+        {
+            Console.Error.WriteLine($"--no-kv-cache is the 'qwen tools' path only; got '{got}'.");
+            return 1;
+        }
+
+        if (simdWiden && precision == "f32")
+        {
+            Console.Error.WriteLine("--simd-widen only changes a bf16/fp16 run (it enables the widen-compute-narrow SIMD kernels for BFloat16/Half); an F32 run is unchanged. Add --precision bf16|fp16 or drop the flag.");
+            return 1;
         }
 
         string modelDir = Path.Combine("samples", "data", resolvedType);

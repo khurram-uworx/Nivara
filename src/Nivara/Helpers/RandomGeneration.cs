@@ -4,9 +4,16 @@ using System.Numerics;
 
 static class RandomGeneration
 {
+    /// <summary>
+    /// Returns a new seeded <see cref="Random"/>, or <see cref="Random.Shared"/> when
+    /// <paramref name="seed"/> is null.
+    /// </summary>
+    /// <param name="seed">Optional RNG seed; null selects the process-global shared RNG</param>
+    public static Random Create(int? seed) => seed.HasValue ? new Random(seed.Value) : Random.Shared;
+
     public static T[] GenerateStandardNormal<T>(int n, int? seed = null) where T : struct, INumber<T>
     {
-        var rng = seed.HasValue ? new Random(seed.Value) : Random.Shared;
+        var rng = Create(seed);
         var result = new T[n];
         for (int i = 0; i < n; i++)
         {
