@@ -26,7 +26,7 @@ namespace Nivara.Tests.Inference;
 [TestFixture]
 public class InferenceCliArgumentTests
 {
-    readonly record struct CliResult(int ExitCode, string StdErr);
+    readonly record struct CliResult(int ExitCode, string StdOut, string StdErr);
 
     const int ProcessTimeoutMs = 30_000;
     const string ModelLookupMessage = "Model file not found";
@@ -161,6 +161,26 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("bogus"), "Unknown model type: bogus");
 
     /// <summary>
+    /// The usage path: no model, or <c>-h</c>/<c>--help</c>, prints the usage block to stdout and
+    /// exits non-zero. stdout, not stderr — the usage is not an error message.
+    /// </summary>
+    [Test]
+    public void Help_AndEmptyModel_PrintUsageAndExitNonZero()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach (string[] args in HelpCases)
+            {
+                CliResult result = Run(args);
+                Assert.That(result.ExitCode, Is.EqualTo(1),
+                    $"'{string.Join(' ', args)}' should exit 1");
+                Assert.That(result.StdOut, Does.Contain("Usage: NivaraInference"),
+                    $"'{string.Join(' ', args)}' should print the usage block");
+            }
+        });
+    }
+
+    /// <summary>
     /// #587, generalised to every model: an unrecognised mode used to fall through to the model's
     /// default runner (the vision models printed "Image not found" and exited 0). The vision message
     /// names the image-path escape hatch; every other model lists its keywords.
@@ -250,6 +270,10 @@ public class InferenceCliArgumentTests
     }
 
     [Test]
+    public void Text_MissingValue_Rejected() =>
+        AssertRejected(Run("qwen", "--text"), "--text needs a value.");
+
+    [Test]
     public void PlainAndPromptFlags_OutsideScope_Rejected()
     {
         AssertRejected(Run("minilm", "--plain"), "is a 'qwen' option only");
@@ -291,9 +315,12 @@ public class InferenceCliArgumentTests
         (["modernbert", "garbag"], "Unsupported mode 'garbag' for 'modernbert'"),
         (["smollm", "garbag"], "Unsupported mode 'garbag' for 'smollm'"),
         (["laya", "compare_diag"], "Unsupported mode 'compare_diag' for 'laya'"),
+        (["laya", "garbag"], "Unsupported mode 'garbag' for 'laya'"),
         (["mobilenet_v2", "garbag"], "Unsupported mode or image 'garbag' for 'mobilenet_v2'"),
         (["resnet18", "garbag"], "Unsupported mode or image 'garbag' for 'resnet18'"),
     ];
+
+    static readonly string[][] HelpCases = [[], ["--help"], ["-h"]];
 
     static readonly (string[] Args, string Expected)[] NarrowPrecisionCases =
     [
@@ -345,8 +372,8 @@ public class InferenceCliArgumentTests
             ?? throw new InvalidOperationException("Failed to start 'dotnet'.");
 
         // Drain both pipes asynchronously: the process-API docs warn that reading the two streams
-        // synchronously can deadlock. Only stderr is asserted; stdout is drained so it cannot block.
-        Task stdout = process.StandardOutput.ReadToEndAsync();
+        // synchronously can deadlock. Only stdout/stderr are asserted once the process has exited.
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
         Task<string> stderr = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(ProcessTimeoutMs))
         {
@@ -354,8 +381,9 @@ public class InferenceCliArgumentTests
             Assert.Fail($"NivaraInference {string.Join(' ', args)} did not exit within {ProcessTimeoutMs / 1000} s.");
         }
 
-        stdout.GetAwaiter().GetResult();
-        return new CliResult(process.ExitCode, stderr.GetAwaiter().GetResult());
+        string stdoutText = stdout.GetAwaiter().GetResult();
+        string stderrText = stderr.GetAwaiter().GetResult();
+        return new CliResult(process.ExitCode, stdoutText, stderrText);
     }
 
     static string FindRepoRoot()
