@@ -303,10 +303,10 @@ internal static class D3d12Compute
 
     /// <summary>Entry point behind the <c>dx12</c> CLI mode: availability check +
     /// the compute leg through the standard gate table.</summary>
-    public static int Run()
+    public static int Run(int rounds = KernelGate.DefaultRounds)
     {
         Console.WriteLine();
-        return KernelGate.Run(KernelFixtures.Generate(), "DX12 (hand-rolled)", RunLeg);
+        return KernelGate.Run(KernelFixtures.Generate(), "DX12 (hand-rolled)", RunLeg, rounds);
     }
 
     /// <summary>The DX12 leg over the fixed fixture set: dot16 + silu + gemv through

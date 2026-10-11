@@ -11,7 +11,7 @@ namespace Nivara.GpuProbe.Kernels;
 /// <para>
 /// Timing is the repeated same-host profile (#552 Arc 140T, #553 Iris Xe): each leg's own
 /// best-of-<c>N</c> steady-state sample is taken, but the whole leg set is swept
-/// <see cref="Rounds"/> times with a rotating leg order, so the decision table reports the
+/// <c>--rounds</c> (default <see cref="DefaultRounds"/>) times with a rotating leg order, so the decision table reports the
 /// run-to-run <b>median</b> and <b>min–max band</b> per cell rather than a single sample.
 /// Rotating the start point keeps any one leg from being systematically first or last. The
 /// per-leg internal best-of-N is still the gauge for a single sample; the median and band are
@@ -31,22 +31,31 @@ namespace Nivara.GpuProbe.Kernels;
 /// </summary>
 internal static class KernelGate
 {
-    /// <summary>Sweeps every leg this many times (<c>#552</c>/<c>#553</c> require ≥5) with a
-    /// rotating leg order, so per-cell timing can be reported as a median + min–max band.</summary>
-    private const int Rounds = 5;
+    /// <summary>Default sweep count: every leg is swept this many times (<c>#552</c>/<c>#553</c>
+    /// require ≥5) with a rotating leg order, so per-cell timing can be reported as a median +
+    /// min–max band. Overridable per run with the <c>--rounds</c> CLI argument.</summary>
+    public const int DefaultRounds = 5;
 
-    /// <summary>Single-leg convenience overload (unchanged single-sample behaviour).</summary>
-    public static int Run(KernelFixtures fixtures, string gpuLegName, Func<KernelFixtures, LegResults?> gpuLeg)
-        => Run(fixtures, (gpuLegName, gpuLeg, (KernelDiagnosis?)null));
+    /// <summary>Single-leg convenience overload.</summary>
+    public static int Run(KernelFixtures fixtures, string gpuLegName, Func<KernelFixtures, LegResults?> gpuLeg,
+        int rounds = DefaultRounds)
+        => Run(fixtures, rounds, (gpuLegName, gpuLeg, (KernelDiagnosis?)null));
 
-    /// <summary>
-    /// Runs the CPU reference + every GPU leg <see cref="Rounds"/> times with a rotating order,
-    /// gates correctness once (round 0), then prints the correctness table and the median +
-    /// min–max timing table.
-    /// </summary>
+    /// <summary>Multi-leg convenience overload: sweeps <see cref="DefaultRounds"/> times.</summary>
     public static int Run(KernelFixtures fixtures,
         params (string Name, Func<KernelFixtures, LegResults?> Leg, KernelDiagnosis? Diagnosis)[] legs)
+        => Run(fixtures, DefaultRounds, legs);
+
+    /// <summary>
+    /// Runs the CPU reference + every GPU leg <paramref name="rounds"/> times with a rotating
+    /// order, gates correctness once (round 0), then prints the correctness table and the median +
+    /// min–max timing table.
+    /// </summary>
+    public static int Run(KernelFixtures fixtures, int rounds,
+        params (string Name, Func<KernelFixtures, LegResults?> Leg, KernelDiagnosis? Diagnosis)[] legs)
     {
+        if (rounds < 1)
+            throw new ArgumentOutOfRangeException(nameof(rounds), rounds, "rounds must be >= 1");
         Console.WriteLine();
         Console.WriteLine("--- kernel gates vs CPU (production Nivara kernels) ---");
 
@@ -68,10 +77,10 @@ internal static class KernelGate
         int failures = 0, diagnosed = 0;
         LegResults? cpuReference = null;
 
-        for (int round = 0; round < Rounds; round++)
+        for (int round = 0; round < rounds; round++)
         {
             Console.WriteLine();
-            Console.WriteLine($"--- round {round + 1}/{Rounds} (leg order rotates so no leg is systematically first/last) ---");
+            Console.WriteLine($"--- round {round + 1}/{rounds} (leg order rotates so no leg is systematically first/last) ---");
 
             LegResults cpu = CpuLeg.ComputeLeg(fixtures);
             cpuReference ??= cpu;
@@ -96,7 +105,7 @@ internal static class KernelGate
         PrintTimingTable(samples, legs);
 
         Console.WriteLine();
-        Console.WriteLine($"  kernels mode exit: {failures} unexpected failed kernel(s), {diagnosed} diagnosed honest, {Rounds} sweeps");
+        Console.WriteLine($"  kernels mode exit: {failures} unexpected failed kernel(s), {diagnosed} diagnosed honest, {rounds} sweeps");
         return failures;
     }
 
