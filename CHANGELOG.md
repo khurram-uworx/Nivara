@@ -118,6 +118,26 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraInference` rejects the last four inert options: Qwen-only `--plain`/`--text`/`--no-kv-cache`
+  and F32 `--simd-widen` (#580)** — `--plain` was parsed for every model but consumed only by `qwen`;
+  `--text` and `--no-kv-cache` were read only by the qwen prompt paths (`Qwen.RunPlain` /
+  `Qwen.RunTools`); and `--simd-widen` changes only a bf16/fp16 run (`WidenPrimitives.ShouldWiden` /
+  `TensorsHelper.DotFor` gate on the narrow type). So `minilm --plain`, `minilm --text "…"`,
+  `minilm --no-kv-cache`, and `minilm --simd-widen` all accepted the flag and ran identically — the
+  silent-acceptance failure mode #474/#568/#571 already closed for `--seq`/`--warmup`/`--iters`,
+  `--gpu`, and the distill-only flags. The parser now rejects each one — naming the flag and the
+  requirement, exiting `1` before the weight file is touched — unless the consuming path is selected:
+  `--plain` needs `qwen`; `--text` / `--no-kv-cache` need the qwen prompt path (`qwen`, `qwen tools`,
+  or any non-`benchmark`/non-`distill` mode, without `--synthetic-weights`; `--no-kv-cache`
+  additionally without `--plain`); `--simd-widen` needs `--precision bf16|fp16`. The `--simd-widen`
+  scope is precision-based rather than SmolLM-only because the flag governs the widen-compute-narrow
+  kernels for every narrow-float model — including the documented `distilbert_sst --precision bf16`
+  lever. `--text` presence is now tracked explicitly (the `""` default hid an explicit value) and a
+  trailing `--text` with no value is rejected instead of falling through and being read as a mode
+  name. Both help blocks gain negative lines. Sample CLI only — no `src/Nivara` change. The two
+  adjacent silent-acceptance leftovers are tracked as #586 (vision models ignore
+  `--precision bf16|fp16`) and #587 (an unrecognised `qwen` mode silently runs the tools path).
+
 - **`qwen distill` init now uses the library's seedable Kaiming initializer (#577)** — the
   sample-local `SeededKaimingUniform` added by #570 (which duplicated `bound = sqrt(6/fanIn)`)
   is deleted. `RunDistill` builds one `new KaimingUniformInitializer<float>(seed)` shared across
