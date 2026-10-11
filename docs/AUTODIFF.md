@@ -652,7 +652,7 @@ PerRowLayerNorm(x) → LayerNormKernel.Forward with empty gamma/beta spans (mean
 
 ```csharp
 public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new Conv1d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
+// new Conv1d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true, weightInitializer?: null)
 ```
 
 1D convolution with tiled im2col-based kernel and full autograd support. Weight layout is PyTorch-compatible `[outChannels, inChannels, kernelSize]`.
@@ -665,7 +665,8 @@ BiasGrad:  TensorPrimitives.Sum over batch and length per output channel
 ```
 
 - Input shape: `[N, C, L]`, output: `[N, outChannels, oL]` where `oL = (L + 2*padding - kernelSize) / stride + 1`
-- Kaiming-Uniform initialization: `U(-√(6/fanIn), √(6/fanIn))`
+- Default weight draw: `U(-√(2/fanIn), √(2/fanIn))` from a fixed seed (see #603)
+- Optional `weightInitializer` (`IInitializer<T>`) replaces the default draw; omitted, initialization is unchanged
 - All kernel methods accept `Span<T>`/`ReadOnlySpan<T>` for composability
 
 ### Conv2d\<T\>
@@ -764,7 +765,7 @@ LayerNormKernel<T>
 
 ```csharp
 public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new DepthwiseSeparableConv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
+// new DepthwiseSeparableConv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true, weightInitializer?: null)
 ```
 
 Efficient depthwise separable convolution (MobileNet-style): depthwise conv (`groups=inChannels`) + pointwise 1×1 conv. Reuses existing `Conv2d` grouped kernel and `ConvForward1x1`.
@@ -773,6 +774,8 @@ Efficient depthwise separable convolution (MobileNet-style): depthwise conv (`gr
 DepthwiseSeparableConv2d<T> : Module<T>
 └── Forward(input) → Conv2d(groups=inChannels) → ReLU → Conv2d(1×1)
 ```
+
+- Optional `weightInitializer` (`IInitializer<T>`) forwarded to both the depthwise and pointwise convolutions; omitted, initialization is unchanged
 
 ### ConvVAE\<T\>
 
