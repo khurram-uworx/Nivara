@@ -244,7 +244,7 @@ public class InferenceCliArgumentTests
     }
 
     /// <summary>
-    /// The flag's migration contract (#616): the pre-Silk name is rejected with the new name named,
+    /// The flag's migration contract: the pre-Silk name is rejected with the new name named,
     /// not silently aliased, so an old invocation cannot quietly keep running the ILGPU path.
     /// </summary>
     [Test]

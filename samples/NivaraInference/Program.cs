@@ -191,7 +191,7 @@ class Program
                 useSilk = true;
             else if (args[i] == "--gpu")
             {
-                // The flag was renamed when the Silk path arrived (#616). Rejected rather than aliased
+                // The flag was renamed when the Silk path arrived. Rejected rather than aliased
                 // so an old invocation fails loudly instead of silently running the ILGPU path.
                 Console.Error.WriteLine("--gpu was renamed --ilgpu; rerun with --ilgpu.");
                 return 1;
