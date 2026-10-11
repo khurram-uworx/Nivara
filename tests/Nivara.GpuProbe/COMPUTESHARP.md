@@ -171,11 +171,12 @@ against the production Nivara CPU kernels (the multi-leg gold target,
 Same gemv worst-ULP caveat as every other leg: the diagnostic row lands near
 zero where an f32 ULP is tiny, far inside the `1e-6` absolute gate — a
 *diagnostic*, not the pass/fail bound. On the Iris Xe validation machine the
-`kernels` exit code was **9** (3 SYCL UNBUILT + 6 OpenVINO UNBUILT — neither
+`kernels` exit code is **9** (3 SYCL UNBUILT + 6 OpenVINO UNBUILT — neither
 toolchain installed on that machine), **0 unexpected**; the ComputeSharp row
-contributes **0** failures. On the Arc 140T machine the documented exit stays
-405 (402 honest OV-bf16 silu + 3 SYCL UNBUILT) with ComputeSharp adding 0 —
-re-checked when the Arc 140T run happens.
+contributes **0** failures. On the Arc 140T machine the #606-gate `kernels`
+exit is **3** = 3 SYCL UNBUILT + **0** unexpected (the 402 OV-bf16 silu
+failures are diagnosed-honest, each within 2 half-ULP of the F16 mirror —
+[OPENVINO.md](OPENVINO.md) §3), with ComputeSharp adding 0.
 
 Reading: DXIL from ComputeSharp's bundled DXC is exact to the same bound as the
 hand-rolled `cs_5_1` DXBC — yet another evidence point that **compiler-produced

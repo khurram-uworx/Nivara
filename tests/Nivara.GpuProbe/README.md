@@ -17,7 +17,7 @@ independent GPU paths**, each gated against the production Nivara CPU kernels:
 | **DX12** | hand-rolled HLSL `cs_5_1` via inbox `d3dcompiler_47.dll` | **proven PASS** — FL 12_2 / SM 6.8, no external tooling |
 | **OpenVINO** | pip-installed `openvino_c.dll` + tuned GPU plugin, IR v11 models | **proven PASS** — first-party, zero compiler, ~14–21× CPU on gemv (Arc 140T host only — no OV runtime on the Iris Xe leg); BF16 silu honestly F16-tier |
 | **ILGPU (phase 4a)** | NuGet `ILGPU 1.5.3` — pure-managed JIT of C# kernels to OpenCL C (in-box ICD + Intel driver) | **proven PASS** — all three gates on the real iGPU, no CPU fallback; fastest GPU leg on silu at the time it was measured, now tied there by Silk.NET on both hosts (see [docs/ILGPU.md](../../docs/ILGPU.md)) |
-| **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md)) |
+| **ComputeSharp (phase 4b)** | NuGet `ComputeSharp 3.2.0` + `ComputeSharp.Dxc 3.2.0` — pure-managed C# structs → source-gen HLSL → DXIL via bundled DXC → D3D12 | **proven PASS** — all three gates on the real iGPU, no CPU fallback; the first managed-D3D12 path (see [COMPUTESHARP.md](COMPUTESHARP.md) · [SILK.md](SILK.md)) |
 | **Silk.NET OpenCL** | NuGet `Silk.NET.OpenCL 2.23.0` — hand-authored OpenCL C, compiled **in-process** by the driver (`clCreateProgramWithSource` + `clBuildProgram`), no toolchain | **proven PASS** — all three gates on the real iGPU, `dot16` bit-exact (0.0 ULP), no CPU fallback; fastest hand-authored leg and fastest GPU row on `dot16`; ties OpenVINO's tuned bf16 kernel on `gemv` on the Arc (see [SILK.md](SILK.md)) |
 
 The Level Zero leg got this series started by proving the harness end-to-end
@@ -26,7 +26,7 @@ The Level Zero leg got this series started by proving the harness end-to-end
 access-chain ICE) that only affects hand-authored bytecode — the reason real
 math pivoted to the compiler-backed and driver-backed paths above. Full write-ups
 in [SPIRV.md](SPIRV.md) · [SYCL.md](SYCL.md) · [DX12.md](DX12.md) · [OPENVINO.md](OPENVINO.md) ·
-[docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md).
+[docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) · [SILK.md](SILK.md).
 
 Hosts: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 (128 EU, PCI 8086:7DD1) and an on-package **Intel AI Boost NPU** (8086:7D1D) —
@@ -47,7 +47,7 @@ OpenVINO leg, C# device methods for the ILGPU leg, and C# shader structs
 (source-gen HLSL) for the ComputeSharp leg, per the case-study docs [SPIRV.md](SPIRV.md)
 (L0), [SYCL.md](SYCL.md) (oneAPI/SYCL), [DX12.md](DX12.md) (DX12),
 [OPENVINO.md](OPENVINO.md) (OpenVINO), [docs/ILGPU.md](../../docs/ILGPU.md) (ILGPU phase 4a), and
-[COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) (ComputeSharp phase 4b):
+[COMPUTESHARP.md](COMPUTESHARP.md) · [SILK.md](SILK.md) (ComputeSharp phase 4b):
 
 - `src/Nivara` — `LlamaFusedKernels.MatMulTransposedB<T>` (the production SmolLM
   GEMV kernel — dot and GEMV both run through it, in the exact fused-head call
@@ -135,8 +135,10 @@ forward.
   rotating leg order so no leg is systematically first or last. Per cell:
   **median [min–max]** across the 5 sweeps, n=5.
 - Host records: [results/552-arc-140t.md](results/552-arc-140t.md) (Arc 140T,
-  `kernels` exit 405) and [results/553-iris-xe.md](results/553-iris-xe.md)
-  (Iris Xe, `kernels` exit 9), each with its `.raw.txt` harness stdout.
+  `kernels` exit 405 under the pre-#606 gate; **3** under the #606 diagnosis
+  gate — see below) and [results/553-iris-xe.md](results/553-iris-xe.md)
+  (Iris Xe, `kernels` exit 9, unchanged), each with its `.raw.txt` harness
+  stdout.
 - **Band-overlap rule:** two legs are *ordered* only when their min–max bands
   are **disjoint**; any overlap is a **tie** (a single draw cannot separate
   them). An ordering is claimed as a kernel property only when it holds on
@@ -156,7 +158,7 @@ express the kernels at all):
 | L0 hand-authored SPIR-V | — (IGC `OpFMul`→`FSub`/`OpFDiv`→`FMul` miscompile, [SPIRV.md](SPIRV.md)) | same | same |
 | SYCL/oneAPI | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
 | DX12 | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
-| OpenVINO bf16 | PASS (0.0 ULP) | **honest FAIL** — F16 silu, 402/576 ([OPENVINO.md](OPENVINO.md) §3) | PASS |
+| OpenVINO bf16 | PASS (0.0 ULP) | **honest FAIL, diagnosed** — F16 silu 402/576, all ≤ 2 half-ULP of the F16 mirror → **0 unexpected** ([OPENVINO.md](OPENVINO.md) §3) | PASS |
 | OpenVINO f32 | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
 | ILGPU (OpenCL) | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
 | Silk.NET (OpenCL) | PASS (0.0 ULP) | PASS (4.0 ULP) | PASS |
@@ -217,14 +219,14 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gate
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ov      # OpenVINO availability (runtime + GPU readback) + both precision configs' gates
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ilgpu  # ILGPU availability (OpenCL devices + accelerator) + gates (phase 4a)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- computesharp # ComputeSharp availability (default D3D12 device) + gates (phase 4b; Windows build only — see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # eight-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + Silk.NET + ComputeSharp (exit = failed cells)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # eight-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + Silk.NET + ComputeSharp (exit = unexpected cells; diagnosed-honest rows reported, not counted)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- silk    # Silk.NET OpenCL leg alone (exit 0 = all three gates pass)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12 + openvino + computesharp
 ```
 
 The ComputeSharp leg is **compile-gated to Windows hosts** (`WINDOWS`
 symbol + conditioned package refs in the csproj): its source generator cannot
-run on a non-Windows SDK (see [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) §1). On a
+run on a non-Windows SDK (see [COMPUTESHARP.md](COMPUTESHARP.md) · [SILK.md](SILK.md) §1). On a
 Linux/macOS build of the probe the `computesharp` mode, its `kernels` row, and
 its default-mode chain are omitted (eight-way → seven-way) so the rest of the
 probe still compiles there. The Silk.NET OpenCL leg is **not** gated this way —
@@ -236,14 +238,23 @@ harness) is the
 **correctness gate**: the CPU leg (production Nivara kernels, see
 `Kernels/CpuLeg.cs`) is the gold target, and each wired GPU leg's `dot16` /
 `silu` / `gemv` output is gated against it with
-`|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|`. Exit code = number of failed
-cells (never a miscode — every failing cell is explicitly flagged). The two host
-records: **Arc 140T = 405** = 402 (the *honest* OV-bf16 silu row:
-F16-elementwise sigmoid/multiply on a BF16-declared model, see
-[OPENVINO.md](OPENVINO.md) §3) + 3 (SYCL UNBUILT baseline); **Iris Xe = 9** =
-3 (SYCL runner not built) + 3 (OV bf16: `openvino_c.dll` not installed) + 3
-(OV f32: same). The ILGPU (phase 4a) and ComputeSharp (phase 4b) rows pass all
-three each on every host they ran on.
+`|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|`. A leg may additionally declare a
+**diagnosis** (`KernelDiagnosis`) for one of its kernels: every failing element
+is then matched, in the half lattice, against a reference derived from the same
+fixtures as the gold (never from the leg's own output — a leg cannot
+self-certify). Elements within the diagnosis's half-ULP tolerance are
+**diagnosed-honest**: reported in the row (`402 failed, 402 diagnosed-honest`),
+not counted. Exit code = number of **unexpected** failed cells (never a miscode
+— every cell is explicitly flagged). Measured on the Arc 140T the gate exits
+**3** = 3 (SYCL UNBUILT baseline) + **0** unexpected: all 402 OV-bf16 silu
+failures match the F16-elementwise reference within **2 half-ULP** — the
+BF16-declared model is executed in F16 by the GPU plugin (the first diagnosed
+row, [OPENVINO.md](OPENVINO.md) §3, #606). The pre-#606 host records: **Arc
+140T = 405** = that 402 + 3, **Iris Xe = 9** = 3 (SYCL runner not built) + 3
+(OV bf16: `openvino_c.dll` not installed) + 3 (OV f32: same) — the Iris Xe
+exit is unchanged under the gate because its OV legs are unavailable, and a
+diagnosis only applies to a leg that runs. The ILGPU (phase 4a) and ComputeSharp
+(phase 4b) rows pass all three each on every host they ran on.
 
 `run` is the real probe: it builds modules with `zeModuleCreate` (logs any
 `zeModuleBuildLogGetString` output), launches kernels on a compute queue, and
@@ -447,7 +458,7 @@ production native `.dll` with a long-lived queue eliminates it entirely. Full
 notes in [SYCL.md](SYCL.md); the DX12 workflow lives in [DX12.md](DX12.md);
 the L0/hand-authored-SPIR-V verdict and safe subset live in [SPIRV.md](SPIRV.md).
 Together these six case-study docs — [SPIRV.md](SPIRV.md) · [SYCL.md](SYCL.md) ·
-[DX12.md](DX12.md) · [OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md) — are Nivara's GPU-backend
+[DX12.md](DX12.md) · [OPENVINO.md](OPENVINO.md) · [docs/ILGPU.md](../../docs/ILGPU.md) · [COMPUTESHARP.md](COMPUTESHARP.md) · [SILK.md](SILK.md) — are Nivara's GPU-backend
 decision records.
 
 ## DX12 compute leg (commit 8 — hand-rolled, proven)
@@ -515,7 +526,7 @@ Gates vs the production Nivara CPU kernels:
 | config | kernel | gate | result |
 |---|---|---|---|
 | `bf16` | `dot16` | `\|leg − cpu\| ≤ 1e-6 + 1e-5·\|cpu\|` | **PASS — 0.0 ULP (bit-exact)** |
-| `bf16` | `silu` (576) | tolerance gate per element | **honest FAIL** — 402/576; F16-elementwise sigmoid/multiply on a BF16-declared model (~1.25e-5 @ 0.014). Precision finding, not a miscode ([OPENVINO.md](OPENVINO.md) §3) |
+| `bf16` | `silu` (576) | tolerance gate per element + F16 diagnosis | **honest FAIL, diagnosed** — 402/576, 402/402 within **2 half-ULP** of the F16 mirror → **0 unexpected**; F16-elementwise sigmoid/multiply on a BF16-declared model (~1.25e-5 @ 0.014 vs the f32 gold). Precision finding, not a miscode ([OPENVINO.md](OPENVINO.md) §3) |
 | `bf16` | `gemv` (1536×576) | tolerance gate per row | **PASS** — 1536/1536 (F32-accumulated) |
 | `f32` | `dot16` | tolerance | **PASS — 0.0 ULP (bit-exact)** |
 | `f32` | `silu` (576) | tolerance | **PASS** — 576/576, worst 4.0 ULP |
@@ -613,7 +624,7 @@ both hosts ComputeSharp is disjointly slower than Silk.NET and ILGPU on the
 small kernels and slower than Silk.NET on `gemv`; its small-kernel rank against
 DX12 is host-dependent (ComputeSharp < DX12 on the Arc, a tie on the Iris Xe),
 while `ComputeSharp < DX12` on `gemv` holds on both. Full notes in
-[COMPUTESHARP.md](COMPUTESHARP.md) ┬╖ [SILK.md](SILK.md).
+[COMPUTESHARP.md](COMPUTESHARP.md) · [SILK.md](SILK.md).
 
 ## Level Zero P/Invoke surface
 

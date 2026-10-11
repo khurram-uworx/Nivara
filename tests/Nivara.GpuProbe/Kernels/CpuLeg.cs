@@ -65,6 +65,31 @@ internal static class CpuLeg
         return span.ToArray();
     }
 
+    /// <summary>
+    /// The <see cref="Silu"/> formula computed in f32 then rounded to Half once: the
+    /// reference an F16-executed elementwise sigmoid+multiply must match. The BCL has
+    /// no Half exponentiation (the same limitation recorded for the Silk.NET fp16
+    /// diagnostic), so this is the f32-then-round form only. Derived from the same
+    /// production widen the gold is computed from — never from a leg's own output.
+    /// </summary>
+    public static ushort[] SiluF16ReferenceBits(ReadOnlySpan<BFloat16> values)
+    {
+        var f32 = Widen(values);
+        var bits = new ushort[values.Length];
+        for (int i = 0; i < values.Length; i++)
+            bits[i] = BitConverter.HalfToUInt16Bits((Half)(f32[i] / (1f + MathF.Exp(-f32[i]))));
+        return bits;
+    }
+
+    /// <summary>Ordered distance in the half lattice: sign-magnitude bits are mapped
+    /// to a two's-complement order so a value and its neighbour differ by 1, including
+    /// across zero.</summary>
+    public static int HalfUlpDistance(ushort a, ushort b)
+    {
+        static int Ordered(ushort bits) => (bits & 0x8000) != 0 ? 0x8000 - (bits & 0x7FFF) : bits;
+        return Math.Abs(Ordered(a) - Ordered(b));
+    }
+
     public static bool WithinTolerance(double leg, double reference)
         => Math.Abs(leg - reference) <= GateAbs + GateRel * Math.Abs(reference);
 

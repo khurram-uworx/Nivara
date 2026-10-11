@@ -99,7 +99,7 @@ are hand-emitted OpenVINO IR v11 with the output tensors cast to F32
 | config | kernel | gate | worst (diagnostic) | result |
 |---|---|---|---|---|
 | `OV (bf16 IR)`, no hint (plugin picks F16) | `dot16` (K=16) | PASS | **0.0 ULP** (bit-exact) | PASS |
-| `OV (bf16 IR)`, no hint | `silu` (576) | **402 / 576 fail** | 13 453 ULP @ 139, `\|diff\| = 1.25e-5` @ 0.014 | **honest FAIL** (BF16/F16 elementwise) |
+| `OV (bf16 IR)`, no hint | `silu` (576) | **402 / 576 fail**, 402/402 ≤ **2 half-ULP** of F16 mirror (diagnosed) | 13 453 ULP @ 139, `\|diff\| = 1.25e-5` @ 0.014 (vs f32 gold) | **honest FAIL — diagnosed** → **0 unexpected** (BF16/F16 elementwise) |
 | `OV (bf16 IR)`, no hint | `gemv` (1536×576) | PASS | 14 336 ULP @ 1508 (`\|diff\| = 1.6e-9`, near-zero ref row) | PASS |
 | `OV (f32 + hint)` | `dot16` (K=16) | PASS | **0.0 ULP** (bit-exact) | PASS |
 | `OV (f32 + hint)` | `silu` (576) | PASS 576/576 | 4.0 ULP | PASS |
@@ -127,10 +127,15 @@ reductions and exactly wrong for the nonlinearity:
   F32 CPU gold (13.5k ULP at F16 precision on that row) — legitimately outside
   the tight F32 gate. This is **not a miscode**: the BF16-declared model did
   exactly what it declared, sigmoid/multiply just aren't F32-tier when executed
-  in F16. It is reported as the honest gap the issue's BF16 row always implied
-  and tracked as issue **#606** — the 402/576 gate failure, filed as a precision
-  defect rather than a timing one. The f32 config (direct IGC-class proof)
-  passes all three kernels.
+  in F16. Issue **#606** is now a *measured, machine-gated* classification
+  rather than an argued one: the gate runs a diagnosis for this row
+  (`KernelDiagnosis.OvBf16Silu`) that recomputes every element's sigmoid in F32
+  and rounds to Half — from the same fixtures the gold is derived, never from
+  the leg's output — and **all 402/402 failing elements match it within 2
+  half-ULP** (worst half-ULP @ index 46). The row prints `402 failed, 402
+  diagnosed-honest` and contributes **0 unexpected** to the exit code: the Arc
+  `kernels` exit moves 405 → **3** (the 3 are SYCL-unavailable) and `ov` exits
+  0. The f32 config (direct IGC-class proof) passes all three kernels.
 
 **Read: the plugin, precision-declared properly, is correct on both configs; a
 BF16-rounded sigmoid is a *precision* finding, not a correctness one.** For a
@@ -269,7 +274,9 @@ the Arc 140T its tuned GPU plugin does *not* carry the hand-authored SPIR-V bug
 class — the F32-declared config passes all three production kernels (dot16
 bit-exact, silu 4 ULP, gemv 1.6e-9), and the BF16-declared row keeps the F32-tier
 matmul win (~21× bf16 / ~14× f32 CPU) while honestly surfacing the
-F16-elementwise sigmoid rounding the BF16 row always implied (tracked as #606).
+F16-elementwise sigmoid rounding the BF16 row always implied — now a gated,
+diagnosed #606 finding: 402/402 failures within 2 half-ULP of the F16 mirror,
+0 unexpected (exit 405 → 3 under the #606 gate).
 The probe's OpenVINO numbers are **Arc-only** — the plugin does not run on the
 Iris Xe leg — so none of its orderings transfer to that host. If Nivara ships a
 managed GPU backend, OpenVINO's P/Invoke surface, `pip install` distribution and
@@ -280,11 +287,15 @@ precompiled plugin make it the lowest-infrastructure candidate on the table.
 1. `python -m pip install openvino==2026.2.1`
 2. `dotnet build tests/Nivara.GpuProbe -c Release` — 0 warnings, 0 errors.
 3. `dotnet run -c Release --project tests/Nivara.GpuProbe -- ov` — runtime
-   banner, device readback (`FULL_DEVICE_NAME`), both configs' gates.
+   banner, device readback (`FULL_DEVICE_NAME`), both configs' gates (exits 0:
+   the bf16 silu row is diagnosed-honest, not a failure).
 4. `dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels` — the
-   five-way gate + timing table. Exit contract: number of failed cells —
-   **405** on this machine = 402 honest-OV-bf16-silu + 3 SYCL-unavailable
-   (baseline); every failing cell is an explicitly-flagged honest one.
+   five-way gate + timing table. Exit contract: number of **unexpected** failed
+   cells; diagnosed-honest failures are printed in the rows (`402 failed, 402
+   diagnosed-honest`) and not counted. On this machine: **3** = 3
+   SYCL-unavailable (baseline) + **0** unexpected. The pre-#606 record's 405
+   counted the same 402 as failed cells; the determination (all 402 within
+   2 half-ULP of the F16 mirror) is re-measured on every gate run.
 
 Snapshot:
 

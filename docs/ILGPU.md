@@ -129,9 +129,11 @@ passed against the production Nivara CPU kernels (the multi-leg gold target,
 
 Same gemv worst-ULP caveat as the SYCL/DX12/OV legs: the diagnostic row lands
 near zero where an f32 ULP is tiny, far inside the `1e-6` absolute gate — a
-*diagnostic*, not the pass/fail bound. The `kernels` exit code on this machine
-stays the documented 405 = 402 (honest OV-bf16 silu) + 3 (SYCL UNBUILT); the
-ILGPU row contributes **0** failures.
+*diagnostic*, not the pass/fail bound. The #606-gate `kernels` exit code on
+this machine is **3** = 3 (SYCL UNBUILT) + **0** unexpected: the 402 OV-bf16
+silu failures are diagnosed-honest (all ≤ 2 half-ULP from the F16 mirror —
+pre-#606 the documented exit was 405 = 402 + 3); the ILGPU row contributes
+**0** failures.
 
 Reading: the bug class that blocks hand-authored bytecode (§3 of
 [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md)) does **not** affect ILGPU — as with SYCL, **compiler-produced

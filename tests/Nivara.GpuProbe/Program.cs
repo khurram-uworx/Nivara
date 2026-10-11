@@ -32,8 +32,8 @@ internal class Program
         string mode = args.Length > 0 ? args[0] : "l0";
         int OVRun()
             => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(),
-                ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16),
-                ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32));
+                ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16, Kernels.KernelDiagnosis.OvBf16Silu()),
+                ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32, (Kernels.KernelDiagnosis?)null));
         return mode switch
         {
             "l0" => L0Probe.Run() + L0Run.Run(),
@@ -50,14 +50,14 @@ internal class Program
             "computesharp" => ComputeSharp.Availability.Run() + Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg),
 #endif
             "kernels" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(),
-                ("SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
-                ("DX12 (hand-rolled)", D3d12.D3d12Compute.RunLeg),
-                ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16),
-                ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32),
-                ("ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg),
-                ("Silk.NET OpenCL", OpenCl.SilkLeg.RunLeg)
+                ("SYCL (oneAPI)", Sycl.SyclLeg.RunLeg, (Kernels.KernelDiagnosis?)null),
+                ("DX12 (hand-rolled)", D3d12.D3d12Compute.RunLeg, null),
+                ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16, Kernels.KernelDiagnosis.OvBf16Silu()),
+                ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32, null),
+                ("ILGPU (OpenCL)", Ilgpu.IlgpuLeg.RunLeg, null),
+                ("Silk.NET OpenCL", OpenCl.SilkLeg.RunLeg, null)
 #if WINDOWS
-                , ("ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg)
+                , ("ComputeSharp (DXIL)", ComputeSharp.ComputeSharpLeg.RunLeg, null)
 #endif
                 ),
             "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun()
