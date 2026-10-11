@@ -21,7 +21,9 @@ public sealed class NormalInitializer<T> : IInitializer<T> where T : struct, IFl
     /// <param name="seed">Optional RNG seed; when null, draws from <see cref="Random.Shared"/></param>
     /// <remarks>
     /// The seeded form holds its own <see cref="Random"/> and is not thread-safe; the null-seed
-    /// default uses <see cref="Random.Shared"/> and is thread-safe.
+    /// default uses <see cref="Random.Shared"/> and is thread-safe. A bare
+    /// <c>new NormalInitializer&lt;T&gt;(null)</c> is ambiguous between the <c>int?</c> and
+    /// <see cref="Random"/> overloads — pass <c>seed:</c>/<c>random:</c> by name or omit the argument.
     /// </remarks>
     public NormalInitializer(int? seed = null) : this(T.Zero, T.One, seed) { }
 
@@ -43,7 +45,9 @@ public sealed class NormalInitializer<T> : IInitializer<T> where T : struct, IFl
     /// <param name="seed">Optional RNG seed; when null, draws from <see cref="Random.Shared"/></param>
     /// <remarks>
     /// The seeded form holds its own <see cref="Random"/> and is not thread-safe; the null-seed
-    /// default uses <see cref="Random.Shared"/> and is thread-safe.
+    /// default uses <see cref="Random.Shared"/> and is thread-safe. A bare
+    /// <c>new NormalInitializer&lt;T&gt;(null)</c> is ambiguous between the <c>int?</c> and
+    /// <see cref="Random"/> overloads — pass <c>seed:</c>/<c>random:</c> by name or omit the argument.
     /// </remarks>
     public NormalInitializer(T mean, T std, int? seed = null)
         : this(mean, std, RandomGeneration.Create(seed))

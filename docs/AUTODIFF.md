@@ -862,7 +862,9 @@ Every initializer also accepts an `int? seed` or an explicit `Random` for reprod
 initialization: the same seed produces identical weights on the same runtime, a different seed
 differs, and a null seed draws from `Random.Shared` (the default). A seeded initializer holds its
 `Random` from construction, so reusing one instance across layers advances a single deterministic
-stream; the seeded instance is not thread-safe (`Random.Shared` is).
+stream; the seeded instance is not thread-safe (`Random.Shared` is). Note that a bare
+`new SomeInitializer<T>(null)` is ambiguous between the `int?` and `Random` overloads — pass
+`seed:`/`random:` by name, or omit the argument.
 
 ### Example
 
