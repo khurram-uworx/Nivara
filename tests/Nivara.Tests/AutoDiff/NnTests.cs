@@ -3469,6 +3469,61 @@ public class NnTests
     }
 
     [Test]
+    public void Conv1d_CustomWeightInit_UsesInitializer()
+    {
+        using var conv = new Conv1d<float>(inChannels: 2, outChannels: 3, kernelSize: 3, padding: 1,
+            weightInitializer: new DeterministicInit<float>());
+
+        var w = conv.Weight!.Tensor;
+        Assert.That(w.Length, Is.EqualTo(3 * 2 * 3));
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(w[i], Is.EqualTo(0.05f * (i + 1)).Within(1e-6f));
+    }
+
+    [Test]
+    public void DepthwiseSeparableConv2d_CustomWeightInit_ForwardsToEveryLayer()
+    {
+        using var dsc = new DepthwiseSeparableConv2d<float>(inChannels: 4, outChannels: 6, kernelSize: 3, padding: 1,
+            weightInitializer: new DeterministicInit<float>());
+
+        var depthwise = dsc.DepthwiseConv.Weight!.Tensor;
+        Assert.That(depthwise.Length, Is.EqualTo(4 * 1 * 3 * 3));
+        for (int i = 0; i < depthwise.Length; i++)
+            Assert.That(depthwise[i], Is.EqualTo(0.05f * (i + 1)).Within(1e-6f));
+
+        var pointwise = dsc.PointwiseConv.Weight!.Tensor;
+        Assert.That(pointwise.Length, Is.EqualTo(6 * 4));
+        for (int i = 0; i < pointwise.Length; i++)
+            Assert.That(pointwise[i], Is.EqualTo(0.05f * (i + 1)).Within(1e-6f));
+
+        var bias = dsc.PointwiseConv.Bias!.Tensor;
+        for (int i = 0; i < bias.Length; i++)
+            Assert.That(bias[i], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void Conv1d_DefaultInit_KeepsFixedSeedDraw()
+    {
+        const int inChannels = 2;
+        const int outChannels = 3;
+        const int kernelSize = 3;
+
+        using var conv = new Conv1d<float>(inChannels, outChannels, kernelSize, padding: 1, bias: false);
+
+        // The default draw is uniform in [-bound, bound] with bound = sqrt(2/fanIn) from a seed-42
+        // stream. Re-derive it here so a change to the seed or the bound fails this test exactly.
+        var bound = (float)Math.Sqrt(2.0 / (inChannels * kernelSize));
+        var rng = new Random(42);
+        var w = conv.Weight!.Tensor;
+        Assert.That(w.Length, Is.EqualTo(outChannels * inChannels * kernelSize));
+        for (int i = 0; i < w.Length; i++)
+        {
+            var expected = (float)((rng.NextDouble() * 2.0 - 1.0) * (double)bound);
+            Assert.That(w[i], Is.EqualTo(expected));
+        }
+    }
+
+    [Test]
     public void ConvVAE_3Channel_RGB()
     {
         using var cvae = new ConvVAE<float>(
