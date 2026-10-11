@@ -18,6 +18,67 @@ namespace NivaraInference;
 class Program
 {
     const double GateRelTol = 1e-3; // GPU-vs-CPU f32 parity bound: |gpu − ref| ≤ GateRelTol·(1+|ref|)
+
+    // The CLI surface, in one place. Every guard below and the dispatch switch read these tables, and
+    // tests/Nivara.Tests/Inference/InferenceCliArgumentTests.cs pins the (model, mode) pairs: a model
+    // whose dispatch gains or loses a path must be updated here, or the gate fails.
+    static readonly Dictionary<string, string[]> SupportedModes = new()
+    {
+        ["mobilenet_v2"] = ["", "benchmark", "compare", "compare_diag"],
+        ["resnet18"] = ["", "benchmark", "compare", "compare_diag"],
+        ["minilm"] = ["", "benchmark", "compare", "similarity"],
+        ["distilbert"] = ["", "benchmark", "compare"],
+        ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
+        ["laya"] = ["", "benchmark", "compare"],
+        ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
+        ["smollm"] = ["", "benchmark", "ab", "generate"],
+        ["qwen"] = ["", "tools", "distill", "benchmark"],
+    };
+
+    static readonly Dictionary<string, string[]> GpuModes = new()
+    {
+        ["minilm"] = ["", "benchmark", "compare"],
+        ["distilbert"] = ["", "benchmark", "compare"],
+        ["distilbert_sst"] = ["", "benchmark", "compare"],
+        ["laya"] = ["", "benchmark", "compare"],
+        ["modernbert"] = ["", "benchmark", "compare"],
+    };
+
+    const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
+
+    // The dispatch selects the model's BFloat16/Half runner for these (model, mode) pairs, so a narrow
+    // --precision is consumed exactly when this is true. 'synthetic' is the qwen benchmark shortcut,
+    // which reaches a narrow runner without an explicit 'benchmark' token.
+    static bool ConsumesNarrow(string model, string mode, bool synthetic) => model switch
+    {
+        "minilm" or "distilbert" or "distilbert_sst" or "smollm" => true,
+        "laya" or "modernbert" => mode is not ("compare" or "compare_diag"),
+        "qwen" => mode == "benchmark" || synthetic,
+        _ => false, // mobilenet_v2 / resnet18 have no narrow-float path
+    };
+
+    // --simd-widen changes a run only where a narrow runner reads NivaraPrimitives.UseWidenSimd and does
+    // not set it itself: smollm's and qwen's narrow runners auto-enable it, so the flag is inert there
+    // (and the 'ab' mode toggles it on its own), which is why this is narrower than ConsumesNarrow.
+    static bool ConsumesWiden(string model, string mode)
+        => model is "minilm" or "distilbert" or "distilbert_sst" or "laya" or "modernbert"
+           && ConsumesNarrow(model, mode, synthetic: false);
+
+    static bool IsVisionModel(string model) => model is "mobilenet_v2" or "resnet18";
+
+    // A vision model's mode is either a keyword or the path of an image that exists; every other model's
+    // mode must be a keyword. The path check is what lets 'mobilenet_v2 picture.jpg' through while
+    // rejecting a typo that the old code handed to RunImageInference (which printed "Image not found"
+    // and exited 0).
+    static bool IsSupportedMode(string model, string mode)
+        => SupportedModes.ContainsKey(model)
+           && (SupportedModes[model].Contains(mode) || (IsVisionModel(model) && mode.Length > 0 && File.Exists(mode)));
+
+    static string ModeList(string model)
+        => model == "qwen"
+            ? "tools, distill, benchmark, or no mode (bare 'qwen' runs the tools demo)"
+            : string.Join(", ", SupportedModes[model].Select(m => m.Length == 0 ? "default" : m));
+
     static int Main(string[] args)
     {
         Console.WriteLine("=== Nivara HuggingFace Inference ===");
@@ -192,26 +253,36 @@ class Program
             Console.WriteLine("  (--teacher-examples / --seed / --force are 'qwen distill' only; any other model or mode rejects them)");
             Console.WriteLine("  (--plain / --text / --no-kv-cache are 'qwen' options only; --no-kv-cache is the 'qwen tools' path only)");
             Console.WriteLine();
-            Console.WriteLine("Precision (text models only):");
+            Console.WriteLine("Precision (narrow-float models only — the vision models have no bf16/fp16 path):");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
-            Console.WriteLine("                    (bf16/fp16 are rejected for qwen; student training is always F32).");
+            Console.WriteLine("                    (rejected for qwen fp16 and for qwen bf16 outside 'benchmark' / --synthetic-weights;");
+            Console.WriteLine("                     rejected where the run is F32-only: the vision models and laya/modernbert 'compare')");
             Console.WriteLine();
-            Console.WriteLine("SIMD (narrow-float models):");
-            Console.WriteLine("  --simd-widen      Enable widen-compute-narrow SIMD kernels for BFloat16/Half");
-            Console.WriteLine("                    (NivaraPrimitives.UseWidenSimd). A/B against scalar: run");
-            Console.WriteLine("                    once without and once with this flag, or use the 'ab' mode.");
-            Console.WriteLine("                    (a no-op for --precision f32; only a bf16/fp16 run changes)");
+            Console.WriteLine("SIMD (narrow-float models: minilm / distilbert / distilbert_sst / modernbert / laya):");
+            Console.WriteLine("  --simd-widen      Enable widen-compute-narrow SIMD kernels for the BFloat16/Half run");
+            Console.WriteLine("                    (NivaraPrimitives.UseWidenSimd). Rejected where the run does not read");
+            Console.WriteLine("                    the toggle: an F32 run, 'compare', the vision models, and smollm/qwen");
+            Console.WriteLine("                    (their narrow runners already enable it). A/B: 'smollm ab'.");
             return 1;
         }
 
         int[]? seqLengths = null;
         int warmup = ModernBert.DefaultWarmup;
         int iterations = ModernBert.DefaultIterations;
+        string got = $"{modelType}{(mode.Length > 0 ? " " + mode : "")}";
 
-        // Checked before anything touches the disk: a bad timing option is a typo, and a typo should
-        // cost a second rather than a 1.5 GB safetensors read.
+        // Every guard below runs before the first disk touch: a bad option is a typo, and a typo should
+        // cost a second rather than a 1.5 GB safetensors read. It also lets the gate in tests/Nivara.Tests
+        // prove each reject on a machine that has no weights installed.
+
+        if (!SupportedModes.ContainsKey(modelType))
+        {
+            Console.Error.WriteLine($"Unknown model type: {modelType}");
+            return 1;
+        }
+
         if (seqArg is not null || warmupArg is not null || itersArg is not null)
         {
             if (modelType != "modernbert")
@@ -222,7 +293,7 @@ class Program
 
             if (mode != "benchmark")
             {
-                Console.Error.WriteLine($"--seq / --warmup / --iters need the 'benchmark' mode; got '{modelType}{(mode.Length > 0 ? " " + mode : "")}'. Drop the flag or add 'benchmark'.");
+                Console.Error.WriteLine($"--seq / --warmup / --iters need the 'benchmark' mode; got '{got}'. Drop the flag or add 'benchmark'.");
                 return 1;
             }
 
@@ -245,7 +316,7 @@ class Program
             }
         }
 
-        if (useGpu && modelType is not ("minilm" or "distilbert" or "distilbert_sst" or "modernbert" or "laya"))
+        if (useGpu && !GpuModes.ContainsKey(modelType))
         {
             Console.Error.WriteLine($"--gpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
             return 1;
@@ -261,7 +332,7 @@ class Program
 
         if ((teacherExamplesSet || seedSet || forceSet) && mode != "distill")
         {
-            Console.Error.WriteLine($"--teacher-examples / --seed / --force need the 'distill' mode; got '{modelType}{(mode.Length > 0 ? " " + mode : "")}'. Drop the flag or add 'distill'.");
+            Console.Error.WriteLine($"--teacher-examples / --seed / --force need the 'distill' mode; got '{got}'. Drop the flag or add 'distill'.");
             return 1;
         }
 
@@ -274,11 +345,16 @@ class Program
             return 1;
         }
 
+        if (plain && isQwen && mode.Length > 0 && mode != "benchmark")
+        {
+            Console.Error.WriteLine($"--plain is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
+            return 1;
+        }
+
         // --text and --no-kv-cache ride the qwen prompt paths: RunPlain / RunTools are reached for
         // 'qwen', 'qwen tools' and any other mode that is not 'distill' / 'benchmark'; RunTools is
         // the only consumer of the KV-cache switch.
         bool qwenPromptPath = isQwen && !syntheticWeights && mode is not ("distill" or "benchmark");
-        string got = $"{modelType}{(mode.Length > 0 ? " " + mode : "")}";
 
         if (textSet && !qwenPromptPath)
         {
@@ -292,32 +368,31 @@ class Program
             return 1;
         }
 
-        if (simdWiden && precision == "f32")
+        // The mode allow-list (#587). An unrecognised mode used to fall through to the model's default
+        // runner: the vision models printed "Image not found" and exited 0, and qwen ran the tools demo.
+        if (!IsSupportedMode(modelType, mode))
         {
-            Console.Error.WriteLine("--simd-widen only changes a bf16/fp16 run (it enables the widen-compute-narrow SIMD kernels for BFloat16/Half); an F32 run is unchanged. Add --precision bf16|fp16 or drop the flag.");
+            Console.Error.WriteLine(IsVisionModel(modelType)
+                ? $"Unsupported mode or image '{mode}' for '{modelType}'; supported: benchmark, compare, compare_diag, or the path of an existing image."
+                : $"Unsupported mode '{mode}' for '{modelType}'; supported: {ModeList(modelType)}.");
             return 1;
         }
 
-        string modelDir = Path.Combine("samples", "data", resolvedType);
-        string modelPath = Path.Combine(modelDir, "model.safetensors");
-
-        if (!File.Exists(modelPath))
+        if (useGpu && !GpuModes[modelType].Contains(mode))
         {
-            if (syntheticWeights && isQwen)
-            {
-                Console.WriteLine("--synthetic-weights: no model file required; fabricating Qwen2.5-0.5B-shaped weights.");
-                Console.WriteLine();
-            }
-            else
-            {
-                Console.Error.WriteLine($"Model file not found: {modelPath}");
-                return 1;
-            }
+            Console.Error.WriteLine($"--gpu does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (GPU modes: default, benchmark, compare).");
+            return 1;
         }
 
         if (syntheticWeights && !isQwen)
         {
             Console.Error.WriteLine("--synthetic-weights is only supported for the qwen benchmark mode.");
+            return 1;
+        }
+
+        if (syntheticWeights && isQwen && mode.Length > 0 && mode != "benchmark")
+        {
+            Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
             return 1;
         }
 
@@ -337,6 +412,43 @@ class Program
         {
             Console.Error.WriteLine("--gpu is F32-only in this phase: the ILGPU path has no bf16/fp16 kernels yet. Drop --precision bf16|fp16 (or --gpu) and rerun.");
             return 1;
+        }
+
+        // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
+        // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
+        // there loaded BF16/Half weights and then ran the F32 path.
+        if ((bf16 || fp16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
+        {
+            Console.Error.WriteLine(isQwen
+                ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32."
+                : $"--precision {precision} is not supported for '{got}': the selected run is F32-only. Narrow-float models: {NarrowFloatModels} ('modernbert' / 'laya' compare are F32-only).");
+            return 1;
+        }
+
+        // #591: --simd-widen is an A/B lever only where the run reads the toggle. smollm and qwen enable
+        // widen for their narrow runs themselves (so the flag is inert there), an F32 run is unchanged,
+        // and the vision models have no narrow path at all.
+        if (simdWiden && !(precision != "f32" && ConsumesWiden(modelType, mode)))
+        {
+            Console.Error.WriteLine($"--simd-widen only changes minilm / distilbert / distilbert_sst / modernbert / laya at --precision bf16|fp16 outside 'compare'; '{got}' does not read the widen kernels. Drop the flag.");
+            return 1;
+        }
+
+        string modelDir = Path.Combine("samples", "data", resolvedType);
+        string modelPath = Path.Combine(modelDir, "model.safetensors");
+
+        if (!File.Exists(modelPath))
+        {
+            if (syntheticWeights && isQwen)
+            {
+                Console.WriteLine("--synthetic-weights: no model file required; fabricating Qwen2.5-0.5B-shaped weights.");
+                Console.WriteLine();
+            }
+            else
+            {
+                Console.Error.WriteLine($"Model file not found: {modelPath}");
+                return 1;
+            }
         }
 
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
@@ -385,27 +497,16 @@ class Program
                 {
                     if (benchmark) return BenchmarkMiniLmGpu(tensors);
                     if (compare) return RunMiniLmGpuCompare(tensors);
-                    if (mode == "similarity")
-                    {
-                        Console.Error.WriteLine("--gpu does not support mode 'similarity' for minilm (supported: default, benchmark, compare).");
-                        return 1;
-                    }
                     return RunMiniLmGpuInference(tensors);
                 }
                 if (bf16) return benchmark ? BenchmarkMiniLM(tensorsBf16, "BFloat16") : RunMiniLMBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkMiniLM(tensorsHalf, "Half") : RunMiniLMHalf(tensorsHalf);
                 if (compare) return RunMiniLMCompare(tensors);
-                bool similarity = mode == "similarity";
-                return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
+                return mode == "similarity" ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
             case "distilbert":
                 if (useGpu)
                 {
                     if (compare) return RunDistilBertGpuCompare(tensors);
-                    if (mode is "predict" or "compare_diag")
-                    {
-                        Console.Error.WriteLine($"--gpu does not support mode '{mode}' for distilbert (supported: default, benchmark, compare).");
-                        return 1;
-                    }
                     return benchmark ? BenchmarkDistilBertGpu(tensors) : RunDistilBertGpuInference(tensors);
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBert(tensorsBf16, "BFloat16") : RunDistilBertBFloat16(tensorsBf16);
@@ -417,11 +518,6 @@ class Program
                 {
                     if (benchmark) return BenchmarkDistilBertSstGpu(tensors);
                     if (compare) return RunDistilBertSstGpuCompare(tensors);
-                    if (mode == "predict")
-                    {
-                        Console.Error.WriteLine("--gpu does not support the 'predict' REPL for distilbert_sst yet (supported: default 8-sentence table, benchmark, compare).");
-                        return 1;
-                    }
                     return RunDistilBertSstGpuInference(tensors);
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBertSst(tensorsBf16, "BFloat16") : RunDistilBertSstBFloat16(tensorsBf16);
@@ -434,22 +530,7 @@ class Program
                 {
                     if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir);
                     if (compare) return Laya.CompareGpu(tensors, modelDir);
-                    if (compareDiag)
-                    {
-                        Console.Error.WriteLine("--gpu does not support 'compare_diag' for laya: the per-stage diff reads named CPU intermediates, and the GPU runners have no per-stage hook. 'laya --gpu compare' gates the head's marker logits and act probability against the in-process CPU head instead (supported: default, benchmark, compare).");
-                        return 1;
-                    }
-                    if (mode.Length > 0)
-                    {
-                        Console.Error.WriteLine($"--gpu does not support the '{mode}' mode for laya (supported: default, benchmark, compare).");
-                        return 1;
-                    }
                     return Laya.RunGpu(tensors, modelDir);
-                }
-                if (compareDiag)
-                {
-                    Console.Error.WriteLine("laya does not support 'compare_diag' (supported: default, benchmark, compare).");
-                    return 1;
                 }
                 if (compare) return Laya.Compare(tensors, modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
@@ -460,11 +541,6 @@ class Program
                 {
                     if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations);
                     if (compare) return ModernBert.CompareGpu(tensors, modelDir);
-                    if (compareDiag)
-                    {
-                        Console.Error.WriteLine("--gpu does not support 'compare_diag' for modernbert: the per-stage diff reads named CPU intermediates, and the GPU runner has no per-stage hook. 'modernbert --gpu compare' gates the final hidden state instead (supported: default, benchmark, compare).");
-                        return 1;
-                    }
                     return ModernBert.RunGpu(tensors, modelDir);
                 }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
@@ -484,32 +560,16 @@ class Program
                 return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
             case "qwen":
                 if (syntheticWeights)
-                {
-                    if (mode.Length > 0 && mode != "benchmark")
-                    {
-                        Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
-                        return 1;
-                    }
-                    bool syntheticPlain = plain;
-                    if (bf16) return syntheticPlain ? Qwen.RunSyntheticBenchmark<BFloat16>(plain: true) : Qwen.RunSyntheticBenchmark<BFloat16>();
-                    return syntheticPlain ? Qwen.RunSyntheticBenchmark<float>(plain: true) : Qwen.RunSyntheticBenchmark<float>();
-                }
-                if (plain && mode.Length > 0 && mode != "benchmark")
-                {
-                    Console.Error.WriteLine("--plain is only valid with the default single-shot run or 'benchmark'.");
-                    return 1;
-                }
-                if (bf16)
-                {
-                    if (mode == "benchmark")
-                        return plain ? Qwen.RunPlainBenchmark(tensorsBf16, modelDir) : Qwen.RunBenchmark(tensorsBf16, modelDir);
-                    Console.Error.WriteLine("Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32.");
-                    return 1;
-                }
+                    return bf16
+                        ? (plain ? Qwen.RunSyntheticBenchmark<BFloat16>(plain: true) : Qwen.RunSyntheticBenchmark<BFloat16>())
+                        : (plain ? Qwen.RunSyntheticBenchmark<float>(plain: true) : Qwen.RunSyntheticBenchmark<float>());
                 if (mode == "distill")
                     return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")
+                {
+                    if (bf16) return plain ? Qwen.RunPlainBenchmark(tensorsBf16, modelDir) : Qwen.RunBenchmark(tensorsBf16, modelDir);
                     return plain ? Qwen.RunPlainBenchmark(tensors, modelDir) : Qwen.RunBenchmark(tensors, modelDir);
+                }
                 if (plain)
                     return Qwen.RunPlain(tensors, modelDir, text);
                 return Qwen.RunTools(tensors, modelDir, useKvCache: !noKvCache, text);
@@ -709,10 +769,11 @@ class Program
         Console.WriteLine();
 
         if (string.IsNullOrEmpty(mode))
+        {
             RunInference(model);
-        else
-            RunImageInference(model, mode);
-        return 0;
+            return 0;
+        }
+        return RunImageInference(model, mode);
     }
 
     static int RunResNet18Inference(
@@ -726,10 +787,11 @@ class Program
         Console.WriteLine();
 
         if (string.IsNullOrEmpty(mode))
+        {
             RunInference(model);
-        else
-            RunImageInference(model, mode);
-        return 0;
+            return 0;
+        }
+        return RunImageInference(model, mode);
     }
 
     static void RunInference(Module<float> model)
@@ -746,12 +808,15 @@ class Program
         PrintTopK(output);
     }
 
-    static void RunImageInference(Module<float> model, string imagePath)
+    static int RunImageInference(Module<float> model, string imagePath)
     {
+        // Unreachable from the guard-validated CLI (the mode allow-list requires the path to exist),
+        // but the path can disappear between the check and here; a missing image is an error, not a
+        // silent success.
         if (!File.Exists(imagePath))
         {
             Console.Error.WriteLine($"Image not found: {imagePath}");
-            return;
+            return 1;
         }
 
         Console.WriteLine($"Loading image: {imagePath}");
@@ -769,6 +834,7 @@ class Program
         Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
 
         PrintTopK(output);
+        return 0;
     }
 
     static ReverseGradTensor<float> CreateRandomInput(int n, int c, int h, int w)

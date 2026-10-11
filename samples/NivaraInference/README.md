@@ -129,6 +129,33 @@ dotnet run --project samples/NivaraInference -- laya
 dotnet run --project samples/NivaraInference -- laya compare
 ```
 
+### Argument validation
+
+Every option is validated before the first weight file is touched: an unrecognised model or mode, a
+flag whose consuming path is not selected, or a narrow `--precision` / `--simd-widen` that the
+selected run does not read exits `1` with a message naming the requirement instead of silently
+running something else. In particular:
+
+- Each model accepts a fixed mode set — `minilm` `benchmark`/`compare`/`similarity`, `qwen`
+  `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing
+  image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through
+  to the model's default runner.
+- `--precision bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner
+  (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya` — but not `compare`;
+  `qwen` for `benchmark`/`--synthetic-weights`). The vision models and `laya compare` /
+  `modernbert compare` reject it: they have no narrow path, so the flag used to load half-memory
+  weights and then run F32.
+- `--simd-widen` is an A/B lever for those narrow runs only. `smollm` and `qwen` enable widen for
+  their narrow runs themselves (use `smollm ab`), and an F32 run is unchanged, so the flag is
+  rejected there.
+
+```bash
+dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16          # accepted (narrow runner)
+dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16 --simd-widen  # accepted (A/B lever)
+dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 --precision bf16    # rejected: no narrow path
+dotnet run --project samples/NivaraInference -c Release -- smollm --simd-widen              # rejected: auto-enabled
+```
+
 ### Python (PyTorch reference)
 
 ```bash

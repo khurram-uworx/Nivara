@@ -144,7 +144,7 @@ public class BFloat16Tests
     [Test]
     public void LinearModule_BFloat16SgdTraining_LossDecreases()
     {
-        using var model = new Linear<BFloat16>(1, 1);
+        using var model = new Linear<BFloat16>(1, 1, weightInitializer: new DeterministicInit<BFloat16>());
         var optimizer = new SGD<BFloat16>(BFloat16.CreateChecked(0.05f));
         optimizer.AddParameterGroup(model.GetParameters().Values);
 

@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
@@ -33,6 +34,8 @@ public sealed class VAE<T> : Module<T>, IMultipleInputModule<T> where T : struct
     /// <param name="activation">Activation used inside encoder/decoder; defaults to ReLU</param>
     /// <param name="beta">Weight of the KL term (β-VAE)</param>
     /// <param name="conditionDim">Dimension of an optional conditioning vector</param>
+    /// <param name="weightInitializer">Optional custom weight initializer for every layer (defaults to Kaiming uniform)</param>
+    /// <param name="biasInitializer">Optional bias initializer for every layer (no default initialization when null)</param>
     public VAE(
         int inputDim,
         int latentDim,
@@ -40,7 +43,9 @@ public sealed class VAE<T> : Module<T>, IMultipleInputModule<T> where T : struct
         int? decoderHiddenDim = null,
         Func<ReverseGradTensor<T>, ReverseGradTensor<T>>? activation = null,
         float beta = 1.0f,
-        int conditionDim = 0)
+        int conditionDim = 0,
+        IInitializer<T>? weightInitializer = null,
+        IInitializer<T>? biasInitializer = null)
     {
         if (inputDim <= 0) throw new ArgumentOutOfRangeException(nameof(inputDim));
         if (latentDim <= 0) throw new ArgumentOutOfRangeException(nameof(latentDim));
@@ -55,14 +60,14 @@ public sealed class VAE<T> : Module<T>, IMultipleInputModule<T> where T : struct
         var encoderInputDim = inputDim + conditionDim;
         var decoderInputDim = latentDim + conditionDim;
 
-        encoderLayer1 = new Linear<T>(encoderInputDim, hiddenDim);
-        encoderLayer2 = new Linear<T>(hiddenDim, hiddenDim);
-        muHead = new Linear<T>(hiddenDim, latentDim);
-        logVarHead = new Linear<T>(hiddenDim, latentDim);
+        encoderLayer1 = new Linear<T>(encoderInputDim, hiddenDim, weightInitializer: weightInitializer, biasInitializer: biasInitializer);
+        encoderLayer2 = new Linear<T>(hiddenDim, hiddenDim, weightInitializer: weightInitializer, biasInitializer: biasInitializer);
+        muHead = new Linear<T>(hiddenDim, latentDim, weightInitializer: weightInitializer, biasInitializer: biasInitializer);
+        logVarHead = new Linear<T>(hiddenDim, latentDim, weightInitializer: weightInitializer, biasInitializer: biasInitializer);
 
         var decHidden = decoderHiddenDim ?? hiddenDim;
-        decoderLayer1 = new Linear<T>(decoderInputDim, decHidden);
-        decoderLayer2 = new Linear<T>(decHidden, inputDim);
+        decoderLayer1 = new Linear<T>(decoderInputDim, decHidden, weightInitializer: weightInitializer, biasInitializer: biasInitializer);
+        decoderLayer2 = new Linear<T>(decHidden, inputDim, weightInitializer: weightInitializer, biasInitializer: biasInitializer);
 
         var betaData = new T[] { T.CreateChecked(beta) };
         this.beta = new Parameter<T>("Beta", betaData, requiresGrad: false);

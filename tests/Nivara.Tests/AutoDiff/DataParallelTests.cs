@@ -56,7 +56,10 @@ public class DataParallelTests
     {
         var loader = CreateLoader(100, 25, shuffle: false);
 
-        using var model = new Linear<float>(1, 1);
+        // Deterministic init, not the unseeded Kaiming default: the last<first loss assertion
+        // below depends on the starting weight, which Random.Shared would otherwise vary per
+        // process. 0.05 is far from the optimum (w≈2, b≈1) for this feature/label shape.
+        using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new Adam<float>();
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
@@ -73,7 +76,7 @@ public class DataParallelTests
     {
         var loader = CreateLoader(200, 50, shuffle: false);
 
-        using var model = new Linear<float>(1, 1);
+        using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new Adam<float>();
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
@@ -96,7 +99,7 @@ public class DataParallelTests
         {
             var ds = new TensorDataset<float>(frame, ["f1"], "label");
             var loader = new DataLoader<float>(ds, 25, shuffle: true, seed: seed);
-            using var model = new Linear<float>(1, 1);
+            using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
             var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
             var optimizer = new Adam<float>();
             optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);

@@ -11,6 +11,12 @@ namespace Nivara.Tests.AutoDiff;
 /// requires-grad flag and shape. Used wherever a test asserts on a training
 /// trajectory, so results do not depend on the unseeded <see cref="Random.Shared"/>.
 /// </summary>
+/// <remarks>
+/// The values grow linearly with the element index, so the ramp is only safe for shallow
+/// stacks. Applied to the six stacked layers of <c>VAE&lt;T&gt;</c> it drives
+/// <c>exp(0.5 * logVar)</c> to +Inf and the loss to NaN. For a multi-layer network use a
+/// seedable, fan-in-scaled initializer (e.g. <c>KaimingUniformInitializer&lt;T&gt;(seed: ...)</c>).
+/// </remarks>
 internal sealed class DeterministicInit<T> : IInitializer<T> where T : struct, IFloatingPointIeee754<T>
 {
     public void Initialize(Parameter<T> parameter)

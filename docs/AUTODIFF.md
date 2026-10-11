@@ -610,7 +610,7 @@ Pre-built per-token classification pipeline: `Embedding → Linear(hidden) → R
 
 ```csharp
 public sealed class VAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new VAE<T>(inputDim, latentDim, hiddenDim, decoderHiddenDim?, activation?, beta: 1.0f)
+// new VAE<T>(inputDim, latentDim, hiddenDim, decoderHiddenDim?, activation?, beta: 1.0f, conditionDim: 0, weightInitializer?, biasInitializer?)
 ```
 
 Variational Autoencoder with encoder → reparameterization trick → decoder.
@@ -624,6 +624,8 @@ Variational Autoencoder with encoder → reparameterization trick → decoder.
 | `ElboLoss(recon, original, mu, logVar, lossType)` | Reconstruction + KL divergence loss |
 
 `ElboLossType`: `KldBeta` (weighted KL via learned `Beta` parameter) or `KldAnnealing` (unweighted KL for annealing schedules).
+
+The constructor accepts optional `weightInitializer` / `biasInitializer` applied to every encoder and decoder layer (e.g. a seeded `KaimingUniformInitializer<T>(seed: ...)` for reproducible runs); both default to the standard unseeded initialization.
 
 ### TransformerBlock\<T\>
 
@@ -670,7 +672,7 @@ BiasGrad:  TensorPrimitives.Sum over batch and length per output channel
 
 ```csharp
 public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new Conv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, groups: 1, bias: true)
+// new Conv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, groups: 1, bias: true, weightInitializer?: null)
 ```
 
 2D convolution with tiled im2col → `TensorPrimitives.Dot` per output channel.
@@ -688,12 +690,13 @@ Key optimizations:
 - **InputGrad specializations**: `InputGrad1x1` (direct MultiplyAdd), `InputGrad3x3` (bounds-checked 9-tap scatter), `InputGradGeneric` (nested loops)
 - **Zero-copy via TryGetSpan**: eliminates tensor copy when storage is contiguous
 - **Grouped convolution**: `groups` parameter splits input/output channels into independent groups. For `groups=1` (common path), zero overhead
+- **Custom weight initializer**: optional `weightInitializer` (`IInitializer<T>`) replaces the default He-uniform draw; when omitted the weights keep the existing fixed-seed initialization
 
 ### ConvTranspose2d\<T\>
 
 ```csharp
 public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new ConvTranspose2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
+// new ConvTranspose2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true, weightInitializer?: null)
 ```
 
 2D transposed convolution using direct scatter kernel (not im2col-based).
@@ -705,6 +708,7 @@ WeightGrad:  ConvTransposeWeightGradKernel (reduction over ih, iw)
 ```
 
 - No grouped convolution support (Conv2d has it)
+- Optional `weightInitializer` (`IInitializer<T>`) replaces the default He-uniform draw; omitted, initialization is unchanged
 - Used by ConvVAE decoder for stride-upsampling
 
 ### BatchNorm1d\<T\> / BatchNorm2d\<T\>
@@ -774,7 +778,7 @@ DepthwiseSeparableConv2d<T> : Module<T>
 
 ```csharp
 public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
-// new ConvVAE<T>(inputChannels, encoderChannels, latentChannels, spatialSize, kernelSize, stride, padding)
+// new ConvVAE<T>(inputChannels, encoderChannels, latentChannels, spatialSize, kernelSize, stride, padding, weightInitializer?: null)
 ```
 
 Fully convolutional VAE with 1×1 Conv2d heads for spatial latent representations.
@@ -789,6 +793,7 @@ ConvVAE<T> : Module<T>
 ```
 
 - Configurable encoder channel list, latent channels, kernel/stride/padding
+- Optional `weightInitializer` (`IInitializer<T>`) forwarded to every encoder, latent-head, and decoder convolution, so initialization can be made reproducible
 - 1×1 Conv heads preserve spatial structure in latent space
 
 ### Conditional VAE
