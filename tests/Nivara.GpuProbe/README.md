@@ -131,8 +131,8 @@ forward.
 
 - One `kernels` run per host, Release (`net11.0`), AC power, all legs
   in-process. Each leg runs its own steady state (1 warmup + best-of-25
-  synchronized dispatches); the leg set is then swept **5 times** with a
-  rotating leg order so no leg is systematically first or last. Per cell:
+  synchronized dispatches); the leg set is then swept **5 times** (the `--rounds`
+  default) with a rotating leg order so no leg is systematically first or last. Per cell:
   **median [min–max]** across the 5 sweeps, n=5.
 - Host records: [results/552-arc-140t.md](results/552-arc-140t.md) (Arc 140T,
   `kernels` exit 405 under the pre-#606 gate; **3** under the #606 diagnosis
@@ -219,10 +219,21 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gate
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ov      # OpenVINO availability (runtime + GPU readback) + both precision configs' gates
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ilgpu  # ILGPU availability (OpenCL devices + accelerator) + gates (phase 4a)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- computesharp # ComputeSharp availability (default D3D12 device) + gates (phase 4b; Windows build only — see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # eight-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + Silk.NET + ComputeSharp (exit = unexpected cells; diagnosed-honest rows reported, not counted)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # eight-way gate harness: CPU gold + SYCL + DX12 + OV-bf16 + OV-f32 + ILGPU + Silk.NET + ComputeSharp (exit = unexpected cells; diagnosed-honest rows reported, not counted; each leg swept 5× → median [min–max], see --rounds below)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- silk    # Silk.NET OpenCL leg alone (exit 0 = all three gates pass)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12 + openvino + computesharp
 ```
+
+Every `KernelGate` mode — `kernels`, `all`, the default chain, and the single-leg
+`sycl` / `ov` / `ilgpu` / `computesharp` / `silk` / `dx12` modes — sweeps its legs
+**5 times** with a rotating leg order and reports each timing cell as a
+**median [min–max]** band, not a single sample (the repeated same-host profile of
+#552/#553). Pass **`--rounds N`** to override the sweep count; the flag may appear
+before or after the mode, so `-- kernels --rounds 1` takes one diagnostic sweep and
+`-- --rounds 1 silk` is equivalent. A non-positive, non-numeric, or missing value
+prints a usage line on stderr and exits **64** — a code kept distinct from a gate
+run's exit code, which is the count of unexpected failed kernels. `l0` / `run` do
+not route through `KernelGate` and ignore `--rounds`.
 
 The ComputeSharp leg is **compile-gated to Windows hosts** (`WINDOWS`
 symbol + conditioned package refs in the csproj): its source generator cannot
@@ -637,7 +648,8 @@ entry points by name from `ze_loader.dll`.
 ## Files
 
 - `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `dx12` /
-  `sycl` / `ov` / `ilgpu` / `computesharp` / `kernels` / `all`).
+  `sycl` / `ov` / `ilgpu` / `computesharp` / `kernels` / `all`) and the
+  `--rounds N` sweep-count flag (default 5; any position; usage error = exit 64).
 - `Kernels/KernelFixtures.cs` — SmolLM-shaped BF16 fixtures + shared native
   write-BF16 / read-f32 helpers.
 - `Kernels/LegResults.cs` — one leg's results over the fixture set
