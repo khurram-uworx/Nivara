@@ -13,6 +13,13 @@ All notable changes to Nivara are documented here. Released versions are publish
   so all existing call sites are unaffected. The `VAE_Training_ReducesLoss` convergence test uses the
   new hook to drop its dependence on `Random.Shared`.
 
+- **`Conv2d<T>` / `ConvTranspose2d<T>` / `ConvVAE<T>` accept a custom weight initializer (#594)** —
+  both `Conv2d<T>` constructors, `ConvTranspose2d<T>`, and `ConvVAE<T>` gained an optional
+  `IInitializer<T>? weightInitializer` that replaces the built-in He-uniform draw, mirroring
+  `Linear<T>`/`VAE<T>`; `ConvVAE<T>` forwards it to every encoder, latent-head, and decoder
+  convolution. Omitted, initialization is unchanged (the existing fixed-seed draw), so no existing
+  caller's weights change. Bias remains zero-initialized.
+
 - **Seedable AutoDiff initializers (#577)** — all seven initializers
   (`KaimingUniformInitializer<T>`, `KaimingNormalInitializer<T>`, `XavierUniformInitializer<T>`,
   `XavierNormalInitializer<T>`, `NormalInitializer<T>`, `UniformInitializer<T>`,
