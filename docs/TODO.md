@@ -152,9 +152,37 @@ Known ambiguity: `new X<T>(null)` does not compile (`int?` vs `Random`); callers
 6. `docs: document seeding on initializers in AUTODIFF.md (#577)` — AUTODIFF
 7. `docs: remove TODO.md — plan executed` (G2 gate, only after both reviews clear)
 
-## G1 grounding
+## G1 grounding (2026-10-11)
 
-_Run immediately after the plan commit; record findings here._
+- **Seeded `Random` is the documented pattern for reproducible test suites:** the
+  [Random class](https://learn.microsoft.com/dotnet/api/system.random?view=net-10.0) docs state
+  "If the same seed is used for separate `Random` objects, they will generate the same series of
+  random numbers" and the canonical examples (seed > restore > replay) reproduce the same sequence —
+  the exact same-seed/different-seed contract the plan's NUnit gate asserts.
+- **`Random.Shared` is the thread-safe default:** [Random.Shared](https://learn.microsoft.com/dotnet/api/system.random.shared?view=net-10.0)
+  "Provides a thread-safe `Random` instance that may be used concurrently from any thread." Default
+  behavior (null seed ⇒ `Random.Shared`) is therefore unchanged, including the current
+  thread-safety of the singletons.
+- **Seeded instances are NOT thread-safe:** docs warn that concurrent use of one `Random` instance
+  can corrupt it (calls "return 0"). XML docs on the new constructors will state that a seeded
+  initializer holds a caller-facing RNG and must not be shared across threads when mutated (matching
+  the existing `Sampler<T>`/`DataLoader` precedent, and irrelevant to the default path).
+- **Cross-version determinism is not guaranteed:** docs note a seed may produce different sequences
+  across .NET versions. The contract documented is same-seed ⇒ identical weights on a given
+  runtime — no cross-version promise.
+- **Blast radius re-confirmed via code-memory:** `IInitializer<T>` has a single member
+  `Initialize(Parameter<T>)`; the seven classes are constructed only from `Nivara.Tests`
+  (`NnTests.cs`), module ctor defaults (`Linear.cs:62` uses `KaimingUniformInitializer<T>.Instance`),
+  and `Embedding`/`SparseEmbedding`/`MultiheadAttention`/`TransformerBlock` via
+  `new NormalInitializer<T>(T.Zero, ...)`. All existing call sites are source-compatible with the
+  new overloads (additive ctors; `Normal`/`Uniform` parameterless ctor replaced by
+  `(int? seed = null)`, still callable as `new X<T>()`).
+- **Sample count:** `samples/NivaraInference/Qwen.cs` is the only consumer needing a seedable path
+  (`SeededKaimingUniform`); replacement is a 1:1 library-ctor swap (same formula and draw order ⇒
+  `--seed 42` values preserved).
+- **No decisions or red flags surfaced.** The two design choices (both `int? seed` + `Random`
+  overloads; shared single initializer instance in the sample) were resolved with the human during
+  planning.
 
 ## GitHub issues log
 
