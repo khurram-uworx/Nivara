@@ -75,7 +75,7 @@ BF16 halves the weight memory (256.6 MB vs 513.1 MB), but on CPU it is **not** f
 | BF16 widen (`UseWidenSimd = on`, default for narrow) | 705 | 374 | 22,591 ms | 11,972 ms | **7.13× faster** |
 | F32 native (control) | 333 | 231 | 10,660–10,926 ms | 7,404 ms | widen transparent |
 
-The `--simd-widen` flag toggles the widen path from the CLI; for narrow models it is enabled by default (without it, BF16 matmul falls back to the scalar dot). The F32 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading the table together with the memory-vs-performance table above: BF16 **widen** is 7.1× faster than BF16 **scalar** and ~1.6× slower than F32 native.
+The `smollm` BF16/Half runs enable the widen path automatically (without it, BF16 matmul falls back to the scalar dot), so `--simd-widen` is rejected for `smollm` — use `smollm --precision bf16 ab`, which runs scalar and widen side by side, to measure the lever. The F32 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading the table together with the memory-vs-performance table above: BF16 **widen** is 7.1× faster than BF16 **scalar** and ~1.6× slower than F32 native.
 
 Two things changed on AC and are worth recording rather than smoothing over:
 

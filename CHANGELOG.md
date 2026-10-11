@@ -132,6 +132,26 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraInference` rejects inert and unrecognised options before the first disk touch
+  (#586 #587 #591)** — the guards had drifted from the dispatch switch, so each closed hole opened
+  the next. The vision models accepted `--precision bf16|fp16`, loaded the BF16/Half weights, and
+  ran the F32 path (#586); `laya compare` and `modernbert compare` did the same. An unrecognised
+  mode fell through to the model's default runner — `qwen garbag` ran the tools demo (#587), and
+  `mobilenet_v2 garbag` printed `Image not found` and exited `0`. And `--simd-widen` passed its
+  precision-only guard on a run that never reads `NivaraPrimitives.UseWidenSimd` (#591). The CLI
+  surface now lives in one capability block (`SupportedModes`, `GpuModes`, `ConsumesNarrow`,
+  `ConsumesWiden`) that both the guards and the switch read: a narrow `--precision` is accepted only
+  where the dispatch selects a BFloat16/Half runner (`minilm`/`distilbert`/`distilbert_sst`/
+  `smollm`, and `modernbert`/`laya` outside `compare`; `qwen` for `benchmark`/`--synthetic-weights`);
+  a mode must be in the model's allow-list (a vision mode may also be the path of an existing
+  image); and `--simd-widen` is an A/B lever only for `minilm`/`distilbert`/`distilbert_sst`/
+  `modernbert`/`laya` at bf16|fp16 outside `compare` — `smollm` and `qwen` auto-enable widen for
+  their narrow runs, so the flag is rejected there (use `smollm ab`). `--plain` with a qwen mode
+  other than `benchmark` is rejected too. Every guard now runs before the model-file check, so a
+  typo costs a second rather than a 1.5 GB safetensors read, and the dispatch lost the guards the
+  pre-disk pass owns. The CLI argument gate (#581) grows to the whole surface (#589). Sample CLI
+  only — no `src/Nivara` change.
+
 - **`NivaraInference` rejects the last four inert options: Qwen-only `--plain`/`--text`/`--no-kv-cache`
   and F32 `--simd-widen` (#580)** — `--plain` was parsed for every model but consumed only by `qwen`;
   `--text` and `--no-kv-cache` were read only by the qwen prompt paths (`Qwen.RunPlain` /
@@ -149,8 +169,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   lever. `--text` presence is now tracked explicitly (the `""` default hid an explicit value) and a
   trailing `--text` with no value is rejected instead of falling through and being read as a mode
   name. Both help blocks gain negative lines. Sample CLI only — no `src/Nivara` change. The two
-  adjacent silent-acceptance leftovers are tracked as #586 (vision models ignore
-  `--precision bf16|fp16`) and #587 (an unrecognised `qwen` mode silently runs the tools path).
+  adjacent silent-acceptance leftovers it named (#586, #587) are closed by the entry above.
 
 - **`qwen distill` init now uses the library's seedable Kaiming initializer (#577)** — the
   sample-local `SeededKaimingUniform` added by #570 (which duplicated `bound = sqrt(6/fanIn)`)
