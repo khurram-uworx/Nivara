@@ -769,10 +769,11 @@ class Program
         Console.WriteLine();
 
         if (string.IsNullOrEmpty(mode))
+        {
             RunInference(model);
-        else
-            RunImageInference(model, mode);
-        return 0;
+            return 0;
+        }
+        return RunImageInference(model, mode);
     }
 
     static int RunResNet18Inference(
@@ -786,10 +787,11 @@ class Program
         Console.WriteLine();
 
         if (string.IsNullOrEmpty(mode))
+        {
             RunInference(model);
-        else
-            RunImageInference(model, mode);
-        return 0;
+            return 0;
+        }
+        return RunImageInference(model, mode);
     }
 
     static void RunInference(Module<float> model)
@@ -806,12 +808,15 @@ class Program
         PrintTopK(output);
     }
 
-    static void RunImageInference(Module<float> model, string imagePath)
+    static int RunImageInference(Module<float> model, string imagePath)
     {
+        // Unreachable from the guard-validated CLI (the mode allow-list requires the path to exist),
+        // but the path can disappear between the check and here; a missing image is an error, not a
+        // silent success.
         if (!File.Exists(imagePath))
         {
             Console.Error.WriteLine($"Image not found: {imagePath}");
-            return;
+            return 1;
         }
 
         Console.WriteLine($"Loading image: {imagePath}");
@@ -829,6 +834,7 @@ class Program
         Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
 
         PrintTopK(output);
+        return 0;
     }
 
     static ReverseGradTensor<float> CreateRandomInput(int n, int c, int h, int w)
