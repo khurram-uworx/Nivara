@@ -138,8 +138,8 @@ static class IncidentLabBenchmark
         try
         {
             Directory.CreateDirectory(tempDir);
-            Console.Write("    Generating 5K rows with rowGroupSize=1000... ");
-            GenerateSmallWithRowGroupSize(tempDir, "A", rowGroupSize: 1000);
+            Console.Write("    Generating 5K records with rowGroupSize=1000 (full dataset)... ");
+            DatasetGenerator.GenerateFromRecordCount(tempDir, "A", 5_000, rowGroupSize: 1000);
             Console.Write("checking row groups... ");
 
             var parquetPath = Path.Combine(tempDir, "requests.parquet");
@@ -193,69 +193,6 @@ static class IncidentLabBenchmark
         finally
         {
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
-        }
-    }
-
-    static void GenerateSmallWithRowGroupSize(string dir, string scenarioId, int rowGroupSize)
-    {
-        var scenario = Scenarios.Get(scenarioId);
-        var rng = new Random(42);
-        var baseTime = new DateTimeOffset(2025, 6, 15, 14, 0, 0, TimeSpan.Zero);
-        var incidentStart = scenario.IncidentStart;
-        var incidentEnd = scenario.IncidentEnd;
-
-        int totalRequests = 5000;
-        int requestsPerMinute = totalRequests / 30;
-        int remainderRequests = totalRequests - requestsPerMinute * 30;
-
-        var timestampData = new long[totalRequests];
-        var serviceData = new string[totalRequests];
-        var endpointData = new string[totalRequests];
-        var durationMsData = new double[totalRequests];
-        var statusCodeData = new int[totalRequests];
-        var regionData = new string[totalRequests];
-        var traceIdData = new string[totalRequests];
-        var isRetryData = new bool[totalRequests];
-
-        var services = new[] { "gateway", "catalog", "orders", "checkout", "payments" };
-        var regions = new[] { "us-east-1", "us-west-2", "eu-west-1", "ap-south-1" };
-
-        int idx = 0;
-        for (int minute = 0; minute < 30; minute++)
-        {
-            int minuteRequests = requestsPerMinute + (minute < remainderRequests ? 1 : 0);
-            for (int r = 0; r < minuteRequests; r++, idx++)
-            {
-                timestampData[idx] = baseTime.AddMinutes(minute).AddMilliseconds(rng.NextDouble() * 60_000).Ticks;
-                serviceData[idx] = services[rng.Next(services.Length)];
-                endpointData[idx] = $"/api/v1/{rng.Next(10)}";
-                durationMsData[idx] = Math.Round(Math.Max(1.0, rng.NextDouble() * 100), 2);
-                statusCodeData[idx] = rng.NextDouble() < 0.1 ? 500 : 200;
-                regionData[idx] = regions[rng.Next(regions.Length)];
-                traceIdData[idx] = $"trace-{idx:X8}";
-                isRetryData[idx] = rng.NextDouble() < 0.05;
-            }
-        }
-
-        var requestFrame = NivaraFrame.Create(
-            ("Timestamp", NivaraColumn<long>.Create(timestampData)),
-            ("Service", NivaraColumn<string>.Create(serviceData)),
-            ("Endpoint", NivaraColumn<string>.Create(endpointData)),
-            ("DurationMs", NivaraColumn<double>.Create(durationMsData)),
-            ("StatusCode", NivaraColumn<int>.Create(statusCodeData)),
-            ("Region", NivaraColumn<string>.Create(regionData)),
-            ("TraceId", NivaraColumn<string>.Create(traceIdData)),
-            ("IsRetry", NivaraColumn<bool>.Create(isRetryData)));
-
-        var options = ParquetWriteOptions.Default.With(rowGroupSize: rowGroupSize);
-        requestFrame.ToParquet(Path.Combine(dir, "requests.parquet"), options);
-
-        using var writer = new StreamWriter(Path.Combine(dir, "requests.csv"));
-        writer.WriteLine("Timestamp,Service,Endpoint,DurationMs,StatusCode,Region,TraceId,IsRetry");
-        for (int i = 0; i < totalRequests; i++)
-        {
-            var ts = new DateTimeOffset(timestampData[i], TimeSpan.Zero);
-            writer.WriteLine($"{ts:O},{serviceData[i]},{endpointData[i]},{durationMsData[i]:F2},{statusCodeData[i]},{regionData[i]},{traceIdData[i]},{isRetryData[i]}");
         }
     }
 
