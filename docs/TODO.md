@@ -144,4 +144,9 @@ Headline corrections: `dot16` "CPU wins" holds only on the Iris Xe (tie on the A
 
 ## GitHub issues log
 
-- (none yet)
+- [x] #610 — OPENVINO.md: "System.Numerics.Tensors / BFloat16" citation points at the numeric-
+      guidelines page, unrelated to the label (filed during G1 grounding).
+- [x] #611 — DX12.md: dead "Shader model 6.8 / Wave Matrix" citation (404 on learn.microsoft.com;
+      filed during G1 grounding).
+- Both are candidate fold-ins for change unit 5 (same case-study files, one-line link fixes);
+  decision pending with the human.
