@@ -74,16 +74,20 @@ explicitly-flagged unavailable leg, never a miscoded kernel.
 
 ## What this host's bands say (scoped to Iris Xe)
 
-- **`gemv`**: the ordering is **Silk.NET (486) < ComputeSharp (574) < DX12 (706) <
-  ILGPU (860)**. The bands are **disjoint**, so this ordering is readable *on this host*
-  at these shapes — not asserted as a kernel property until it survives the Arc 140T
-  comparison.
+- **`gemv`**: the ordering by median is **Silk.NET (486) ≈ ComputeSharp (574) < DX12
+  (706) < ILGPU (860)**. Every pair is **disjoint except Silk.NET vs ComputeSharp**,
+  whose bands overlap — `[469.4–583.9]` against `[536.3–628.2]`, by ~48 µs — so by the
+  rule these issues set that pair is a **tie**, not an ordering. The rest is readable
+  *on this host* at these shapes, not asserted as a kernel property until it survives
+  the Arc 140T comparison.
 - **`silu` and `dot16`**: **Silk.NET and ILGPU are a tie** (bands overlap:
   66.2–94.3 vs 70.8–76.5 on silu; 66.8–77.4 vs 70.9–106.3 on dot16). ComputeSharp
-  (DXIL) is consistently the slowest non-DX12 leg on the two small kernels; DX12 is
-  launch-bound at 576 elements, as on the Arc.
-- Silk.NET is the fastest hand-authored leg and the fastest GPU row on both small
-  kernels and on `gemv` on this host.
+  (DXIL) is disjointly slower than both on the two small kernels. **DX12 and
+  ComputeSharp overlap there as well** (dot16 `140.9–249.0` vs `128.3–152.0`; silu
+  `121.3–208.7` vs `122.4–164.6`), so DX12's own rank on the small kernels is not
+  readable on this host either.
+- Silk.NET is the fastest hand-authored leg, and the fastest **or tied-fastest** GPU row
+  on both small kernels and on `gemv` on this host.
 
 ## Device-dependence vs the Arc 140T (for the joint correction)
 
@@ -91,6 +95,8 @@ Compared against the Arc 140T series figures already in `README.md`, every runna
 leg is **materially slower on the Iris Xe** — `gemv` roughly 4–6× (Silk.NET ≈486 vs
 90–100; ILGPU ≈860 vs 133–140; ComputeSharp ≈574 vs 144–151). The Iris Xe is the older
 and smaller part (96 EU vs 128, Tiger Lake vs Xe2), so this is the expected direction.
-The open question the joint correction must answer is the **ordering**, not the
-absolute level: whether Silk.NET's `gemv` lead over ILGPU/DX12 and the ILGPU≈Silk.NET
-tie on the small kernels **hold on both hosts** or **flip**.
+The question the joint correction must answer is the **ordering**, not the absolute
+level: whether Silk.NET's `gemv` lead over ILGPU/DX12 and the ILGPU≈Silk.NET tie on the
+small kernels **hold on both hosts** or **flip**. The sibling same-host Arc record,
+[`552-arc-140t.md`](552-arc-140t.md), answers it pair by pair — that file is the input to
+#599, which owns the doc wording.
