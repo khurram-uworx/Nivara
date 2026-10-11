@@ -318,7 +318,10 @@ public class TrainingTests
         var dataset = new TensorDataset<float>(frame, ["f1"], "label");
         var loader = new DataLoader<float>(dataset, 5, shuffle: false);
 
-        using var model = new Linear<float>(1, 1);
+        // Deterministic init, not the unseeded Kaiming default: a 1x1 weight start near
+        // the optimum (~2.01) leaves the last-epoch loss above the first at lr=0.001, so
+        // the last<first assertion below depends on the init draw. 0.05 is far from that band.
+        using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new SGD<float>(0.001f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.001f);
@@ -393,7 +396,7 @@ public class TrainingTests
         var dataset = new TensorDataset<float>(frame, ["f1"], "label");
         var loader = new DataLoader<float>(dataset, 50, shuffle: false);
 
-        using var model = new Linear<float>(1, 1);
+        using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new Adam<float>();
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
@@ -415,8 +418,8 @@ public class TrainingTests
         var loader = new DataLoader<float>(dataset, 8, shuffle: false);
 
         using var model = new Sequential<float>(
-            new Linear<float>(2, 3),
-            new Linear<float>(3, 1));
+            new Linear<float>(2, 3, weightInitializer: new DeterministicInit<float>()),
+            new Linear<float>(3, 1, weightInitializer: new DeterministicInit<float>()));
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new SGD<float>(0.01f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
@@ -563,7 +566,7 @@ public class TrainingTests
         var dataset = new TensorDataset<float>(frame, ["f1"], "label");
         var loader = new DataLoader<float>(dataset, 3, shuffle: false);
 
-        using var model = new Linear<float>(1, 1);
+        using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new SGD<float>(0.01f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
@@ -597,7 +600,7 @@ public class TrainingTests
         var dataset = new TensorDataset<float>(frame, ["f1"], "label");
         var loader = new DataLoader<float>(dataset, 5, shuffle: true, seed: 42);
 
-        using var model = new Linear<float>(1, 1);
+        using var model = new Linear<float>(1, 1, weightInitializer: new DeterministicInit<float>());
         var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>(Reduction.Sum).Forward(pred, tgt);
         var optimizer = new SGD<float>(0.01f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
