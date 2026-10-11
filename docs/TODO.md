@@ -150,4 +150,7 @@ Headline corrections: `dot16` "CPU wins" holds only on the Iris Xe (tie on the A
       guidelines page, unrelated to the label (filed during G1 grounding).
 - [x] #611 — DX12.md: dead "Shader model 6.8 / Wave Matrix" citation (404 on learn.microsoft.com;
       filed during G1 grounding).
-- Both folded into change unit 5 per the human (2026-10-11); the #599 PR will reference them.
+- [x] #612 — GpuProbe README.md: 7 double-encoded `┬╖` separators (committed mojibake; filed
+      during unit-1 authoring). Out of #599 scope (cosmetic, README-only) — track, do not fold.
+- Both citation fixes folded into change unit 5 per the human (2026-10-11); the #599 PR will
+  reference them.
