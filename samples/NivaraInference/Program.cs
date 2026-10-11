@@ -172,7 +172,7 @@ class Program
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
-            Console.WriteLine("  --seed N           Distill: seed accepted for future use (Kaiming init is unseeded)");
+            Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
             Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");

@@ -104,6 +104,19 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`qwen distill` init is now driven by `--seed` (#570)** — `--seed N` was parsed, stored, and
+  printed, but nothing consumed it: the student MLP and the linear baseline built their `Linear`
+  layers through the default initializer, which draws from `Random.Shared`, so every run started
+  from different weights while the status line claimed the seed was merely "accepted for future
+  use". `RunDistill` now creates one `Random(seed)` and passes it to a sample-local Kaiming-uniform
+  initializer for both models (same distribution as the library's `KaimingUniformInitializer<float>`:
+  uniform in `[-bound, bound]`, `bound = sqrt(6/fanIn)`), so a given `--seed` — default `42`, now
+  stated in the help — reproduces the run. Sample CLI only — no `src/Nivara` change; the Kaiming
+  formula is deliberately duplicated in the sample because the library initializer draws from
+  `Random.Shared` and cannot be seeded without a new public constructor. The fix has no automated
+  gate: `RunDistill` needs the (unshipped) Qwen2.5-0.5B checkpoint and the student types are private
+  to the sample exe, so it is verified by release build only — the two-run trace diff was not run.
+
 - **`NivaraInference` rejects `--gpu` for models with no GPU path (#568)** — `--gpu` was parsed
   unconditionally but read only by the five `switch (modelType)` cases that have a `useGpu` branch,
   so `mobilenet_v2`/`resnet18`/`smollm`/`qwen` accepted the flag and silently ran on the CPU: the one
