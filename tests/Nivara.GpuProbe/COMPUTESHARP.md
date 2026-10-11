@@ -1,6 +1,6 @@
 # ComputeSharp on the Arc 140T from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp**
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp** · [Silk.NET OpenCL](../../docs/SILK.md)
 
 This is the sixth GPU-backend case-study doc and the deliverable for issue #432
 (GPU probe phase 4b). The previous phases proved four compile/driver paths
@@ -291,4 +291,4 @@ shape.
   seconds via `dotnet run … -- kernels`. DXIL handling is driver-versioned like
   every other path in the series.
 
-**Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp** — the GPU-backend case-study series
+**Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · **ComputeSharp** · [Silk.NET OpenCL](../../docs/SILK.md) — the GPU-backend case-study series

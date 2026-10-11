@@ -1,6 +1,6 @@
 # ILGPU on the Arc 140T from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md)
+> **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
 
 This is the fifth GPU-backend case-study doc (after [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md), [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md),
 [DX12](../tests/Nivara.GpuProbe/DX12.md), [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md)) and the deliverable for issue #431 (GPU probe
@@ -261,4 +261,4 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
   its own reference is a gate whose green means nothing. A *missing* baseline fails the run; with
   nothing to be exact against, the run verified nothing.
 
-**Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) — the GPU-backend case-study series
+**Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md) — the GPU-backend case-study series

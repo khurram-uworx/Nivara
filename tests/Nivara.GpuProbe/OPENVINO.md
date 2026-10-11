@@ -1,6 +1,6 @@
 # Intel OpenVINO GPU Compute from .NET — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md)
+> **Series:** [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](../../docs/SILK.md)
 
 This is the fourth GPU-backend case-study doc (after [SPIR-V / Level Zero](SPIRV.md),
 [SYCL / oneAPI](SYCL.md), [DX12](DX12.md)) and the deliverable for issue #428: the
@@ -311,4 +311,4 @@ OS:       Windows 10.0.26200   .NET: 11.0 (Release)
 - [OpenVINO GPU plugin / properties (INFERENCE_PRECISION_HINT, EXECUTION_DEVICES, CACHE_DIR)](https://docs.openvino.ai/2026/openvino-workflow/running-inference/inference-devices-and-modes/gpu-device.html)
 - [OpenVINO IR v11 element names / opset1](https://docs.openvino.ai/2026/documentation/openvino-ir-format.html)
 - [System.Numerics.Tensors — TensorPrimitives API (Microsoft Learn)](https://learn.microsoft.com/en-us/dotnet/api/system.numerics.tensors.tensorprimitives?view=net-11.0)
-- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) — the GPU-backend case-study series
+- Series: [SPIR-V / Level Zero](SPIRV.md) · [SYCL / oneAPI](SYCL.md) · [DX12](DX12.md) · [OpenVINO](OPENVINO.md) · [ILGPU](../../docs/ILGPU.md) · [ComputeSharp](COMPUTESHARP.md) · [Silk.NET OpenCL](../../docs/SILK.md) — the GPU-backend case-study series

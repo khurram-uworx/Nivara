@@ -20,12 +20,15 @@ public class DocCitationTests
     const int ExpectedCitedDocumentCount = 16;
 
     /// <summary>
-    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 39 under
+    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 40 under
     /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
     /// <c>docs/TODO.md</c> does <em>not</em> increase this number — excluding it is the point, and it is
-    /// what keeps the count stable across a workflow that commits one.
+    /// what keeps the count stable across a workflow that commits one. The move of <c>SILK.md</c>
+    /// from <c>tests/Nivara.GpuProbe/</c> into <c>docs/</c> is what took <c>docs/</c> from 39 to 40:
+    /// the gate scans the repository root plus <c>docs/</c>, never <c>tests/</c>, so the probe tree
+    /// was not counted before and the document entered scope on arrival.
     /// </summary>
-    const int ExpectedDocumentCount = 48;
+    const int ExpectedDocumentCount = 49;
 
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()

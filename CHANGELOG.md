@@ -6,7 +6,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
-- **`minilm --silk`: a second OpenCL backend, hand-authored OpenCL C** — the GPU flag was
+- **`minilm --silk`: a second OpenCL backend, hand-authored OpenCL C (#617)** — the GPU flag was
   renamed `--gpu` → `--ilgpu` (the old spelling is rejected with the new name rather than aliased,
   so an old invocation cannot quietly keep running ILGPU), and a new `--silk` path runs the MiniLM
   encoder through six hand-written OpenCL C kernels compiled in-process by the driver via
