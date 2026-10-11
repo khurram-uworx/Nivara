@@ -6,6 +6,13 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`VAE<T>` accepts custom weight/bias initializers (#583)** — the constructor gained optional
+  `IInitializer<T>? weightInitializer` / `biasInitializer` parameters, forwarded to every encoder and
+  decoder layer, so a VAE can be initialized reproducibly (e.g. a seeded `KaimingUniformInitializer<T>`)
+  instead of only through the unseeded default. Both default to the existing standard initialization,
+  so all existing call sites are unaffected. The `VAE_Training_ReducesLoss` convergence test uses the
+  new hook to drop its dependence on `Random.Shared`.
+
 - **Seedable AutoDiff initializers (#577)** — all seven initializers
   (`KaimingUniformInitializer<T>`, `KaimingNormalInitializer<T>`, `XavierUniformInitializer<T>`,
   `XavierNormalInitializer<T>`, `NormalInitializer<T>`, `UniformInitializer<T>`,
