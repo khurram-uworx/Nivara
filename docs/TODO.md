@@ -133,6 +133,25 @@ test project references. The only strong gate is the live two-run diff, which is
 here. This was surfaced to the human during planning and A2 was chosen anyway; the changelog
 will record the coverage limitation rather than imply the run was reproduced.
 
+### Implementation deviation from the plan (found during execution)
+
+The planned `NivaraColumn<float>.CreateFromOwnedArray(data)` + 3-arg
+`new ReverseGradTensor<float>(column, requiresGrad, shape)` does not compile from the sample:
+`CreateFromOwnedArray` and that constructor are **internal** to the `Nivara` assembly (the
+library's own initializers may use them; a sample may not). The landed initializer uses only
+public APIs — `ReverseGradTensor<float>.FromArray(data, requiresGrad)` then `Reshape(shape)` —
+which preserves the shape and requires-grad flag identically. The `using Nivara;` this briefly
+needed was removed. Same class of finding as the `Tensor<T>` issues (#524-#532): the plan's
+sketch was checked against the compiler rather than trusted.
+
+### Verification result
+
+- `dotnet build samples/NivaraInference -c Release` — **succeeded, 0 warnings, 0 errors**.
+- End-to-end two-run trace diff — **not run**: `qwen distill --seed 7` exits at
+  `Model file not found: samples\data\qwen2.5-0.5b-instruct\model.safetensors`, before any init.
+  The checkpoint is not in this checkout, so this gate is not runnable here (as the plan
+  anticipated). Coverage is stated honestly in the changelog rather than implied.
+
 ## Planned commits
 
 1. `fix(samples): seed the qwen distill student/baseline init from --seed (#570)` —
@@ -143,4 +162,5 @@ will record the coverage limitation rather than imply the run was reproduced.
 
 ## GitHub issues log
 
-- [ ] (none yet — capture any deferred work discovered during execution here, immediately)
+- [x] #577 — AutoDiff: add a seedable initializer so init reproducibility can be gated (created
+  while landing #570; this is the deferred "A1" alternative to the sample-local initializer)
