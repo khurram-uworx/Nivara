@@ -10,13 +10,17 @@ namespace Nivara.Tests.Inference;
 /// code — is what makes the gate real: a removed guard falls through to a different exit-1 path
 /// (unknown model, or the model-file check), so the code alone would still be <c>1</c>.
 /// <para>
-/// <b>Coverage.</b> The <c>--seq</c>/<c>--warmup</c>/<c>--iters</c> scope rejects (#474), the
-/// <c>--precision</c>/<c>--seed</c>/<c>--teacher-examples</c> value rejects (#479), the <c>--gpu</c>
-/// model-scope reject (#568), the <c>--teacher-examples</c>/<c>--seed</c>/<c>--force</c> scope rejects
-/// (#571), the guard-before-disk ordering, and the <c>qwen distill</c> happy path where all three
-/// flags are accepted. The ordering and happy-path cases use <c>qwen</c> because its checkpoint is
-/// never present (<c>samples/data/qwen2.5-0.5b-instruct/</c> is gitignored and no <c>*.safetensors</c>
-/// is tracked), so the guard runs before the first disk touch in every environment.
+/// <b>Coverage.</b> Every reject the CLI owns is asserted here: the <c>--seq</c>/<c>--warmup</c>/
+/// <c>--iters</c> scope (#474), the <c>--precision</c>/<c>--seed</c>/<c>--teacher-examples</c> values
+/// (#479), the <c>--gpu</c> model scope (#568), the <c>--teacher-examples</c>/<c>--seed</c>/
+/// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
+/// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
+/// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
+/// scopes (#580). #589 requires each reject to be observable before the first disk touch, so the
+/// ordering cases and the <c>qwen</c> happy paths use <c>qwen</c> (its checkpoint is never present:
+/// <c>samples/data/qwen2.5-0.5b-instruct/</c> is gitignored and no <c>*.safetensors</c> is tracked)
+/// and the mode cases pin the message, not the exit code — a guard that fell through to the
+/// model-file check would exit <c>1</c> with a different message.
 /// </para>
 /// </summary>
 [TestFixture]
@@ -151,6 +155,170 @@ public class InferenceCliArgumentTests
         Assert.That(result.StdErr, Does.Not.Contain("expects an integer"));
         Assert.That(result.StdErr, Does.Not.Contain("needs a value"));
     }
+
+    [Test]
+    public void UnknownModel_Rejected() =>
+        AssertRejected(Run("bogus"), "Unknown model type: bogus");
+
+    /// <summary>
+    /// #587, generalised to every model: an unrecognised mode used to fall through to the model's
+    /// default runner (the vision models printed "Image not found" and exited 0). The vision message
+    /// names the image-path escape hatch; every other model lists its keywords.
+    /// </summary>
+    [Test]
+    public void UnknownMode_RejectedOnEveryModel()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach ((string[] args, string expected) in UnknownModeCases)
+                AssertRejected(Run(args), expected);
+        });
+    }
+
+    [Test]
+    public void UnknownMode_RejectedBeforeModelFileLookup()
+    {
+        // 'minilm' weights may be present in a developer workspace but not on CI; the mode guard must
+        // fire before the model-file check either way, or the message would differ between the two.
+        CliResult result = Run("minilm", "garbag");
+        Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage));
+        AssertRejected(result, "Unsupported mode 'garbag' for 'minilm'");
+    }
+
+    /// <summary>
+    /// #586: a narrow <c>--precision</c> is only meaningful where the dispatch selects a narrow
+    /// runner. The vision models have no bf16/fp16 path, and laya/modernbert <c>compare</c> are
+    /// F32-only, so the flag there loaded BF16/Half weights and then ran F32.
+    /// </summary>
+    [Test]
+    public void NarrowPrecision_OnRunThatDoesNotConsumeIt_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach ((string[] args, string expected) in NarrowPrecisionCases)
+                AssertRejected(Run(args), expected);
+        });
+    }
+
+    [Test]
+    public void QwenPrecision_Rejected()
+    {
+        AssertRejected(Run("qwen", "--precision", "bf16"),
+            "bf16 supports only the 'benchmark' and '--synthetic-weights' modes");
+        AssertRejected(Run("qwen", "--precision", "fp16"),
+            "fp16 is not supported for the qwen mode");
+    }
+
+    [Test]
+    public void GpuPrecisionCombination_Rejected() =>
+        AssertRejected(Run("minilm", "--gpu", "--precision", "bf16"), "--gpu is F32-only in this phase");
+
+    [Test]
+    public void GpuUnsupportedMode_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach ((string[] args, string expected) in GpuModeCases)
+                AssertRejected(Run(args), expected);
+        });
+    }
+
+    /// <summary>
+    /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
+    /// enable widen for their narrow runs themselves, so the flag is inert there; an F32 run is
+    /// unchanged; and the vision models have no narrow path at all.
+    /// </summary>
+    [Test]
+    public void SimdWiden_OnRunThatDoesNotReadIt_Rejected()
+    {
+        const string expected = "does not read the widen kernels";
+        AssertRejected(Run("mobilenet_v2", "--simd-widen"), expected);
+        AssertRejected(Run("minilm", "--simd-widen"), expected);
+        AssertRejected(Run("laya", "--simd-widen"), expected);
+        AssertRejected(Run("smollm", "--precision", "bf16", "--simd-widen"), expected);
+        AssertRejected(Run("smollm", "ab", "--simd-widen"), expected);
+        AssertRejected(Run("qwen", "benchmark", "--precision", "bf16", "--simd-widen"), expected);
+    }
+
+    [Test]
+    public void SyntheticWeights_OutsideScope_Rejected()
+    {
+        AssertRejected(Run("minilm", "--synthetic-weights"),
+            "is only supported for the qwen benchmark mode");
+        AssertRejected(Run("qwen", "distill", "--synthetic-weights"),
+            "supports only the 'benchmark' mode");
+    }
+
+    [Test]
+    public void PlainAndPromptFlags_OutsideScope_Rejected()
+    {
+        AssertRejected(Run("minilm", "--plain"), "is a 'qwen' option only");
+        AssertRejected(Run("qwen", "tools", "--plain"), "only valid with the default single-shot run or 'benchmark'");
+        AssertRejected(Run("minilm", "--text", "hi"), "is a 'qwen' / 'qwen tools' prompt option only");
+        AssertRejected(Run("minilm", "--no-kv-cache"), "is the 'qwen tools' path only");
+    }
+
+    /// <summary>
+    /// The counterpart to the rejects above: every accepted qwen mode still reaches the weight load.
+    /// <c>qwen</c>'s checkpoint is never present, so "Model file not found" is the deepest point this
+    /// gate can observe; the point is that no guard fires before it.
+    /// </summary>
+    [Test]
+    public void QwenAcceptedModes_ReachTheModelFileLookup()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach (string[] args in AcceptedQwenCases)
+            {
+                CliResult result = Run(args);
+                string label = string.Join(' ', args);
+                Assert.That(result.StdErr, Does.Contain(ModelLookupMessage),
+                    $"'{label}' should reach the weight load; stderr:{Environment.NewLine}{result.StdErr}");
+                Assert.That(result.StdErr, Does.Not.Contain("Unsupported mode"));
+                Assert.That(result.StdErr, Does.Not.Contain("not supported for"));
+                Assert.That(result.StdErr, Does.Not.Contain("precision error"));
+            }
+        });
+    }
+
+    static readonly (string[] Args, string Expected)[] UnknownModeCases =
+    [
+        (["qwen", "garbag"], "Unsupported mode 'garbag' for 'qwen'"),
+        (["minilm", "garbag"], "Unsupported mode 'garbag' for 'minilm'"),
+        (["distilbert", "predict"], "Unsupported mode 'predict' for 'distilbert'"),
+        (["distilbert", "compare_diag"], "Unsupported mode 'compare_diag' for 'distilbert'"),
+        (["distilbert_sst", "compare_diag"], "Unsupported mode 'compare_diag' for 'distilbert_sst'"),
+        (["modernbert", "garbag"], "Unsupported mode 'garbag' for 'modernbert'"),
+        (["smollm", "garbag"], "Unsupported mode 'garbag' for 'smollm'"),
+        (["laya", "compare_diag"], "Unsupported mode 'compare_diag' for 'laya'"),
+        (["mobilenet_v2", "garbag"], "Unsupported mode or image 'garbag' for 'mobilenet_v2'"),
+        (["resnet18", "garbag"], "Unsupported mode or image 'garbag' for 'resnet18'"),
+    ];
+
+    static readonly (string[] Args, string Expected)[] NarrowPrecisionCases =
+    [
+        (["mobilenet_v2", "--precision", "bf16"], "--precision bf16 is not supported for 'mobilenet_v2'"),
+        (["mobilenet_v2", "--precision", "fp16", "benchmark"], "--precision fp16 is not supported for 'mobilenet_v2 benchmark'"),
+        (["resnet18", "--precision", "bf16", "compare"], "--precision bf16 is not supported for 'resnet18 compare'"),
+        (["laya", "compare", "--precision", "bf16"], "--precision bf16 is not supported for 'laya compare'"),
+        (["modernbert", "compare", "--precision", "fp16"], "--precision fp16 is not supported for 'modernbert compare'"),
+    ];
+
+    static readonly (string[] Args, string Expected)[] GpuModeCases =
+    [
+        (["minilm", "--gpu", "similarity"], "--gpu does not support mode 'similarity' for 'minilm'"),
+        (["distilbert_sst", "--gpu", "predict"], "--gpu does not support mode 'predict' for 'distilbert_sst'"),
+        (["modernbert", "--gpu", "compare_diag"], "--gpu does not support mode 'compare_diag' for 'modernbert'"),
+    ];
+
+    static readonly string[][] AcceptedQwenCases =
+    [
+        ["qwen"],
+        ["qwen", "tools"],
+        ["qwen", "distill"],
+        ["qwen", "benchmark"],
+        ["qwen", "--precision", "bf16", "benchmark"],
+    ];
 
     static void AssertRejected(CliResult result, string message)
     {
