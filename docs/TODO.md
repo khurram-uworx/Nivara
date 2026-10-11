@@ -134,10 +134,26 @@ names the three flags, the `qwen distill` requirement, that the guard precedes t
 2. `fix(samples): reject --teacher-examples / --seed / --force outside qwen distill (#571)`
 3. `docs: remove TODO.md — plan executed`
 
+## G1 grounding (2026-10-11)
+
+- **Blast radius confirmed via code-memory:** `Program.Main(string[] args)` (`Program.cs:21`) has
+  `0` relationship records targeting it — it is the sample process entry point with no in-repo
+  callers, so the guard affects only direct `dotnet run` invocations of `NivaraInference`.
+- **Exit-code convention:** [Main() return values](https://learn.microsoft.com/dotnet/csharp/fundamentals/program-structure/main-command-line#main-return-values)
+  states "a nonzero value means there's an error", so `Console.Error.WriteLine(...)` + `return 1` is
+  the idiomatic reject for a bad option — consistent with the #474/#568 guards this mirrors.
+- **No new library API:** the change touches only hand-rolled argument parsing
+  (`TryParseCount`/`TryParseSeqLengths` precedent). `System.CommandLine` would reject unknown options
+  by default, but this sample deliberately hand-rolls its parser and the local convention for a
+  scope mismatch is the two-branch guard, so mirroring #474 is correct rather than switching APIs.
+- **No decisions or red flags surfaced.** The one scope question (whether to include `--force`) was
+  resolved with the human before the plan was written: `--force` is included. The remaining inert
+  flags are filed as #580.
+
 ## GitHub issues log
 
-- [ ] TBD — capture the remaining inert flags (`--plain` / `--no-kv-cache` / `--text` /
-      `--simd-widen`) as a follow-up to #571 (created during execution).
+- [x] #580 — reject Qwen-only `--plain` / `--no-kv-cache` / `--text` and SmolLM-only `--simd-widen`
+      outside the paths that consume them (created while working on #571).
 
 > As each task executes, any deferred work or concern is filed immediately via
 > `gh issue create --repo khurram-uworx/Nivara` and recorded here — not held in memory, because
