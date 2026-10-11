@@ -17,6 +17,17 @@ namespace Nivara.GpuProbe.Kernels;
 /// per-leg internal best-of-N is still the gauge for a single sample; the median and band are
 /// the cross-run statistic the two host issues exist to record.
 /// </para>
+/// <para>
+/// A leg may declare an <see cref="KernelDiagnosis"/> for one of its kernels: a
+/// structural gate failure that is an expected, evidenced precision finding rather
+/// than a miscode. Failing elements are then judged against a reference derived from
+/// the same fixtures as the gold (never from the leg's own output), and any element
+/// that matches it within the diagnosis's half-ULP tolerance is counted as
+/// <em>diagnosed</em> rather than <em>unexpected</em>. The exit code is the count of
+/// unexpected failures; diagnosed-honest ones are reported, not counted (the
+/// OpenVINO BF16-declared silu, resolved to F16 execution by the GPU plugin, is the
+/// first such row — #606).
+/// </para>
 /// </summary>
 internal static class KernelGate
 {
@@ -26,14 +37,15 @@ internal static class KernelGate
 
     /// <summary>Single-leg convenience overload (unchanged single-sample behaviour).</summary>
     public static int Run(KernelFixtures fixtures, string gpuLegName, Func<KernelFixtures, LegResults?> gpuLeg)
-        => Run(fixtures, (gpuLegName, gpuLeg));
+        => Run(fixtures, (gpuLegName, gpuLeg, (KernelDiagnosis?)null));
 
     /// <summary>
     /// Runs the CPU reference + every GPU leg <see cref="Rounds"/> times with a rotating order,
     /// gates correctness once (round 0), then prints the correctness table and the median +
     /// min–max timing table.
     /// </summary>
-    public static int Run(KernelFixtures fixtures, params (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs)
+    public static int Run(KernelFixtures fixtures,
+        params (string Name, Func<KernelFixtures, LegResults?> Leg, KernelDiagnosis? Diagnosis)[] legs)
     {
         Console.WriteLine();
         Console.WriteLine("--- kernel gates vs CPU (production Nivara kernels) ---");
@@ -49,11 +61,11 @@ internal static class KernelGate
             ["silu"] = new(StringComparer.Ordinal) { ["CPU (production Nivara)"] = [] },
             ["gemv"] = new(StringComparer.Ordinal) { ["CPU (production Nivara)"] = [] },
         };
-        foreach ((string name, _) in legs)
+        foreach ((string name, _, _) in legs)
             foreach (Dictionary<string, List<double>> byKernel in samples.Values)
                 byKernel[name] = [];
 
-        int failures = 0;
+        int failures = 0, diagnosed = 0;
         LegResults? cpuReference = null;
 
         for (int round = 0; round < Rounds; round++)
@@ -64,14 +76,18 @@ internal static class KernelGate
             LegResults cpu = CpuLeg.ComputeLeg(fixtures);
             cpuReference ??= cpu;
             if (round == 0)
-                failures += Gate(cpu, cpu, "CPU (production Nivara)");
+                failures += Gate(cpu, cpu, "CPU (production Nivara)", null, null, out _);
             RecordSample(samples, cpu, "CPU (production Nivara)");
 
-            foreach ((string name, Func<KernelFixtures, LegResults?> leg) in Rotate(legs, round))
+            foreach ((string name, Func<KernelFixtures, LegResults?> leg, KernelDiagnosis? diagnosis) in Rotate(legs, round))
             {
                 LegResults? results = leg(fixtures);
                 if (round == 0) // correctness is deterministic; gate once, not every sweep
-                    failures += GateLeg(name, results, cpuReference);
+                {
+                    ushort[]? diagRef = diagnosis?.ReferenceFactory(fixtures);
+                    failures += GateLeg(name, results, cpuReference, diagnosis, diagRef, out int diagnosedHere);
+                    diagnosed += diagnosedHere;
+                }
                 if (results is not null)
                     RecordSample(samples, results, name);
             }
@@ -80,7 +96,7 @@ internal static class KernelGate
         PrintTimingTable(samples, legs);
 
         Console.WriteLine();
-        Console.WriteLine($"  kernels mode exit: {failures} failed kernel(s), {Rounds} sweeps, 0 unexpected");
+        Console.WriteLine($"  kernels mode exit: {failures} unexpected failed kernel(s), {diagnosed} diagnosed honest, {Rounds} sweeps");
         return failures;
     }
 
@@ -93,8 +109,8 @@ internal static class KernelGate
     }
 
     /// <summary>Rotates the leg list by <paramref name="offset"/> so no leg keeps the same position.</summary>
-    private static IEnumerable<(string Name, Func<KernelFixtures, LegResults?> Leg)> Rotate(
-        (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs, int offset)
+    private static IEnumerable<(string Name, Func<KernelFixtures, LegResults?> Leg, KernelDiagnosis? Diagnosis)> Rotate(
+        (string Name, Func<KernelFixtures, LegResults?> Leg, KernelDiagnosis? Diagnosis)[] legs, int offset)
     {
         int n = legs.Length;
         for (int i = 0; i < n; i++)
@@ -108,7 +124,7 @@ internal static class KernelGate
     /// </summary>
     private static void PrintTimingTable(
         Dictionary<string, Dictionary<string, List<double>>> samples,
-        (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs)
+        (string Name, Func<KernelFixtures, LegResults?> Leg, KernelDiagnosis? Diagnosis)[] legs)
     {
         Console.WriteLine();
         Console.WriteLine("  kernel timings over all sweeps (µs per invocation, kernel-only; median[min–max]):");
@@ -117,7 +133,7 @@ internal static class KernelGate
             Console.WriteLine();
             Console.WriteLine($"    [{kernel}]");
             Console.WriteLine($"      {"CPU (production Nivara)",-26} {Cell(samples[kernel]["CPU (production Nivara)"])}");
-            foreach ((string name, _) in legs)
+            foreach ((string name, _, _) in legs)
                 Console.WriteLine($"      {name,-26} {Cell(samples[kernel][name])}");
         }
     }
@@ -133,30 +149,34 @@ internal static class KernelGate
         return $"{median,9:F1} [{ordered[0]:F1}–{ordered[^1]:F1}]  (n={values.Count})";
     }
 
-    private static int GateLeg(string name, LegResults? results, LegResults cpu)
+    private static int GateLeg(string name, LegResults? results, LegResults cpu,
+        KernelDiagnosis? diagnosis, ushort[]? diagRef, out int diagnosed)
     {
         if (results is null)
         {
+            diagnosed = 0;
             Console.WriteLine($"\n  {name.PadRight(28)} UNBUILT / UNAVAILABLE (3 kernels failed)");
             return 3;
         }
 
         Console.WriteLine();
-        return Gate(cpu, results, name);
+        return Gate(cpu, results, name, diagnosis, diagRef, out diagnosed);
     }
 
-    private static int Gate(LegResults reference, LegResults leg, string name)
+    private static int Gate(LegResults reference, LegResults leg, string name,
+        KernelDiagnosis? diagnosis, ushort[]? diagRef, out int diagnosed)
     {
         if (ReferenceEquals(reference, leg))
         {
             // Identity row: the CPU leg against itself (0 ULP sanity check of the harness).
+            diagnosed = 0;
             Console.WriteLine($"  {name.PadRight(28)} dot16 0.0 ULP | silu 0/0 failed | gemv 0/0 failed");
             return 0;
         }
 
         int failedDots = GateDot16(reference, leg, name);
-        int failedSilu = GateVector(reference.Silu, leg.Silu, "silu", name);
-        int failedGemv = GateVector(reference.Gemv, leg.Gemv, "gemv", name);
+        int failedSilu = GateVector(reference.Silu, leg.Silu, "silu", name, diagnosis, diagRef, out diagnosed);
+        int failedGemv = GateVector(reference.Gemv, leg.Gemv, "gemv", name, null, null, out _);
         return failedDots + failedSilu + failedGemv;
     }
 
@@ -167,12 +187,24 @@ internal static class KernelGate
         return pass ? 0 : 1;
     }
 
-    private static int GateVector(float[] reference, float[] leg, string kernel, string name)
+    /// <summary>
+    /// Gates one kernel row and returns the count of <em>unexpected</em> failures
+    /// (failures minus those diagnosed by <paramref name="diagnosis"/>). When a
+    /// diagnosis applies, every element is also matched against the diagnosis's
+    /// reference in the half lattice, and the worst half-ULP is reported so the
+    /// "honest" classification is checkable in the log, not asserted in prose.
+    /// </summary>
+    private static int GateVector(float[] reference, float[] leg, string kernel, string name,
+        KernelDiagnosis? diagnosis, ushort[]? diagRef, out int diagnosedOut)
     {
-        int passed = 0, failed = 0;
+        int passed = 0, failed = 0, diagnosed = 0;
         double worstUlp = 0;
         int worstIndex = -1;
         float worstLeg = 0f, worstRef = 0f;
+        int worstHalfUlp = 0, worstHalfIndex = -1;
+        bool applies = diagnosis is not null && diagRef is not null
+            && string.Equals(diagnosis.Kernel, kernel, StringComparison.Ordinal);
+
         for (int i = 0; i < leg.Length; i++)
         {
             double ulp = CpuLeg.UlpDistance(leg[i], reference[i]);
@@ -184,19 +216,68 @@ internal static class KernelGate
                 worstRef = reference[i];
             }
             if (CpuLeg.WithinTolerance(leg[i], reference[i]))
+            {
                 passed++;
+            }
             else
+            {
                 failed++;
+                if (applies)
+                {
+                    int halfUlp = CpuLeg.HalfUlpDistance(
+                        BitConverter.HalfToUInt16Bits((Half)leg[i]), diagRef![i]);
+                    if (halfUlp > worstHalfUlp)
+                    {
+                        worstHalfUlp = halfUlp;
+                        worstHalfIndex = i;
+                    }
+                    if (halfUlp <= diagnosis!.MaxHalfUlp)
+                        diagnosed++;
+                }
+            }
         }
         if (worstIndex >= 0)
         {
             double worstGate = CpuLeg.GateAbs + CpuLeg.GateRel * Math.Abs(worstRef);
-            Console.WriteLine($"  {name.PadRight(28)} {kernel} {passed}/{leg.Length} within gate ({failed} failed), worst {worstUlp:F1} ULP @ index {worstIndex} (leg {worstLeg:G9} vs CPU {worstRef:G9}, gate {worstGate:G3}, |diff| {Math.Abs(worstLeg - worstRef):G3})");
+            string diagnosisNote = diagnosed > 0 ? $", {diagnosed} diagnosed-honest" : "";
+            Console.WriteLine($"  {name.PadRight(28)} {kernel} {passed}/{leg.Length} within gate ({failed} failed{diagnosisNote}), worst {worstUlp:F1} ULP @ index {worstIndex} (leg {worstLeg:G9} vs CPU {worstRef:G9}, gate {worstGate:G3}, |diff| {Math.Abs(worstLeg - worstRef):G3})");
+            if (diagnosed > 0)
+                Console.WriteLine($"  {name.PadRight(28)} {kernel} F16-mirror: worst {worstHalfUlp} half-ULP @ index {worstHalfIndex} ({diagnosis?.Reason})");
         }
         else
         {
             Console.WriteLine($"  {name.PadRight(28)} {kernel} {passed}/{leg.Length} within gate ({failed} failed)");
         }
-        return failed;
+
+        diagnosedOut = diagnosed;
+        return failed - diagnosed;
     }
+}
+
+/// <summary>
+/// A declared honest gate failure: <see cref="Kernel"/>'s failures are counted as
+/// <em>diagnosed</em> (not unexpected) when every failing element also matches the
+/// reference produced by <see cref="ReferenceFactory"/> within
+/// <see cref="MaxHalfUlp"/> half-ULPs. The reference is derived from the same
+/// fixtures as the gold — never from the leg's own output — so a leg cannot
+/// self-certify: the classification is re-measured every gate run.
+/// </summary>
+internal sealed record KernelDiagnosis(
+    string Kernel,
+    string Reason,
+    Func<KernelFixtures, ushort[]> ReferenceFactory,
+    int MaxHalfUlp)
+{
+    /// <summary>
+    /// The OpenVINO BF16-declared silu: the IR declares Sigmoid+Multiply in BF16,
+    /// the GPU plugin resolves execution to F16 (the read-back
+    /// <c>INFERENCE_PRECISION_HINT</c> is <c>f16</c>; BF16 is a CPU-only token on
+    /// this release), so every elementwise failure against the f32 gold is an
+    /// F16-rounded value of the same formula. See issue #606.
+    /// </summary>
+    public static KernelDiagnosis OvBf16Silu() => new(
+        Kernel: "silu",
+        Reason: "F16 elementwise sigmoid+multiply on a BF16-declared model (GPU plugin resolves BF16 to F16)",
+        ReferenceFactory: fixtures => CpuLeg.SiluF16ReferenceBits(fixtures.SiluX),
+        MaxHalfUlp: 4);
 }

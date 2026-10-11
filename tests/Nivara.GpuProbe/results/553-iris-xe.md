@@ -70,7 +70,10 @@ the reason the CPU column is directional, not spec. The GPU columns are tightly 
 The 12288-ULP `gemv` diagnostic sits on a near-zero reference row
 (`|diff| = 1.4e-9`, far inside the `1e-6` absolute gate), matching the other legs.
 `kernels` exit code = 9 = 3 (SYCL) + 3 (OV bf16) + 3 (OV f32); every failure is an
-explicitly-flagged unavailable leg, never a miscoded kernel.
+explicitly-flagged unavailable leg, never a miscoded kernel. Unchanged under the
+#606 diagnosed-honest gate: the OpenVINO legs do not run on this host, and a
+diagnosis only applies to a leg that runs — their rows stay UNBUILT/UNAVAILABLE,
+3 cells each.
 
 ## What this host's bands say (scoped to Iris Xe)
 

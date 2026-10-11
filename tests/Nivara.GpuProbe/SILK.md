@@ -58,7 +58,7 @@ Why it leads the hand-authored legs: it is the only one that dispatches the comp
 directly, with no ILGPU runtime abstraction between the NDRange and the queue. Build cost is
 ~4.4–5.2 ms (in-process, driver JIT, highly variable); first dispatch adds 66–498 µs.
 
-**Note on the observed ULP figures:** `gemv`'s worst-case 14336 ULP and `silu`'s 4.0 ULP are *not* Silk.NET-specific — the DX12, OV-f32, ILGPU and ComputeSharp legs report identical values, because it is f32 rounding at those magnitudes against a slightly different summation order, not a kernel difference. `|diff|` is ~1.6e-09 for gemv and ~3.7e-09 for silu, both far inside the `1e-6 + 1e-5·|ref|` gate. `OV (bf16 IR)` is the only silu leg that genuinely fails (402/576) — a real OpenVINO bf16 IR precision issue, pre-existing; filed as issue **#606**.
+**Note on the observed ULP figures:** `gemv`'s worst-case 14336 ULP and `silu`'s 4.0 ULP are *not* Silk.NET-specific — the DX12, OV-f32, ILGPU and ComputeSharp legs report identical values, because it is f32 rounding at those magnitudes against a slightly different summation order, not a kernel difference. `|diff|` is ~1.6e-09 for gemv and ~3.7e-09 for silu, both far inside the `1e-6 + 1e-5·|ref|` gate. `OV (bf16 IR)` is the only silu leg outside the f32 gate (402/576) — a real OpenVINO bf16 IR precision issue, filed as issue **#606** and now a *diagnosed* gate row: all 402 failing elements match the F16-elementwise reference within 2 half-ULP, so it contributes 0 to the exit code.
 
 ---
 
@@ -96,7 +96,7 @@ Expected (on Intel Arc 140T) for `silk`:
   [dot16] first      415 µs | steady      6.8 µs
   ...
   Silk.NET OpenCL              dot16 ... -> PASS (0.0 ULP)
-  kernels mode exit: 0 failed kernel(s), 0 unexpected
+  kernels mode exit: 0 unexpected failed kernel(s), 0 diagnosed honest, 5 sweeps
 ```
 
 Exit code 0 means all three gates passed. Always build `Release` — in `Debug` the probe
@@ -188,8 +188,9 @@ Consequences, so they don't get re-derived:
 - `dot16` cannot become a packed BF16 dot on this device. The multiply stays f32 whichever
   convert is used. A packed BF16 dot needs a different toolchain (HLSL `__bf16` on DX12, or
   SYCL `bf16`). OpenVINO's GPU plugin does reach Xe2 DPAS BF16 for GEMM; that is a closed
-  tuned kernel, not something this leg can author, and the same bf16 IR leg fails `silu`
-  402/576.
+  tuned kernel, not something this leg can author, and the same bf16 IR leg sits outside
+  the f32 gate on `silu` (402/576 — all diagnosed-honest within 2 half-ULP of the F16
+  mirror, #606).
 - The f32 widening in this leg is a property of the platform, not of Silk.NET.
 
 **Naming trap.** A substring search for `bf16` reports this device as having no BF16 support,
@@ -332,8 +333,10 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- silk     # exit 0 = all
 The `kernels` mode includes this leg alongside SYCL/DX12/OpenVINO/ILGPU/ComputeSharp.
 Note that its overall exit code is **not** 0 on this machine even when the Silk.NET row is
 fully green — SYCL is unavailable (no oneAPI on this box) and the OpenVINO bf16-IR SiLU leg
-fails 402/576, which are pre-existing conditions unrelated to Silk.NET. Verify the Silk.NET
-row's own PASS lines, not just the process exit code.
+is outside the f32 gate 402/576, each failure within 2 half-ULP of the F16 mirror (a
+diagnosed-honest #606 row, 0 in the exit code) — pre-existing conditions unrelated to
+Silk.NET. The #606-gate exit on this machine is 3 = SYCL-unavailable + 0 unexpected. Verify
+the Silk.NET row's own PASS lines, not just the process exit code.
 
 ---
 
