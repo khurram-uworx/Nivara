@@ -20,6 +20,14 @@ All notable changes to Nivara are documented here. Released versions are publish
   convolution. Omitted, initialization is unchanged (the existing fixed-seed draw), so no existing
   caller's weights change. Bias remains zero-initialized.
 
+- **`Conv1d<T>` / `DepthwiseSeparableConv2d<T>` accept a custom weight initializer (#596)** —
+  `Conv1d<T>` gained an optional `IInitializer<T>? weightInitializer`, and
+  `DepthwiseSeparableConv2d<T>` gained one that it forwards to both its depthwise and pointwise
+  convolutions, completing the convolution family started in #594. Omitted, initialization is
+  unchanged. The fixed-seed default draw, previously copy-pasted verbatim in `Conv1d<T>`,
+  `Conv2d<T>`, and `ConvTranspose2d<T>`, is now defined once in `DefaultConvInitialization.Fill`;
+  the drawn values are byte-identical.
+
 - **Seedable AutoDiff initializers (#577)** — all seven initializers
   (`KaimingUniformInitializer<T>`, `KaimingNormalInitializer<T>`, `XavierUniformInitializer<T>`,
   `XavierNormalInitializer<T>`, `NormalInitializer<T>`, `UniformInitializer<T>`,
