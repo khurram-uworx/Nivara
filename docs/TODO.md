@@ -84,3 +84,5 @@ per-cell **median + min–max band** — a statistic the harness cannot currentl
 
 - [x] #599 — land the joint #552/#553 doc correction (both hosts side by side) once both
   hosts are measured. Created while working on #553; blocks the shared doc edits.
+- [x] #600 — make the `kernels` sweep count a `--rounds N` argument and update the README
+  runbook to describe the repeated profile. Created while working on #553.
