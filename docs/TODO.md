@@ -103,6 +103,21 @@ to make.
 2. `docs(gpuprobe): record the Arc 140T eight-leg profile (#552)` (+ raw harness stdout)
 3. `docs: remove TODO.md — plan executed` (only after G2 clears)
 
+## Executed — outcome and deviations from plan
+
+- **Exit code 405 confirmed exactly** (402 OV-bf16 `silu` + 3 SYCL), and the harness's own
+  line `kernels mode exit: 405 failed kernel(s), 5 sweeps, 0 unexpected` agrees with the
+  process status independently. `n=5` on every measured cell.
+- **Host, as measured**: 128 EU (`8×8×2`, SIMD-8, 2250 MHz); L0 API 1.15 / driverVersion
+  `0x010393E2` — the issue's `1.15.37858` is that value's low 16 bits, so the compute
+  driver is *unchanged* behind the newer Windows driver `32.0.101.8826`; OS `10.0.26300`.
+- **Deviation (small, deliberate)**: the plan's §3 said the device-dependence section would
+  state the open question and defer the answer to #599. Instead it classifies **every**
+  shared-leg pair on both hosts as disjoint or overlapping and buckets them into
+  holds-on-both / strict-flip / one-host-only. This is what produced the #607 finding and
+  it is data, not doc wording, so it stays in the artifact; #599 still owns the docs.
+- **Found-and-filed** (two issues, above) — both real, both out of this branch's change set.
+
 ## GitHub issues log
 
 - [ ] (pre-existing, referenced) **#599** — land the joint #552/#553 doc correction, both
@@ -111,7 +126,14 @@ to make.
       argument; the runbook update rides with #599.
 - [ ] (pre-existing, referenced) **#601** — `InferenceCliArgumentTests` 30 s timeout on slow
       hosts (unrelated; found while verifying #553).
-- [ ] **NEW — OpenVINO bf16 `silu` precision defect (`402/576`).** Both #552 and #553 bodies
-      say "its own issue", but no such issue exists (`gh issue list --search` finds none) and
-      `docs/ACCELERATION.md` L148 already calls it "pre-existing and still unfiled". To file
-      during execution (confirm the current failure count from this run before filing).
+- [x] **NEW — OpenVINO bf16 `silu` precision defect (`402/576`) — filed as #606.** Both
+      #552 and #553 bodies said "its own issue" and `docs/ACCELERATION.md` L148 already
+      called it "pre-existing and still unfiled", but no issue existed. Filed with this
+      run's confirmed count (402 failed, worst 13453.0 ULP @ index 139, `|diff| 1.25e-05`).
+- [x] **NEW — `553-iris-xe.md` `gemv` "the bands are disjoint" is false for Silk.NET vs
+      ComputeSharp — filed as #607.** Found while classifying the cross-host pairs: the two
+      bands `[469.4–583.9]` and `[536.3–628.2]` overlap, so by the issues' own rule that
+      pair is a **tie** on the Iris Xe, which makes `Silk.NET < ComputeSharp` host-dependent
+      (disjoint-faster on the Arc) rather than a property #599 can state generally. Not
+      edited from this branch — the correction to a #553 artifact on a #552 branch needs
+      the owner's call; `552-arc-140t.md` records the correct reading either way.
