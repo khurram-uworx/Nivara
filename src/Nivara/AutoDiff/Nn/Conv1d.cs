@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Buffers;
@@ -50,13 +51,15 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
     /// <param name="stride">The convolution stride (must be positive)</param>
     /// <param name="padding">Zero padding applied on each end of the sequence</param>
     /// <param name="bias">Whether to include a bias parameter</param>
+    /// <param name="weightInitializer">Optional custom weight initializer (defaults to the built-in fixed-seed draw)</param>
     public Conv1d(
         int inChannels,
         int outChannels,
         int kernelSize,
         int stride = 1,
         int padding = 0,
-        bool bias = true)
+        bool bias = true,
+        IInitializer<T>? weightInitializer = null)
     {
         if (inChannels <= 0) throw new ArgumentOutOfRangeException(nameof(inChannels));
         if (outChannels <= 0) throw new ArgumentOutOfRangeException(nameof(outChannels));
@@ -74,14 +77,15 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
         int patchSize = inChannels * kernelSize;
         int fanIn = patchSize;
         var weightData = new T[outChannels * patchSize];
-        var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
-        var rng = new Random(42);
-        for (int i = 0; i < weightData.Length; i++)
-            weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
+        if (weightInitializer is null)
+            DefaultConvInitialization.Fill(weightData, fanIn);
 
         weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, outChannels, patchSize, requiresGrad: true));
         RegisterParameters(weight);
+
+        if (weightInitializer is not null)
+            weightInitializer.Initialize(weight);
 
         if (bias)
         {
