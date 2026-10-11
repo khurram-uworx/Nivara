@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Buffers;
@@ -63,6 +64,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     /// <param name="padding">Zero padding applied on all sides</param>
     /// <param name="bias">Whether to include a bias parameter</param>
     /// <param name="groups">Number of channel groups; both channel counts must be divisible by it</param>
+    /// <param name="weightInitializer">Optional custom weight initializer (defaults to the built-in He-uniform draw)</param>
     public Conv2d(
         int inChannels,
         int outChannels,
@@ -70,8 +72,9 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         int stride = 1,
         int padding = 0,
         bool bias = true,
-        int groups = 1)
-        : this(inChannels, outChannels, kernelSize, stride, padding, padding, padding, padding, bias, groups)
+        int groups = 1,
+        IInitializer<T>? weightInitializer = null)
+        : this(inChannels, outChannels, kernelSize, stride, padding, padding, padding, padding, bias, groups, weightInitializer)
     {
     }
 
@@ -88,6 +91,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     /// <param name="paddingRight">Zero padding applied to the right</param>
     /// <param name="bias">Whether to include a bias parameter</param>
     /// <param name="groups">Number of channel groups; both channel counts must be divisible by it</param>
+    /// <param name="weightInitializer">Optional custom weight initializer (defaults to the built-in He-uniform draw)</param>
     public Conv2d(
         int inChannels,
         int outChannels,
@@ -98,7 +102,8 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         int paddingLeft,
         int paddingRight,
         bool bias,
-        int groups = 1)
+        int groups = 1,
+        IInitializer<T>? weightInitializer = null)
     {
         if (inChannels <= 0) throw new ArgumentOutOfRangeException(nameof(inChannels));
         if (outChannels <= 0) throw new ArgumentOutOfRangeException(nameof(outChannels));
@@ -127,14 +132,20 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         int oPerGroup = outChannels / groups;
         int fanIn = cPerGroup * kernelSize * kernelSize;
         var weightData = new T[outChannels * cPerGroup * kernelSize * kernelSize];
-        var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
-        var rng = new Random(42);
-        for (int i = 0; i < weightData.Length; i++)
-            weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
+        if (weightInitializer is null)
+        {
+            var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
+            var rng = new Random(42);
+            for (int i = 0; i < weightData.Length; i++)
+                weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
+        }
 
         weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, outChannels, cPerGroup * kernelSize * kernelSize, requiresGrad: true));
         RegisterParameters(weight);
+
+        if (weightInitializer is not null)
+            weightInitializer.Initialize(weight);
 
         if (bias)
         {
@@ -729,13 +740,15 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
     /// <param name="stride">The convolution stride (must be positive)</param>
     /// <param name="padding">Zero padding applied on each side</param>
     /// <param name="bias">Whether to include a bias parameter</param>
+    /// <param name="weightInitializer">Optional custom weight initializer (defaults to the built-in He-uniform draw)</param>
     public ConvTranspose2d(
         int inChannels,
         int outChannels,
         int kernelSize,
         int stride = 1,
         int padding = 0,
-        bool bias = true)
+        bool bias = true,
+        IInitializer<T>? weightInitializer = null)
     {
         if (inChannels <= 0) throw new ArgumentOutOfRangeException(nameof(inChannels));
         if (outChannels <= 0) throw new ArgumentOutOfRangeException(nameof(outChannels));
@@ -752,14 +765,20 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
 
         int fanIn = inChannels * kernelSize * kernelSize;
         var weightData = new T[inChannels * outChannels * kernelSize * kernelSize];
-        var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
-        var rng = new Random(42);
-        for (int i = 0; i < weightData.Length; i++)
-            weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
+        if (weightInitializer is null)
+        {
+            var kaimingBound = T.CreateChecked(Math.Sqrt(2.0 / fanIn));
+            var rng = new Random(42);
+            for (int i = 0; i < weightData.Length; i++)
+                weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
+        }
 
         weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, inChannels, outChannels * kernelSize * kernelSize, requiresGrad: true));
         RegisterParameters(weight);
+
+        if (weightInitializer is not null)
+            weightInitializer.Initialize(weight);
 
         if (bias)
         {

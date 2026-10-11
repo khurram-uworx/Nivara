@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
@@ -33,6 +34,7 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
     /// <param name="kernelSize">Convolution kernel size</param>
     /// <param name="stride">Convolution stride</param>
     /// <param name="padding">Convolution padding</param>
+    /// <param name="weightInitializer">Optional custom weight initializer for every convolution (defaults to the built-in He-uniform draw)</param>
     public ConvVAE(
         int inputChannels,
         int[] encoderChannels,
@@ -40,7 +42,8 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
         int spatialSize,
         int kernelSize = 3,
         int stride = 2,
-        int padding = 1)
+        int padding = 1,
+        IInitializer<T>? weightInitializer = null)
     {
         if (encoderChannels == null || encoderChannels.Length == 0)
             throw new ArgumentException("Encoder channels must have at least one entry.", nameof(encoderChannels));
@@ -54,12 +57,12 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
         for (int i = 0; i < encoderChannels.Length; i++)
         {
             int inC = i == 0 ? inputChannels : encoderChannels[i - 1];
-            encoderConvs[i] = new Conv2d<T>(inC, encoderChannels[i], kernelSize, stride, padding, bias: false);
+            encoderConvs[i] = new Conv2d<T>(inC, encoderChannels[i], kernelSize, stride, padding, bias: false, weightInitializer: weightInitializer);
         }
 
         int lastEncCh = encoderChannels[^1];
-        muConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false);
-        logVarConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false);
+        muConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false, weightInitializer: weightInitializer);
+        logVarConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false, weightInitializer: weightInitializer);
 
         int decoderSteps = encoderChannels.Length;
         var decoderChannels = new int[decoderSteps];
@@ -70,10 +73,10 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
         for (int i = 0; i < decoderSteps; i++)
         {
             int inC = i == 0 ? latentChannels : decoderChannels[i - 1];
-            decoderConvs[i] = new ConvTranspose2d<T>(inC, decoderChannels[i], kernelSize, stride, padding, bias: false);
+            decoderConvs[i] = new ConvTranspose2d<T>(inC, decoderChannels[i], kernelSize, stride, padding, bias: false, weightInitializer: weightInitializer);
         }
 
-        reconConv = new ConvTranspose2d<T>(decoderChannels[^1], inputChannels, 1, bias: true);
+        reconConv = new ConvTranspose2d<T>(decoderChannels[^1], inputChannels, 1, bias: true, weightInitializer: weightInitializer);
 
         RegisterModules(encoderConvs);
         RegisterModules(muConv, logVarConv);
