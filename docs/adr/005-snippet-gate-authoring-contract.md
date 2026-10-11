@@ -120,7 +120,10 @@ runtime closure, wrapped by a per-block mode, and annotated only by an adjacent
    `using static` imports, and those are emitted for that block alone. A block
    annotated with a preamble sees that preamble's types and none from another; a
    name not in the mapping is a harness defect and `DocSnippetCompiler.Compile`
-   throws `InvalidDataException` for it. Stubs for a name live in
+   throws `InvalidDataException` for it, as does a name whose namespace declares no
+   types: `DocSnippetExtractor.TypeNamespaces` is the derived set of namespaces that
+   declare at least one type, and the compile path and the reflection gate share it.
+   Stubs for a name live in
    `Preambles/<Name>.cs` under `Nivara.Tests.Docs.Preambles.<Name>` and must stay
    `public`, because the generated `Nivara.DocSnippet` assembly holds no
    `InternalsVisibleTo` grant. `KnownPreambles` is the mapping's keys; it is

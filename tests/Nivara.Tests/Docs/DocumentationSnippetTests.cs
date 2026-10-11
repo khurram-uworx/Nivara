@@ -44,12 +44,6 @@ public class DocumentationSnippetTests
         // with a cascade of CS0246 the reader cannot act on - which is exactly the state #546 fixed.
         const string flatNamespace = "Nivara.Tests.Docs.Preambles";
 
-        var assembly = typeof(DocSnippetExtractor).Assembly;
-        var typesByNamespace = assembly.GetTypes()
-            .Where(t => t.Namespace is not null)
-            .GroupBy(t => t.Namespace!, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
-
         var mapped = DocSnippetExtractor.Preambles.ToArray();
 
         Assert.Multiple(() =>
@@ -58,18 +52,18 @@ public class DocumentationSnippetTests
                 Is.EqualTo(mapped.Length),
                 "preamble names must not share a namespace, or the name stops selecting a bundle");
 
-            Assert.That(typesByNamespace.ContainsKey(flatNamespace), Is.False,
+            Assert.That(DocSnippetExtractor.TypeNamespaces, Does.Not.Contain(flatNamespace),
                 $"no stub may be left in the flat namespace '{flatNamespace}': a type there is reachable "
                 + "from every block through the enclosing-namespace lookup, which is the shadowing #546 removed");
 
             foreach (var (name, import) in mapped)
             {
-                Assert.That(typesByNamespace.TryGetValue(import.Namespace, out var types) && types.Length > 0,
-                    Is.True,
+                Assert.That(DocSnippetExtractor.TypeNamespaces, Does.Contain(import.Namespace),
                     $"preamble '{name}' maps to '{import.Namespace}', which declares no types");
 
                 foreach (var staticType in import.StaticImports)
-                    Assert.That(assembly.GetType(staticType, throwOnError: false), Is.Not.Null,
+                    Assert.That(typeof(DocSnippetExtractor).Assembly.GetType(staticType, throwOnError: false),
+                        Is.Not.Null,
                         $"preamble '{name}' imports '{staticType}' with `using static`, but that type does not exist");
             }
         });

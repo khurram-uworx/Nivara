@@ -119,6 +119,20 @@ static partial class DocSnippetExtractor
     internal static string[] KnownPreambles => [.. Preambles.Keys.Order(StringComparer.Ordinal)];
 
     /// <summary>
+    /// The namespaces that declare at least one type in this assembly, computed once. A preamble
+    /// mapping is only a contract if its namespace carries types: an empty namespace would make every
+    /// annotated block fail as a cascade of unresolved names, which is the failure #546 removed. Both
+    /// <see cref="DocSnippetCompiler"/> (as a runtime guard) and the reflection gate consult this one
+    /// derived set rather than each rediscovering it.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> TypeNamespaces = typeof(DocSnippetExtractor).Assembly
+        .GetTypes()
+        .Select(type => type.Namespace)
+        .Where(ns => ns is not null)
+        .Select(ns => ns!)
+        .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
     /// Transient working documents left out of the scan. They are not reader-facing, and the plan file
     /// is <c>docs/TODO.md</c> because <c>iterative-work</c> <em>commits</em> it for the duration of a
     /// multi-step piece of work and removes it at G2 — so it sits in the tree, and would otherwise be

@@ -162,6 +162,10 @@ static class DocSnippetCompiler
         if (!DocSnippetExtractor.Preambles.TryGetValue(name, out var import))
             throw new InvalidDataException($"{block.Location} unknown preamble '{name}'");
 
+        if (!DocSnippetExtractor.TypeNamespaces.Contains(import.Namespace))
+            throw new InvalidDataException(
+                $"{block.Location} preamble '{name}' resolves to '{import.Namespace}', which declares no types");
+
         generated.Add($"using {import.Namespace};");
         generated.AddRange(import.StaticImports.Select(s => $"using static {s};"));
     }

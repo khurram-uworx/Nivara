@@ -438,7 +438,8 @@ All notable changes to Nivara are documented here. Released versions are publish
   unconditionally, and every stub lived in that one flat namespace, so the declared names constrained
   nothing. `DocSnippetExtractor.KnownPreambles` is replaced by a name → (namespace, static imports)
   mapping; `Compile` emits the imports for the block's own preamble and throws `InvalidDataException`
-  on an unknown name, so a typo fails loudly instead of surfacing as a cascade of unresolved names.
+  on an unknown name — or one whose namespace declares no types — so a typo fails loudly instead of
+  surfacing as a cascade of unresolved names.
   `SnippetStubs.cs` is split into one file per namespace under `Preambles/`, the five preambles that
   supplied no types are dropped, and the six `row-types` blocks that had been relying on the global
   import are annotated. No fence was added or split, so the coverage pins (106 gated / 2 excluded /
