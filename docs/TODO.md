@@ -105,8 +105,16 @@ The test's only nondeterminism is the **two unseeded `cvae.Reparameterize(mu, lo
 
 ## GitHub issues log
 
-- [ ] #594 — this work (`ConvVAE<T>` initializer hook); body to be corrected re: the conv-init
-      premise.
-- [ ] (to file) follow-up — `Conv1d<T>` / `DepthwiseSeparableConv2d<T>` still hard-code
-      `new Random(42)` with no seed/initializer hook.
+- [x] #594 — this work (`ConvVAE<T>` initializer hook); body corrected, implemented on PR #595.
+- [x] #596 — `Conv1d<T>` / `DepthwiseSeparableConv2d<T>` still hard-code `new Random(42)` with no
+      hook (filed as the follow-up).
 - [ ] #595 — PR carrying both #583 and #594; body to be updated and linked to #594.
+
+## Results (2026-10-11, Release)
+
+- `FullyQualifiedName~Conv` — 134 passed (includes the tightened strict-`<`
+  `ConvVAE_EndToEnd_ReducesLoss` and the three new hook tests).
+- `~DataParallelTests|~VAE_Training_ReducesLoss|~LinearModule_BFloat16SgdTraining_LossDecreases|~OpNodeInputContractTests`
+  — 108 passed × 5 consecutive runs (no cross-regression from the conv change).
+- `~Docs.` — 57 passed (snippet/citation gates).
+- Full suite not run (requires human confirmation).
