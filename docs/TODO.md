@@ -97,7 +97,9 @@ Headline corrections: `dot16` "CPU wins" holds only on the Iris Xe (tie on the A
 5. **Case-study repoint** — `OPENVINO.md` §6/matrix/Verdict (OV **Arc-only**; `~26–34×` → ~21×
    bf16 / ~14× f32; #606 at §3), `DX12.md` §5 (retire `117–560/86–364/152–525`; rewrite the
    "within noise"/"silu splits" reading per host), `COMPUTESHARP.md` §5/§6/§7 (fill the Arc medians
-   65.9 / 68.0 / 157.5, clear the `pending` markers).
+   65.9 / 68.0 / 157.5, clear the `pending` markers). **Plus the two human-approved citation
+   repoints (folded from #610/#611):** `OPENVINO.md:287` → TensorPrimitives API page;
+   `DX12.md:288` → `D3D12DDI_WAVE_MMA_DATA_0103` page.
 6. **`SILK.md`** — `:46` "trails OV-bf16 on gemv" → **tie** (the `#607`-class claim), `:5` driver
    label (`1.15.37858` is the Level Zero `driverVersion`, not the Windows driver), repoint to the
    two-host tables, link #606.
@@ -148,5 +150,4 @@ Headline corrections: `dot16` "CPU wins" holds only on the Iris Xe (tie on the A
       guidelines page, unrelated to the label (filed during G1 grounding).
 - [x] #611 — DX12.md: dead "Shader model 6.8 / Wave Matrix" citation (404 on learn.microsoft.com;
       filed during G1 grounding).
-- Both are candidate fold-ins for change unit 5 (same case-study files, one-line link fixes);
-  decision pending with the human.
+- Both folded into change unit 5 per the human (2026-10-11); the #599 PR will reference them.
