@@ -252,6 +252,40 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("minilm", "--gpu"), "--gpu was renamed --ilgpu");
 
     /// <summary>
+    /// The Silk phase: <c>--silk</c> is a second GPU backend whose model scope (MiniLM's six encoder
+    /// kernels only) and mode scope are narrower than <c>--ilgpu</c>'s, and it is F32-only. Each
+    /// rejection is pinned by message for the same reason the ILGPU scopes are: a removed guard would
+    /// fall through to a different exit-1 path and the exit code alone would still be <c>1</c>.
+    /// </summary>
+    [Test]
+    public void Silk_OnModelWithoutSilkKernels_Rejected() =>
+        AssertRejected(Run("smollm", "--silk"),
+            "--silk is not supported for 'smollm' (Silk models: minilm).");
+
+    [Test]
+    public void Silk_RejectedBeforeModelFileLookup()
+    {
+        CliResult result = Run("qwen", "--silk");
+        Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
+            "the --silk guard must run before the model-file check; 'qwen' weights are never present");
+        AssertRejected(result, "--silk is not supported for 'qwen'");
+    }
+
+    [Test]
+    public void SilkAndIlgpu_CompetingBackends_Rejected() =>
+        AssertRejected(Run("minilm", "--ilgpu", "--silk"),
+            "--ilgpu and --silk select competing GPU backends");
+
+    [Test]
+    public void SilkPrecisionCombination_Rejected() =>
+        AssertRejected(Run("minilm", "--silk", "--precision", "bf16"), "--silk is F32-only");
+
+    [Test]
+    public void SilkUnsupportedMode_Rejected() =>
+        AssertRejected(Run("minilm", "--silk", "similarity"),
+            "--silk does not support mode 'similarity' for 'minilm'");
+
+    /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
     /// enable widen for their narrow runs themselves, so the flag is inert there; an F32 run is
     /// unchanged; and the vision models have no narrow path at all.

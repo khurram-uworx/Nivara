@@ -18,8 +18,14 @@ namespace Nivara.Samples.Gpu;
 /// mismatched argument count makes the kernel read uninitialized scalars and answers fast and
 /// wrong rather than erroring.
 /// </para>
+///
+/// <para>
+/// Public because <see cref="SilkBertEncoderRunner"/> takes one, the same way
+/// <see cref="BertEncoderGpuRunner"/> takes an <see cref="IlgpuRuntime"/>: the caller owns the
+/// device lifetime and the runner only borrows it.
+/// </para>
 /// </summary>
-internal sealed unsafe class SilkRuntime : IDisposable
+public sealed unsafe class SilkRuntime : IDisposable
 {
     readonly CL cl;
     nint device;
@@ -115,6 +121,29 @@ internal sealed unsafe class SilkRuntime : IDisposable
         if (err != 0 || buffer == 0)
             throw new InvalidOperationException($"--silk clCreateBuffer({bytes} B) failed ({err}).");
         return buffer;
+    }
+
+    /// <summary>
+    /// Creates a read-only sub-buffer view of <paramref name="elementCount"/> floats starting at
+    /// <paramref name="elementOffset"/> into <paramref name="parent"/> — the OpenCL spelling of the
+    /// ILGPU <c>SubView</c> the reference runner hands to the fused attention kernel, whose q/k/v
+    /// are the three contiguous blocks of the packed qkv result. The view shares the parent's
+    /// storage, so the parent must outlive it; the caller releases it via <see cref="Release"/>.
+    /// </summary>
+    public nint CreateSubview(nint parent, int elementOffset, int elementCount)
+    {
+        var region = new BufferRegion
+        {
+            Origin = (nuint)((ulong)elementOffset * sizeof(float)),
+            Size = (nuint)((ulong)elementCount * sizeof(float))
+        };
+
+        int err = 0;
+        nint view = cl.CreateSubBuffer(parent, MemFlags.ReadOnly, BufferCreateType.Region, ref region, out err);
+        if (err != 0 || view == 0)
+            throw new InvalidOperationException(
+                $"--silk clCreateSubBuffer(offset {elementOffset}, {elementCount} floats) failed ({err}).");
+        return view;
     }
 
     /// <summary>Blocking write of exactly <paramref name="data"/>.Length elements.</summary>

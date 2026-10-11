@@ -44,6 +44,14 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
     };
 
+    // The Silk.NET OpenCL path is kernels-first and MiniLM-only for now: six hand-authored kernels
+    // (samples/Nivara.Samples/Gpu/SilkKernels.cs) cover the encoder, none cover the other models.
+    // Kept separate from GpuModes because --silk's model and mode scope are both narrower.
+    static readonly Dictionary<string, string[]> SilkModes = new()
+    {
+        ["minilm"] = ["", "benchmark", "compare"],
+    };
+
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
 
     // The dispatch selects the model's BFloat16/Half runner for these (model, mode) pairs, so a narrow
@@ -99,6 +107,7 @@ class Program
         bool syntheticWeights = false;
         bool plain = false;
         bool useGpu = false;
+        bool useSilk = false;
         int teacherExamples = 0;
         int seed = 42;
         bool teacherExamplesSet = false;
@@ -178,6 +187,8 @@ class Program
                 plain = true;
             else if (args[i] == "--ilgpu")
                 useGpu = true;
+            else if (args[i] == "--silk")
+                useSilk = true;
             else if (args[i] == "--gpu")
             {
                 // The flag was renamed when the Silk path arrived (#616). Rejected rather than aliased
@@ -238,6 +249,10 @@ class Program
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
+            Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
+            Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' only,");
+            Console.WriteLine("                     F32-only, default/benchmark/compare modes. Competing with --ilgpu,");
+            Console.WriteLine("                     so the two are mutually exclusive.");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
@@ -290,6 +305,15 @@ class Program
             return 1;
         }
 
+        // A conflict between the two backend flags does not depend on the model, so it is checked
+        // before the model-scoped guards: 'minilm --ilgpu --silk' must name the conflict, not one
+        // flag's model scope.
+        if (useGpu && useSilk)
+        {
+            Console.Error.WriteLine("--ilgpu and --silk select competing GPU backends; pick one (each invocation runs one backend).");
+            return 1;
+        }
+
         if (seqArg is not null || warmupArg is not null || itersArg is not null)
         {
             if (modelType != "modernbert")
@@ -326,6 +350,12 @@ class Program
         if (useGpu && !GpuModes.ContainsKey(modelType))
         {
             Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            return 1;
+        }
+
+        if (useSilk && !SilkModes.ContainsKey(modelType))
+        {
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm).");
             return 1;
         }
 
@@ -391,6 +421,12 @@ class Program
             return 1;
         }
 
+        if (useSilk && !SilkModes[modelType].Contains(mode))
+        {
+            Console.Error.WriteLine($"--silk does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (Silk modes: default, benchmark, compare).");
+            return 1;
+        }
+
         if (syntheticWeights && !isQwen)
         {
             Console.Error.WriteLine("--synthetic-weights is only supported for the qwen benchmark mode.");
@@ -418,6 +454,12 @@ class Program
         if (useGpu && (bf16 || fp16))
         {
             Console.Error.WriteLine("--ilgpu is F32-only in this phase: the ILGPU path has no bf16/fp16 kernels yet. Drop --precision bf16|fp16 (or --ilgpu) and rerun.");
+            return 1;
+        }
+
+        if (useSilk && (bf16 || fp16))
+        {
+            Console.Error.WriteLine("--silk is F32-only: the six-kernel Silk stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
             return 1;
         }
 
@@ -500,6 +542,12 @@ class Program
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             case "minilm":
+                if (useSilk)
+                {
+                    if (benchmark) return BenchmarkMiniLmSilk(tensors);
+                    if (compare) return RunMiniLmSilkCompare(tensors);
+                    return RunMiniLmSilkInference(tensors);
+                }
                 if (useGpu)
                 {
                     if (benchmark) return BenchmarkMiniLmGpu(tensors);
@@ -1355,19 +1403,85 @@ class Program
         return 0;
     }
 
-    static int RunMiniLmGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    /// <summary>Creates a backend's encoder runner together with the device object whose lifetime
+    /// it borrows, so the three MiniLM entry points below are written once against
+    /// <see cref="IBertEncoderRunner"/> and pick ILGPU or Silk at construction.</summary>
+    delegate BertEncoderBackend OpenEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors);
+
+    /// <summary>
+    /// An <see cref="IBertEncoderRunner"/> plus the device it borrows. Disposal is runner-then-device
+    /// because the runner releases its buffers through the device.
+    /// </summary>
+    sealed class BertEncoderBackend : IDisposable
     {
-        Console.WriteLine("=== MiniLM GPU Inference ===");
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        Console.WriteLine();
+        readonly IDisposable device;
+
+        public IBertEncoderRunner Runner { get; }
+
+        public BertEncoderBackend(IDisposable device, IBertEncoderRunner runner)
+        {
+            this.device = device;
+            Runner = runner;
+        }
+
+        public void Dispose()
+        {
+            Runner.Dispose();
+            device.Dispose();
+        }
+    }
+
+    static BertEncoderBackend OpenIlgpuEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        var runtime = new IlgpuRuntime();
+        try
+        {
+            return new BertEncoderBackend(runtime, new BertEncoderGpuRunner(runtime, config, tensors, BertGpuNaming.Bert));
+        }
+        catch
+        {
+            runtime.Dispose();
+            throw;
+        }
+    }
+
+    static BertEncoderBackend OpenSilkEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        var runtime = new SilkRuntime();
+        try
+        {
+            return new BertEncoderBackend(runtime, new SilkBertEncoderRunner(runtime, config, tensors));
+        }
+        catch
+        {
+            runtime.Dispose();
+            throw;
+        }
+    }
+
+    // MiniLM's three entry points are backend-agnostic: the "GPU" label is the incumbent ILGPU path
+    // (whose output is unchanged) and "Silk" is the hand-authored OpenCL stack. Both go through the
+    // same body, so a fix to one cannot be forgotten in the other.
+
+    static int RunMiniLmGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunMiniLmInference("GPU", OpenIlgpuEncoder, tensors);
+
+    static int RunMiniLmSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunMiniLmInference("Silk", OpenSilkEncoder, tensors);
+
+    static int RunMiniLmInference(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine($"=== MiniLM {backend} Inference ===");
 
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
-        Console.WriteLine($"Config: dim={config.HiddenSize}, layers={config.NumHiddenLayers}, heads={config.NumAttentionHeads}, intermediate={config.IntermediateSize}");
-
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config, tensors, BertGpuNaming.Bert);
+        using var session = open(config, tensors);
         buildSw.Stop();
+        var runner = session.Runner;
+
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine();
+        Console.WriteLine($"Config: dim={config.HiddenSize}, layers={config.NumHiddenLayers}, heads={config.NumAttentionHeads}, intermediate={config.IntermediateSize}");
         Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
@@ -1407,16 +1521,23 @@ class Program
     }
 
     static int BenchmarkMiniLmGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => BenchmarkMiniLm("GPU", OpenIlgpuEncoder, tensors);
+
+    static int BenchmarkMiniLmSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => BenchmarkMiniLm("Silk", OpenSilkEncoder, tensors);
+
+    static int BenchmarkMiniLm(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== MiniLM GPU Benchmark ===");
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        Console.WriteLine();
+        Console.WriteLine($"=== MiniLM {backend} Benchmark ===");
 
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config, tensors, BertGpuNaming.Bert);
+        using var session = open(config, tensors);
         buildSw.Stop();
+        var runner = session.Runner;
+
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
@@ -1445,8 +1566,14 @@ class Program
     }
 
     static int RunMiniLmGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunMiniLmCompare("GPU", OpenIlgpuEncoder, tensors);
+
+    static int RunMiniLmSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunMiniLmCompare("Silk", OpenSilkEncoder, tensors);
+
+    static int RunMiniLmCompare(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== MiniLM GPU vs CPU/PyTorch Gate ===");
+        Console.WriteLine($"=== MiniLM {backend} vs CPU/PyTorch Gate ===");
 
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
         var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
@@ -1485,12 +1612,13 @@ class Program
         Console.WriteLine($"CPU reference ({n} sentences): {cpuSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config, tensors, BertGpuNaming.Bert);
+        using var session = open(config, tensors);
         buildSw.Stop();
-        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        var runner = session.Runner;
+
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"{backend} model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
         var gpuHidden = new float[n][];
@@ -1510,7 +1638,7 @@ class Program
             var embStats = ParityStats(gpuEmbeddings[s], cpuEmbeddings[s]);
             double cosine = TensorPrimitives.CosineSimilarity(gpuEmbeddings[s].AsSpan(), cpuEmbeddings[s].AsSpan());
             if (cosine < worstCosine) worstCosine = cosine;
-            Console.WriteLine($"  [{s}] \"{sentences[s]}\"  cosine(GPU,CPU)={cosine:F6}  hiddenMaxRel={hiddenStats.MaxRel:E3}  embMaxRel={embStats.MaxRel:E3}  {sw.ElapsedMilliseconds} ms");
+            Console.WriteLine($"  [{s}] \"{sentences[s]}\"  cosine({backend},CPU)={cosine:F6}  hiddenMaxRel={hiddenStats.MaxRel:E3}  embMaxRel={embStats.MaxRel:E3}  {sw.ElapsedMilliseconds} ms");
         }
         Console.WriteLine();
 
@@ -1518,9 +1646,9 @@ class Program
         var cpuHiddenAll = cpuHidden.SelectMany(x => x).ToArray();
         var embAll = gpuEmbeddings.SelectMany(x => x).ToArray();
         var cpuEmbAll = cpuEmbeddings.SelectMany(x => x).ToArray();
-        ReportParity(hiddenAll, cpuHiddenAll, "hidden (GPU vs CPU, all sentences)");
-        ReportParity(embAll, cpuEmbAll, "pooled embeddings (GPU vs CPU, all sentences)");
-        Console.WriteLine($"  pooled-embedding cosine min (GPU vs CPU): {worstCosine:F6} (target >= 0.9999)");
+        ReportParity(hiddenAll, cpuHiddenAll, $"hidden ({backend} vs CPU, all sentences)");
+        ReportParity(embAll, cpuEmbAll, $"pooled embeddings ({backend} vs CPU, all sentences)");
+        Console.WriteLine($"  pooled-embedding cosine min ({backend} vs CPU): {worstCosine:F6} (target >= 0.9999)");
         Console.WriteLine();
 
         string pyPath = Path.Combine("samples", "data", "compare_minilm_embeddings_py.bin");
@@ -1531,11 +1659,11 @@ class Program
             Buffer.BlockCopy(rawBytes, 0, pyData, 0, rawBytes.Length);
             var pyEmbAll = new float[n * config.HiddenSize];
             Array.Copy(pyData, pyEmbAll, Math.Min(pyData.Length, pyEmbAll.Length));
-            ReportParity(embAll, pyEmbAll, "pooled embeddings (GPU vs PyTorch)");
+            ReportParity(embAll, pyEmbAll, $"pooled embeddings ({backend} vs PyTorch)");
         }
         else
         {
-            Console.WriteLine("  (PyTorch fixture compare_minilm_embeddings_py.bin not found; GPU-vs-CPU gate only)");
+            Console.WriteLine($"  (PyTorch fixture compare_minilm_embeddings_py.bin not found; {backend}-vs-CPU gate only)");
         }
         Console.WriteLine();
 
