@@ -18,6 +18,10 @@
          snapshot pin as tests/Nivara.GpuProbe (docs/ILGPU.md). -->
     <PackageReference Include="ILGPU" Version="1.5.3" />
     <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
+    <!-- Silk OpenCL path: thin managed bindings to the OpenCL C API, kernels compiled
+         in-process by the driver (samples/Nivara.Samples/Gpu/SilkKernels.cs). Same
+         version pin as the probe leg (tests/Nivara.GpuProbe, docs/SILK.md §4). -->
+    <PackageReference Include="Silk.NET.OpenCL" Version="2.23.0" />
   </ItemGroup>
 
   <ItemGroup>
