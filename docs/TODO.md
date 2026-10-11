@@ -174,4 +174,4 @@ the weight load"; deeper `qwen distill` determinism is #577, out of scope.
 
 ## GitHub issues log
 
-- (none yet)
+- [x] #589 — extend the NivaraInference CLI gate to the remaining rejects (per-model mode scope, `--synthetic-weights`/`--plain` scope, `--gpu`+precision, fp16-qwen, usage/unknown-model). Discovered while adding the #581 gate; out of #581's stated list.
