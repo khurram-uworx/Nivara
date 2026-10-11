@@ -161,9 +161,48 @@ guards, the explicit-presence tracker, the `--text` missing-value fix, the help 
 3. `fix(samples): reject Qwen-only --plain/--text/--no-kv-cache and F32 --simd-widen (#580)`
 4. `docs: remove TODO.md — plan executed` (G2 gate, only after both reviews clear)
 
+## G1 grounding (2026-10-11)
+
+- **Exit-code convention:** [Main() return values](https://learn.microsoft.com/dotnet/csharp/fundamentals/program-structure/main-command-line#main-return-values)
+  and [Environment.ExitCode](https://learn.microsoft.com/dotnet/api/system.environment.exitcode)
+  both state "a nonzero value means there's an error" / "0 indicates success", so
+  `Console.Error.WriteLine(...)` + `return 1` is the idiomatic reject for a bad option — consistent
+  with the #474/#568/#571 guards this mirrors.
+- **Blast radius re-confirmed via code-memory SQL:** `NivaraInference.Program.Main(string[] args)`
+  (`Program.cs:21-475`) has **0** relationship records targeting it — it is the sample process entry
+  point with no in-repo callers, so the guards affect only direct `dotnet run` invocations. The four
+  consuming members (`Qwen.RunTools` `Qwen.cs:411`, `RunBenchmark` `541`, `RunPlainBenchmark` `560`,
+  `RunPlain` `574`, `RunDistill` `708`) are reached only from `case "qwen"`.
+- **Dispatch re-read for the tools path:** `mode == "tools"` has no branch in `case "qwen"` and falls
+  through to `return Qwen.RunTools(...)`, exactly as bare `mode == ""` does. The guard condition is
+  therefore `isQwen && !syntheticWeights && mode is not ("distill" or "benchmark")`, not
+  `mode.Length == 0` as the issue's "bare qwen" wording implied — otherwise `qwen tools
+  --no-kv-cache` (the README's canonical tools invocation) would be wrongly rejected.
+- **`--simd-widen` is not SmolLM-only:** `TensorsHelper.DotFor<T>` (`TensorsHelper.cs:167`) routes
+  every `BFloat16`/`Half` dot through `WidenPrimitives.Dot` → `ShouldWiden` → the global set at
+  `Program.cs:325`; `KernelSelector.DetermineKernelType<T>` (`KernelSelector.cs:29`) does the same
+  for the column path. So the flag is effective for `distilbert` / `distilbert_sst` / `laya` /
+  `modernbert` at bf16/fp16, corroborated by `docs/BFLOAT16.md:353` (`distilbert_sst --precision
+  bf16` argmax 8/8 "with and without `--simd-widen`"). The precision axis is the correct scope.
+- **`--text` missing value is a soundness prerequisite:** the current branch only consumes its value
+  when `i + 1 < args.Length`, so a trailing `--text` falls through to the positional-mode branch and
+  becomes a mode — `minilm --text` silently runs `minilm` with mode `--text`. The guard can only see
+  `--text` if the branch is fixed the way `--teacher-examples` / `--seq` already are ("the flag's
+  value can never fall through to the positional-mode branch"). Treated as part of this change, not
+  a separate issue; it is the same flag's handling.
+- **Decisions surfaced and resolved with the human before implementation:** (1) `--simd-widen`
+  scope — precision-based (reject on f32) rather than the issue's SmolLM-only wording, because the
+  latter regresses a documented narrow-float lever; (2) `--text` / `--no-kv-cache` strictness —
+  inert-free (reject whenever the consuming path is not selected). Both answered during planning.
+- **No new red flags surfaced by grounding** beyond the two corrections above (already folded into
+  the plan) and the two follow-ups filed below.
+
 ## GitHub issues log
 
-- (none yet)
+- [x] #586 — `--precision bf16|fp16` is silently ignored by the vision models (mobilenet_v2/resnet18)
+      (created while working on #580)
+- [x] #587 — an unrecognised qwen mode is silently ignored and runs the tools path
+      (created while working on #580)
 
 > As each task executes, any deferred work or concern is filed immediately via
 > `gh issue create --repo khurram-uworx/Nivara` and recorded here — not held in memory, because
