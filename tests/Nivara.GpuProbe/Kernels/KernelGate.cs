@@ -30,7 +30,8 @@ internal static class KernelGate
 
     /// <summary>
     /// Runs the CPU reference + every GPU leg <see cref="Rounds"/> times with a rotating order,
-    /// gates each round, then prints the correctness table and the median + min–max timing table.
+    /// gates correctness once (round 0), then prints the correctness table and the median +
+    /// min–max timing table.
     /// </summary>
     public static int Run(KernelFixtures fixtures, params (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs)
     {

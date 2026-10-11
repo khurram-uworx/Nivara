@@ -86,3 +86,5 @@ per-cell **median + min–max band** — a statistic the harness cannot currentl
   hosts are measured. Created while working on #553; blocks the shared doc edits.
 - [x] #600 — make the `kernels` sweep count a `--rounds N` argument and update the README
   runbook to describe the repeated profile. Created while working on #553.
+- [x] #601 — `InferenceCliArgumentTests` 30 s subprocess timeout fails on slow hosts
+  (pre-existing on `main`, unrelated to #553; found while running the full suite).
