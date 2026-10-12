@@ -51,9 +51,9 @@ def _parse_seq_lengths(raw):
         if not token:
             continue
         # Mirror the C# accept set exactly: an optional leading sign, then ASCII digits. Python's
-        # `int()` alone would also accept `1_28`, full-width `１２８`, and other Unicode digits that
-        # `int.TryParse` with NumberStyles.Integer rejects — a silent divergence the issue's "same
-        # surface" goal rules out.
+        # `int()` alone would also accept a PEP 515 underscore (`1_28` -> 128) and full-width or
+        # other Unicode decimal digits, which `int.TryParse` with NumberStyles.Integer rejects — a
+        # silent divergence the issue's "same surface" goal rules out.
         digits = token[1:] if token[:1] in ("+", "-") else token
         if not (digits.isascii() and digits.isdigit()):
             raise argparse.ArgumentTypeError(_SEQ_ERROR.format(token=token, raw=raw))
