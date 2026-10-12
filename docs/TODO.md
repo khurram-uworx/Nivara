@@ -36,6 +36,23 @@ generalize. DistilBERT is a genuine extension of the frontier:
    runner device-pure and the byte-identity gate meaningful. The host-round-trip alternative was
    rejected (adds a sync, breaks the "same code, different `Forward`" seam).
 
+## Status (progress log)
+
+- **Stages 1–2 complete and verified** — commits `f7ad4d7b` (naming), `2ad7228b` (kernels +
+  gate), `f9183b8b` (head + routing).
+  - `dotnet build Nivara.slnx` — clean, 0 warnings.
+  - `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"` — 36/36 pass.
+  - `--silk-kernels` gate — **PASS**: 32/32 cells bit-identical to ILGPU, including `gather_rows`,
+    `gemm_row4_relu`, and the DistilBERT headDim-64 attention cell (the `MaxHeadDim` boundary).
+    6 cells fall outside the x0.8–x1.2 informal timing band — red flags to report, not failures:
+    minilm fc1 gelu x1.24, minilm attention x1.26, distilbert qkv bias x1.43, distilbert qkv relu
+    x1.25, distilbert fc1 bias x1.26, distilbert fc1 relu x1.33.
+  - `distilbert_sst --silk compare` — **PASS**: 0/16 violations, argmax 8/8 vs CPU and vs PyTorch.
+  - `distilbert --silk compare` — **PASS**: 0/98304 violations (PyTorch fixture absent).
+  - `distilbert_sst --ilgpu compare` — **PASS** (the ILGPU path is unaffected by the refactor).
+- **Stages 3–4 (docs) not started.** Stage 4's placement is the deferred decision below; Stage 3
+  writes into the *final* homes, so it waits on that call.
+
 ## Proposed changes
 
 ### Stage 1 — `distilbert --silk` (encoder)
