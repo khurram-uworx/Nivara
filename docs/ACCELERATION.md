@@ -201,19 +201,34 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   shapes; `minilm --silk compare`, `distilbert --silk compare` and `distilbert_sst --silk compare` are
   the end-to-end gates (`|gpu−cpu| ≤ 1e-3·(1+|cpu|)`, plus pooled-embedding cosine for MiniLM and
   argmax 8/8 for SST-2). `InferenceCliArgumentTests` pins the new rejects. The gate's timing column is
-  explicitly *not a verdict*: on battery a few cells leave the informal x0.8..x1.2 band — consistently
-  DistilBERT's larger GEMM shapes (qkv, fc1), four to six of the 32 in recent runs, worst ≈1.4× — and
-  the exact set moves run to run. Flagged, not failed, and not tracked as an issue.
-- **Informal A/B (battery; both legs on battery, same session).** The `--silk-kernels` gate runs the
-  ILGPU originals and the Silk kernels **in one process**, so its timing column compares the two
-  backends under one clock and one power state. On the **MiniLM** shapes the per-kernel ratio
-  (Silk / ILGPU) fell in **0.79–1.19**; the drift is concentrated in the larger DistilBERT GEMM
-  shapes (above). A back-to-back `minilm --silk benchmark` / `minilm --ilgpu benchmark` pair (same
-  3-warmup + 10-timed protocol) compares the whole forward: it averaged **29.5 ms (Silk) vs
-  31.4 ms (ILGPU), ≈0.94×**. Read these as "no separation", not as rows to quote: they are
-  **battery** numbers, the gate's timing column is explicitly *not a verdict*, and the absolute
-  milliseconds are not comparable to the AC-powered §1 table. (The gate prints the same battery
-  warning at the top of every run.)
+  explicitly *not a verdict*.
+- **Per-kernel timing (AC, valid).** `--silk-kernels` on AC reports all **32/32 outputs
+  bit-identical** to ILGPU; **one** of the 32 cells leaves the informal x0.8..x1.2 band (MiniLM
+  `batched_attention` at **0.80** — Silk ahead), and the DistilBERT GEMM cells land at **0.89–0.99**.
+  On **battery** those same DistilBERT GEMM cells read **1.2–1.4×**; that is the iGPU throttling
+  flat, not the kernels — the gate prints `Power: battery` and invalidates the ratios (the lesson is
+  in [ILGPU.md Part 1](ILGPU.md)).
+- **Whole-forward A/B (AC, valid; both backends run the same benchmark body).** Back-to-back
+  `--silk benchmark` / `--ilgpu benchmark` per model (3 warmup + 10 timed, median of 3 runs, 128
+  tokens). The Stage-1/2 refactor gives both backends one shared benchmark body, so the protocol is
+  identical:
+
+  | model | Silk | ILGPU | Silk / ILGPU |
+  |---|---|---|---|
+  | MiniLM | 20.9 ms | 22.1 ms | 0.95 |
+  | DistilBERT | 52.3 ms | 55.8 ms | 0.94 |
+  | DistilBERT SST-2 | 52.1 ms | 57.0 ms | 0.91 |
+
+  Silk is **at least at parity and modestly ahead** here, with a far tighter run-to-run spread (Silk
+  ≈1–3 ms; ILGPU up to ≈8 ms). The SST-2 head is free on Silk (52.1 ms vs 52.3 ms base) and costs
+  ~1–2 ms on ILGPU. Read it as "parity-to-slightly-ahead on one host", not a win — one Arc 140T in one
+  session (2026-10-13). **Session caveat:** these absolute ILGPU milliseconds sit uniformly ≈10% below
+  the 2026-09-19 post-M2 rows in §1 (55.8 vs 63.1, 22.1 vs 24.3, 57.0 vs 63.7) — a different session's
+  clock/thermal/driver state, not a protocol change (both legs call the identical `ReportGpuTiming`
+  body, so the pre-refactor and post-refactor ILGPU benchmarks are the same measurement). The
+  **ratio** is the comparable quantity; do not mix today's absolute milliseconds with the §1 table.
+  The earlier **battery** MiniLM pair (29.5 ms Silk vs 31.4 ms ILGPU) is kept only as the battery
+  lesson: those absolute numbers are inflated and non-quotable.
 
 ## 2. Where the implementation detail lives
 

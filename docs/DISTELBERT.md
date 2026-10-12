@@ -153,7 +153,14 @@ The same three models also run through the second backend: hand-authored OpenCL 
 - **Gate.** `--silk-kernels` holds `gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_qkv` and
   `gather_rows` to **byte-identity** against ILGPU over both MiniLM and DistilBERT shapes; DistilBERT
   drives `headDim` to 64, the attention kernel's `MaxHeadDim` local-memory bound.
-- **No DistilBERT `--silk` vs `--ilgpu` whole-forward A/B is recorded.** The informal A/B exists only
-  for MiniLM (battery, non-quotable); the in-process kernel gate is the timing evidence that exists.
+- **Whole-forward A/B (AC, valid; both backends run the same benchmark body).** Median of 3 runs at
+  128 tokens (3 warmup + 10 timed before each): DistilBERT **52.3 ms (Silk) vs 55.8 ms (ILGPU),
+  ≈0.94×**; DistilBERT SST-2 **52.1 ms vs 57.0 ms, ≈0.91×**. Silk is at least at parity and modestly
+  ahead, with a tighter run-to-run spread (Silk ≈1–3 ms, ILGPU up to ≈8 ms). One host (Arc 140T), one
+  session (2026-10-13) — read it as parity-to-slightly-ahead, not a win. The absolute ILGPU values sit
+  ≈10% below the post-M2 rows in [ACCELERATION.md](ACCELERATION.md) §1 — a different session's clock
+  state, not a protocol change — so compare the ratio, not the absolute milliseconds. Per kernel, the
+  `--silk-kernels` gate holds all 32 outputs bit-identical on AC, with Silk ahead on
+  `batched_attention` (0.80–0.85).
 
 Detail: [docs/SILK.md](SILK.md) Part 2.
