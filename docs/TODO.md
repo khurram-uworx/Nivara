@@ -142,4 +142,4 @@ Plus `docs: plan enforce .editorconfig whitespace in CI in TODO.md` and the fina
 
 ## GitHub issues log
 
-- (none yet — record any deferred work / concerns discovered during execution here)
+- [ ] #622 — document the whitespace-formatting workflow and why the gate excludes analyzers (created during #593)
