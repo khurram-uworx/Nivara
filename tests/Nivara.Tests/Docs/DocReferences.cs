@@ -22,9 +22,14 @@ static partial class DocReferenceExtractor
     /// Paths excluded from the scan. <c>tests/Nivara.Tests/Docs/</c> is this gate's own fixtures and
     /// negative controls, which contain deliberately broken references; <c>docs/TODO.md</c> is the
     /// transient iterative-work plan document, kept out for the same reason the snippet and citation
-    /// gates keep it out.
+    /// gates keep it out; <c>samples/data/</c> is the fixtures and downloaded-model cache - the
+    /// repository tracks data there (no <c>.md</c> or <c>.cs</c>) and <c>.gitignore</c> treats the
+    /// model directories as absent, so a machine that has run a sample carries an imported model's own
+    /// <c>README.md</c> inside one. The scan walks the filesystem, so reading that tree would make the
+    /// pinned file count depend on whether the machine happens to have downloaded a model - exactly how
+    /// this gate first failed in CI (686 there, 687 on a machine that had run Laya).
     /// </summary>
-    static readonly string[] ExcludedPathPrefixes = ["tests/Nivara.Tests/Docs/"];
+    static readonly string[] ExcludedPathPrefixes = ["tests/Nivara.Tests/Docs/", "samples/data/"];
 
     /// <summary>Documents excluded by exact path rather than by directory prefix.</summary>
     static readonly string[] ExcludedDocuments = ["docs/TODO.md"];

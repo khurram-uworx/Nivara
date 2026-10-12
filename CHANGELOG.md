@@ -190,7 +190,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   already used the correct path), and 5 named documents that never existed at all — `BFLOAT16-GPU.md`,
   `143-PLAN.md`, and a hypothetical `adr/README.md` in ADR-005 — whose stale path was removed rather
   than re-pointed at nothing. The other 20 occurrences (across 10 file/target pairs) are tolerated
-  history. Measured coverage is 354 document references and 126 code citations across 687 files, pinned
+  history. Measured coverage is 354 document references and 126 code citations across 686 files, pinned
   so a shrinking scope reads as reduced coverage rather than a quiet pass.
 
   **Limitation:** the gate checks that a reference *resolves*, not that the linked document supports the
