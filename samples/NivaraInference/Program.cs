@@ -44,14 +44,15 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
     };
 
-    // The Silk.NET OpenCL path is kernels-first: six hand-authored kernels
+    // The Silk.NET OpenCL path is kernels-first: the hand-authored kernels
     // (samples/Nivara.Samples/Gpu/SilkKernels.cs) cover the BERT-family encoder (MiniLM,
-    // DistilBERT), none cover the other models. Kept separate from GpuModes because --silk's
-    // model and mode scope are both narrower.
+    // DistilBERT) and DistilBERT's classifier head, none cover the other models. Kept separate from
+    // GpuModes because --silk's model and mode scope are both narrower.
     static readonly Dictionary<string, string[]> SilkModes = new()
     {
         ["minilm"] = ["", "benchmark", "compare"],
         ["distilbert"] = ["", "benchmark", "compare"],
+        ["distilbert_sst"] = ["", "benchmark", "compare"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -253,8 +254,9 @@ class Program
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
             Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' /");
-            Console.WriteLine("                     'distilbert' only, F32-only, default/benchmark/compare modes.");
-            Console.WriteLine("                     Competing with --ilgpu, so the two are mutually exclusive.");
+            Console.WriteLine("                     'distilbert' / 'distilbert_sst' only, F32-only, default/benchmark/");
+            Console.WriteLine("                     compare modes. Competing with --ilgpu, so the two are mutually");
+            Console.WriteLine("                     exclusive.");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
@@ -357,7 +359,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst).");
             return 1;
         }
 
@@ -461,7 +463,7 @@ class Program
 
         if (useSilk && (bf16 || fp16))
         {
-            Console.Error.WriteLine("--silk is F32-only: the six-kernel Silk stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
+            Console.Error.WriteLine("--silk is F32-only: the hand-authored Silk kernel stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
             return 1;
         }
 
@@ -576,6 +578,12 @@ class Program
                 if (compare) return RunDistilBertCompare(tensors);
                 return benchmark ? BenchmarkDistilBert(tensors, "F32") : RunDistilBertInference(tensors);
             case "distilbert_sst":
+                if (useSilk)
+                {
+                    if (benchmark) return BenchmarkDistilBertSstSilk(tensors);
+                    if (compare) return RunDistilBertSstSilkCompare(tensors);
+                    return RunDistilBertSstSilkInference(tensors);
+                }
                 if (useGpu)
                 {
                     if (benchmark) return BenchmarkDistilBertSstGpu(tensors);
