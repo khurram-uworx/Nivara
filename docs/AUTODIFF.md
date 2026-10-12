@@ -665,7 +665,7 @@ BiasGrad:  TensorPrimitives.Sum over batch and length per output channel
 ```
 
 - Input shape: `[N, C, L]`, output: `[N, outChannels, oL]` where `oL = (L + 2*padding - kernelSize) / stride + 1`
-- Default weight draw: `U(-√(2/fanIn), √(2/fanIn))` from a fixed seed (see #603)
+- Default weight draw: He-uniform `U(-√(6/fanIn), √(6/fanIn))` from a fixed seed — the same draw as `KaimingUniformInitializer<T>`
 - Optional `weightInitializer` (`IInitializer<T>`) replaces the default draw; omitted, initialization is unchanged
 - All kernel methods accept `Span<T>`/`ReadOnlySpan<T>` for composability
 
