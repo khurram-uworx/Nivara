@@ -44,12 +44,14 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
     };
 
-    // The Silk.NET OpenCL path is kernels-first and MiniLM-only for now: six hand-authored kernels
-    // (samples/Nivara.Samples/Gpu/SilkKernels.cs) cover the encoder, none cover the other models.
-    // Kept separate from GpuModes because --silk's model and mode scope are both narrower.
+    // The Silk.NET OpenCL path is kernels-first: six hand-authored kernels
+    // (samples/Nivara.Samples/Gpu/SilkKernels.cs) cover the BERT-family encoder (MiniLM,
+    // DistilBERT), none cover the other models. Kept separate from GpuModes because --silk's
+    // model and mode scope are both narrower.
     static readonly Dictionary<string, string[]> SilkModes = new()
     {
         ["minilm"] = ["", "benchmark", "compare"],
+        ["distilbert"] = ["", "benchmark", "compare"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -250,9 +252,9 @@ class Program
             Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
-            Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' only,");
-            Console.WriteLine("                     F32-only, default/benchmark/compare modes. Competing with --ilgpu,");
-            Console.WriteLine("                     so the two are mutually exclusive.");
+            Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' /");
+            Console.WriteLine("                     'distilbert' only, F32-only, default/benchmark/compare modes.");
+            Console.WriteLine("                     Competing with --ilgpu, so the two are mutually exclusive.");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
@@ -355,7 +357,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert).");
             return 1;
         }
 
@@ -559,6 +561,11 @@ class Program
                 if (compare) return RunMiniLMCompare(tensors);
                 return mode == "similarity" ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
             case "distilbert":
+                if (useSilk)
+                {
+                    if (compare) return RunDistilBertSilkCompare(tensors);
+                    return benchmark ? BenchmarkDistilBertSilk(tensors) : RunDistilBertSilkInference(tensors);
+                }
                 if (useGpu)
                 {
                     if (compare) return RunDistilBertGpuCompare(tensors);
@@ -1404,9 +1411,11 @@ class Program
     }
 
     /// <summary>Creates a backend's encoder runner together with the device object whose lifetime
-    /// it borrows, so the three MiniLM entry points below are written once against
-    /// <see cref="IBertEncoderRunner"/> and pick ILGPU or Silk at construction.</summary>
-    delegate BertEncoderBackend OpenEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors);
+    /// it borrows, so the BERT-family entry points below are written once against
+    /// <see cref="IBertEncoderRunner"/> and pick ILGPU or Silk at construction. <c>naming</c> selects
+    /// the checkpoint's weight-key style (MiniLM's BERT-style keys, DistilBERT's <c>distilbert.*</c>),
+    /// so the same opener serves every BERT-family model.</summary>
+    delegate BertEncoderBackend OpenEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming);
 
     /// <summary>
     /// An <see cref="IBertEncoderRunner"/> plus the device it borrows. Disposal is runner-then-device
@@ -1431,12 +1440,12 @@ class Program
         }
     }
 
-    static BertEncoderBackend OpenIlgpuEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    static BertEncoderBackend OpenIlgpuEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming)
     {
         var runtime = new IlgpuRuntime();
         try
         {
-            return new BertEncoderBackend(runtime, new BertEncoderGpuRunner(runtime, config, tensors, BertGpuNaming.Bert));
+            return new BertEncoderBackend(runtime, new BertEncoderGpuRunner(runtime, config, tensors, naming));
         }
         catch
         {
@@ -1445,12 +1454,12 @@ class Program
         }
     }
 
-    static BertEncoderBackend OpenSilkEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    static BertEncoderBackend OpenSilkEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming)
     {
         var runtime = new SilkRuntime();
         try
         {
-            return new BertEncoderBackend(runtime, new SilkBertEncoderRunner(runtime, config, tensors));
+            return new BertEncoderBackend(runtime, new SilkBertEncoderRunner(runtime, config, tensors, naming));
         }
         catch
         {
@@ -1475,7 +1484,7 @@ class Program
 
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var session = open(config, tensors);
+        using var session = open(config, tensors, BertGpuNaming.Bert);
         buildSw.Stop();
         var runner = session.Runner;
 
@@ -1532,7 +1541,7 @@ class Program
 
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var session = open(config, tensors);
+        using var session = open(config, tensors, BertGpuNaming.Bert);
         buildSw.Stop();
         var runner = session.Runner;
 
@@ -1613,7 +1622,7 @@ class Program
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using var session = open(config, tensors);
+        using var session = open(config, tensors, BertGpuNaming.Bert);
         buildSw.Stop();
         var runner = session.Runner;
 
@@ -1919,19 +1928,28 @@ class Program
         return 0;
     }
 
+    // DistilBERT's entry points are backend-agnostic, mirroring the MiniLM trio: the "GPU" label is
+    // the incumbent ILGPU path and "Silk" is the hand-authored OpenCL stack. Both go through the same
+    // body with DistilBert naming, so a fix to one cannot be forgotten in the other.
+
     static int RunDistilBertGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertBackendInference("GPU", OpenIlgpuEncoder, tensors);
+
+    static int RunDistilBertSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertBackendInference("Silk", OpenSilkEncoder, tensors);
+
+    static int RunDistilBertBackendInference(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== DistilBERT GPU Inference ===");
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        Console.WriteLine();
+        Console.WriteLine($"=== DistilBERT {backend} Inference ===");
 
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
         Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
 
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        using var session = open(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
         Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
@@ -1967,16 +1985,21 @@ class Program
     }
 
     static int BenchmarkDistilBertGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => BenchmarkDistilBertBackend("GPU", OpenIlgpuEncoder, tensors);
+
+    static int BenchmarkDistilBertSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => BenchmarkDistilBertBackend("Silk", OpenSilkEncoder, tensors);
+
+    static int BenchmarkDistilBertBackend(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== DistilBERT GPU Benchmark ===");
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        Console.WriteLine();
+        Console.WriteLine($"=== DistilBERT {backend} Benchmark ===");
 
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        using var session = open(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
@@ -1998,20 +2021,25 @@ class Program
     }
 
     static int RunDistilBertSstGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertSstBackendInference("GPU", OpenIlgpuEncoder, tensors);
+
+    static int RunDistilBertSstSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertSstBackendInference("Silk", OpenSilkEncoder, tensors);
+
+    static int RunDistilBertSstBackendInference(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== DistilBERT SST-2 GPU Inference ===");
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        Console.WriteLine();
+        Console.WriteLine($"=== DistilBERT SST-2 {backend} Inference ===");
 
         string modelDir = Path.Combine("samples", "data", "distilbert_sst");
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
         Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
 
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
-        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        using var session = open(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
+        var runner = session.Runner;
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        Console.WriteLine($"Device: {runner.DeviceName}");
         Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = DistilBertSst.CountParameters(tensors);
@@ -2041,17 +2069,22 @@ class Program
     }
 
     static int BenchmarkDistilBertSstGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => BenchmarkDistilBertSstBackend("GPU", OpenIlgpuEncoder, tensors);
+
+    static int BenchmarkDistilBertSstSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => BenchmarkDistilBertSstBackend("Silk", OpenSilkEncoder, tensors);
+
+    static int BenchmarkDistilBertSstBackend(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== DistilBERT SST-2 GPU Benchmark ===");
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        Console.WriteLine();
+        Console.WriteLine($"=== DistilBERT SST-2 {backend} Benchmark ===");
 
         string modelDir = Path.Combine("samples", "data", "distilbert_sst");
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
         var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        using var session = open(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
         buildSw.Stop();
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = DistilBertSst.CountParameters(tensors);
@@ -2125,8 +2158,14 @@ class Program
     }
 
     static int RunDistilBertGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertBackendCompare("GPU", OpenIlgpuEncoder, tensors);
+
+    static int RunDistilBertSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertBackendCompare("Silk", OpenSilkEncoder, tensors);
+
+    static int RunDistilBertBackendCompare(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== DistilBERT GPU vs CPU/PyTorch Gate ===");
+        Console.WriteLine($"=== DistilBERT {backend} vs CPU/PyTorch Gate ===");
 
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
         var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
@@ -2148,20 +2187,17 @@ class Program
         cpuSw.Stop();
         Console.WriteLine($"CPU reference forward: {cpuSw.ElapsedMilliseconds} ms");
 
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
-        buildSw.Stop();
-        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        using var session = open(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
 
         var fwdSw = Stopwatch.StartNew();
         var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
         fwdSw.Stop();
-        Console.WriteLine($"GPU forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"{backend} forward: {fwdSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
-        ReportParity(result.Hidden, cpuHidden, "final hidden state (GPU vs CPU)");
+        ReportParity(result.Hidden, cpuHidden, $"final hidden state ({backend} vs CPU)");
 
         string refPath = Path.Combine("samples", "data", "distilbert", "last_hidden_state_py.bin");
         if (File.Exists(refPath))
@@ -2169,11 +2205,11 @@ class Program
             var rawBytes = File.ReadAllBytes(refPath);
             float[] refData = new float[rawBytes.Length / 4];
             Buffer.BlockCopy(rawBytes, 0, refData, 0, rawBytes.Length);
-            ReportParity(result.Hidden, refData, "final hidden state (GPU vs PyTorch)");
+            ReportParity(result.Hidden, refData, $"final hidden state ({backend} vs PyTorch)");
         }
         else
         {
-            Console.WriteLine("  (PyTorch fixture last_hidden_state_py.bin not found; GPU-vs-CPU gate only)");
+            Console.WriteLine($"  (PyTorch fixture last_hidden_state_py.bin not found; {backend}-vs-CPU gate only)");
         }
         Console.WriteLine();
 
@@ -2182,8 +2218,14 @@ class Program
     }
 
     static int RunDistilBertSstGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertSstBackendCompare("GPU", OpenIlgpuEncoder, tensors);
+
+    static int RunDistilBertSstSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunDistilBertSstBackendCompare("Silk", OpenSilkEncoder, tensors);
+
+    static int RunDistilBertSstBackendCompare(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
-        Console.WriteLine("=== DistilBERT SST-2 GPU vs CPU/PyTorch Gate ===");
+        Console.WriteLine($"=== DistilBERT SST-2 {backend} vs CPU/PyTorch Gate ===");
 
         string modelDir = Path.Combine("samples", "data", "distilbert_sst");
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
@@ -2203,12 +2245,9 @@ class Program
         cpuSw.Stop();
         Console.WriteLine($"CPU reference (8 sentences): {cpuSw.ElapsedMilliseconds} ms");
 
-        using var rt = new IlgpuRuntime();
-        Console.WriteLine($"Device: {rt.DeviceName}");
-        var buildSw = Stopwatch.StartNew();
-        using var runner = new BertEncoderGpuRunner(rt, config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
-        buildSw.Stop();
-        Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
+        using var session = open(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
         Console.WriteLine();
 
         var gpuLogits = new float[n * 2];
@@ -2228,13 +2267,13 @@ class Program
             int gpuArg = gpuLogits[s * 2 + 1] > gpuLogits[s * 2] ? 1 : 0;
             int cpuArg = cpuLogits[s * 2 + 1] > cpuLogits[s * 2] ? 1 : 0;
             if (gpuArg == cpuArg) argmaxAgree++;
-            Console.WriteLine($"  [{s}] GPU {DistilBertSst.Label(gpuArg),-8}  CPU {DistilBertSst.Label(cpuArg),-8}  {(gpuArg == cpuArg ? "" : "<- MISMATCH")}  {sw.ElapsedMilliseconds} ms");
+            Console.WriteLine($"  [{s}] {backend} {DistilBertSst.Label(gpuArg),-8}  CPU {DistilBertSst.Label(cpuArg),-8}  {(gpuArg == cpuArg ? "" : "<- MISMATCH")}  {sw.ElapsedMilliseconds} ms");
         }
         Console.WriteLine();
 
         var stats = ParityStats(gpuLogits, cpuLogits);
-        ReportParity(gpuLogits, cpuLogits, "logits (GPU vs CPU)");
-        Console.WriteLine($"  argmax agreement GPU-vs-CPU: {argmaxAgree}/{n}");
+        ReportParity(gpuLogits, cpuLogits, $"logits ({backend} vs CPU)");
+        Console.WriteLine($"  argmax agreement {backend}-vs-CPU: {argmaxAgree}/{n}");
         Console.WriteLine();
 
         string pyPath = Path.Combine("samples", "data", "compare_distilbert_sst_py.bin");
@@ -2243,7 +2282,7 @@ class Program
             var py = DistilBertSst.ReadCompareOutput(pyPath, n);
             if (py != null)
             {
-                ReportParity(gpuLogits, py.Value.Logits, "logits (GPU vs PyTorch)");
+                ReportParity(gpuLogits, py.Value.Logits, $"logits ({backend} vs PyTorch)");
                 int pyAgree = 0;
                 for (int s = 0; s < n; s++)
                 {
@@ -2251,12 +2290,12 @@ class Program
                     int pyArg = py.Value.Logits[s * 2 + 1] > py.Value.Logits[s * 2] ? 1 : 0;
                     if (gpuArg == pyArg) pyAgree++;
                 }
-                Console.WriteLine($"  argmax agreement GPU-vs-PyTorch: {pyAgree}/{n}");
+                Console.WriteLine($"  argmax agreement {backend}-vs-PyTorch: {pyAgree}/{n}");
             }
         }
         else
         {
-            Console.WriteLine("  (PyTorch fixture compare_distilbert_sst_py.bin not found; GPU-vs-CPU gate only)");
+            Console.WriteLine($"  (PyTorch fixture compare_distilbert_sst_py.bin not found; {backend}-vs-CPU gate only)");
         }
         Console.WriteLine();
 

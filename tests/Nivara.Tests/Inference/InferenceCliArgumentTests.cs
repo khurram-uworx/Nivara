@@ -252,15 +252,16 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("minilm", "--gpu"), "--gpu was renamed --ilgpu");
 
     /// <summary>
-    /// The Silk phase: <c>--silk</c> is a second GPU backend whose model scope (MiniLM's six encoder
-    /// kernels only) and mode scope are narrower than <c>--ilgpu</c>'s, and it is F32-only. Each
+    /// The Silk phase: <c>--silk</c> is a second GPU backend whose model scope (the six encoder
+    /// kernels cover the BERT-family encoders, MiniLM and DistilBERT) and mode scope are narrower
+    /// than <c>--ilgpu</c>'s, and it is F32-only. Each
     /// rejection is pinned by message for the same reason the ILGPU scopes are: a removed guard would
     /// fall through to a different exit-1 path and the exit code alone would still be <c>1</c>.
     /// </summary>
     [Test]
     public void Silk_OnModelWithoutSilkKernels_Rejected() =>
         AssertRejected(Run("smollm", "--silk"),
-            "--silk is not supported for 'smollm' (Silk models: minilm).");
+            "--silk is not supported for 'smollm' (Silk models: minilm, distilbert).");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()

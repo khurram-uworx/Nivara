@@ -1,17 +1,18 @@
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// MiniLM encoder forward on the Silk.NET OpenCL backend (<see cref="SilkKernels"/>): the
+/// BERT-family encoder forward on the Silk.NET OpenCL backend (<see cref="SilkKernels"/>): the
 /// <c>--silk</c> counterpart of <see cref="BertEncoderGpuRunner"/>. Same weight layout, same
 /// operation order and the same fused epilogues, so the two backends are elementwise comparable —
 /// the <c>--silk-kernels</c> gate holds their GEMMs to byte-identity and the remaining kernels to
 /// the model's numeric bound.
 ///
 /// <para>
-/// <b>Scope.</b> MiniLM only, with the BERT-style key names <see cref="BertGpuKeys"/> resolves.
-/// The classifier head is <em>not</em> ported — it needs a gather and a ReLU kernel the six-kernel
-/// set does not carry — so a checkpoint that ships head weights is rejected at construction rather
-/// than silently answered with the encoder hidden state.
+/// <b>Scope.</b> The BERT-family encoders the ILGPU runner covers — MiniLM and DistilBERT — selected
+/// by the <see cref="BertGpuNaming"/> passed to the constructor, which resolves the checkpoint's key
+/// style (<see cref="BertGpuKeys"/>). The classifier head is <em>not</em> ported — it needs a gather
+/// and a ReLU kernel the six-kernel set does not carry — so a checkpoint that ships head weights is
+/// rejected at construction rather than silently answered with the encoder hidden state.
 /// </para>
 ///
 /// <para>
@@ -36,6 +37,7 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     readonly float eps;
     readonly float scale;
     readonly bool hasTokenType;
+    readonly BertGpuNaming naming;
 
     readonly nint wordEmb;
     readonly nint posEmb;
@@ -60,15 +62,18 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     /// <summary>
     /// Uploads every weight — GEMM weights transposed once and q/k/v packed through
     /// <see cref="GpuBuffers"/>, the same arithmetic the ILGPU runner uses, so the two backends
-    /// cannot drift — and sizes the cap workspace. Throws if a required encoder key is missing, if
-    /// the device's local memory cannot hold the attention tile, or if a classifier head is present.
+    /// cannot drift — and sizes the cap workspace. <paramref name="naming"/> selects the checkpoint's
+    /// weight-key style. Throws if a required encoder key is missing, if the device's local memory
+    /// cannot hold the attention tile, or if a classifier head is present.
     /// </summary>
     public SilkBertEncoderRunner(
         SilkRuntime runtime,
         BertConfig config,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        BertGpuNaming naming)
     {
         this.runtime = runtime;
+        this.naming = naming;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -79,13 +84,12 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
 
         if (tensors.ContainsKey("pre_classifier.weight") || tensors.ContainsKey("classifier.weight"))
             throw new NotSupportedException(
-                "--silk ports the MiniLM encoder only: the pre_classifier/classifier head needs a "
+                "--silk ports the BERT-family encoder only: the pre_classifier/classifier head needs a "
                 + "gather + ReLU kernel pair the Silk kernel set does not carry. Use --ilgpu for a "
                 + "checkpoint with a head, or drop --silk.");
 
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        var naming = BertGpuNaming.Bert;
         string emb = BertGpuKeys.Embeddings(naming);
         wordEmb = UploadPlain(tensors, $"{emb}.word_embeddings.weight");
         posEmb = UploadPlain(tensors, $"{emb}.position_embeddings.weight");
@@ -270,7 +274,6 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
 
     LayerSilkWeights UploadLayer(Dictionary<string, (float[] Data, int[] Shape)> tensors, int index)
     {
-        var naming = BertGpuNaming.Bert;
         string q = BertGpuKeys.Attention(naming, index, 'q');
         string k = BertGpuKeys.Attention(naming, index, 'k');
         string v = BertGpuKeys.Attention(naming, index, 'v');
