@@ -170,10 +170,10 @@ All notable changes to Nivara are documented here. Released versions are publish
   float/double type-switch claim while those lines hold `getTypeSize` — perfectly resolvable, and
   still wrong. That one needs a reader.
 
-- **Documentation reference gate now reads the product trees and both reference forms (#625, #549)** —
-  the citation gate read the repository root plus `docs/` and recognised only `File.cs:NN`, so a broken
-  link from `samples/`, `tests/` or `src/` was invisible, and a `docs/…md` reference was invisible
-  everywhere. #625 is the worked example: `BERT-GPU.md` was renamed twice and merged into
+- **Documentation reference gate now reads the product trees and both reference forms (#627)** —
+  the citation gate read the repository root plus `docs/` and recognised only `File.cs:NN` (the blind
+  spot #549 tracked), so a broken link from `samples/`, `tests/` or `src/` was invisible, and a
+  `docs/…md` reference was invisible everywhere. #625 is the worked example: `BERT-GPU.md` was renamed twice and merged into
   `docs/ACCELERATION.md`, and twelve sites still cited it — ten `.cs` comments under `samples/` and
   `tests/`, plus `samples/NivaraChat/README.md` and `tests/Nivara.PerformanceTests/README.md` — none of
   which the gate had ever read. `DocReferenceExtractor` widens the input to root `*.md`, `docs/**/*.md`
