@@ -1,6 +1,6 @@
 # If Polars originated in .NET — the lens and the review
 
-**Status:** architecture reference · **Scope:** the columnar engine (`src/Nivara`) · **Companion:** `docs/POLARS-ROADMAP.md`
+**Status:** architecture reference · **Scope:** the columnar engine (`src/Nivara`) · **Companion:** `docs/plan/POLARS-ROADMAP.md`
 
 This document records a specific lens for evaluating Nivara's columnar engine: **"What if Polars had been conceived in .NET instead of Rust?"** It is deliberately *not* "how close are we to a Polars port." A port copies a foreign architecture. A lens derives a native one.
 
@@ -185,13 +185,13 @@ Nivara is ~75% a "Polars for .NET" and ~80% a "columnar + Arrow-inspired + AI in
 
 > Nivara already makes the right native-.NET choices on **memory**, **tensor substrate**, **Arrow positioning**, **optimization**, and **observability**. At the time of this review it violated the native model in exactly one architectural place — the expression engine boxed instead of compiling — and it was missing the native-only differentiators (source generators) and the analytical breadth (window functions). The expression engine and the window functions have since been built (§4, §5.2), so the remaining native-only gap is source generators; what is still open is the secondary list in §5.
 
-The roadmap to close those gaps is in **`docs/POLARS-ROADMAP.md`**.
+The roadmap to close those gaps is in **`docs/plan/POLARS-ROADMAP.md`**.
 
 ## Related documents
 
-- `docs/POLARS-ROADMAP.md` — the query/expression roadmap that closes out this review.
-- `docs/ARROW-REVIEW.md` — the second lens: Arrow-inspired columnar *physics* (validity bitmaps, layouts, chunked columns, zero-copy), where the same storage/columns are evaluated differently.
-- `docs/ARROW-ROADMAP.md` — the roadmap for that physics gap.
-- `docs/AISTACK-REVIEW.md` — the third lens: complementing the local .NET AI stack (ONNX, ML.NET, MEAI, AutoDiff).
-- `docs/AISTACK-ROADMAP.md` — the roadmap for that AI-data last mile.
+- `docs/plan/POLARS-ROADMAP.md` — the query/expression roadmap that closes out this review.
+- `docs/plan/ARROW-REVIEW.md` — the second lens: Arrow-inspired columnar *physics* (validity bitmaps, layouts, chunked columns, zero-copy), where the same storage/columns are evaluated differently.
+- `docs/plan/ARROW-ROADMAP.md` — the roadmap for that physics gap.
+- `docs/plan/AISTACK-REVIEW.md` — the third lens: complementing the local .NET AI stack (ONNX, ML.NET, MEAI, AutoDiff).
+- `docs/plan/AISTACK-ROADMAP.md` — the roadmap for that AI-data last mile.
 - `docs/IDEA.md` (retired 2026-08-06; its query/expression-adjacent items are tracked as GitHub issues: [benchmark API #128](https://github.com/khurram-uworx/Nivara/issues/128), [observability #129](https://github.com/khurram-uworx/Nivara/issues/129), [typed LINQ `Query<T>()` #130](https://github.com/khurram-uworx/Nivara/issues/130), [window functions #134](https://github.com/khurram-uworx/Nivara/issues/134)), `docs/TENSORS.md`, `docs/LINQ.md`, `docs/AUTODIFF.md` — product vision, strategic framing, plan-layer spec, and kernel patterns.

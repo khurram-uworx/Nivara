@@ -1,14 +1,14 @@
 # If Arrow-inspired columnar analytics originated in .NET — the lens and the review
 
-**Status:** architecture reference · **Scope:** the columnar engine (`src/Nivara`) + Arrow/Parquet interop (`src/Nivara.Extensions/IO/`) · **Companion:** `docs/ARROW-ROADMAP.md`, `docs/POLARS-REVIEW.md`
+**Status:** architecture reference · **Scope:** the columnar engine (`src/Nivara`) + Arrow/Parquet interop (`src/Nivara.Extensions/IO/`) · **Companion:** `docs/plan/ARROW-ROADMAP.md`, `docs/plan/POLARS-REVIEW.md`
 
 This document evaluates Nivara through a second lens: **"What would Arrow-inspired columnar analytics look like if it had been conceived in .NET?"** It is deliberately *not* "how closely do we match Apache Arrow." Arrow is a format standard; this lens is about the *physics* of columnar analytics — the memory model, the layout rules, the sharing and streaming mechanics — that Arrow made popular, translated to the substrate .NET actually provides.
 
-The Polars lens (`docs/POLARS-REVIEW.md`) asked whether Nivara behaves like a *query engine* born in .NET. This lens asks whether Nivara behaves like a *columnar memory system* born in .NET. The verdict is sharper than the Polars one: **Nivara adopted Arrow's semantics (columnar processing, explicit nulls, immutability, mask-OR kernels) but skipped its physics (bit-packed validity, layout separation, shareable buffers, chunked columns) — and the one place it reached for the physics, interop zero-copy, is left as commented-out scaffolding.**
+The Polars lens (`docs/plan/POLARS-REVIEW.md`) asked whether Nivara behaves like a *query engine* born in .NET. This lens asks whether Nivara behaves like a *columnar memory system* born in .NET. The verdict is sharper than the Polars one: **Nivara adopted Arrow's semantics (columnar processing, explicit nulls, immutability, mask-OR kernels) but skipped its physics (bit-packed validity, layout separation, shareable buffers, chunked columns) — and the one place it reached for the physics, interop zero-copy, is left as commented-out scaffolding.**
 
-> **Reconciled 2026-08-02 (issue #94):** the `ArrowConversionOptions.UseZeroCopy` option and `TryCreateZeroCopy*Array` placeholders cited below were **removed** by the claims-integrity triage (recorded in `CHANGELOG.md`; Tasks 1–2 of the triage). §4.1's finding stands — the code could not deliver zero-copy — and the remedy changed from "make the option honest" to "add real zero-copy APIs when ready" (`docs/ARROW-ROADMAP.md` Phase D). No public API or README advertises zero-copy today.
+> **Reconciled 2026-08-02 (issue #94):** the `ArrowConversionOptions.UseZeroCopy` option and `TryCreateZeroCopy*Array` placeholders cited below were **removed** by the claims-integrity triage (recorded in `CHANGELOG.md`; Tasks 1–2 of the triage). §4.1's finding stands — the code could not deliver zero-copy — and the remedy changed from "make the option honest" to "add real zero-copy APIs when ready" (`docs/plan/ARROW-ROADMAP.md` Phase D). No public API or README advertises zero-copy today.
 
-> **Superseded 2026-08-03 (storage consolidation, PR #110):** the storage-specific evidence in the §3 scorecard and §4 findings is **historical** — it describes the pre-consolidation `TensorStorage`/`MemoryStorage` split. Post-consolidation there is a single sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`): span access is a genuine zero-copy view, and internal column→`Tensor<T>` views are real and **public** (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, issue #107). The *Arrow/Parquet interchange* conclusion in §4.1 still holds — that boundary remains element-by-element copying until `docs/ARROW-ROADMAP.md` Phase D. Pillar 2's validity-bitmap gap and Pillar 4's chunked-column gap are unchanged.
+> **Superseded 2026-08-03 (storage consolidation, PR #110):** the storage-specific evidence in the §3 scorecard and §4 findings is **historical** — it describes the pre-consolidation `TensorStorage`/`MemoryStorage` split. Post-consolidation there is a single sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`): span access is a genuine zero-copy view, and internal column→`Tensor<T>` views are real and **public** (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, issue #107). The *Arrow/Parquet interchange* conclusion in §4.1 still holds — that boundary remains element-by-element copying until `docs/plan/ARROW-ROADMAP.md` Phase D. Pillar 2's validity-bitmap gap and Pillar 4's chunked-column gap are unchanged.
 
 ---
 
@@ -82,9 +82,9 @@ A .NET-native implementation of these ideas does not import Arrow's C++ memory m
 | 3 · Buffers + zero-copy | ❌ **Copy at the boundary** | *Internally* access is now a genuine zero-copy view — `AsSpan()` returns a slice of the owned array (`src/Nivara/Storage/ColumnStorage.cs:238-242`) and `Slice` shares the same backing array (`:167-182`), so the pre-consolidation `GetFlattenedSpan()` copy is gone. The **interop** boundary still has no zero-copy path — the placeholder `TryCreateZeroCopy*Array` methods were removed (issue #94), so all conversion copies element-by-element (`ArrowInterop.cs:677-710`, `731-806`, `824-849`) |
 | 4 · Chunked columns / RecordBatch | ❌ Absent | No chunked column in core; Arrow `ChunkedArray` is *flattened* on import into single arrays (`ArrowInterop.cs:688-710`), losing chunk structure |
 | 5 · Schema artifact | ✅ Strong | Immutable `Schema` with metadata + compatibility checks (`src/Nivara/Schema.cs:9-300`); source-generated typed accessors missing |
-| 6 · Null-propagating kernels | ✅ Strong | Column kernels are null-aware, mask-OR, vectorized (`TensorPrimitives` in `src/Nivara/NivaraColumn.cs`) — *except* the boxed query expression path (see `docs/POLARS-REVIEW.md` §4) |
+| 6 · Null-propagating kernels | ✅ Strong | Column kernels are null-aware, mask-OR, vectorized (`TensorPrimitives` in `src/Nivara/NivaraColumn.cs`) — *except* the boxed query expression path (see `docs/plan/POLARS-REVIEW.md` §4) |
 | 7 · Dictionary encoding | ❌ Absent | Listed only as "future" in `docs/IDEA.md` (retired); tracked as [issue #132](https://github.com/khurram-uworx/Nivara/issues/132) |
-| 8 · Interchange-native scanning | 🟡 Partial | Lazy sources + streaming strategies exist (`StreamingExecutionStrategy`); pull-based, not async-first (see `docs/POLARS-ROADMAP.md` Phase 4) |
+| 8 · Interchange-native scanning | 🟡 Partial | Lazy sources + streaming strategies exist (`StreamingExecutionStrategy`); pull-based, not async-first (see `docs/plan/POLARS-ROADMAP.md` Phase 4) |
 
 Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
@@ -94,13 +94,13 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
 ### 4.1 "Zero-copy" was a placeholder — it is now removed, not fixed
 
-The design promised Arrow-style zero-copy sharing, but the code only had scaffolding. **Resolution (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94):** the `ArrowConversionOptions.UseZeroCopy` option and the `TryCreateZeroCopy*Array` placeholders were **removed** as a breaking change rather than left lying. No public API or README advertises zero-copy today; the real implementation is `docs/ARROW-ROADMAP.md` Phase D, which will re-introduce the APIs.
+The design promised Arrow-style zero-copy sharing, but the code only had scaffolding. **Resolution (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94):** the `ArrowConversionOptions.UseZeroCopy` option and the `TryCreateZeroCopy*Array` placeholders were **removed** as a breaking change rather than left lying. No public API or README advertises zero-copy today; the real implementation is `docs/plan/ARROW-ROADMAP.md` Phase D, which will re-introduce the APIs.
 
 - Interop is entirely element-by-element copying through `List<object?>` and `GetValue` boxing (`ArrowInterop.cs:677-710`, `731-806`, `824-849`). The option that used to claim otherwise is gone.
 - Historically even *internal* span access copied: `TensorStorage.GetFlattenedSpan()` flattened into a freshly allocated `T[]`, and `TensorStorage.Slice` copied. Both members are gone. Today `AsSpan()` hands back a slice of the owned array (`src/Nivara/Storage/ColumnStorage.cs:238-242`) and `Slice` re-uses that same array with an offset (`:167-182`) — so this half of the old finding is **resolved**, and only the interop boundary above is still open.
 - The plumbing is no longer half-present. Zero-copy used to work only on the memory-storage path, with the tensor path — supposedly the fast path — copying; today there is a single path and it shares (`src/Nivara/Storage/ColumnStorage.cs:167-182`). That is precisely why §4.1's *conclusion* survives while its storage-side evidence does not: the capability still missing is zero-copy across the Arrow/Parquet **boundary**, and no amount of internal sharing substitutes for that.
 
-**Consequence:** the core Arrow promise — share buffers, don't copy — is the single capability the project currently cannot deliver. It is no longer advertised; `docs/ARROW-ROADMAP.md` Phase D adds it with real APIs and real advertising.
+**Consequence:** the core Arrow promise — share buffers, don't copy — is the single capability the project currently cannot deliver. It is no longer advertised; `docs/plan/ARROW-ROADMAP.md` Phase D adds it with real APIs and real advertising.
 
 ### 4.2 No chunked model, so the Arrow shapes collapse at the boundary
 
@@ -130,12 +130,12 @@ The one-line verdict:
 
 > Nivara adopted Arrow's **semantics** — columnar processing, explicit null masks, immutability, mask-OR kernels — but skipped its **physics**: bit-packed validity, logical/physical layout separation, genuinely shareable buffers, and chunked columns. The one place it reached for the physics (interop zero-copy) was scaffolding that silently copied; it has been removed from the public API pending a real implementation (issue #94).
 
-The roadmap to close that gap is in **`docs/ARROW-ROADMAP.md`**.
+The roadmap to close that gap is in **`docs/plan/ARROW-ROADMAP.md`**.
 
 ## Related documents
 
-- `docs/ARROW-ROADMAP.md` — the roadmap to close that gap.
+- `docs/plan/ARROW-ROADMAP.md` — the roadmap to close that gap.
 - `CHANGELOG.md` — records the claims-integrity removal of the `UseZeroCopy` placeholder (issue #94).
-- `docs/POLARS-REVIEW.md` / `docs/POLARS-ROADMAP.md` — the query-engine lens and roadmap.
-- `docs/AISTACK-REVIEW.md` / `docs/AISTACK-ROADMAP.md` — the third lens: complementing the local .NET AI stack, which consumes the chunked/zero-copy foundation this roadmap builds.
+- `docs/plan/POLARS-REVIEW.md` / `docs/plan/POLARS-ROADMAP.md` — the query-engine lens and roadmap.
+- `docs/plan/AISTACK-REVIEW.md` / `docs/plan/AISTACK-ROADMAP.md` — the third lens: complementing the local .NET AI stack, which consumes the chunked/zero-copy foundation this roadmap builds.
 - `docs/IDEA.md` (retired 2026-08-06; its storage/Arrow-adjacent items are tracked as GitHub issues: [dictionary encoding #132](https://github.com/khurram-uworx/Nivara/issues/132), [custom storage plug-in seam #133](https://github.com/khurram-uworx/Nivara/issues/133), [GPU offload #135](https://github.com/khurram-uworx/Nivara/issues/135)), `docs/TENSORS.md`, `docs/adr/001-autodiff-nonnullable-domain.md` — product vision, strategic framing, null-boundary rule.

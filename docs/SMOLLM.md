@@ -119,7 +119,7 @@ SmolLM-135M-instruct inference in `samples/NivaraInference` is CPU-only and its 
 The BF16 compute path is ready. The blocker is the access-chain ICE (Q1).
 
 #### Q3 — If BF16 is not natively usable, what are the options?
-Produce a documented recommendation (in this file / `docs/BFLOAT16-GPU.md`):
+Produce a documented recommendation (in this file):
 - **(a) Driver update + re-probe** — IGC fix is upstream (IGCIT #1144 class); `run` bisects the whole surface in seconds, so re-validation is cheap.
 - **(b) BF16-emulated on GPU** — store BF16 weights on device, widen in-register per dot (the CPU `UseWidenSimd` pattern); viable only once indexed access works (Q1) since it needs real GEMV kernels.
 - **(c) F32 GPU path only** — weights widened to F32 at upload (2× memory, 513 MB for SmolLM); BF16 stays CPU-only. Simplest, works where kernels can run at all.
@@ -141,7 +141,7 @@ Produce a documented recommendation (in this file / `docs/BFLOAT16-GPU.md`):
 1. ✓ `8c0c46d` — `docs: plan SmolLM GPU probe-first investigation` (this file)
 2. ✓ `a70fc79` — baseline re-run recorded (driver `0x010393E2`, L0 API 1.15, SPIR-V max 1.0); `ZE_extension_bfloat16_conversions` + BF16-relevant module caps summarized in `L0Probe` output; the minimal GEMV-shaped access check is covered by the bisection's `straight` variant (`c[0] = a[0] + b[0]`) and still triggers the access-chain ICE
 3. ✓ `a70fc79` + `027c80b` — `bf16_native` / `bf16_emul` / `bf16_native_acc` kernels built, launched, host-verified exact; host edge refined to a pure `BFloat16` round trip (no `ushort`/`ToSingle`)
-4. ✓ `0393130` + this file — `dx12` availability probe committed; Q1/Q2/Q3 answer blocks + BF16/DX12 recommendation recorded in `docs/SMOLLM.md` (`docs/BFLOAT16-GPU.md` not needed separately — the answers live here)
+4. ✓ `0393130` + this file — `dx12` availability probe committed; Q1/Q2/Q3 answer blocks + BF16/DX12 recommendation recorded in `docs/SMOLLM.md` (a separate BF16-GPU document is not needed - the answers live here)
 
 ### Verification steps
 
@@ -153,7 +153,7 @@ Produce a documented recommendation (in this file / `docs/BFLOAT16-GPU.md`):
 ### Blast radius
 
 - `tests/Nivara.GpuProbe/LevelZero/SpvKernels.cs`, `L0Run.cs`, `L0Probe.cs`, `README.md`, `tests/Nivara.GpuProbe/Program.cs`, `tests/Nivara.GpuProbe/D3d12Check.cs` — probe-only additions.
-- `docs/SMOLLM.md`, `docs/BFLOAT16-GPU.md` — documentation.
+- `docs/SMOLLM.md` - documentation.
 - No core library, no samples, no Nivara.Tests, no package changes.
 
 ### Follow-up (next branch, gated on probe answers)
