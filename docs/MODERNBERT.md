@@ -62,7 +62,7 @@ Re-run after the encoder norms switched from an unloaded zero Beta to `LayerNorm
 | 128 tokens | 287.3 ms | 1249.8 ms | ~4.3× |
 | 256 tokens | 504.0 ms | 1922.4 ms | ~3.8× |
 
-Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates short runs — ~5.4× a seq-128 forward. Nivara: 20.8 tok/s at seq 128, 13.5 tok/s at seq 256, ~44.6 and ~68.7 ms/layer. Each row is 1 warmup + 3 timed passes, median reported. `--seq N[,N...]` picks the lengths and `--warmup N` / `--iters N` the pass counts on both benchmark paths; the defaults are the tables above. The PyTorch side of the comparison uses 3 warmup passes, not 1 — `--warmup 3` matches it. See the [NivaraInference README](../samples/NivaraInference/README.md) for full benchmark tables.
+Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates short runs — ~5.4× a seq-128 forward. Nivara: 20.8 tok/s at seq 128, 13.5 tok/s at seq 256, ~44.6 and ~68.7 ms/layer. Each row is 1 warmup + 3 timed passes, median reported. `--seq N[,N...]` picks the lengths (and `--warmup N` / `--iters N` the pass counts) on both C# benchmark paths, and `Python/modernbert_benchmark.py` takes the same `--seq`; the defaults are the tables above. The PyTorch side of the comparison uses 3 warmup passes, not 1 — `--warmup 3` matches it. See the [NivaraInference README](../samples/NivaraInference/README.md) for full benchmark tables.
 
 ## GPU path
 
