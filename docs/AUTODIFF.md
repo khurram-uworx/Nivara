@@ -709,7 +709,8 @@ WeightGrad:  ConvTransposeWeightGradKernel (reduction over ih, iw)
 ```
 
 - No grouped convolution support (Conv2d has it)
-- Optional `weightInitializer` (`IInitializer<T>`) replaces the default He-uniform draw; omitted, initialization is unchanged
+- Default weight draw: He-uniform `U(-√(6/fanIn), √(6/fanIn))` from a fixed seed, with `fanIn` = the weight's second shape dimension (`outChannels × kernelSize²`), matching `KaimingUniformInitializer<T>` and PyTorch's `_calculate_fan_in_and_fan_out`
+- Optional `weightInitializer` (`IInitializer<T>`) replaces the default draw; omitted, initialization is unchanged
 - Used by ConvVAE decoder for stride-upsampling
 
 ### BatchNorm1d\<T\> / BatchNorm2d\<T\>

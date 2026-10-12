@@ -758,7 +758,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
         this.padding = padding;
         useBias = bias;
 
-        int fanIn = inChannels * kernelSize * kernelSize;
+        int fanIn = outChannels * kernelSize * kernelSize;
         var weightData = new T[inChannels * outChannels * kernelSize * kernelSize];
         if (weightInitializer is null)
             DefaultConvInitialization.Fill(weightData, fanIn);

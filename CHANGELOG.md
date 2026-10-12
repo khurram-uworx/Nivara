@@ -455,12 +455,26 @@ All notable changes to Nivara are documented here. Released versions are publish
   He-normal standard deviation reused as a uniform half-width. That is variance `2/(3·fanIn)`, a third
   of He-uniform's `2/fanIn`, and matched neither `KaimingUniformInitializer<T>` nor `Linear<T>`'s
   default. `DefaultConvInitialization.Fill` now uses `bound = √(6/fanIn)`, making conv and linear
-  defaults one distribution family. Each layer's convolution fan-in (input channels × kernel area) is
-  unchanged, including `ConvTranspose2d<T>`'s, which is deliberately not its weight's `shape[1]`. The
+  defaults one distribution family. Each layer's convolution fan-in is unchanged at this step —
+  `Conv1d<T>`/`Conv2d<T>` keep input-channels × kernel-area; `ConvTranspose2d<T>`'s fan-in is aligned
+  to its weight's `shape[1]` in #604 below. The
   seed-42 stream is unchanged, so identically-shaped layers still initialize identically, but every
   conv model's starting weights differ — training samples (`NivaraVAE`, `NivaraTimeSeries`,
   `NivaraClassifier`) now start from a different point; inference samples load checkpoints and are
   unaffected. Pinned by the `Conv1d<T>`/`Conv2d<T>`/`ConvTranspose2d<T>` fixed-seed-draw tests.
+
+- **`ConvTranspose2d<T>` default fan-in aligned to its weight's `shape[1]` (#604)** — the default draw
+  used `fanIn = inChannels × kernelSize²`, but the weight is stored as a matrix
+  `[inChannels, outChannels × kernelSize²]`, so `shape[1] = outChannels × kernelSize²`. The default
+  therefore disagreed with the layer's own `KaimingUniformInitializer<T>`/`PyTorchDefaultInitializer<T>`
+  (which read `shape[1]`) whenever `inChannels != outChannels`, despite the "one family" claim above.
+  The default is now `fanIn = outChannels × kernelSize²` (`shape[1]`), matching the initializer family
+  and PyTorch's `_calculate_fan_in_and_fan_out`, and making the built-in draw byte-identical to
+  `KaimingUniformInitializer<T>` for the same shape. Because the draw is a fixed seed-42 stream, every
+  `ConvTranspose2d<T>` default weight — and every `ConvVAE<T>` decoder's starting point — changes;
+  `Conv1d<T>`/`Conv2d<T>`/`Linear<T>` are unaffected. The `ConvTranspose2d<T>` fixed-seed-draw test is
+  re-baselined against the weight's `shape[1]`, and it now also pins the weight's layout
+  (`shape[1] = outChannels × kernelSize²`).
 
 - **Snippet-gate `preamble:` now resolves to one namespace per name (amends ADR-005, #546)** — the
   gate's `preamble:` directive was never read: `DocSnippetCompiler` emitted
