@@ -201,18 +201,19 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   shapes; `minilm --silk compare`, `distilbert --silk compare` and `distilbert_sst --silk compare` are
   the end-to-end gates (`|gpu−cpu| ≤ 1e-3·(1+|cpu|)`, plus pooled-embedding cosine for MiniLM and
   argmax 8/8 for SST-2). `InferenceCliArgumentTests` pins the new rejects. The gate's timing column is
-  explicitly *not a verdict*; on the current battery run 6 of 32 cells sit outside the informal
-  x0.8..x1.2 band (worst 1.43×) — flagged, not failed, and not tracked as an issue.
+  explicitly *not a verdict*: on battery a few cells leave the informal x0.8..x1.2 band — consistently
+  DistilBERT's larger GEMM shapes (qkv, fc1), four to six of the 32 in recent runs, worst ≈1.4× — and
+  the exact set moves run to run. Flagged, not failed, and not tracked as an issue.
 - **Informal A/B (battery; both legs on battery, same session).** The `--silk-kernels` gate runs the
   ILGPU originals and the Silk kernels **in one process**, so its timing column compares the two
-  backends under one clock and one power state; a back-to-back `minilm --silk benchmark` /
-  `minilm --ilgpu benchmark` pair (same 3-warmup + 10-timed protocol) compares the whole forward.
-  Across two gate runs the per-kernel ratio (Silk / ILGPU) fell in **0.79–1.19** — no kernel was
-  consistently slower, and the two single cells that left the x0.8..x1.2 band (one per run) swap
-  sides. The whole forward averaged **29.5 ms (Silk) vs 31.4 ms (ILGPU), ≈0.94×**. Read these as
-  "no separation", not as rows to quote: they are **battery** numbers, the gate's timing column is
-  explicitly *not a verdict*, and the absolute milliseconds are not comparable to the AC-powered §1
-  table.
+  backends under one clock and one power state. On the **MiniLM** shapes the per-kernel ratio
+  (Silk / ILGPU) fell in **0.79–1.19**; the drift is concentrated in the larger DistilBERT GEMM
+  shapes (above). A back-to-back `minilm --silk benchmark` / `minilm --ilgpu benchmark` pair (same
+  3-warmup + 10-timed protocol) compares the whole forward: it averaged **29.5 ms (Silk) vs
+  31.4 ms (ILGPU), ≈0.94×**. Read these as "no separation", not as rows to quote: they are
+  **battery** numbers, the gate's timing column is explicitly *not a verdict*, and the absolute
+  milliseconds are not comparable to the AC-powered §1 table. (The gate prints the same battery
+  warning at the top of every run.)
 
 ## 2. Where the implementation detail lives
 
