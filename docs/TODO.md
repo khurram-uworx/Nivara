@@ -40,7 +40,7 @@ generalize. DistilBERT is a genuine extension of the frontier:
 
 - **Stage 4 placement — restructure now, on this branch, as its own commit.** Not deferred to a
   separate branch/PR. Stage 3 therefore follows Stage 4 (it writes into the final homes).
-- **`--silk-kernels` timing red flags — leave as a note for now.** The six out-of-band cells listed
+- **`--silk-kernels` timing red flags — leave as a note for now.** The few (four to six of 32 across runs) out-of-band cells listed
   under Status stay recorded in the plan/report as informal-timing observations; the gate's timing
   column is explicitly *not* a verdict, and no GitHub issue is opened for them.
 
@@ -101,7 +101,7 @@ New human instructions that refine Stage 4 and add work to it:
   - `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"` — 36/36 pass.
   - `--silk-kernels` gate — **PASS**: 32/32 cells bit-identical to ILGPU, including `gather_rows`,
     `gemm_row4_relu`, and the DistilBERT headDim-64 attention cell (the `MaxHeadDim` boundary).
-    6 cells fall outside the x0.8–x1.2 informal timing band — red flags to report, not failures:
+    In that run, 6 cells fell outside the x0.8–x1.2 informal timing band — red flags to report, not failures:
     minilm fc1 gelu x1.24, minilm attention x1.26, distilbert qkv bias x1.43, distilbert qkv relu
     x1.25, distilbert fc1 bias x1.26, distilbert fc1 relu x1.33.
   - `distilbert_sst --silk compare` — **PASS**: 0/16 violations, argmax 8/8 vs CPU and vs PyTorch.
@@ -296,4 +296,9 @@ final home rather than into `ACCELERATION.md` and then moved.
 
 ## GitHub issues log
 
-- [ ] (none yet)
+- (no issues opened by the plan itself)
+
+- **#625** — 12 sites cite the deleted `docs/BERT-GPU.md` (renamed → `GPU-ACCL.md` → merged into
+  `ACCELERATION.md`); surfaced at G2, pre-existing, not introduced by this branch. The citation gate
+  cannot see them (they live under `samples/` and `tests/`, and the gate scans root `*.md` + `docs/`
+  only) — the same blind spot as #549. Left out of this branch on scope grounds.
