@@ -3546,7 +3546,7 @@ public class NnTests
     }
 
     [Test]
-    public void ConvTranspose2d_DefaultInit_UsesConvFanIn()
+    public void ConvTranspose2d_DefaultInit_UsesShape1FanIn()
     {
         const int inChannels = 2;
         const int outChannels = 3;
@@ -3554,12 +3554,19 @@ public class NnTests
 
         using var conv = new ConvTranspose2d<float>(inChannels, outChannels, kernelSize, bias: false);
 
-        // He-uniform default with the convolution fan-in (inChannels * kernelSize^2), which is
-        // deliberately NOT the weight's second shape dimension (outChannels * kernelSize^2). This
-        // test fails if the bound is derived from shape[1] instead.
-        var bound = (float)Math.Sqrt(6.0 / (inChannels * kernelSize * kernelSize));
-        var rng = new Random(42);
+        // The weight is stored as a matrix [inChannels, outChannels * kernelSize^2], so its second
+        // shape dimension is the outChannels fan-in, deliberately different from the input fan-in
+        // here so the two are distinguishable.
         var w = conv.Weight!.Tensor;
+        Assert.That(w.Shape, Is.EqualTo(new[] { inChannels, outChannels * kernelSize * kernelSize }));
+        Assert.That(w.Shape[1], Is.Not.EqualTo(inChannels * kernelSize * kernelSize));
+
+        // He-uniform default with fanIn = the weight's second shape dimension
+        // (outChannels * kernelSize^2), the same value KaimingUniformInitializer<T> and PyTorch's
+        // _calculate_fan_in_and_fan_out use. This test fails if the bound falls back to the input
+        // fan-in (inChannels * kernelSize^2), which it did before #604.
+        var bound = (float)Math.Sqrt(6.0 / (outChannels * kernelSize * kernelSize));
+        var rng = new Random(42);
         Assert.That(w.Length, Is.EqualTo(inChannels * outChannels * kernelSize * kernelSize));
         for (int i = 0; i < w.Length; i++)
         {
