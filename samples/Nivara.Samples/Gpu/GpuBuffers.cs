@@ -94,7 +94,7 @@ internal static class GpuBuffers
 
         /// <summary>
         /// Shared memory the A and B tiles need per group. ILGPU allocates per work
-        /// <em>group</em>, not per work item (docs/ACCELERATION.md lesson 15), and the
+        /// <em>group</em>, not per work item (docs/ILGPU.md §17 lesson 15), and the
         /// allocation size must be a compile-time constant — hence the geometry constants
         /// rather than runtime shape arguments.
         /// </summary>

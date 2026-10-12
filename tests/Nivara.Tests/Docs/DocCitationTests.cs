@@ -14,21 +14,23 @@ public class DocCitationTests
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenCitations.md";
 
     /// <summary>Count of citations found repository-wide. Pinned deliberately: see the coverage test.</summary>
-    const int ExpectedCitationCount = 106;
+    const int ExpectedCitationCount = 113;
 
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
-    const int ExpectedCitedDocumentCount = 16;
+    const int ExpectedCitedDocumentCount = 18;
 
     /// <summary>
-    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 40 under
+    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 41 under
     /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
     /// <c>docs/TODO.md</c> does <em>not</em> increase this number — excluding it is the point, and it is
     /// what keeps the count stable across a workflow that commits one. The move of <c>SILK.md</c>
     /// from <c>tests/Nivara.GpuProbe/</c> into <c>docs/</c> is what took <c>docs/</c> from 39 to 40:
     /// the gate scans the repository root plus <c>docs/</c>, never <c>tests/</c>, so the probe tree
-    /// was not counted before and the document entered scope on arrival.
+    /// was not counted before and the document entered scope on arrival. The acceleration-doc
+    /// restructure took it from 40 to 41 by extracting the ungated streaming design proposal into
+    /// its own <c>docs/STREAMING-PROPOSAL.md</c>.
     /// </summary>
-    const int ExpectedDocumentCount = 49;
+    const int ExpectedDocumentCount = 50;
 
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()

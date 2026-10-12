@@ -1,17 +1,18 @@
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// MiniLM encoder forward on the Silk.NET OpenCL backend (<see cref="SilkKernels"/>): the
+/// BERT-family encoder forward on the Silk.NET OpenCL backend (<see cref="SilkKernels"/>): the
 /// <c>--silk</c> counterpart of <see cref="BertEncoderGpuRunner"/>. Same weight layout, same
 /// operation order and the same fused epilogues, so the two backends are elementwise comparable —
 /// the <c>--silk-kernels</c> gate holds their GEMMs to byte-identity and the remaining kernels to
 /// the model's numeric bound.
 ///
 /// <para>
-/// <b>Scope.</b> MiniLM only, with the BERT-style key names <see cref="BertGpuKeys"/> resolves.
-/// The classifier head is <em>not</em> ported — it needs a gather and a ReLU kernel the six-kernel
-/// set does not carry — so a checkpoint that ships head weights is rejected at construction rather
-/// than silently answered with the encoder hidden state.
+/// <b>Scope.</b> The BERT-family encoders the ILGPU runner covers — MiniLM and DistilBERT — selected
+/// by the <see cref="BertGpuNaming"/> passed to the constructor, which resolves the checkpoint's key
+/// style (<see cref="BertGpuKeys"/>). A checkpoint that ships the classifier head
+/// (<c>pre_classifier</c>/<c>classifier</c> keys) runs it too, through the <c>gather_rows</c> and
+/// <c>gemm_row4_relu</c> kernels, and returns the <c>[batch, numClasses]</c> logits.
 /// </para>
 ///
 /// <para>
@@ -26,6 +27,12 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     /// <summary>Workspace cap, matching the ILGPU runner's (the scenario's actual maxima).</summary>
     const int MaxBatch = 8;
     const int MaxSeqLen = 128;
+    const int NumClasses = 2;
+
+    const string PreWKey = "pre_classifier.weight";
+    const string PreBKey = "pre_classifier.bias";
+    const string ClsWKey = "classifier.weight";
+    const string ClsBKey = "classifier.bias";
 
     readonly SilkRuntime runtime;
     readonly int hiddenDim;
@@ -36,12 +43,18 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     readonly float eps;
     readonly float scale;
     readonly bool hasTokenType;
+    readonly BertGpuNaming naming;
 
     readonly nint wordEmb;
     readonly nint posEmb;
     readonly nint embLnW;
     readonly nint embLnB;
     readonly nint tokenTypeEmb;
+    readonly bool hasHead;
+    readonly nint preW;
+    readonly nint preB;
+    readonly nint clsW;
+    readonly nint clsB;
     readonly LayerSilkWeights[] layers;
 
     readonly nint x;
@@ -50,9 +63,12 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     readonly nint h;
     readonly nint f1;
     readonly nint zeroResidual;
+    readonly nint clsOut;
+    readonly nint logits;
     readonly nint maskBuf;
     readonly nint idsBuf;
     readonly nint posIdsBuf;
+    readonly nint clsIdsBuf;
 
     readonly List<nint> owned = [];
     int cachedPosSeqLen = -1;
@@ -60,15 +76,20 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     /// <summary>
     /// Uploads every weight — GEMM weights transposed once and q/k/v packed through
     /// <see cref="GpuBuffers"/>, the same arithmetic the ILGPU runner uses, so the two backends
-    /// cannot drift — and sizes the cap workspace. Throws if a required encoder key is missing, if
-    /// the device's local memory cannot hold the attention tile, or if a classifier head is present.
+    /// cannot drift — and sizes the cap workspace. <paramref name="naming"/> selects the checkpoint's
+    /// weight-key style. Throws if a required encoder key is missing or if the device's local memory
+    /// cannot hold the attention tile. The classifier-head weights are optional: when the checkpoint
+    /// ships <c>pre_classifier</c>/<c>classifier</c> keys they are uploaded and the head runs in
+    /// <see cref="Forward"/>.
     /// </summary>
     public SilkBertEncoderRunner(
         SilkRuntime runtime,
         BertConfig config,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        BertGpuNaming naming)
     {
         this.runtime = runtime;
+        this.naming = naming;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -77,15 +98,10 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
         eps = config.LayerNormEps;
         scale = (float)(1.0 / Math.Sqrt(headDim));
 
-        if (tensors.ContainsKey("pre_classifier.weight") || tensors.ContainsKey("classifier.weight"))
-            throw new NotSupportedException(
-                "--silk ports the MiniLM encoder only: the pre_classifier/classifier head needs a "
-                + "gather + ReLU kernel pair the Silk kernel set does not carry. Use --ilgpu for a "
-                + "checkpoint with a head, or drop --silk.");
-
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        var naming = BertGpuNaming.Bert;
+        hasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
+
         string emb = BertGpuKeys.Embeddings(naming);
         wordEmb = UploadPlain(tensors, $"{emb}.word_embeddings.weight");
         posEmb = UploadPlain(tensors, $"{emb}.position_embeddings.weight");
@@ -104,6 +120,21 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
         for (int i = 0; i < numLayers; i++)
             layers[i] = UploadLayer(tensors, i);
 
+        // Classifier head: pre_classifier (hidden→hidden, ReLU) then classifier (hidden→numClasses).
+        // Allocated even when the checkpoint has no head so Dispose is unconditional; uploaded only
+        // when hasHead.
+        preW = Register(runtime.Allocate(hiddenDim * hiddenDim));
+        preB = Register(runtime.Allocate(hiddenDim));
+        clsW = Register(runtime.Allocate(NumClasses * hiddenDim));
+        clsB = Register(runtime.Allocate(NumClasses));
+        if (hasHead)
+        {
+            runtime.Upload(preW, GpuBuffers.Transposed(tensors, PreWKey, "--silk"));
+            runtime.Upload(preB, GpuBuffers.Req(tensors, PreBKey, "--silk").Data);
+            runtime.Upload(clsW, GpuBuffers.Transposed(tensors, ClsWKey, "--silk"));
+            runtime.Upload(clsB, GpuBuffers.Req(tensors, ClsBKey, "--silk").Data);
+        }
+
         int rowsCap = MaxBatch * MaxSeqLen;
         x = Register(runtime.Allocate(rowsCap * hiddenDim));
         qkv = Register(runtime.Allocate(rowsCap * 3 * hiddenDim));
@@ -111,13 +142,16 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
         h = Register(runtime.Allocate(rowsCap * hiddenDim));
         f1 = Register(runtime.Allocate(rowsCap * intermediateDim));
         zeroResidual = Register(runtime.Allocate(rowsCap * hiddenDim));
+        clsOut = Register(runtime.Allocate(MaxBatch * hiddenDim));
+        logits = Register(runtime.Allocate(MaxBatch * NumClasses));
         maskBuf = Register(runtime.Allocate(rowsCap));
         idsBuf = Register(runtime.Allocate(rowsCap));
         posIdsBuf = Register(runtime.Allocate(rowsCap));
+        clsIdsBuf = Register(runtime.Allocate(MaxBatch));
 
         // The embedding LayerNorm is the encoder's one non-residual layer norm, and
         // layer_norm_residual reproduces it exactly with a zero residual (a + 0.0f == a), which is
-        // why the six-kernel set has no seventh kernel for it.
+        // why the kernel set has no dedicated embedding-norm kernel.
         runtime.Upload(zeroResidual, new float[rowsCap * hiddenDim]);
     }
 
@@ -183,7 +217,23 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
             runtime.Release(v);
         }
 
-        return new BertEncoderGpuResult(runtime.Download(x, rows * hiddenDim), null);
+        float[]? logitsArr = null;
+        if (hasHead)
+        {
+            // The CLS row of each batch row is row b*seqLen (position 0), matching the CPU/ILGPU
+            // head: gather it, then pre_classifier (ReLU) → classifier (bias only).
+            var clsIds = new int[batch];
+            for (int b = 0; b < batch; b++)
+                clsIds[b] = b * seqLen;
+
+            runtime.Upload(clsIdsBuf, clsIds.AsSpan(0, batch));
+            LaunchGather(clsOut, x, clsIdsBuf, hiddenDim, batch * hiddenDim);
+            LaunchGemm(SilkKernels.GemmRelu, clsOut, preW, h, preB, batch, hiddenDim, hiddenDim);
+            LaunchGemm(SilkKernels.GemmBias, h, clsW, logits, clsB, batch, hiddenDim, NumClasses);
+            logitsArr = runtime.Download(logits, batch * NumClasses);
+        }
+
+        return new BertEncoderGpuResult(runtime.Download(x, rows * hiddenDim), logitsArr);
     }
 
     public void Dispose()
@@ -268,9 +318,20 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
 
     // ── weight upload ─────────────────────────────────────────────
 
+    void LaunchGather(nint output, nint table, nint ids, int hidden, int total)
+    {
+        runtime.SetBuffer(SilkKernels.GatherRows, 0, table);
+        runtime.SetBuffer(SilkKernels.GatherRows, 1, ids);
+        runtime.SetBuffer(SilkKernels.GatherRows, 2, output);
+        runtime.SetUInt32(SilkKernels.GatherRows, 3, (uint)total);
+        runtime.SetUInt32(SilkKernels.GatherRows, 4, (uint)hidden);
+        runtime.Run(SilkKernels.GatherRows,
+            [(nuint)SilkKernels.LinearGlobal(total)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     LayerSilkWeights UploadLayer(Dictionary<string, (float[] Data, int[] Shape)> tensors, int index)
     {
-        var naming = BertGpuNaming.Bert;
         string q = BertGpuKeys.Attention(naming, index, 'q');
         string k = BertGpuKeys.Attention(naming, index, 'k');
         string v = BertGpuKeys.Attention(naming, index, 'v');

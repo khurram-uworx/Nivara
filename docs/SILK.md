@@ -6,6 +6,18 @@ All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU; th
 
 ---
 
+This document has two parts:
+
+- **Part 1 — the spike.** The `tests/Nivara.GpuProbe` Silk.NET leg (`silk` mode): Silk.NET/OpenCL
+  setup, the measured results, and the BF16/FP16 answer for this iGPU.
+- **Part 2 — the production implementation.** The `--silk` hand-authored OpenCL C backend in
+  `samples/Nivara.Samples/Gpu/` — every kernel, the runtime, the runner and the gate. Written from
+  the source, as the map for adding the next model to this backend.
+
+---
+
+# Part 1 — the spike (GpuProbe, `silk` mode)
+
 ## 1. What the leg does (current state)
 
 Everything lives in **`OpenCl/SilkLeg.cs`** (mode `silk`, and a row in `kernels`):
@@ -337,6 +349,194 @@ is outside the f32 gate 402/576, each failure within 2 half-ULP of the F16 mirro
 diagnosed-honest #606 row, 0 in the exit code) — pre-existing conditions unrelated to
 Silk.NET. The #606-gate exit on this machine is 3 = SYCL-unavailable + 0 unexpected. Verify
 the Silk.NET row's own PASS lines, not just the process exit code.
+
+---
+
+# Part 2 — the production `--silk` implementation
+
+Part 1 measured the Silk.NET/OpenCL route on microkernels. Part 2 is the same route on a real model:
+the `--silk` backend, OpenCL C written by hand and compiled in-process by the driver. It is written
+from `samples/Nivara.Samples/Gpu/` — the map for adding the next model to this backend.
+
+## 10. What the path is, and what is in it
+
+`--silk` runs the BERT-family encoder through hand-authored OpenCL C
+(`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It exists to evaluate a
+vendor-neutral, non-ILGPU route on a real model. Scope today: **MiniLM, DistilBERT and
+DistilBERT+SST-2**, F32 only, modes `default` / `benchmark` / `compare`; mutually exclusive with
+`--ilgpu`.
+
+| file | role |
+|---|---|
+| `SilkKernels.cs` | the OpenCL C translation unit (`Source`) and all geometry, as pure data so it can be unit-checked without a device; `KernelNames` is the build order |
+| `SilkRuntime.cs` | `CL.GetApi()`, platform/device select, in-process build with the build log decoded on failure, buffers/sub-buffers, per-argument status checking, blocking dispatch, reverse-order dispose |
+| `SilkBertEncoderRunner.cs` | the `--silk` counterpart of `BertEncoderGpuRunner` — same weight layout, same operation order, same fused epilogues |
+| `IBertEncoderRunner.cs` | the seam shared with ILGPU; `GpuBuffers.cs` carries the weight-layout and launch maths for both |
+
+The sample csproj pins `Silk.NET.OpenCL` 2.23.0; `SilkKernels` is `internal` with
+`InternalsVisibleTo` to `Nivara.Tests`/`Nivara.PerformanceTests`, so the gate and the unit checks can
+reach it.
+
+## 11. The translation unit
+
+### 11.1 The kernel set
+
+`KernelNames` (`SilkKernels.cs:69`) is the build/creation order:
+
+```csharp
+[EmbedSum, GatherRows, LayerNormResidual, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention]
+```
+
+i.e. `embed_sum`, `gather_rows`, `layer_norm_residual`, `gemm_row4_bias`, `gemm_row4_relu`,
+`gemm_row4_gelu`, `gemm_row4_qkv`, `batched_attention`. (The array orders `relu` before `gelu` while
+the source text defines `gelu` first; both are instances of the one accumulation macro, so the order
+is only the creation list.)
+
+Each is a port of the same-shape ILGPU kernel with the operation order preserved — same strictly
+ascending K-reduction, same tile geometry, same fused epilogues:
+
+| kernel | signature (abridged) | purpose |
+|---|---|---|
+| `embed_sum` | `ids, posIds, wordEmb, posEmb, tokenType, y, n, hidden, includeTt` | fused word + position (+ token-type row, gated by `includeTt`) gather/sum for the embedding step |
+| `gather_rows` | `table, ids, y, n, hidden` | gather rows — the CLS-row selection in the classifier head |
+| `layer_norm_residual` | `a, b, gamma, beta, y, rows, cols, eps` | `LayerNorm(a + b)` in one kernel; a zero `b` reproduces the embedding LayerNorm exactly |
+| `gemm_row4_bias` | `a, b, c, bias, aRows, aCols, bCols` | Row4 GEMM + bias epilogue (o-projection, fc2) |
+| `gemm_row4_relu` | as above | Row4 GEMM + ReLU epilogue (head `pre_classifier`); clamp written `(r < 0 ? 0 : r)`, not `fmax` |
+| `gemm_row4_gelu` | as above | Row4 GEMM + exact-GELU epilogue (fc1) |
+| `gemm_row4_qkv` | as above **+ `blockWidth`** | Row4 GEMM writing the block-separable `[q | k | v]` layout via `qkv_dest` |
+| `batched_attention` | `q, k, v, mask, attnOut, batch, seqLen, numHeads, headDim, band, scale` | score + scale + mask + row-softmax + weighted-V, three passes, banded |
+
+### 11.2 Geometry
+
+`GemmTileSize` 16, `GemmBlockCols` 4, `GemmTileCols` 64, `GemmRowStride` 80, `LinearGroupSize` 256,
+`AttentionGroupSize` 64, `MaxHeadDim` 64, `GlobalAttentionBand` −1 — the same numbers the ILGPU
+`GpuBuffers` carries. The helpers are pure functions (`GemmGlobalRows`, `GemmGlobalCols`,
+`LinearGlobal`, `AttentionGlobal`, `RoundUp`) so they unit-check without a device.
+`GemmGlobalCols` counts *groups*, not threads: a group is 16 threads wide but covers 64 output
+columns, so returning `RoundUp(bCols, GemmTileCols)` would over-launch by `GemmBlockCols`× and the
+surplus groups would run the whole K-loop and then discard every result.
+
+### 11.3 Bit-identity: the macro and the pragma
+
+The three Row4 GEMM epilogues share **one** accumulation macro, `GEMM_ROW4_ACCUMULATE`
+(`SilkKernels.cs:201`), deliberately: the byte-identity claim rests on all three adding the same f32
+values to the same accumulators in the same order, so the text must not be able to drift between
+them. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
+OFF` (uppercase; the lowercase spelling the spec also admits is not honoured here) keeps the driver
+from fusing it, because that is what ILGPU produces. The gate replays each dot product three ways in
+the same ascending-K order and reports the hit counts: ILGPU matches `mul+add` on 100% of elements
+and `fma` on ~19%. An explicit `fma()` here would defeat the pragma and diverge from ILGPU on ~81% of
+outputs at rounding scale, systematically wrong and invisible to any tolerance.
+
+Transcendentals (`exp` in the softmax and the GELU erf) are **not** assumed identical to ILGPU's
+`XMath.Exp`; those cells gate on the model's numeric bound instead (§14).
+
+## 12. The runtime (`SilkRuntime`)
+
+- **Acquisition:** `CL.GetApi()` — instance methods on `CL`, not statics.
+- **Device select:** two-call platform/device enumeration, `DeviceType.Gpu` only, with Intel/AMD
+  vendors preferred and the first candidate kept as a fallback; then a GPU **re-assert** (`IsGpu`),
+  because "a driver that answers with something else must fail loudly rather than silently turn this
+  into a CPU measurement." Construction throws rather than falling back.
+- **Build:** `CreateProgramWithSource` + `BuildProgram` with `num_devices = 0` ("every device in the
+  context" — the one device asked for). On failure the driver's build log is decoded
+  (first-NUL trim, UTF-8) and thrown — the single most useful diagnostic on Intel/AMD drivers.
+- **Buffers:** `CreateBuffer(ReadWrite)`; `Allocate(floatCount)` and `AllocateBytes(bytes)`.
+- **Sub-buffers:** `CreateSubview(parent, elementOffset, elementCount)` builds a `BufferRegion` and
+  `CreateSubBuffer(ReadOnly, …)`. The view shares the parent's storage, so the parent must outlive it
+  and the caller releases it.
+- **Upload/download:** blocking `EnqueueWriteBuffer` / `EnqueueReadBuffer` of exactly the payload.
+- **Argument setting:** `SetBuffer` / `SetUInt32` / `SetInt32` / `SetFloat32`, **each call checked
+  individually** and the failure names the kernel and argument index. This is the deliberate
+  divergence from the probe's OR-ed status: a mismatched argument count otherwise makes the kernel
+  read uninitialized scalars and answer fast and wrong rather than erroring.
+- **Dispatch:** `EnqueueNdrangeKernel` then `clFinish` — every dispatch is blocking, so a readback
+  needs no further synchronization. The global size must already be a whole multiple of the local
+  size (the geometry helpers guarantee it), because OpenCL rejects a non-multiple and the in-kernel
+  guard would otherwise be dead.
+- **Cleanup:** kernels → program → command queue → context, reverse of construction. A failed
+  partial construction disposes what it built (`catch { Dispose(); throw; }`).
+
+## 13. The runner (`SilkBertEncoderRunner`)
+
+The constructor takes a **`BertGpuNaming`** (`DistilBert` or `Bert`) — the parameter that lets
+DistilBERT reuse the MiniLM runner — and resolves embeddings + per-layer q/k/v/o, ffn and LayerNorm
+keys through the shared `BertGpuKeys` resolver (which lives beside `BertEncoderGpuRunner`).
+
+- **Uploads.** Embeddings plain. q/k/v through `GpuBuffers.QkvPacked`, one pre-transposed
+  `[in × 3·out]` `[Bt_q | Bt_k | Bt_v]` plus a `[3·out]` bias — byte-identical to ILGPU's, produced
+  from the same arithmetic rather than a second copy. `O`/`W1`/`W2` transposed; biases and LayerNorms
+  plain. Token-type: only row 0 is read (all-zero segment ids), so one row is uploaded rather than the
+  checkpoint's two.
+- **Head weights** are allocated unconditionally — so `Dispose` is unconditional — and uploaded only
+  when the checkpoint ships `pre_classifier`/`classifier`.
+- **Workspace** is cap-sized (`batch ≤ 8`, `seqLen ≤ 128`, the scenario's actual maxima) with every
+  layer intermediate resident on device. A `zeroResidual` buffer lets `layer_norm_residual` reproduce
+  the encoder's one non-residual norm exactly (`a + 0.0f == a`), which is why there is no dedicated
+  embedding-norm kernel.
+- **Forward.** Upload mask + ids; rebuild posIds only when `seqLen` changes (`row % seqLen`), so the
+  repeat-forward benchmark path skips the copy; `embed_sum` then `layer_norm_residual(x, zeroResidual,
+  …)`; then per layer fused-QKV → attention → o → LN-residual → fc1 GELU → fc2 → LN-residual. The
+  optional SST-2 head runs `gather_rows` (CLS row `b*seqLen`) → `gemm_row4_relu` → `gemm_row4_bias`
+  for `[batch, 2]` logits. Only the final hidden state (and logits) are downloaded.
+- **q/k/v sub-buffers** are created once per forward from the packed `qkv` result — the three
+  contiguous blocks, so the already-gated fused attention kernel is untouched — and released in a
+  `finally`, because they share the parent's storage.
+
+`IBertEncoderRunner` is the only thing the CLI's BERT-family entry points see, so the two backends are
+the same code with a different `Forward` behind it. The padding contract is stated on the interface:
+mask `0` at padding, positional ids `0..seqLen−1` repeated per batch row.
+
+## 14. CLI surface and the gate
+
+- **`SilkModes`** is the allow-list — `minilm` / `distilbert` / `distilbert_sst` × `{"", benchmark,
+  compare}` — deliberately narrower than `GpuModes` (which also lists `laya` and `modernbert`),
+  because the hand-authored kernels cover only the BERT-family encoders and DistilBERT's head.
+- **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
+  `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
+- **The model-scope guard runs before any model-file lookup** — pinned by
+  `Silk_RejectedBeforeModelFileLookup`, because `qwen` weights are never present and a
+  "Model file not found" would otherwise mask the real reason.
+- **F32-only**: `--silk --precision bf16|fp16` is rejected (there is no bf16/fp16 translation unit).
+- **`--gpu` is rejected, not aliased** to `--ilgpu`, so an old invocation fails loudly.
+- **`OpenSilkEncoder`/`OpenIlgpuEncoder`** share the `OpenEncoder` delegate and one set of entry-point
+  bodies, so a fix to one backend cannot be forgotten in the other.
+- **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
+  (`SilkKernelsGate.cs`). It runs the ILGPU originals and the Silk kernels **in one process** and
+  requires **byte-identity** for `gemm_row4_bias`, `gemm_row4_qkv`, `gemm_row4_relu` and
+  `gather_rows` (pure multiply-and-add, so a bit difference means the accumulation order or the
+  contraction changed — a design bug, not rounding), and the numeric bound
+  `|silk − ilgpu| ≤ 1e-3·(1 + |ilgpu|)` for the rest (`gemm_row4_gelu`, `batched_attention`, and the
+  elementwise cells, whose `exp` may differ by an ulp). Timing is best-of-N after warmups and is
+  **explicitly not a verdict** — a ratio outside x0.8..x1.2 is a red flag to report, not a failure to
+  encode, and the exit code counts correctness failures only. Shapes: MiniLM (seq 128, hidden 384, 12
+  heads, headDim 32) and DistilBERT (seq 128, hidden 768, 12 heads, headDim 64) — DistilBERT drives
+  `headDim` to `MaxHeadDim`, the attention kernel's compiled local-memory bound. An unavailable device
+  or program exits `UNBUILT` (10).
+- **End-to-end compares are the other half.** `minilm --silk compare`, `distilbert --silk compare` and
+  `distilbert_sst --silk compare` each check the GPU against the **same-process CPU** at
+  `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` — with pooled-embedding cosine for MiniLM, and the PyTorch 3-way
+  (`argmax 8/8`) for SST-2. The `--silk-kernels` cells are what localise a failure; the compares are
+  what say the assembled forward is right.
+
+## 15. Adding a model to the Silk path
+
+1. The runtime is model-agnostic; only `SilkKernels.Source` and `SilkBertEncoderRunner` change.
+2. Add a kernel only if the operation is not already in `KernelNames`; reuse
+   `GEMM_ROW4_ACCUMULATE` for any new GEMM so the byte-identity claim keeps holding.
+3. Keep the accumulation order identical to the ILGPU kernel of the same shape — the gate compares
+   them directly.
+4. Keep `KernelNames` in sync with the translation unit (add the name constant).
+5. Take the weight-layout and launch maths from `GpuBuffers` (`Transposed`, `QkvPacked`, `Req`,
+   `Cfg1D`, `ValidateGemmSharedMemory`, `ValidateAttentionLocalMemory`). Do not re-derive it per
+   backend: the drift would be a silently wrong attention rather than a crash.
+6. Register every buffer so `Dispose` is unconditional; release sub-buffers in a `finally`.
+7. Add the model to `SilkModes` and the CLI dispatch, and extend `InferenceCliArgumentTests` for each
+   new rejection.
+8. Add the shape to `SilkKernelsGate.Shapes`; mark any pure multiply-and-add cell `requireBytes:
+   true`.
+9. Watch `headDim`: `MaxHeadDim` is a compile-time bound, so a model above 64 needs the constant
+   raised — `EnsureAttentionLocalMemory` rejects it at construction and says so.
 
 ---
 

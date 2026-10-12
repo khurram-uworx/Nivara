@@ -175,6 +175,11 @@ advisory tracker — it is not a hard in-flight ceiling. A hard byte ceiling on 
 path is not implemented; that is the subject of [#325](https://github.com/khurram-uworx/Nivara/issues/325)
 (spill-to-disk design) and is out of scope here.
 
+The **design** for that hard ceiling — the `MemoryBudget` primitive, the `Advisory`/`Enforced`
+modes, the acquire/release protocol and the acceptance criteria — is the ungated proposal in
+[docs/STREAMING-PROPOSAL.md](STREAMING-PROPOSAL.md). That document is the proposal; this section is
+the shipped contract.
+
 `StreamingBufferManager.IsMemoryBudgetExceeded` (Nivara.Extensions) is an IO-layer-only
 helper for chunk-buffered readers (CSV/Parquet). It is **intentionally not** wired into
 `StreamingExecutionStrategy`. Its 256 MB default therefore describes the IO layer only; the

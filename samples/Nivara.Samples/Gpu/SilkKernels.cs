@@ -1,7 +1,7 @@
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// The six OpenCL C kernels the MiniLM encoder needs, authored once and shared by the sample
+/// The OpenCL C kernels the BERT-family encoder needs, authored once and shared by the sample
 /// runner (<c>--silk</c>) and the performance gate (<c>--silk-kernels</c>). The host side lives
 /// in <see cref="SilkRuntime"/>; this type is pure data and arithmetic-free geometry so it can
 /// be unit-checked without a device.
@@ -57,15 +57,17 @@ internal static class SilkKernels
     public const int GlobalAttentionBand = -1;
 
     public const string EmbedSum = "embed_sum";
+    public const string GatherRows = "gather_rows";
     public const string LayerNormResidual = "layer_norm_residual";
     public const string GemmBias = "gemm_row4_bias";
+    public const string GemmRelu = "gemm_row4_relu";
     public const string GemmGelu = "gemm_row4_gelu";
     public const string GemmQkv = "gemm_row4_qkv";
     public const string Attention = "batched_attention";
 
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
-        [EmbedSum, LayerNormResidual, GemmBias, GemmGelu, GemmQkv, Attention];
+        [EmbedSum, GatherRows, LayerNormResidual, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
     public static int GemmGlobalRows(int aRows) => RoundUp(aRows, GemmTileSize);
@@ -131,6 +133,20 @@ internal static class SilkKernels
             if (includeTt != 0u)
                 v += tokenType[col];
             y[idx] = v;
+        }
+
+        __kernel void gather_rows(
+            __global const float* table,
+            __global const int* ids,
+            __global float* y,
+            const uint n,
+            const uint hidden)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            uint row = idx / hidden;
+            uint col = idx - row * hidden;
+            y[idx] = table[(uint)ids[row] * hidden + col];
         }
 
         __kernel void layer_norm_residual(
@@ -266,6 +282,39 @@ internal static class SilkKernels
                 if (c1 < bCols) c[rowBase + 1] = gelu_exact(a1 + b1);
                 if (c2 < bCols) c[rowBase + 2] = gelu_exact(a2 + b2);
                 if (c3 < bCols) c[rowBase + 3] = gelu_exact(a3 + b3);
+            }
+        }
+
+        /* As gemm_row4_bias with a fused ReLU epilogue — the DistilBERT classifier head's
+           pre_classifier projection. The clamp is written as the same conditional ILGPU's Row4
+           ReLU kernel uses (r < 0 ? 0 : r), not fmax(), so a NaN-bearing input would round the
+           same way on both backends; the epilogue is otherwise a pure add, so this stays
+           byte-identical to ILGPU. */
+        __kernel void gemm_row4_relu(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                float r0 = a0 + b0; if (r0 < 0.0f) r0 = 0.0f;
+                float r1 = a1 + b1; if (r1 < 0.0f) r1 = 0.0f;
+                float r2 = a2 + b2; if (r2 < 0.0f) r2 = 0.0f;
+                float r3 = a3 + b3; if (r3 < 0.0f) r3 = 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = r0;
+                if (c1 < bCols) c[rowBase + 1] = r1;
+                if (c2 < bCols) c[rowBase + 2] = r2;
+                if (c3 < bCols) c[rowBase + 3] = r3;
             }
         }
 

@@ -23,6 +23,18 @@ below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU, driver
 
 ---
 
+This document has two parts:
+
+- **Part 1 — the spike.** Issue **#431** (GpuProbe phase 4a): does Intel's IGC frontend handle
+  *ILGPU-generated* OpenCL C correctly? The verdict and the measurements, from `tests/Nivara.GpuProbe`.
+- **Part 2 — the production implementation.** The code in `samples/Nivara.Samples/Gpu/` built on that
+  verdict — the runners, the kernels, the geometry decisions and the lessons found while writing
+  them. Written from the source, as the map for adding the next model or porting the path.
+
+---
+
+# Part 1 — the spike (GpuProbe, #431)
+
 ## 1. Toolchain / setup (the "managed JIT" path)
 
 OpenVINO needed a pip install; SYCL needed the oneAPI toolchain; DX12 needed a
@@ -260,5 +272,290 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
   and re-recording the reference is a separate explicit flag, because a gate that can rewrite
   its own reference is a gate whose green means nothing. A *missing* baseline fails the run; with
   nothing to be exact against, the run verified nothing.
+
+---
+
+# Part 2 — the production implementation
+
+Where Part 1 asked *whether* ILGPU's OpenCL path is trustworthy on this device, Part 2 is the code
+built on the answer. It is written from `samples/Nivara.Samples/Gpu/` — read it as the map for
+adding a model to the GPU path, or for porting the path to a second backend.
+
+## 8. Layout: what is in `samples/Nivara.Samples/Gpu/`
+
+| file | role |
+|---|---|
+| `IlgpuRuntime.cs` | OpenCL-only `Context`/`CLAccelerator`/stream at `OptimizationLevel.O2`; a device select that **asserts a GPU and has no CPU fallback**; `Allocate1D`, `Synchronize` |
+| `GpuBuffers.cs` | the weight-layout and launch maths both backends share — `Transposed`/`UploadTransposed`, `QkvPacked`/`UploadQkvConcat`, `UploadPlain`, `Ensure`, `Req`, `Readback`, `Cfg1D`/`GemmCfg`, the `GemmGeometry` record, `ValidateGemmSharedMemory`, `ValidateAttentionLocalMemory`; constants `LinearGroupSize` = 256, `AttentionGroupSize` = 64, `MaxHeadDim` = 64, `GlobalAttentionBand` = −1 |
+| `IBertEncoderRunner.cs` | the backend seam: `DeviceName` + `Forward(int[] tokenIds, float[] mask, int batch, int seqLen)` |
+| `GemmKernels.cs` | `TiledGemmKernelRow4` (the keystone) and the 1×1 baseline; the fused-epilogue siblings `Row4Bias`/`Row4Gelu`/`Row4Relu`/`Row4Qkv`; the four #440 register-blocked geometries, kept as a labelled negative; `TiledGemm` |
+| `AttentionKernels.cs` | `BatchedAttention` — score + scale + mask + row-softmax + weighted-V in three passes, banded |
+| `ElementwiseKernels.cs` | `Gather`, `AddBias`, `SplitColumns`, `Add`, `LayerNormResidual1D`, `EmbeddingSum`, `LayerNorm1D`, `GeluExact`, `Gelu`, `Relu`, `Rotary`, `GeGlu` |
+| `BertEncoderGpuRunner.cs` | BERT-family encoder (MiniLM, DistilBERT) + the optional SST-2 head; `BertGpuNaming`/`BertGpuKeys` make it naming-driven |
+| `ModernBertGpuRunner.cs` | ModernBERT encoder; exposes `HiddenOnDevice`/`HiddenRows`/`ForwardOnDevice` |
+| `LayaHeadGpuRunner.cs` | the Laya typed head, hung off the encoder's on-device hidden state |
+| `SilkRuntime.cs` / `SilkKernels.cs` / `SilkBertEncoderRunner.cs` | the second backend, documented in [SILK.md](SILK.md) |
+
+## 9. Runtime and the no-CPU-fallback contract
+
+`IlgpuRuntime` builds the context OpenCL-only (`builder.OpenCL().Optimize(OptimizationLevel.O2)`,
+`IlgpuRuntime.cs:36`). `SelectGpu` (`:57–69`) returns the first device that is `CL_DEVICE_TYPE_GPU`
+**and** whose name contains "Intel"; if none, construction throws ("--ilgpu requires an OpenCL GPU
+device…"). It then asserts the *accelerator's* device type too (`:47–51`) — a driver that answers the
+enumeration with something else must fail loudly rather than become a CPU measurement. `XMath` from
+`ILGPU.Algorithms` is available to kernels without an explicit `EnableAlgorithms` call
+(probe-verified). `Device` is exposed for its `DeviceId` (the native `cl_device_id`);
+`CLDevice.DeviceVersion` is the **OpenCL** version, not `CL_DEVICE_DRIVER_VERSION`, which ILGPU
+1.5.3 does not surface.
+
+## 10. The GEMM family
+
+`TileSize = 16` and groups are 16×16 everywhere. The keystone is **`TiledGemmKernelRow4`**
+(`GemmKernels.cs:68`): each thread owns a **1×4** register block — 4 adjacent output columns of one
+row — so a 16×16 group covers a 16-row × 64-col tile and each K step reads `BlockRows + BlockCols =
+5` shared floats for 4 MACs, against the 1×1 baseline's 2 reads per 1 MAC. It was measured at
+303–379 GMAC/s on all DistilBERT shapes against the naive gemv's 6.6 GMAC/s, and its ascending-K
+order is identical to the 1×1 kernel, so the results are **bit-identical** — which is what kept
+parity simple. The 1×1 form itself is local-memory bound at ~150 GMAC/s flat, regardless of shape.
+
+Both Row4 and the 1×1 kernel stage A and B in **one wide `Allocate2D`** (`RowStride = TileSize +
+TileCols = 80`; A in columns `[0,16)`, B in `[16,80)`), which measured ~20% faster than the earlier
+two-allocation form (#468, below).
+
+The fused-epilogue siblings keep Row4's 1×4 geometry, single allocation and ascending-K order and
+differ **only** in the epilogue — so each is bit-identical to the unfused GEMM + add sequence:
+
+- `Row4Bias` (`:514`) — `y = A·Bt + bias`, the lean identity epilogue.
+- `Row4Gelu` (`:584`) — `y = gelu(A·Bt + bias)`, calling the shared `ElementwiseKernels.GeluExact`.
+- `Row4Relu` (`:654`) — `y = max(A·Bt + bias, 0)`, written `(r < 0 ? 0 : r)`.
+- `Row4Qkv` (`:737`) — takes an extra `blockWidth` and scatters the result into a **block-separable**
+  layout `[q-block | k-block | v-block]` via `QkvDest` (`:808`), so attention reads each block as a
+  dense `[rows × hidden]` view. Still bit-identical to three separate GEMM + add sequences.
+
+Three siblings rather than one kernel with a runtime activation byte is deliberate: a shared kernel
+would inline all three paths and bloat registers on the hot lean launches.
+
+### 10.1 Labelled negative: the #440 register-blocked geometries
+
+`GemmGeometries` (`GpuBuffers.cs:134`) holds four wider-block geometries (`2x2@KT16`, `2x2@KT32`,
+`4x2@KT32`, `1x8@KT16`) whose kernels live in `GemmKernels.cs:197–501`, each flagged **"Measured
+slower than Row4 — not adopted."** All four were gated and measured on 2026-09-29 and every one lost
+on every shape: best cell 1.01× (a wash inside run-to-run noise), typical 0.6–0.85×, and the
+launch-bound narrow shapes worst at 0.25–0.42×. The full ratio table is in
+`tests/Nivara.PerformanceTests/README.md` ("GEMM gate baseline (2026-09-29)").
+
+They lose because **the premise was wrong**: they widen the per-thread output block to cut shared
+floats read per MAC by 20–40% on paper, but the binding constraint on this iGPU is shared-memory
+*capacity per group*, not *traffic*. The isolating pair — `2x2@KT16` against `2x2@KT32` — has
+identical blocking factors, hence identical reads per MAC, and differs only in footprint (4 KB vs
+8 KB); on the nine largest shapes the 8 KB one is 18–25% slower, every one of them, and `4x2@KT32`
+agrees with the mechanism (best traffic ratio 0.75 reads/MAC, worst footprint 12 KB, mid-pack). The
+scoped claim is "footprint dominates at saturation", not "footprint predicts the ordering" — the
+unscoped version is false on 6 of 15 shapes. Row4 therefore stands, and the geometries stay in the
+file so the negative is reproducible.
+
+All four keep the incumbent's group, K-tile staging and ascending-K accumulation, so each is
+bit-identical to Row4 — and the `--gemm` gate asserts that byte-identity alongside its
+double-precision truth check, which is what caught #468: an ILGPU OpenCL lowering bug that returns
+plausible wrong values and **cannot be seen in review**.
+
+### 10.2 Lesson #468: at most one shared allocation per kernel body
+
+Every #440 kernel that staged a KT-wide A tile against a TileCols-wide B tile returned *plausible*
+wrong values (`maxAbs` 20–119 — the right order of magnitude for a real dot product taken against the
+wrong elements, so it does not look like an out-of-bounds smear), and one failed at `LoadKernel`
+with **`CL_OUT_OF_RESOURCES`** on a device with shared memory to spare. ILGPU's OpenCL lowering
+mis-places the second allocation when the two extents disagree. The narrow rule first written — "the
+two allocations need matching extents" — was **wrong**: the `1x8@KT16` row had a square 16×16 A tile
+and still would not build, so Row4's survival was a property of this build and driver, not of its
+source. The rule that holds is **stage every tile through one allocation**;
+`tests/Nivara.Tests/Gpu/SharedMemoryAllocationTests.cs` enforces it on the compiled IL.
+
+The two families are on different forms today — Row4 and 1×1 use the wide `Allocate2D`, the #440
+kernels use 1D `Allocate<float>` with hand-computed 2-D offsets — which is a known state, not an
+oversight; the 2D form is 10–20% faster on this device. Leave a kernel's form alone unless it is
+being changed for a measured reason.
+
+## 11. Attention
+
+`BatchedAttention` (`samples/Nivara.Samples/Gpu/AttentionKernels.cs:36`) runs one work item per `(b, h, q)` and computes the
+softmax row in **three passes, each recomputing the score** — max, exp-sum, then the
+probability-weighted V accumulation into a shared-memory tile. It never spills the row: `[B, H, S, S]`
+would be 268 MB at S=2048 and 4.3 GB at S=8192. The accumulator tile is `[MaxHeadDim ×
+AttentionGroupSize]` with `DenseX(MaxHeadDim)` stride — column `Group.IdxX` is the thread's private
+slice, so two work items in a group cannot race — and it is over-allocated to compile-time constants
+because ILGPU needs a statically known allocation size while `headDim` is a runtime argument.
+`GpuBuffers.ValidateAttentionLocalMemory` rejects a larger `headDim` at construction; every encoder
+on this path has `headDim` 64, so the 16 KB tile costs no extra local memory.
+
+Two numerics rules:
+
+- **`max == -inf → zeros`** (`:86–91`): a row with every key suppressed would otherwise compute
+  `s - max = NaN` and poison the residual stream below it. It mirrors the CPU safe-softmax clamp; the
+  BERT-family runners pass `GlobalAttentionBand = −1` and never hit it, but a sliding band over a
+  padded batch does.
+- **The band restricts the loop bounds** (`:70–71`), computed once and reused across all three
+  passes, so a sliding layer's cost tracks its window rather than `seqLen` (#447) — before this the
+  band only overwrote an already-computed score with `-inf` and bought no arithmetic. `Keep` (`:152`)
+  stays as the *authority* on the window even though the bounds now agree with it: the cost is one
+  integer compare against a `headDim`-long dot product, and collapsing the test into the bounds would
+  make the kernel silently wrong the first time someone widened a bound without thinking about it.
+
+## 12. Elementwise kernels
+
+Implicitly-grouped 1D kernels over flattened buffers: `Gather`; `AddBias`; `SplitColumns` (walks
+rows, because a pre-fused projection is interleaved per row — lesson 13 below); `Add`; `EmbeddingSum`
+(word/position/token-type gathers + sum in one launch, with `includeTt` gating the token-type read
+because a view cannot be null); `LayerNorm1D`; `LayerNormResidual1D` (residual folded into the LN
+row reduction; `y` may alias `a`); `Relu`; `Rotary` (half-split RoPE, one work item per
+`(row, head, frequency)` writing **both** halves so `rotate_half` needs no cross-work-item
+communication); `GeGlu` (activates the *first* half of the fused `Wi` projection,
+`gelu(Wi[0:I]) * Wi[I:2I]`).
+
+The exact-GELU polynomial has **one definition** on the GPU path: `internal static float
+GeluExact(float v)` (`ElementwiseKernels.cs:171`), a direct A–S 7.1.26 erf port with `XMath.Exp`
+(ILGPU has no `erf`). Both `Gelu` and the GELU GEMM epilogues call it, so the polynomial cannot
+drift.
+
+## 13. The BERT-family runner and the seam
+
+`BertEncoderGpuRunner` uploads the loader's weight key set once (GEMM weights transposed
+`[out,in] → Bt[in,out]` so `C = A·Bt` is plain row-major and global reads coalesce along K), then runs
+the whole forward with every intermediate resident on device and only the final hidden / logits read
+back (`BertEncoderGpuRunner.cs:76`). It is config-driven from `BertConfig` and naming-driven via
+`BertGpuNaming { DistilBert, Bert }` + `BertGpuKeys`, so MiniLM and DistilBERT share it:
+`embeddings`/`encoder.layer.N.*` for Bert against `distilbert.embeddings`/`distilbert.transformer.layer.N.*`
+for DistilBert (Bert keys are pre-stripped of the `bert.` prefix during provisioning).
+
+Per layer: fused QKV GEMM (`Row4Qkv`) → three sub-views → attention → o-projection (`Row4Bias`) →
+`LayerNormResidual` → fc1 (`Row4Gelu`) → fc2 (`Row4Bias`) → `LayerNormResidual`. Workspace is
+cap-sized once (`rowsCap = 8*128`; `Forward` rejects `batch > 8 || seqLen > 128`), posIds are cached
+per `seqLen` (`row % seqLen`, so the repeat-forward benchmark path skips the copy), and token-type
+embeddings are added only when the key is present.
+
+The optional SST-2 head runs entirely on device: `Gather` the CLS row → `Row4Relu` (`pre_classifier`)
+→ `Row4Bias` (`classifier`), producing `[batch, 2]` logits. `IBertEncoderRunner` is the seam, and the
+*only* difference between the two backends is what sits behind `Forward`. The padding contract is
+stated on the interface: mask `0` at padding, positional ids `0..seqLen−1` repeated per batch row.
+
+## 14. ModernBERT
+
+`ModernBertGpuRunner` mirrors `ModernBertEncoder<T>.Forward` operation for operation: rotary instead
+of learned positions, a gated feed-forward instead of a plain FFN, pre-norm instead of post-norm, and
+**per-layer attention geometry** (band + rope theta). It is the first runner sharing no structure
+with the BERT family.
+
+- **RoPE tables come from the CPU** (`RotaryEmbedding<T>.GetPositionTables`, now public) rather than
+  device `XMath.Cos` — one host-libm-vs-`XMath` ulp per entry would otherwise be the largest single
+  error term in the gate (lesson 14).
+- **Bias-free GEMMs**: all projections use plain `TiledGemmKernelRow4` and adds are the separate
+  `Add`; norms pass a shared zero-filled `zeroBeta` because a view cannot be null.
+- The fused `Wi` GEMM writes `2*intermediateDim`; `SplitColumns` then separates the per-row
+  interleaved q/k/v; `GeGlu` reads the fused gate/up buffer directly.
+- `LayerWeights.Band`/`.Full` come from `config.Band(index)`/`config.IsFullAttention(index)`; layer
+  0's `attn_norm` is an identity.
+
+Its seam for a downstream head is additive: `HiddenOnDevice` (the final-normed hidden, still on
+device), `HiddenRows`, `ForwardOnDevice`. The buffer is the runner's own and grown-never-shrunk, so a
+head must run before the next `Forward`.
+
+## 15. Laya head, and the on-device seam
+
+`LayaHeadGpuRunner` needed **zero new kernels**: its layer is `nn.TransformerEncoderLayer` defaults —
+pre-norm, *biased* LayerNorm, ReLU FFN, fused *biased* QKV, no RoPE, no band — all already present.
+It reads `ModernBertGpuRunner.HiddenOnDevice` and only the marker/act logits cross to the host. Two
+easy-to-invert details are called out in the code: the residual lives in the head layer (adding it
+inside attention would double-count), and every norm here is **biased** where every ModernBERT norm
+is not. The act head's four features are computed on the host by `LayaHeadScoring` (device would need
+a softmax, top-k and entropy kernel) and the assembled `[hidden + 4]` row is uploaded.
+
+## 16. Design decisions worth keeping
+
+- **Correctness first**: one kernel per operation, one stream, one sync before readback. Fusion and
+  stream tricks were deferred until the thing was trivially verifiable.
+- **Weights transposed once at upload** (`GpuBuffers.Transposed`, split out so Silk produces
+  byte-identical weights from the same arithmetic rather than a second copy). A *transpose-free*
+  in-kernel GEMM was dropped for first-cut correctness; it is worth revisiting only if upload time
+  ever matters, which it does not on a shared-DRAM iGPU.
+- **Persistent cap-sized workspace** with `Ensure`-only growth; payload copies go through
+  explicit-length `View.SubView(0, n)`.
+- **Mask semantics copied exactly from the CPU**: per-batch column-`j` suppressed when `mask[b][j] <
+  0.5`, identical across query rows.
+- **Same-process CPU reference** beats fixture-only gating.
+
+## 17. What we learned (the durable lessons)
+
+1. **`ArrayView.CopyFromCPU<T>(T[])` fills the *whole* view** — its guard is `data.Length ≥
+   view.Length`, and a shorter payload throws. Copy into `View.SubView(0, n)`; there is no
+   "copy prefix" overload.
+2. **Stream ordering is your responsibility.** Buffer-level `CopyFromCPU` uses the default stream,
+   kernels use yours — route every copy through the kernel stream and sync after bulk ctor uploads.
+3. **Launch overhead dominates at inference shapes — but the per-kernel cost is ~30 µs, not the
+   ~0.4–0.7 ms first estimated.** M2 removed ~70 of ~100 dispatches and moved MiniLM 26.8 → 24.3 ms
+   and DistilBERT 65.3 → 63.1 ms; launch overhead was ~3 ms of the baseline, not ~21 ms.
+4. **A tiled GEMM is a requirement, not an optimization** — the naive gemv's 6.6 GMAC/s would take
+   ~825 ms for DistilBERT's matmuls; Row4 hit 303–379 GMAC/s with the per-output-column accumulation
+   order unchanged.
+5. **Double-precision-truth GEMM gates catch real bugs** — a Row4 `colBase` bug (global thread-Y
+   instead of group index) produced maxAbs ~40–77 and was caught by the bounds check.
+6. **f32 parity between summation orders has a floor** — ~4.4e-5…1.6e-4 (K=768…3072), so a `1e-6`
+   gate is impossible; the `1e-3·(1+|x|)` bound is right, and real bugs still trip it at ~40-class
+   outliers.
+7. **`XMath` has no `erf`** — GELU needs an in-kernel polynomial; the direct A–S 7.1.26 port with
+   `XMath.Exp` matched CPU `GeluExact` inside hidden-state parity.
+8. **Battery throttles the iGPU flat** — every shape drops to ~150–160 GMAC/s regardless of size.
+   **All GPU perf claims require AC power.**
+9. **ILGPU deployment is the whole story** — NuGet package = the entire install, in-box Windows
+   `OpenCL.dll` + Intel ICD, kernels are C# static methods. Assert `CL_DEVICE_TYPE_GPU` and re-run the
+   gates after every driver bump (two compilers in the path: ILGPU JIT + IGC).
+10. **The iGPU shares DRAM** — the weight upload is memcpy-class, so transposing once at upload costs
+    nothing and buys GEMM coalescing.
+11. **Workspace hygiene** — allocate cap buffers once and reuse (`Ensure` only grows); integer
+    payloads need an explicit integer-buffer alloc. `GetAsArray()` returns the full cap; always slice
+    by payload length.
+12. **Same-process CPU reference beats fixture-only gating** — fixtures may be absent.
+13. **A pre-fused projection is interleaved per row, not block-concatenated.** Row `r` holds
+    `[q(r) | k(r) | v(r)]`, so contiguous `SubView` offsets are right for row 0 and wrong for every
+    row after it — the first row looks perfect. `SplitColumns` walks rows. The gate/up buffer needs
+    no split because `GeGlu` indexes the fused buffer directly: check which layout the consumer
+    actually assumes before reaching for a split.
+14. **RoPE tables should come from the CPU, not device `XMath`.** Recomputing them on device is one
+    host-libm-vs-`XMath` ulp per entry, a three-order-of-magnitude regression against a `maxRel`
+    ~3e-6 — for a difference unrelated to whether the port is correct. Promote the authoritative
+    definition to an accessor rather than duplicating the formula.
+15. **ILGPU's `SharedMemory` is per work *group*, not per work item, and its `Allocate` size must be
+    statically known.** A first attempt gave each thread its own `Allocate<float>(64)` and every
+    thread raced on the same 64 floats — structurally wrong, not rounding-level. The tile is 2-D with
+    the size over-allocated to a compile-time constant. Query `MaxSharedMemoryPerGroup`, **not**
+    `MaxLocalMemorySize`, and size the single allocation for the whole group (lesson 19).
+16. **Verify a suspected kernel defect with an isolated probe before blaming the runner.** A GEMM and
+    an uploaded-weight bit-compare cost one run and ruled out the two most expensive hypotheses.
+    Build the reference with the *exact* layout the device buffer has, every time.
+17. **Diagnostic references are code and they rot like code.** Of five "kernel bugs" chased for #449,
+    three were faults in the throwaway stage diagnostic (block-major vs row-major, per-row interleave
+    vs block-contiguous, and a missing `GeluExact` on a gated activation — the last showing as a
+    suspiciously perfect 100% relative error).
+18. **The ILGPU stream is in order; do not go looking for a race.** Lesson 2 is the real ordering
+    rule; "the default stream is unordered" is not one of its failure modes.
+19. **At most one `SharedMemory` allocation per kernel body** — see §10.2 for how the narrower rule
+    ("matching extents") was first written, and how the `1x8@KT16` row refuted it.
+
+## 18. Adding the next model
+
+1. Work from the CPU implementation and mirror it **operation for operation**; the parity gate is the
+   contract, so restructuring a CPU op is a decision to make deliberately.
+2. Decide which existing runner it resembles. If it shares the BERT-family shape, extend
+   `BertEncoderGpuRunner` (it is config- and naming-driven) — do not fork it.
+3. Reuse the seam for a head (`HiddenOnDevice`/`ForwardOnDevice`) before writing kernels: the Laya
+   head needed none.
+4. Check the fused weights' layout before slicing them — per-row interleaved needs `SplitColumns`,
+   block-concatenated does not.
+5. Take any reference tables (RoPE, and anything `libm` computes) from the CPU, not the device.
+6. Ask whether any kernel needs a second shared allocation; if so, restructure to one (#468).
+7. Gate it: same-process CPU compare at the `1e-3·(1+|x|)` bound first, then fixtures.
+8. Sizes are hard caps today (`batch ≤ 8`, `seqLen ≤ 128`). Raise them with the scenario, and say so
+   in the error message when you do.
+
+---
 
 **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [docs/ILGPU.md](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md) — the GPU-backend case-study series

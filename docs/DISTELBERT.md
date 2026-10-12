@@ -117,7 +117,13 @@ See [docs/ACCELERATION.md](ACCELERATION.md) §1 for GPU benchmark tables. CPU be
 
 ## GPU path
 
-All three models run on the OpenCL iGPU via ILGPU 1.5.3 on the shared `BertEncoderGpuRunner`. Measured (128 tokens, AC power):
+All three models run on an OpenCL iGPU. Two backends exist: **ILGPU** (`--ilgpu`, the default GPU
+path) and the hand-authored **Silk.NET** stack (`--silk`); `--silk` and `--ilgpu` are mutually
+exclusive and both are F32-only.
+
+### ILGPU (`--ilgpu`)
+
+ILGPU 1.5.3 on the shared `BertEncoderGpuRunner`. Measured (128 tokens, AC power):
 
 | Model | GPU | CPU | vs CPU |
 |-------|-----|-----|--------|
@@ -125,4 +131,36 @@ All three models run on the OpenCL iGPU via ILGPU 1.5.3 on the shared `BertEncod
 | SST-2 | 64.0 ms | 166.4 ms | ~2.6× faster |
 | MiniLM | 26.8 ms | 76.3 ms | ~2.9× faster |
 
-M2 kernel fusion (issue #437) brought MiniLM to 24.3 ms and DistilBERT to 63.1 ms. Dispatches went from ~113–119 to **44–48** per forward. All parity gates stayed byte-identical at every step (hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM hidden `maxRel 1.0e-5`). See [docs/ACCELERATION.md](ACCELERATION.md) for full details and ILGPU lessons.
+M2 kernel fusion (issue #437) brought MiniLM to 24.3 ms and DistilBERT to 63.1 ms. Dispatches went
+from ~113–119 to **44–48** per forward. All parity gates stayed byte-identical at every step
+(hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM hidden
+`maxRel 1.0e-5`). See [docs/ILGPU.md](ILGPU.md) Part 2 for the implementation and lessons, and
+[docs/ACCELERATION.md](ACCELERATION.md) §1 for the cross-backend results.
+
+### `--silk` (Silk.NET, hand-authored OpenCL C)
+
+The same three models also run through the second backend: hand-authored OpenCL C
+(`Silk.NET.OpenCL` 2.23.0) compiled in-process by the driver, in `SilkBertEncoderRunner`.
+
+- **Encoder + head, eight kernels.** `embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4
+  GEMM epilogues (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`) and
+  `batched_attention`. The SST-2 head runs entirely on the device — `gather_rows` (CLS row) →
+  `gemm_row4_relu` → `gemm_row4_bias` — not a host round-trip.
+- **Parity.** `distilbert --silk compare` — GPU vs same-process CPU, **0/98304 violations** at
+  `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` (the `last_hidden_state_py.bin` PyTorch fixture is absent, so this is
+  GPU-vs-CPU only). `distilbert_sst --silk compare` — logits vs CPU and vs PyTorch, **0/16
+  violations, argmax 8/8 both**.
+- **Gate.** `--silk-kernels` holds `gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_qkv` and
+  `gather_rows` to **byte-identity** against ILGPU over both MiniLM and DistilBERT shapes; DistilBERT
+  drives `headDim` to 64, the attention kernel's `MaxHeadDim` local-memory bound.
+- **Whole-forward A/B (AC, valid; both backends run the same benchmark body).** Median of 3 runs at
+  128 tokens (3 warmup + 10 timed before each): DistilBERT **52.3 ms (Silk) vs 55.8 ms (ILGPU),
+  ≈0.94×**; DistilBERT SST-2 **52.1 ms vs 57.0 ms, ≈0.91×**. Silk is at least at parity and modestly
+  ahead, with a tighter run-to-run spread (Silk ≈1–3 ms, ILGPU up to ≈8 ms). One host (Arc 140T), one
+  session (2026-10-13) — read it as parity-to-slightly-ahead, not a win. The absolute ILGPU values sit
+  ≈10% below the post-M2 rows in [ACCELERATION.md](ACCELERATION.md) §1 — a different session's clock
+  state, not a protocol change — so compare the ratio, not the absolute milliseconds. Per kernel, the
+  `--silk-kernels` gate holds all 32 outputs bit-identical on AC, with Silk ahead on
+  `batched_attention` (0.80–0.85).
+
+Detail: [docs/SILK.md](SILK.md) Part 2.

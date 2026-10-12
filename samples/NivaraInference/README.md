@@ -59,10 +59,15 @@ dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu         
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu compare
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
 
-# MiniLM on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
-# (MiniLM-only, F32-only, mutually exclusive with --ilgpu; see docs/ACCELERATION.md)
+# BERT-family encoders on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
+# (MiniLM / DistilBERT / DistilBERT SST-2, F32-only, mutually exclusive with --ilgpu;
+#  see docs/SILK.md Part 2 for the backend and docs/ACCELERATION.md §1 for the cross-backend view)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
-dotnet run --project samples/NivaraInference -c Release -- minilm --silk compare   # Silk-vs-CPU parity gate
+dotnet run --project samples/NivaraInference -c Release -- distilbert --silk
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk
+dotnet run --project samples/NivaraInference -c Release -- minilm --silk compare            # Silk-vs-CPU parity gate
+dotnet run --project samples/NivaraInference -c Release -- distilbert --silk compare
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk compare    # logits vs CPU + argmax 8/8
 
 # Narrow-precision inference (half weight memory; see model docs for details)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
@@ -221,7 +226,7 @@ python modernbert_benchmark.py --seq 256
 | **DistilBERT** | 63.3 ms | 209.7 ms | **~3.3× faster** |
 | **DistilBERT SST-2** | 63.8 ms | 199.9 ms | **~3.1× faster** |
 
-These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --ilgpu benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1b.
+These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --ilgpu benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
 The MiniLM table above is the AC-powered `--ilgpu` baseline. The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
