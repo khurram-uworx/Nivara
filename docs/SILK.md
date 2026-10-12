@@ -513,6 +513,11 @@ mask `0` at padding, positional ids `0..seqLen−1` repeated per batch row.
   heads, headDim 32) and DistilBERT (seq 128, hidden 768, 12 heads, headDim 64) — DistilBERT drives
   `headDim` to `MaxHeadDim`, the attention kernel's compiled local-memory bound. An unavailable device
   or program exits `UNBUILT` (10).
+- **End-to-end compares are the other half.** `minilm --silk compare`, `distilbert --silk compare` and
+  `distilbert_sst --silk compare` each check the GPU against the **same-process CPU** at
+  `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` — with pooled-embedding cosine for MiniLM, and the PyTorch 3-way
+  (`argmax 8/8`) for SST-2. The `--silk-kernels` cells are what localise a failure; the compares are
+  what say the assembled forward is right.
 
 ## 15. Adding a model to the Silk path
 

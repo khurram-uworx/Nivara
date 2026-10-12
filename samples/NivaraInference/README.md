@@ -59,10 +59,15 @@ dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu         
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu compare
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
 
-# MiniLM on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
-# (MiniLM-only, F32-only, mutually exclusive with --ilgpu; see docs/ACCELERATION.md)
+# BERT-family encoders on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
+# (MiniLM / DistilBERT / DistilBERT SST-2, F32-only, mutually exclusive with --ilgpu;
+#  see docs/SILK.md Part 2 for the backend and docs/ACCELERATION.md §1 for the cross-backend view)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
-dotnet run --project samples/NivaraInference -c Release -- minilm --silk compare   # Silk-vs-CPU parity gate
+dotnet run --project samples/NivaraInference -c Release -- distilbert --silk
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk
+dotnet run --project samples/NivaraInference -c Release -- minilm --silk compare            # Silk-vs-CPU parity gate
+dotnet run --project samples/NivaraInference -c Release -- distilbert --silk compare
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk compare    # logits vs CPU + argmax 8/8
 
 # Narrow-precision inference (half weight memory; see model docs for details)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16

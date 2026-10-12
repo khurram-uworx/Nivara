@@ -34,6 +34,23 @@ All notable changes to Nivara are documented here. Released versions are publish
   forward ≈0.94×, per-kernel 0.79–1.19×, both backends measured under one clock and power state); the
   AC-powered §1 table is unchanged. Sample-side only — no `src/Nivara` change.
 
+- **`--silk` extended from MiniLM to the DistilBERT family: encoder and the SST-2 head** — the
+  hand-authored OpenCL C backend, previously MiniLM-only, now runs `distilbert --silk` and
+  `distilbert_sst --silk`. The Silk encoder runner — whose weight naming was hardcoded to the
+  BERT-style keys — takes a `BertGpuNaming` constructor parameter, the seam the ILGPU runner already
+  had, so DistilBERT reuses the runner rather than forking it. Two kernels were added: `gather_rows`
+  (an exact copy for the CLS-row selection) and `gemm_row4_relu` (a third epilogue over the shared
+  `GEMM_ROW4_ACCUMULATE` macro). The SST-2 head therefore runs entirely on the device —
+  `gather_rows` → `gemm_row4_relu` → `gemm_row4_bias` — rather than round-tripping to the host, and
+  the `--silk` scope is now MiniLM / DistilBERT / DistilBERT SST-2, still F32-only and mutually
+  exclusive with `--ilgpu`. The `--silk-kernels` gate covers both shape families (MiniLM headDim 32,
+  DistilBERT headDim 64 — the attention kernel's `MaxHeadDim` bound): its four pure-multiply cells
+  (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_qkv`, `gather_rows`) stay bit-identical to ILGPU,
+  and every cell passes its bound (byte-identity where applicable, `1e-3·(1+|x|)` otherwise). End to
+  end, `distilbert --silk compare` passes at 0/98304 violations and `distilbert_sst --silk compare` at
+  0/16 violations with **argmax 8/8** against both CPU and the PyTorch fixture. Sample + gate only —
+  no `src/Nivara` change.
+
 - **`VAE<T>` accepts custom weight/bias initializers (#583)** — the constructor gained optional
   `IInitializer<T>? weightInitializer` / `biasInitializer` parameters, forwarded to every encoder and
   decoder layer, so a VAE can be initialized reproducibly (e.g. a seeded `KaimingUniformInitializer<T>`)
