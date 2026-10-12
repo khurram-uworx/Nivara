@@ -6,6 +6,17 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`--seq` for the PyTorch side of the ModernBERT benchmark (#477)** — `Python/modernbert_benchmark.py`
+  took no arguments and hardcoded `MAX_LENGTHS = (128, 256)`, so the PyTorch half of the CPU
+  comparison could not be pointed at the same length as `modernbert benchmark --seq` without editing
+  the file, and the two sides could be measured at different lengths by accident — the exact failure
+  `--seq` was added to remove. The script now takes `--seq N[,N...]` (one length or a comma list,
+  positive integers, ascending and de-duplicated — the same contract as `Program.TryParseSeqLengths`),
+  defaulting to `MAX_LENGTHS` so its current output is unchanged, and it prints the lengths it ran.
+  No length cap is imposed: the C# CPU path's 2048 `ModernBertMasks.MaxDenseLength` limit is a C#-CPU
+  allocation constraint, not a property of the PyTorch reference, so a longer row pairs with
+  `modernbert --ilgpu benchmark --seq`. Sample-side only — no `src/Nivara` change.
+
 - **`minilm --silk`: a second OpenCL backend, hand-authored OpenCL C (#617)** — the GPU flag was
   renamed `--gpu` → `--ilgpu` (the old spelling is rejected with the new name rather than aliased,
   so an old invocation cannot quietly keep running ILGPU), and a new `--silk` path runs the MiniLM
