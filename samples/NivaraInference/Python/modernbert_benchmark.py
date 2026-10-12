@@ -1,8 +1,13 @@
 """ModernBERT-large inference benchmark (PyTorch side of the C# `modernbert benchmark` comparison).
 
 Mirrors `ModernBert.RunBenchmark` deliberately: the same fixture sentence, the same two padded
-lengths (128 and 256), then 3 timed passes reported as median and min. Only the same-row
-PyTorch-vs-Nivara ratio is meaningful, and only if both sides are run in the same session.
+lengths by default (128 and 256), then 3 timed passes reported as median and min. `--seq N[,N...]`
+times a chosen subset of those lengths, exactly like the C# `--seq`; the default reproduces the
+(128, 256) rows unchanged. Only the same-row PyTorch-vs-Nivara ratio is meaningful, and only if
+both sides are run in the same session.
+
+A length above 2048 has no CPU partner: the C# CPU path caps `--seq` at its dense `[L, L]` mask
+limit, so the matching C# number for such a row is `modernbert --ilgpu benchmark --seq N` instead.
 
 The two sides do not warm up identically: this script runs 3 untimed passes (`WARMUP_PASSES`),
 the C# mode 1. The docstring here used to claim "one untimed pass ... deliberately", which
@@ -12,6 +17,7 @@ this with `WARMUP_PASSES = 1` to match the other way.
 The sentence is `SampleSentences[0]` in the C# mode and `TEXT` in `modernbert_compare.py`, so the
 26 valid tokens are identical on both sides.
 """
+import argparse
 import os
 import statistics
 import sys
@@ -29,9 +35,54 @@ MAX_LENGTHS = (128, 256)
 WARMUP_PASSES = 3
 TEXT = "Nivara runs ModernBERT-large on CPU in 2026, with 28 layers and sliding-window attention."
 
+_SEQ_ERROR = ('--seq expects positive integers, one value or a comma-separated list; '
+              'got \'{token}\' in "{raw}".')
+
+
+def _parse_seq_lengths(raw):
+    """Parse a `--seq` value — one length or a comma-separated list — ascending and de-duplicated,
+    so the printed table stays ordered however the list was typed. A token must be a positive
+    integer, which also settles the `--seq 1,000` trap: the comma is the list separator, so that is
+    the tokens `1` and `000`, and `000` is not a length. Mirrors the C# `Program.TryParseSeqLengths`.
+    """
+    lengths = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            length = int(token)
+        except ValueError:
+            raise argparse.ArgumentTypeError(_SEQ_ERROR.format(token=token, raw=raw))
+        if length <= 0:
+            raise argparse.ArgumentTypeError(_SEQ_ERROR.format(token=token, raw=raw))
+        lengths.append(length)
+
+    if not lengths:
+        raise argparse.ArgumentTypeError(
+            f"--seq needs at least one sequence length; got \"{raw}\".")
+    return sorted(set(lengths))
+
 
 def main():
+    ap = argparse.ArgumentParser(
+        description="ModernBERT-large PyTorch inference benchmark "
+                    "(the C# `modernbert benchmark` partner).")
+    ap.add_argument(
+        "--seq",
+        type=_parse_seq_lengths,
+        default=None,
+        metavar="N[,N...]",
+        help="Sequence lengths to time, one value or a comma-separated list, ascending and "
+             "de-duplicated (mirrors the C# --seq). Defaults to "
+             + ",".join(str(length) for length in MAX_LENGTHS)
+             + " so the published rows are unchanged.")
+    args = ap.parse_args()
+    lengths = args.seq if args.seq is not None else list(MAX_LENGTHS)
+
     print("=== HuggingFace ModernBERT-large Inference (same weights as C#) ===")
+    print()
+    print(f"Sequence lengths: {', '.join(str(length) for length in lengths)}")
     print()
 
     model_dir = os.path.join(MODELS_DIR, "modernbert")
@@ -48,7 +99,7 @@ def main():
     print()
 
     outputs = None
-    for max_length in MAX_LENGTHS:
+    for max_length in lengths:
         encoded = tokenizer(
             TEXT,
             padding="max_length",
