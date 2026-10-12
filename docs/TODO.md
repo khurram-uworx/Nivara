@@ -109,16 +109,50 @@ situation ModernBERT was in).
 End-to-end: `distilbert_sst --silk compare` — logits vs CPU + argmax 8/8, and the PyTorch 3-way
 (`compare_distilbert_sst_py.bin` is present).
 
-### Docs (fold in after the code runs)
+### Stage 3 — `--silk` DistilBERT docs (feature content, into the *final* homes)
 
-- `docs/ACCELERATION.md` — line 18 status sentence and §1 "Second OpenCL backend": scope MiniLM +
-  DistilBERT + SST-2; kernel set six → eight; file-table row; gate coverage. Add the DistilBERT
-  informal A/B only if measured on AC (else "not measured / non-quotable", as the MiniLM battery
-  note does).
+Lands **after** the Stage 4 restructure, so the new content is written directly into its home doc
+instead of into `ACCELERATION.md` and then moved.
+
+- `docs/SILK.md` — extend its model-path section (created by Stage 4): scope MiniLM + DistilBERT +
+  SST-2; kernel set six → eight (`gather_rows`, `gemm_row4_relu`); the device-pure head path; gate
+  coverage (`--silk-kernels` cells + the two new E2E compares). Add the DistilBERT informal A/B only
+  if measured on AC (else "not measured / non-quotable", as the MiniLM battery note does).
 - `docs/DISTELBERT.md` — "GPU path": add a `--silk` paragraph/row + verification-table rows.
-- Consistency (same branch, own commit): `samples/NivaraInference/README.md` quick start,
-  `CHANGELOG.md` Unreleased bullet, and the `Program.cs` help/scope strings. `docs/SILK.md` is the
-  GpuProbe leg, not the model path — no change.
+- Consistency (same branch): `samples/NivaraInference/README.md` quick start, `CHANGELOG.md`
+  Unreleased bullet, and the `Program.cs` help/scope strings.
+
+### Stage 4 — Documentation restructure (`ACCELERATION.md` → index + home docs)
+
+Motivation (raised by the human): `docs/ACCELERATION.md` has grown into the single home for every
+acceleration topic — ILGPU production lessons, the Silk.NET `--silk` backend, the GpuProbe verdicts,
+and a streaming memory-budget proposal — so it is both **too long** and **internally mixed**.
+Restructure it into an **overview/index** that points at cohesive per-topic documents, and make the
+specific documents self-contained:
+
+| content in `ACCELERATION.md` | destination |
+|---|---|
+| title/intro index, `§1` cross-backend results table + the shape-specificity paragraph, `§5` promotion decision, CPU-side pointer, References | **stays** — `ACCELERATION.md` is the overview/index |
+| `§1` ModernBERT GPU (#449) + Laya head GPU (#462) blocks, M2-fusion block, correctness-gate bullets, `§2` ILGPU file rows + design decisions, `§3` the 19 ILGPU lessons, `§4` reality-vs-estimate, `§5` ILGPU follow-ups | **`docs/ILGPU.md`** — merge with the existing GpuProbe ILGPU case study so it is the one cohesive ILGPU document (probe verdicts **and** the production model path) |
+| `§1` "Second OpenCL backend: `--silk`" subsection, the Silk row of `§2`, Silk gates and follow-ups | **`docs/SILK.md`** — merge with the existing Silk.NET OpenCL probe doc so it is the one cohesive Silk document (probe **and** model path) |
+| the whole `# Streaming Memory-Budget Enforcement` section (Phase 1 / #325 design proposal, "not implemented" banner) and the `## Streaming memory budget` combined-next-steps block | **`docs/STREAMING.md`** — as a clearly-bannered "Design proposal: memory-budget enforcement (#325)" section beside the existing AC3 section; it is a streaming topic, not a GPU/CPU acceleration topic |
+| cross-references into moved anchors (GpuProbe series headers, `tests/Nivara.GpuProbe/README.md`, `docs/*.md` links) | fix in the same commit |
+
+- **Consolidate "not done / planned / future" into one list at the bottom of `ACCELERATION.md`.**
+  Today it is scattered across struck-through done items in `§5`, the `# Combined next steps`
+  GPU/Streaming/CPU subsections, and inline "not implemented / later decision / outstanding work"
+  sentences. Move **every outstanding item** into a single **`# Not done / planned`** section at the
+  bottom (of the index doc), one line each with a link to its home doc and its issue number;
+  completed items become a terse "Done" marker or drop to the home doc's history. No future-work
+  item should remain only inline in a results section.
+- **Ordering note.** Because the ILGPU/Silk/streaming specifics move *out*, this restructure is a
+  near-pure move plus link repair — no rewriting of the technical content, so the diff stays
+  reviewable. Stage 3 then adds the DistilBERT `--silk` content to the new homes.
+- **Deferred decision (assess/regroup later).** Whether this restructure lands on *this* branch (own
+  commit) or as a **separate branch/PR** will be decided later, after the code work — it is large and
+  independent of the DistilBERT feature. The plan keeps the restructure decomposed as its own commit
+  so either call stays cheap; if deferred to a follow-up PR, create the tracking issue then and
+  record it in the GitHub issues log below.
 
 ## Verification steps
 
@@ -130,6 +164,10 @@ End-to-end: `distilbert_sst --silk compare` — logits vs CPU + argmax 8/8, and 
 - `dotnet run -c Release --project samples/NivaraInference -- distilbert_sst --silk compare`
 - Benchmarks (`… distilbert --silk benchmark`, `… distilbert_sst --silk benchmark`) — **Release,
   AC power only** for numbers that go in the docs.
+- Docs restructure (Stage 4): `grep -rn "ACCELERATION.md" docs tests samples` to find links/anchors
+  into moved sections and repair them; confirm the moved fenced blocks (if any) still satisfy the
+  documentation snippet gate — `dotnet test -c Release --filter "FullyQualifiedName~SnippetGate"`
+  or the `EveryGatedBlock_CompilesWithoutErrors` test.
 
 ## Blast radius
 
@@ -144,6 +182,10 @@ End-to-end: `distilbert_sst --silk compare` — logits vs CPU + argmax 8/8, and 
 - `tests/Nivara.PerformanceTests/SilkKernelsGate.cs` — standalone harness (`--silk-kernels`), not
   part of the CI unit suite.
 - Downstream callers: none outside the sample (the `IBertEncoderRunner` seam is sample-internal).
+- **Docs (Stage 4):** `docs/ACCELERATION.md`, `docs/ILGPU.md`, `docs/SILK.md`, `docs/STREAMING.md`
+  are restructured (content moved, not rewritten); inbound links from `docs/*.md`,
+  `tests/Nivara.GpuProbe/README.md`, `samples/NivaraInference/README.md`, `AGENTS.md`, `CHANGELOG.md`
+  and README files must be re-pointed. No code or test behavior changes.
 
 ## Planned commits
 
@@ -152,8 +194,15 @@ End-to-end: `distilbert_sst --silk compare` — logits vs CPU + argmax 8/8, and 
 2. `Add gather_rows and gemm_row4_relu Silk kernels` — Stage 2 kernels + `KernelNames` + gate cells.
 3. `Port the DistilBERT classification head to the Silk runner` — head support + `distilbert_sst`
    routing/scope.
-4. `document --silk support for the DistilBERT family` — ACCELERATION.md, DISTELBERT.md, README,
-   CHANGELOG.
+4. `restructure acceleration docs into an index plus backend home docs` — Stage 4: move the
+   ILGPU/Silk/streaming specifics into `ILGPU.md` / `SILK.md` / `STREAMING.md`, repair links, and
+   consolidate outstanding work into one `# Not done / planned` section at the bottom of
+   `ACCELERATION.md`. (Placement on this branch vs a separate PR is the deferred decision above.)
+5. `document --silk support for the DistilBERT family` — Stage 3: `SILK.md`, `DISTELBERT.md`,
+   `README.md`, `CHANGELOG.md`.
+
+Order note: 4 lands before 5 so the new DistilBERT `--silk` docs are written directly into their
+final home rather than into `ACCELERATION.md` and then moved.
 
 ## GitHub issues log
 
