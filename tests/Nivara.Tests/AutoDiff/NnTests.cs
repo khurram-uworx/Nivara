@@ -3510,12 +3510,57 @@ public class NnTests
 
         using var conv = new Conv1d<float>(inChannels, outChannels, kernelSize, padding: 1, bias: false);
 
-        // The default draw is uniform in [-bound, bound] with bound = sqrt(2/fanIn) from a seed-42
-        // stream. Re-derive it here so a change to the seed or the bound fails this test exactly.
-        var bound = (float)Math.Sqrt(2.0 / (inChannels * kernelSize));
+        // The default draw is He-uniform: uniform in [-bound, bound] with bound = sqrt(6/fanIn)
+        // (fanIn = inChannels * kernelSize) from a seed-42 stream. Re-derive it here so a change to
+        // the seed, the bound, or the fan-in definition fails this test exactly.
+        var bound = (float)Math.Sqrt(6.0 / (inChannels * kernelSize));
         var rng = new Random(42);
         var w = conv.Weight!.Tensor;
         Assert.That(w.Length, Is.EqualTo(outChannels * inChannels * kernelSize));
+        for (int i = 0; i < w.Length; i++)
+        {
+            var expected = (float)((rng.NextDouble() * 2.0 - 1.0) * (double)bound);
+            Assert.That(w[i], Is.EqualTo(expected));
+        }
+    }
+
+    [Test]
+    public void Conv2d_DefaultInit_KeepsFixedSeedDraw()
+    {
+        const int inChannels = 2;
+        const int outChannels = 3;
+        const int kernelSize = 3;
+
+        using var conv = new Conv2d<float>(inChannels, outChannels, kernelSize, padding: 1, bias: false);
+
+        // He-uniform default: bound = sqrt(6/fanIn), fanIn = (inChannels/groups) * kernelSize^2.
+        var bound = (float)Math.Sqrt(6.0 / (inChannels * kernelSize * kernelSize));
+        var rng = new Random(42);
+        var w = conv.Weight!.Tensor;
+        Assert.That(w.Length, Is.EqualTo(outChannels * inChannels * kernelSize * kernelSize));
+        for (int i = 0; i < w.Length; i++)
+        {
+            var expected = (float)((rng.NextDouble() * 2.0 - 1.0) * (double)bound);
+            Assert.That(w[i], Is.EqualTo(expected));
+        }
+    }
+
+    [Test]
+    public void ConvTranspose2d_DefaultInit_UsesConvFanIn()
+    {
+        const int inChannels = 2;
+        const int outChannels = 3;
+        const int kernelSize = 3;
+
+        using var conv = new ConvTranspose2d<float>(inChannels, outChannels, kernelSize, bias: false);
+
+        // He-uniform default with the convolution fan-in (inChannels * kernelSize^2), which is
+        // deliberately NOT the weight's second shape dimension (outChannels * kernelSize^2). This
+        // test fails if the bound is derived from shape[1] instead.
+        var bound = (float)Math.Sqrt(6.0 / (inChannels * kernelSize * kernelSize));
+        var rng = new Random(42);
+        var w = conv.Weight!.Tensor;
+        Assert.That(w.Length, Is.EqualTo(inChannels * outChannels * kernelSize * kernelSize));
         for (int i = 0; i < w.Length; i++)
         {
             var expected = (float)((rng.NextDouble() * 2.0 - 1.0) * (double)bound);
