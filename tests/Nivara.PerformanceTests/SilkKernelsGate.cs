@@ -16,7 +16,7 @@ namespace Nivara.PerformanceTests;
 /// <c>gather_rows</c>) gate on
 /// <b>byte-identity</b>: they add the same f32 values to the same accumulators in the same
 /// ascending-K order as the ILGPU Row4 family, so a bit difference means the accumulation order
-/// or the contraction changed — a design bug, not rounding (docs/ACCELERATION.md lesson 19,
+/// or the contraction changed — a design bug, not rounding (docs/ILGPU.md §10.2,
 /// GUIDELINES.md "Assert Exactness When Exactness Is Available"). That is not a theoretical
 /// hazard: the first version of these kernels was fused (the OpenCL driver contracts
 /// <c>a*b+c</c> by default; ILGPU does not) and diverged from ILGPU on ~81% of outputs at

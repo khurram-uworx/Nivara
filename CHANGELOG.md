@@ -854,7 +854,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   figures are unchanged; only the claim about how they were produced was wrong. The PyTorch side
   also runs 3 warmup passes against Nivara's 1, so the ModernBERT ratio compares medians taken
   under different warmup counts — `--warmup 3` now matches the two sides. `docs/ACCELERATION.md`
-  §1b item 12's note that the 4096 row cannot be re-measured alone is superseded by `--seq`.
+  §1's note that the 4096 row cannot be re-measured alone is superseded by `--seq`.
 
 ## [1.4.0] - 2026-08-21
 

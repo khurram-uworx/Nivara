@@ -65,7 +65,6 @@ static partial class DocSnippetExtractor
     [
         "ARCHITECTURE.md",
         "README.md",
-        "docs/ACCELERATION.md",
         "docs/AUTODIFF.md",
         "docs/BFLOAT16.md",
         "docs/ILGPU.md",
@@ -74,6 +73,8 @@ static partial class DocSnippetExtractor
         "docs/QWEN.md",
         "docs/RETRAINING.md",
         "docs/SAFETENSORS.md",
+        "docs/SILK.md",
+        "docs/STREAMING-PROPOSAL.md",
         "docs/TENSORS.md",
         "docs/blog/1-the-workhorses-from-words-to-numbers.md",
         "docs/blog/2-self-attention-the-soft-crossbar-switch.md",

@@ -9,7 +9,7 @@ namespace Nivara.PerformanceTests;
 /// <c>variant|shape</c>. The gate compares every cell against the committed baseline rather than
 /// against a tolerance, because the contract these kernels promise is exactness — the same f32
 /// values added to the same accumulator in the same ascending-K order — and a tolerance converts
-/// a structural defect into a judgement call (docs/ACCELERATION.md lesson 19,
+/// a structural defect into a judgement call (docs/ILGPU.md §10.2,
 /// GUIDELINES.md "Assert Exactness When Exactness Is Available").
 /// </summary>
 /// <remarks>

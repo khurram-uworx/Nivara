@@ -228,7 +228,7 @@ count dominates instead.
 `4x2@KT32` is consistent with that mechanism rather than with the traffic metric: it has the
 best traffic ratio in the family (0.75 reads/MAC) and the worst footprint (12 KB), and it lands
 mid-pack. So going from Row4's 5 KB to 8–12 KB costs more co-resident work groups than the
-20–40% traffic saving returns. See [ACCELERATION.md](../../docs/ACCELERATION.md) §5.2.
+20–40% traffic saving returns. See [ILGPU.md](../../docs/ILGPU.md) §10.1.
 
 **A second finding, about the gate rather than the kernel.** All four geometries were *wrong*
 on the first run (maxAbs 20–119) and `1x8@KT16` failed to compile at all, from an ILGPU OpenCL

@@ -132,7 +132,7 @@ internal static class GemmKernels
     // They are kept, and kept in the --gemm gate, so the result is reproducible and so the
     // next person to try a wider tile finds this instead of re-running the experiment. The
     // full ratio table is in tests/Nivara.PerformanceTests/README.md under "GEMM gate baseline
-    // (2026-09-29)"; the analysis is docs/ACCELERATION.md section 5.2.
+    // (2026-09-29)"; the analysis is docs/ILGPU.md section 10.1.
     //
     // They lose because the premise was wrong. These widen the per-thread output block beyond
     // Row4's 1x4 so a K step reads fewer shared floats per multiply-add
@@ -189,7 +189,7 @@ internal static class GemmKernels
     // Row4 and the 1x1 kernel use one wide Allocate2D (A in columns [0,16), B in [16, RowStride),
     // the same 5120 B as before) and measured ~20% faster than the two-allocation form they
     // replace. The four #440 kernels use the 1D Allocate<float> with hand-computed 2D offsets,
-    // which is lesson 15's prescribed shape and which costs 10-20% against the 2D form on this
+    // which is docs/ILGPU.md §17 lesson 15's prescribed shape and which costs 10-20% against the 2D form on this
     // device. Leave a kernel's form alone unless it is being changed for a measured reason: the
     // two families are on different forms today, which is a known state, not an oversight.
 

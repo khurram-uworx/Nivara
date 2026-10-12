@@ -14,7 +14,7 @@ namespace Nivara.Tests.Gpu;
 /// tile mis-placed by the generated OpenCL C, and the symptom is plausible wrong numbers rather
 /// than a compile error — the shape of defect that a tolerance-based gate argues its way past and
 /// that no amount of code review catches, because the C# is correct. See
-/// docs/ACCELERATION.md lesson 19.
+/// docs/ILGPU.md §10.2.
 ///
 /// <para>
 /// The rule is deliberately "one allocation", not "allocations with matching extents". Matching
@@ -102,7 +102,7 @@ public class SharedMemoryAllocationTests
         Assert.That(offenders.Select(scan => $"{scan.Method} ({scan.Allocations} allocations)"), Is.Empty,
             "these kernel methods make more than one SharedMemory allocation, which ILGPU's OpenCL lowering " +
             "can mis-place (#468). Stage every tile through a single allocation with hand-computed offsets - " +
-            "see the banner in samples/Nivara.Samples/Gpu/GemmKernels.cs and docs/ACCELERATION.md lesson 19.");
+            "see the banner in samples/Nivara.Samples/Gpu/GemmKernels.cs and docs/ILGPU.md §10.2.");
     }
 
     /// <summary>What one method's IL says about its shared allocations.</summary>

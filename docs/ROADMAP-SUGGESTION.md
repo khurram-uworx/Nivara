@@ -34,8 +34,8 @@ PyTorch = recorded 2026-09-01 CPU baseline, aligned architecture):
 A **second model shipped on the same infra** (`khurram/minilm-gpu`): the runner
 generalized to a config/naming-driven `BertEncoderGpuRunner`, so MiniLM (BERT-style
 keys, 384-dim) reused the kernel set unchanged at ~20% of the original effort —
-26.8 ms iGPU vs 76.3 ms Nivara CPU (~2.9×). Details and the token-type lesson in
-`docs/ACCELERATION.md` §5.5; launch-overhead follow-up was issue **#437**.
+26.8 ms iGPU vs 76.3 ms Nivara CPU (~2.9×). Details in `docs/ACCELERATION.md` §1
+and the token-type lesson in `docs/ILGPU.md` §13; launch-overhead follow-up was issue **#437**.
 
 **M2 fusion (issue #437) shipped 2026-09-19** (`khurram/lazystream-gpu` → PR
 targets `khurram/minilm-gpu`): GEMM epilogue bias+GELU/ReLU, packed q/k/v GEMM,
@@ -48,7 +48,7 @@ GEMM throughput (issue **#440**), has since been **measured and did not pay off*
 register-blocked tile geometries lost to Row4 on every shape, because on this iGPU
 shared-memory *capacity per group* dominates shared-memory *traffic per MAC*. The remaining
 GPU lever is the attention leg (**#447**), which a leg profile measures at 57% of Laya
-wall-clock against 39.2% for all GEMM together. See §5.2 in docs/ACCELERATION.md.
+wall-clock against 39.2% for all GEMM together. See §10.1 in docs/ILGPU.md.
 
 ## 2. The gap we want to attack (CPU GEMM)
 
@@ -200,7 +200,7 @@ native bridge. Measure both and publish both in the README table.
   bound on the banded cost, so the prize is larger than 57% rather than
   smaller.
 - **PR #436** — DistilBERT GPU first scenario (merged when approved; M2 follow-up
-  documented in `docs/ACCELERATION.md` §1/§5).
+  documented in `docs/ACCELERATION.md` §1 and its "Not done / planned" list).
 - **PR (next)** — MiniLM GPU (`khurram/minilm-gpu`, retargets to `main` after
   #436 merges): second config-driven model on the shared runner.
 - Any decision to *start* M1/M2/M3 should first be recorded as GitHub issues and
