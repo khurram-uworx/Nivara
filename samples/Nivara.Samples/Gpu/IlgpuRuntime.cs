@@ -5,7 +5,7 @@ using ILGPU.Runtime.OpenCL;
 namespace Nivara.Samples.Gpu;
 
 /// <summary>
-/// OpenCL-only ILGPU runtime for the DistilBERT GPU scenario (docs/BERT-GPU.md):
+/// OpenCL-only ILGPU runtime for the DistilBERT GPU scenario (docs/ILGPU.md Part 2):
 /// context + accelerator + explicit stream lifecycle with a hard GPU-device assert —
 /// a silent CPU fallback is impossible (same contract as the probe's IlgpuLeg,
 /// docs/ILGPU.md). Context is built OpenCL-only at OptimizationLevel.O2; XMath from

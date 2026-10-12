@@ -735,7 +735,7 @@ public static class ModernBert
     /// representation floor rather than a property of the port. Measured reductions of ModernBERT's
     /// two K values put the floor at ~4.4e-5 (K=1024) to ~1.6e-4 (K=2624), so 1e-3 leaves roughly
     /// an order of magnitude of headroom over the worst case. DistilBERT's identical gate measures
-    /// maxRel 3.2e-6 (docs/BERT-GPU.md §3.6), which is where a correct port actually lands.
+    /// maxRel 3.2e-6 (docs/ILGPU.md Part 2), which is where a correct port actually lands.
     ///
     /// The whole buffer is gated, valid prefix and padding region alike, and the two are reported
     /// separately. A padding row is not an arbitrary artifact here, which is what makes it a useful

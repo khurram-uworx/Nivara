@@ -7,7 +7,7 @@ namespace Nivara.Samples.Gpu;
 /// <summary>
 /// ModernBERT encoder forward on an OpenCL accelerator, mirroring
 /// <see cref="ModernBertEncoder{T}.Forward(int[], int)"/> operation for operation
-/// (docs/BERT-GPU.md §3). This is the GPU half of issue #449; the CPU encoder it is gated
+/// (docs/ILGPU.md Part 2). This is the GPU half of issue #449; the CPU encoder it is gated
 /// against is the Phase 1 implementation, so the fixture cost is one, not two.
 ///
 /// Per layer, matching <c>ModernBertLayer&lt;T&gt;.Forward</c>:

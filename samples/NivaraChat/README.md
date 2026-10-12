@@ -470,7 +470,7 @@ Lessons learned from building this sample with Microsoft.Agents.AI.Workflows. Ag
 
 Further reading:
 - [Microsoft Agent Framework docs](https://learn.microsoft.com/agent-framework/workflows/executors)
-- API reference and integration patterns: `docs/RESEARCH-AGENT-FRAMEWORK.md`
+- API reference and integration patterns: `docs/research/AGENT-FRAMEWORK.md`
 
 ## Architecture
 
