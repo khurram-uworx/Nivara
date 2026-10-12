@@ -34,7 +34,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   forward ≈0.94×, per-kernel 0.79–1.19×, both backends measured under one clock and power state); the
   AC-powered §1 table is unchanged. Sample-side only — no `src/Nivara` change.
 
-- **`--silk` extended from MiniLM to the DistilBERT family: encoder and the SST-2 head** — the
+- **`--silk` extended from MiniLM to the DistilBERT family: encoder and the SST-2 head (#626)** — the
   hand-authored OpenCL C backend, previously MiniLM-only, now runs `distilbert --silk` and
   `distilbert_sst --silk`. The Silk encoder runner — whose weight naming was hardcoded to the
   BERT-style keys — takes a `BertGpuNaming` constructor parameter, the seam the ILGPU runner already
