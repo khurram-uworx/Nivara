@@ -262,7 +262,8 @@ internal static class SilkKernels
         }
 
         /* Half-split RoPE. One work item owns both halves of one pair, so y may alias x.
-           cosTab/sinTab are not named cos/sin: those are OpenCL builtins. */
+           cosTab/sinTab are not named cos/sin, and the pair width is not named half:
+           those are OpenCL builtins or type names, and this driver rejects the program. */
         __kernel void rotary(
             __global const float* x,
             __global const int* posIds,
@@ -273,21 +274,21 @@ internal static class SilkKernels
             const uint numHeads,
             const uint headDim)
         {
-            uint half = headDim / 2u;
+            uint pair = headDim / 2u;
             uint idx = get_global_id(0);
-            if (idx >= rows * numHeads * half) return;
-            uint i = idx % half;
-            uint rem = idx / half;
+            if (idx >= rows * numHeads * pair) return;
+            uint i = idx % pair;
+            uint rem = idx / pair;
             uint h = rem % numHeads;
             uint row = rem / numHeads;
-            uint t = (uint)posIds[row] * half + i;
+            uint t = (uint)posIds[row] * pair + i;
             float c = cosTab[t];
             float s = sinTab[t];
             uint b = row * (numHeads * headDim) + h * headDim;
             float x0 = x[b + i];
-            float x1 = x[b + i + half];
+            float x1 = x[b + i + pair];
             y[b + i] = x0 * c - x1 * s;
-            y[b + i + half] = x0 * s + x1 * c;
+            y[b + i + pair] = x0 * s + x1 * c;
         }
 
         /* First half is the GELU, second half is the gate. Reversing them still looks plausible. */
