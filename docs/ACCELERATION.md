@@ -27,8 +27,8 @@ Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436
 `khurram/minilm-gpu`, ModernBERT via issue #449 on `khurram/449`). A second, hand-authored OpenCL
 backend (`--silk`, Silk.NET) covers the BERT-family encoders, DistilBERT's SST-2 head, ModernBERT,
 and Laya. The BERT slice is gated and was given an informal battery, same-session A/B against ILGPU
-(no separation). ModernBERT and Laya are kernel-gated against ILGPU; their end-to-end compares have
-not been run yet — see "Second OpenCL backend" under §1.
+(no separation). ModernBERT and Laya are kernel-gated against ILGPU; their same-session benchmark
+A/B ran on AC power 2026-10-13 (§1 below), and their end-to-end compares have not been run yet.
 
 ## 1. Measured results
 
@@ -237,6 +237,38 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   **ratio** is the comparable quantity; do not mix today's absolute milliseconds with the §1 table.
   The earlier **battery** MiniLM pair (29.5 ms Silk vs 31.4 ms ILGPU) is kept only as the battery
   lesson: those absolute numbers are inflated and non-quotable.
+
+**ModernBERT and Laya, same-session A/B (AC, 2026-10-13).** Their benchmark protocol differs from
+the BERT rows above — **1 warmup + 3 timed passes, median reported**, at the four GPU sequence
+lengths for ModernBERT and at `max_len` 512 per question for Laya — so they are a separate table,
+not rows of the 128-token one. Both backends still run the identical benchmark body back-to-back
+in the same session, so the ratio is the comparable quantity. ModernBERT-large (28 layers, 10 full
++ 18 sliding, band 64), table as printed by the mode:
+
+| seq | ILGPU | Silk | Silk / ILGPU |
+|---|---|---|---|
+| 128 | 341.6 ms | 343.8 ms | 1.01× |
+| 512 | 1533.8 ms | 1402.0 ms | 0.91× |
+| 2048 | 13400.0 ms | 10842.4 ms | 0.81× |
+| 4096 | 43547.5 ms | 32708.3 ms | 0.75× |
+
+Silk is at parity at 128 and pulls ahead as sequence length grows, reaching **0.75× (≈25% less
+time) at 4096**. The same direction as the BERT rows (Silk parity-to-ahead) but bigger at the
+lengths ModernBERT exists for. Laya (encoder **and** head, `max_len` 512):
+
+| question | ILGPU | Silk | Silk / ILGPU |
+|---|---|---|---|
+| choice2 | 1949 ms | 1759 ms | 0.90× |
+| choice13 | 2282 ms | 1843 ms | 0.81× |
+| score4 | 1806 ms | 1683 ms | 0.93× |
+| noul | 1770 ms | 1640 ms | 0.93× |
+
+Silk leads all four questions by 7–19%. **Session caveat applies to both tables:** today's ILGPU
+ModernBERT leg (341.6 ms / 1.53 s / 13.4 s / 43.5 s) is a different session's read of the same
+binary than the 400 ms / 2.30 s / 19.6 s / 63.0 s quoted in the #449 section above — the ratios in
+these tables are the comparable quantity, not those absolute milliseconds. These are benchmark
+timings only; the end-to-end **compares** (`modernbert --silk compare`, `laya --silk compare`)
+have not been run yet — the kernel-gate cells and the compares are separate verdicts.
 
 ## 2. Where the implementation detail lives
 

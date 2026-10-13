@@ -214,6 +214,8 @@ None that block execution. Two offers, not gates:
 - `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"` after Task 3 and again after Task 4. One fixture. Ask before any wider suite.
 - Ask before `--silk-kernels`, and before either `--silk compare`. Both need a GPU, Release, and AC power. Battery numbers are not quotable.
 
+**Run so far (2026-10-13).** `--silk-kernels` ran on the GPU: **43/43 bit-identical**, but on battery, so the gate's timing column is not quotable. CLI arg tests pass (39). `modernbert --ilgpu benchmark`, `modernbert --silk benchmark`, `laya --ilgpu benchmark`, `laya --silk benchmark` all ran on AC power, back-to-back per model in one session, and the Silk-vs-ILGPU ratios are now recorded in `docs/ACCELERATION.md` §1, `docs/MODERNBERT.md`, and `docs/LAYA.md` (ModernBERT: parity at 128, ~0.75× at 4096; Laya: 0.81–0.93× per question). **Still not run:** `modernbert --silk compare` and `laya --silk compare` — the correctness verdicts. They stay the last gate before `docs/TODO.md` can be deleted.
+
 ## Planned commits
 
 1. `docs: plan Silk support for ModernBERT and Laya` — this file only.
