@@ -19,7 +19,7 @@ public class GpuElementwiseParityTests
     /// product at full precision, so the two disagree by a few ULP on the polynomial — the
     /// agreement is close, not bit-exact, and this bound is what "a few ULP" measures out to.
     /// DistilBERT's f32 FFN already routes through this kernel, and the recorded GPU-vs-CPU gate
-    /// (docs/BERT-GPU.md §3.6) passes at maxRel 3.2e-6 with it in the path.
+    /// (docs/ILGPU.md Part 2) passes at maxRel 3.2e-6 with it in the path.
     /// </summary>
     const float GeluRelativeTolerance = 1e-6f;
 

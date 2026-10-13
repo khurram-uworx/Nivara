@@ -1,10 +1,10 @@
 # If AI data infrastructure complemented the .NET AI stack — the lens and the review
 
-**Status:** architecture reference · **Scope:** the AI/data plane — AutoDiff (`src/Nivara/AutoDiff/`), tensor interop (`src/Nivara/Tensors/`), ML.NET interop (`src/Nivara.Extensions/MLNet/`), AI samples · **Companion:** `docs/AISTACK-ROADMAP.md`, `docs/POLARS-REVIEW.md`, `docs/ARROW-REVIEW.md`
+**Status:** architecture reference · **Scope:** the AI/data plane — AutoDiff (`src/Nivara/AutoDiff/`), tensor interop (`src/Nivara/Tensors/`), ML.NET interop (`src/Nivara.Extensions/MLNet/`), AI samples · **Companion:** `docs/plan/AISTACK-ROADMAP.md`, `docs/plan/POLARS-REVIEW.md`, `docs/plan/ARROW-REVIEW.md`
 
 This document evaluates Nivara through a third lens: **"What would AI data infrastructure look like if it were born in .NET to complement the .NET AI stack — with Azure and cloud explicitly off the table?"**
 
-The first two lenses asked whether Nivara behaves like a query engine born in .NET (`docs/POLARS-REVIEW.md`) and like a columnar memory system born in .NET (`docs/ARROW-REVIEW.md`). This lens asks whether Nivara is the *data layer* the local .NET AI ecosystem is missing.
+The first two lenses asked whether Nivara behaves like a query engine born in .NET (`docs/plan/POLARS-REVIEW.md`) and like a columnar memory system born in .NET (`docs/plan/ARROW-REVIEW.md`). This lens asks whether Nivara is the *data layer* the local .NET AI ecosystem is missing.
 
 **Verdict:** this is Nivara's **strongest** lens. The Polars lens found a fatal flaw (the boxed expression evaluator); the Arrow lens found zero-copy scaffolding. This lens finds neither — the project has already invested here. Nivara complements the .NET AI stack at ~80–85%, and the gaps are narrow and *additive*: ONNX export/import, an embedding-column data type, and a dataset/evaluation layer.
 
@@ -118,12 +118,12 @@ The one-line verdict:
 
 > Nivara is already the best-placed of the three lenses — it complements the **local .NET AI stack** at ~85%, proving the pattern in samples (MEAI, ML.NET, Ollama, SafeTensors, PyTorch parity). What's missing is the last mile of *interchange and data types*: ONNX export/import, an embedding-column type wired to `Microsoft.Extensions.AI`, and a dataset/evaluation layer.
 
-The roadmap to close that last mile is in **`docs/AISTACK-ROADMAP.md`**.
+The roadmap to close that last mile is in **`docs/plan/AISTACK-ROADMAP.md`**.
 
 ## Related documents
 
-- `docs/AISTACK-ROADMAP.md` — the roadmap that closes out this review.
-- `docs/POLARS-REVIEW.md` / `docs/POLARS-ROADMAP.md` — the query-engine lens and roadmap.
-- `docs/ARROW-REVIEW.md` / `docs/ARROW-ROADMAP.md` — the columnar-physics lens and roadmap.
+- `docs/plan/AISTACK-ROADMAP.md` — the roadmap that closes out this review.
+- `docs/plan/POLARS-REVIEW.md` / `docs/plan/POLARS-ROADMAP.md` — the query-engine lens and roadmap.
+- `docs/plan/ARROW-REVIEW.md` / `docs/plan/ARROW-ROADMAP.md` — the columnar-physics lens and roadmap.
 - `docs/AUTODIFF.md` — the AutoDiff subsystem this lens evaluates.
 - `docs/TENSORS.md` — tensor/AI strategic framing.

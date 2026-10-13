@@ -222,7 +222,7 @@ correct but not hardware-accelerated.
 `decimal` are converted via `TensorPrimitives.ConvertChecked<T,double>` and z-scored in
 `double` (output `NivaraColumn<double>`); `float`/`double`/`Half` use the in-place SIMD
 `TensorsHelper.TryNormalizeInPlace`. `char`, `BigInteger`, `Int128`, `UInt128` are excluded
-by design (see `docs/143-PLAN.md`).
+by design.
 
 ---
 
@@ -232,9 +232,9 @@ The question "what does Nivara own that .NET 10 does not?" is now answered by co
 not open options:
 
 - **Columnar analytics** (was "Option A") — the execution engine is built; the roadmap forward is
-  `docs/POLARS-ROADMAP.md` (query/expression engine) and `docs/ARROW-ROADMAP.md` (columnar physics).
-- **Polars-style engine** (was "Option B") — committed as `docs/POLARS-ROADMAP.md`.
-- **AI data infrastructure** (was "Option C") — committed as `docs/AISTACK-ROADMAP.md`.
+  `docs/plan/POLARS-ROADMAP.md` (query/expression engine) and `docs/plan/ARROW-ROADMAP.md` (columnar physics).
+- **Polars-style engine** (was "Option B") — committed as `docs/plan/POLARS-ROADMAP.md`.
+- **AI data infrastructure** (was "Option C") — committed as `docs/plan/AISTACK-ROADMAP.md`.
 
 The "danger" of competing with the platform is handled by the boundary above: Nivara does not
 re-wrap what `TensorPrimitives` already does, and the tensor surface is interop, not an engine.
@@ -243,7 +243,7 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 
 ## Future strategy / where to go next
 
-### Columnar engine (`docs/POLARS-ROADMAP.md`)
+### Columnar engine (`docs/plan/POLARS-ROADMAP.md`)
 
 - Unified typed expression engine (make-or-break)
 - Kernel fusion + generic-math collapse
@@ -251,7 +251,7 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 - Async-first streaming
 - Source generators
 
-### Columnar physics (`docs/ARROW-ROADMAP.md`)
+### Columnar physics (`docs/plan/ARROW-ROADMAP.md`)
 
 - Chunked column model in core
 - Layout separation + variable-binary strings
@@ -260,7 +260,7 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 - Dictionary encoding
 - Interchange-native scanning
 
-### Local .NET AI stack (`docs/AISTACK-ROADMAP.md`)
+### Local .NET AI stack (`docs/plan/AISTACK-ROADMAP.md`)
 
 - ONNX export/import (train in Nivara, exchange with the ecosystem)
 - Embedding columns as a first-class data type

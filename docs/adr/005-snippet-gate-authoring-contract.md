@@ -198,7 +198,7 @@ runtime closure, wrapped by a per-block mode, and annotated only by an adjacent
 `AGENTS.md` carries the single ADR index, and this ADR is listed in it. That is the
 only place. Three alternatives were considered and rejected:
 
-- **A `docs/adr/README.md` index** — a second list of the same records, kept in sync by
+- **A `README.md` index under `docs/adr/`** - a second list of the same records, kept in sync by
   remembering. That is the failure this record was written after: ADR-004 landed and its
   index line appeared six weeks later.
 - **`CONTRIBUTING.md`** — the obvious home by convention, but its own header declares

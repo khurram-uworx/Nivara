@@ -1,8 +1,8 @@
 # ARROW-ROADMAP — the road to Arrow-inspired columnar physics in .NET
 
-**Status:** planning reference · **Scope:** the columnar engine (`src/Nivara`) + Arrow/Parquet interop (`src/Nivara.Extensions/IO/`) · **Lens:** `docs/ARROW-REVIEW.md`
+**Status:** planning reference · **Scope:** the columnar engine (`src/Nivara`) + Arrow/Parquet interop (`src/Nivara.Extensions/IO/`) · **Lens:** `docs/plan/ARROW-REVIEW.md`
 
-This is the travel plan for giving Nivara the *physics* of Arrow-inspired columnar analytics — the memory model, layouts, and sharing mechanics — translated to a native-.NET substrate. It complements `docs/POLARS-ROADMAP.md` (the query/expression engine) and together they close out the two lenses in `docs/POLARS-REVIEW.md` and `docs/ARROW-REVIEW.md`.
+This is the travel plan for giving Nivara the *physics* of Arrow-inspired columnar analytics — the memory model, layouts, and sharing mechanics — translated to a native-.NET substrate. It complements `docs/plan/POLARS-ROADMAP.md` (the query/expression engine) and together they close out the two lenses in `docs/plan/POLARS-REVIEW.md` and `docs/plan/ARROW-REVIEW.md`.
 
 ---
 
@@ -220,9 +220,9 @@ The vision at §0 holds, verified by:
 
 ## Related documents
 
-- `docs/ARROW-REVIEW.md` — the lens, the eight pillars, and the scorecard this roadmap closes out.
-- `docs/POLARS-REVIEW.md` — the query-engine lens (the boxed expression evaluator finding).
-- `docs/POLARS-ROADMAP.md` — the query/expression roadmap this roadmap converges with.
+- `docs/plan/ARROW-REVIEW.md` — the lens, the eight pillars, and the scorecard this roadmap closes out.
+- `docs/plan/POLARS-REVIEW.md` — the query-engine lens (the boxed expression evaluator finding).
+- `docs/plan/POLARS-ROADMAP.md` — the query/expression roadmap this roadmap converges with.
 - `docs/IDEA.md` — original product vision (storage abstraction, Arrow interop sections). Retired 2026-08-06; the remaining storage/Arrow-adjacent items are tracked as GitHub issues: [dictionary encoding #132](https://github.com/khurram-uworx/Nivara/issues/132), [custom storage plug-in seam #133](https://github.com/khurram-uworx/Nivara/issues/133).
 - `docs/TENSORS.md` — tensor-vs-Polars strategic framing.
 - `docs/adr/001-autodiff-nonnullable-domain.md` — the explicit-null boundary all validity work must respect.

@@ -4,7 +4,7 @@
 **Scope:** `samples/NivaraIncident.Web/` (ASP.NET Core minimal API + static client)
 **Depends on:** Phase 3a complete (CLI works, all 4 analyses validated), Phase 4 complete (benchmarks done)
 **Parent plan:** `samples/Incident-PLAN.md`
-**Related:** `docs/PHASE3A.md`, `docs/PHASE4.md`, `samples/NivaraIncident/IDEA.md` (product spec)
+**Related:** `samples/NivaraIncident/IDEA.md` (product spec); the Phase 3a/4 plans were delivered and their docs removed.
 
 ---
 

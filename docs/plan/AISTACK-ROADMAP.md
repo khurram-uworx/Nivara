@@ -1,8 +1,8 @@
 # AISTACK-ROADMAP — the road to complementing the .NET AI stack
 
-**Status:** planning reference · **Scope:** AI/data plane — AutoDiff, tensor interop, ML.NET interop, dataset/eval layer · **Lens:** `docs/AISTACK-REVIEW.md`
+**Status:** planning reference · **Scope:** AI/data plane — AutoDiff, tensor interop, ML.NET interop, dataset/eval layer · **Lens:** `docs/plan/AISTACK-REVIEW.md`
 
-This is the travel plan for closing the last mile between Nivara and the **local .NET AI stack** (Azure/cloud off the table): `System.Numerics.Tensors`, ML.NET, ONNX Runtime, TorchSharp, `Microsoft.Extensions.AI`, `Microsoft.ML.Tokenizers`. It complements `docs/POLARS-ROADMAP.md` (expression engine) and `docs/ARROW-ROADMAP.md` (columnar physics), which together supply the span-first, null-aware foundation this roadmap builds on.
+This is the travel plan for closing the last mile between Nivara and the **local .NET AI stack** (Azure/cloud off the table): `System.Numerics.Tensors`, ML.NET, ONNX Runtime, TorchSharp, `Microsoft.Extensions.AI`, `Microsoft.ML.Tokenizers`. It complements `docs/plan/POLARS-ROADMAP.md` (expression engine) and `docs/plan/ARROW-ROADMAP.md` (columnar physics), which together supply the span-first, null-aware foundation this roadmap builds on.
 
 ---
 
@@ -189,9 +189,9 @@ The vision at §0 holds, verified by:
 
 ## Related documents
 
-- `docs/AISTACK-REVIEW.md` — the lens, the eight pillars, and the scorecard this roadmap closes out.
-- `docs/POLARS-ROADMAP.md` / `docs/POLARS-REVIEW.md` — the expression-engine roadmap and lens this roadmap builds on.
-- `docs/ARROW-ROADMAP.md` / `docs/ARROW-REVIEW.md` — the columnar-physics roadmap and lens (Phase D here depends on ARROW Phase D).
+- `docs/plan/AISTACK-REVIEW.md` — the lens, the eight pillars, and the scorecard this roadmap closes out.
+- `docs/plan/POLARS-ROADMAP.md` / `docs/plan/POLARS-REVIEW.md` — the expression-engine roadmap and lens this roadmap builds on.
+- `docs/plan/ARROW-ROADMAP.md` / `docs/plan/ARROW-REVIEW.md` — the columnar-physics roadmap and lens (Phase D here depends on ARROW Phase D).
 - `docs/AUTODIFF.md` — the AutoDiff subsystem all phases touch.
 - `docs/TENSORS.md` — tensor/AI strategic framing (Nivara's standing and committed direction).
 - `docs/adr/001-autodiff-nonnullable-domain.md` — the null-boundary rule metrics and embeddings must respect.

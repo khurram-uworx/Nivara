@@ -14,6 +14,9 @@ enum DocCitationFaultKind
 
     /// <summary>The cited line, or the last line of the cited range, is past end-of-file.</summary>
     PastEndOfFile,
+
+    /// <summary>The reference named a markdown document that does not exist.</summary>
+    MissingDocument,
 }
 
 /// <param name="DocumentPath">Repo-relative path of the markdown file holding the citation.</param>
@@ -120,6 +123,11 @@ static partial class DocCitationExtractor
     /// <summary>Total citations discovered across the gate's scope, for the coverage assertion.</summary>
     internal static int CitationCount() =>
         DocSnippetExtractor.MarkdownFiles().Sum(document => Scan(document).Count);
+
+    /// <summary>
+    /// <c>File.cs:NN</c> citations in one document, for the widened scope's coverage assertion.
+    /// </summary>
+    internal static int CitationCountIn(string documentPath) => Scan(documentPath).Count;
 
     /// <summary>Documents carrying at least one citation, for the coverage assertion.</summary>
     internal static int CitedDocumentCount() =>

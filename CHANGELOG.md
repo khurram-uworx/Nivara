@@ -170,6 +170,33 @@ All notable changes to Nivara are documented here. Released versions are publish
   float/double type-switch claim while those lines hold `getTypeSize` — perfectly resolvable, and
   still wrong. That one needs a reader.
 
+- **Documentation reference gate now reads the product trees and both reference forms (#627)** —
+  the citation gate read the repository root plus `docs/` and recognised only `File.cs:NN` (the blind
+  spot #549 tracked), so a broken link from `samples/`, `tests/` or `src/` was invisible, and a
+  `docs/…md` reference was invisible everywhere. #625 is the worked example: `BERT-GPU.md` was renamed twice and merged into
+  `docs/ACCELERATION.md`, and twelve sites still cited it — ten `.cs` comments under `samples/` and
+  `tests/`, plus `samples/NivaraChat/README.md` and `tests/Nivara.PerformanceTests/README.md` — none of
+  which the gate had ever read. `DocReferenceExtractor` widens the input to root `*.md`, `docs/**/*.md`
+  and `src|samples|tests/**/*.{md,cs}` (skipping build output and the gate's own fixtures) and widens
+  the form to a `docs/`-relative `.md` link; a reference naming no file is a `MissingDocument` fault.
+  Historical mentions — a sentence that is *about* a removed document, such as a decision log, a
+  changelog entry or a "retired" note — are tolerated by an explicit `(file, target)` allowlist, and a
+  test asserts every entry is still present in its file, so an entry whose reference is fixed or
+  removed fails instead of rotting in place.
+
+  Fixes 84 dead references, all in the classes the old gate could not see: 59 pointed at the six
+  AISTACK/ARROW/POLARS REVIEW/ROADMAP docs under their pre-move `docs/…` path (they now live in
+  `docs/plan/`; 52 inside `docs/plan/` itself and 7 in `docs/TENSORS.md`, whose related-reading section
+  already used the correct path), and 5 named documents that never existed at all — `BFLOAT16-GPU.md`,
+  `143-PLAN.md`, and a hypothetical `adr/README.md` in ADR-005 — whose stale path was removed rather
+  than re-pointed at nothing. The other 20 occurrences (across 10 file/target pairs) are tolerated
+  history. Measured coverage is 354 document references and 126 code citations across 686 files, pinned
+  so a shrinking scope reads as reduced coverage rather than a quiet pass.
+
+  **Limitation:** the gate checks that a reference *resolves*, not that the linked document supports the
+  sentence around it; and its document form covers `docs/`-relative `.md` links only, so a bare
+  `SOMEDOC.md` in prose is not checked.
+
 - **`ColumnStorage<T>` tensor-view aliasing invariant pinned (#536)** — `AsTensor()` hands out a
   memoised, zero-copy `Tensor<T>` over the storage's sole-owner `T[]`. `Tensor.Create` uses the
   array as its backing buffer (it does not copy) and `Tensor<T>` exposes a writable `Span<T>`
