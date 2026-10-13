@@ -45,15 +45,15 @@ class Program
     };
 
     // The Silk.NET OpenCL path is kernels-first. The hand-authored kernels cover the BERT-family
-    // encoder, DistilBERT's classifier head, and ModernBERT. Laya hangs off the ModernBERT trunk
-    // and is not in this list until that head runner exists. Kept separate from GpuModes because
-    // --silk's model and mode scope are still narrower.
+    // encoder, DistilBERT's classifier head, ModernBERT, and the Laya head that hangs off that
+    // trunk. Kept separate from GpuModes because --silk's model scope is still narrower.
     static readonly Dictionary<string, string[]> SilkModes = new()
     {
         ["minilm"] = ["", "benchmark", "compare"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare"],
+        ["laya"] = ["", "benchmark", "compare"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -255,7 +255,7 @@ class Program
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
             Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' /");
-            Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert', F32-only,");
+            Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
             Console.WriteLine("                     default/benchmark/compare modes. Competing with --ilgpu, so the");
             Console.WriteLine("                     two are mutually exclusive.");
             Console.WriteLine();
@@ -360,7 +360,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya).");
             return 1;
         }
 
@@ -597,11 +597,12 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "laya":
-                if (useGpu)
+                if (useSilk || useGpu)
                 {
-                    if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir);
-                    if (compare) return Laya.CompareGpu(tensors, modelDir);
-                    return Laya.RunGpu(tensors, modelDir);
+                    OpenLayaSession open = useSilk ? SilkLayaSession.Open : IlgpuLayaSession.Open;
+                    if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
+                    if (compare) return Laya.CompareGpu(tensors, modelDir, open);
+                    return Laya.RunGpu(tensors, modelDir, open);
                 }
                 if (compare) return Laya.Compare(tensors, modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");

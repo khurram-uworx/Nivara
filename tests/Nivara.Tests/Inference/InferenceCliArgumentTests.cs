@@ -261,7 +261,7 @@ public class InferenceCliArgumentTests
     [Test]
     public void Silk_OnModelWithoutSilkKernels_Rejected() =>
         AssertRejected(Run("smollm", "--silk"),
-            "--silk is not supported for 'smollm' (Silk models: minilm, distilbert, distilbert_sst, modernbert).");
+            "--silk is not supported for 'smollm' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya).");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
@@ -285,6 +285,20 @@ public class InferenceCliArgumentTests
     public void SilkUnsupportedMode_Rejected() =>
         AssertRejected(Run("minilm", "--silk", "similarity"),
             "--silk does not support mode 'similarity' for 'minilm'");
+
+    /// <summary>
+    /// <c>compare_diag</c> is not a Laya mode at all, so the general allow-list rejects it before
+    /// the Silk mode guard. The Silk-specific message is what <c>modernbert --silk compare_diag</c>
+    /// hits, because that mode exists on the CPU path.
+    /// </summary>
+    [Test]
+    public void SilkLaya_CompareDiag_Rejected() =>
+        AssertRejected(Run("laya", "--silk", "compare_diag"),
+            "Unsupported mode 'compare_diag' for 'laya'");
+
+    [Test]
+    public void SilkLaya_Precision_Rejected() =>
+        AssertRejected(Run("laya", "--silk", "--precision", "bf16"), "--silk is F32-only");
 
     [Test]
     public void SilkModernBert_CompareDiag_Rejected() =>
