@@ -96,51 +96,56 @@ gate — get there through `InternalsVisibleTo`. `Nivara.Extensions.csproj` curr
 
 ## Proposed changes
 
-### Step 1 — Silk device layer + host math + launcher (commit 2)
+The order below is forced by build-green commits: a Silk runner references model types, so the model
+layer moves before the Silk stack; and any move must rewire its consumers (including tests) in the
+same commit, because `dotnet build Nivara.slnx` compiles the test projects too.
 
-- Move `Gpu/SilkKernels.cs` and `Gpu/SilkRuntime.cs` to `src/Nivara.Extensions/Silk/`;
-  `namespace Nivara.Silk`.
+### Step 1 — host math extraction (commit 2)
+
 - Extract `Transposed` / `QkvPacked` / `Req` from `Gpu/GpuBuffers.cs` into
-  `src/Nivara.Extensions/Silk/WeightLayout.cs`; `GpuBuffers` calls the new helper.
-- Add `SilkLauncher` absorbing the duplicated helpers: `LaunchGemm`, `LaunchLayerNorm`,
+  `src/Nivara.Extensions/Silk/WeightLayout.cs`, `namespace Nivara.Silk`; `GpuBuffers` delegates.
+- No package changes yet (`WeightLayout` needs no Silk.NET). `WeightLayout` is `public` because
+  `GpuBuffers` (samples) is a production consumer.
+
+### Step 2 — model layer (commit 3)
+
+- Move the model files to `src/Nivara.Extensions/AI/`, `namespace Nivara.AI`, seeded by
+  `BertConfig`, `ModernBertConfig` and the Laya types; follow the compiler to the true closure
+  (expected: `BertModel`, `ModernBertModel`, `LayaHeadModel`, `LayaHeadScoring`, `LayaPromptBuilder`,
+  `LayaCalibration`, `Gpt2BpeTokenizer`, `SafeTensorsLoader`, `StateDictLoader`; `DistilBertModel`
+  only if the compiler drags it).
+- Split `BertGpuNaming` / `BertGpuKeys` / `BertEncoderGpuResult` out of
+  `Gpu/BertEncoderGpuRunner.cs` into `AI/BertEncoderGpuTypes.cs` (that file stays in samples, so it
+  must be split).
+- Add `Microsoft.ML.Tokenizers` 3.0.0-preview.26457.2 to `Nivara.Extensions.csproj`.
+- Rewire every consumer's `using` in the same commit: the remaining ILGPU runners/sessions, the CLI
+  (`NivaraInference`, `NivaraFineTuning`) and the affected tests.
+
+### Step 3 — Silk device layer + launcher + runners + sessions (commit 4)
+
+- Move `Gpu/SilkKernels.cs` (stays `internal`) and `Gpu/SilkRuntime.cs` to
+  `src/Nivara.Extensions/Silk/`; `namespace Nivara.Silk`.
+- Add `SilkLauncher` (`internal`) absorbing the duplicated helpers: `LaunchGemm`, `LaunchLayerNorm`,
   `LaunchAttention`, `LaunchAdd`, `LaunchAddBias`, `LaunchGather`, `LaunchSplit`, `LaunchRotary`,
-  `LaunchGeGlu`, `RunLinear`, `UploadPlain`, `UploadTransposed`, `Upload`, `Release`.
-- Rewire the three Silk runners (still in samples for this commit) to call `SilkLauncher`.
-- Add `Silk.NET.OpenCL` 2.23.0 to `Nivara.Extensions.csproj`; add IVT to
-  `Nivara.PerformanceTests`; drop the direct pin from `Nivara.Samples.csproj` (now transitive).
+  `LaunchGeGlu`, `RunLinear`, `UploadPlain`, `UploadTransposed`, `Upload`, `Release`. The three
+  runners' `LaunchGemm` signatures differ, so the launcher exposes the primitive operations and the
+  runners keep their model-specific call sites over it.
+- Move `SilkBertEncoderRunner.cs`, `SilkModernBertGpuRunner.cs`, `SilkLayaHeadGpuRunner.cs` to
+  `Silk/`; move the Silk halves of `ModernBertGpuSession.cs` / `LayaGpuSession.cs` into
+  `Silk/SilkModernBertSession.cs` / `Silk/SilkLayaSession.cs`. Everything Silk is then same-assembly,
+  so `SilkKernels` and `SilkLauncher` stay `internal` with no IVT to samples.
+- Move the shared seam (`IBertEncoderRunner`, `IModernBertGpuSession`, `ILayaGpuSession` and the
+  `OpenModernBertSession` / `OpenLayaSession` delegates) to `AI/`; the ILGPU session classes stay in
+  `samples/Nivara.Samples/Gpu/` and implement the `Nivara.AI` interfaces.
+- Add `Silk.NET.OpenCL` 2.23.0 to `Nivara.Extensions.csproj`; add IVT to `Nivara.PerformanceTests`;
+  drop the direct pin from `Nivara.Samples.csproj` (now transitive via Extensions).
 - Backend-neutralize the `--silk …` strings inside the moved files (a shipped library should not
   name a CLI flag); reword cross-assembly `<see cref>` targets (they become errors under
   `TreatWarningsAsErrors`).
 
-### Step 2 — Silk runners + sessions (commit 3)
+### Step 4 — docs (commit 5)
 
-- Move `SilkBertEncoderRunner.cs`, `SilkModernBertGpuRunner.cs`, `SilkLayaHeadGpuRunner.cs` to
-  `Silk/`; move the Silk halves of `ModernBertGpuSession.cs` / `LayaGpuSession.cs` into
-  `Silk/SilkModernBertSession.cs` / `Silk/SilkLayaSession.cs`.
-- Move the shared seam (`IBertEncoderRunner`, `IModernBertGpuSession`, `ILayaGpuSession` and the
-  `OpenModernBertSession` / `OpenLayaSession` delegates) to `AI/`; the ILGPU session classes stay in
-  `samples/Nivara.Samples/Gpu/` and implement the `Nivara.AI` interfaces.
-- Split `BertGpuNaming` / `BertGpuKeys` / `BertEncoderGpuResult` out of
-  `Gpu/BertEncoderGpuRunner.cs` into `AI/BertEncoderGpuTypes.cs`.
-- Rewire the ILGPU runners/sessions and the CLI.
-
-### Step 3 — Model layer (commit 4)
-
-- Move the model files to `src/Nivara.Extensions/AI/`, `namespace Nivara.AI`, seeded by
-  `BertConfig`, `ModernBertConfig` and the Laya types; follow the compiler to the true closure
-  (expected: `BertModel`, `ModernBertModel`, `DistilBertModel`, `LayaHeadModel`, `LayaHeadScoring`,
-  `LayaPromptBuilder`, `LayaCalibration`, `Gpt2BpeTokenizer`, `SafeTensorsLoader`, `StateDictLoader`).
-- Rewire every consumer's `using`.
-
-### Step 4 — Tests (commit 5)
-
-- Update `using Nivara.Samples;` → `using Nivara.AI;` and `using Nivara.Samples.Gpu;` → the
-  appropriate `Nivara.Silk` / `Nivara.AI` / remaining `Nivara.Samples.Gpu` namespace across the test
-  projects. `SharedMemoryAllocationTests` keeps scanning `Nivara.Samples.Gpu` (ILGPU kernels stay).
-
-### Step 5 — Docs (commit 6)
-
-- Update the paths in `SILK.md`, `ACCELERATION.md`, `ILGPU.md`, `LAY A.md`, `DISTELBERT.md`, the
+- Update the paths in `SILK.md`, `ACCELERATION.md`, `ILGPU.md`, `LAYA.md`, `DISTELBERT.md`, the
   `AGENTS.md` implementation map, `CHANGELOG.md`, the `NivaraInference` help string, and the
   `Nivara.Extensions` package `Description` (now ships the model layer + a GPU backend).
 
@@ -156,12 +161,11 @@ gate — get there through `InternalsVisibleTo`. `Nivara.Extensions.csproj` curr
 ## Planned commits
 
 1. `docs: plan Silk promotion into Nivara.Extensions in TODO.md`
-2. `refactor: extract host math and move the Silk device layer into Nivara.Extensions`
-3. `refactor: move the Silk runners and sessions into Nivara.Extensions`
-4. `refactor: move the BERT-family model layer into Nivara.Extensions`
-5. `test: rewire Silk and model tests to the Nivara.Extensions namespaces`
-6. `docs: update Silk and model docs for the Nivara.Extensions move`
-7. (G2) `docs: remove TODO.md — plan executed`
+2. `refactor: extract weight-layout host math into Nivara.Extensions`
+3. `refactor: move the BERT-family model layer into Nivara.Extensions`
+4. `refactor: move the Silk device layer, runners and sessions into Nivara.Extensions`
+5. `docs: update Silk and model docs for the Nivara.Extensions move`
+6. (G2) `docs: remove TODO.md — plan executed`
 
 ## Non-goals
 
