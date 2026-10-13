@@ -1,3 +1,5 @@
+using Nivara.AI;
+
 namespace Nivara.Samples.Gpu;
 
 /// <summary>

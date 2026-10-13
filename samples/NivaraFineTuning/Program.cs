@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
+using Nivara.AI;
 using Nivara.Samples;
 
 namespace NivaraFineTuning;

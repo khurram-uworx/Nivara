@@ -3,6 +3,7 @@ using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
 using NUnit.Framework;
 using System.Numerics;
+using Nivara.AI;
 
 namespace Nivara.Tests.AutoDiff;
 

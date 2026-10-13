@@ -3,6 +3,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
+using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Samples.Gpu;
 using System.Diagnostics;

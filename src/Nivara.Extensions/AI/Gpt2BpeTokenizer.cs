@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 /// <summary>
 /// GPT-2 byte-level BPE tokenizer (as used by SmolLM's <c>GPT2Tokenizer</c>, with

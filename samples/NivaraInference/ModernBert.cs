@@ -1,4 +1,5 @@
 using Nivara.AutoDiff;
+using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Samples.Gpu;
 using System.Diagnostics;

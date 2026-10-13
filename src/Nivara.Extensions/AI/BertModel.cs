@@ -1,10 +1,9 @@
-using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 public sealed record BertConfig
 {

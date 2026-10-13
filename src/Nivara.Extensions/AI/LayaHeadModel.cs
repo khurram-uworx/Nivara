@@ -3,7 +3,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 /// <summary>
 /// One pre-norm transformer encoder layer: <c>LayerNorm → attention → residual → LayerNorm →

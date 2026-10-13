@@ -1,3 +1,4 @@
+using Nivara.AI;
 using Nivara.AutoDiff.Nn;
 
 namespace Nivara.Samples.Gpu;

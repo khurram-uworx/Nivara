@@ -1,3 +1,4 @@
+using Nivara.AI;
 using Nivara.Samples;
 using System.Diagnostics;
 

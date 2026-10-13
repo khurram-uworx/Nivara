@@ -1,6 +1,7 @@
 using Nivara.AutoDiff.Nn;
 using Nivara.Samples;
 using NUnit.Framework;
+using Nivara.AI;
 
 namespace Nivara.Tests.AutoDiff;
 

@@ -6,6 +6,7 @@ using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
+using Nivara.AI;
 using Nivara.Samples;
 using System.Numerics;
 using System.Numerics.Tensors;
