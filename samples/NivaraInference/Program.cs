@@ -44,15 +44,16 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
     };
 
-    // The Silk.NET OpenCL path is kernels-first: the hand-authored kernels
-    // (samples/Nivara.Samples/Gpu/SilkKernels.cs) cover the BERT-family encoder (MiniLM,
-    // DistilBERT) and DistilBERT's classifier head, none cover the other models. Kept separate from
-    // GpuModes because --silk's model and mode scope are both narrower.
+    // The Silk.NET OpenCL path is kernels-first. The hand-authored kernels cover the BERT-family
+    // encoder, DistilBERT's classifier head, and ModernBERT. Laya hangs off the ModernBERT trunk
+    // and is not in this list until that head runner exists. Kept separate from GpuModes because
+    // --silk's model and mode scope are still narrower.
     static readonly Dictionary<string, string[]> SilkModes = new()
     {
         ["minilm"] = ["", "benchmark", "compare"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
+        ["modernbert"] = ["", "benchmark", "compare"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -254,14 +255,14 @@ class Program
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
             Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' /");
-            Console.WriteLine("                     'distilbert' / 'distilbert_sst' only, F32-only, default/benchmark/");
-            Console.WriteLine("                     compare modes. Competing with --ilgpu, so the two are mutually");
-            Console.WriteLine("                     exclusive.");
+            Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert', F32-only,");
+            Console.WriteLine("                     default/benchmark/compare modes. Competing with --ilgpu, so the");
+            Console.WriteLine("                     two are mutually exclusive.");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
-            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu. The CPU path caps a");
-            Console.WriteLine("                   length at 2048 (dense [L, L] mask); --ilgpu has no such cap, and the");
+            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu / --silk. The CPU path caps a");
+            Console.WriteLine("                   length at 2048 (dense [L, L] mask); a GPU backend has no such cap, and the");
             Console.WriteLine("                   4096 row is the evidence. A length below the sentence truncates it.");
             Console.WriteLine("  --warmup N       Untimed passes before timing (default 1)");
             Console.WriteLine("  --iters N        Timed passes; the median is reported (default 3)");
@@ -332,7 +333,7 @@ class Program
                 return 1;
             }
 
-            if (seqArg is not null && !TryParseSeqLengths(seqArg, useGpu, out seqLengths, out string seqError))
+            if (seqArg is not null && !TryParseSeqLengths(seqArg, useGpu || useSilk, out seqLengths, out string seqError))
             {
                 Console.Error.WriteLine(seqError);
                 return 1;
@@ -359,7 +360,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert).");
             return 1;
         }
 
@@ -607,11 +608,12 @@ class Program
                 if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
                 return Laya.Run<float, float>(tensors, modelDir, mode, "F32");
             case "modernbert":
-                if (useGpu)
+                if (useSilk || useGpu)
                 {
-                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations);
-                    if (compare) return ModernBert.CompareGpu(tensors, modelDir);
-                    return ModernBert.RunGpu(tensors, modelDir);
+                    OpenModernBertSession open = useSilk ? SilkModernBertSession.Open : IlgpuModernBertSession.Open;
+                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations, open);
+                    if (compare) return ModernBert.CompareGpu(tensors, modelDir, open);
+                    return ModernBert.RunGpu(tensors, modelDir, open);
                 }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                 if (compare) return ModernBert.Compare(tensors, modelDir);
@@ -683,7 +685,7 @@ class Program
                 lengths = [];
                 error = $"--seq {length} exceeds the CPU path's dense-mask limit of {ModernBertMasks.MaxDenseLength} " +
                         "(the cost is the [L, L] allocation, not the arithmetic). " +
-                        $"Run 'modernbert --ilgpu benchmark --seq {length}', where the band lives inside the kernel; " +
+                        $"Run 'modernbert --ilgpu benchmark --seq {length}' or 'modernbert --silk benchmark --seq {length}', where the band lives inside the kernel; " +
                         "the CPU equivalent is #473.";
                 return false;
             }
