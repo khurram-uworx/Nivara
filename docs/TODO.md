@@ -214,7 +214,7 @@ None that block execution. Two offers, not gates:
 - `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"` after Task 3 and again after Task 4. One fixture. Ask before any wider suite.
 - Ask before `--silk-kernels`, and before either `--silk compare`. Both need a GPU, Release, and AC power. Battery numbers are not quotable.
 
-**Run so far (2026-10-13).** `--silk-kernels` ran on the GPU: **43/43 bit-identical**, but on battery, so the gate's timing column is not quotable. CLI arg tests pass (39). `modernbert --ilgpu benchmark`, `modernbert --silk benchmark`, `laya --ilgpu benchmark`, `laya --silk benchmark` all ran on AC power, back-to-back per model in one session, and the Silk-vs-ILGPU ratios are now recorded in `docs/ACCELERATION.md` §1, `docs/MODERNBERT.md`, and `docs/LAYA.md` (ModernBERT: parity at 128, ~0.75× at 4096; Laya: 0.81–0.93× per question). **Still not run:** `modernbert --silk compare` and `laya --silk compare` — the correctness verdicts. They stay the last gate before `docs/TODO.md` can be deleted.
+**Run so far (2026-10-13).** `--silk-kernels` ran on the GPU: **43/43 bit-identical**, but on battery, so the gate's timing column is not quotable. CLI arg tests pass (39). `modernbert --ilgpu benchmark`, `modernbert --silk benchmark`, `laya --ilgpu benchmark`, `laya --silk benchmark` all ran on AC power, back-to-back per model in one session, and the Silk-vs-ILGPU ratios are recorded in `docs/ACCELERATION.md` §1, `docs/MODERNBERT.md`, and `docs/LAYA.md` (ModernBERT: parity at 128, ~0.75× at 4096; Laya: 0.81–0.93× per question). **Compares (AC, same day):** `modernbert --silk compare` passes at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — identical to the ILGPU gate — and `laya --silk compare` passes at 1.110E-005 = 1.1% of the 1e-3 bound, mask clamp PASS on both. Every planned verification has now been run; nothing remains before G2.
 
 ## Planned commits
 
@@ -232,7 +232,7 @@ Code claims are from the symbols and lines cited above. No microsoft-learn claim
 
 Assumptions:
 
-- ModernBERT-large and the Laya checkpoint may be absent. If they are, Tasks 3 and 4 stop at the kernel gate plus the CLI argument tests, and the compare is reported as not run.
+- ModernBERT-large and the Laya checkpoint are both present on this machine, so Tasks 3 and 4 ran end to end, including both `--silk compare` gates (passing, see Verification). The contingency — stop at the kernel gate plus CLI argument tests and report the compare as not run — did not apply.
 - `a + 0.0f` is not bit-identical to `a` for `-0`. That is why `gemm_row4` and `layer_norm` are dedicated ports. IEEE rule, not measured this session.
 - Workspace at S=4096 is about 300 MB. Counted, not measured.
 

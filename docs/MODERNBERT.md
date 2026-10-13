@@ -66,7 +66,7 @@ Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates shor
 
 ## GPU path
 
-`ModernBertGpuRunner` + `modernbert --ilgpu` (issue #449). `modernbert --silk` is the same contract on the hand-authored OpenCL backend: F32 only, modes `default` / `benchmark` / `compare`, the band inside the kernel, and the same 4096 benchmark lengths. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry.
+`ModernBertGpuRunner` + `modernbert --ilgpu` (issue #449). `modernbert --silk` is the same contract on the hand-authored OpenCL backend: F32 only, modes `default` / `benchmark` / `compare`, the band inside the kernel, and the same 4096 benchmark lengths. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry. `modernbert --silk compare` passes (AC, 2026-10-13) at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the same figures as the ILGPU gate.
 
 The gate is GPU-vs-CPU in-process (no PyTorch fixture needed). Fixture seqLen 128, 26 valid positions:
 

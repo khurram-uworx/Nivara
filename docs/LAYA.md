@@ -188,7 +188,7 @@ Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biase
 
 ### The head on the GPU (#462, 2026-09-29)
 
-Wired, and gated. `laya --ilgpu` runs the encoder *and* the decision head on the accelerator, and `laya --ilgpu compare` gates the pair against this CPU head. `laya --silk` is the same contract on the hand-authored backend: the encoder (prefix `"encoder"`) plus the head, F32 only, modes `default` / `benchmark` / `compare`, gated the same way against this CPU head. The Silk compare has not been run yet; the Silk-vs-ILGPU benchmark A/B has (AC, 2026-10-13 — see [Measured](#silk-vs-ilgpu-benchmark-2026-10-13)). Biased norms and eps `1e-5` are the traps on both backends. Detail is [SILK.md §13a](SILK.md). The zero-new-kernel claim held on ILGPU: every op in the head had a kernel already, and the mapping is one-to-one. Silk reused those same shapes; it did not add a head-only kernel.
+Wired, and gated. `laya --ilgpu` runs the encoder *and* the decision head on the accelerator, and `laya --ilgpu compare` gates the pair against this CPU head. `laya --silk` is the same contract on the hand-authored backend: the encoder (prefix `"encoder"`) plus the head, F32 only, modes `default` / `benchmark` / `compare`, gated the same way against this CPU head. **The Silk compare passes (AC, 2026-10-13)** at 1.110E-005 = 1.1% of the 1e-3 bound — the same figure as the ILGPU gate — and the Silk-vs-ILGPU benchmark A/B is below (see [Measured](#silk-vs-ilgpu-benchmark-2026-10-13)). Biased norms and eps `1e-5` are the traps on both backends. Detail is [SILK.md §13a](SILK.md). The zero-new-kernel claim held on ILGPU: every op in the head had a kernel already, and the mapping is one-to-one. Silk reused those same shapes; it did not add a head-only kernel.
 
 | head op | kernel |
 |---|---|
@@ -334,7 +334,8 @@ milliseconds are one session and are not comparable to the #462 table's.
 
 Silk leads all four questions by 7–19% — the same direction as the ModernBERT rows in
 [docs/ACCELERATION.md](ACCELERATION.md) §1 (Silk parity-to-ahead). Benchmark timing only; the
-`laya --silk compare` correctness verdict is still not run.
+`laya --silk compare` correctness verdict ran separately and passes at 1.1% of the 1e-3 bound
+(see [The head on the GPU](#the-head-on-the-gpu-462-2026-09-29)).
 
 ## What we learned
 

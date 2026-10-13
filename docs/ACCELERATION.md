@@ -28,7 +28,8 @@ Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436
 backend (`--silk`, Silk.NET) covers the BERT-family encoders, DistilBERT's SST-2 head, ModernBERT,
 and Laya. The BERT slice is gated and was given an informal battery, same-session A/B against ILGPU
 (no separation). ModernBERT and Laya are kernel-gated against ILGPU; their same-session benchmark
-A/B ran on AC power 2026-10-13 (§1 below), and their end-to-end compares have not been run yet.
+A/B ran on AC power 2026-10-13 (§1 below), and their end-to-end compares pass on the same day
+(§1 "Second OpenCL backend": ModernBERT at maxRel 5.577E-004, Laya at 1.1% of the 1e-3 bound).
 
 ## 1. Measured results
 
@@ -208,7 +209,10 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   2026-10-13 run was **43/43 bit-identical**. It was on battery, so the timing column is not quotable;
   it was never a verdict. `minilm --silk compare`, `distilbert --silk compare` and
   `distilbert_sst --silk compare` are the BERT end-to-end gates. `modernbert --silk compare` and
-  `laya --silk compare` are the same 1e-3 bound and have not been run yet. `InferenceCliArgumentTests`
+  `laya --silk compare` are the same 1e-3 bound and **passed 2026-10-13** (AC): ModernBERT at maxAbs
+  2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the same figures as the ILGPU gate — and Laya's
+  worst marker-logit residual at 1.110E-005 = 1.1% of the bound (choice2), act matching to 0.0,
+  mask clamp PASS on both. `InferenceCliArgumentTests`
   pins the rejects.
 - **Per-kernel timing (AC, valid).** `--silk-kernels` on AC reports all **32/32 outputs
   bit-identical** to ILGPU; **one** of the 32 cells leaves the informal x0.8..x1.2 band (MiniLM
@@ -267,8 +271,9 @@ Silk leads all four questions by 7–19%. **Session caveat applies to both table
 ModernBERT leg (341.6 ms / 1.53 s / 13.4 s / 43.5 s) is a different session's read of the same
 binary than the 400 ms / 2.30 s / 19.6 s / 63.0 s quoted in the #449 section above — the ratios in
 these tables are the comparable quantity, not those absolute milliseconds. These are benchmark
-timings only; the end-to-end **compares** (`modernbert --silk compare`, `laya --silk compare`)
-have not been run yet — the kernel-gate cells and the compares are separate verdicts.
+timings only — the end-to-end **compares** (`modernbert --silk compare`, `laya --silk compare`)
+passed on 2026-10-13 at the figures in the gates bullet above; the kernel-gate cells and the
+compares remain separate verdicts.
 
 ## 2. Where the implementation detail lives
 

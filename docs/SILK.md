@@ -548,13 +548,14 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
   `distilbert_sst --silk compare` each check the GPU against the **same-process CPU** at
   `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` — with pooled-embedding cosine for MiniLM, and the PyTorch 3-way
   (`argmax 8/8`) for SST-2. `modernbert --silk compare` and `laya --silk compare` are the same bound
-  against the in-process CPU encoder and head. They have not been run on this branch yet; the kernel
-  gate has. The `--silk-kernels` cells are what localise a failure; the compares are what say the
-  assembled forward is right. **The benchmark A/B has been run** — ModernBERT and Laya timing
+  against the in-process CPU encoder and head. **Both pass (AC, 2026-10-13):** ModernBERT at maxAbs
+  2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the identical figures to the ILGPU gate — and
+  Laya at 1.110E-005 = 1.1% of the 1e-3 bound with act matching to 0.0 and mask clamp PASS on both.
+  The `--silk-kernels` cells are what localise a failure; the compares are what say the
+  assembled forward is right. **The benchmark A/B has been run too** — ModernBERT and Laya timing
   (back-to-back `--silk` / `--ilgpu benchmark`, AC, same session, 1 warmup + 3 timed median) is in
   [docs/ACCELERATION.md](ACCELERATION.md) §1: Silk at parity at 128 and ~25% ahead at 4096, and
-  ahead on all four Laya questions. Keep the compare and the benchmark separate verdicts: the
-  compare's job is correctness, and it is still not run.
+  ahead on all four Laya questions. The compare and the benchmark remain separate verdicts.
 
 ## 15. Adding a model to the Silk path
 
