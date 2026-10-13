@@ -188,7 +188,7 @@ Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biase
 
 ### The head on the GPU (#462, 2026-09-29)
 
-Wired, and gated. `laya --ilgpu` runs the encoder *and* the decision head on the accelerator, and `laya --ilgpu compare` gates the pair against this CPU head. The zero-new-kernel claim held: every op in the head had a kernel already, and the mapping is one-to-one.
+Wired, and gated. `laya --ilgpu` runs the encoder *and* the decision head on the accelerator, and `laya --ilgpu compare` gates the pair against this CPU head. `laya --silk` is the same contract on the hand-authored backend: the encoder (prefix `"encoder"`) plus the head, F32 only, modes `default` / `benchmark` / `compare`, gated the same way against this CPU head. The Silk compare has not been run yet. Biased norms and eps `1e-5` are the traps on both backends. Detail is [SILK.md §13a](SILK.md). The zero-new-kernel claim held on ILGPU: every op in the head had a kernel already, and the mapping is one-to-one. Silk reused those same shapes; it did not add a head-only kernel.
 
 | head op | kernel |
 |---|---|

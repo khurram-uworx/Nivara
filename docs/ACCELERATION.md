@@ -25,9 +25,10 @@ backend). The probe verdicts are ILGPU.md Part 1 and SILK.md Part 1; the shipped
 
 Status: **Implemented, gated, and measured** (2026-09-19; DistilBERT via PR #436, MiniLM via
 `khurram/minilm-gpu`, ModernBERT via issue #449 on `khurram/449`). A second, hand-authored OpenCL
-backend (`--silk`, Silk.NET) covers the BERT-family encoders and DistilBERT's SST-2 head — MiniLM,
-DistilBERT and DistilBERT+SST-2; it is gated, and given an informal battery, same-session A/B against
-ILGPU (no separation) — see "Second OpenCL backend" under §1.
+backend (`--silk`, Silk.NET) covers the BERT-family encoders, DistilBERT's SST-2 head, ModernBERT,
+and Laya. The BERT slice is gated and was given an informal battery, same-session A/B against ILGPU
+(no separation). ModernBERT and Laya are kernel-gated against ILGPU; their end-to-end compares have
+not been run yet — see "Second OpenCL backend" under §1.
 
 ## 1. Measured results
 
@@ -173,22 +174,27 @@ in-process by the driver (`Silk.NET.OpenCL` 2.23.0), reached with `--silk` inste
 exists to evaluate a vendor-neutral, non-ILGPU route — the same shore the `tests/Nivara.GpuProbe`
 Silk.NET leg probes — on a real model rather than on microkernels.
 
-- **Scope.** **MiniLM, DistilBERT and DistilBERT+SST-2**, F32 only, modes `default` / `benchmark` /
-  `compare`. `--silk` and `--ilgpu` are mutually exclusive, and `--silk --precision bf16|fp16` is
-  rejected with the same F32-only contract the ILGPU path uses. A checkpoint whose head weights the
-  kernel set cannot serve is rejected at runner construction rather than answered with the encoder
-  hidden state, which would be silent wrong output.
-- **The kernel set** is eight kernels in `samples/Nivara.Samples/Gpu/SilkKernels.cs`, one per
-  operation the family needs: `embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4 GEMM
-  epilogues (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`) and
-  `batched_attention`. They are ports of the ILGPU kernels of the same shape — same K-reduction order,
+- **Scope.** **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, and Laya**, F32 only, modes
+  `default` / `benchmark` / `compare`. `--silk` and `--ilgpu` are mutually exclusive, and
+  `--silk --precision bf16|fp16` is rejected with the same F32-only contract the ILGPU path uses.
+  A checkpoint whose head weights the kernel set cannot serve is rejected at runner construction
+  rather than answered with the encoder hidden state, which would be silent wrong output.
+  `modernbert --silk benchmark` accepts the same lengths as `--ilgpu`, including 4096.
+- **The kernel set** is the original eight plus seven ports in `samples/Nivara.Samples/Gpu/SilkKernels.cs`:
+  `embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4 GEMM epilogues
+  (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`), `batched_attention`, and
+  the ModernBERT/Laya ports `layer_norm`, `add`, `add_bias`, `gemm_row4` (bias-free store),
+  `split_columns`, `rotary`, and `geglu`. The table is [SILK.md §11](SILK.md). They are ports of the
+  ILGPU kernels of the same shape — same K-reduction order,
   same tile geometry, same fused epilogues — and the Row4 GEMMs share one accumulation macro so their
   f32 text cannot diverge. `#pragma OPENCL FP_CONTRACT OFF` is load-bearing: ILGPU does not fuse
   `acc += a*b`, the OpenCL driver fuses by default, so without the pragma the Silk side computes the
   fma model and diverges at rounding scale. Detail in [SILK.md §11](SILK.md).
 - **Host side** is `SilkKernels.cs` (source + geometry), `SilkRuntime.cs` (device select, in-process
   compile with the build log decoded on failure, buffers, dispatch) and `SilkBertEncoderRunner.cs`.
-  Both runners implement `IBertEncoderRunner`, so the CLI's BERT-family entry points are written once
+  ModernBERT and Laya have their own runners (`SilkModernBertGpuRunner`, `SilkLayaHeadGpuRunner`)
+  behind a session, so those mode bodies are also written once. The BERT runners implement
+  `IBertEncoderRunner`, so the CLI's BERT-family entry points are written once
   and pick a backend at construction; the weight-layout maths (`GpuBuffers`) and the launch geometry
   (`SilkKernels`) are shared rather than re-derived per backend. The DistilBERT support is a
   `BertGpuNaming` constructor parameter on the same runner, not a fork.
@@ -196,12 +202,14 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   ILGPU's `SubView`), created once per forward, so the already-gated fused attention kernel is
   untouched.
 - **Gates.** `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels` holds
-  `gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_qkv` and `gather_rows` to **byte-identity** against
-  ILGPU and the remaining kernels to the model's numeric bound, over both MiniLM and DistilBERT
-  shapes; `minilm --silk compare`, `distilbert --silk compare` and `distilbert_sst --silk compare` are
-  the end-to-end gates (`|gpu−cpu| ≤ 1e-3·(1+|cpu|)`, plus pooled-embedding cosine for MiniLM and
-  argmax 8/8 for SST-2). `InferenceCliArgumentTests` pins the new rejects. The gate's timing column is
-  explicitly *not a verdict*.
+  the pure multiply-and-add cells (`gemm_row4`, `gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_qkv`,
+  `gather_rows`, `add`, `add_bias`, `split_columns`, `rotary`) to **byte-identity** against ILGPU and
+  the rest to the model's numeric bound, including one `batched_attention` cell at `band = 64`. The
+  2026-10-13 run was **43/43 bit-identical**. It was on battery, so the timing column is not quotable;
+  it was never a verdict. `minilm --silk compare`, `distilbert --silk compare` and
+  `distilbert_sst --silk compare` are the BERT end-to-end gates. `modernbert --silk compare` and
+  `laya --silk compare` are the same 1e-3 bound and have not been run yet. `InferenceCliArgumentTests`
+  pins the rejects.
 - **Per-kernel timing (AC, valid).** `--silk-kernels` on AC reports all **32/32 outputs
   bit-identical** to ILGPU; **one** of the 32 cells leaves the informal x0.8..x1.2 band (MiniLM
   `batched_attention` at **0.80** — Silk ahead), and the DistilBERT GEMM cells land at **0.89–0.99**.
@@ -292,6 +300,8 @@ Every open, deferred or future item, one line each — status, home document, is
   kernel body" rule is the workaround and is gate-enforced. Home: [ILGPU.md §10.2](ILGPU.md).
 - **#480 measure the scalar `ApplyMask` cost · #481 attention-mask gradient** — open CPU/AutoDiff
   follow-ups from the #448 mask-as-select work. Home: [AUTODIFF.md](AUTODIFF.md).
+- **#628 SmolLM `--silk` · #629 Qwen `--silk` · #630 vision `--silk`** — open; no ILGPU runner to
+  port. Home: the issues. Not part of the ModernBERT/Laya Silk port.
 - **#457 GPU vision kernels · #458 CPU-side performance deficit** — open; the convolution kernels are
   naive nested loops, and a managed tiled GEMM and/or an optional native BLAS bridge would close the
   ~5.6× Nivara-CPU deficit (possibly beating the GPU at these shapes). Home:

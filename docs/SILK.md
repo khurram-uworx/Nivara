@@ -362,16 +362,19 @@ from `samples/Nivara.Samples/Gpu/` — the map for adding the next model to this
 
 `--silk` runs the BERT-family encoder through hand-authored OpenCL C
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It exists to evaluate a
-vendor-neutral, non-ILGPU route on a real model. Scope today: **MiniLM, DistilBERT and
-DistilBERT+SST-2**, F32 only, modes `default` / `benchmark` / `compare`; mutually exclusive with
-`--ilgpu`.
+vendor-neutral, non-ILGPU route on a real model. Scope today: **MiniLM, DistilBERT,
+DistilBERT+SST-2, ModernBERT, and Laya**, F32 only, modes `default` / `benchmark` / `compare`;
+mutually exclusive with `--ilgpu`.
 
 | file | role |
 |---|---|
 | `SilkKernels.cs` | the OpenCL C translation unit (`Source`) and all geometry, as pure data so it can be unit-checked without a device; `KernelNames` is the build order |
 | `SilkRuntime.cs` | `CL.GetApi()`, platform/device select, in-process build with the build log decoded on failure, buffers/sub-buffers, per-argument status checking, blocking dispatch, reverse-order dispose |
 | `SilkBertEncoderRunner.cs` | the `--silk` counterpart of `BertEncoderGpuRunner` — same weight layout, same operation order, same fused epilogues |
-| `IBertEncoderRunner.cs` | the seam shared with ILGPU; `GpuBuffers.cs` carries the weight-layout and launch maths for both |
+| `SilkModernBertGpuRunner.cs` | the `--silk` counterpart of `ModernBertGpuRunner` — bias-free GEMM, row-interleaved QKV split, CPU-uploaded RoPE, per-layer band |
+| `SilkLayaHeadGpuRunner.cs` | the `--silk` counterpart of `LayaHeadGpuRunner` — biased norms, fused biased QKV, host-side act-head features |
+| `IBertEncoderRunner.cs` | the seam shared with ILGPU for the BERT family; `GpuBuffers.cs` carries the weight-layout and launch maths for both |
+| `ModernBertGpuSession.cs` / `LayaGpuSession.cs` | the same seam for ModernBERT and Laya: the CLI sees `Forward`, not a device buffer |
 
 The sample csproj pins `Silk.NET.OpenCL` 2.23.0; `SilkKernels` is `internal` with
 `InternalsVisibleTo` to `Nivara.Tests`/`Nivara.PerformanceTests`, so the gate and the unit checks can
@@ -384,13 +387,14 @@ reach it.
 `KernelNames` (`SilkKernels.cs:69`) is the build/creation order:
 
 ```csharp
-[EmbedSum, GatherRows, LayerNormResidual, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention]
+[EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
+ Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention]
 ```
 
-i.e. `embed_sum`, `gather_rows`, `layer_norm_residual`, `gemm_row4_bias`, `gemm_row4_relu`,
-`gemm_row4_gelu`, `gemm_row4_qkv`, `batched_attention`. (The array orders `relu` before `gelu` while
-the source text defines `gelu` first; both are instances of the one accumulation macro, so the order
-is only the creation list.)
+i.e. the original eight (`embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4 epilogues,
+`batched_attention`) plus the seven ModernBERT/Laya ports (`layer_norm`, `add`, `add_bias`,
+`split_columns`, `rotary`, `geglu`, `gemm_row4`). The array order is the creation list, not the
+source order.
 
 Each is a port of the same-shape ILGPU kernel with the operation order preserved — same strictly
 ascending K-reduction, same tile geometry, same fused epilogues:
@@ -405,6 +409,13 @@ ascending K-reduction, same tile geometry, same fused epilogues:
 | `gemm_row4_gelu` | as above | Row4 GEMM + exact-GELU epilogue (fc1) |
 | `gemm_row4_qkv` | as above **+ `blockWidth`** | Row4 GEMM writing the block-separable `[q | k | v]` layout via `qkv_dest` |
 | `batched_attention` | `q, k, v, mask, attnOut, batch, seqLen, numHeads, headDim, band, scale` | score + scale + mask + row-softmax + weighted-V, three passes, banded |
+| `layer_norm` | `x, gamma, beta, y, rows, cols, eps` | `LayerNorm(x)`, not `LayerNorm(a+b)`. ModernBERT pre-norm and the Laya head. A zero partner in `layer_norm_residual` is a different reduction |
+| `add` | `a, b, y, n` | residual add; `y` may alias `a` |
+| `add_bias` | `x, bias, y, rows, cols` | Laya type-embedding broadcast, in place |
+| `gemm_row4` | `a, b, c, aRows, aCols, bCols` | bias-free Row4 store. Not `gemm_row4_bias` with a zero bias: `acc + 0.0f` canonicalizes `-0` |
+| `split_columns` | `src, dst, rows, blockCols, parts, part` | ModernBERT QKV is row-interleaved; a contiguous sub-view is right for row 0 and wrong after it |
+| `rotary` | `x, posIds, cosTab, sinTab, y, rows, numHeads, headDim` | half-split RoPE, in place on q and k. Tables are inputs. The pair width is not named `half`: this driver treats that as a type name and rejects the program |
+| `geglu` | `x, y, rows, intermediate` | `gelu(first half) * second half`. Reversing the halves still looks plausible |
 
 ### 11.2 Geometry
 
@@ -418,10 +429,10 @@ surplus groups would run the whole K-loop and then discard every result.
 
 ### 11.3 Bit-identity: the macro and the pragma
 
-The three Row4 GEMM epilogues share **one** accumulation macro, `GEMM_ROW4_ACCUMULATE`
-(`SilkKernels.cs:201`), deliberately: the byte-identity claim rests on all three adding the same f32
+The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE`
+deliberately: the byte-identity claim rests on every variant adding the same f32
 values to the same accumulators in the same order, so the text must not be able to drift between
-them. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
+them. The store after the macro is the only difference. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
 OFF` (uppercase; the lowercase spelling the spec also admits is not honoured here) keeps the driver
 from fusing it, because that is what ILGPU produces. The gate replays each dot product three ways in
 the same ascending-K order and reports the hit counts: ILGPU matches `mul+add` on 100% of elements
@@ -442,6 +453,9 @@ Transcendentals (`exp` in the softmax and the GELU erf) are **not** assumed iden
   context" — the one device asked for). On failure the driver's build log is decoded
   (first-NUL trim, UTF-8) and thrown — the single most useful diagnostic on Intel/AMD drivers.
 - **Buffers:** `CreateBuffer(ReadWrite)`; `Allocate(floatCount)` and `AllocateBytes(bytes)`.
+  `Ensure(SilkBuffer, floatCount)` grows a buffer the way `GpuBuffers.Ensure` does: allocate on
+  first use, release and replace when the next forward is longer, never shrink. The BERT runner
+  does not use it; ModernBERT does, up to `max_position_embeddings`.
 - **Sub-buffers:** `CreateSubview(parent, elementOffset, elementCount)` builds a `BufferRegion` and
   `CreateSubBuffer(ReadOnly, …)`. The view shares the parent's storage, so the parent must outlive it
   and the caller releases it.
@@ -487,11 +501,27 @@ keys through the shared `BertGpuKeys` resolver (which lives beside `BertEncoderG
 the same code with a different `Forward` behind it. The padding contract is stated on the interface:
 mask `0` at padding, positional ids `0..seqLen−1` repeated per batch row.
 
+## 13a. ModernBERT and Laya
+
+`SilkModernBertGpuRunner` mirrors `ModernBertGpuRunner`. Prefix `"model"` for the stock checkpoint,
+`"encoder"` for Laya. Workspace grows via `SilkRuntime.Ensure` up to `max_position_embeddings`; it
+is not the BERT cap of batch ≤ 8, seqLen ≤ 128. RoPE cos/sin are uploaded from the CPU
+`RotaryEmbedding<float>` for both thetas. Layer 0 has no `attn_norm` and is an identity, not a zero
+gamma. Each layer passes `config.Band(index)` into `batched_attention`; global layers pass `-1`.
+QKV is a bias-free `gemm_row4` plus `split_columns`. GeGLU activates the first half.
+
+`SilkLayaHeadGpuRunner` mirrors `LayaHeadGpuRunner` and adds no kernels. Norms are biased, eps is
+`1e-5` (not `config.NormEps`), QKV is the existing `gemm_row4_qkv` with its real bias, attention is
+the global band, and the four act-head features stay on `LayaHeadScoring`. A checkpoint without
+`type_emb.weight` throws at head construction; the session disposes the encoder on that path.
+
+The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays backend-private.
+
 ## 14. CLI surface and the gate
 
-- **`SilkModes`** is the allow-list — `minilm` / `distilbert` / `distilbert_sst` × `{"", benchmark,
-  compare}` — deliberately narrower than `GpuModes` (which also lists `laya` and `modernbert`),
-  because the hand-authored kernels cover only the BERT-family encoders and DistilBERT's head.
+- **`SilkModes`** is the allow-list — `minilm` / `distilbert` / `distilbert_sst` / `modernbert` /
+  `laya` × `{"", benchmark, compare}`. Still narrower than the CPU mode lists (`compare_diag` stays
+  rejected). SmolLM, Qwen, and vision are #628, #629, and #630.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by
@@ -503,11 +533,12 @@ mask `0` at padding, positional ids `0..seqLen−1` repeated per batch row.
   bodies, so a fix to one backend cannot be forgotten in the other.
 - **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
   (`SilkKernelsGate.cs`). It runs the ILGPU originals and the Silk kernels **in one process** and
-  requires **byte-identity** for `gemm_row4_bias`, `gemm_row4_qkv`, `gemm_row4_relu` and
-  `gather_rows` (pure multiply-and-add, so a bit difference means the accumulation order or the
-  contraction changed — a design bug, not rounding), and the numeric bound
-  `|silk − ilgpu| ≤ 1e-3·(1 + |ilgpu|)` for the rest (`gemm_row4_gelu`, `batched_attention`, and the
-  elementwise cells, whose `exp` may differ by an ulp). Timing is best-of-N after warmups and is
+  requires **byte-identity** for `gemm_row4`, `gemm_row4_bias`, `gemm_row4_qkv`, `gemm_row4_relu`,
+  `gather_rows`, `add`, `add_bias`, `split_columns`, and `rotary` (pure multiply-and-add, so a bit
+  difference means the accumulation order or the contraction changed — a design bug, not rounding),
+  and the numeric bound `|silk − ilgpu| ≤ 1e-3·(1 + |ilgpu|)` for the rest (`gemm_row4_gelu`,
+  `geglu`, `layer_norm`, `batched_attention`, and the elementwise cells, whose `exp` or `sqrt` may
+  differ by an ulp). One attention cell launches `band = 64`; the BERT cells stay on the global band. Timing is best-of-N after warmups and is
   **explicitly not a verdict** — a ratio outside x0.8..x1.2 is a red flag to report, not a failure to
   encode, and the exit code counts correctness failures only. Shapes: MiniLM (seq 128, hidden 384, 12
   heads, headDim 32) and DistilBERT (seq 128, hidden 768, 12 heads, headDim 64) — DistilBERT drives
@@ -516,12 +547,16 @@ mask `0` at padding, positional ids `0..seqLen−1` repeated per batch row.
 - **End-to-end compares are the other half.** `minilm --silk compare`, `distilbert --silk compare` and
   `distilbert_sst --silk compare` each check the GPU against the **same-process CPU** at
   `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` — with pooled-embedding cosine for MiniLM, and the PyTorch 3-way
-  (`argmax 8/8`) for SST-2. The `--silk-kernels` cells are what localise a failure; the compares are
-  what say the assembled forward is right.
+  (`argmax 8/8`) for SST-2. `modernbert --silk compare` and `laya --silk compare` are the same bound
+  against the in-process CPU encoder and head. They have not been run on this branch yet; the kernel
+  gate has. The `--silk-kernels` cells are what localise a failure; the compares are what say the
+  assembled forward is right.
 
 ## 15. Adding a model to the Silk path
 
-1. The runtime is model-agnostic; only `SilkKernels.Source` and `SilkBertEncoderRunner` change.
+1. The runtime is model-agnostic. A BERT-shaped model changes `SilkKernels.Source` and
+   `SilkBertEncoderRunner`. A model that is not BERT-shaped adds a runner, the way ModernBERT and
+   Laya did. Do not fold those into the BERT runner.
 2. Add a kernel only if the operation is not already in `KernelNames`; reuse
    `GEMM_ROW4_ACCUMULATE` for any new GEMM so the byte-identity claim keeps holding.
 3. Keep the accumulation order identical to the ILGPU kernel of the same shape — the gate compares
