@@ -16,10 +16,10 @@ public class DocReferenceTests
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenReferences.md";
 
     /// <summary>Files read by the widened scan. Pinned deliberately: a drop is reduced coverage.</summary>
-    const int ExpectedFileCount = 686;
+    const int ExpectedFileCount = 691;
 
     /// <summary><c>docs/…md</c> references discovered. Pinned deliberately.</summary>
-    const int ExpectedDocumentReferenceCount = 354;
+    const int ExpectedDocumentReferenceCount = 356;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;

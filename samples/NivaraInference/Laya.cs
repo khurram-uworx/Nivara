@@ -230,68 +230,11 @@ public static class Laya
         return 0;
     }
 
-    /// <summary>
-    /// Uploads both the encoder trunk and the decision head, and reports the build time. The GPU
-    /// path is F32 only — every kernel is <c>ArrayView&lt;float&gt;</c> — so unlike the CPU modes
-    /// there is no <c>--bf16</c>/<c>--fp16</c> variant, and the CLI rejects those flags up front
-    /// rather than silently ignoring them.
-    /// </summary>
-    static GpuModels LoadGpuModels(
-        IlgpuRuntime runtime,
+    /// <summary><c>laya --ilgpu</c> or <c>laya --silk</c>. Both halves of the model on the accelerator.</summary>
+    public static int RunGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        ModernBertConfig config,
-        AgentConfig agent)
-    {
-        // Laya nests the backbone under "encoder"; the stock checkpoint uses "model".
-        var encoder = new ModernBertGpuRunner(runtime, config, tensors, prefix: "encoder");
-        try
-        {
-            return new GpuModels(encoder, new LayaHeadGpuRunner(runtime, tensors, agent.HeadLayers));
-        }
-        catch
-        {
-            // A head that fails to upload is the common case here — a stock encoder checkpoint has
-            // no type_emb — and leaking the trunk's 1.7 GB of weights on that path would be a poor
-            // way to report it.
-            encoder.Dispose();
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Encoder then head, entirely on the device. The head consumes the encoder's hidden state
-    /// where the trunk left it, so only the marker logits and the act logits come back.
-    /// </summary>
-    static LayaHeadOutput ForwardGpu(
-        GpuModels models,
-        int[] ids,
-        int validLength,
-        LayaQuestionType type,
-        IReadOnlyList<int> markers)
-    {
-        models.Encoder.ForwardOnDevice(ids, validLength);
-        return models.Head.Forward(
-            models.Encoder.HiddenOnDevice, models.Encoder.HiddenRows, type, markers, validLength);
-    }
-
-    /// <summary>
-    /// The two GPU halves, owned together. Both hold a large share of the model's weights, and a
-    /// tuple return has no way to be disposed — which leaks both, on every mode.
-    /// </summary>
-    sealed class GpuModels(ModernBertGpuRunner encoder, LayaHeadGpuRunner head) : IDisposable
-    {
-        public ModernBertGpuRunner Encoder { get; } = encoder;
-        public LayaHeadGpuRunner Head { get; } = head;
-
-        public void Dispose()
-        {
-            Encoder.Dispose();
-            Head.Dispose();
-        }
-    }
-
-    /// <summary><c>laya --ilgpu</c>. Both halves of the model on the accelerator.</summary>
-    public static int RunGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+        string modelDir,
+        OpenLayaSession open)
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
@@ -302,12 +245,10 @@ public static class Laya
         Console.WriteLine();
         PrintSetup(config, agent);
 
-        using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
-
         var buildSw = Stopwatch.StartNew();
-        using var models = LoadGpuModels(runtime, tensors, config, agent);
+        using ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
         buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine(ParameterLine(tensors));
         Console.WriteLine();
@@ -325,7 +266,7 @@ public static class Laya
                 tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
 
             var sw = Stopwatch.StartNew();
-            var output = ForwardGpu(models, sequence.Ids, sequence.Length, question.Type, sequence.Markers);
+            var output = session.Forward(sequence.Ids, sequence.Length, question.Type, sequence.Markers);
             sw.Stop();
 
             var decision = calibration.Decode(question, output.Logits, output.ActionProbability);
@@ -347,7 +288,10 @@ public static class Laya
     /// and the head on the same rows the CPU head is timed on, and the head's key-padding mask makes
     /// the padding a numeric no-op.
     /// </summary>
-    public static int RunBenchmarkGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    public static int RunBenchmarkGpu(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        OpenLayaSession open)
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
@@ -355,12 +299,10 @@ public static class Laya
         Console.WriteLine($"=== {ModelTypeName} Benchmark (GPU) ===");
         PrintSetup(config, agent);
 
-        using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
-
         var buildSw = Stopwatch.StartNew();
-        using var models = LoadGpuModels(runtime, tensors, config, agent);
+        using ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
         buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
@@ -377,14 +319,14 @@ public static class Laya
                 tokenizer, FixtureState, question, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
             var (ids, validLength) = PadTo(sequence.Ids, agent.MaxLen, config.PadTokenId);
 
-            ForwardGpu(models, ids, validLength, question.Type, sequence.Markers);
+            session.Forward(ids, validLength, question.Type, sequence.Markers);
 
             const int iterations = 3;
             var samples = new long[iterations];
             for (int i = 0; i < iterations; i++)
             {
                 var sw = Stopwatch.StartNew();
-                ForwardGpu(models, ids, validLength, question.Type, sequence.Markers);
+                session.Forward(ids, validLength, question.Type, sequence.Markers);
                 sw.Stop();
                 samples[i] = sw.ElapsedMilliseconds;
             }
@@ -432,7 +374,10 @@ public static class Laya
     /// row is enough to poison the residual stream below it (#448). Unpadded prompts would make the
     /// check vacuous, since nothing would be fully masked.
     /// </remarks>
-    public static int CompareGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    public static int CompareGpu(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        OpenLayaSession open)
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
@@ -448,11 +393,10 @@ public static class Laya
         cpuBuildSw.Stop();
         Console.WriteLine($"CPU model load: {cpuBuildSw.ElapsedMilliseconds} ms");
 
-        using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"Device: {runtime.DeviceName}");
         var buildSw = Stopwatch.StartNew();
-        using var models = LoadGpuModels(runtime, tensors, config, agent);
+        using ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
         buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine(ParameterLine(tensors));
         Console.WriteLine();
@@ -476,7 +420,7 @@ public static class Laya
             cpuSw.Stop();
 
             var gpuSw = Stopwatch.StartNew();
-            var gpuOutput = ForwardGpu(models, ids, validLength, question.Type, sequence.Markers);
+            var gpuOutput = session.Forward(ids, validLength, question.Type, sequence.Markers);
             gpuSw.Stop();
 
             var row = CompareQuestion(

@@ -564,7 +564,10 @@ public static class ModernBert
     /// CPU modes there is no <c>--fp16</c>/<c>--bf16</c> variant, and the CLI rejects those flags
     /// up front rather than silently ignoring them.
     /// </summary>
-    public static int RunGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    public static int RunGpu(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        OpenModernBertSession open)
     {
         var config = LoadConfig(modelDir);
         var tokenizer = LoadTokenizer(modelDir, config);
@@ -573,11 +576,10 @@ public static class ModernBert
         PrintConfig(config);
         Console.WriteLine();
 
-        using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
         var buildSw = Stopwatch.StartNew();
-        using var runner = new ModernBertGpuRunner(runtime, config, tensors);
+        using IModernBertGpuSession session = open(config, tensors);
         buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine($"Parameters: {tensors.Values.Sum(t => t.Data.Length):N0} " +
                           $"({tensors.Values.Sum(t => t.Data.Length) * 4.0 / (1024.0 * 1024.0):F1} MB as F32)");
@@ -591,7 +593,7 @@ public static class ModernBert
             int validLength = ids.Length;
 
             var sw = Stopwatch.StartNew();
-            var hidden = runner.Forward(ids, validLength);
+            var hidden = session.Forward(ids, validLength);
             sw.Stop();
 
             var stats = SpanStats(hidden.AsSpan(0, validLength * config.HiddenSize));
@@ -619,8 +621,10 @@ public static class ModernBert
         string modelDir,
         int[]? requestedSeqLengths = null,
         int warmup = DefaultWarmup,
-        int iterations = DefaultIterations)
+        int iterations = DefaultIterations,
+        OpenModernBertSession? open = null)
     {
+        ArgumentNullException.ThrowIfNull(open);
         var config = LoadConfig(modelDir);
         var tokenizer = LoadTokenizer(modelDir, config);
 
@@ -628,11 +632,10 @@ public static class ModernBert
         PrintConfig(config);
         Console.WriteLine();
 
-        using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"Device: {runtime.DeviceName}, precision F32");
         var buildSw = Stopwatch.StartNew();
-        using var runner = new ModernBertGpuRunner(runtime, config, tensors);
+        using IModernBertGpuSession session = open(config, tensors);
         buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
@@ -658,13 +661,13 @@ public static class ModernBert
             var (ids, validLength) = PadTo(tokenizer, text, maxLength, config.PadTokenId);
 
             for (int i = 0; i < warmup; i++)
-                runner.Forward(ids, validLength);
+                session.Forward(ids, validLength);
 
             var timings = new double[iterations];
             for (int i = 0; i < iterations; i++)
             {
                 var sw = Stopwatch.StartNew();
-                runner.Forward(ids, validLength);
+                session.Forward(ids, validLength);
                 sw.Stop();
                 timings[i] = sw.Elapsed.TotalMilliseconds;
             }
@@ -749,7 +752,10 @@ public static class ModernBert
     /// nothing to dismiss, so the region is gated rather than explained away, and it is the check
     /// that the GPU's <c>max == -inf</c> clamp is actually wired up.
     /// </remarks>
-    public static int CompareGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    public static int CompareGpu(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        OpenModernBertSession open)
     {
         string metaPath = Path.Combine(modelDir, "compare_meta.json");
         if (!File.Exists(metaPath))
@@ -782,15 +788,14 @@ public static class ModernBert
         cpuSw.Stop();
         Console.WriteLine($"CPU reference forward: {cpuSw.ElapsedMilliseconds} ms");
 
-        using var runtime = new IlgpuRuntime();
-        Console.WriteLine($"Device: {runtime.DeviceName}");
         var buildSw = Stopwatch.StartNew();
-        using var runner = new ModernBertGpuRunner(runtime, config, tensors);
+        using IModernBertGpuSession session = open(config, tensors);
         buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
 
         var fwdSw = Stopwatch.StartNew();
-        var gpuHidden = runner.Forward(ids, validLength);
+        var gpuHidden = session.Forward(ids, validLength);
         fwdSw.Stop();
         Console.WriteLine($"GPU forward: {fwdSw.ElapsedMilliseconds} ms");
         Console.WriteLine();

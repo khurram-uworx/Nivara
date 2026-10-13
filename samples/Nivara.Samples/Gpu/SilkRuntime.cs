@@ -113,6 +113,22 @@ public sealed unsafe class SilkRuntime : IDisposable
                 $"--silk attention needs {needed} B of local memory per work-group; {DeviceName} reports {LocalMemorySize} B.");
     }
 
+    /// <summary>
+    /// Grows <paramref name="buffer"/> when it is smaller than <paramref name="floatCount"/>,
+    /// allocating it on first use. Never shrinks. The same shape as
+    /// <see cref="GpuBuffers.Ensure(ref MemoryBuffer1D{float, Stride1D.Dense}, int, Accelerator)"/>:
+    /// a runner declares workspace as <see cref="SilkBuffer.Empty"/> and the first forward sizes it.
+    /// </summary>
+    public SilkBuffer Ensure(SilkBuffer buffer, int floatCount)
+    {
+        if (floatCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(floatCount), floatCount, "floatCount cannot be negative.");
+        if (buffer.Handle != 0 && buffer.Capacity >= floatCount)
+            return buffer;
+        Release(buffer.Handle);
+        return floatCount == 0 ? SilkBuffer.Empty : new SilkBuffer(Allocate(floatCount), floatCount);
+    }
+
     public nint Allocate(int floatCount) => AllocateBytes((ulong)floatCount * sizeof(float));
 
     public nint AllocateBytes(ulong bytes)
@@ -235,6 +251,12 @@ public sealed unsafe class SilkRuntime : IDisposable
         int finish = cl.Finish(queue);
         if (finish != 0)
             throw new InvalidOperationException($"--silk clFinish after '{kernelName}' failed ({finish}).");
+    }
+
+    /// <summary>A device buffer plus the float capacity it was allocated for. <see cref="Handle"/> 0 is empty.</summary>
+    public readonly record struct SilkBuffer(nint Handle, int Capacity)
+    {
+        public static SilkBuffer Empty => default;
     }
 
     public void Release(nint buffer)

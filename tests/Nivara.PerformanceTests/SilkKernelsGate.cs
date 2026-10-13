@@ -12,8 +12,9 @@ namespace Nivara.PerformanceTests;
 /// worth building out: do the two backends compute the same numbers?
 ///
 /// <para>
-/// The pure-multiply cells (<c>gemm_row4_bias</c>, <c>gemm_row4_qkv</c>, <c>gemm_row4_relu</c>,
-/// <c>gather_rows</c>) gate on
+/// The pure-multiply cells (<c>gemm_row4</c>, <c>gemm_row4_bias</c>, <c>gemm_row4_qkv</c>,
+/// <c>gemm_row4_relu</c>, <c>gather_rows</c>, <c>add</c>, <c>add_bias</c>, <c>split_columns</c>,
+/// <c>rotary</c>) gate on
 /// <b>byte-identity</b>: they add the same f32 values to the same accumulators in the same
 /// ascending-K order as the ILGPU Row4 family, so a bit difference means the accumulation order
 /// or the contraction changed — a design bug, not rounding (docs/ILGPU.md §10.2,
@@ -26,7 +27,8 @@ namespace Nivara.PerformanceTests;
 /// <para>
 /// The remaining cells gate on the model's numeric bound, <c>|silk - ilgpu| &lt;= 1e-3 *
 /// (1 + |ilgpu|)</c>, and report their byte status on the same line. That is not leniency for its
-/// own sake: <c>gemm_row4_gelu</c> and <c>batched_attention</c> call <c>exp</c>, and ILGPU's
+/// own sake: <c>gemm_row4_gelu</c>, <c>geglu</c> and <c>batched_attention</c> call <c>exp</c>,
+/// <c>layer_norm</c> calls <c>sqrt</c>, and ILGPU's
 /// <c>XMath.Exp</c> and OpenCL's <c>exp</c> are independent implementations of the same function
 /// that may differ by an ulp — a difference no exactness check could tell apart from a real bug.
 /// Every cell currently comes out bit-identical, GELU and softmax included; the bound is what
@@ -107,7 +109,8 @@ internal static class SilkKernelsGate
         GemmBenchmark.PrintPowerState();
         Console.WriteLine("Silk.NET OpenCL BERT-family kernel gate: Silk kernels vs the ILGPU originals");
         Console.WriteLine($"  Numeric bound : |silk - ilgpu| <= {Bound:E0} * (1 + |ilgpu|)   (exp ulp diverger)");
-        Console.WriteLine("  Byte-identity : REQUIRED for gemm_row4_bias, gemm_row4_qkv, gemm_row4_relu, gather_rows");
+        Console.WriteLine("  Byte-identity : REQUIRED for gemm_row4, gemm_row4_bias, gemm_row4_qkv, gemm_row4_relu,");
+        Console.WriteLine("                  gather_rows, add, add_bias, split_columns, rotary");
         Console.WriteLine($"  Timing        : best-of-{Rounds} after {Warmups} warmups; NOT a verdict (x{BandLow:F1}..x{BandHigh:F1} is a red flag only)");
         Console.WriteLine();
 
@@ -150,6 +153,8 @@ internal static class SilkKernelsGate
                     legs.Add(MeasureEmbedSum(ilgpu, silk, shape, buffers));
                     legs.Add(MeasureGather(ilgpu, silk, shape, buffers));
                 }
+
+                legs.AddRange(MeasureModernBertPorts(ilgpu, silk, buffers));
                 return Report(legs);
             }
             finally
@@ -318,7 +323,7 @@ internal static class SilkKernelsGate
 
     // ── attention ─────────────────────────────────────────────────
 
-    static Leg MeasureAttention(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers)
+    static Leg MeasureAttention(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers, int band = GpuBuffers.GlobalAttentionBand)
     {
         const int batch = 2;
         int seqLen = shape.SeqLen;
@@ -380,12 +385,15 @@ internal static class SilkKernelsGate
         silk.Upload(sv, v);
         silk.Upload(smask, mask);
 
+        string label = band < 0
+            ? $"{shape.Name} b{batch} s{seqLen} h{numHeads} d{headDim}"
+            : $"{shape.Name} band{band} s{seqLen}";
         return Measure(
-            SilkKernels.Attention, $"{shape.Name} b{batch} s{seqLen} h{numHeads} d{headDim}", requireBytes: false,
+            SilkKernels.Attention, label, requireBytes: false,
             () =>
             {
                 attention(stream, cfg, qView, kView, vView, maskView, outView,
-                    batch, seqLen, numHeads, headDim, GpuBuffers.GlobalAttentionBand, scale);
+                    batch, seqLen, numHeads, headDim, band, scale);
                 ilgpu.Synchronize();
             },
             () => outBuf.AsContiguous().GetAsArray(),
@@ -400,7 +408,7 @@ internal static class SilkKernelsGate
                 silk.SetUInt32(SilkKernels.Attention, 6, (uint)seqLen);
                 silk.SetUInt32(SilkKernels.Attention, 7, (uint)numHeads);
                 silk.SetUInt32(SilkKernels.Attention, 8, (uint)headDim);
-                silk.SetInt32(SilkKernels.Attention, 9, GpuBuffers.GlobalAttentionBand);
+                silk.SetInt32(SilkKernels.Attention, 9, band);
                 silk.SetFloat32(SilkKernels.Attention, 10, scale);
                 silk.Run(
                     SilkKernels.Attention,
@@ -627,6 +635,377 @@ internal static class SilkKernelsGate
             () => silk.Download(sout, elements));
     }
 
+    // ── ModernBERT / Laya ports ───────────────────────────────────
+
+    static List<Leg> MeasureModernBertPorts(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers)
+    {
+        // ModernBERT-large defaults: seq 128 is the kernel-gate length, not the 4096 benchmark.
+        // headDim 64 is MaxHeadDim. intermediate 2624 makes the GeGLU input 2x that.
+        const int seq = 128;
+        const int hidden = 1024;
+        const int heads = 16;
+        const int headDim = 64;
+        const int intermediate = 2624;
+        const float eps = 1e-5f;
+
+        var legs = new List<Leg>();
+        var shape = new ModelShape("modernbert", seq, hidden, heads, headDim, 50368, eps, []);
+        legs.Add(MeasureAttention(ilgpu, silk, shape, buffers, band: 64));
+        legs.AddRange(MeasurePlainGemm(ilgpu, silk, buffers, seq, hidden, intermediate));
+        legs.Add(MeasureAdd(ilgpu, silk, buffers, seq, hidden));
+        legs.Add(MeasureAddBias(ilgpu, silk, buffers, seq, hidden));
+        legs.Add(MeasureSplit(ilgpu, silk, buffers, seq, hidden));
+        legs.Add(MeasureLayerNorm(ilgpu, silk, buffers, seq, hidden, eps));
+        legs.Add(MeasureRotary(ilgpu, silk, buffers, seq, heads, headDim));
+        legs.Add(MeasureGeGlu(ilgpu, silk, buffers, seq, intermediate));
+        return legs;
+    }
+
+    static List<Leg> MeasurePlainGemm(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int seq, int hidden, int intermediate)
+    {
+        var legs = new List<Leg>();
+        uint seed = 0x6E4D0001u;
+        var acc = ilgpu.Accelerator;
+        var stream = ilgpu.Stream;
+        var kernel = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4);
+
+        (string Name, int ARows, int ACols, int BCols)[] gemms =
+        [
+            ("qkv", seq, hidden, 3 * hidden),
+            ("o", seq, hidden, hidden),
+            ("wi", seq, hidden, 2 * intermediate),
+            ("wo", seq, intermediate, hidden),
+        ];
+
+        foreach (var (name, aRows, aCols, bCols) in gemms)
+        {
+            var a = new float[aRows * aCols];
+            var bt = new float[aCols * bCols];
+            for (int i = 0; i < a.Length; i++) a[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < bt.Length; i++) bt[i] = GemmBenchmark.NextUniformF(ref seed);
+
+            int elements = aRows * bCols;
+            var cfg = GpuBuffers.GemmCfg(aRows, bCols);
+            using var aBuf = ilgpu.Allocate1D(a.Length);
+            using var bBuf = ilgpu.Allocate1D(bt.Length);
+            using var cBuf = ilgpu.Allocate1D(elements);
+            aBuf.CopyFromCPU(a);
+            bBuf.CopyFromCPU(bt);
+            var aView = aBuf.View;
+            var bView = bBuf.View;
+            var cView = cBuf.View;
+
+            nint sa = silk.Allocate(a.Length); buffers.Add(sa);
+            nint sb = silk.Allocate(bt.Length); buffers.Add(sb);
+            nint sc = silk.Allocate(elements); buffers.Add(sc);
+            silk.Upload(sa, a);
+            silk.Upload(sb, bt);
+
+            legs.Add(Measure(
+                SilkKernels.Gemm, $"modernbert {name}", requireBytes: true,
+                () => { kernel(stream, cfg, aView, bView, cView, aRows, aCols, bCols); ilgpu.Synchronize(); },
+                () => cBuf.AsContiguous().GetAsArray(),
+                () =>
+                {
+                    silk.SetBuffer(SilkKernels.Gemm, 0, sa);
+                    silk.SetBuffer(SilkKernels.Gemm, 1, sb);
+                    silk.SetBuffer(SilkKernels.Gemm, 2, sc);
+                    silk.SetUInt32(SilkKernels.Gemm, 3, (uint)aRows);
+                    silk.SetUInt32(SilkKernels.Gemm, 4, (uint)aCols);
+                    silk.SetUInt32(SilkKernels.Gemm, 5, (uint)bCols);
+                    RunGemm(silk, SilkKernels.Gemm, aRows, bCols);
+                },
+                () => silk.Download(sc, elements)));
+        }
+
+        return legs;
+    }
+
+    static Leg MeasureAdd(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int cols)
+    {
+        int n = rows * cols;
+        uint seed = 0xADD00001u;
+        var a = new float[n];
+        var b = new float[n];
+        for (int i = 0; i < n; i++) a[i] = GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < n; i++) b[i] = GemmBenchmark.NextUniformF(ref seed);
+
+        var stream = ilgpu.Stream;
+        var kernel = ilgpu.Accelerator.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>>(ElementwiseKernels.Add);
+        var cfg = GpuBuffers.Cfg1D(n);
+        using var aBuf = ilgpu.Allocate1D(n);
+        using var bBuf = ilgpu.Allocate1D(n);
+        using var yBuf = ilgpu.Allocate1D(n);
+        aBuf.CopyFromCPU(a);
+        bBuf.CopyFromCPU(b);
+        var aView = aBuf.View;
+        var bView = bBuf.View;
+        var yView = yBuf.View;
+
+        nint sa = silk.Allocate(n); buffers.Add(sa);
+        nint sb = silk.Allocate(n); buffers.Add(sb);
+        nint sy = silk.Allocate(n); buffers.Add(sy);
+        silk.Upload(sa, a);
+        silk.Upload(sb, b);
+
+        return Measure(
+            SilkKernels.Add, $"modernbert n{n}", requireBytes: true,
+            () => { kernel(stream, cfg, aView, bView, yView); ilgpu.Synchronize(); },
+            () => yBuf.AsContiguous().GetAsArray(),
+            () =>
+            {
+                silk.SetBuffer(SilkKernels.Add, 0, sa);
+                silk.SetBuffer(SilkKernels.Add, 1, sb);
+                silk.SetBuffer(SilkKernels.Add, 2, sy);
+                silk.SetUInt32(SilkKernels.Add, 3, (uint)n);
+                RunLinear(silk, SilkKernels.Add, n);
+            },
+            () => silk.Download(sy, n));
+    }
+
+    static Leg MeasureAddBias(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int cols)
+    {
+        int n = rows * cols;
+        uint seed = 0xB1A50001u;
+        var x = new float[n];
+        var bias = new float[cols];
+        for (int i = 0; i < n; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < cols; i++) bias[i] = GemmBenchmark.NextUniformF(ref seed);
+
+        var stream = ilgpu.Stream;
+        var kernel = ilgpu.Accelerator.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(ElementwiseKernels.AddBias);
+        var cfg = GpuBuffers.Cfg1D(n);
+        using var xBuf = ilgpu.Allocate1D(n);
+        using var biasBuf = ilgpu.Allocate1D(cols);
+        using var yBuf = ilgpu.Allocate1D(n);
+        xBuf.CopyFromCPU(x);
+        biasBuf.CopyFromCPU(bias);
+        var xView = xBuf.View;
+        var biasView = biasBuf.View;
+        var yView = yBuf.View;
+
+        nint sx = silk.Allocate(n); buffers.Add(sx);
+        nint sb = silk.Allocate(cols); buffers.Add(sb);
+        nint sy = silk.Allocate(n); buffers.Add(sy);
+        silk.Upload(sx, x);
+        silk.Upload(sb, bias);
+
+        return Measure(
+            SilkKernels.AddBias, $"modernbert r{rows} c{cols}", requireBytes: true,
+            () => { kernel(stream, cfg, xView, biasView, yView, rows, cols); ilgpu.Synchronize(); },
+            () => yBuf.AsContiguous().GetAsArray(),
+            () =>
+            {
+                silk.SetBuffer(SilkKernels.AddBias, 0, sx);
+                silk.SetBuffer(SilkKernels.AddBias, 1, sb);
+                silk.SetBuffer(SilkKernels.AddBias, 2, sy);
+                silk.SetUInt32(SilkKernels.AddBias, 3, (uint)rows);
+                silk.SetUInt32(SilkKernels.AddBias, 4, (uint)cols);
+                RunLinear(silk, SilkKernels.AddBias, n);
+            },
+            () => silk.Download(sy, n));
+    }
+
+    static Leg MeasureSplit(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int blockCols)
+    {
+        const int parts = 3;
+        const int part = 1;
+        int srcN = rows * blockCols * parts;
+        int dstN = rows * blockCols;
+        uint seed = 0x59170001u;
+        var src = new float[srcN];
+        for (int i = 0; i < srcN; i++) src[i] = GemmBenchmark.NextUniformF(ref seed);
+
+        var stream = ilgpu.Stream;
+        var kernel = ilgpu.Accelerator.LoadKernel<ArrayView<float>, ArrayView<float>, int, int, int, int>(ElementwiseKernels.SplitColumns);
+        var cfg = GpuBuffers.Cfg1D(dstN);
+        using var srcBuf = ilgpu.Allocate1D(srcN);
+        using var dstBuf = ilgpu.Allocate1D(dstN);
+        srcBuf.CopyFromCPU(src);
+        var srcView = srcBuf.View;
+        var dstView = dstBuf.View;
+
+        nint ssrc = silk.Allocate(srcN); buffers.Add(ssrc);
+        nint sdst = silk.Allocate(dstN); buffers.Add(sdst);
+        silk.Upload(ssrc, src);
+
+        return Measure(
+            SilkKernels.SplitColumns, $"modernbert part{part}", requireBytes: true,
+            () => { kernel(stream, cfg, srcView, dstView, rows, blockCols, parts, part); ilgpu.Synchronize(); },
+            () => dstBuf.AsContiguous().GetAsArray(),
+            () =>
+            {
+                silk.SetBuffer(SilkKernels.SplitColumns, 0, ssrc);
+                silk.SetBuffer(SilkKernels.SplitColumns, 1, sdst);
+                silk.SetUInt32(SilkKernels.SplitColumns, 2, (uint)rows);
+                silk.SetUInt32(SilkKernels.SplitColumns, 3, (uint)blockCols);
+                silk.SetUInt32(SilkKernels.SplitColumns, 4, parts);
+                silk.SetUInt32(SilkKernels.SplitColumns, 5, part);
+                RunLinear(silk, SilkKernels.SplitColumns, dstN);
+            },
+            () => silk.Download(sdst, dstN));
+    }
+
+    static Leg MeasureLayerNorm(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int cols, float eps)
+    {
+        int n = rows * cols;
+        uint seed = 0x1A7E0001u;
+        var x = new float[n];
+        var gamma = new float[cols];
+        var beta = new float[cols];
+        for (int i = 0; i < n; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < cols; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < cols; i++) beta[i] = GemmBenchmark.NextUniformF(ref seed);
+
+        var stream = ilgpu.Stream;
+        var kernel = ilgpu.Accelerator.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float>(
+            ElementwiseKernels.LayerNorm1D);
+        var cfg = GpuBuffers.Cfg1D(rows);
+        using var xBuf = ilgpu.Allocate1D(n);
+        using var gammaBuf = ilgpu.Allocate1D(cols);
+        using var betaBuf = ilgpu.Allocate1D(cols);
+        using var yBuf = ilgpu.Allocate1D(n);
+        xBuf.CopyFromCPU(x);
+        gammaBuf.CopyFromCPU(gamma);
+        betaBuf.CopyFromCPU(beta);
+        var xView = xBuf.View;
+        var gammaView = gammaBuf.View;
+        var betaView = betaBuf.View;
+        var yView = yBuf.View;
+
+        nint sx = silk.Allocate(n); buffers.Add(sx);
+        nint sg = silk.Allocate(cols); buffers.Add(sg);
+        nint sb = silk.Allocate(cols); buffers.Add(sb);
+        nint sy = silk.Allocate(n); buffers.Add(sy);
+        silk.Upload(sx, x);
+        silk.Upload(sg, gamma);
+        silk.Upload(sb, beta);
+
+        return Measure(
+            SilkKernels.LayerNorm, $"modernbert r{rows} c{cols}", requireBytes: false,
+            () => { kernel(stream, cfg, xView, gammaView, betaView, yView, rows, cols, eps); ilgpu.Synchronize(); },
+            () => yBuf.AsContiguous().GetAsArray(),
+            () =>
+            {
+                silk.SetBuffer(SilkKernels.LayerNorm, 0, sx);
+                silk.SetBuffer(SilkKernels.LayerNorm, 1, sg);
+                silk.SetBuffer(SilkKernels.LayerNorm, 2, sb);
+                silk.SetBuffer(SilkKernels.LayerNorm, 3, sy);
+                silk.SetUInt32(SilkKernels.LayerNorm, 4, (uint)rows);
+                silk.SetUInt32(SilkKernels.LayerNorm, 5, (uint)cols);
+                silk.SetFloat32(SilkKernels.LayerNorm, 6, eps);
+                RunLinear(silk, SilkKernels.LayerNorm, rows);
+            },
+            () => silk.Download(sy, n));
+    }
+
+    static Leg MeasureRotary(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int numHeads, int headDim)
+    {
+        int half = headDim / 2;
+        int n = rows * numHeads * headDim;
+        int table = rows * half;
+        uint seed = 0x20FE0001u;
+        var x = new float[n];
+        var cos = new float[table];
+        var sin = new float[table];
+        var pos = new int[rows];
+        for (int i = 0; i < n; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < table; i++) cos[i] = GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < table; i++) sin[i] = GemmBenchmark.NextUniformF(ref seed);
+        for (int i = 0; i < rows; i++) pos[i] = i;
+
+        int work = rows * numHeads * half;
+        var stream = ilgpu.Stream;
+        var kernel = ilgpu.Accelerator.LoadKernel<ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            ElementwiseKernels.Rotary);
+        var cfg = GpuBuffers.Cfg1D(work);
+        using var xBuf = ilgpu.Allocate1D(n);
+        using var posBuf = GpuBuffers.AllocInt(ilgpu.Accelerator, rows);
+        using var cosBuf = ilgpu.Allocate1D(table);
+        using var sinBuf = ilgpu.Allocate1D(table);
+        using var yBuf = ilgpu.Allocate1D(n);
+        xBuf.CopyFromCPU(x);
+        posBuf.CopyFromCPU(pos);
+        cosBuf.CopyFromCPU(cos);
+        sinBuf.CopyFromCPU(sin);
+        var xView = xBuf.View;
+        var posView = posBuf.View;
+        var cosView = cosBuf.View;
+        var sinView = sinBuf.View;
+        var yView = yBuf.View;
+
+        nint sx = silk.Allocate(n); buffers.Add(sx);
+        nint spos = silk.AllocateBytes((ulong)rows * sizeof(int)); buffers.Add(spos);
+        nint scos = silk.Allocate(table); buffers.Add(scos);
+        nint ssin = silk.Allocate(table); buffers.Add(ssin);
+        nint sy = silk.Allocate(n); buffers.Add(sy);
+        silk.Upload(sx, x);
+        silk.Upload(spos, pos);
+        silk.Upload(scos, cos);
+        silk.Upload(ssin, sin);
+
+        return Measure(
+            SilkKernels.Rotary, $"modernbert h{numHeads} d{headDim}", requireBytes: true,
+            () => { kernel(stream, cfg, xView, posView, cosView, sinView, yView, rows, numHeads, headDim); ilgpu.Synchronize(); },
+            () => yBuf.AsContiguous().GetAsArray(),
+            () =>
+            {
+                silk.SetBuffer(SilkKernels.Rotary, 0, sx);
+                silk.SetBuffer(SilkKernels.Rotary, 1, spos);
+                silk.SetBuffer(SilkKernels.Rotary, 2, scos);
+                silk.SetBuffer(SilkKernels.Rotary, 3, ssin);
+                silk.SetBuffer(SilkKernels.Rotary, 4, sy);
+                silk.SetUInt32(SilkKernels.Rotary, 5, (uint)rows);
+                silk.SetUInt32(SilkKernels.Rotary, 6, (uint)numHeads);
+                silk.SetUInt32(SilkKernels.Rotary, 7, (uint)headDim);
+                RunLinear(silk, SilkKernels.Rotary, work);
+            },
+            () => silk.Download(sy, n));
+    }
+
+    static Leg MeasureGeGlu(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int intermediate)
+    {
+        int srcN = rows * 2 * intermediate;
+        int dstN = rows * intermediate;
+        uint seed = 0x6E610001u;
+        var x = new float[srcN];
+        for (int i = 0; i < srcN; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+
+        var stream = ilgpu.Stream;
+        var kernel = ilgpu.Accelerator.LoadKernel<ArrayView<float>, ArrayView<float>, int, int>(ElementwiseKernels.GeGlu);
+        var cfg = GpuBuffers.Cfg1D(dstN);
+        using var xBuf = ilgpu.Allocate1D(srcN);
+        using var yBuf = ilgpu.Allocate1D(dstN);
+        xBuf.CopyFromCPU(x);
+        var xView = xBuf.View;
+        var yView = yBuf.View;
+
+        nint sx = silk.Allocate(srcN); buffers.Add(sx);
+        nint sy = silk.Allocate(dstN); buffers.Add(sy);
+        silk.Upload(sx, x);
+
+        return Measure(
+            SilkKernels.GeGlu, $"modernbert i{intermediate}", requireBytes: false,
+            () => { kernel(stream, cfg, xView, yView, rows, intermediate); ilgpu.Synchronize(); },
+            () => yBuf.AsContiguous().GetAsArray(),
+            () =>
+            {
+                silk.SetBuffer(SilkKernels.GeGlu, 0, sx);
+                silk.SetBuffer(SilkKernels.GeGlu, 1, sy);
+                silk.SetUInt32(SilkKernels.GeGlu, 2, (uint)rows);
+                silk.SetUInt32(SilkKernels.GeGlu, 3, (uint)intermediate);
+                RunLinear(silk, SilkKernels.GeGlu, dstN);
+            },
+            () => silk.Download(sy, dstN));
+    }
+
+    static void RunLinear(SilkRuntime silk, string kernel, int total)
+        => silk.Run(
+            kernel,
+            [(nuint)SilkKernels.LinearGlobal(total)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+
     // ── measurement + verdict ─────────────────────────────────────
 
     static Leg Measure(
@@ -702,7 +1081,7 @@ internal static class SilkKernelsGate
         int requiredByte = legs.Count(l => l.RequireBytes && ByteDiffs(l.Actual, l.Reference) != 0);
         int numeric = legs.Count(l => !l.RequireBytes && WorstRatio(l.Actual, l.Reference) > 1.0);
         if (requiredByte > 0)
-            Console.WriteLine($"Byte-identity FAIL — {requiredByte} of the {legs.Count(l => l.RequireBytes)} required GEMM cells differ from ILGPU; the accumulation order or the contraction changed (a design bug, not rounding).");
+            Console.WriteLine($"Byte-identity FAIL — {requiredByte} of the {legs.Count(l => l.RequireBytes)} required cells differ from ILGPU; the accumulation order or the contraction changed (a design bug, not rounding).");
         if (numeric > 0)
             Console.WriteLine($"Numeric FAIL — {numeric} cells exceed {Bound:E0} * (1 + |ilgpu|).");
         return failures;

@@ -1,0 +1,437 @@
+namespace Nivara.Samples.Gpu;
+
+/// <summary>
+/// Laya's decision head on the Silk runtime, operation for operation with
+/// <see cref="LayaHeadGpuRunner"/>. Norms are biased and use eps 1e-5, not the encoder's.
+/// The four act-head features stay on <see cref="LayaHeadScoring"/>.
+/// </summary>
+public sealed class SilkLayaHeadGpuRunner : IDisposable
+{
+    readonly SilkRuntime runtime;
+    readonly int hiddenDim;
+    readonly int numHeads;
+    readonly int headDim;
+    readonly int intermediateDim;
+    readonly int actClassCount;
+    readonly int actHidden;
+    readonly float eps;
+    readonly float scale;
+
+    readonly nint typeEmb;
+    readonly nint scorerNormW;
+    readonly nint scorerNormB;
+    readonly nint scorerHiddenW;
+    readonly nint scorerHiddenB;
+    readonly nint scorerOutW;
+    readonly nint scorerOutB;
+    readonly nint actInW;
+    readonly nint actInB;
+    readonly nint actOutW;
+    readonly nint actOutB;
+    readonly LayerWeights[] layers;
+    readonly nint pooledIds;
+
+    SilkRuntime.SilkBuffer normed;
+    SilkRuntime.SilkBuffer qkv;
+    SilkRuntime.SilkBuffer context;
+    SilkRuntime.SilkBuffer projected;
+    SilkRuntime.SilkBuffer ffnIn;
+    SilkRuntime.SilkBuffer ffnOut;
+    SilkRuntime.SilkBuffer markerRows;
+    SilkRuntime.SilkBuffer markerScored;
+    SilkRuntime.SilkBuffer logits;
+    SilkRuntime.SilkBuffer actRow;
+    SilkRuntime.SilkBuffer actHiddenBuf;
+    SilkRuntime.SilkBuffer actLogits;
+    SilkRuntime.SilkBuffer maskBuf;
+    SilkRuntime.SilkBuffer markerIds;
+
+    int[] markerIdHost = [];
+
+    public SilkLayaHeadGpuRunner(
+        SilkRuntime runtime,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        int headLayerCount = 2,
+        int actClassCount = 2)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(tensors);
+        if (headLayerCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(headLayerCount), headLayerCount, "headLayerCount cannot be negative");
+        if (actClassCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(actClassCount), actClassCount, "actClassCount must be positive");
+
+        this.runtime = runtime;
+        this.actClassCount = actClassCount;
+
+        if (!tensors.TryGetValue("type_emb.weight", out var typeWeight))
+            throw new KeyNotFoundException(
+                "Missing tensor: type_emb.weight. A stock encoder checkpoint is not a Laya decision " +
+                "model; the head is what makes it one.");
+        hiddenDim = typeWeight.Shape[1];
+        if (typeWeight.Shape[0] != LayaDecisionHead<float>.QuestionTypeCount)
+            throw new ArgumentException(
+                $"type_emb.weight has {typeWeight.Shape[0]} rows, expected " +
+                $"{LayaDecisionHead<float>.QuestionTypeCount} question types.", nameof(tensors));
+
+        numHeads = Math.Max(1, hiddenDim / LayaDecisionHead<float>.HeadDimTarget);
+        if (hiddenDim % numHeads != 0)
+            throw new ArgumentException(
+                $"hiddenSize {hiddenDim} does not divide into {numHeads} heads at " +
+                $"{LayaDecisionHead<float>.HeadDimTarget} wide.", nameof(tensors));
+        headDim = hiddenDim / numHeads;
+        intermediateDim = 4 * hiddenDim;
+        actHidden = LayaDecisionHead<float>.ActHeadHidden;
+        eps = 1e-5f;
+        scale = 1f / MathF.Sqrt(headDim);
+        runtime.EnsureAttentionLocalMemory(headDim);
+
+        try
+        {
+            typeEmb = UploadPlain(tensors, "type_emb.weight");
+            scorerNormW = UploadPlain(tensors, "scorer.0.weight");
+            scorerNormB = UploadPlain(tensors, "scorer.0.bias");
+            scorerHiddenW = UploadTransposed(tensors, "scorer.1.weight");
+            scorerHiddenB = UploadPlain(tensors, "scorer.1.bias");
+            scorerOutW = UploadTransposed(tensors, "scorer.3.weight");
+            scorerOutB = UploadPlain(tensors, "scorer.3.bias");
+            actInW = UploadTransposed(tensors, "act_head.0.weight");
+            actInB = UploadPlain(tensors, "act_head.0.bias");
+            actOutW = UploadTransposed(tensors, "act_head.2.weight");
+            actOutB = UploadPlain(tensors, "act_head.2.bias");
+
+            layers = new LayerWeights[headLayerCount];
+            for (int i = 0; i < layers.Length; i++)
+                layers[i] = new LayerWeights(this, tensors, i);
+
+            pooledIds = runtime.Allocate(1);
+            runtime.Upload(pooledIds, new[] { 0 });
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+    }
+
+    public int HiddenSize => hiddenDim;
+
+    public LayaHeadOutput Forward(
+        nint hidden,
+        int rows,
+        LayaQuestionType type,
+        IReadOnlyList<int> markerPositions,
+        int validLength)
+    {
+        ArgumentNullException.ThrowIfNull(markerPositions);
+        if (rows <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rows), $"rows must be non-empty, got {rows}.");
+        if (validLength <= 0 || validLength > rows)
+            throw new ArgumentOutOfRangeException(nameof(validLength), $"validLength must be within [1, {rows}], got {validLength}.");
+        if (markerPositions.Count == 0)
+            throw new ArgumentException(
+                "No marker positions survived. Every option's [MASK] was pushed out by the length " +
+                "budget, so the question does not fit head_max_len.", nameof(markerPositions));
+        if (hidden == 0)
+            throw new ArgumentException("The encoder buffer is empty. Forward the encoder before the head.", nameof(hidden));
+
+        int k = markerPositions.Count;
+        EnsureWorkspace(rows, k);
+
+        int typeOffset = (int)type * hiddenDim;
+        nint typeRow = runtime.CreateSubview(typeEmb, typeOffset, hiddenDim);
+        try
+        {
+            LaunchAddBias(hidden, typeRow, hidden, rows, hiddenDim);
+        }
+        finally
+        {
+            runtime.Release(typeRow);
+        }
+
+        if (layers.Length > 0)
+        {
+            runtime.Upload(maskBuf.Handle, LayaHeadScoring.PrefixMask(rows, validLength));
+            nint q = runtime.CreateSubview(qkv.Handle, 0, rows * hiddenDim);
+            nint kv = runtime.CreateSubview(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
+            nint v = runtime.CreateSubview(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            try
+            {
+                for (int i = 0; i < layers.Length; i++)
+                {
+                    LayerWeights w = layers[i];
+                    LaunchLayerNorm(hidden, w.Norm1W, w.Norm1B, normed.Handle, rows);
+                    LaunchGemm(SilkKernels.GemmQkv, normed.Handle, w.Wqkv, qkv.Handle, w.Bqkv, rows, hiddenDim, 3 * hiddenDim, hiddenDim);
+                    LaunchAttention(q, kv, v, maskBuf.Handle, context.Handle, rows);
+                    LaunchGemm(SilkKernels.GemmBias, context.Handle, w.Wo, projected.Handle, w.Bo, rows, hiddenDim, hiddenDim);
+                    LaunchAdd(hidden, projected.Handle, hidden, rows * hiddenDim);
+                    LaunchLayerNorm(hidden, w.Norm2W, w.Norm2B, normed.Handle, rows);
+                    LaunchGemm(SilkKernels.GemmRelu, normed.Handle, w.W1, ffnIn.Handle, w.B1, rows, hiddenDim, intermediateDim);
+                    LaunchGemm(SilkKernels.GemmBias, ffnIn.Handle, w.W2, ffnOut.Handle, w.B2, rows, intermediateDim, hiddenDim);
+                    LaunchAdd(hidden, ffnOut.Handle, hidden, rows * hiddenDim);
+                }
+            }
+            finally
+            {
+                runtime.Release(q);
+                runtime.Release(kv);
+                runtime.Release(v);
+            }
+        }
+
+        if (markerIdHost.Length < k)
+            markerIdHost = new int[k];
+        for (int i = 0; i < k; i++)
+            markerIdHost[i] = markerPositions[i];
+        runtime.Upload(markerIds.Handle, markerIdHost.AsSpan(0, k));
+        LaunchGather(hidden, markerIds.Handle, markerRows.Handle, k * hiddenDim);
+        LaunchLayerNorm(markerRows.Handle, scorerNormW, scorerNormB, markerScored.Handle, k);
+        LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScored.Handle, scorerHiddenB, k, hiddenDim, hiddenDim);
+        LaunchGemm(SilkKernels.GemmBias, markerScored.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1);
+        float[] logitsHost = runtime.Download(logits.Handle, k);
+
+        double[] probabilities = LayaHeadScoring.Softmax(logitsHost);
+        double[] features = LayaHeadScoring.BuildFeatures(probabilities);
+
+        LaunchGather(hidden, pooledIds, actRow.Handle, hiddenDim);
+        float[] actRowHost = runtime.Download(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
+        for (int i = 0; i < features.Length; i++)
+            actRowHost[hiddenDim + i] = (float)features[i];
+        runtime.Upload(actRow.Handle, actRowHost);
+
+        LaunchGemm(SilkKernels.GemmGelu, actRow.Handle, actInW, actHiddenBuf.Handle, actInB, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden);
+        LaunchGemm(SilkKernels.GemmBias, actHiddenBuf.Handle, actOutW, actLogits.Handle, actOutB, 1, actHidden, actClassCount);
+        float[] actHost = runtime.Download(actLogits.Handle, actClassCount);
+
+        return new LayaHeadOutput
+        {
+            Logits = logitsHost,
+            MarkerProbabilities = probabilities,
+            Features = features,
+            ActionProbability = LayaHeadScoring.Softmax(actHost)[0],
+            ActionClassCount = actClassCount
+        };
+    }
+
+    void EnsureWorkspace(int rows, int markers)
+    {
+        normed = runtime.Ensure(normed, rows * hiddenDim);
+        qkv = runtime.Ensure(qkv, rows * 3 * hiddenDim);
+        context = runtime.Ensure(context, rows * hiddenDim);
+        projected = runtime.Ensure(projected, rows * hiddenDim);
+        ffnIn = runtime.Ensure(ffnIn, rows * intermediateDim);
+        ffnOut = runtime.Ensure(ffnOut, rows * hiddenDim);
+        markerRows = runtime.Ensure(markerRows, markers * hiddenDim);
+        markerScored = runtime.Ensure(markerScored, markers * hiddenDim);
+        logits = runtime.Ensure(logits, markers);
+        actRow = runtime.Ensure(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
+        actHiddenBuf = runtime.Ensure(actHiddenBuf, actHidden);
+        actLogits = runtime.Ensure(actLogits, actClassCount);
+        maskBuf = runtime.Ensure(maskBuf, rows);
+        markerIds = runtime.Ensure(markerIds, markers);
+    }
+
+    void LaunchAddBias(nint x, nint bias, nint y, int rows, int cols)
+    {
+        runtime.SetBuffer(SilkKernels.AddBias, 0, x);
+        runtime.SetBuffer(SilkKernels.AddBias, 1, bias);
+        runtime.SetBuffer(SilkKernels.AddBias, 2, y);
+        runtime.SetUInt32(SilkKernels.AddBias, 3, (uint)rows);
+        runtime.SetUInt32(SilkKernels.AddBias, 4, (uint)cols);
+        RunLinear(SilkKernels.AddBias, rows * cols);
+    }
+
+    void LaunchLayerNorm(nint src, nint gamma, nint beta, nint y, int rows)
+    {
+        runtime.SetBuffer(SilkKernels.LayerNorm, 0, src);
+        runtime.SetBuffer(SilkKernels.LayerNorm, 1, gamma);
+        runtime.SetBuffer(SilkKernels.LayerNorm, 2, beta);
+        runtime.SetBuffer(SilkKernels.LayerNorm, 3, y);
+        runtime.SetUInt32(SilkKernels.LayerNorm, 4, (uint)rows);
+        runtime.SetUInt32(SilkKernels.LayerNorm, 5, (uint)hiddenDim);
+        runtime.SetFloat32(SilkKernels.LayerNorm, 6, eps);
+        RunLinear(SilkKernels.LayerNorm, rows);
+    }
+
+    void LaunchGemm(string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, int? blockWidth = null)
+    {
+        runtime.SetBuffer(kernel, 0, a);
+        runtime.SetBuffer(kernel, 1, b);
+        runtime.SetBuffer(kernel, 2, c);
+        runtime.SetBuffer(kernel, 3, bias);
+        runtime.SetUInt32(kernel, 4, (uint)aRows);
+        runtime.SetUInt32(kernel, 5, (uint)aCols);
+        runtime.SetUInt32(kernel, 6, (uint)bCols);
+        if (blockWidth is int width)
+            runtime.SetUInt32(kernel, 7, (uint)width);
+        runtime.Run(
+            kernel,
+            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
+
+    void LaunchAttention(nint q, nint k, nint v, nint mask, nint output, int seqLen)
+    {
+        runtime.SetBuffer(SilkKernels.Attention, 0, q);
+        runtime.SetBuffer(SilkKernels.Attention, 1, k);
+        runtime.SetBuffer(SilkKernels.Attention, 2, v);
+        runtime.SetBuffer(SilkKernels.Attention, 3, mask);
+        runtime.SetBuffer(SilkKernels.Attention, 4, output);
+        runtime.SetUInt32(SilkKernels.Attention, 5, 1);
+        runtime.SetUInt32(SilkKernels.Attention, 6, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.Attention, 7, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.Attention, 8, (uint)headDim);
+        runtime.SetInt32(SilkKernels.Attention, 9, SilkKernels.GlobalAttentionBand);
+        runtime.SetFloat32(SilkKernels.Attention, 10, scale);
+        runtime.Run(
+            SilkKernels.Attention,
+            [(nuint)SilkKernels.AttentionGlobal(seqLen * numHeads)],
+            [(nuint)SilkKernels.AttentionGroupSize]);
+    }
+
+    void LaunchAdd(nint a, nint b, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Add, 0, a);
+        runtime.SetBuffer(SilkKernels.Add, 1, b);
+        runtime.SetBuffer(SilkKernels.Add, 2, y);
+        runtime.SetUInt32(SilkKernels.Add, 3, (uint)n);
+        RunLinear(SilkKernels.Add, n);
+    }
+
+    void LaunchGather(nint table, nint ids, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.GatherRows, 0, table);
+        runtime.SetBuffer(SilkKernels.GatherRows, 1, ids);
+        runtime.SetBuffer(SilkKernels.GatherRows, 2, y);
+        runtime.SetUInt32(SilkKernels.GatherRows, 3, (uint)n);
+        runtime.SetUInt32(SilkKernels.GatherRows, 4, (uint)hiddenDim);
+        RunLinear(SilkKernels.GatherRows, n);
+    }
+
+    void RunLinear(string kernel, int total)
+        => runtime.Run(
+            kernel,
+            [(nuint)SilkKernels.LinearGlobal(total)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+
+    nint UploadPlain(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
+        => Upload(GpuBuffers.Req(tensors, key, "--silk").Data);
+
+    nint UploadTransposed(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
+        => Upload(GpuBuffers.Transposed(tensors, key, "--silk"));
+
+    nint Upload(float[] data)
+    {
+        nint buffer = runtime.Allocate(data.Length);
+        try
+        {
+            runtime.Upload(buffer, data);
+            return buffer;
+        }
+        catch
+        {
+            runtime.Release(buffer);
+            throw;
+        }
+    }
+
+    public void Dispose()
+    {
+        Release(typeEmb);
+        Release(scorerNormW);
+        Release(scorerNormB);
+        Release(scorerHiddenW);
+        Release(scorerHiddenB);
+        Release(scorerOutW);
+        Release(scorerOutB);
+        Release(actInW);
+        Release(actInB);
+        Release(actOutW);
+        Release(actOutB);
+        Release(pooledIds);
+        if (layers is not null)
+        {
+            foreach (LayerWeights w in layers)
+                w?.Dispose();
+        }
+
+        Release(normed);
+        Release(qkv);
+        Release(context);
+        Release(projected);
+        Release(ffnIn);
+        Release(ffnOut);
+        Release(markerRows);
+        Release(markerScored);
+        Release(logits);
+        Release(actRow);
+        Release(actHiddenBuf);
+        Release(actLogits);
+        Release(maskBuf);
+        Release(markerIds);
+    }
+
+    void Release(nint buffer) => runtime.Release(buffer);
+
+    void Release(SilkRuntime.SilkBuffer buffer) => runtime.Release(buffer.Handle);
+
+    sealed class LayerWeights : IDisposable
+    {
+        readonly SilkRuntime runtime;
+        public readonly nint Norm1W;
+        public readonly nint Norm1B;
+        public readonly nint Wqkv;
+        public readonly nint Bqkv;
+        public readonly nint Wo;
+        public readonly nint Bo;
+        public readonly nint Norm2W;
+        public readonly nint Norm2B;
+        public readonly nint W1;
+        public readonly nint B1;
+        public readonly nint W2;
+        public readonly nint B2;
+
+        public LayerWeights(SilkLayaHeadGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, int index)
+        {
+            runtime = owner.runtime;
+            try
+            {
+                string prefix = $"head.layers.{index}";
+                string attn = $"{prefix}.self_attn";
+                Norm1W = owner.UploadPlain(tensors, $"{prefix}.norm1.weight");
+                Norm1B = owner.UploadPlain(tensors, $"{prefix}.norm1.bias");
+                Wqkv = owner.UploadTransposed(tensors, $"{attn}.in_proj_weight");
+                Bqkv = owner.UploadPlain(tensors, $"{attn}.in_proj_bias");
+                Wo = owner.UploadTransposed(tensors, $"{attn}.out_proj.weight");
+                Bo = owner.UploadPlain(tensors, $"{attn}.out_proj.bias");
+                Norm2W = owner.UploadPlain(tensors, $"{prefix}.norm2.weight");
+                Norm2B = owner.UploadPlain(tensors, $"{prefix}.norm2.bias");
+                W1 = owner.UploadTransposed(tensors, $"{prefix}.linear1.weight");
+                B1 = owner.UploadPlain(tensors, $"{prefix}.linear1.bias");
+                W2 = owner.UploadTransposed(tensors, $"{prefix}.linear2.weight");
+                B2 = owner.UploadPlain(tensors, $"{prefix}.linear2.bias");
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            runtime.Release(Norm1W);
+            runtime.Release(Norm1B);
+            runtime.Release(Wqkv);
+            runtime.Release(Bqkv);
+            runtime.Release(Wo);
+            runtime.Release(Bo);
+            runtime.Release(Norm2W);
+            runtime.Release(Norm2B);
+            runtime.Release(W1);
+            runtime.Release(B1);
+            runtime.Release(W2);
+            runtime.Release(B2);
+        }
+    }
+}

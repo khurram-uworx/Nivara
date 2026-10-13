@@ -14,8 +14,11 @@ namespace Nivara.Samples.Gpu;
 /// </para>
 ///
 /// <para>
-/// <b>Bit-identity.</b> The three GEMM variants share one accumulation body — the
-/// <c>GEMM_ROW4_ACCUMULATE</c> macro — so their f32 accumulation text cannot diverge. Its inner
+/// <b>Bit-identity.</b> The Row4 GEMM family shares one accumulation body — the
+/// <c>GEMM_ROW4_ACCUMULATE</c> macro — so their f32 accumulation text cannot diverge.
+/// <c>gemm_row4</c> stores that accumulator and adds no bias; the epilogues add theirs
+/// after the macro. A zero bias passed to an epilogue would be <c>acc + 0.0f</c>, which
+/// is not the plain store. Its inner
 /// product is a plain <c>acc += a * b</c>, and <c>#pragma OPENCL FP_CONTRACT OFF</c> (uppercase;
 /// the lowercase spelling the spec also admits is not honoured here) keeps it from being fused,
 /// because that is what ILGPU produces: the gate replays each dot product on the host as
@@ -59,6 +62,13 @@ internal static class SilkKernels
     public const string EmbedSum = "embed_sum";
     public const string GatherRows = "gather_rows";
     public const string LayerNormResidual = "layer_norm_residual";
+    public const string LayerNorm = "layer_norm";
+    public const string Add = "add";
+    public const string AddBias = "add_bias";
+    public const string SplitColumns = "split_columns";
+    public const string Rotary = "rotary";
+    public const string GeGlu = "geglu";
+    public const string Gemm = "gemm_row4";
     public const string GemmBias = "gemm_row4_bias";
     public const string GemmRelu = "gemm_row4_relu";
     public const string GemmGelu = "gemm_row4_gelu";
@@ -67,7 +77,10 @@ internal static class SilkKernels
 
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
-        [EmbedSum, GatherRows, LayerNormResidual, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention];
+    [
+        EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
+        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
+    ];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
     public static int GemmGlobalRows(int aRows) => RoundUp(aRows, GemmTileSize);
@@ -177,9 +190,126 @@ internal static class SilkKernels
                 y[off + c] = (a[off + c] + b[off + c] - mean) * invStd * gamma[c] + beta[c];
         }
 
-        /* Shared accumulation for the three Row4 GEMM epilogues. Deliberately one macro: the
-           byte-identity claim rests on all three adding the same f32 values to the same
-           accumulator in the same order, so the text must not be able to drift between them.
+        /* LayerNorm over x, not over a+b. A zero partner in layer_norm_residual is a different
+           reduction (a[c]+b[c]) and is not this kernel. y may alias x: the owning work item
+           finishes both reductions before it writes the row. */
+        __kernel void layer_norm(
+            __global const float* x,
+            __global const float* gamma,
+            __global const float* beta,
+            __global float* y,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint r = get_global_id(0);
+            if (r >= rows) return;
+            uint off = r * cols;
+            float sum = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+                sum += x[off + c];
+            float mean = sum / (float)cols;
+            float sumSq = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+            {
+                float d = x[off + c] - mean;
+                sumSq += d * d;
+            }
+            float invStd = 1.0f / sqrt(sumSq / (float)cols + eps);
+            for (uint c = 0; c < cols; ++c)
+                y[off + c] = (x[off + c] - mean) * invStd * gamma[c] + beta[c];
+        }
+
+        /* y may alias a. Each work item reads both inputs before it writes its one element. */
+        __kernel void add(
+            __global const float* a,
+            __global const float* b,
+            __global float* y,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            y[idx] = a[idx] + b[idx];
+        }
+
+        __kernel void add_bias(
+            __global const float* x,
+            __global const float* bias,
+            __global float* y,
+            const uint rows,
+            const uint cols)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * cols) return;
+            y[idx] = x[idx] + bias[idx % cols];
+        }
+
+        /* Row-interleaved [parts] blocks to a dense block. A contiguous sub-view of the source
+           is right for row 0 and wrong for every row after it. */
+        __kernel void split_columns(
+            __global const float* src,
+            __global float* dst,
+            const uint rows,
+            const uint blockCols,
+            const uint parts,
+            const uint part)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * blockCols) return;
+            uint row = idx / blockCols;
+            uint col = idx - row * blockCols;
+            dst[idx] = src[row * blockCols * parts + part * blockCols + col];
+        }
+
+        /* Half-split RoPE. One work item owns both halves of one pair, so y may alias x.
+           cosTab/sinTab are not named cos/sin, and the pair width is not named half:
+           those are OpenCL builtins or type names, and this driver rejects the program. */
+        __kernel void rotary(
+            __global const float* x,
+            __global const int* posIds,
+            __global const float* cosTab,
+            __global const float* sinTab,
+            __global float* y,
+            const uint rows,
+            const uint numHeads,
+            const uint headDim)
+        {
+            uint pair = headDim / 2u;
+            uint idx = get_global_id(0);
+            if (idx >= rows * numHeads * pair) return;
+            uint i = idx % pair;
+            uint rem = idx / pair;
+            uint h = rem % numHeads;
+            uint row = rem / numHeads;
+            uint t = (uint)posIds[row] * pair + i;
+            float c = cosTab[t];
+            float s = sinTab[t];
+            uint b = row * (numHeads * headDim) + h * headDim;
+            float x0 = x[b + i];
+            float x1 = x[b + i + pair];
+            y[b + i] = x0 * c - x1 * s;
+            y[b + i + pair] = x0 * s + x1 * c;
+        }
+
+        /* First half is the GELU, second half is the gate. Reversing them still looks plausible. */
+        __kernel void geglu(
+            __global const float* x,
+            __global float* y,
+            const uint rows,
+            const uint intermediate)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * intermediate) return;
+            uint col = idx % intermediate;
+            uint row = idx / intermediate;
+            uint xBase = row * 2u * intermediate;
+            y[idx] = gelu_exact(x[xBase + col]) * x[xBase + intermediate + col];
+        }
+
+        /* Shared accumulation for the Row4 GEMM family, including the bias-free store.
+           Deliberately one macro: the byte-identity claim rests on every variant adding the
+           same f32 values to the same accumulator in the same order, so the text must not
+           be able to drift between them. The store after the macro is the only difference.
 
            The scratch tile is a private layout: element [i, j] lives at i + j*TILE, so the
            first index is the contiguous one. Only the store/load pairs have to agree on it, and
@@ -235,6 +365,26 @@ internal static class SilkKernels
             uint block = j / blockWidth;
             uint colInBlock = j - block * blockWidth;
             return block * aRows * blockWidth + outRow * blockWidth + colInBlock;
+        }
+
+        /* Bias-free store. Not gemm_row4_bias with a zero bias: acc + 0.0f canonicalizes -0. */
+        __kernel void gemm_row4(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
         }
 
         __kernel void gemm_row4_bias(
