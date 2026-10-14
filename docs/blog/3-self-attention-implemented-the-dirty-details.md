@@ -263,7 +263,7 @@ text ──→ ●tokenizer ──→ token ids [128]
   ScatterHead (32-37), PackHeads (42-46), SoftmaxRows/SoftmaxRow (53-88), SoftmaxBackwardRows (95-116)
 - `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs` — scale (40), ComputeAttention (118-136),
   CreatePaddingMask (138-155)
-- `samples/Nivara.Samples/BertModel.cs` — BertSelfAttention.Forward (65-71), scale (61),
+- `src/Nivara.Extensions/AI/BertModel.cs` — BertSelfAttention.Forward (65-71), scale (61),
   ForwardWithMask mask building (73-93), batched block-diagonal mask (105-149)
 - `samples/NivaraInference/README.md` — fused kernel win (230), benchmark table (218-230)
 

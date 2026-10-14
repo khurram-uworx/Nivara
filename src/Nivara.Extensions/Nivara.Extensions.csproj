@@ -8,7 +8,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
     <PackageVersion>2.0.0-preview</PackageVersion>
-    <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, and AI integration for Nivara</Description>
+    <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, the BERT-family model layer, and the Silk OpenCL GPU backend for Nivara</Description>
     <PackageReleaseNotes>v1.4.0: Public ScanAsQueryFrame lazy streaming factories for CSV/JSON/Parquet; genuinely async chunk reads for CSV and JSON lazy sources (JsonRecordStreamReader for true streaming JSON array parsing); Parquet row-group predicate pushdown and chunk-based streaming via ParquetLazySource; CsvOptions.SchemaInferenceRows renamed to SchemaInferenceRecords; streaming budget tracker and window overlap buffer support; Streamix reactive streaming scenarios (fault-tolerant, windowed analytics, online AutoDiff learning); NivaraFlux bridge (ToFlux, ToFluxRows, ToNivaraFrameAsync); various streaming and execution fixes. Existing surface: Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure, immutable options with With() builders.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>

@@ -4,6 +4,20 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ## [Unreleased]
 
+### Changed
+
+- **Silk OpenCL backend and the BERT-family model layer now ship from `Nivara.Extensions`** — the
+  hand-authored OpenCL stack (`SilkKernels`, `SilkRuntime`, the three runners, the two sessions) moved
+  from `samples/Nivara.Samples/Gpu/` to `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`), and
+  the model types it shares with the CPU and ILGPU paths (`BertModel`, `ModernBertModel`,
+  `LayaHeadModel`, `LayaHeadScoring`, `LayaPromptBuilder`, `LayaCalibration`, `Gpt2BpeTokenizer`,
+  `SafeTensorsLoader`, `StateDictLoader`) moved to `src/Nivara.Extensions/AI/` (`namespace Nivara.AI`).
+  The seam (`IBertEncoderRunner`, `IModernBertGpuSession`, `ILayaGpuSession`, the open delegates)
+  lives there too; the ILGPU sessions stay in samples and implement it. `SilkLauncher` owns the
+  duplicated dispatch, and `WeightLayout` owns `Transposed` / `QkvPacked` / `Req` (`GpuBuffers`
+  delegates). `Silk.NET.OpenCL` 2.23.0 is now a `Nivara.Extensions` dependency; samples no longer pins
+  it. `SilkKernels` stays `internal`. CLI flags are unchanged.
+
 ### Added
 
 - **`--seq` for the PyTorch side of the ModernBERT benchmark (#477)** — `Python/modernbert_benchmark.py`

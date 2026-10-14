@@ -27,7 +27,7 @@
 
 - The attention stage routes information *between* tokens; the FFN transforms each token
   *independently* — no cross-token mixing, each of the 128 rows goes through the same
-  two Linear layers (`BertLayer.Forward`, `samples/Nivara.Samples/BertModel.cs:177-189`):
+  two Linear layers (`BertLayer.Forward`, `src/Nivara.Extensions/AI/BertModel.cs:177-189`):
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -282,7 +282,7 @@ running example lands on one cosine — cat vs dog high, cat vs programming low.
 
 ## Source references
 
-- `samples/Nivara.Samples/BertModel.cs` — BertLayer.Forward (177-203), BertConfig (8-16),
+- `src/Nivara.Extensions/AI/BertModel.cs` — BertLayer.Forward (177-203), BertConfig (8-16),
   MiniLMDistilled.Forward (338-343), L2Normalize (376-397)
 - `samples/Nivara.Samples/DistilBertModel.cs` — classification head (27-39), ExtractClsTokens (44-50)
 - `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` — Relu (879-905), Gelu tanh (907-946), GeluExact (948-976)

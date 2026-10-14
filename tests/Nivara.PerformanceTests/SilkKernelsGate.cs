@@ -6,7 +6,7 @@ namespace Nivara.PerformanceTests;
 
 /// <summary>
 /// The <c>--silk-kernels</c> gate: runs the OpenCL C BERT-family kernels
-/// (samples/Nivara.Samples/Gpu/Nivara.Silk.SilkKernels.cs) that the <c>--silk</c> sample path uses against the
+/// (src/Nivara.Extensions/Silk/SilkKernels.cs) that the <c>--silk</c> sample path uses against the
 /// incumbent ILGPU kernels of the same shape, on the same inputs, at each model's real dimensions
 /// (MiniLM and DistilBERT) — and answers the one question that decides whether the Silk path is
 /// worth building out: do the two backends compute the same numbers?

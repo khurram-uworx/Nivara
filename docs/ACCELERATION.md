@@ -181,7 +181,7 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   A checkpoint whose head weights the kernel set cannot serve is rejected at runner construction
   rather than answered with the encoder hidden state, which would be silent wrong output.
   `modernbert --silk benchmark` accepts the same lengths as `--ilgpu`, including 4096.
-- **The kernel set** is the original eight plus seven ports in `samples/Nivara.Samples/Gpu/SilkKernels.cs`:
+- **The kernel set** is the original eight plus seven ports in `src/Nivara.Extensions/Silk/SilkKernels.cs`:
   `embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4 GEMM epilogues
   (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`), `batched_attention`, and
   the ModernBERT/Laya ports `layer_norm`, `add`, `add_bias`, `gemm_row4` (bias-free store),
@@ -191,14 +191,17 @@ Silk.NET leg probes — on a real model rather than on microkernels.
   f32 text cannot diverge. `#pragma OPENCL FP_CONTRACT OFF` is load-bearing: ILGPU does not fuse
   `acc += a*b`, the OpenCL driver fuses by default, so without the pragma the Silk side computes the
   fma model and diverges at rounding scale. Detail in [SILK.md §11](SILK.md).
-- **Host side** is `SilkKernels.cs` (source + geometry), `SilkRuntime.cs` (device select, in-process
-  compile with the build log decoded on failure, buffers, dispatch) and `SilkBertEncoderRunner.cs`.
-  ModernBERT and Laya have their own runners (`SilkModernBertGpuRunner`, `SilkLayaHeadGpuRunner`)
-  behind a session, so those mode bodies are also written once. The BERT runners implement
-  `IBertEncoderRunner`, so the CLI's BERT-family entry points are written once
-  and pick a backend at construction; the weight-layout maths (`GpuBuffers`) and the launch geometry
-  (`SilkKernels`) are shared rather than re-derived per backend. The DistilBERT support is a
-  `BertGpuNaming` constructor parameter on the same runner, not a fork.
+- **Host side** lives in `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`): `SilkKernels.cs`
+  (source + geometry), `SilkRuntime.cs` (device select, in-process compile with the build log decoded
+  on failure, buffers, dispatch), `SilkLauncher.cs` (the shared dispatch) and
+  `SilkBertEncoderRunner.cs`. ModernBERT and Laya have their own runners
+  (`SilkModernBertGpuRunner`, `SilkLayaHeadGpuRunner`) behind a session, so those mode bodies are
+  also written once. The seam (`IBertEncoderRunner`, the session interfaces, the open delegates) is
+  `Nivara.AI` (`src/Nivara.Extensions/AI/GpuSeam.cs`); the ILGPU sessions stay in samples and
+  implement it, so the CLI's entry points are written once and pick a backend at construction. The
+  weight-layout maths (`WeightLayout`; `GpuBuffers` delegates) and the launch geometry
+  (`SilkKernels`, dispatched through `SilkLauncher`) are shared rather than re-derived per backend.
+  The DistilBERT support is a `BertGpuNaming` constructor parameter on the same runner, not a fork.
 - **q/k/v reach attention as read-only sub-buffers** (`clCreateSubBuffer`, the OpenCL analogue of
   ILGPU's `SubView`), created once per forward, so the already-gated fused attention kernel is
   untouched.

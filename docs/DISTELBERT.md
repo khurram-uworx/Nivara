@@ -140,7 +140,8 @@ from ~113–119 to **44–48** per forward. All parity gates stayed byte-identic
 ### `--silk` (Silk.NET, hand-authored OpenCL C)
 
 The same three models also run through the second backend: hand-authored OpenCL C
-(`Silk.NET.OpenCL` 2.23.0) compiled in-process by the driver, in `SilkBertEncoderRunner`.
+(`Silk.NET.OpenCL` 2.23.0) compiled in-process by the driver, in
+`src/Nivara.Extensions/Silk/SilkBertEncoderRunner.cs`.
 
 - **Encoder + head, eight kernels.** `embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4
   GEMM epilogues (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`) and

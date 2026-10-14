@@ -123,7 +123,7 @@ Live demo: `dotnet run --project samples/NivaraInference -c Release -- minilm si
 | `vocab_size` | 30522 | token lookup table row count |
 | `layer_norm_eps` | 1e-12 | **not** the PyTorch default 1e-5 |
 
-Defaults mirror `BertConfig` (`samples/Nivara.Samples/BertModel.cs:8-16`).
+Defaults mirror `BertConfig` (`src/Nivara.Extensions/AI/BertModel.cs:8-16`).
 
 **Parameter budget (~22.6M, computed from config):**
 
@@ -218,7 +218,7 @@ dotnet run --project samples/NivaraInference -c Release -- minilm compare
 
 ## Source files referenced throughout
 
-- Model: `samples/Nivara.Samples/BertModel.cs` (BertConfig, BertSelfAttention, BertLayer, BertEncoder, MiniLMDistilled, MiniLMTokenizer)
+- Model: `src/Nivara.Extensions/AI/BertModel.cs` (BertConfig, BertSelfAttention, BertLayer, BertEncoder, MiniLMDistilled, MiniLMTokenizer)
 - Modules: `src/Nivara/AutoDiff/Nn/{Embedding,Linear,LayerNorm,LayerNormKernel,MultiheadAttention,Activation}.cs`
 - Ops: `src/Nivara/AutoDiff/Operations/{ReverseGradOperations,AttentionKernels}.cs`
 - Tensors: `src/Nivara/AutoDiff/ReverseGradTensor.cs`, `src/Nivara/Tensors/NivaraTensorExtensions.cs` (GELU kernels)

@@ -33,6 +33,8 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 - **Fused expressions:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs`
 - **Frame interop:** `src/Nivara/NivaraFrame.cs` (`ToTensors`, `TryGetRowMajorSpan`, `CopyToRowMajor`, `AsQueryFrame()`), `src/Nivara/Query/QueryFrame.cs` (`AsStream`, `CollectAsync`, lazy factories)
 - **AutoDiff:** See [docs/AUTODIFF.md](AUTODIFF.md) for all operations, modules, optimizers, forward-mode AD, and DataFrame integration. Core: `src/Nivara/AutoDiff/` (ReverseGradTensor, GradNode, ReverseGradOperations, ForwardGradOperations, Optimizer/, Nn/, Training/, Serialization/)
+- **Silk (OpenCL GPU backend):** `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`) — `SilkKernels` (internal), `SilkRuntime`, `SilkLauncher` (internal typed dispatch), `WeightLayout` (`Transposed`/`QkvPacked`/`Req`), the three runners and the two sessions. ILGPU stays in `samples/Nivara.Samples/Gpu/` and delegates the shared host math to `WeightLayout`. See [docs/SILK.md](docs/SILK.md).
+- **Model layer (BERT family, ModernBERT, Laya):** `src/Nivara.Extensions/AI/` (`namespace Nivara.AI`) — `BertModel`, `ModernBertModel`, `LayaHeadModel`, `LayaHeadScoring`, `LayaPromptBuilder`, `LayaCalibration`, `Gpt2BpeTokenizer`, `SafeTensorsLoader`, `StateDictLoader`, and the GPU seam (`GpuSeam.cs`: `IBertEncoderRunner`, the session interfaces, the open delegates).
 - **Factory:** `src/Nivara/Storage/ColumnStorageFactory.cs`, `src/Nivara/Tensors/NivaraTensorExtensions.cs`
 
 ## Key rules for AI Agents

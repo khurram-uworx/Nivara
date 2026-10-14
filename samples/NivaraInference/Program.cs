@@ -256,7 +256,7 @@ class Program
             Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
-            Console.WriteLine("                     stack (samples/Nivara.Samples/Gpu/SilkKernels.cs). 'minilm' /");
+            Console.WriteLine("                     stack (src/Nivara.Extensions/Silk/SilkKernels.cs). 'minilm' /");
             Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
             Console.WriteLine("                     default/benchmark/compare modes. Competing with --ilgpu, so the");
             Console.WriteLine("                     two are mutually exclusive.");
