@@ -1,11 +1,11 @@
 using Nivara.AI;
 using Nivara.AutoDiff.Nn;
 
-namespace Nivara.Samples.Gpu;
+namespace Nivara.Silk;
 
 /// <summary>
 /// ModernBERT encoder forward through the hand-authored OpenCL kernels, operation for operation
-/// with <see cref="ModernBertGpuRunner"/>. <paramref name="prefix"/> is <c>"model"</c> for the
+/// with <c>ModernBertGpuRunner</c>. <paramref name="prefix"/> is <c>"model"</c> for the
 /// stock checkpoint and <c>"encoder"</c> for Laya.
 /// </summary>
 public sealed class SilkModernBertGpuRunner : IDisposable
@@ -219,128 +219,36 @@ public sealed class SilkModernBertGpuRunner : IDisposable
     }
 
     void LaunchGather(nint table, nint ids, nint y, int n)
-    {
-        runtime.SetBuffer(SilkKernels.GatherRows, 0, table);
-        runtime.SetBuffer(SilkKernels.GatherRows, 1, ids);
-        runtime.SetBuffer(SilkKernels.GatherRows, 2, y);
-        runtime.SetUInt32(SilkKernels.GatherRows, 3, (uint)n);
-        runtime.SetUInt32(SilkKernels.GatherRows, 4, (uint)hiddenDim);
-        RunLinear(SilkKernels.GatherRows, n);
-    }
+        => SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
 
     void LaunchLayerNorm(nint src, nint gamma, nint beta, nint y, int rows)
-    {
-        runtime.SetBuffer(SilkKernels.LayerNorm, 0, src);
-        runtime.SetBuffer(SilkKernels.LayerNorm, 1, gamma);
-        runtime.SetBuffer(SilkKernels.LayerNorm, 2, beta);
-        runtime.SetBuffer(SilkKernels.LayerNorm, 3, y);
-        runtime.SetUInt32(SilkKernels.LayerNorm, 4, (uint)rows);
-        runtime.SetUInt32(SilkKernels.LayerNorm, 5, (uint)hiddenDim);
-        runtime.SetFloat32(SilkKernels.LayerNorm, 6, eps);
-        RunLinear(SilkKernels.LayerNorm, rows);
-    }
+        => SilkLauncher.LayerNorm(runtime, src, gamma, beta, y, rows, hiddenDim, eps);
 
     void LaunchGemm(nint a, nint b, nint c, int aRows, int aCols, int bCols)
-    {
-        runtime.SetBuffer(SilkKernels.Gemm, 0, a);
-        runtime.SetBuffer(SilkKernels.Gemm, 1, b);
-        runtime.SetBuffer(SilkKernels.Gemm, 2, c);
-        runtime.SetUInt32(SilkKernels.Gemm, 3, (uint)aRows);
-        runtime.SetUInt32(SilkKernels.Gemm, 4, (uint)aCols);
-        runtime.SetUInt32(SilkKernels.Gemm, 5, (uint)bCols);
-        runtime.Run(
-            SilkKernels.Gemm,
-            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
-            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
-    }
+        => SilkLauncher.Gemm(runtime, a, b, c, aRows, aCols, bCols);
 
     void LaunchSplit(nint src, nint dst, int rows, int part)
-    {
-        runtime.SetBuffer(SilkKernels.SplitColumns, 0, src);
-        runtime.SetBuffer(SilkKernels.SplitColumns, 1, dst);
-        runtime.SetUInt32(SilkKernels.SplitColumns, 2, (uint)rows);
-        runtime.SetUInt32(SilkKernels.SplitColumns, 3, (uint)hiddenDim);
-        runtime.SetUInt32(SilkKernels.SplitColumns, 4, 3);
-        runtime.SetUInt32(SilkKernels.SplitColumns, 5, (uint)part);
-        RunLinear(SilkKernels.SplitColumns, rows * hiddenDim);
-    }
+        => SilkLauncher.Split(runtime, src, dst, rows, hiddenDim, 3, part);
 
     void LaunchRotary(nint buffer, nint cos, nint sin, int rows)
-    {
-        runtime.SetBuffer(SilkKernels.Rotary, 0, buffer);
-        runtime.SetBuffer(SilkKernels.Rotary, 1, posIdsBuf.Handle);
-        runtime.SetBuffer(SilkKernels.Rotary, 2, cos);
-        runtime.SetBuffer(SilkKernels.Rotary, 3, sin);
-        runtime.SetBuffer(SilkKernels.Rotary, 4, buffer);
-        runtime.SetUInt32(SilkKernels.Rotary, 5, (uint)rows);
-        runtime.SetUInt32(SilkKernels.Rotary, 6, (uint)numHeads);
-        runtime.SetUInt32(SilkKernels.Rotary, 7, (uint)headDim);
-        RunLinear(SilkKernels.Rotary, rows * numHeads * halfDim);
-    }
+        => SilkLauncher.Rotary(runtime, buffer, posIdsBuf.Handle, cos, sin, rows, numHeads, headDim, halfDim);
 
     void LaunchAttention(nint qBuf, nint kBuf, nint vBuf, nint mask, nint output, int seqLen, int band)
-    {
-        runtime.SetBuffer(SilkKernels.Attention, 0, qBuf);
-        runtime.SetBuffer(SilkKernels.Attention, 1, kBuf);
-        runtime.SetBuffer(SilkKernels.Attention, 2, vBuf);
-        runtime.SetBuffer(SilkKernels.Attention, 3, mask);
-        runtime.SetBuffer(SilkKernels.Attention, 4, output);
-        runtime.SetUInt32(SilkKernels.Attention, 5, 1);
-        runtime.SetUInt32(SilkKernels.Attention, 6, (uint)seqLen);
-        runtime.SetUInt32(SilkKernels.Attention, 7, (uint)numHeads);
-        runtime.SetUInt32(SilkKernels.Attention, 8, (uint)headDim);
-        runtime.SetInt32(SilkKernels.Attention, 9, band);
-        runtime.SetFloat32(SilkKernels.Attention, 10, scale);
-        runtime.Run(
-            SilkKernels.Attention,
-            [(nuint)SilkKernels.AttentionGlobal(seqLen * numHeads)],
-            [(nuint)SilkKernels.AttentionGroupSize]);
-    }
+        => SilkLauncher.Attention(runtime, qBuf, kBuf, vBuf, mask, output, 1, seqLen, numHeads, headDim, band, scale);
 
     void LaunchAdd(nint a, nint b, nint y, int n)
-    {
-        runtime.SetBuffer(SilkKernels.Add, 0, a);
-        runtime.SetBuffer(SilkKernels.Add, 1, b);
-        runtime.SetBuffer(SilkKernels.Add, 2, y);
-        runtime.SetUInt32(SilkKernels.Add, 3, (uint)n);
-        RunLinear(SilkKernels.Add, n);
-    }
+        => SilkLauncher.Add(runtime, a, b, y, n);
 
     void LaunchGeGlu(nint src, nint y, int rows)
-    {
-        runtime.SetBuffer(SilkKernels.GeGlu, 0, src);
-        runtime.SetBuffer(SilkKernels.GeGlu, 1, y);
-        runtime.SetUInt32(SilkKernels.GeGlu, 2, (uint)rows);
-        runtime.SetUInt32(SilkKernels.GeGlu, 3, (uint)intermediateDim);
-        RunLinear(SilkKernels.GeGlu, rows * intermediateDim);
-    }
-
-    void RunLinear(string kernel, int total)
-        => runtime.Run(
-            kernel,
-            [(nuint)SilkKernels.LinearGlobal(total)],
-            [(nuint)SilkKernels.LinearGroupSize]);
+        => SilkLauncher.GeGlu(runtime, src, y, rows, intermediateDim);
 
     nint UploadPlain(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => Upload(GpuBuffers.Req(tensors, key, "--silk").Data);
+        => Upload(WeightLayout.Req(tensors, key, "Silk").Data);
 
     nint UploadTransposed(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => Upload(GpuBuffers.Transposed(tensors, key, "--silk"));
+        => Upload(WeightLayout.Transposed(tensors, key, "Silk"));
 
-    nint Upload(float[] data)
-    {
-        nint buffer = runtime.Allocate(data.Length);
-        try
-        {
-            runtime.Upload(buffer, data);
-            return buffer;
-        }
-        catch
-        {
-            runtime.Release(buffer);
-            throw;
-        }
-    }
+    nint Upload(float[] data) => SilkLauncher.Upload(runtime, data);
 
     public void Dispose()
     {

@@ -6,6 +6,7 @@ using Nivara.Primitives;
 using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Samples.Gpu;
+using Nivara.Silk;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
@@ -600,7 +601,7 @@ class Program
             case "laya":
                 if (useSilk || useGpu)
                 {
-                    OpenLayaSession open = useSilk ? SilkLayaSession.Open : IlgpuLayaSession.Open;
+                    Nivara.AI.OpenLayaSession open = useSilk ? Nivara.Silk.SilkLayaSession.Open : Nivara.Samples.Gpu.IlgpuLayaSession.Open;
                     if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
                     if (compare) return Laya.CompareGpu(tensors, modelDir, open);
                     return Laya.RunGpu(tensors, modelDir, open);
@@ -612,7 +613,7 @@ class Program
             case "modernbert":
                 if (useSilk || useGpu)
                 {
-                    OpenModernBertSession open = useSilk ? SilkModernBertSession.Open : IlgpuModernBertSession.Open;
+                    Nivara.AI.OpenModernBertSession open = useSilk ? Nivara.Silk.SilkModernBertSession.Open : Nivara.Samples.Gpu.IlgpuModernBertSession.Open;
                     if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(tensors, modelDir, open);
                     return ModernBert.RunGpu(tensors, modelDir, open);
@@ -1424,22 +1425,22 @@ class Program
 
     /// <summary>Creates a backend's encoder runner together with the device object whose lifetime
     /// it borrows, so the BERT-family entry points below are written once against
-    /// <see cref="IBertEncoderRunner"/> and pick ILGPU or Silk at construction. <c>naming</c> selects
+    /// <see cref="Nivara.AI.IBertEncoderRunner"/> and pick ILGPU or Silk at construction. <c>naming</c> selects
     /// the checkpoint's weight-key style (MiniLM's BERT-style keys, DistilBERT's <c>distilbert.*</c>),
     /// so the same opener serves every BERT-family model.</summary>
     delegate BertEncoderBackend OpenEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming);
 
     /// <summary>
-    /// An <see cref="IBertEncoderRunner"/> plus the device it borrows. Disposal is runner-then-device
+    /// An <see cref="Nivara.AI.IBertEncoderRunner"/> plus the device it borrows. Disposal is runner-then-device
     /// because the runner releases its buffers through the device.
     /// </summary>
     sealed class BertEncoderBackend : IDisposable
     {
         readonly IDisposable device;
 
-        public IBertEncoderRunner Runner { get; }
+        public Nivara.AI.IBertEncoderRunner Runner { get; }
 
-        public BertEncoderBackend(IDisposable device, IBertEncoderRunner runner)
+        public BertEncoderBackend(IDisposable device, Nivara.AI.IBertEncoderRunner runner)
         {
             this.device = device;
             Runner = runner;
@@ -1457,7 +1458,7 @@ class Program
         var runtime = new IlgpuRuntime();
         try
         {
-            return new BertEncoderBackend(runtime, new BertEncoderGpuRunner(runtime, config, tensors, naming));
+            return new BertEncoderBackend(runtime, new Nivara.Samples.Gpu.BertEncoderGpuRunner(runtime, config, tensors, naming));
         }
         catch
         {
@@ -1468,10 +1469,10 @@ class Program
 
     static BertEncoderBackend OpenSilkEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming)
     {
-        var runtime = new SilkRuntime();
+        var runtime = new Nivara.Silk.SilkRuntime();
         try
         {
-            return new BertEncoderBackend(runtime, new SilkBertEncoderRunner(runtime, config, tensors, naming));
+            return new BertEncoderBackend(runtime, new Nivara.Silk.SilkBertEncoderRunner(runtime, config, tensors, naming));
         }
         catch
         {

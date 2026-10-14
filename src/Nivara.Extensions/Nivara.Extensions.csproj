@@ -18,6 +18,9 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>Nivara.Tests</_Parameter1>
     </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Nivara.PerformanceTests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>
@@ -35,6 +38,7 @@
     <PackageReference Include="CsvHelper" Version="33.1.0" />
     <PackageReference Include="Microsoft.ML" Version="6.0.0-preview.26457.2" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0-preview.26457.2" />
+    <PackageReference Include="Silk.NET.OpenCL" Version="2.23.0" />
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.1.26425.128" />
     <PackageReference Include="Parquet.Net" Version="6.1.1-pre.1" />
   </ItemGroup>

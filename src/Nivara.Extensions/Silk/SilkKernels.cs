@@ -1,14 +1,14 @@
-namespace Nivara.Samples.Gpu;
+namespace Nivara.Silk;
 
 /// <summary>
-/// The OpenCL C kernels the BERT-family encoder needs, authored once and shared by the sample
-/// runner (<c>--silk</c>) and the performance gate (<c>--silk-kernels</c>). The host side lives
+/// The OpenCL C kernels the BERT-family encoder needs, authored once and shared by the Silk
+/// runners and the performance gate that compares them to ILGPU. The host side lives
 /// in <see cref="SilkRuntime"/>; this type is pure data and arithmetic-free geometry so it can
 /// be unit-checked without a device.
 ///
 /// <para>
 /// Each kernel is a port of the ILGPU kernel of the same shape
-/// (<see cref="GemmKernels"/>, <see cref="AttentionKernels"/>, <see cref="ElementwiseKernels"/>)
+/// (<c>GemmKernels</c>, <c>AttentionKernels</c>, <c>ElementwiseKernels</c>)
 /// with the operation order preserved: same K-reduction order (strictly ascending), same tile
 /// geometry, same fused epilogues, so the gate can compare the two backends elementwise.
 /// </para>

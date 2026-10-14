@@ -21,7 +21,7 @@ namespace Nivara.Samples.Gpu;
 /// siblings), so bias and activation no longer dispatch separate kernels (issue #437). Config-
 /// and naming-driven so DistilBERT and MiniLM (BERT-style keys) share the runner.
 /// </summary>
-public sealed class BertEncoderGpuRunner : IBertEncoderRunner
+public sealed class BertEncoderGpuRunner : Nivara.AI.IBertEncoderRunner
 {
     const string PreWKey = "pre_classifier.weight";
     const string PreBKey = "pre_classifier.bias";

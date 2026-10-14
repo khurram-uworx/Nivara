@@ -1,7 +1,7 @@
 using Silk.NET.OpenCL;
 using System.Text;
 
-namespace Nivara.Samples.Gpu;
+namespace Nivara.Silk;
 
 /// <summary>
 /// Host-side OpenCL plumbing for <see cref="SilkKernels"/>: an Intel/AMD GPU is selected (and
@@ -21,7 +21,7 @@ namespace Nivara.Samples.Gpu;
 ///
 /// <para>
 /// Public because <see cref="SilkBertEncoderRunner"/> takes one, the same way
-/// <see cref="BertEncoderGpuRunner"/> takes an <see cref="IlgpuRuntime"/>: the caller owns the
+/// <c>BertEncoderGpuRunner</c> takes an <c>IlgpuRuntime</c>: the caller owns the
 /// device lifetime and the runner only borrows it.
 /// </para>
 /// </summary>
@@ -43,7 +43,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     /// <summary>
     /// Builds the context, the in-process program and every kernel in
     /// <see cref="SilkKernels.KernelNames"/>. Throws (rather than falling back to the CPU) when
-    /// no OpenCL GPU is reachable, so a <c>--silk</c> run on a machine without a driver fails
+    /// no OpenCL GPU is reachable, so a run on a machine without a driver fails
     /// with the reason instead of quietly measuring the host.
     /// </summary>
     public SilkRuntime()
@@ -54,13 +54,13 @@ public sealed unsafe class SilkRuntime : IDisposable
             nint dev = SelectGpu(cl, out string name, out string vendor, out ulong maxWorkGroupSize, out ulong localMemorySize);
             if (dev == 0)
                 throw new InvalidOperationException(
-                    "--silk requires an OpenCL GPU device (the in-box OpenCL.dll + Intel/AMD driver exposing an iGPU); none was found.");
+                    "Silk requires an OpenCL GPU device (the in-box OpenCL.dll + Intel/AMD driver exposing an iGPU); none was found.");
 
             // The enumeration asked for GPUs; a driver that answers with something else must fail
             // loudly rather than silently turn this into a CPU measurement.
             if (!IsGpu(cl, dev))
                 throw new InvalidOperationException(
-                    $"--silk found {name}, which reports a non-GPU device type — refusing to run (no CPU fallback).");
+                    $"Silk found {name}, which reports a non-GPU device type — refusing to run (no CPU fallback).");
 
             device = dev;
             DeviceName = name;
@@ -71,18 +71,18 @@ public sealed unsafe class SilkRuntime : IDisposable
             int err = 0;
             context = cl.CreateContext(null, 1, &dev, null, null, out err);
             if (err != 0 || context == 0)
-                throw new InvalidOperationException($"--silk clCreateContext failed ({err}).");
+                throw new InvalidOperationException($"Silk clCreateContext failed ({err}).");
 
             queue = cl.CreateCommandQueue(context, device, CommandQueueProperties.None, out err);
             if (err != 0 || queue == 0)
-                throw new InvalidOperationException($"--silk clCreateCommandQueue failed ({err}).");
+                throw new InvalidOperationException($"Silk clCreateCommandQueue failed ({err}).");
 
             program = BuildProgram();
             foreach (string kernelName in SilkKernels.KernelNames)
             {
                 nint kernel = cl.CreateKernel(program, kernelName, out err);
                 if (err != 0 || kernel == 0)
-                    throw new InvalidOperationException($"--silk clCreateKernel('{kernelName}') failed ({err}).");
+                    throw new InvalidOperationException($"Silk clCreateKernel('{kernelName}') failed ({err}).");
                 kernels[kernelName] = kernel;
             }
         }
@@ -98,25 +98,25 @@ public sealed unsafe class SilkRuntime : IDisposable
 
     /// <summary>
     /// Rejects a head dimension the fused attention tile cannot hold (it mirrors
-    /// <see cref="GpuBuffers.ValidateAttentionLocalMemory"/> on the ILGPU path): the kernel's
+    /// <c>GpuBuffers.ValidateAttentionLocalMemory</c> on the ILGPU path): the kernel's
     /// accumulator tile is a compile-time constant, so a larger <c>headDim</c> would read past it.
     /// </summary>
     public void EnsureAttentionLocalMemory(int headDim)
     {
         if (headDim > SilkKernels.MaxHeadDim)
             throw new InvalidOperationException(
-                $"--silk attention supports headDim up to {SilkKernels.MaxHeadDim}; got {headDim}.");
+                $"Silk attention supports headDim up to {SilkKernels.MaxHeadDim}; got {headDim}.");
 
         ulong needed = (ulong)SilkKernels.MaxHeadDim * SilkKernels.AttentionGroupSize * sizeof(float);
         if (LocalMemorySize < needed)
             throw new InvalidOperationException(
-                $"--silk attention needs {needed} B of local memory per work-group; {DeviceName} reports {LocalMemorySize} B.");
+                $"Silk attention needs {needed} B of local memory per work-group; {DeviceName} reports {LocalMemorySize} B.");
     }
 
     /// <summary>
     /// Grows <paramref name="buffer"/> when it is smaller than <paramref name="floatCount"/>,
     /// allocating it on first use. Never shrinks. The same shape as
-    /// <see cref="GpuBuffers.Ensure(ref MemoryBuffer1D{float, Stride1D.Dense}, int, Accelerator)"/>:
+    /// <c>GpuBuffers.Ensure</c>:
     /// a runner declares workspace as <see cref="SilkBuffer.Empty"/> and the first forward sizes it.
     /// </summary>
     public SilkBuffer Ensure(SilkBuffer buffer, int floatCount)
@@ -135,7 +135,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     {
         nint buffer = cl.CreateBuffer(context, MemFlags.ReadWrite, (nuint)bytes, null, out int err);
         if (err != 0 || buffer == 0)
-            throw new InvalidOperationException($"--silk clCreateBuffer({bytes} B) failed ({err}).");
+            throw new InvalidOperationException($"Silk clCreateBuffer({bytes} B) failed ({err}).");
         return buffer;
     }
 
@@ -158,7 +158,7 @@ public sealed unsafe class SilkRuntime : IDisposable
         nint view = cl.CreateSubBuffer(parent, MemFlags.ReadOnly, BufferCreateType.Region, ref region, out err);
         if (err != 0 || view == 0)
             throw new InvalidOperationException(
-                $"--silk clCreateSubBuffer(offset {elementOffset}, {elementCount} floats) failed ({err}).");
+                $"Silk clCreateSubBuffer(offset {elementOffset}, {elementCount} floats) failed ({err}).");
         return view;
     }
 
@@ -184,7 +184,7 @@ public sealed unsafe class SilkRuntime : IDisposable
         {
             int err = cl.EnqueueReadBuffer(queue, buffer, true, 0, (nuint)(count * sizeof(float)), p, 0, null, null);
             if (err != 0)
-                throw new InvalidOperationException($"--silk readback of {count} floats failed ({err}).");
+                throw new InvalidOperationException($"Silk readback of {count} floats failed ({err}).");
         }
         return values;
     }
@@ -193,7 +193,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     {
         int err = cl.EnqueueWriteBuffer(queue, buffer, true, 0, (nuint)bytes, p, 0, null, null);
         if (err != 0)
-            throw new InvalidOperationException($"--silk upload of {bytes} B failed ({err}).");
+            throw new InvalidOperationException($"Silk upload of {bytes} B failed ({err}).");
     }
 
     public void SetBuffer(string kernelName, uint index, nint buffer)
@@ -224,7 +224,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     void FailArg(string kernelName, uint index, int err)
     {
         if (err != 0)
-            throw new InvalidOperationException($"--silk clSetKernelArg('{kernelName}', arg {index}) failed ({err}).");
+            throw new InvalidOperationException($"Silk clSetKernelArg('{kernelName}', arg {index}) failed ({err}).");
     }
 
     /// <summary>
@@ -245,12 +245,12 @@ public sealed unsafe class SilkRuntime : IDisposable
             int err = cl.EnqueueNdrangeKernel(
                 queue, Kernel(kernelName), (uint)global.Length, &offset, g, l, 0, null, null);
             if (err != 0)
-                throw new InvalidOperationException($"--silk dispatch of '{kernelName}' failed ({err}).");
+                throw new InvalidOperationException($"Silk dispatch of '{kernelName}' failed ({err}).");
         }
 
         int finish = cl.Finish(queue);
         if (finish != 0)
-            throw new InvalidOperationException($"--silk clFinish after '{kernelName}' failed ({finish}).");
+            throw new InvalidOperationException($"Silk clFinish after '{kernelName}' failed ({finish}).");
     }
 
     /// <summary>A device buffer plus the float capacity it was allocated for. <see cref="Handle"/> 0 is empty.</summary>
@@ -268,7 +268,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     nint Kernel(string name)
         => kernels.TryGetValue(name, out nint kernel)
             ? kernel
-            : throw new InvalidOperationException($"--silk has no kernel named '{name}'.");
+            : throw new InvalidOperationException($"Silk has no kernel named '{name}'.");
 
     /// <summary>Compiles <see cref="SilkKernels.Source"/> in-process; on failure the driver's
     /// build log is decoded (the single most useful diagnostics for Intel/AMD drivers).</summary>
@@ -277,7 +277,7 @@ public sealed unsafe class SilkRuntime : IDisposable
         int err = 0;
         nint built = cl.CreateProgramWithSource(context, 1, [SilkKernels.Source], null, out err);
         if (err != 0 || built == 0)
-            throw new InvalidOperationException($"--silk clCreateProgramWithSource failed ({err}).");
+            throw new InvalidOperationException($"Silk clCreateProgramWithSource failed ({err}).");
 
         // num_devices = 0 means "every device in the context" — the one device asked for.
         if (cl.BuildProgram(built, 0, null, (string?)null, null, null) == 0)
@@ -285,7 +285,7 @@ public sealed unsafe class SilkRuntime : IDisposable
 
         string log = BuildLog(built);
         cl.ReleaseProgram(built);
-        throw new InvalidOperationException("--silk clBuildProgram failed:" + Environment.NewLine + log);
+        throw new InvalidOperationException("Silk clBuildProgram failed:" + Environment.NewLine + log);
     }
 
     string BuildLog(nint built)
