@@ -234,6 +234,12 @@ baseline): coverage 7/7, 6/6, 4/4, no void. Encoder medians 3715–4430 ms. Atte
 transposed-B vs per-call transpose was 0.993 (within noise). Held for the three-run record;
 not cited from the README until those runs exist.
 
+Three post-commit runs (exit 0, coverage 7/7, 6/6, 4/4, AC, REAL): attention roll-up
+745–769 ms at valid 40 and 781–868 ms at valid 512, under the same-run encoder
+(3935–4843 / 4151–4712) in every run. Shape ratio QK^T/PV with the flag held constant
+was 1.157, 0.884, 1.149 — it changes sign. Recorded in the README, LAYA.md, and
+ACCELERATION.md. The 2414 ms GEMM projection was not re-measured and is not replaced.
+
 ## GitHub issues log
 
 - [ ] #473 — CPU attention is still dense (`ModernBertMasks.MaxDenseLength`); referenced, not

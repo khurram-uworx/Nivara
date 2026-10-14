@@ -643,8 +643,46 @@ An optional diagnostics pass groups one forward by `OperationType`. The tracker
 takes a lock per op, so those shares are of the instrumented total, not of the
 forward timed above.
 
-No result is recorded here. The mode exists; the three runs that can support a
-number have not been made.
+**Recorded** (three Release runs, AC, real checkpoint, 2026-10-15, this machine;
+exit 0 and coverage 7/7, 6/6, 4/4 in every run). Ids are random, not the fixture
+prompt, so this is the same shape as `laya benchmark` and not its number. The
+forward moves across runs and the attention roll-up does not, so the forward is a
+band and the attention figure is the stable one. A same-day `laya benchmark` on
+this machine read 4001–4312 ms and sits inside the encoder band; it was not a
+different machine.
+
+| | run 1 | run 2 | run 3 | band |
+|---|---|---|---|---|
+| encoder, valid 40 | 3935 | 4843 | 4671 | 3935–4843 ms |
+| encoder, valid 512 | 4151 | 4689 | 4712 | 4151–4712 ms |
+| head, valid 40 | 356 | 313 | 361 | 313–361 ms |
+| pair, valid 40 | 4811 | 4536 | 5094 | 4536–5094 ms |
+| attention roll-up, valid 40 | 769 | 752 | 745 | **745–769 ms** |
+| attention roll-up, valid 512 | 868 | 781 | 827 | **781–868 ms** |
+
+Attention is under the same-run encoder in every run: 15–20% at valid 40
+(769/3935, 752/4843, 745/4671), 17–21% at valid 512. The retracted 9.1–13.4 s
+figure does not reproduce. The residual (forward minus attention, 3.2–4.1 s) is
+not called GEMM — this probe did not time GEMM.
+
+Only the sliding layer at valid 40 has fully-masked rows (408 of 512, every run).
+`SoftmaxSingle` early-outs there and that leg is 24.1–24.7 ms. A full-attention
+padding row is not fully masked (0 of 512), so valid length does not skip `Exp`
+on those 10 layers.
+
+**Layout, settled as a negative.** With the transposed-B flag held constant,
+QK^T/PV is 1.157, 0.884, 1.149 — it changes sign, so it is not 11× and not a
+stable 1.8×. The flag itself at QK^T is 1.013–1.060 (one run inside the ±3%
+band, two just outside). At PV the per-call transpose costs 1.11–1.40×, the same
+direction `--cpu-gemm` measured at GEMM shapes: `MatMul` pays the transpose and
+`MatMulTransposedB` is the faster, steady-state leg. The issue's candidate, that
+the transposed-B path is disproportionately slow, is not what these runs show.
+
+The diagnostics pass is a check, not a denominator. `AutoDiffMultiHeadAttention`
+read 836 / 887 / 970 ms (25–30% of the instrumented total) and
+`AutoDiffMatMulTransposedB` 2.3–2.7 s (70–75%). The instrumented total
+(3.1–3.6 s) is less than the forward, because norms and activations are absent.
+The tracker's attention and the roll-up are the same order; they are not averaged.
 
 ### No-regression gate (P4)
 
