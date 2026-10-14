@@ -1,10 +1,9 @@
-using Nivara.Samples;
+using Nivara.AI;
 using NUnit.Framework;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using Nivara.AI;
 
 namespace Nivara.Tests.AutoDiff;
 

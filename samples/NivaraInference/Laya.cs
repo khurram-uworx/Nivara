@@ -1,6 +1,4 @@
 using Nivara.AI;
-using Nivara.Samples;
-using Nivara.Samples.Gpu;
 using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;

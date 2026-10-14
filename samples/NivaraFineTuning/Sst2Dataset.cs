@@ -1,7 +1,6 @@
 using Microsoft.ML.Tokenizers;
-using Nivara.IO;
 using Nivara.AI;
-using Nivara.Samples;
+using Nivara.IO;
 
 namespace NivaraFineTuning;
 

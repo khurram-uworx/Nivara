@@ -1,5 +1,4 @@
 using Nivara.IO;
-using Nivara.Tests;
 using NUnit.Framework;
 
 namespace Nivara.Tests.IO;

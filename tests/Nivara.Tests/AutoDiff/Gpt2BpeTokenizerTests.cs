@@ -1,5 +1,4 @@
 using Nivara.AI;
-using Nivara.Samples;
 using NUnit.Framework;
 using System.Text.Json;
 

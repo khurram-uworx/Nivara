@@ -8,7 +8,7 @@ public sealed class SilkLayaSession : ILayaGpuSession
     readonly SilkModernBertGpuRunner encoder;
     readonly SilkLayaHeadGpuRunner head;
 
-    public SilkLayaSession(ModernBertConfig config, Dictionary<string,(float[] Data,int[] Shape)> tensors, int headLayerCount)
+    public SilkLayaSession(ModernBertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int headLayerCount)
     {
         runtime = new SilkRuntime();
         try
@@ -20,7 +20,7 @@ public sealed class SilkLayaSession : ILayaGpuSession
         catch { runtime.Dispose(); throw; }
     }
 
-    public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string,(float[] Data,int[] Shape)> tensors, int headLayerCount)
+    public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int headLayerCount)
         => new SilkLayaSession(config, tensors, headLayerCount);
 
     public string DeviceName => runtime.DeviceName;

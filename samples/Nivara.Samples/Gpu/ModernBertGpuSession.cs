@@ -1,5 +1,4 @@
 using Nivara.AI;
-using Nivara.Silk;
 
 namespace Nivara.Samples.Gpu;
 

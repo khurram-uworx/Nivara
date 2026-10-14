@@ -1,7 +1,7 @@
 using Microsoft.ML.Tokenizers;
+using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Utilities;
-using Nivara.AI;
 using Nivara.Samples;
 using System.Numerics;
 using System.Numerics.Tensors;

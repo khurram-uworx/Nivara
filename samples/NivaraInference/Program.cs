@@ -1,9 +1,9 @@
+using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
-using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Samples.Gpu;
 using Nivara.Silk;
@@ -613,7 +613,7 @@ class Program
             case "modernbert":
                 if (useSilk || useGpu)
                 {
-                    Nivara.AI.OpenModernBertSession open = useSilk ? Nivara.Silk.SilkModernBertSession.Open : Nivara.Samples.Gpu.IlgpuModernBertSession.Open;
+                    OpenModernBertSession open = useSilk ? SilkModernBertSession.Open : IlgpuModernBertSession.Open;
                     if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(tensors, modelDir, open);
                     return ModernBert.RunGpu(tensors, modelDir, open);

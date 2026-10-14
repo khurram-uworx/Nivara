@@ -1,6 +1,5 @@
-using System.Diagnostics;
-using System.Reflection;
 using NUnit.Framework;
+using System.Diagnostics;
 
 namespace Nivara.Tests;
 
