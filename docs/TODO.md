@@ -209,6 +209,25 @@ No symbol in `src/Nivara` or `src/Nivara.Extensions` changes. `ModernBertEncoder
 `TensorsHelper.MultiplyCore` are read, not edited. Downstream of those symbols is therefore
 untouched.
 
+## Reproduction (before the slice fix, 2026-10-15, AC, Release, this machine)
+
+`laya benchmark`: choice2 4239 ms (valid 40), choice13 4201 (119), score4 4001 (48),
+noul 4312 (39). The recorded ~4.1 s reproduces here. It is not a different machine.
+
+`--mask`, unfixed probe, one run: attention 114.4 ms/layer = 3203 ms/forward.
+QK^T 2.09 ms/call, PV 1.12 ms/call (~1.9×), softmax 3.31 ms/call. The probe printed
+"attention alone is larger than the recorded whole forward" against 3203 < 4100.
+That sentence was a string literal. The 9.1–13.4 s figure does not reproduce.
+3203 ms is the unfixed probe and is not a baseline.
+
+Slice-fix smoke (one Release run, not a baseline, not published in the README): the
+guard held and the comparison sentence followed the numbers ("does not exceed").
+Causal-mask attention read 33.6 ms/layer = 942 ms/forward. QK^T fell 2.09 → 0.41
+ms/call and PV 1.12 → 0.53, which is the span bug's signature (the short-K call
+was the one dominated by the 16× copy). Softmax also moved (3.31 → 0.57) on a
+buffer the bug does not touch, so that leg is still not a point estimate. None of
+these are the reconciliation.
+
 ## GitHub issues log
 
 - [ ] #473 — CPU attention is still dense (`ModernBertMasks.MaxDenseLength`); referenced, not

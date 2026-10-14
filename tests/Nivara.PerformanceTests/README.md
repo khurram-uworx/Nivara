@@ -472,8 +472,21 @@ Three findings, and the third is the one that constrains any fix:
    path for those types and it is currently winning.
 
 **Laya leg profile** (B=1, S=512, d=1024, H=16, headDim=64, 28 layers; legs mirror
-`ReverseGradOperations.MultiHeadAttention`). Two consecutive runs of the
-per-round-chain design:
+`ReverseGradOperations.MultiHeadAttention`). The `QK^T` and `PV` rows below, the
+~1.8× gap between them, and the attention total derived from them are **retracted**.
+Those calls passed the packed multi-head buffers (`heads * rows * headDim`) into
+`MatMulTransposedB` / `MatMul` while declaring one head's dimensions, then the
+accounting multiplied that one call by 16. `MultiplyCore` rents, copies and
+`clearArray`-returns by `span.Length` (`ArrayPool.Rent` returns at least the
+requested length; `Return(clearArray: true)` clears that array), so each published
+"head" moved 16× the bytes production moves. No replacement matmul number is
+published here; the corrected probe has not been recorded yet (#492).
+
+`ApplyMask`, the `add` counterfactual, `softmax rows`, `scale multiply` and
+`ScatterHead` timed `scores` / `outHead`, which are one head's buffer. Their
+absolute milliseconds stand. Their share of attention does not, because the total
+they were divided by included the bloated matmul. The table is kept so the
+retraction has something to point at:
 
 | leg | ms/call A | ms/call B | ms/call C | spread |
 |---|---|---|---|---|
@@ -488,7 +501,9 @@ per-round-chain design:
 | **attention total (ms/layer)** | **479.4** | **338.1** | **323.7** | **48%** |
 
 The mask's absolute cost is **96–133 ms per 28-layer forward** across the three runs.
-The *share* is **1.3–2.0%** of attention, which is unstable for the reason below.
+That figure is heads times `(maskMs - addMs)` times 28 on the correctly-sized
+`scores` buffer, so the span bug does not move it. The *share* (1.3–2.0% of
+attention) is retracted with the total it was divided by.
 
 **Two earlier defects in this profile, both corrected here, and both of which had
 produced false claims.** The original design timed each leg 30× *in isolation*, and
@@ -510,26 +525,25 @@ the data it sees in production. The `add` counterfactual now sits immediately be
 delta is a real A/B on identical input rather than two independent measurements.
 
 **Consequence: the previously published 62% `QK^T` share and its 11× layout gap
-were mostly measurement artifact, and are retracted.** Under the corrected design
-`QK^T` is **25.8–39.2%** and the `QK^T`/`PV` gap is **~1.8×** (7.74 vs 4.31; 8.29 vs
-4.59), not 11×. The old gap was produced by `PV` reading the degenerate converged
-softmax output (measured 1.395 ms, vs 4.31 ms on real data) and by `QK^T` being timed
-back-to-back against a hot cache instead of interleaved with the other legs. A
-materiality argument built on that gap does not survive; it must not be cited from
-earlier revisions of this file.
+were mostly measurement artifact, and are retracted.** The chain design removed the
+cause (a converged softmax, a hot cache). The ~1.8× gap the chain design then
+published is retracted too, by the span bug above — it was the same two calls. A
+materiality argument built on either gap does not survive; neither may be cited
+from this file.
 
-**The correction did not fix the reconciliation, and it did not fix stability.**
-Attention alone is 324–479 ms/layer = **9 100–13 400 ms per forward**, still far
-from `docs/LAYA.md`'s recorded ~4.1 s whole forward, and the total swings 48% across
-three runs while its neighbour legs sit at 6–7%. The spread is dominated by run A's
-`softmax rows` at 17.05 ms against 7.36/6.79 in runs B and C — so B and C agree
-within 8% and A is the outlier, rather than the leg being reliably bimodal. Three
-runs cannot distinguish "one contaminated run" from "a genuine low-probability
-state", so it is recorded as unexplained rather than characterized. Either way
-`SoftmaxSingle` — a scalar max loop plus `TensorPrimitives.Subtract`/`Exp`/`Divide`
-— costs 6.8–17 ms for 262 144 elements, i.e. 26–65 ns/element, far off a vectorized
-`Exp` rate, and at 33–57% it is the dominant attention leg. **No percentage-of-forward
-is published.** The mode prints the reconciliation conflict instead.
+**The 9.1–13.4 s reconciliation conflict does not reproduce, and the sentence that
+reported it was not reading its own numbers.** A same-day run of the *unfixed*
+probe (AC, Release, this machine, 2026-10-15) read 114 ms/layer = 3203 ms of
+attention, against a same-day `laya benchmark` of 4001–4312 ms. The probe still
+printed "attention alone is larger than the recorded whole forward", which 3203 is
+not — that sentence was a string literal. It now prints the comparison its numbers
+actually have. 3203 ms is not a baseline: it is the unfixed probe, and it is one
+run. `SoftmaxSingle` on a causal mask (no fully-masked row, so every row pays
+`Exp`) read 6.8–17 ms/head across the three chain-design runs, 26–65 ns/element.
+That absolute range stands; its 33–57% share does not, because the total is
+retracted. **No percentage-of-forward is published.** The profile's mask is causal,
+not the padding mask `laya benchmark` builds, so it is not that forward's attention
+either.
 
 **Two caveats carried in the output.** (a) The `[1,512]` row measures the mask
 API *at decode shape*; `DecodeAttention` and `BatchedAttention` use a `Keep`
@@ -553,8 +567,8 @@ consecutive runs:
 | `float` `[512,512]` causal/empty | 1.17× (SLOWER) | 1.05× (SLOWER) | — | **straddles the band** |
 | `ApplyMask` leg (ms/call) | 0.388 | 0.429 | 0.316 | 36% |
 | `add` counterfactual (ms/call) | 0.138 | 0.132 | 0.101 | 37% |
-| `softmax rows` leg (ms/call) | 17.05 | 7.36 | 6.79 | **2.5×, A the outlier** |
-| attention total (ms/layer) | 479.4 | 338.1 | 323.7 | 48% |
+| `softmax rows` leg (ms/call) | 17.05 | 7.36 | 6.79 | **2.5×, A the outlier**; absolute time stands |
+| attention total (ms/layer) | 479.4 | 338.1 | 323.7 | **retracted** (16× matmul span) |
 
 Five consequences:
 
@@ -568,13 +582,12 @@ Five consequences:
    move with it in the same direction. The earlier figure was stable *because* it
    was measuring something other than the production data path, not because the
    quantity is stable.
-3. **The attention total's 48% spread is dominated by one leg and one run.** Run
-   A's `softmax rows` reads 17.05 ms against 7.36/6.79 in B and C, and softmax is
-   33–57% of attention, so softmax alone accounts for the total's spread. The other
-   legs hold 6–7%. Three runs cannot separate "run A was contaminated" from "the
-   leg has a real low-probability slow state", so it stays unexplained. Until it is
-   settled the attention *share* is a 1.3–2.0% band, and the mask's *absolute*
-   96–133 ms/forward band is the citable quantity.
+3. **The attention total is retracted, so its 48% spread is not a finding.** It
+   included the bloated matmul. What remains unexplained is `softmax rows` itself:
+   17.05 ms in run A against 7.36/6.79 in B and C, on a correctly-sized buffer.
+   Three runs cannot separate "run A was contaminated" from "the leg has a real
+   low-probability slow state". The mask's *absolute* 96–133 ms/forward band is the
+   citable quantity. Its share of attention is not.
 4. The instability is **not** inherited from the kernel A/B grid: parity (72/72),
    measurable-cell count (48/72) and the win counts are identical in all three
    runs. Only the wall-clock legs move.
@@ -585,9 +598,10 @@ Five consequences:
 **What survives:** the `float` wide-prefill regression (all six cells outside the
 band, essentially 0 of 30 rounds won, across all three runs), the exact parity and
 coverage counts, and the mask's absolute cost as the 96–133 ms/forward band.
-**What does not:** any single-cell magnitude near the band, any second digit on the
-attention share, the prior "stable to 0.02 ms" delta, and the retracted 62%/11×
-`QK^T` figures.
+**What does not:** any single-cell magnitude near the band, any share of the
+attention total, the prior "stable to 0.02 ms" delta, the retracted 62%/11×
+`QK^T` figures, and the ~1.8× gap and 9.1–13.4 s total that replaced them — those
+were the oversized-span calls.
 
 ### No-regression gate (P4)
 
