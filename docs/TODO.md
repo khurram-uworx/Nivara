@@ -228,12 +228,18 @@ was the one dominated by the 16× copy). Softmax also moved (3.31 → 0.57) on a
 buffer the bug does not touch, so that leg is still not a point estimate. None of
 these are the reconciliation.
 
+Smoke of `--laya-forward` (one Release run, AC, REAL checkpoint, 2026-10-15, not a published
+baseline): coverage 7/7, 6/6, 4/4, no void. Encoder medians 3715–4430 ms. Attention roll-up
+712 ms at valid 40 and 1079 ms at valid 512, both under the same-run forward. QK^T
+transposed-B vs per-call transpose was 0.993 (within noise). Held for the three-run record;
+not cited from the README until those runs exist.
+
 ## GitHub issues log
 
 - [ ] #473 — CPU attention is still dense (`ModernBertMasks.MaxDenseLength`); referenced, not
   duplicated, if the roll-up shows the full `QK^T` dominating a sliding layer. Do not file a
   second issue for that.
 
-Created during execution (none yet):
+Created during execution:
 
-<!-- append here as `gh issue create` happens; do not hold deferred work in memory -->
+- [ ] #633 — `ApplyMask` remarks still cite the retracted 1.3–2.0% attention share (found while retracting the `--mask` total; `src/` comment, out of scope for this branch)

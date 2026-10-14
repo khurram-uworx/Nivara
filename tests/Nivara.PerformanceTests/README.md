@@ -603,6 +603,49 @@ attention total, the prior "stable to 0.02 ms" delta, the retracted 62%/11×
 `QK^T` figures, and the ~1.8× gap and 9.1–13.4 s total that replaced them — those
 were the oversized-span calls.
 
+### `--laya-forward` — same-run reconciliation (#492)
+
+```bash
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --laya-forward
+```
+
+A probe, not a gate. Exit 0 when every planned cell ran, 1 on a structural void
+(a matmul span that was not one head, a non-finite hidden state or score), 2 on a
+Debug build. It does not divide by the recorded 4.1 s or the recorded 2414 ms
+GEMM projection: those were not measured in the process that prints the residual.
+
+Three blocks, one process:
+
+1. **Forward.** Resolves `samples/data/laya/model.safetensors` from the working
+   directory, walking up. Times `ModernBertEncoder.Forward` at seq 512 for valid
+   lengths 40, 119, 48, 39 and 512 (1 warmup + 3 timed, median, min, max — the
+   benchmark's protocol). Times the decision head on its own at valid 40, and
+   times encoder-plus-head in one stopwatch at valid 40, which is the benchmark's
+   unit of work for one question. Ids are random in range with the pad id past
+   `validLength`: same shape as the benchmark, not its prompt. If the checkpoint
+   is absent the forward is Kaiming-initialized and printed `SYNTHETIC` on every
+   line. A synthetic number is not a denominator against the recorded 4.1 s.
+2. **Attention legs**, on per-head slices. Causal (the mask `--mask` uses, which
+   is not a production mask), full attention at valid 512 / 40 / 119, and sliding
+   at the config's band for valid 40 and 512. Prints the fully-masked row count.
+   `SoftmaxSingle` skips `Exp` only when the row max is `-inf` — every key
+   suppressed — so a mostly-masked row still pays `Exp`. The roll-up is
+   `fullLayers * full + slidingLayers * sliding`, with the layer counts read off
+   the config. The residual is forward minus that roll-up. It is not called GEMM,
+   and it is not a percentage of either recorded figure.
+3. **Layout matrix.** QK^T (512×64×512) and PV (512×512×64), each with B already
+   transposed and with the per-call transpose, interleaved, same logical B, spans
+   exactly the declared shape. A ratio that survives the transposed-B flag being
+   held constant is a shape gap. A ratio that appears only when the flag flips is
+   the per-call transpose. One run is not the settlement; the mode says so.
+
+An optional diagnostics pass groups one forward by `OperationType`. The tracker
+takes a lock per op, so those shares are of the instrumented total, not of the
+forward timed above.
+
+No result is recorded here. The mode exists; the three runs that can support a
+number have not been made.
+
 ### No-regression gate (P4)
 
 The harness doubles as an executable perf gate (`ADR-002` P4). Two modes:
