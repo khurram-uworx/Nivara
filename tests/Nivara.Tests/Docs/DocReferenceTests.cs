@@ -15,11 +15,19 @@ public class DocReferenceTests
 {
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenReferences.md";
 
-    /// <summary>Files read by the widened scan. Pinned deliberately: a drop is reduced coverage.</summary>
-    const int ExpectedFileCount = 691;
+    /// <summary>
+    /// Files read by the widened scan. Pinned deliberately: a drop is reduced coverage.
+    /// 696 = 691 + the six new Silk/model files (<c>WeightLayout</c>, <c>BertEncoderGpuTypes</c>,
+    /// <c>GpuSeam</c>, <c>SilkLauncher</c>, <c>SilkModernBertSession</c>, <c>SilkLayaSession</c>)
+    /// minus the deleted samples <c>IBertEncoderRunner.cs</c>.
+    /// </summary>
+    const int ExpectedFileCount = 696;
 
-    /// <summary><c>docs/…md</c> references discovered. Pinned deliberately.</summary>
-    const int ExpectedDocumentReferenceCount = 356;
+    /// <summary>
+    /// <c>docs/…md</c> references discovered. Pinned deliberately.
+    /// 358 = 356 + the two <c>docs/SILK.md</c> occurrences in the AGENTS.md map link.
+    /// </summary>
+    const int ExpectedDocumentReferenceCount = 358;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
