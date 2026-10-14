@@ -1,5 +1,4 @@
-using Nivara.Samples;
-using Nivara.Samples.Gpu;
+using Nivara.AI;
 using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
@@ -234,7 +233,7 @@ public static class Laya
     public static int RunGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string modelDir,
-        OpenLayaSession open)
+        Nivara.AI.OpenLayaSession open)
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
@@ -246,7 +245,7 @@ public static class Laya
         PrintSetup(config, agent);
 
         var buildSw = Stopwatch.StartNew();
-        using ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
+        using Nivara.AI.ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -291,7 +290,7 @@ public static class Laya
     public static int RunBenchmarkGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string modelDir,
-        OpenLayaSession open)
+        Nivara.AI.OpenLayaSession open)
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
@@ -300,7 +299,7 @@ public static class Laya
         PrintSetup(config, agent);
 
         var buildSw = Stopwatch.StartNew();
-        using ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
+        using Nivara.AI.ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -377,7 +376,7 @@ public static class Laya
     public static int CompareGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string modelDir,
-        OpenLayaSession open)
+        Nivara.AI.OpenLayaSession open)
     {
         var agent = LoadAgentConfig(modelDir);
         var config = LoadEncoderConfig(modelDir);
@@ -394,7 +393,7 @@ public static class Laya
         Console.WriteLine($"CPU model load: {cpuBuildSw.ElapsedMilliseconds} ms");
 
         var buildSw = Stopwatch.StartNew();
-        using ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
+        using Nivara.AI.ILayaGpuSession session = open(config, tensors, agent.HeadLayers);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");

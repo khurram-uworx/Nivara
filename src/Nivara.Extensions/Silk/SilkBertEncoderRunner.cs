@@ -1,11 +1,12 @@
-namespace Nivara.Samples.Gpu;
+using Nivara.AI;
+
+namespace Nivara.Silk;
 
 /// <summary>
 /// BERT-family encoder forward on the Silk.NET OpenCL backend (<see cref="SilkKernels"/>): the
-/// <c>--silk</c> counterpart of <see cref="BertEncoderGpuRunner"/>. Same weight layout, same
-/// operation order and the same fused epilogues, so the two backends are elementwise comparable —
-/// the <c>--silk-kernels</c> gate holds their GEMMs to byte-identity and the remaining kernels to
-/// the model's numeric bound.
+/// Silk counterpart of <c>BertEncoderGpuRunner</c>. Same weight layout, same operation order and
+/// the same fused epilogues, so the two backends are elementwise comparable — the kernel gate
+/// holds their GEMMs to byte-identity and the remaining kernels to the model's numeric bound.
 ///
 /// <para>
 /// <b>Scope.</b> The BERT-family encoders the ILGPU runner covers — MiniLM and DistilBERT — selected
@@ -17,7 +18,7 @@ namespace Nivara.Samples.Gpu;
 ///
 /// <para>
 /// The workspace is cap-sized (batch ≤ 8, seqLen ≤ 128 — the scenario's actual maxima) and every
-/// layer intermediate stays on the device, mirroring <see cref="BertEncoderGpuRunner"/>; only the
+/// layer intermediate stays on the device, mirroring <c>BertEncoderGpuRunner</c>; only the
 /// final hidden state is read back. Every dispatch finishes the queue, so the readback needs no
 /// further sync.
 /// </para>
@@ -28,6 +29,7 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     const int MaxBatch = 8;
     const int MaxSeqLen = 128;
     const int NumClasses = 2;
+    const string Backend = "Silk";
 
     const string PreWKey = "pre_classifier.weight";
     const string PreBKey = "pre_classifier.bias";
@@ -75,7 +77,7 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
 
     /// <summary>
     /// Uploads every weight — GEMM weights transposed once and q/k/v packed through
-    /// <see cref="GpuBuffers"/>, the same arithmetic the ILGPU runner uses, so the two backends
+    /// <see cref="WeightLayout"/>, the same arithmetic the ILGPU runner uses, so the two backends
     /// cannot drift — and sizes the cap workspace. <paramref name="naming"/> selects the checkpoint's
     /// weight-key style. Throws if a required encoder key is missing or if the device's local memory
     /// cannot hold the attention tile. The classifier-head weights are optional: when the checkpoint
@@ -114,7 +116,7 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
         tokenTypeEmb = Register(runtime.Allocate(hiddenDim));
         if (hasTokenType)
             runtime.Upload(tokenTypeEmb,
-                GpuBuffers.Req(tensors, $"{emb}.token_type_embeddings.weight", "--silk").Data.AsSpan(0, hiddenDim));
+                WeightLayout.Req(tensors, $"{emb}.token_type_embeddings.weight", Backend).Data.AsSpan(0, hiddenDim));
 
         layers = new LayerSilkWeights[numLayers];
         for (int i = 0; i < numLayers; i++)
@@ -129,10 +131,10 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
         clsB = Register(runtime.Allocate(NumClasses));
         if (hasHead)
         {
-            runtime.Upload(preW, GpuBuffers.Transposed(tensors, PreWKey, "--silk"));
-            runtime.Upload(preB, GpuBuffers.Req(tensors, PreBKey, "--silk").Data);
-            runtime.Upload(clsW, GpuBuffers.Transposed(tensors, ClsWKey, "--silk"));
-            runtime.Upload(clsB, GpuBuffers.Req(tensors, ClsBKey, "--silk").Data);
+            runtime.Upload(preW, WeightLayout.Transposed(tensors, PreWKey, Backend));
+            runtime.Upload(preB, WeightLayout.Req(tensors, PreBKey, Backend).Data);
+            runtime.Upload(clsW, WeightLayout.Transposed(tensors, ClsWKey, Backend));
+            runtime.Upload(clsB, WeightLayout.Req(tensors, ClsBKey, Backend).Data);
         }
 
         int rowsCap = MaxBatch * MaxSeqLen;
@@ -246,89 +248,28 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     // ── launch helpers ────────────────────────────────────────────
 
     void LaunchEmbedSum(int total, int includeTokenType)
-    {
-        runtime.SetBuffer(SilkKernels.EmbedSum, 0, idsBuf);
-        runtime.SetBuffer(SilkKernels.EmbedSum, 1, posIdsBuf);
-        runtime.SetBuffer(SilkKernels.EmbedSum, 2, wordEmb);
-        runtime.SetBuffer(SilkKernels.EmbedSum, 3, posEmb);
-        runtime.SetBuffer(SilkKernels.EmbedSum, 4, tokenTypeEmb);
-        runtime.SetBuffer(SilkKernels.EmbedSum, 5, x);
-        runtime.SetUInt32(SilkKernels.EmbedSum, 6, (uint)total);
-        runtime.SetUInt32(SilkKernels.EmbedSum, 7, (uint)hiddenDim);
-        runtime.SetUInt32(SilkKernels.EmbedSum, 8, (uint)includeTokenType);
-        runtime.Run(SilkKernels.EmbedSum,
-            [(nuint)SilkKernels.LinearGlobal(total)],
-            [(nuint)SilkKernels.LinearGroupSize]);
-    }
+        => SilkLauncher.EmbedSum(
+            runtime, idsBuf, posIdsBuf, wordEmb, posEmb, tokenTypeEmb, x, total, hiddenDim, includeTokenType);
 
     void LaunchLayerNormResidual(nint a, nint b, nint gamma, nint beta, nint y, int rows, int cols)
-    {
-        runtime.SetBuffer(SilkKernels.LayerNormResidual, 0, a);
-        runtime.SetBuffer(SilkKernels.LayerNormResidual, 1, b);
-        runtime.SetBuffer(SilkKernels.LayerNormResidual, 2, gamma);
-        runtime.SetBuffer(SilkKernels.LayerNormResidual, 3, beta);
-        runtime.SetBuffer(SilkKernels.LayerNormResidual, 4, y);
-        runtime.SetUInt32(SilkKernels.LayerNormResidual, 5, (uint)rows);
-        runtime.SetUInt32(SilkKernels.LayerNormResidual, 6, (uint)cols);
-        runtime.SetFloat32(SilkKernels.LayerNormResidual, 7, eps);
-        runtime.Run(SilkKernels.LayerNormResidual,
-            [(nuint)SilkKernels.LinearGlobal(rows)],
-            [(nuint)SilkKernels.LinearGroupSize]);
-    }
+        => SilkLauncher.LayerNormResidual(runtime, a, b, gamma, beta, y, rows, cols, eps);
 
     /// <summary>
-    /// Sets the six arguments every Row4 epilogue shares and dispatches it over the
-    /// <c>(ceil(aRows/16), ceil(bCols/64))</c> grid of 16×16 groups. <paramref name="qkvBlockWidth"/>
-    /// is <c>gemm_row4_qkv</c>'s extra argument: it is <c>null</c> for <c>gemm_row4_bias</c> and
-    /// <c>gemm_row4_gelu</c>, which take six.
+    /// Dispatches a Row4 epilogue GEMM over the <c>(ceil(aRows/16), ceil(bCols/64))</c> grid of
+    /// 16×16 groups. <paramref name="qkvBlockWidth"/> is <c>gemm_row4_qkv</c>'s extra argument:
+    /// it is <c>null</c> for <c>gemm_row4_bias</c> and <c>gemm_row4_gelu</c>, which take six.
     /// </summary>
     void LaunchGemm(string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, int? qkvBlockWidth = null)
-    {
-        runtime.SetBuffer(kernel, 0, a);
-        runtime.SetBuffer(kernel, 1, b);
-        runtime.SetBuffer(kernel, 2, c);
-        runtime.SetBuffer(kernel, 3, bias);
-        runtime.SetUInt32(kernel, 4, (uint)aRows);
-        runtime.SetUInt32(kernel, 5, (uint)aCols);
-        runtime.SetUInt32(kernel, 6, (uint)bCols);
-        if (qkvBlockWidth is int blockWidth)
-            runtime.SetUInt32(kernel, 7, (uint)blockWidth);
-        runtime.Run(kernel,
-            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
-            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
-    }
+        => SilkLauncher.GemmEpilogue(runtime, kernel, a, b, c, bias, aRows, aCols, bCols, qkvBlockWidth);
 
     void LaunchAttention(nint q, nint k, nint v, nint mask, nint output, int batch, int seqLen)
-    {
-        runtime.SetBuffer(SilkKernels.Attention, 0, q);
-        runtime.SetBuffer(SilkKernels.Attention, 1, k);
-        runtime.SetBuffer(SilkKernels.Attention, 2, v);
-        runtime.SetBuffer(SilkKernels.Attention, 3, mask);
-        runtime.SetBuffer(SilkKernels.Attention, 4, output);
-        runtime.SetUInt32(SilkKernels.Attention, 5, (uint)batch);
-        runtime.SetUInt32(SilkKernels.Attention, 6, (uint)seqLen);
-        runtime.SetUInt32(SilkKernels.Attention, 7, (uint)numHeads);
-        runtime.SetUInt32(SilkKernels.Attention, 8, (uint)headDim);
-        runtime.SetInt32(SilkKernels.Attention, 9, SilkKernels.GlobalAttentionBand);
-        runtime.SetFloat32(SilkKernels.Attention, 10, scale);
-        runtime.Run(SilkKernels.Attention,
-            [(nuint)SilkKernels.AttentionGlobal(batch * numHeads * seqLen)],
-            [(nuint)SilkKernels.AttentionGroupSize]);
-    }
-
-    // ── weight upload ─────────────────────────────────────────────
+        => SilkLauncher.Attention(
+            runtime, q, k, v, mask, output, batch, seqLen, numHeads, headDim, SilkKernels.GlobalAttentionBand, scale);
 
     void LaunchGather(nint output, nint table, nint ids, int hidden, int total)
-    {
-        runtime.SetBuffer(SilkKernels.GatherRows, 0, table);
-        runtime.SetBuffer(SilkKernels.GatherRows, 1, ids);
-        runtime.SetBuffer(SilkKernels.GatherRows, 2, output);
-        runtime.SetUInt32(SilkKernels.GatherRows, 3, (uint)total);
-        runtime.SetUInt32(SilkKernels.GatherRows, 4, (uint)hidden);
-        runtime.Run(SilkKernels.GatherRows,
-            [(nuint)SilkKernels.LinearGlobal(total)],
-            [(nuint)SilkKernels.LinearGroupSize]);
-    }
+        => SilkLauncher.Gather(runtime, table, ids, output, total, hidden);
+
+    // ── weight upload ─────────────────────────────────────────────
 
     LayerSilkWeights UploadLayer(Dictionary<string, (float[] Data, int[] Shape)> tensors, int index)
     {
@@ -341,7 +282,7 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
         string ln1 = BertGpuKeys.LayerNorm(naming, index, 1);
         string ln2 = BertGpuKeys.LayerNorm(naming, index, 2);
 
-        var (wqkv, bqkv) = GpuBuffers.QkvPacked(tensors, q, k, v, "--silk");
+        var (wqkv, bqkv) = WeightLayout.QkvPacked(tensors, q, k, v, Backend);
         return new LayerSilkWeights
         {
             Wqkv = Upload(wqkv),
@@ -360,10 +301,10 @@ public sealed class SilkBertEncoderRunner : IBertEncoderRunner
     }
 
     nint UploadPlain(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => Upload(GpuBuffers.Req(tensors, key, "--silk").Data);
+        => Upload(WeightLayout.Req(tensors, key, Backend).Data);
 
     nint UploadTransposed(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => Upload(GpuBuffers.Transposed(tensors, key, "--silk"));
+        => Upload(WeightLayout.Transposed(tensors, key, Backend));
 
     nint Upload(float[] data)
     {

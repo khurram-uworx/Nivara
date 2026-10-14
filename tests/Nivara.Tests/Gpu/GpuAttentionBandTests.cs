@@ -1,8 +1,8 @@
 using ILGPU;
 using ILGPU.Runtime;
+using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
-using Nivara.Samples;
 using Nivara.Samples.Gpu;
 using NUnit.Framework;
 

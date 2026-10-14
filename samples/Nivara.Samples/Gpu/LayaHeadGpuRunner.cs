@@ -1,5 +1,6 @@
 using ILGPU;
 using ILGPU.Runtime;
+using Nivara.AI;
 
 namespace Nivara.Samples.Gpu;
 

@@ -1,5 +1,6 @@
 using ILGPU;
 using ILGPU.Runtime;
+using Nivara.Silk;
 
 namespace Nivara.Samples.Gpu;
 
@@ -244,16 +245,7 @@ internal static class GpuBuffers
     /// </summary>
     public static float[] Transposed(
         Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, string backend = "--ilgpu")
-    {
-        var t = Req(tensors, key, backend);
-        int outDim = t.Shape[0];
-        int inDim = t.Shape[1];
-        var bt = new float[outDim * inDim];
-        for (int r = 0; r < outDim; r++)
-            for (int c = 0; c < inDim; c++)
-                bt[c * outDim + r] = t.Data[r * inDim + c];
-        return bt;
-    }
+        => WeightLayout.Transposed(tensors, key, backend);
 
     public static MemoryBuffer1D<float, Stride1D.Dense> UploadTransposed(
         Accelerator accelerator,
@@ -282,28 +274,7 @@ internal static class GpuBuffers
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string qKey, string kKey, string vKey,
         string backend = "--ilgpu")
-    {
-        var weights = new[]
-        {
-            Req(tensors, $"{qKey}.weight", backend),
-            Req(tensors, $"{kKey}.weight", backend),
-            Req(tensors, $"{vKey}.weight", backend)
-        };
-        int outDim = weights[0].Shape[0];
-        int inDim = weights[0].Shape[1];
-        int concat = 3 * outDim;
-        var w = new float[inDim * concat];
-        for (int block = 0; block < 3; block++)
-            for (int r = 0; r < outDim; r++)
-                for (int c = 0; c < inDim; c++)
-                    w[c * concat + block * outDim + r] = weights[block].Data[r * inDim + c];
-
-        var bias = new float[concat];
-        Array.Copy(Req(tensors, $"{qKey}.bias", backend).Data, bias, outDim);
-        Array.Copy(Req(tensors, $"{kKey}.bias", backend).Data, 0, bias, outDim, outDim);
-        Array.Copy(Req(tensors, $"{vKey}.bias", backend).Data, 0, bias, 2 * outDim, outDim);
-        return (w, bias);
-    }
+        => WeightLayout.QkvPacked(tensors, qKey, kKey, vKey, backend);
 
     public static (MemoryBuffer1D<float, Stride1D.Dense> W, MemoryBuffer1D<float, Stride1D.Dense> Bias) UploadQkvConcat(
         Accelerator accelerator,
@@ -332,9 +303,7 @@ internal static class GpuBuffers
 
     public static (float[] Data, int[] Shape) Req(
         Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, string backend = "--ilgpu")
-        => tensors.TryGetValue(key, out var t)
-            ? t
-            : throw new InvalidOperationException($"Missing weight key '{key}' for the {backend} forward.");
+        => WeightLayout.Req(tensors, key, backend);
 
     // ── readback ──────────────────────────────────────────────────
 

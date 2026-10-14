@@ -1,7 +1,7 @@
+using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Samples;
 using NUnit.Framework;
 
 namespace Nivara.Tests.NivaraTorch;

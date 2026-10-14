@@ -1,4 +1,4 @@
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 /// <summary>
 /// The host-side half of the Laya decision head: the softmax, the two-against-1 marker padding

@@ -85,7 +85,7 @@ Labels bypass the tensor system entirely. No change needed.
 
 ## 3. Current Behavior in SafeTensorsLoader
 
-`samples/Nivara.Samples/SafeTensorsLoader.cs` currently widens ALL dtypes to
+`src/Nivara.Extensions/AI/SafeTensorsLoader.cs` currently widens ALL dtypes to
 `float[]`:
 
 | Source Dtype | Conversion                 | Precision                     |
@@ -262,7 +262,7 @@ public ReverseGradTensor<T> Forward(int[] indices)
 | `src/Nivara/AutoDiff/Utilities/TypeValidator.cs` | Defines supported types |
 | `src/Nivara/AutoDiff/Nn/Embedding.cs` | Embedding layer with float→int extraction |
 | `src/Nivara/AutoDiff/Nn/Functional/CrossEntropyLoss.cs` | Loss with int[] target overload |
-| `samples/Nivara.Samples/SafeTensorsLoader.cs` | Weight loader with dtype→float conversion |
+| `src/Nivara.Extensions/AI/SafeTensorsLoader.cs` | Weight loader with dtype→float conversion |
 
 ---
 

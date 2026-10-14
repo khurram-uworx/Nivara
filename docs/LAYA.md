@@ -75,14 +75,15 @@ Per-type fallback: choice 1.6369, score 1.2514, noul 1.9834. Bucket table: `choi
 
 ## How this model improved the library
 
-All new types are sample-side (`src/Nivara` is untouched):
+The head, prompt builder, calibration and state-dict slice now ship from `Nivara.Extensions`
+(`src/Nivara` is untouched):
 
 | Piece | Location | Notes |
 |---|---|---|
-| `LayaPromptBuilder`, `LayaQuestion`, `LayaSequence` | `samples/Nivara.Samples/LayaPromptBuilder.cs` | port of `build_sequence` / `render_options` / `render_criterion` |
-| `LayaCalibration`, `LayaDecision`, `LayaTemperature` | `samples/Nivara.Samples/LayaCalibration.cs` | bucket, clamp, decode. Temperature is applied here, not in the head |
-| `LayaHeadLayer<T>`, `LayaDecisionHead<T>` | `samples/Nivara.Samples/LayaHeadModel.cs` | the head. Attention is the reused `BertSelfAttention<T>`, not a new module |
-| `StateDictLoader.LoadFusedLinearSlice` | `samples/Nivara.Samples/StateDictLoader.cs` | additive. Reads `in_proj_weight` / `in_proj_bias` by key, not by prefix |
+| `LayaPromptBuilder`, `LayaQuestion`, `LayaSequence` | `src/Nivara.Extensions/AI/LayaPromptBuilder.cs` | port of `build_sequence` / `render_options` / `render_criterion` |
+| `LayaCalibration`, `LayaDecision`, `LayaTemperature` | `src/Nivara.Extensions/AI/LayaCalibration.cs` | bucket, clamp, decode. Temperature is applied here, not in the head |
+| `LayaHeadLayer<T>`, `LayaDecisionHead<T>` | `src/Nivara.Extensions/AI/LayaHeadModel.cs` | the head. Attention is the reused `BertSelfAttention<T>`, not a new module |
+| `StateDictLoader.LoadFusedLinearSlice` | `src/Nivara.Extensions/AI/StateDictLoader.cs` | additive. Reads `in_proj_weight` / `in_proj_bias` by key, not by prefix |
 | `Laya` mode | `samples/NivaraInference/Laya.cs` | default, `benchmark`, `compare`. `--ilgpu` rejected |
 | `Python/laya_compare.py` | `samples/NivaraInference/Python/` | wheel download + `importlib` load of `common.py`. Nothing is installed |
 

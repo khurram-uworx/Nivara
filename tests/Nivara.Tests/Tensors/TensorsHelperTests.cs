@@ -1,4 +1,3 @@
-using Nivara.Tests;
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Diagnostics;

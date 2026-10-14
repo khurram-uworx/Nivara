@@ -1,4 +1,4 @@
-using Nivara.Samples;
+using Nivara.AI;
 using System.Diagnostics;
 
 namespace Nivara.PerformanceTests;

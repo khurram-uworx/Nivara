@@ -1,4 +1,4 @@
-using Nivara.Samples.Gpu;
+using Nivara.Silk;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Gpu;

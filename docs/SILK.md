@@ -11,8 +11,8 @@ This document has two parts:
 - **Part 1 — the spike.** The `tests/Nivara.GpuProbe` Silk.NET leg (`silk` mode): Silk.NET/OpenCL
   setup, the measured results, and the BF16/FP16 answer for this iGPU.
 - **Part 2 — the production implementation.** The `--silk` hand-authored OpenCL C backend in
-  `samples/Nivara.Samples/Gpu/` — every kernel, the runtime, the runner and the gate. Written from
-  the source, as the map for adding the next model to this backend.
+  `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`) — every kernel, the runtime, the runners
+  and the gate. Written from the source, as the map for adding the next model to this backend.
 
 ---
 
@@ -356,7 +356,8 @@ the Silk.NET row's own PASS lines, not just the process exit code.
 
 Part 1 measured the Silk.NET/OpenCL route on microkernels. Part 2 is the same route on a real model:
 the `--silk` backend, OpenCL C written by hand and compiled in-process by the driver. It is written
-from `samples/Nivara.Samples/Gpu/` — the map for adding the next model to this backend.
+from `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`) — the map for adding the next model to
+this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 
 ## 10. What the path is, and what is in it
 
@@ -368,17 +369,19 @@ mutually exclusive with `--ilgpu`.
 
 | file | role |
 |---|---|
-| `SilkKernels.cs` | the OpenCL C translation unit (`Source`) and all geometry, as pure data so it can be unit-checked without a device; `KernelNames` is the build order |
+| `SilkKernels.cs` | the OpenCL C translation unit (`Source`) and all geometry, as pure data so it can be unit-checked without a device; `KernelNames` is the build order. `internal` |
 | `SilkRuntime.cs` | `CL.GetApi()`, platform/device select, in-process build with the build log decoded on failure, buffers/sub-buffers, per-argument status checking, blocking dispatch, reverse-order dispose |
-| `SilkBertEncoderRunner.cs` | the `--silk` counterpart of `BertEncoderGpuRunner` — same weight layout, same operation order, same fused epilogues |
-| `SilkModernBertGpuRunner.cs` | the `--silk` counterpart of `ModernBertGpuRunner` — bias-free GEMM, row-interleaved QKV split, CPU-uploaded RoPE, per-layer band |
-| `SilkLayaHeadGpuRunner.cs` | the `--silk` counterpart of `LayaHeadGpuRunner` — biased norms, fused biased QKV, host-side act-head features |
-| `IBertEncoderRunner.cs` | the seam shared with ILGPU for the BERT family; `GpuBuffers.cs` carries the weight-layout and launch maths for both |
-| `ModernBertGpuSession.cs` / `LayaGpuSession.cs` | the same seam for ModernBERT and Laya: the CLI sees `Forward`, not a device buffer |
+| `SilkLauncher.cs` | typed dispatch shared by the three runners: argument order and grid geometry, so a runner cannot drift from the kernel. `internal` |
+| `WeightLayout.cs` | `Transposed` / `QkvPacked` / `Req` — the host math both backends share. `GpuBuffers` delegates to it |
+| `SilkBertEncoderRunner.cs` | the Silk counterpart of `BertEncoderGpuRunner` — same weight layout, same operation order, same fused epilogues |
+| `SilkModernBertGpuRunner.cs` | the Silk counterpart of `ModernBertGpuRunner` — bias-free GEMM, row-interleaved QKV split, CPU-uploaded RoPE, per-layer band |
+| `SilkLayaHeadGpuRunner.cs` | the Silk counterpart of `LayaHeadGpuRunner` — biased norms, fused biased QKV, host-side act-head features |
+| `SilkModernBertSession.cs` / `SilkLayaSession.cs` | the Silk session implementations. The CLI sees `Forward`, not a device buffer |
+| `src/Nivara.Extensions/AI/GpuSeam.cs` | `IBertEncoderRunner`, `IModernBertGpuSession`, `ILayaGpuSession` and the open delegates (`namespace Nivara.AI`). The ILGPU session classes stay in `samples/Nivara.Samples/Gpu/` and implement them |
 
-The sample csproj pins `Silk.NET.OpenCL` 2.23.0; `SilkKernels` is `internal` with
-`InternalsVisibleTo` to `Nivara.Tests`/`Nivara.PerformanceTests`, so the gate and the unit checks can
-reach it.
+`Nivara.Extensions.csproj` pins `Silk.NET.OpenCL` 2.23.0. `SilkKernels` and `SilkLauncher` are
+`internal`, with `InternalsVisibleTo` to `Nivara.Tests` and `Nivara.PerformanceTests`, so the gate
+and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives transitively.
 
 ## 11. The translation unit
 
@@ -475,9 +478,9 @@ Transcendentals (`exp` in the softmax and the GELU erf) are **not** assumed iden
 
 The constructor takes a **`BertGpuNaming`** (`DistilBert` or `Bert`) — the parameter that lets
 DistilBERT reuse the MiniLM runner — and resolves embeddings + per-layer q/k/v/o, ffn and LayerNorm
-keys through the shared `BertGpuKeys` resolver (which lives beside `BertEncoderGpuRunner`).
+keys through the shared `BertGpuKeys` resolver (`src/Nivara.Extensions/AI/BertEncoderGpuTypes.cs`).
 
-- **Uploads.** Embeddings plain. q/k/v through `GpuBuffers.QkvPacked`, one pre-transposed
+- **Uploads.** Embeddings plain. q/k/v through `WeightLayout.QkvPacked`, one pre-transposed
   `[in × 3·out]` `[Bt_q | Bt_k | Bt_v]` plus a `[3·out]` bias — byte-identical to ILGPU's, produced
   from the same arithmetic rather than a second copy. `O`/`W1`/`W2` transposed; biases and LayerNorms
   plain. Token-type: only row 0 is read (all-zero segment ids), so one row is uploaded rather than the
@@ -567,9 +570,9 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
 3. Keep the accumulation order identical to the ILGPU kernel of the same shape — the gate compares
    them directly.
 4. Keep `KernelNames` in sync with the translation unit (add the name constant).
-5. Take the weight-layout and launch maths from `GpuBuffers` (`Transposed`, `QkvPacked`, `Req`,
-   `Cfg1D`, `ValidateGemmSharedMemory`, `ValidateAttentionLocalMemory`). Do not re-derive it per
-   backend: the drift would be a silently wrong attention rather than a crash.
+5. Take `Transposed`, `QkvPacked` and `Req` from `WeightLayout`, and dispatch from `SilkLauncher`.
+   The ILGPU side reaches the same host math through `GpuBuffers`, which delegates. Do not re-derive
+   it per backend: the drift would be a silently wrong attention rather than a crash.
 6. Register every buffer so `Dispose` is unconditional; release sub-buffers in a `finally`.
 7. Add the model to `SilkModes` and the CLI dispatch, and extend `InferenceCliArgumentTests` for each
    new rejection.

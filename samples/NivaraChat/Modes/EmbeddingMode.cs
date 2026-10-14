@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using Nivara.Samples;
+using Nivara.AI;
 using System.Numerics.Tensors;
 
 namespace NivaraChat.Modes;

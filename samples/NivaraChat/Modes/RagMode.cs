@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using Nivara.Samples;
+using Nivara.AI;
 using NivaraChat.Helpers;
 using OllamaSharp;
 

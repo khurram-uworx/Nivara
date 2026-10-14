@@ -1,4 +1,4 @@
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 /// <summary>The temperature actually applied to one question, with the provenance of the value.</summary>
 /// <param name="Scale">The clamped divisor applied to the logits. Always in [0.5, 5.0].</param>

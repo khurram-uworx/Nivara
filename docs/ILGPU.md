@@ -27,9 +27,10 @@ This document has two parts:
 
 - **Part 1 — the spike.** Issue **#431** (GpuProbe phase 4a): does Intel's IGC frontend handle
   *ILGPU-generated* OpenCL C correctly? The verdict and the measurements, from `tests/Nivara.GpuProbe`.
-- **Part 2 — the production implementation.** The code in `samples/Nivara.Samples/Gpu/` built on that
-  verdict — the runners, the kernels, the geometry decisions and the lessons found while writing
-  them. Written from the source, as the map for adding the next model or porting the path.
+- **Part 2 — the production implementation.** The ILGPU code in `samples/Nivara.Samples/Gpu/` built
+  on that verdict — the runners, the kernels, the geometry decisions and the lessons found while
+  writing them. The Silk backend that was ported from it now lives in `src/Nivara.Extensions/Silk/`
+  ([SILK.md](SILK.md) Part 2). Written from the source, as the map for adding the next model.
 
 ---
 
@@ -278,23 +279,24 @@ preserved for a real `src/Nivara.Gpu`. Default float IEEE math was kept
 # Part 2 — the production implementation
 
 Where Part 1 asked *whether* ILGPU's OpenCL path is trustworthy on this device, Part 2 is the code
-built on the answer. It is written from `samples/Nivara.Samples/Gpu/` — read it as the map for
-adding a model to the GPU path, or for porting the path to a second backend.
+built on the answer. The ILGPU half is written from `samples/Nivara.Samples/Gpu/`; the Silk half
+that was ported from it now lives in `src/Nivara.Extensions/Silk/` ([SILK.md](SILK.md) Part 2).
+Read this part as the map for adding a model to the ILGPU path.
 
 ## 8. Layout: what is in `samples/Nivara.Samples/Gpu/`
 
 | file | role |
 |---|---|
 | `IlgpuRuntime.cs` | OpenCL-only `Context`/`CLAccelerator`/stream at `OptimizationLevel.O2`; a device select that **asserts a GPU and has no CPU fallback**; `Allocate1D`, `Synchronize` |
-| `GpuBuffers.cs` | the weight-layout and launch maths both backends share — `Transposed`/`UploadTransposed`, `QkvPacked`/`UploadQkvConcat`, `UploadPlain`, `Ensure`, `Req`, `Readback`, `Cfg1D`/`GemmCfg`, the `GemmGeometry` record, `ValidateGemmSharedMemory`, `ValidateAttentionLocalMemory`; constants `LinearGroupSize` = 256, `AttentionGroupSize` = 64, `MaxHeadDim` = 64, `GlobalAttentionBand` = −1 |
-| `IBertEncoderRunner.cs` | the backend seam: `DeviceName` + `Forward(int[] tokenIds, float[] mask, int batch, int seqLen)` |
+| `GpuBuffers.cs` | ILGPU upload, readback and launch maths. `Transposed` / `QkvPacked` / `Req` delegate to `Nivara.Silk.WeightLayout` so Silk produces byte-identical weights from the same arithmetic. Also `Ensure`, `Readback`, `Cfg1D`/`GemmCfg`, `ValidateGemmSharedMemory`, `ValidateAttentionLocalMemory`; constants `LinearGroupSize` = 256, `AttentionGroupSize` = 64, `MaxHeadDim` = 64, `GlobalAttentionBand` = −1 |
+| `Nivara.AI.IBertEncoderRunner` | the backend seam, in `src/Nivara.Extensions/AI/GpuSeam.cs`: `DeviceName` + `Forward(int[] tokenIds, float[] mask, int batch, int seqLen)`. `BertEncoderGpuRunner` implements it |
 | `GemmKernels.cs` | `TiledGemmKernelRow4` (the keystone) and the 1×1 baseline; the fused-epilogue siblings `Row4Bias`/`Row4Gelu`/`Row4Relu`/`Row4Qkv`; the four #440 register-blocked geometries, kept as a labelled negative; `TiledGemm` |
 | `AttentionKernels.cs` | `BatchedAttention` — score + scale + mask + row-softmax + weighted-V in three passes, banded |
 | `ElementwiseKernels.cs` | `Gather`, `AddBias`, `SplitColumns`, `Add`, `LayerNormResidual1D`, `EmbeddingSum`, `LayerNorm1D`, `GeluExact`, `Gelu`, `Relu`, `Rotary`, `GeGlu` |
 | `BertEncoderGpuRunner.cs` | BERT-family encoder (MiniLM, DistilBERT) + the optional SST-2 head; `BertGpuNaming`/`BertGpuKeys` make it naming-driven |
 | `ModernBertGpuRunner.cs` | ModernBERT encoder; exposes `HiddenOnDevice`/`HiddenRows`/`ForwardOnDevice` |
 | `LayaHeadGpuRunner.cs` | the Laya typed head, hung off the encoder's on-device hidden state |
-| `SilkRuntime.cs` / `SilkKernels.cs` / `SilkBertEncoderRunner.cs` | the second backend, documented in [SILK.md](SILK.md) |
+| (Silk) | the second backend moved to `src/Nivara.Extensions/Silk/`; documented in [SILK.md](SILK.md) Part 2 |
 
 ## 9. Runtime and the no-CPU-fallback contract
 
@@ -473,8 +475,9 @@ a softmax, top-k and entropy kernel) and the assembled `[hidden + 4]` row is upl
 
 - **Correctness first**: one kernel per operation, one stream, one sync before readback. Fusion and
   stream tricks were deferred until the thing was trivially verifiable.
-- **Weights transposed once at upload** (`GpuBuffers.Transposed`, split out so Silk produces
-  byte-identical weights from the same arithmetic rather than a second copy). A *transpose-free*
+- **Weights transposed once at upload** (`WeightLayout.Transposed`, which `GpuBuffers.Transposed`
+  delegates to, so Silk produces byte-identical weights from the same arithmetic rather than a
+  second copy). A *transpose-free*
   in-kernel GEMM was dropped for first-cut correctness; it is worth revisiting only if upload time
   ever matters, which it does not on a shared-DRAM iGPU.
 - **Persistent cap-sized workspace** with `Ensure`-only growth; payload copies go through

@@ -32,7 +32,7 @@
 
 From each token's embedding row, three **Linear** projections are computed (post 1's
 threshold-logic vote, applied three times). Source: `BertSelfAttention.Forward`,
-`samples/Nivara.Samples/BertModel.cs:65-71`:
+`src/Nivara.Extensions/AI/BertModel.cs:65-71`:
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -211,7 +211,7 @@ text ──→ ●tokenizer ──→ token ids [128]
 
 ## Source references
 
-- `samples/Nivara.Samples/BertModel.cs` — BertSelfAttention (45-157), scale (61)
+- `src/Nivara.Extensions/AI/BertModel.cs` — BertSelfAttention (45-157), scale (61)
 - `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs` — constructor & scale (27-58), Forward (60-116)
 - `src/Nivara/AutoDiff/Nn/Linear.cs` — the projections are Linear layers (post 1)
 - `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` — MultiHeadAttention entry (362-521)

@@ -82,7 +82,7 @@ The data is crunched, but the crunching is bookkeeping: one finite vocabulary
 
 **2. How MiniLM uses it.** This is node #1 in the chain — text goes in, a `[128]` vector of
 token ids comes out. MiniLM's tokenizer is WordPiece (`MiniLMTokenizer.Load/Encode`,
-`samples/Nivara.Samples/BertModel.cs:437-463`):
+`src/Nivara.Extensions/AI/BertModel.cs:437-463`):
 
 - `[CLS]` and `[SEP]` are added around the sentence (`addSpecialTokens: true`,
   `BertModel.cs:449`). Standard BERT ids: `[PAD]=0`, `[UNK]=100`, `[CLS]=101`, `[SEP]=102`,
@@ -400,7 +400,7 @@ text ──→ ●tokenizer ──→ token ids [128]
 
 ## Source references
 
-- `samples/Nivara.Samples/BertModel.cs` — BertConfig (8-16), BertEncoder.Forward (258-278),
+- `src/Nivara.Extensions/AI/BertModel.cs` — BertConfig (8-16), BertEncoder.Forward (258-278),
   MiniLMTokenizer.Encode (444-463)
 - `src/Nivara/AutoDiff/Nn/Embedding.cs` — constructor (18-33), Forward/Gather (35-64)
 - `src/Nivara/AutoDiff/Nn/Linear.cs` — Forward two-path (55-68), transposed cache (70-82)

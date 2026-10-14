@@ -6,7 +6,7 @@ namespace Nivara.PerformanceTests;
 
 /// <summary>
 /// The <c>--silk-kernels</c> gate: runs the OpenCL C BERT-family kernels
-/// (samples/Nivara.Samples/Gpu/SilkKernels.cs) that the <c>--silk</c> sample path uses against the
+/// (src/Nivara.Extensions/Silk/SilkKernels.cs) that the <c>--silk</c> sample path uses against the
 /// incumbent ILGPU kernels of the same shape, on the same inputs, at each model's real dimensions
 /// (MiniLM and DistilBERT) — and answers the one question that decides whether the Silk path is
 /// worth building out: do the two backends compute the same numbers?
@@ -40,7 +40,7 @@ namespace Nivara.PerformanceTests;
 /// <c>f64</c> in the same ascending-K order — with the byte-match counts against both backends
 /// printed above the table. It is the difference between "the byte gate disagrees" and "the byte
 /// gate disagrees <i>because</i> the driver fused": it is how the contraction above was pinned
-/// down, and it is the standing evidence for the accumulation claim in <see cref="SilkKernels"/>.
+/// down, and it is the standing evidence for the accumulation claim in <see cref="Nivara.Silk.SilkKernels"/>.
 /// </para>
 ///
 /// <para>
@@ -63,7 +63,7 @@ internal static class SilkKernelsGate
     // hidden 384, intermediate 1536, num_attention_heads 12 -> headDim 32, layer_norm_eps 1e-12.
     // DistilBERT (distilbert-base-uncased, samples/data/distilbert/config.json):
     // hidden 768, intermediate 3072, num_attention_heads 12 -> headDim 64, layer_norm_eps 1e-12.
-    // DistilBERT is the stressing case: headDim 64 == SilkKernels.MaxHeadDim, so it drives the
+    // DistilBERT is the stressing case: headDim 64 == Nivara.Silk.SilkKernels.MaxHeadDim, so it drives the
     // attention kernel's per-thread local-memory tile to its compiled bound.
     sealed record ModelShape(
         string Name,
@@ -121,10 +121,10 @@ internal static class SilkKernelsGate
             return ExitUnbuilt;
         }
 
-        SilkRuntime silk;
+        Nivara.Silk.SilkRuntime silk;
         try
         {
-            silk = new SilkRuntime();
+            silk = new Nivara.Silk.SilkRuntime();
         }
         catch (Exception ex)
         {
@@ -167,7 +167,7 @@ internal static class SilkKernelsGate
 
     // ── GEMM: byte-identity on the fused epilogues ────────────────
 
-    static List<Leg> MeasureGemms(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers)
+    static List<Leg> MeasureGemms(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
         var legs = new List<Leg>();
         uint seed = 0x5EED1234u;
@@ -224,34 +224,34 @@ internal static class SilkKernelsGate
             silk.Upload(sbias, bias);
 
             Leg biasLeg = Measure(
-                SilkKernels.GemmBias, cell, requireBytes: true,
+                Nivara.Silk.SilkKernels.GemmBias, cell, requireBytes: true,
                 () => { biasKernel(stream, cfg, aView, bView, cView, biasView, aRows, aCols, bCols); ilgpu.Synchronize(); },
                 () => cBuf.AsContiguous().GetAsArray(),
-                () => { SetGemmArgs(silk, SilkKernels.GemmBias, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: false); RunGemm(silk, SilkKernels.GemmBias, aRows, bCols); },
+                () => { SetGemmArgs(silk, Nivara.Silk.SilkKernels.GemmBias, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: false); RunGemm(silk, Nivara.Silk.SilkKernels.GemmBias, aRows, bCols); },
                 () => silk.Download(sc, elements));
             legs.Add(biasLeg);
             PrintAccumulationModel(cell, a, bt, bias, aRows, aCols, bCols, biasLeg.Reference, biasLeg.Actual);
 
             // pre_classifier-shaped ReLU epilogue: pure add + clamp, so byte-identity is required.
             legs.Add(Measure(
-                SilkKernels.GemmRelu, cell, requireBytes: true,
+                Nivara.Silk.SilkKernels.GemmRelu, cell, requireBytes: true,
                 () => { reluKernel(stream, cfg, aView, bView, cView, biasView, aRows, aCols, bCols); ilgpu.Synchronize(); },
                 () => cBuf.AsContiguous().GetAsArray(),
-                () => { SetGemmArgs(silk, SilkKernels.GemmRelu, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: false); RunGemm(silk, SilkKernels.GemmRelu, aRows, bCols); },
+                () => { SetGemmArgs(silk, Nivara.Silk.SilkKernels.GemmRelu, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: false); RunGemm(silk, Nivara.Silk.SilkKernels.GemmRelu, aRows, bCols); },
                 () => silk.Download(sc, elements)));
 
             legs.Add(Measure(
-                SilkKernels.GemmGelu, cell, requireBytes: false,
+                Nivara.Silk.SilkKernels.GemmGelu, cell, requireBytes: false,
                 () => { geluKernel(stream, cfg, aView, bView, cView, biasView, aRows, aCols, bCols); ilgpu.Synchronize(); },
                 () => cBuf.AsContiguous().GetAsArray(),
-                () => { SetGemmArgs(silk, SilkKernels.GemmGelu, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: false); RunGemm(silk, SilkKernels.GemmGelu, aRows, bCols); },
+                () => { SetGemmArgs(silk, Nivara.Silk.SilkKernels.GemmGelu, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: false); RunGemm(silk, Nivara.Silk.SilkKernels.GemmGelu, aRows, bCols); },
                 () => silk.Download(sc, elements)));
 
             legs.Add(Measure(
-                SilkKernels.GemmQkv, cell, requireBytes: true,
+                Nivara.Silk.SilkKernels.GemmQkv, cell, requireBytes: true,
                 () => { qkvKernel(stream, cfg, aView, bView, cView, biasView, aRows, aCols, bCols, bCols / 3); ilgpu.Synchronize(); },
                 () => cBuf.AsContiguous().GetAsArray(),
-                () => { SetGemmArgs(silk, SilkKernels.GemmQkv, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: true); RunGemm(silk, SilkKernels.GemmQkv, aRows, bCols); },
+                () => { SetGemmArgs(silk, Nivara.Silk.SilkKernels.GemmQkv, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: true); RunGemm(silk, Nivara.Silk.SilkKernels.GemmQkv, aRows, bCols); },
                 () => silk.Download(sc, elements)));
         }
 
@@ -263,7 +263,7 @@ internal static class SilkKernelsGate
     /// in exactly the ascending-K order the kernels use, and counting byte-for-byte matches. This
     /// is what turns "the byte gate disagrees" into "the byte gate disagrees because <i>this</i>",
     /// and it is the evidence behind (or against) the bit-identity claim in
-    /// <see cref="SilkKernels"/>. Prints one line per backend.</summary>
+    /// <see cref="Nivara.Silk.SilkKernels"/>. Prints one line per backend.</summary>
     static void PrintAccumulationModel(
         string shape, float[] a, float[] bt, float[] bias, int aRows, int aCols, int bCols, float[] ilgpu, float[] silk)
     {
@@ -303,7 +303,7 @@ internal static class SilkKernelsGate
             $"  accumulation {shape,-8} silk : mul+add {hits[3],7}/{total}  fma {hits[4],7}/{total}  f64 {hits[5],7}/{total}");
     }
 
-    static void SetGemmArgs(SilkRuntime silk, string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, bool qkv)
+    static void SetGemmArgs(Nivara.Silk.SilkRuntime silk, string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, bool qkv)
     {
         silk.SetBuffer(kernel, 0, a);
         silk.SetBuffer(kernel, 1, b);
@@ -315,15 +315,15 @@ internal static class SilkKernelsGate
         if (qkv) silk.SetUInt32(kernel, 7, (uint)(bCols / 3));
     }
 
-    static void RunGemm(SilkRuntime silk, string kernel, int aRows, int bCols)
+    static void RunGemm(Nivara.Silk.SilkRuntime silk, string kernel, int aRows, int bCols)
         => silk.Run(
             kernel,
-            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
-            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+            [(nuint)Nivara.Silk.SilkKernels.GemmGlobalRows(aRows), (nuint)Nivara.Silk.SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)Nivara.Silk.SilkKernels.GemmTileSize, (nuint)Nivara.Silk.SilkKernels.GemmTileSize]);
 
     // ── attention ─────────────────────────────────────────────────
 
-    static Leg MeasureAttention(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers, int band = GpuBuffers.GlobalAttentionBand)
+    static Leg MeasureAttention(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers, int band = GpuBuffers.GlobalAttentionBand)
     {
         const int batch = 2;
         int seqLen = shape.SeqLen;
@@ -389,7 +389,7 @@ internal static class SilkKernelsGate
             ? $"{shape.Name} b{batch} s{seqLen} h{numHeads} d{headDim}"
             : $"{shape.Name} band{band} s{seqLen}";
         return Measure(
-            SilkKernels.Attention, label, requireBytes: false,
+            Nivara.Silk.SilkKernels.Attention, label, requireBytes: false,
             () =>
             {
                 attention(stream, cfg, qView, kView, vView, maskView, outView,
@@ -399,28 +399,28 @@ internal static class SilkKernelsGate
             () => outBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.Attention, 0, sq);
-                silk.SetBuffer(SilkKernels.Attention, 1, sk);
-                silk.SetBuffer(SilkKernels.Attention, 2, sv);
-                silk.SetBuffer(SilkKernels.Attention, 3, smask);
-                silk.SetBuffer(SilkKernels.Attention, 4, sout);
-                silk.SetUInt32(SilkKernels.Attention, 5, batch);
-                silk.SetUInt32(SilkKernels.Attention, 6, (uint)seqLen);
-                silk.SetUInt32(SilkKernels.Attention, 7, (uint)numHeads);
-                silk.SetUInt32(SilkKernels.Attention, 8, (uint)headDim);
-                silk.SetInt32(SilkKernels.Attention, 9, band);
-                silk.SetFloat32(SilkKernels.Attention, 10, scale);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Attention, 0, sq);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Attention, 1, sk);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Attention, 2, sv);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Attention, 3, smask);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Attention, 4, sout);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Attention, 5, batch);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Attention, 6, (uint)seqLen);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Attention, 7, (uint)numHeads);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Attention, 8, (uint)headDim);
+                silk.SetInt32(Nivara.Silk.SilkKernels.Attention, 9, band);
+                silk.SetFloat32(Nivara.Silk.SilkKernels.Attention, 10, scale);
                 silk.Run(
-                    SilkKernels.Attention,
-                    [(nuint)SilkKernels.AttentionGlobal(total)],
-                    [(nuint)SilkKernels.AttentionGroupSize]);
+                    Nivara.Silk.SilkKernels.Attention,
+                    [(nuint)Nivara.Silk.SilkKernels.AttentionGlobal(total)],
+                    [(nuint)Nivara.Silk.SilkKernels.AttentionGroupSize]);
             },
             () => silk.Download(sout, q.Length));
     }
 
     // ── layer norm + residual ─────────────────────────────────────
 
-    static Leg MeasureLayerNormResidual(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers)
+    static Leg MeasureLayerNormResidual(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
         int rows = shape.SeqLen, cols = shape.Hidden, elements = rows * cols;
         uint seed = 0x1A71CE12u;
@@ -466,7 +466,7 @@ internal static class SilkKernelsGate
         silk.Upload(sbeta, beta);
 
         return Measure(
-            SilkKernels.LayerNormResidual, $"{shape.Name} r{rows} c{cols}", requireBytes: false,
+            Nivara.Silk.SilkKernels.LayerNormResidual, $"{shape.Name} r{rows} c{cols}", requireBytes: false,
             () =>
             {
                 layerNormResidual(stream, cfg, aView, bView, gammaView, betaView, yView, rows, cols, shape.Eps);
@@ -475,25 +475,25 @@ internal static class SilkKernelsGate
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.LayerNormResidual, 0, sa);
-                silk.SetBuffer(SilkKernels.LayerNormResidual, 1, sb);
-                silk.SetBuffer(SilkKernels.LayerNormResidual, 2, sgamma);
-                silk.SetBuffer(SilkKernels.LayerNormResidual, 3, sbeta);
-                silk.SetBuffer(SilkKernels.LayerNormResidual, 4, sy);
-                silk.SetUInt32(SilkKernels.LayerNormResidual, 5, (uint)rows);
-                silk.SetUInt32(SilkKernels.LayerNormResidual, 6, (uint)cols);
-                silk.SetFloat32(SilkKernels.LayerNormResidual, 7, shape.Eps);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNormResidual, 0, sa);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNormResidual, 1, sb);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNormResidual, 2, sgamma);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNormResidual, 3, sbeta);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNormResidual, 4, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.LayerNormResidual, 5, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.LayerNormResidual, 6, (uint)cols);
+                silk.SetFloat32(Nivara.Silk.SilkKernels.LayerNormResidual, 7, shape.Eps);
                 silk.Run(
-                    SilkKernels.LayerNormResidual,
-                    [(nuint)SilkKernels.LinearGlobal(rows)],
-                    [(nuint)SilkKernels.LinearGroupSize]);
+                    Nivara.Silk.SilkKernels.LayerNormResidual,
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(rows)],
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
             },
             () => silk.Download(sy, elements));
     }
 
     // ── embedding gather/sum ──────────────────────────────────────
 
-    static Leg MeasureEmbedSum(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers)
+    static Leg MeasureEmbedSum(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
         int rows = shape.SeqLen, hidden = shape.Hidden, elements = rows * hidden;
         uint seed = 0x3EEB1234u;
@@ -549,7 +549,7 @@ internal static class SilkKernelsGate
         silk.Upload(stt, tokenType);
 
         return Measure(
-            SilkKernels.EmbedSum, $"{shape.Name} r{rows} h{hidden}", requireBytes: false,
+            Nivara.Silk.SilkKernels.EmbedSum, $"{shape.Name} r{rows} h{hidden}", requireBytes: false,
             () =>
             {
                 embeddingSum(stream, cfg, idsView, posIdsView, wordView, posView, ttView, yView, hidden, 0);
@@ -558,26 +558,26 @@ internal static class SilkKernelsGate
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.EmbedSum, 0, sids);
-                silk.SetBuffer(SilkKernels.EmbedSum, 1, sposIds);
-                silk.SetBuffer(SilkKernels.EmbedSum, 2, sword);
-                silk.SetBuffer(SilkKernels.EmbedSum, 3, spos);
-                silk.SetBuffer(SilkKernels.EmbedSum, 4, stt);
-                silk.SetBuffer(SilkKernels.EmbedSum, 5, sy);
-                silk.SetUInt32(SilkKernels.EmbedSum, 6, (uint)elements);
-                silk.SetUInt32(SilkKernels.EmbedSum, 7, (uint)hidden);
-                silk.SetUInt32(SilkKernels.EmbedSum, 8, 0u);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.EmbedSum, 0, sids);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.EmbedSum, 1, sposIds);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.EmbedSum, 2, sword);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.EmbedSum, 3, spos);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.EmbedSum, 4, stt);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.EmbedSum, 5, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.EmbedSum, 6, (uint)elements);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.EmbedSum, 7, (uint)hidden);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.EmbedSum, 8, 0u);
                 silk.Run(
-                    SilkKernels.EmbedSum,
-                    [(nuint)SilkKernels.LinearGlobal(elements)],
-                    [(nuint)SilkKernels.LinearGroupSize]);
+                    Nivara.Silk.SilkKernels.EmbedSum,
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(elements)],
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
             },
             () => silk.Download(sy, elements));
     }
 
     // ── classifier-head row gather ────────────────────────────────
 
-    static Leg MeasureGather(IlgpuRuntime ilgpu, SilkRuntime silk, ModelShape shape, List<nint> buffers)
+    static Leg MeasureGather(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
         const int batch = 8;
         const int tableRows = 1024;
@@ -613,7 +613,7 @@ internal static class SilkKernelsGate
         silk.Upload(sids, ids);
 
         return Measure(
-            SilkKernels.GatherRows, $"{shape.Name} r{rows} h{hidden}", requireBytes: true,
+            Nivara.Silk.SilkKernels.GatherRows, $"{shape.Name} r{rows} h{hidden}", requireBytes: true,
             () =>
             {
                 gather(stream, cfg, tableView, idsView, outView, hidden);
@@ -622,22 +622,22 @@ internal static class SilkKernelsGate
             () => outBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.GatherRows, 0, stable);
-                silk.SetBuffer(SilkKernels.GatherRows, 1, sids);
-                silk.SetBuffer(SilkKernels.GatherRows, 2, sout);
-                silk.SetUInt32(SilkKernels.GatherRows, 3, (uint)elements);
-                silk.SetUInt32(SilkKernels.GatherRows, 4, (uint)hidden);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.GatherRows, 0, stable);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.GatherRows, 1, sids);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.GatherRows, 2, sout);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.GatherRows, 3, (uint)elements);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.GatherRows, 4, (uint)hidden);
                 silk.Run(
-                    SilkKernels.GatherRows,
-                    [(nuint)SilkKernels.LinearGlobal(elements)],
-                    [(nuint)SilkKernels.LinearGroupSize]);
+                    Nivara.Silk.SilkKernels.GatherRows,
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(elements)],
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
             },
             () => silk.Download(sout, elements));
     }
 
     // ── ModernBERT / Laya ports ───────────────────────────────────
 
-    static List<Leg> MeasureModernBertPorts(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers)
+    static List<Leg> MeasureModernBertPorts(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers)
     {
         // ModernBERT-large defaults: seq 128 is the kernel-gate length, not the 4096 benchmark.
         // headDim 64 is MaxHeadDim. intermediate 2624 makes the GeGLU input 2x that.
@@ -661,7 +661,7 @@ internal static class SilkKernelsGate
         return legs;
     }
 
-    static List<Leg> MeasurePlainGemm(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int seq, int hidden, int intermediate)
+    static List<Leg> MeasurePlainGemm(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int seq, int hidden, int intermediate)
     {
         var legs = new List<Leg>();
         uint seed = 0x6E4D0001u;
@@ -703,18 +703,18 @@ internal static class SilkKernelsGate
             silk.Upload(sb, bt);
 
             legs.Add(Measure(
-                SilkKernels.Gemm, $"modernbert {name}", requireBytes: true,
+                Nivara.Silk.SilkKernels.Gemm, $"modernbert {name}", requireBytes: true,
                 () => { kernel(stream, cfg, aView, bView, cView, aRows, aCols, bCols); ilgpu.Synchronize(); },
                 () => cBuf.AsContiguous().GetAsArray(),
                 () =>
                 {
-                    silk.SetBuffer(SilkKernels.Gemm, 0, sa);
-                    silk.SetBuffer(SilkKernels.Gemm, 1, sb);
-                    silk.SetBuffer(SilkKernels.Gemm, 2, sc);
-                    silk.SetUInt32(SilkKernels.Gemm, 3, (uint)aRows);
-                    silk.SetUInt32(SilkKernels.Gemm, 4, (uint)aCols);
-                    silk.SetUInt32(SilkKernels.Gemm, 5, (uint)bCols);
-                    RunGemm(silk, SilkKernels.Gemm, aRows, bCols);
+                    silk.SetBuffer(Nivara.Silk.SilkKernels.Gemm, 0, sa);
+                    silk.SetBuffer(Nivara.Silk.SilkKernels.Gemm, 1, sb);
+                    silk.SetBuffer(Nivara.Silk.SilkKernels.Gemm, 2, sc);
+                    silk.SetUInt32(Nivara.Silk.SilkKernels.Gemm, 3, (uint)aRows);
+                    silk.SetUInt32(Nivara.Silk.SilkKernels.Gemm, 4, (uint)aCols);
+                    silk.SetUInt32(Nivara.Silk.SilkKernels.Gemm, 5, (uint)bCols);
+                    RunGemm(silk, Nivara.Silk.SilkKernels.Gemm, aRows, bCols);
                 },
                 () => silk.Download(sc, elements)));
         }
@@ -722,7 +722,7 @@ internal static class SilkKernelsGate
         return legs;
     }
 
-    static Leg MeasureAdd(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int cols)
+    static Leg MeasureAdd(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int rows, int cols)
     {
         int n = rows * cols;
         uint seed = 0xADD00001u;
@@ -750,21 +750,21 @@ internal static class SilkKernelsGate
         silk.Upload(sb, b);
 
         return Measure(
-            SilkKernels.Add, $"modernbert n{n}", requireBytes: true,
+            Nivara.Silk.SilkKernels.Add, $"modernbert n{n}", requireBytes: true,
             () => { kernel(stream, cfg, aView, bView, yView); ilgpu.Synchronize(); },
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.Add, 0, sa);
-                silk.SetBuffer(SilkKernels.Add, 1, sb);
-                silk.SetBuffer(SilkKernels.Add, 2, sy);
-                silk.SetUInt32(SilkKernels.Add, 3, (uint)n);
-                RunLinear(silk, SilkKernels.Add, n);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Add, 0, sa);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Add, 1, sb);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Add, 2, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Add, 3, (uint)n);
+                RunLinear(silk, Nivara.Silk.SilkKernels.Add, n);
             },
             () => silk.Download(sy, n));
     }
 
-    static Leg MeasureAddBias(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int cols)
+    static Leg MeasureAddBias(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int rows, int cols)
     {
         int n = rows * cols;
         uint seed = 0xB1A50001u;
@@ -792,22 +792,22 @@ internal static class SilkKernelsGate
         silk.Upload(sb, bias);
 
         return Measure(
-            SilkKernels.AddBias, $"modernbert r{rows} c{cols}", requireBytes: true,
+            Nivara.Silk.SilkKernels.AddBias, $"modernbert r{rows} c{cols}", requireBytes: true,
             () => { kernel(stream, cfg, xView, biasView, yView, rows, cols); ilgpu.Synchronize(); },
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.AddBias, 0, sx);
-                silk.SetBuffer(SilkKernels.AddBias, 1, sb);
-                silk.SetBuffer(SilkKernels.AddBias, 2, sy);
-                silk.SetUInt32(SilkKernels.AddBias, 3, (uint)rows);
-                silk.SetUInt32(SilkKernels.AddBias, 4, (uint)cols);
-                RunLinear(silk, SilkKernels.AddBias, n);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.AddBias, 0, sx);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.AddBias, 1, sb);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.AddBias, 2, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.AddBias, 3, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.AddBias, 4, (uint)cols);
+                RunLinear(silk, Nivara.Silk.SilkKernels.AddBias, n);
             },
             () => silk.Download(sy, n));
     }
 
-    static Leg MeasureSplit(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int blockCols)
+    static Leg MeasureSplit(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int rows, int blockCols)
     {
         const int parts = 3;
         const int part = 1;
@@ -831,23 +831,23 @@ internal static class SilkKernelsGate
         silk.Upload(ssrc, src);
 
         return Measure(
-            SilkKernels.SplitColumns, $"modernbert part{part}", requireBytes: true,
+            Nivara.Silk.SilkKernels.SplitColumns, $"modernbert part{part}", requireBytes: true,
             () => { kernel(stream, cfg, srcView, dstView, rows, blockCols, parts, part); ilgpu.Synchronize(); },
             () => dstBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.SplitColumns, 0, ssrc);
-                silk.SetBuffer(SilkKernels.SplitColumns, 1, sdst);
-                silk.SetUInt32(SilkKernels.SplitColumns, 2, (uint)rows);
-                silk.SetUInt32(SilkKernels.SplitColumns, 3, (uint)blockCols);
-                silk.SetUInt32(SilkKernels.SplitColumns, 4, parts);
-                silk.SetUInt32(SilkKernels.SplitColumns, 5, part);
-                RunLinear(silk, SilkKernels.SplitColumns, dstN);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.SplitColumns, 0, ssrc);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.SplitColumns, 1, sdst);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.SplitColumns, 2, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.SplitColumns, 3, (uint)blockCols);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.SplitColumns, 4, parts);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.SplitColumns, 5, part);
+                RunLinear(silk, Nivara.Silk.SilkKernels.SplitColumns, dstN);
             },
             () => silk.Download(sdst, dstN));
     }
 
-    static Leg MeasureLayerNorm(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int cols, float eps)
+    static Leg MeasureLayerNorm(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int rows, int cols, float eps)
     {
         int n = rows * cols;
         uint seed = 0x1A7E0001u;
@@ -883,24 +883,24 @@ internal static class SilkKernelsGate
         silk.Upload(sb, beta);
 
         return Measure(
-            SilkKernels.LayerNorm, $"modernbert r{rows} c{cols}", requireBytes: false,
+            Nivara.Silk.SilkKernels.LayerNorm, $"modernbert r{rows} c{cols}", requireBytes: false,
             () => { kernel(stream, cfg, xView, gammaView, betaView, yView, rows, cols, eps); ilgpu.Synchronize(); },
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.LayerNorm, 0, sx);
-                silk.SetBuffer(SilkKernels.LayerNorm, 1, sg);
-                silk.SetBuffer(SilkKernels.LayerNorm, 2, sb);
-                silk.SetBuffer(SilkKernels.LayerNorm, 3, sy);
-                silk.SetUInt32(SilkKernels.LayerNorm, 4, (uint)rows);
-                silk.SetUInt32(SilkKernels.LayerNorm, 5, (uint)cols);
-                silk.SetFloat32(SilkKernels.LayerNorm, 6, eps);
-                RunLinear(silk, SilkKernels.LayerNorm, rows);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNorm, 0, sx);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNorm, 1, sg);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNorm, 2, sb);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.LayerNorm, 3, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.LayerNorm, 4, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.LayerNorm, 5, (uint)cols);
+                silk.SetFloat32(Nivara.Silk.SilkKernels.LayerNorm, 6, eps);
+                RunLinear(silk, Nivara.Silk.SilkKernels.LayerNorm, rows);
             },
             () => silk.Download(sy, n));
     }
 
-    static Leg MeasureRotary(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int numHeads, int headDim)
+    static Leg MeasureRotary(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int rows, int numHeads, int headDim)
     {
         int half = headDim / 2;
         int n = rows * numHeads * headDim;
@@ -946,25 +946,25 @@ internal static class SilkKernelsGate
         silk.Upload(ssin, sin);
 
         return Measure(
-            SilkKernels.Rotary, $"modernbert h{numHeads} d{headDim}", requireBytes: true,
+            Nivara.Silk.SilkKernels.Rotary, $"modernbert h{numHeads} d{headDim}", requireBytes: true,
             () => { kernel(stream, cfg, xView, posView, cosView, sinView, yView, rows, numHeads, headDim); ilgpu.Synchronize(); },
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.Rotary, 0, sx);
-                silk.SetBuffer(SilkKernels.Rotary, 1, spos);
-                silk.SetBuffer(SilkKernels.Rotary, 2, scos);
-                silk.SetBuffer(SilkKernels.Rotary, 3, ssin);
-                silk.SetBuffer(SilkKernels.Rotary, 4, sy);
-                silk.SetUInt32(SilkKernels.Rotary, 5, (uint)rows);
-                silk.SetUInt32(SilkKernels.Rotary, 6, (uint)numHeads);
-                silk.SetUInt32(SilkKernels.Rotary, 7, (uint)headDim);
-                RunLinear(silk, SilkKernels.Rotary, work);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Rotary, 0, sx);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Rotary, 1, spos);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Rotary, 2, scos);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Rotary, 3, ssin);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.Rotary, 4, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Rotary, 5, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Rotary, 6, (uint)numHeads);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.Rotary, 7, (uint)headDim);
+                RunLinear(silk, Nivara.Silk.SilkKernels.Rotary, work);
             },
             () => silk.Download(sy, n));
     }
 
-    static Leg MeasureGeGlu(IlgpuRuntime ilgpu, SilkRuntime silk, List<nint> buffers, int rows, int intermediate)
+    static Leg MeasureGeGlu(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers, int rows, int intermediate)
     {
         int srcN = rows * 2 * intermediate;
         int dstN = rows * intermediate;
@@ -986,25 +986,25 @@ internal static class SilkKernelsGate
         silk.Upload(sx, x);
 
         return Measure(
-            SilkKernels.GeGlu, $"modernbert i{intermediate}", requireBytes: false,
+            Nivara.Silk.SilkKernels.GeGlu, $"modernbert i{intermediate}", requireBytes: false,
             () => { kernel(stream, cfg, xView, yView, rows, intermediate); ilgpu.Synchronize(); },
             () => yBuf.AsContiguous().GetAsArray(),
             () =>
             {
-                silk.SetBuffer(SilkKernels.GeGlu, 0, sx);
-                silk.SetBuffer(SilkKernels.GeGlu, 1, sy);
-                silk.SetUInt32(SilkKernels.GeGlu, 2, (uint)rows);
-                silk.SetUInt32(SilkKernels.GeGlu, 3, (uint)intermediate);
-                RunLinear(silk, SilkKernels.GeGlu, dstN);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.GeGlu, 0, sx);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.GeGlu, 1, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.GeGlu, 2, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.GeGlu, 3, (uint)intermediate);
+                RunLinear(silk, Nivara.Silk.SilkKernels.GeGlu, dstN);
             },
             () => silk.Download(sy, dstN));
     }
 
-    static void RunLinear(SilkRuntime silk, string kernel, int total)
+    static void RunLinear(Nivara.Silk.SilkRuntime silk, string kernel, int total)
         => silk.Run(
             kernel,
-            [(nuint)SilkKernels.LinearGlobal(total)],
-            [(nuint)SilkKernels.LinearGroupSize]);
+            [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(total)],
+            [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
 
     // ── measurement + verdict ─────────────────────────────────────
 

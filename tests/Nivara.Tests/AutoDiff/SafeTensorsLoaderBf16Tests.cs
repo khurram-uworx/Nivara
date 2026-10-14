@@ -1,4 +1,4 @@
-using Nivara.Samples;
+using Nivara.AI;
 using NUnit.Framework;
 using System.Buffers.Binary;
 using System.Diagnostics;

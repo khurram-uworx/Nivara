@@ -4,7 +4,7 @@ using Nivara.AutoDiff.Operations;
 using System.Numerics;
 using System.Text.Json;
 
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 /// <summary>
 /// Configuration for a ModernBERT encoder. Understands both the 4.47-era Hub layout

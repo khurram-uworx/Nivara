@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.Samples;
 using System.Numerics;

@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 public static class SafeTensorsLoader
 {

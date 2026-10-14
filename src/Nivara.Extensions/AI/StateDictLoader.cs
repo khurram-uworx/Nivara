@@ -3,7 +3,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 public static class StateDictLoader
 {

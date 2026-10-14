@@ -1,6 +1,6 @@
+using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.Samples;
 using System.Numerics;
 using System.Runtime.InteropServices;
 

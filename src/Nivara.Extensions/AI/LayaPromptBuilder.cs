@@ -1,4 +1,4 @@
-namespace Nivara.Samples;
+namespace Nivara.AI;
 
 /// <summary>Question types the Laya head discriminates between.</summary>
 public enum LayaQuestionType

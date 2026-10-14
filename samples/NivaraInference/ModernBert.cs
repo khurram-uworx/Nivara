@@ -1,6 +1,5 @@
+using Nivara.AI;
 using Nivara.AutoDiff;
-using Nivara.Samples;
-using Nivara.Samples.Gpu;
 using System.Diagnostics;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -567,7 +566,7 @@ public static class ModernBert
     public static int RunGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string modelDir,
-        OpenModernBertSession open)
+        Nivara.AI.OpenModernBertSession open)
     {
         var config = LoadConfig(modelDir);
         var tokenizer = LoadTokenizer(modelDir, config);
@@ -577,7 +576,7 @@ public static class ModernBert
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using IModernBertGpuSession session = open(config, tensors);
+        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -622,7 +621,7 @@ public static class ModernBert
         int[]? requestedSeqLengths = null,
         int warmup = DefaultWarmup,
         int iterations = DefaultIterations,
-        OpenModernBertSession? open = null)
+        Nivara.AI.OpenModernBertSession? open = null)
     {
         ArgumentNullException.ThrowIfNull(open);
         var config = LoadConfig(modelDir);
@@ -633,7 +632,7 @@ public static class ModernBert
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using IModernBertGpuSession session = open(config, tensors);
+        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -755,7 +754,7 @@ public static class ModernBert
     public static int CompareGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string modelDir,
-        OpenModernBertSession open)
+        Nivara.AI.OpenModernBertSession open)
     {
         string metaPath = Path.Combine(modelDir, "compare_meta.json");
         if (!File.Exists(metaPath))
@@ -789,7 +788,7 @@ public static class ModernBert
         Console.WriteLine($"CPU reference forward: {cpuSw.ElapsedMilliseconds} ms");
 
         var buildSw = Stopwatch.StartNew();
-        using IModernBertGpuSession session = open(config, tensors);
+        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
