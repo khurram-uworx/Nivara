@@ -663,7 +663,19 @@ different machine.
 Attention is under the same-run encoder in every run: 15–20% at valid 40
 (769/3935, 752/4843, 745/4671), 17–21% at valid 512. The retracted 9.1–13.4 s
 figure does not reproduce. The residual (forward minus attention, 3.2–4.1 s) is
-not called GEMM — this probe did not time GEMM.
+not called GEMM — this probe did not time GEMM. The roll-up is a kernel roll-up
+under the production masks, not a trace of the forward's own attention. The
+diagnostics trace of that attention was 836–970 ms, the same order, and the two
+are not averaged.
+
+| leg | run 1 | run 2 | run 3 | band |
+|---|---|---|---|---|
+| causal/512 (not a production mask) | 32.05 | 27.47 | 31.64 | 27.5–32.1 ms/layer |
+| full/512 | 31.97 | 30.58 | 30.10 | 30.1–32.0 |
+| full/40 | 32.44 | 31.87 | 30.54 | 30.5–32.4 |
+| full/119 | 29.16 | 31.55 | 31.65 | 29.2–31.7 |
+| sliding/40, 408 of 512 rows fully masked | 24.72 | 24.07 | 24.42 | 24.1–24.7 |
+| sliding/512, 0 fully masked | 30.46 | 26.41 | 29.25 | 26.4–30.5 |
 
 Only the sliding layer at valid 40 has fully-masked rows (408 of 512, every run).
 `SoftmaxSingle` early-outs there and that leg is 24.1–24.7 ms. A full-attention
