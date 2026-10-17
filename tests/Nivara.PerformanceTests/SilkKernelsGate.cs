@@ -1078,6 +1078,7 @@ internal static class SilkKernelsGate
             Action runSilk = () =>
             {
                 Nivara.Silk.SilkLauncher.Silu(silk, sx, sy, n);
+                silk.Finish();
             };
             Func<float[]> readSilk = () => silk.Download(sy, n);
 
@@ -1107,7 +1108,7 @@ internal static class SilkKernelsGate
             silk.Upload(sg, gate);
             silk.Upload(su, up);
 
-            Action runSilk = () => Nivara.Silk.SilkLauncher.SwiGlu(silk, sg, su, sy, rows, intermediate);
+            Action runSilk = () => { Nivara.Silk.SilkLauncher.SwiGlu(silk, sg, su, sy, rows, intermediate); silk.Finish(); };
             Func<float[]> readSilk = () => silk.Download(sy, n);
 
             legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.SwiGlu, $"smollm r{rows} i{intermediate}", runCpu, readCpu, runSilk, readSilk));
@@ -1141,7 +1142,7 @@ internal static class SilkKernelsGate
             silk.Upload(sv, v);
 
             silk.EnsureAttentionLocalMemory(headDim);
-            Action runSilk = () => Nivara.Silk.SilkLauncher.CausalGqaAttention(silk, sq, sk, sv, so, qLen, numHeads, numKvHeads, headDim, scale);
+            Action runSilk = () => { Nivara.Silk.SilkLauncher.CausalGqaAttention(silk, sq, sk, sv, so, qLen, numHeads, numKvHeads, headDim, scale); silk.Finish(); };
             Func<float[]> readSilk = () => silk.Download(so, qn);
 
             legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.CausalGqaAttention, $"smollm s{qLen} h{numHeads}/{numKvHeads} d{headDim}", runCpu, readCpu, runSilk, readSilk));
