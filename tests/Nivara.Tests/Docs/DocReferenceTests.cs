@@ -24,7 +24,7 @@ public class DocReferenceTests
     /// added by the #492 reconciliation. 700 = 698 + the two SmolLM Silk files
     /// (<c>SilkSmolLMGpuRunner.cs</c>, <c>SilkSmolLMSession.cs</c>) added by #628.
     /// </summary>
-    const int ExpectedFileCount = 704;
+    const int ExpectedFileCount = 709;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered. Pinned deliberately.
