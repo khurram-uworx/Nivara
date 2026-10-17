@@ -177,9 +177,11 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// Measured, not assumed (<c>--mask</c> in <c>tests/Nivara.PerformanceTests</c>, #480). On
     /// <c>float</c> at prefill widths this loop is 1.8-3.3x slower than the
     /// <c>TensorPrimitives.Add</c> it replaced, losing 0-1 of 30 interleaved rounds in every
-    /// wide-prefill cell across repeated runs, and costing 1.3-2.0% of a Laya-shaped attention pass
-    /// (96-133 ms per 28-layer forward; that share is unstable run to run - the attention total
-    /// swings 48% across three runs while this leg holds 36% - so quote the band, not a point).
+    /// wide-prefill cell across repeated runs, and costing an absolute 96-133 ms per 28-layer
+    /// forward (heads times (maskMs - addMs) times 28 on the correctly-sized scores buffer). That
+    /// absolute delta stands. Any share of an attention total is retracted: the total it was
+    /// divided by included a bloated matmul span (#492), and no same-run denominator for this
+    /// mask delta exists yet, so quote the milliseconds, not a percentage).
     /// It is not slower everywhere: at S=512 with an all-zero mask and no
     /// flag tracking it wins, and on <c>Half</c>/<c>BFloat16</c> it is usually <em>faster</em> than
     /// the BCL add, because the BCL has no vectorized <c>Add</c> for those types and this loop
