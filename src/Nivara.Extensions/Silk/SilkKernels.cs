@@ -903,18 +903,8 @@ internal static class SilkKernels
             uint kBaseHead = kvHead * headDim;
             uint vBaseHead = kvHead * headDim;
 
-            // max
-            float mx = -INFINITY;
-            for (uint j = 0; j < kvLen; ++j)
-            {
-                float acc = 0.0f;
-                uint kBase = j * Dkv + kBaseHead;
-                for (uint d = 0; d < headDim; ++d)
-                    acc += q[qBase + d] * kCache[kBase + d];
-                float s = acc * scale;
-                if (s > mx) mx = s;
-            }
-
+            // Fused online-softmax attention: each q·k is computed once; running max
+            // (mx) and unnormalised accumulators (sum, accv[]) are rescaled in place.
             if (kvLen == 0u)
             {
                 for (uint d = 0; d < headDim; ++d)
@@ -922,7 +912,11 @@ internal static class SilkKernels
                 return;
             }
 
-            // sum
+            float accv[64];
+            for (uint d = 0; d < headDim; ++d)
+                accv[d] = 0.0f;
+
+            float mx = -INFINITY;
             float sum = 0.0f;
             for (uint j = 0; j < kvLen; ++j)
             {
@@ -931,26 +925,36 @@ internal static class SilkKernels
                 for (uint d = 0; d < headDim; ++d)
                     acc += q[qBase + d] * kCache[kBase + d];
                 float s = acc * scale;
-                sum += exp(s - mx);
+
+                if (s > mx)
+                {
+                    if (mx != -INFINITY)
+                    {
+                        float corr = exp(mx - s);
+                        sum *= corr;
+                        for (uint d = 0; d < headDim; ++d)
+                            accv[d] *= corr;
+                    }
+                    mx = s;
+                }
+
+                float w = exp(s - mx);
+                sum += w;
+                uint vBase = j * Dkv + vBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    accv[d] += w * vCache[vBase + d];
             }
 
-            // weighted V
-            for (uint d = 0; d < headDim; ++d)
+            if (mx == -INFINITY)
             {
-                float accv = 0.0f;
-                for (uint j = 0; j < kvLen; ++j)
-                {
-                    float acc = 0.0f;
-                    uint kBase = j * Dkv + kBaseHead;
-                    for (uint dd = 0; dd < headDim; ++dd)
-                        acc += q[qBase + dd] * kCache[kBase + dd];
-                    float s = acc * scale;
-                    float p = exp(s - mx) / sum;
-                    uint vBase = j * Dkv + vBaseHead;
-                    accv += p * vCache[vBase + d];
-                }
-                out[qBase + d] = accv;
+                for (uint d = 0; d < headDim; ++d)
+                    out[qBase + d] = 0.0f;
+                return;
             }
+
+            float invSum = 1.0f / sum;
+            for (uint d = 0; d < headDim; ++d)
+                out[qBase + d] = accv[d] * invSum;
         }
         """;
 }
