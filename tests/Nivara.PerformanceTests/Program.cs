@@ -30,6 +30,9 @@ static class Program
 
     static int Main(string[] args)
     {
+        if (args.Any(a => a.Equals("--qwen-decode-attn", StringComparison.OrdinalIgnoreCase)))
+            return QwenDecodeAttentionProbe.Run();
+
         var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels, layaForward) = ParseArgs(args);
 
         // Re-recording a fingerprint baseline silently does nothing without --gemm, which is the

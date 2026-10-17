@@ -176,7 +176,7 @@ static class QwenToolParser
 /// distillation into a tiny sentiment classifier. Inference-by-default (ADR-001/002): the
 /// teacher runs outside <c>GradientUtils.Grad()</c>; the student trains inside it.
 /// </summary>
-static class Qwen
+public static class Qwen
 {
     const int FeatureDim = 4096;
     const int MaxNewTokens = 160;
@@ -430,7 +430,7 @@ static class Qwen
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"),
             Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<​|endoftext|>",
+            unkToken: "<|endoftext|>",
             tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
 
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
@@ -499,7 +499,7 @@ static class Qwen
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"),
             Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<​|endoftext|>",
+            unkToken: "<|endoftext|>",
             tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
 
         var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
