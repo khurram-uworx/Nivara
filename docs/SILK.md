@@ -467,10 +467,11 @@ Transcendentals (`exp` in the softmax and the GELU erf) are **not** assumed iden
   individually** and the failure names the kernel and argument index. This is the deliberate
   divergence from the probe's OR-ed status: a mismatched argument count otherwise makes the kernel
   read uninitialized scalars and answer fast and wrong rather than erroring.
-- **Dispatch:** `EnqueueNdrangeKernel` then `clFinish` — every dispatch is blocking, so a readback
-  needs no further synchronization. The global size must already be a whole multiple of the local
-  size (the geometry helpers guarantee it), because OpenCL rejects a non-multiple and the in-kernel
-  guard would otherwise be dead.
+- **Dispatch:** `EnqueueNdrangeKernel` only (non-blocking). The command queue is in-order, so
+  releases/completion follow enqueue order; consumers synchronize via blocking Upload/Download or
+  an explicit `SilkRuntime.Finish()`. The global size must already be a whole multiple of the
+  local size (the geometry helpers guarantee it), because OpenCL rejects a non-multiple and the
+  in-kernel guard would otherwise be dead.
 - **Cleanup:** kernels → program → command queue → context, reverse of construction. A failed
   partial construction disposes what it built (`catch { Dispose(); throw; }`).
 
