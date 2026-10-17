@@ -249,4 +249,109 @@ internal static class SilkLauncher
             kernel,
             [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
             [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+
+    public static void Conv2d(
+        SilkRuntime runtime, nint input, nint weight, nint bias, nint output,
+        int N, int C, int H, int W, int outC, int kH, int kW,
+        int strideH, int strideW, int padTop, int padBottom, int padLeft, int padRight,
+        int groups, bool hasBias, int oH, int oW)
+    {
+        runtime.SetBuffer(SilkKernels.Conv2d, 0, input);
+        runtime.SetBuffer(SilkKernels.Conv2d, 1, weight);
+        runtime.SetBuffer(SilkKernels.Conv2d, 2, bias);
+        runtime.SetBuffer(SilkKernels.Conv2d, 3, output);
+        runtime.SetUInt32(SilkKernels.Conv2d, 4, (uint)N);
+        runtime.SetUInt32(SilkKernels.Conv2d, 5, (uint)C);
+        runtime.SetUInt32(SilkKernels.Conv2d, 6, (uint)H);
+        runtime.SetUInt32(SilkKernels.Conv2d, 7, (uint)W);
+        runtime.SetUInt32(SilkKernels.Conv2d, 8, (uint)outC);
+        runtime.SetUInt32(SilkKernels.Conv2d, 9, (uint)kH);
+        runtime.SetUInt32(SilkKernels.Conv2d, 10, (uint)kW);
+        runtime.SetUInt32(SilkKernels.Conv2d, 11, (uint)strideH);
+        runtime.SetUInt32(SilkKernels.Conv2d, 12, (uint)strideW);
+        runtime.SetUInt32(SilkKernels.Conv2d, 13, (uint)padTop);
+        runtime.SetUInt32(SilkKernels.Conv2d, 14, (uint)padBottom);
+        runtime.SetUInt32(SilkKernels.Conv2d, 15, (uint)padLeft);
+        runtime.SetUInt32(SilkKernels.Conv2d, 16, (uint)padRight);
+        runtime.SetUInt32(SilkKernels.Conv2d, 17, (uint)groups);
+        runtime.SetUInt32(SilkKernels.Conv2d, 18, hasBias ? 1u : 0u);
+        runtime.SetUInt32(SilkKernels.Conv2d, 19, (uint)oH);
+        runtime.SetUInt32(SilkKernels.Conv2d, 20, (uint)oW);
+        int total = N * outC * oH * oW;
+        runtime.Run(SilkKernels.Conv2d, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void BatchNormEval(
+        SilkRuntime runtime, nint x, nint mean, nint var, nint gamma, nint beta, nint y,
+        int N, int C, int H, int W, float eps, bool hasAffine)
+    {
+        int HW = H * W;
+        runtime.SetBuffer(SilkKernels.BatchNormEval, 0, x);
+        runtime.SetBuffer(SilkKernels.BatchNormEval, 1, mean);
+        runtime.SetBuffer(SilkKernels.BatchNormEval, 2, var);
+        runtime.SetBuffer(SilkKernels.BatchNormEval, 3, gamma);
+        runtime.SetBuffer(SilkKernels.BatchNormEval, 4, beta);
+        runtime.SetBuffer(SilkKernels.BatchNormEval, 5, y);
+        runtime.SetUInt32(SilkKernels.BatchNormEval, 6, (uint)N);
+        runtime.SetUInt32(SilkKernels.BatchNormEval, 7, (uint)C);
+        runtime.SetUInt32(SilkKernels.BatchNormEval, 8, (uint)HW);
+        runtime.SetFloat32(SilkKernels.BatchNormEval, 9, eps);
+        runtime.SetUInt32(SilkKernels.BatchNormEval, 10, hasAffine ? 1u : 0u);
+        int total = N * C * HW;
+        runtime.Run(SilkKernels.BatchNormEval, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void Relu(SilkRuntime runtime, nint x, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Relu, 0, x);
+        runtime.SetBuffer(SilkKernels.Relu, 1, y);
+        runtime.SetUInt32(SilkKernels.Relu, 2, (uint)n);
+        runtime.Run(SilkKernels.Relu, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void Relu6(SilkRuntime runtime, nint x, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Relu6, 0, x);
+        runtime.SetBuffer(SilkKernels.Relu6, 1, y);
+        runtime.SetUInt32(SilkKernels.Relu6, 2, (uint)n);
+        runtime.Run(SilkKernels.Relu6, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void MaxPool2d(
+        SilkRuntime runtime, nint input, nint output,
+        int N, int C, int H, int W, int kH, int kW, int strideH, int strideW,
+        int padTop, int padBottom, int padLeft, int padRight, int oH, int oW)
+    {
+        runtime.SetBuffer(SilkKernels.MaxPool2d, 0, input);
+        runtime.SetBuffer(SilkKernels.MaxPool2d, 1, output);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 2, (uint)N);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 3, (uint)C);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 4, (uint)H);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 5, (uint)W);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 6, (uint)kH);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 7, (uint)kW);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 8, (uint)strideH);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 9, (uint)strideW);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 10, (uint)padTop);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 11, (uint)padBottom);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 12, (uint)padLeft);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 13, (uint)padRight);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 14, (uint)oH);
+        runtime.SetUInt32(SilkKernels.MaxPool2d, 15, (uint)oW);
+        int total = N * C * oH * oW;
+        runtime.Run(SilkKernels.MaxPool2d, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void AdaptiveAvgPool2d(
+        SilkRuntime runtime, nint input, nint output, int N, int C, int H, int W)
+    {
+        runtime.SetBuffer(SilkKernels.AdaptiveAvgPool2d, 0, input);
+        runtime.SetBuffer(SilkKernels.AdaptiveAvgPool2d, 1, output);
+        runtime.SetUInt32(SilkKernels.AdaptiveAvgPool2d, 2, (uint)N);
+        runtime.SetUInt32(SilkKernels.AdaptiveAvgPool2d, 3, (uint)C);
+        runtime.SetUInt32(SilkKernels.AdaptiveAvgPool2d, 4, (uint)H);
+        runtime.SetUInt32(SilkKernels.AdaptiveAvgPool2d, 5, (uint)W);
+        int total = N * C;
+        runtime.Run(SilkKernels.AdaptiveAvgPool2d, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
 }
