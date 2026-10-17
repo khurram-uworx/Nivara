@@ -173,12 +173,13 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.Silu, n);
     }
 
-    public static void SwiGlu(SilkRuntime runtime, nint src, nint y, int rows, int intermediate)
+    public static void SwiGlu(SilkRuntime runtime, nint gate, nint up, nint y, int rows, int intermediate)
     {
-        runtime.SetBuffer(SilkKernels.SwiGlu, 0, src);
-        runtime.SetBuffer(SilkKernels.SwiGlu, 1, y);
-        runtime.SetUInt32(SilkKernels.SwiGlu, 2, (uint)rows);
-        runtime.SetUInt32(SilkKernels.SwiGlu, 3, (uint)intermediate);
+        runtime.SetBuffer(SilkKernels.SwiGlu, 0, gate);
+        runtime.SetBuffer(SilkKernels.SwiGlu, 1, up);
+        runtime.SetBuffer(SilkKernels.SwiGlu, 2, y);
+        runtime.SetUInt32(SilkKernels.SwiGlu, 3, (uint)rows);
+        runtime.SetUInt32(SilkKernels.SwiGlu, 4, (uint)intermediate);
         Linear(runtime, SilkKernels.SwiGlu, rows * intermediate);
     }
 

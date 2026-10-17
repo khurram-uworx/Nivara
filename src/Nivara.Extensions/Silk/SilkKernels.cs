@@ -633,22 +633,19 @@ internal static class SilkKernels
             y[idx] = v / (1.0f + exp(-v));
         }
 
-        /* Fused SwiGLU: first half gate, second half up. y = silu(gate) * up. */
+        /* Fused SwiGLU: y = silu(gate) * up. */
         __kernel void swiglu(
-            __global const float* x,
+            __global const float* gate,
+            __global const float* up,
             __global float* y,
             const uint rows,
             const uint intermediate)
         {
             uint idx = get_global_id(0);
             if (idx >= rows * intermediate) return;
-            uint col = idx % intermediate;
-            uint row = idx / intermediate;
-            uint xBase = row * 2u * intermediate;
-            float gate = x[xBase + col];
-            float up = x[xBase + intermediate + col];
-            float siluGate = gate / (1.0f + exp(-gate));
-            y[idx] = siluGate * up;
+            float g = gate[idx];
+            float siluGate = g / (1.0f + exp(-g));
+            y[idx] = siluGate * up[idx];
         }
 
         /* Causal GQA attention. q: [seq, numHeads*headDim], k/v: [seq, numKvHeads*headDim].
