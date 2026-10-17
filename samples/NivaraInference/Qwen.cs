@@ -377,23 +377,20 @@ public static class Qwen
         SilkQwenSession session, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
     {
         session.ResetCache();
-        float[] logits;
-        if (useKvCache)
-            logits = session.ForwardPrefill(promptIds.ToArray());
-        else
-            logits = session.Forward(promptIds.ToArray());
+        int next = useKvCache
+            ? session.ForwardPrefillArgmax(promptIds.ToArray())
+            : session.ForwardLastArgmax(promptIds.ToArray());
 
         int position = promptIds.Count;
         var gen = new List<int>();
         for (int t = 0; t < maxNewTokens && gen.Count < config.MaxPositionEmbeddings; t++)
         {
-            int next = ArgMaxLastRowSilk(logits, config.VocabSize);
             if (QwenIds.StopIds.Contains(next))
                 break;
             gen.Add(next);
-            logits = useKvCache
-                ? session.ForwardCached(next, position++)
-                : session.Forward(BuildSequence(promptIds, gen));
+            next = useKvCache
+                ? session.ForwardCachedArgmax(next, position++)
+                : session.ForwardLastArgmax(BuildSequence(promptIds, gen));
         }
         return gen;
     }

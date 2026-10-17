@@ -2710,7 +2710,7 @@ class Program
         Nivara.Silk.SilkSmolLMSession session, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
     {
         session.ResetCache();
-        var logits = session.ForwardPrefill(promptIds.ToArray());
+        int next = session.ForwardPrefillArgmax(promptIds.ToArray());
         int position = promptIds.Count;
         var sequence = new List<int>(promptIds);
         int generated = 0;
@@ -2720,10 +2720,7 @@ class Program
         int vocab = config.VocabSize;
         while (generated < maxNewTokens)
         {
-            int best = 0;
-            double bestVal = logits[0];
-            for (int i = 1; i < vocab; i++)
-                if (logits[i] > bestVal) { bestVal = logits[i]; best = i; }
+            int best = next;
             if (best == config.EosTokenId)
             {
                 sequence.Add(best);
@@ -2732,7 +2729,7 @@ class Program
             }
             sequence.Add(best);
             generated++;
-            logits = session.ForwardCached(best, position++);
+            next = session.ForwardCachedArgmax(best, position++);
         }
         genSw.Stop();
         return (generated, genSw.ElapsedMilliseconds, sequence);
