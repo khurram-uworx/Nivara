@@ -16,11 +16,14 @@ namespace Nivara.Tests.Inference;
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
-/// scopes (#580). #589 requires each reject to be observable before the first disk touch, so the
-/// ordering cases and the <c>qwen</c> happy paths use <c>qwen</c> (its checkpoint is never present:
-/// <c>samples/data/qwen2.5-0.5b-instruct/</c> is gitignored and no <c>*.safetensors</c> is tracked)
-/// and the mode cases pin the message, not the exit code — a guard that fell through to the
-/// model-file check would exit <c>1</c> with a different message.
+/// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
+/// and the <c>--ollama</c> model scope and URL value). The <c>typesafe</c> happy path is
+/// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
+/// observable before the first disk touch, so the ordering cases and the <c>qwen</c> happy paths use
+/// <c>qwen</c> (its checkpoint is never present: <c>samples/data/qwen2.5-0.5b-instruct/</c> is
+/// gitignored and no <c>*.safetensors</c> is tracked) and the mode cases pin the message, not the
+/// exit code — a guard that fell through to the model-file check would exit <c>1</c> with a
+/// different message.
 /// </para>
 /// </summary>
 [TestFixture]
@@ -373,6 +376,38 @@ public class InferenceCliArgumentTests
             "is only supported for the qwen benchmark mode");
         AssertRejected(Run("qwen", "distill", "--synthetic-weights"),
             "supports only the 'benchmark' mode");
+    }
+
+    /// <summary>
+    /// The TypeSafe demo is a model key whose run is an HTTP client, not a checkpoint, so its
+    /// dispatch sits before the model-file lookup. Each reject therefore has to name its own guard
+    /// rather than fall through to "Model file not found". The happy path is deliberately absent:
+    /// it needs a live decision server, which a CI runner does not have.
+    /// </summary>
+    [Test]
+    public void Typesafe_BeyondItsCliSurface_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "benchmark"), "Unsupported mode 'benchmark' for 'typesafe'");
+            AssertRejected(Run("typesafe", "--ilgpu"), "--ilgpu is not supported for 'typesafe'");
+            AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
+        });
+    }
+
+    /// <summary>
+    /// <c>--ollama</c> selects the decision-model server for the <c>typesafe</c> run and nothing
+    /// else reads it, so it is rejected outside that model; a supplied endpoint must be an absolute
+    /// http(s) URL, because the value would otherwise reach <c>new Uri(…)</c> and throw.
+    /// </summary>
+    [Test]
+    public void Ollama_BeyondItsScopeOrWithABadUrl_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("minilm", "--ollama"), "--ollama is a 'typesafe' option only");
+            AssertRejected(Run("typesafe", "--ollama", "not-a-url"), "--ollama expects an absolute http(s) URL");
+        });
     }
 
     [Test]

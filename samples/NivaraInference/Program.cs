@@ -35,6 +35,9 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
+        // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
+        // checkpoint, and it dispatches before the model-file lookup below.
+        ["typesafe"] = [""],
     };
 
     static readonly Dictionary<string, string[]> GpuModes = new()
@@ -118,6 +121,8 @@ class Program
         bool plain = false;
         bool useGpu = false;
         bool useSilk = false;
+        bool useOllama = false;
+        string? ollamaUrl = null;
         int teacherExamples = 0;
         int seed = 42;
         bool teacherExamplesSet = false;
@@ -199,6 +204,24 @@ class Program
                 useGpu = true;
             else if (args[i] == "--silk")
                 useSilk = true;
+            else if (args[i] == "--ollama")
+            {
+                // Same shape as NivaraChat's --ollama: the bare flag selects the default URL, and a
+                // following non-flag token overrides it. The value is validated here because every
+                // other value-taking flag in this CLI validates its own.
+                useOllama = true;
+                if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                {
+                    ollamaUrl = args[i + 1];
+                    if (!Uri.TryCreate(ollamaUrl, UriKind.Absolute, out Uri? endpoint) ||
+                        (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
+                    {
+                        Console.Error.WriteLine($"--ollama expects an absolute http(s) URL; got '{ollamaUrl}'.");
+                        return 1;
+                    }
+                    i++;
+                }
+            }
             else if (args[i] == "--gpu")
             {
                 // The flag was renamed when the Silk path arrived. Rejected rather than aliased
@@ -242,7 +265,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
@@ -254,6 +277,12 @@ class Program
             Console.WriteLine("  tools             Native Qwen2.5 function calling (getWeather tool loop)");
             Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
+            Console.WriteLine();
+            Console.WriteLine("TypeSafe (no checkpoint; calls a decision-model server over HTTP):");
+            Console.WriteLine("  typesafe          TypeSafeAI news assessment. Default: Ollaya at http://localhost:11435,");
+            Console.WriteLine("                    model laya:en.");
+            Console.WriteLine("  --ollama [url]    Use a local Ollama server instead (default http://localhost:11434, model");
+            Console.WriteLine("                    tev1:0.8b). Both servers expose the TypeSafe /v1/systemone API.");
             Console.WriteLine();
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
@@ -417,6 +446,14 @@ class Program
             return 1;
         }
 
+        // --ollama picks which decision-model server the 'typesafe' demo talks to; no other run
+        // reads it, so reject it loudly rather than let it look like it did something.
+        if (useOllama && modelType != "typesafe")
+        {
+            Console.Error.WriteLine($"--ollama is a 'typesafe' option only; got '{got}'.");
+            return 1;
+        }
+
         // The mode allow-list (#587). An unrecognised mode used to fall through to the model's default
         // runner: the vision models printed "Image not found" and exited 0, and qwen ran the tools demo.
         if (!IsSupportedMode(modelType, mode))
@@ -494,6 +531,11 @@ class Program
             Console.Error.WriteLine($"--simd-widen only changes minilm / distilbert / distilbert_sst / modernbert / laya at --precision bf16|fp16 outside 'compare'; '{got}' does not read the widen kernels. Drop the flag.");
             return 1;
         }
+
+        // The TypeSafe demo has no checkpoint: it calls a decision-model server over HTTP, so it
+        // dispatches here, before the model-file lookup below (which assumes a safetensors file).
+        if (modelType == "typesafe")
+            return TypeSafe.Run(useOllama, ollamaUrl).GetAwaiter().GetResult();
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");

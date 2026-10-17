@@ -39,6 +39,10 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert compare_di
 dotnet run --project samples/NivaraInference -c Release -- laya                 # decision head over the fixture questions (CPU reference)
 dotnet run --project samples/NivaraInference -c Release -- laya compare         # prompt + logit + decision gate vs the laya 0.3.20 wheel
 
+# TypeSafe decision-model demo — no weights; calls a local decision-model server over HTTP
+dotnet run --project samples/NivaraInference -c Release -- typesafe             # Ollaya (laya:en)
+dotnet run --project samples/NivaraInference -c Release -- typesafe --ollama    # Ollama (tev1:0.8b)
+
 # Benchmark (10 passes each)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
@@ -102,6 +106,32 @@ For architecture, verification, performance, and GPU-path details per model:
 | Qwen2.5-0.5B-Instruct | [docs/QWEN.md](../../docs/QWEN.md) |
 | Laya | [docs/LAYA.md](../../docs/LAYA.md) |
 | GPU acceleration (all models) | [docs/ACCELERATION.md](../../docs/ACCELERATION.md) |
+
+## TypeSafe decision-model demo (`typesafe`)
+
+`typesafe` loads no weights. It is an HTTP client for the **TypeSafe "System One"** API, which
+both **Ollaya** and **Ollama 0.35+** expose at the same `POST /v1/systemone` route. It sends six
+AI/ML news headlines through one typed question set — a category choice, three yes/no questions
+and two score questions — and prints the answer and confidence for each, exiting non-zero when
+every assessment failed (the visible symptom of a server that is not running).
+
+| Server | Default URL | Default model | How to select |
+|--------|-------------|---------------|---------------|
+| Ollaya | `http://localhost:11435` | `laya:en` | default |
+| Ollama | `http://localhost:11434` | `tev1:0.8b` | `--ollama [url]` |
+
+```bash
+dotnet run --project samples/NivaraInference -c Release -- typesafe                 # Ollaya default
+dotnet run --project samples/NivaraInference -c Release -- typesafe --ollama        # Ollama default
+dotnet run --project samples/NivaraInference -c Release -- typesafe --ollama http://localhost:11434
+```
+
+`--ollama` takes an optional absolute http(s) URL (defaulting to `http://localhost:11434`) and is
+a `typesafe`-only option; any other model rejects it. Because the route is identical on both
+servers, only the base URL and the model name change. The server side — Ollama's decision models
+`nimble`, `tev1` and `tev1:0.8b` — is described in the
+[Ollama decision-model announcement](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models);
+Ollaya's model is covered in [docs/LAYA.md](../../docs/LAYA.md).
 
 ## Usage
 
