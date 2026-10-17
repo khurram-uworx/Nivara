@@ -2718,7 +2718,12 @@ class Program
         // Final-position logits for the numeric precision diff: feed the full prefix
         // (prompt + all but the last generated token) so the model predicts the last
         // generated token, matching the Python reference generator.
-        var lastLogits = LastPositionLogits(model, sequence, config.VocabSize);
+        // Prefer the PyTorch reference token stream (when a fixture is present) for the
+        // final-position logits so the numeric parity is measured on a common input
+        // sequence rather than on C#'s own (possibly divergent) greedy stream.
+        var refIds = TryLoadSmolLMReferenceTokenStream(modelDir, precisionName);
+        var logitsSequence = (IReadOnlyList<int>)(refIds ?? sequence.ToArray());
+        var lastLogits = LastPositionLogits(model, logitsSequence, config.VocabSize);
 
         CompareSmolLmFixtures(modelDir, promptIds.Count, sequence, lastLogits, precisionName);
     }
@@ -2741,6 +2746,36 @@ class Program
             }
         }
         return best;
+    }
+
+    /// <summary>Loads the PyTorch reference token stream for the given run dtype, if present.</summary>
+    static int[]? TryLoadSmolLMReferenceTokenStream(string modelDir, string precisionName)
+    {
+        string? tag = precisionName == "F32" ? "f32"
+                   : precisionName == "BFloat16" ? "bf16"
+                   : null;
+        string[] candidates = tag != null
+            ? new[] { $"compare_smollm_py_{tag}.bin", "compare_smollm_py.bin" }
+            : new[] { "compare_smollm_py.bin" };
+        foreach (var name in candidates)
+        {
+            var path = Path.Combine(modelDir, "..", name);
+            if (!File.Exists(path)) continue;
+            try
+            {
+                using var br = new BinaryReader(File.OpenRead(path));
+                int inputLen = br.ReadInt32();
+                int count = (int)(new FileInfo(path).Length - 4) / 4;
+                var ids = new int[count];
+                for (int i = 0; i < count; i++) ids[i] = br.ReadInt32();
+                return ids;
+            }
+            catch
+            {
+                // Fall through to the next candidate / no reference.
+            }
+        }
+        return null;
     }
 
     /// <summary>Runs the full prefix through the model and returns the last-row logits as float[].</summary>
@@ -2766,8 +2801,15 @@ class Program
     static void CompareSmolLmFixtures(
         string modelDir, int inputLen, IReadOnlyList<int> fullPrefix, float[] lastLogits, string precisionName)
     {
-        string tokenPath = Path.Combine(modelDir, "..", "compare_smollm_py.bin");
-        string logitsPath = Path.Combine(modelDir, "..", "compare_smollm_logits_py.bin");
+        string? tag = precisionName == "F32" ? "f32"
+                   : precisionName == "BFloat16" ? "bf16"
+                   : null;
+        string tokenName = (tag != null && File.Exists(Path.Combine(modelDir, "..", $"compare_smollm_py_{tag}.bin")))
+            ? $"compare_smollm_py_{tag}.bin" : "compare_smollm_py.bin";
+        string logitsName = (tag != null && File.Exists(Path.Combine(modelDir, "..", $"compare_smollm_logits_py_{tag}.bin")))
+            ? $"compare_smollm_logits_py_{tag}.bin" : "compare_smollm_logits_py.bin";
+        string tokenPath = Path.Combine(modelDir, "..", tokenName);
+        string logitsPath = Path.Combine(modelDir, "..", logitsName);
 
         if (!File.Exists(tokenPath) || !File.Exists(logitsPath))
         {
@@ -2829,6 +2871,8 @@ class Program
         Console.WriteLine($"  max abs diff: {maxAbs:F6}");
         Console.WriteLine($"  mean abs diff: {sumAbs / len:F8}");
         Console.WriteLine($"  cosine similarity: {cosineSim:F8}");
+        if (tag != null)
+            Console.WriteLine($"  Reference-sequence parity gate ({tag}): {(cosineSim >= 0.99f ? "PASS" : "FAIL")}");
         Console.WriteLine();
     }
 

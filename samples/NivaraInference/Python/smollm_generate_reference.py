@@ -88,16 +88,28 @@ def main():
         logits = model(prefix).logits  # [1, len, vocab]
     last_logits = logits[0, -1, :].float().numpy()  # [vocab]
 
-    save_path = os.path.join(MODELS_DIR, "compare_smollm_py.bin")
-    with open(save_path, "wb") as f:
-        f.write(struct.pack("<i", input_len))
-        np.asarray(full_prefix, dtype=np.int32).tofile(f)
-    print(f"Saved token-id stream ({input_len} prompt + {len(generated)} generated) to {save_path}")
+    tag = "f32" if args.dtype == "float32" else "bf16"
 
-    logits_path = os.path.join(MODELS_DIR, "compare_smollm_logits_py.bin")
-    with open(logits_path, "wb") as f:
-        last_logits.tofile(f)
-    print(f"Saved final-position logits ({last_logits.shape[0]} floats) to {logits_path}")
+    # Dtype-suffixed fixtures (preferred): one fixture per compute dtype so a run is
+    # never judged against a reference of a different precision.
+    token_paths = [os.path.join(MODELS_DIR, f"compare_smollm_py_{tag}.bin")]
+    logits_paths = [os.path.join(MODELS_DIR, f"compare_smollm_logits_py_{tag}.bin")]
+    # Keep the legacy (unsuffixed) names for the default BF16 reference so older
+    # tooling and docs keep working.
+    if tag == "bf16":
+        token_paths.append(os.path.join(MODELS_DIR, "compare_smollm_py.bin"))
+        logits_paths.append(os.path.join(MODELS_DIR, "compare_smollm_logits_py.bin"))
+
+    for save_path in token_paths:
+        with open(save_path, "wb") as f:
+            f.write(struct.pack("<i", input_len))
+            np.asarray(full_prefix, dtype=np.int32).tofile(f)
+        print(f"Saved token-id stream ({input_len} prompt + {len(generated)} generated) to {save_path}")
+
+    for logits_path in logits_paths:
+        with open(logits_path, "wb") as f:
+            last_logits.tofile(f)
+        print(f"Saved final-position logits ({last_logits.shape[0]} floats) to {logits_path}")
     print(f"Logits argmax: {int(np.argmax(last_logits))}  top-5: "
           f"{np.argsort(last_logits)[-5:][::-1].tolist()}")
 
