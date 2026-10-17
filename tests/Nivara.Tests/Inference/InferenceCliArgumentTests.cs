@@ -278,9 +278,13 @@ public class InferenceCliArgumentTests
     /// fall through to a different exit-1 path and the exit code alone would still be <c>1</c>.
     /// </summary>
     [Test]
+    public void SilkSmolLM_Precision_Rejected() =>
+        AssertRejected(Run("smollm", "--silk", "--precision", "bf16"), "--silk is F32-only");
+
+    [Test]
     public void Silk_OnModelWithoutSilkKernels_Rejected() =>
-        AssertRejected(Run("smollm", "--silk"),
-            "--silk is not supported for 'smollm' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+        AssertRejected(Run("qwen", "--silk"),
+            "--silk is not supported for 'qwen' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm).");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
