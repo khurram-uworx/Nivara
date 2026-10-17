@@ -84,9 +84,9 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("modernbert", "benchmark", "--seq", "0"), "--seq expects positive integers");
 
     [Test]
-    public void Seq_LargeLengthOnCpu_ReachesModelLookup() =>
-        AssertRejected(Run("modernbert", "benchmark", "--seq", "4096"),
-            "Model file not found");
+    public void Seq_LargeLengthOnCpu_NoLongerHitsDenseMaskCap() =>
+        AssertRejected(Run("modernbert", "benchmark", "--seq", "4096", "--warmup", "0"),
+            "--warmup expects a positive integer");
 
     [Test]
     public void Seq_MissingValue_Rejected() =>
