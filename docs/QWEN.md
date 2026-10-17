@@ -270,4 +270,4 @@ A future `--qwen gguf` sub-mode would load the Qwen checkpoint as GGUF through a
 
 ## GPU path
 
-Qwen does not yet have a GPU runner. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md) (the probe-first investigation that established the Level Zero access-chain wall and the DX12/ComputeSharp fallback recommendation). The bf16 benchmark/synthetic support (#407) lives in the sample.
+Qwen now has an F32 Silk runner (`--qwen ... --silk`: tools, plain, benchmark). `--ilgpu` is still not supported. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
