@@ -46,7 +46,7 @@ or validates against expected values.
 #### Install Python & PyTorch
 
 ```powershell
-pip install torch pandas numpy
+pip install -r samples/NivaraTorch/requirements.txt --index-url https://download.pytorch.org/whl/cpu
 ```
 
 > **Troubleshooting**: If `pip` is not found, try `python -m pip install ...`.
@@ -475,14 +475,21 @@ Requires Python with PyTorch:
 python samples/NivaraTorch/gen_reference.py
 ```
 
-**Regeneration is not currently byte-reproducible against the committed tree.** Re-running the
-generator on this machine rewrites 35 of the 308 pre-existing `.bin` files (outputs and gradients
-of the conv/linear/attention/transformer cases) even with an unmodified script, and pinning
-`OMP_NUM_THREADS=1` / `MKL_NUM_THREADS=1` does not change that. Two consecutive runs *on the same
-machine* are byte-identical, so this is torch-build or microarchitecture drift between the
-environment that produced the committed tree and the current one — not flakiness. The values
-differ only in the last bits and every parity test passes against either, so when adding a case,
-**restore the untouched fixtures rather than committing the churn**:
+**Regeneration is not byte-reproducible across torch builds or machines.** Re-running the
+generator on a different environment rewrites 35 of the 308 pre-existing `.bin` files (outputs and
+gradients of the conv/linear/attention/transformer cases) even with an unmodified script, and
+pinning `OMP_NUM_THREADS=1` / `MKL_NUM_THREADS=1` does not change that. Two consecutive runs *on
+the same machine* are byte-identical, so this is torch-build or microarchitecture drift — not
+flakiness. The values differ only in the last bits and every parity test passes against either, so
+when adding a case, **restore the untouched fixtures rather than committing the churn**:
+
+The producing environment is stamped into `manifest.json` under the `provenance` key (also aliased
+as `environment`): Python/torch/numpy versions, torch git version, platform, CPU model, capability,
+thread counts, thread-related environment variables, and the sha256 of `torch.__config__.show()`.
+Re-running prints a `WARNING: environment differs ...` block when the current environment does not
+match the committed stamp, so drift is attributable. Pin the environment with
+`requirements.txt` (`torch==2.13.0+cpu`, `numpy==2.2.1`) and the CPU-only PyTorch index for the
+closest match to the committed tree.
 
 ```bash
 # after regenerating, keep only your new files + manifest.json

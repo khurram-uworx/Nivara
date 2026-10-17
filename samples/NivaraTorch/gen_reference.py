@@ -4,19 +4,26 @@ Saves raw float32 binary + JSON manifest for C# unit tests to compare against.
 Test fixtures go to samples/data/torch-comparison/.
 
 Reproducibility:
-  - Verified with Python 3.12, torch 2.13.0+cpu, numpy 1.26.
+  - Verified with Python 3.12, torch 2.13.0+cpu, numpy 2.2.1.
   - Fixtures are RNG-derived. Both the global torch RNG (consumed by nn.*
     module weight initialization) and a dedicated torch.Generator are seeded
     with 42 (see run()), and every random draw uses generator=rng. CPU-only
-    execution is required for bit-stable output. Add a new draw to the end of
+    execution with a single thread gives run-to-run bit-stable output on a
+    given machine, but it is NOT bit-stable across torch builds, MKL versions,
+    or CPU microarchitectures: conv/linear/attention/transformer outputs and
+    gradients can drift in the last bits. The producing environment is recorded
+    in manifest.json["provenance"] (and its "environment" alias) so drift is
+    attributable. Add a new draw to the end of
     a case, never insert one mid-stream, or every subsequent fixture changes
     and the C# manifest must be regenerated together.
-  - Regenerate after upgrading torch/numpy: run `python gen_reference.py` and
-    commit the full samples/data/torch-comparison/ tree as one unit.
+  - Regenerate after upgrading torch/numpy: run `python gen_reference.py`,
+    inspect the printed drift warning, and commit the full
+    samples/data/torch-comparison/ tree as one unit. Unrelated churn can be
+    discarded with `git checkout -- samples/data/torch-comparison/<file>.bin`.
 
 Usage: python gen_reference.py
 """
-import os, json, struct, sys, math
+import os, json, struct, sys, math, hashlib, platform
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,11 +40,85 @@ def save_tensor(path, tensor):
     return arr.shape
 
 
+def _parse_config_field(config, key):
+    for line in config.splitlines():
+        if key in line:
+            return line.split(":", 1)[1].strip() if ":" in line else line.strip()
+    return None
+
+
+def collect_provenance():
+    """Capture the exact environment that produces the fixtures."""
+    config = torch.__config__.show()
+    commit = getattr(torch.version, "git_version", None)
+    if not commit:
+        for line in config.splitlines():
+            if "COMMIT_SHA=" in line:
+                commit = line.split("COMMIT_SHA=", 1)[1].split(",", 1)[0].strip()
+                break
+    cpu_capability = _parse_config_field(config, "CPU capability usage")
+    thread_vars = {}
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+        val = os.environ.get(var)
+        if val is not None:
+            thread_vars[var] = val
+
+    return {
+        "python": sys.version.split()[0],
+        "python_full": sys.version.replace("\n", " "),
+        "platform": platform.platform(),
+        "processor": platform.processor(),
+        "torch": torch.__version__,
+        "torch_git_version": commit,
+        "numpy": np.__version__,
+        "torch_num_threads": torch.get_num_threads(),
+        "torch_num_interop_threads": torch.get_num_interop_threads(),
+        "cpu_capability": cpu_capability,
+        "env_thread_vars": thread_vars,
+        "torch_config_sha256": hashlib.sha256(config.encode("utf-8")).hexdigest(),
+        "torch_config": config,
+    }
+
+
+def load_existing_provenance():
+    manifest_path = os.path.join(TEST_DIR, "manifest.json")
+    if not os.path.exists(manifest_path):
+        return None
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data.get("provenance") or data.get("environment")
+
+
+def warn_if_drift(current):
+    previous = load_existing_provenance()
+    if previous is None:
+        return
+    diffs = []
+    for key, value in current.items():
+        if previous.get(key) != value:
+            diffs.append(key)
+    if not diffs:
+        return
+    print("WARNING: environment differs from committed manifest provenance:")
+    for key in diffs:
+        print(f"  {key}: committed={previous.get(key)!r} current={current[key]!r}")
+
+
 def run():
     os.makedirs(TEST_DIR, exist_ok=True)
     manifest = {}
 
-    print(f"torch {torch.__version__} | numpy {np.__version__} | python {sys.version.split()[0]}")
+    provenance = collect_provenance()
+    warn_if_drift(provenance)
+
+    print(f"torch {torch.__version__} (git {provenance['torch_git_version']}) | "
+          f"numpy {np.__version__} | python {sys.version.split()[0]}")
+    print(f"CPU: {platform.processor()} | capability: {provenance['cpu_capability']} | "
+          f"threads: {torch.get_num_threads()}")
     print(f"RNG seed: 42 (global torch RNG + dedicated per-case generators)\n")
 
     # Deterministic RNG
@@ -1712,11 +1793,15 @@ def run():
     # =========================================================================
     # Write manifest
     # =========================================================================
+    case_count = len(manifest)
+    manifest["provenance"] = provenance
+    manifest["environment"] = provenance
+
     manifest_path = os.path.join(TEST_DIR, "manifest.json")
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"\nManifest: {manifest_path}")
-    print(f"Total test cases: {len(manifest)}")
+    print(f"Total test cases: {case_count}")
 
 
 if __name__ == "__main__":
