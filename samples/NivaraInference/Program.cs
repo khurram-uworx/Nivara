@@ -263,9 +263,10 @@ class Program
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
-            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu / --silk. The CPU path caps a");
-            Console.WriteLine("                   length at 2048 (dense [L, L] mask); a GPU backend has no such cap, and the");
-            Console.WriteLine("                   4096 row is the evidence. A length below the sentence truncates it.");
+            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu / --silk. The CPU path no");
+            Console.WriteLine("                   longer builds a dense [L, L] mask (#476), so it has no dense-mask cap; a");
+            Console.WriteLine("                   length above max_position_embeddings is skipped. A length below the");
+            Console.WriteLine("                   sentence truncates it.");
             Console.WriteLine("  --warmup N       Untimed passes before timing (default 1)");
             Console.WriteLine("  --iters N        Timed passes; the median is reported (default 3)");
             Console.WriteLine();
@@ -335,7 +336,7 @@ class Program
                 return 1;
             }
 
-            if (seqArg is not null && !TryParseSeqLengths(seqArg, useGpu || useSilk, out seqLengths, out string seqError))
+            if (seqArg is not null && !TryParseSeqLengths(seqArg, out seqLengths, out string seqError))
             {
                 Console.Error.WriteLine(seqError);
                 return 1;
@@ -671,7 +672,7 @@ class Program
     /// be a positive integer, which also settles the <c>--seq 1,000</c> trap: the comma is the
     /// list separator, so that is the tokens <c>1</c> and <c>000</c>, and <c>000</c> is not a length.
     /// </summary>
-    static bool TryParseSeqLengths(string raw, bool useGpu, out int[] lengths, out string error)
+    static bool TryParseSeqLengths(string raw, out int[] lengths, out string error)
     {
         var requested = new List<int>();
         foreach (string token in raw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
@@ -680,16 +681,6 @@ class Program
             {
                 lengths = [];
                 error = $"--seq expects positive integers, one value or a comma-separated list; got '{token}' in \"{raw}\".";
-                return false;
-            }
-
-            if (!useGpu && length > ModernBertMasks.MaxDenseLength)
-            {
-                lengths = [];
-                error = $"--seq {length} exceeds the CPU path's dense-mask limit of {ModernBertMasks.MaxDenseLength} " +
-                        "(the cost is the [L, L] allocation, not the arithmetic). " +
-                        $"Run 'modernbert --ilgpu benchmark --seq {length}' or 'modernbert --silk benchmark --seq {length}', where the band lives inside the kernel; " +
-                        "the CPU equivalent is #473.";
                 return false;
             }
 

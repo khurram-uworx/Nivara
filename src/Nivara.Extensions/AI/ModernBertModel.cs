@@ -215,12 +215,14 @@ public sealed record ModernBertConfig
 public static class ModernBertMasks
 {
     /// <summary>
-    /// The largest sequence length for which a dense <c>[L, L]</c> mask is built. At the model's
-    /// full 8192-token context one dense mask is 67M elements (268 MB in F32), and a forward
-    /// builds <em>two</em> of them — a global and a sliding — so 537 MB for the pair. Longer
-    /// inputs throw instead of silently allocating. A banded attention kernel is the fix, and it
-    /// now exists on the GPU path (#447), which is why <c>modernbert --ilgpu benchmark</c> runs at
-    /// 4096. The CPU path is still dense and is tracked as #473.
+    /// The largest sequence length for which a dense <c>[L, L]</c> mask is built by the reference
+    /// helper <see cref="Build{T}"/>. At the model's full 8192-token context one dense mask is 67M
+    /// elements (268 MB in F32), and a forward builds <em>two</em> of them — a global and a sliding
+    /// — so 537 MB for the pair. Longer inputs throw instead of silently allocating.
+    ///
+    /// This cap constrains only <see cref="Build{T}"/> (used by tests and reference tooling). The
+    /// CPU attention path no longer builds a dense mask (#476): it carries <c>band</c> and
+    /// <c>validLength</c> as metadata bounds, so it is not limited by this value.
     /// </summary>
     public const int MaxDenseLength = 2048;
 

@@ -56,9 +56,10 @@ public static class ModernBert
     public const int DefaultIterations = 3;
 
     /// <summary>
-    /// The CPU benchmark's default rows. A length above
-    /// <see cref="ModernBertMasks.MaxDenseLength"/> is rejected before the weights are loaded,
-    /// because the CPU path still builds a dense <c>[L, L]</c> mask per forward.
+    /// The CPU benchmark's default rows: the published CPU table (128 and 256 tokens). The CPU
+    /// path no longer builds a dense <c>[L, L]</c> mask (#476), so there is no dense-mask cap here;
+    /// <c>--seq</c> may time any length up to the model's position limit. These two lengths are the
+    /// measurement baseline called for by #476 acceptance #5.
     /// </summary>
     static readonly int[] CpuBenchmarkSeqLengths = [128, 256];
 
@@ -203,13 +204,11 @@ public static class ModernBert
 
         foreach (int maxLength in requestedSeqLengths ?? CpuBenchmarkSeqLengths)
         {
-            // The CLI rejects an over-long length before the weights load; this is the backstop for
-            // a direct call, which would otherwise fail inside ModernBertMasks.Build after the load.
-            if (maxLength > ModernBertMasks.MaxDenseLength)
+            if (maxLength > config.MaxPositionEmbeddings)
             {
                 Console.WriteLine(
-                    $"skipping seq={maxLength}: the CPU path's dense [L, L] mask caps the length at " +
-                    $"{ModernBertMasks.MaxDenseLength}. Run 'modernbert --ilgpu benchmark --seq {maxLength}' instead.");
+                    $"skipping seq={maxLength}: above the model's max_position_embeddings=" +
+                    $"{config.MaxPositionEmbeddings}.");
                 continue;
             }
 
