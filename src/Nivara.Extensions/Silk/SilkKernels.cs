@@ -686,7 +686,7 @@ internal static class SilkKernels
             uint kBaseHead = kvHead * headDim;
             uint vBaseHead = kvHead * headDim;
 
-            // Fused online-softmax attention: each q·k is computed once; running max
+            // Fused online-softmax attention: each q*k is computed once; running max
             // (mx) and unnormalised accumulators (sum, accv[]) are rescaled in place.
             float accv[64];
             for (uint d = 0; d < headDim; ++d)
@@ -903,7 +903,7 @@ internal static class SilkKernels
             uint kBaseHead = kvHead * headDim;
             uint vBaseHead = kvHead * headDim;
 
-            // Fused online-softmax attention: each q·k is computed once; running max
+            // Fused online-softmax attention: each q*k is computed once; running max
             // (mx) and unnormalised accumulators (sum, accv[]) are rescaled in place.
             if (kvLen == 0u)
             {
