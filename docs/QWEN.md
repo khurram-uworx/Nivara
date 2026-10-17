@@ -281,6 +281,44 @@ Commands:
 
 Status: measured on 2026-10-17 (see *Measured Qwen results* below).
 
+### Benchmark commands for agents (human-run, too slow for agents)
+
+Qwen benchmarks are long-running (minutes to tens of minutes) and **must not be run by the agent directly** — the agent would burn the whole session waiting. Instead, the agent quotes the block below verbatim to the human, asks them to run it, and waits for confirmation. After the human confirms completion, the agent reads the deterministic output files (paths below) and consumes the figures — no polling, no re-running.
+
+Deterministic output directory:
+
+```
+data\qwen-bench\
+```
+
+All commands are **PowerShell** and are run from the repo root. The cleanup step deletes all `qwen-bench*` outputs from the previous run first, so the files the agent reads afterwards are guaranteed to be from this run only.
+
+```
+# 1. Clean deterministic benchmark outputs from any previous run
+Remove-Item -Recurse -Force "data\qwen-bench" -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path "data\qwen-bench" | Out-Null
+
+# 2. Release build (benchmarks always run in Release; Debug compares unoptimized code)
+dotnet build -c Release Nivara.slnx
+
+# 3. Real-checkpoint CPU runs (requires samples/data/qwen2.5-0.5b-instruct)
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark --plain > data\qwen-bench\cpu_plain.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark > data\qwen-bench\cpu_tools.txt 2>&1
+
+# 4. Real-checkpoint Silk/OpenCL GPU run (requires samples/data/qwen2.5-0.5b-instruct and an OpenCL GPU)
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > data\qwen-bench\silk_tools.txt 2>&1
+```
+
+Synthetic-weight runs (`qwen --synthetic-weights ...`) are only useful when `samples/data/qwen2.5-0.5b-instruct` is unavailable; when the real checkpoint is present they should be skipped.
+
+Outputs consumed by the agent after confirmation (read, don't re-run):
+
+- `cpu_plain.txt` — plain-prompt CPU prefill/decode ms/token and tok/s
+- `cpu_tools.txt` — tools-prompt CPU prefill/decode ms/token and tok/s
+- `silk_tools.txt` — Silk/OpenCL decode ms/token and tok/s
+
+The Python reference step (`python samples/NivaraInference/Python/qwen_benchmark.py`) is not part of this automated block; run it separately if the PyTorch baseline is needed, since it depends on a separate Python/PyTorch environment.
+
 ## Measured Qwen results (2026-10-17)
 
 All runs were executed in **Release** (`dotnet run -c Release`) with one warm-up pass followed by three timed passes; the median of the three is reported. The checkpoint is `samples/data/qwen2.5-0.5b-instruct` (494,032,768 parameters); precision is `F32` (BF16-on-disk, SIMD-widened to F32 at load, ~1.9 GB resident).

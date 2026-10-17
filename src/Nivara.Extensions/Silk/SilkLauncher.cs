@@ -306,6 +306,48 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
     }
 
+    public static void GemmAdd(
+        SilkRuntime runtime, nint a, nint b, nint c, nint residual,
+        int aRows, int aCols, int bCols)
+    {
+        if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        runtime.SetBuffer(SilkKernels.GemmAdd, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmAdd, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmAdd, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmAdd, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmAdd, 4, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmAdd, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmAdd, 6, (uint)bCols);
+        runtime.Run(
+            SilkKernels.GemmAdd,
+            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
+
+    public static void RmsNormGemmBias(
+        SilkRuntime runtime, nint x, nint gamma, nint b, nint bias, nint c,
+        int aRows, int aCols, int bCols, float eps)
+    {
+        if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 2, b);
+        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 3, bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 4, c);
+        runtime.SetUInt32(SilkKernels.RmsNormGemmBias, 5, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.RmsNormGemmBias, 6, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemmBias, 7, (uint)bCols);
+        runtime.SetFloat32(SilkKernels.RmsNormGemmBias, 8, eps);
+        runtime.Run(
+            SilkKernels.RmsNormGemmBias,
+            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
+
     public static void Conv2d(
         SilkRuntime runtime, nint input, nint weight, nint bias, nint output,
         int N, int C, int H, int W, int outC, int kH, int kW,

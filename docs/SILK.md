@@ -416,6 +416,10 @@ ascending K-reduction, same tile geometry, same fused epilogues:
 | `add` | `a, b, y, n` | residual add; `y` may alias `a` |
 | `add_bias` | `x, bias, y, rows, cols` | Laya type-embedding broadcast, in place |
 | `gemm_row4` | `a, b, c, aRows, aCols, bCols` | bias-free Row4 store. Not `gemm_row4_bias` with a zero bias: `acc + 0.0f` canonicalizes `-0` |
+| `rms_norm` | `x, gamma, y, rows, cols, eps` | `RMSNorm(x)` |
+| `rms_norm_lm_head` | `x, gamma, weight, logits, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ weight` (final head; also used for bias-free cached decode projections) |
+| `rms_norm_gemm_bias` | `x, gamma, b, bias, c, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ b + bias` (cached Q/K/V projections) |
+| `gemm_row4_add` | `a, b, c, residual, aRows, aCols, bCols` | Row4 GEMM plus residual add in the store (O/down projections in cached decode) |
 | `split_columns` | `src, dst, rows, blockCols, parts, part` | ModernBERT QKV is row-interleaved; a contiguous sub-view is right for row 0 and wrong after it |
 | `rotary` | `x, posIds, cosTab, sinTab, y, rows, numHeads, headDim` | half-split RoPE, in place on q and k. Tables are inputs. The pair width is not named `half`: this driver treats that as a type name and rejects the program |
 | `geglu` | `x, y, rows, intermediate` | `gelu(first half) * second half`. Reversing the halves still looks plausible |
