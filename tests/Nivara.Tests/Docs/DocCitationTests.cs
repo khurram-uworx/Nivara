@@ -20,7 +20,7 @@ public class DocCitationTests
     const int ExpectedCitedDocumentCount = 18;
 
     /// <summary>
-    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 41 under
+    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 42 under
     /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
     /// <c>docs/TODO.md</c> does <em>not</em> increase this number — excluding it is the point, and it is
     /// what keeps the count stable across a workflow that commits one. The move of <c>SILK.md</c>
@@ -28,9 +28,10 @@ public class DocCitationTests
     /// the gate scans the repository root plus <c>docs/</c>, never <c>tests/</c>, so the probe tree
     /// was not counted before and the document entered scope on arrival. The acceleration-doc
     /// restructure took it from 40 to 41 by extracting the ungated streaming design proposal into
-    /// its own <c>docs/STREAMING-PROPOSAL.md</c>.
+    /// its own <c>docs/STREAMING-PROPOSAL.md</c>. The #492 reconciliation added
+    /// <c>docs/BLAS-MKL.md</c>, taking <c>docs/</c> from 41 to 42.
     /// </summary>
-    const int ExpectedDocumentCount = 50;
+    const int ExpectedDocumentCount = 51;
 
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()

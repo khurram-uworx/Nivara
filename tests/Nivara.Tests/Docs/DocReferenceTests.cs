@@ -19,15 +19,20 @@ public class DocReferenceTests
     /// Files read by the widened scan. Pinned deliberately: a drop is reduced coverage.
     /// 696 = 691 + the six new Silk/model files (<c>WeightLayout</c>, <c>BertEncoderGpuTypes</c>,
     /// <c>GpuSeam</c>, <c>SilkLauncher</c>, <c>SilkModernBertSession</c>, <c>SilkLayaSession</c>)
-    /// minus the deleted samples <c>IBertEncoderRunner.cs</c>.
+    /// minus the deleted samples <c>IBertEncoderRunner.cs</c>. 698 = 696 +
+    /// <c>docs/BLAS-MKL.md</c> and <c>tests/Nivara.PerformanceTests/LayaForwardProbe.cs</c>
+    /// added by the #492 reconciliation.
     /// </summary>
-    const int ExpectedFileCount = 696;
+    const int ExpectedFileCount = 698;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered. Pinned deliberately.
-    /// 358 = 356 + the two <c>docs/SILK.md</c> occurrences in the AGENTS.md map link.
+    /// 357 = 358 - one <c>docs/LAYA.md</c> reference removed from
+    /// <c>tests/Nivara.PerformanceTests/ApplyMaskProbe.cs</c> and one from
+    /// <c>tests/Nivara.PerformanceTests/README.md</c>, plus one added in
+    /// <c>docs/ACCELERATION.md</c>, by the #492 reconciliation.
     /// </summary>
-    const int ExpectedDocumentReferenceCount = 358;
+    const int ExpectedDocumentReferenceCount = 357;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
