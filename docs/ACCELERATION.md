@@ -335,7 +335,7 @@ Every open, deferred or future item, one line each — status, home document, is
 - **#447 4096-token re-measurement** — pending; `modernbert --ilgpu benchmark --seq 4096 --iters 10
   --warmup 3` is now cheap, and the 4096 row of the banded table is the one unexplained number. Home:
   this doc §1.
-- **#473 ModernBERT CPU `MaxDenseLength` lift (2048 → longer)** — a feasibility fix, not a speed one.
+- **#476/#642 ModernBERT CPU banded attention** — the CPU path no longer builds a dense `[L, L]` mask; `band` and `validLength` are metadata bounds, lifting the 2048 cap (it now constrains only the `ModernBertMasks.Build` reference helper). Feasibility fix, not a speed one: 0.9% ceiling at L=128.
   Home: [MODERNBERT.md](MODERNBERT.md).
 - **#467 LayerNorm one-work-item-per-row** — minor open GPU kernel improvement. Home:
   [ILGPU.md §12](ILGPU.md).

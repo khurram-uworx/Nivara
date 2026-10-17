@@ -210,7 +210,7 @@ Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 log
 
 *Cur* = 2026-09-27 on **AC power**, both frameworks in one session, same machine, Nivara .NET 11.0.0 Release, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass (3 warmup + 10 timed); SmolLM and ModernBERT report the median of 3 runs — **1 warmup + 3 timed on the Nivara side, 3 warmup + 3 timed in PyTorch**, so the ModernBERT rows compare medians taken under different warmup counts. `modernbert benchmark --warmup 3` matches the Python side's protocol; the flag exists precisely because these two counts were previously only visible in the source. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
 
-`--seq N[,N...]` times a chosen subset of the benchmark's lengths (`--warmup N` and `--iters N` set the pass counts) on both C# paths, and the PyTorch script takes the same `--seq N[,N...]` (default `128,256`), so one row can be re-measured on both sides of the CPU comparison; the defaults reproduce the tables above unchanged:
+`--seq N[,N...]` times a chosen subset of the benchmark's lengths (`--warmup N` and `--iters N` set the pass counts) on both C# paths, and the PyTorch script takes the same `--seq N[,N...]` (default `128,256`), so one row can be re-measured on both sides of the CPU comparison; the defaults reproduce the tables above unchanged. The CPU path no longer builds a dense `[L, L]` mask (#476), so `--seq` is not capped at 2048 on the CPU side.
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark --seq 512

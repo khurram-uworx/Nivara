@@ -6,8 +6,9 @@ times a chosen subset of those lengths, exactly like the C# `--seq`; the default
 (128, 256) rows unchanged. Only the same-row PyTorch-vs-Nivara ratio is meaningful, and only if
 both sides are run in the same session.
 
-A length above 2048 has no CPU partner: the C# CPU path caps `--seq` at its dense `[L, L]` mask
-limit, so the matching C# number for such a row is `modernbert --ilgpu benchmark --seq N` instead.
+The C# CPU path no longer builds a dense `[L, L]` mask (#476), so it has no 2048 cap; a CPU row
+for any length up to the model's position limit is `modernbert benchmark --seq N`. Longer rows can
+still be timed on the GPU side with `modernbert --ilgpu benchmark --seq N`.
 
 The two sides do not warm up identically: this script runs 3 untimed passes (`WARMUP_PASSES`),
 the C# mode 1. The docstring here used to claim "one untimed pass ... deliberately", which
