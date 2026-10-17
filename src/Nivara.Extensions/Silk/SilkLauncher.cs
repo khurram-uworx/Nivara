@@ -285,6 +285,27 @@ internal static class SilkLauncher
             [(nuint)256]);
     }
 
+    public static void RmsNormLmHead(
+        SilkRuntime runtime, nint x, nint gamma, nint weight, nint logits,
+        int aRows, int aCols, int bCols, float eps)
+    {
+        if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        runtime.SetBuffer(SilkKernels.RmsNormLmHead, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHead, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHead, 2, weight);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHead, 3, logits);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHead, 4, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHead, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHead, 6, (uint)bCols);
+        runtime.SetFloat32(SilkKernels.RmsNormLmHead, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormLmHead,
+            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
+
     public static void Conv2d(
         SilkRuntime runtime, nint input, nint weight, nint bias, nint output,
         int N, int C, int H, int W, int outC, int kH, int kW,

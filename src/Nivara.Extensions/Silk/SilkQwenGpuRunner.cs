@@ -266,11 +266,9 @@ public sealed class SilkQwenGpuRunner : IDisposable
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
-        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, seqLen, hiddenDim, eps);
-
-        nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
+        nint lastRowView = runtime.CreateSubview(x.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.RmsNormLmHead(runtime, lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -331,11 +329,9 @@ public sealed class SilkQwenGpuRunner : IDisposable
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
-        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, seqLen, hiddenDim, eps);
-
-        nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
+        nint lastRowView = runtime.CreateSubview(x.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.RmsNormLmHead(runtime, lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -397,10 +393,8 @@ public sealed class SilkQwenGpuRunner : IDisposable
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, hiddenDim);
         }
 
-        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, 1, hiddenDim, eps);
-
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, normed.Handle, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.RmsNormLmHead(runtime, x.Handle, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
 
@@ -481,13 +475,10 @@ public sealed class SilkQwenGpuRunner : IDisposable
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
-        // final norm over whole chunk
-        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, seqLen, hiddenDim, eps);
-
-        // last row logits
-        nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
+        // fused final norm + tied LM head on the last row
+        nint lastRowView = runtime.CreateSubview(x.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.RmsNormLmHead(runtime, lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         var logits = runtime.Download(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -553,10 +544,8 @@ public sealed class SilkQwenGpuRunner : IDisposable
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, hiddenDim);
         }
 
-        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, 1, hiddenDim, eps);
-
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, normed.Handle, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.RmsNormLmHead(runtime, x.Handle, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         var logits = runtime.Download(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
 

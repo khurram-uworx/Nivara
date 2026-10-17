@@ -77,6 +77,7 @@ internal static class SilkKernels
 
     // SmolLM (Llama-family causal LM) kernels.
     public const string RmsNorm = "rms_norm";
+    public const string RmsNormLmHead = "rms_norm_lm_head";
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
     public const string CausalGqaAttention = "causal_gqa_attention";
@@ -98,7 +99,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
+        RmsNorm, RmsNormLmHead, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
@@ -1004,6 +1005,82 @@ internal static class SilkKernels
                 uint gi = get_group_id(0);
                 partialIndex[gi] = lidx[0];
                 partialValue[gi] = lval[0];
+            }
+        }
+
+        /* Fused RMSNorm + tied LM head: computes the normalized activation in-place
+           into the Row4 GEMV against tokEmbTransposed, using the same RMSNorm
+           reduction order as rms_norm and the same Row4 accumulation as gemm_row4. */
+        __kernel void rms_norm_lm_head(
+            __global const float* x,
+            __global const float* gamma,
+            __global const float* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols,
+            const float eps)
+        {
+            uint lid0 = get_local_id(0);
+            uint lid1 = get_local_id(1);
+            uint outRow = get_global_id(0);
+            uint colBase = get_group_id(1) * TILECOLS;
+
+            float normScale = 0.0f;
+            if (outRow < aRows)
+            {
+                uint rbase = outRow * aCols;
+                float ssq = 0.0f;
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float v = x[rbase + k];
+                    ssq += v * v;
+                }
+                normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+            }
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            __local float smem[TILE * ROWSTRIDE];
+            for (uint k0 = 0; k0 < aCols; k0 += TILE)
+            {
+                uint aCol = k0 + lid1;
+                uint bRow = k0 + lid0;
+                smem[lid0 + lid1 * TILE] =
+                    (outRow < aRows && aCol < aCols)
+                    ? (x[outRow * aCols + aCol] * normScale * gamma[aCol])
+                    : 0.0f;
+                for (uint w = 0; w < BLOCK; ++w)
+                {
+                    uint outCol = colBase + lid1 * BLOCK + w;
+                    smem[lid0 + (TILE + lid1 * BLOCK + w) * TILE] =
+                        (bRow < aCols && outCol < bCols)
+                        ? b[bRow * bCols + outCol]
+                        : 0.0f;
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+                for (uint k = 0; k < TILE; ++k)
+                {
+                    float av = smem[lid0 + k * TILE];
+                    uint bBase = TILE + lid1 * BLOCK;
+                    a0 += av * smem[k + (bBase + 0) * TILE];
+                    a1 += av * smem[k + (bBase + 1) * TILE];
+                    a2 += av * smem[k + (bBase + 2) * TILE];
+                    a3 += av * smem[k + (bBase + 3) * TILE];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            uint c0 = colBase + lid1 * BLOCK + 0;
+            uint c1 = colBase + lid1 * BLOCK + 1;
+            uint c2 = colBase + lid1 * BLOCK + 2;
+            uint c3 = colBase + lid1 * BLOCK + 3;
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + lid1 * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
             }
         }
         """;
