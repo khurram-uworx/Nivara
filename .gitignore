@@ -375,3 +375,6 @@ samples/NivaraFineTuning/benchmark_results.txt
 samples/data/benchmark-1m
 samples/data/perf-scale1
 samples/data/incident-lab
+
+# Local benchmark outputs (repo-root data/)
+/data/

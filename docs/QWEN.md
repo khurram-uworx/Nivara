@@ -288,29 +288,29 @@ Qwen benchmarks are long-running (minutes to tens of minutes) and **must not be 
 Deterministic output directory:
 
 ```
-C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench\
+data\qwen-bench\
 ```
 
 All commands are **PowerShell** and are run from the repo root. The cleanup step deletes all `qwen-bench*` outputs from the previous run first, so the files the agent reads afterwards are guaranteed to be from this run only.
 
 ```
 # 1. Clean deterministic benchmark outputs from any previous run
-Remove-Item -Recurse -Force "C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench" -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path "C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench" | Out-Null
+Remove-Item -Recurse -Force "data\qwen-bench" -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path "data\qwen-bench" | Out-Null
 
 # 2. Release build (benchmarks always run in Release; Debug compares unoptimized code)
 dotnet build -c Release Nivara.slnx
 
 # 3. Real-checkpoint CPU runs (requires samples/data/qwen2.5-0.5b-instruct)
-dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark --plain > C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench\cpu_plain.txt 2>&1
-dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark > C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench\cpu_tools.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark --plain > data\qwen-bench\cpu_plain.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark > data\qwen-bench\cpu_tools.txt 2>&1
 
 # 4. Real-checkpoint Silk/OpenCL GPU run (requires samples/data/qwen2.5-0.5b-instruct and an OpenCL GPU)
-dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench\silk_tools.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > data\qwen-bench\silk_tools.txt 2>&1
 
 # 5. Synthetic-weight runs (no checkpoint required)
-dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --synthetic-weights benchmark > C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench\synth_cpu.txt 2>&1
-dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --synthetic-weights --silk benchmark > C:\Users\khurram\AppData\Local\Temp\opencode\qwen-bench\synth_silk.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --synthetic-weights benchmark > data\qwen-bench\synth_cpu.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --synthetic-weights --silk benchmark > data\qwen-bench\synth_silk.txt 2>&1
 ```
 
 Outputs consumed by the agent after confirmation (read, don't re-run):
