@@ -524,12 +524,7 @@ static class Qwen
         Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"),
-            Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<​|endoftext|>",
-            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+        var (_, config, tokenizer) = Qwen.LoadModel(tensors, modelDir);
         var prompt = QwenChatTemplate.RenderPlain(PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
 
