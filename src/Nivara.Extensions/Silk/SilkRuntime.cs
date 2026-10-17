@@ -196,6 +196,26 @@ public sealed unsafe class SilkRuntime : IDisposable
             throw new InvalidOperationException($"Silk upload of {bytes} B failed ({err}).");
     }
 
+    /// <summary>Blocking device-to-device copy of <paramref name="count"/> floats from
+    /// <paramref name="src"/> at <paramref name="srcOffset"/> to <paramref name="dst"/> at
+    /// <paramref name="dstOffset"/>.</summary>
+    public void CopyBuffer(nint src, nint dst, int srcOffset, int dstOffset, int count)
+    {
+        if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+        if (count == 0) return;
+        int err = cl.EnqueueCopyBuffer(
+            queue, src, dst,
+            (nuint)((ulong)srcOffset * sizeof(float)),
+            (nuint)((ulong)dstOffset * sizeof(float)),
+            (nuint)((ulong)count * sizeof(float)),
+            0, null, null);
+        if (err != 0)
+            throw new InvalidOperationException($"Silk clEnqueueCopyBuffer({count} floats) failed ({err}).");
+        int finish = cl.Finish(queue);
+        if (finish != 0)
+            throw new InvalidOperationException($"Silk clFinish after copy failed ({finish}).");
+    }
+
     public void SetBuffer(string kernelName, uint index, nint buffer)
     {
         nint local = buffer;
