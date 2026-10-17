@@ -75,7 +75,7 @@ def main():
         generated = out[0, input_len:].tolist()
 
     print(f"Generated {len(generated)} tokens in {gen_sec * 1000:.0f} ms "
-          f"({gen_sec * 1000 / max(1, len(generated)):.0f} ms/token) "
+          f"({len(generated) / max(gen_sec, 1e-9):.2f} tok/s) "
           f"[PyTorch {args.dtype} CPU]")
     print(f"Generated token ids ({len(generated)}): {generated}")
     print(f"Decoded: {tokenizer.decode(out[0], skip_special_tokens=True)!r}")
