@@ -2523,7 +2523,7 @@ class Program
         var generatedIds = sequence.Skip(promptIds.Count).ToList();
 
         Console.WriteLine($"Generated {generated} tokens in {genMs} ms " +
-                          $"({genMs / Math.Max(1, generated)} ms/token)");
+                          $"({generated * 1000.0 / Math.Max(1, genMs):F2} tok/s)");
         Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
         Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
         Console.WriteLine();
@@ -2565,14 +2565,14 @@ class Program
             var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
             runs[i] = (timing.Milliseconds, timing.Generated);
             Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                              $"{timing.Milliseconds / Math.Max(1, timing.Generated)} ms/token)");
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
         }
         Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
         long medianMs = runs[1].Ms;
         int medianTokens = runs[1].Generated;
         Console.WriteLine();
         Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
-                          $"{medianMs / Math.Max(1, medianTokens):F1} ms/token)");
+                          $"{medianTokens * 1000.0 / Math.Max(1, medianMs):F2} tok/s)");
         return 0;
     }
 
@@ -2634,14 +2634,14 @@ class Program
             var timing = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
             runs[i] = (timing.Milliseconds, timing.Generated);
             Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                              $"{timing.Milliseconds / Math.Max(1, timing.Generated)} ms/token)");
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
         }
         Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
         long medianMs = runs[1].Ms;
         int medianTokens = runs[1].Generated;
         Console.WriteLine();
         Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
-                          $"{medianMs / Math.Max(1, medianTokens):F1} ms/token)");
+                          $"{medianTokens * 1000.0 / Math.Max(1, medianMs):F2} tok/s)");
 
         return 0;
     }
@@ -2698,7 +2698,7 @@ class Program
             NivaraPrimitives.UseWidenSimd = true; // narrow auto-enable
             var fallback = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
             Console.WriteLine($"Generated {fallback.Generated} tokens in {fallback.Milliseconds} ms " +
-                              $"({fallback.Milliseconds / Math.Max(1, fallback.Generated)} ms/token)");
+                              $"({fallback.Generated * 1000.0 / Math.Max(1, fallback.Milliseconds):F2} tok/s)");
             return 0;
         }
 
@@ -2710,13 +2710,13 @@ class Program
         NivaraPrimitives.UseWidenSimd = false;
         var scalar = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
         Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
-                          $"{scalar.Milliseconds / Math.Max(1, scalar.Generated)} ms/token)");
+                          $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s)");
 
         // Side B: widen (UseWidenSimd = true).
         NivaraPrimitives.UseWidenSimd = true;
         var widened = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
         Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
-                          $"{widened.Milliseconds / Math.Max(1, widened.Generated)} ms/token)");
+                          $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s)");
         NivaraPrimitives.UseWidenSimd = false; // restore safe default
 
         // Summary.
@@ -2834,7 +2834,7 @@ class Program
         var generatedIds = sequence.Skip(promptIds.Count).ToList();
 
         Console.WriteLine($"Generated {generated} tokens in {genMs} ms " +
-                          $"({genMs / Math.Max(1, generated)} ms/token)");
+                          $"({generated * 1000.0 / Math.Max(1, genMs):F2} tok/s)");
         Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
         Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
         Console.WriteLine();
