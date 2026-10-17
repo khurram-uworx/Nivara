@@ -11,6 +11,9 @@ public class SilkQwenParityTests
     [Test]
     public void ForwardPrefill_SyntheticWeights_SilkMatchesCpuArgmaxAndLogits()
     {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+
         var (tensors, config) = SilkQwenTestWeights.Synthesize();
         var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
 

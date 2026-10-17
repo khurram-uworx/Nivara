@@ -10,6 +10,9 @@ public class SilkQwenKvCacheTests
     [Test]
     public void GenerateSilk_UseKvCacheOnOff_ReturnsIdenticalTokens_Synthetic()
     {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk KV-cache verification."); }
+
         var (tensors, config) = SilkQwenTestWeights.Synthesize();
         int[] prompt = [1, 2, 3];
 
