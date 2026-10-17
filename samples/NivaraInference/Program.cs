@@ -2986,18 +2986,23 @@ class Program
         LlamaForCausalLM<T> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
         where T : struct, IFloatingPointIeee754<T>
     {
+        int headDim = config.HiddenSize / config.NumAttentionHeads;
+        int kvWidth = config.NumKeyValueHeads * headDim;
+        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth);
         var sequence = new List<int>(promptIds);
         int generated = 0;
         var genSw = Stopwatch.StartNew();
+        var logits = model.ForwardPrefill(promptIds.ToArray(), cache);
+        int position = promptIds.Count;
+        int vocab = config.VocabSize;
         while (generated < maxNewTokens)
         {
-            var logits = model.Forward(sequence.ToArray());
-            int vocab = config.VocabSize;
-            int next = ArgMaxLastRow(logits, logits.Shape[0], vocab);
+            int next = ArgMaxLastRow(logits, 1, vocab);
             sequence.Add(next);
             generated++;
             if (next == config.EosTokenId)
                 break;
+            logits = model.ForwardCached(next, position++, cache);
         }
         genSw.Stop();
         return (generated, genSw.ElapsedMilliseconds, sequence);
