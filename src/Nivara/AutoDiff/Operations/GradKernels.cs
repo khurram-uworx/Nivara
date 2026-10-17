@@ -422,30 +422,46 @@ internal static class GradKernels
         if (softmaxOutput.Length != gradOutput.Length || output.Length < gradOutput.Length)
             throw new ArgumentException("All spans must have the same length.");
         int rows = classCount > 0 ? softmaxOutput.Length / classCount : 0;
+
+        // Per-cell annihilation mask: length rows*classCount. Computed normally first, then
+        // dead cells are zeroed, because their pre-softmax score no longer depends on input.
+        bool cellMode = !independentRows.IsEmpty && classCount > 0
+            && independentRows.Length == rows * classCount;
+        bool rowMode = !independentRows.IsEmpty && !cellMode;
+
         if (classCount <= 0 || rows < 2)
         {
-            if (!independentRows.IsEmpty && independentRows[0])
+            if (rowMode && independentRows.Length > 0 && independentRows[0])
             {
                 // Only the row itself, not the whole output: output may be longer than one row.
                 output.Slice(0, softmaxOutput.Length).Clear();
                 return;
             }
             SoftmaxGradientSingle(softmaxOutput, gradOutput, output);
+            if (cellMode)
+                for (int i = 0; i < independentRows.Length && i < output.Length; i++)
+                    if (independentRows[i]) output[i] = default;
             return;
         }
-        if (!independentRows.IsEmpty && independentRows.Length != rows)
+
+        if (rowMode && independentRows.Length != rows)
             throw new ArgumentException(
                 $"Row flags length {independentRows.Length} does not match rows {rows}.", nameof(independentRows));
+
         for (int r = 0; r < rows; r++)
         {
             int start = r * classCount;
-            if (!independentRows.IsEmpty && independentRows[r])
+            if (rowMode && independentRows[r])
             {
                 output.Slice(start, classCount).Clear();
                 continue;
             }
             SoftmaxGradientSingle(softmaxOutput.Slice(start, classCount), gradOutput.Slice(start, classCount), output.Slice(start, classCount));
         }
+
+        if (cellMode)
+            for (int i = 0; i < independentRows.Length && i < output.Length; i++)
+                if (independentRows[i]) output[i] = default;
     }
 
     /// <summary>

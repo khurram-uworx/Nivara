@@ -78,11 +78,61 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
                                            ReadOnlySpan<bool> scoreIndependentRows = default)
     {
-        if (!scoreIndependentRows.IsEmpty && scoreIndependentRows.Length != rows)
+        bool tracking = !scoreIndependentRows.IsEmpty;
+        bool cellMode = tracking && scoreIndependentRows.Length == (long)rows * cols;
+        bool rowMode = tracking && !cellMode;
+
+        if (rowMode && scoreIndependentRows.Length != rows)
             throw new ArgumentException(
                 $"Row flags length {scoreIndependentRows.Length} does not match rows {rows}.", nameof(scoreIndependentRows));
+        if (cellMode && scoreIndependentRows.Length != (long)rows * cols)
+            throw new ArgumentException(
+                $"Cell flags length {scoreIndependentRows.Length} does not match rows*cols ({(long)rows * cols}).", nameof(scoreIndependentRows));
+
+        if (cellMode)
+        {
+            // Compute full gradient, then zero dead cells.
+            GradKernels.SoftmaxGradient(weights, dS, dS, cols, ReadOnlySpan<bool>.Empty);
+            for (int i = 0; i < scoreIndependentRows.Length && i < dS.Length; i++)
+                if (scoreIndependentRows[i]) dS[i] = default;
+            return;
+        }
 
         GradKernels.SoftmaxGradient(weights, dS, dS, cols, scoreIndependentRows);
+    }
+
+    // Bitmask (per-row, kvLen <= 64) overloads: each row's word has bit (1<<c) set
+    // for every annihilated cell in that row.
+
+    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
+                                           ReadOnlySpan<int> deadCellMask)
+        => SoftmaxBackwardRowsBitmask(weights, dS, rows, cols, deadCellMask);
+
+    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
+                                           ReadOnlySpan<uint> deadCellMask)
+        => SoftmaxBackwardRowsBitmask(weights, dS, rows, cols, deadCellMask);
+
+    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
+                                           ReadOnlySpan<long> deadCellMask)
+        => SoftmaxBackwardRowsBitmask(weights, dS, rows, cols, deadCellMask);
+
+    public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols,
+                                           ReadOnlySpan<ulong> deadCellMask)
+        => SoftmaxBackwardRowsBitmask(weights, dS, rows, cols, deadCellMask);
+
+    static void SoftmaxBackwardRowsBitmask<TMask>(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols, ReadOnlySpan<TMask> deadCellMask)
+        where TMask : struct
+    {
+        if (deadCellMask.IsEmpty) { GradKernels.SoftmaxGradient(weights, dS, dS, cols); return; }
+        if (deadCellMask.Length != rows) throw new ArgumentException($"Dead-cell mask length {deadCellMask.Length} does not match rows {rows}.", nameof(deadCellMask));
+        if (cols > 64) throw new ArgumentOutOfRangeException(nameof(cols), "Bitmask form supports kvLen <= 64.");
+        GradKernels.SoftmaxGradient(weights, dS, dS, cols);
+        for (int r = 0; r < rows; r++)
+        {
+            ulong bits = Convert.ToUInt64(deadCellMask[r]);
+            for (int c = 0; c < cols; c++)
+                if (((bits >> c) & 1UL) != 0) dS[r * cols + c] = default;
+        }
     }
 
     /// <summary>
@@ -178,19 +228,27 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
         if (mask.Length != scores.Length)
             throw new ArgumentException(
                 $"Mask length {mask.Length} does not match score length {scores.Length}.", nameof(mask));
-        if (!scoreIndependentRows.IsEmpty)
+
+        bool tracking = !scoreIndependentRows.IsEmpty;
+        bool cellMode = tracking && scoreIndependentRows.Length == (long)rows * cols;
+        bool rowMode = tracking && !cellMode;
+
+        if (tracking)
         {
             if (rows < 0) throw new ArgumentOutOfRangeException(nameof(rows));
             if (cols < 0) throw new ArgumentOutOfRangeException(nameof(cols));
-            if (scoreIndependentRows.Length != rows)
+            if (rowMode && scoreIndependentRows.Length != rows)
                 throw new ArgumentException(
                     $"Row flags length {scoreIndependentRows.Length} does not match rows {rows}.", nameof(scoreIndependentRows));
+            if (cellMode && scoreIndependentRows.Length != (long)rows * cols)
+                throw new ArgumentException(
+                    $"Cell flags length {scoreIndependentRows.Length} does not match rows*cols ({(long)rows * cols}).", nameof(scoreIndependentRows));
             if ((long)rows * cols != scores.Length)
                 throw new ArgumentException(
                     $"rows*cols ({rows * cols}) must equal score length ({scores.Length}).");
         }
 
-        if (scoreIndependentRows.IsEmpty)
+        if (!tracking)
         {
             for (int i = 0; i < scores.Length; i++)
                 scores[i] = MaskedCell(scores[i], mask[i], out _);
@@ -206,10 +264,66 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
             for (int c = 0; c < cols; c++, idx++)
             {
                 scores[idx] = MaskedCell(scores[idx], mask[idx], out bool dead);
+                if (cellMode) scoreIndependentRows[idx] = dead;
                 if (!dead)
                     rowIndependent = false;
             }
-            scoreIndependentRows[r] = rowIndependent;
+            if (rowMode) scoreIndependentRows[r] = rowIndependent;
+        }
+    }
+
+    // Bitmask (per-row, kvLen <= 64) overloads.
+
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask,
+                                 Span<int> deadCellMask, int rows, int cols)
+        => ApplyMaskBitmask(scores, mask, deadCellMask, rows, cols);
+
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask,
+                                 Span<uint> deadCellMask, int rows, int cols)
+        => ApplyMaskBitmask(scores, mask, deadCellMask, rows, cols);
+
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask,
+                                 Span<long> deadCellMask, int rows, int cols)
+        => ApplyMaskBitmask(scores, mask, deadCellMask, rows, cols);
+
+    public static void ApplyMask(Span<T> scores, ReadOnlySpan<T> mask,
+                                 Span<ulong> deadCellMask, int rows, int cols)
+        => ApplyMaskBitmask(scores, mask, deadCellMask, rows, cols);
+
+    static void ApplyMaskBitmask<TMask>(Span<T> scores, ReadOnlySpan<T> mask, Span<TMask> deadCellMask, int rows, int cols)
+        where TMask : struct
+    {
+        if (mask.Length != scores.Length)
+            throw new ArgumentException($"Mask length {mask.Length} does not match score length {scores.Length}.", nameof(mask));
+        if (rows < 0) throw new ArgumentOutOfRangeException(nameof(rows));
+        if (cols < 0) throw new ArgumentOutOfRangeException(nameof(cols));
+        if (cols > 64) throw new ArgumentOutOfRangeException(nameof(cols), "Bitmask form supports kvLen <= 64.");
+        if (!deadCellMask.IsEmpty)
+        {
+            if (deadCellMask.Length != rows)
+                throw new ArgumentException($"Dead-cell mask length {deadCellMask.Length} does not match rows {rows}.", nameof(deadCellMask));
+            if ((long)rows * cols != scores.Length)
+                throw new ArgumentException($"rows*cols ({rows * cols}) must equal score length ({scores.Length}).");
+        }
+
+        if (deadCellMask.IsEmpty)
+        {
+            for (int i = 0; i < scores.Length; i++)
+                scores[i] = MaskedCell(scores[i], mask[i], out _);
+            return;
+        }
+
+        deadCellMask.Clear();
+        int idx = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            ulong bits = 0;
+            for (int c = 0; c < cols; c++, idx++)
+            {
+                scores[idx] = MaskedCell(scores[idx], mask[idx], out bool dead);
+                if (dead) bits |= (1UL << c);
+            }
+            deadCellMask[r] = (TMask)Convert.ChangeType(bits, typeof(TMask));
         }
     }
 
