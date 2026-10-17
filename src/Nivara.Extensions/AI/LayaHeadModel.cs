@@ -92,6 +92,16 @@ public sealed class LayaHeadLayer<T> : Module<T> where T : struct, IFloatingPoin
         var ffn = linear2.Forward(ReverseGradOperations.Relu(linear1.Forward(norm2.Forward(hidden))));
         return ReverseGradOperations.Add(hidden, ffn);
     }
+
+    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int validLength)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var attended = attn.ForwardWithValidLength(norm1.Forward(input), validLength);
+        var hidden = ReverseGradOperations.Add(input, attended);
+        var ffn = linear2.Forward(ReverseGradOperations.Relu(linear1.Forward(norm2.Forward(hidden))));
+        return ReverseGradOperations.Add(hidden, ffn);
+    }
 }
 
 /// <summary>What the decision head produced for one question.</summary>
@@ -297,11 +307,7 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
             throw new ArgumentException(
                 "No marker positions survived. Every option's [MASK] was pushed out by the length " +
                 "budget, so the question does not fit head_max_len.", nameof(markerPositions));
-        if (seqLen > ModernBertMasks.MaxDenseLength)
-            throw new ArgumentOutOfRangeException(
-                nameof(hidden),
-                $"seqLen {seqLen} exceeds the dense-mask limit of {ModernBertMasks.MaxDenseLength}. " +
-                "The head's attention builds a [L, L] key-padding mask, exactly as the encoder's does.");
+        // No [L, L] mask is built: padding is carried as validLength metadata (#476).
 
         // h = h + type_emb[qtype][:, None, :] — the type embedding is one row, broadcast over every
         // position. BroadcastAdd is the op for that (Add requires equal lengths), and it keeps the
@@ -312,9 +318,8 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
 
         if (headLayers.Length > 0)
         {
-            var paddingMask = BuildPrefixMask(seqLen, validLength);
             for (int i = 0; i < headLayers.Length; i++)
-                withType = headLayers[i].Forward(withType, paddingMask);
+                withType = headLayers[i].Forward(withType, validLength);
         }
 
         // torch.gather(h, 1, marker_pos[:, :, None].expand(-1, -1, d)) — a row gather, because the

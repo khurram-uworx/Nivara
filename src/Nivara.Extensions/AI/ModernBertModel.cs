@@ -307,6 +307,18 @@ public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloati
         var context = ReverseGradOperations.MultiHeadAttention(query, key, value, numHeads, scale, mask);
         return oProj.Forward(context);
     }
+
+    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int band, int validLength)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var query = rope.Forward(qProj.Forward(input));
+        var key = rope.Forward(kProj.Forward(input));
+        var value = vProj.Forward(input);
+
+        var context = ReverseGradOperations.MultiHeadAttention(query, key, value, numHeads, scale, null, band, validLength);
+        return oProj.Forward(context);
+    }
 }
 
 /// <summary>
@@ -377,6 +389,15 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
         var hidden = ReverseGradOperations.Add(input, attn.Forward(normed, mask));
         return ReverseGradOperations.Add(hidden, mlp.Forward(mlpNorm.Forward(hidden)));
     }
+
+    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int band, int validLength)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var normed = attnNorm != null ? attnNorm.Forward(input) : input;
+        var hidden = ReverseGradOperations.Add(input, attn.Forward(normed, band, validLength));
+        return ReverseGradOperations.Add(hidden, mlp.Forward(mlpNorm.Forward(hidden)));
+    }
 }
 
 /// <summary>
@@ -434,14 +455,11 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
         if (validLength <= 0)
             throw new ArgumentOutOfRangeException(nameof(validLength), $"validLength must be positive, got {validLength}.");
 
-        var fullMask = ModernBertMasks.Build<T>(seqLen, -1, validLength);
-        var slidingMask = ModernBertMasks.Build<T>(seqLen, config.SlidingWindow, validLength);
-
         var hidden = embedNorm.Forward(tokenEmbedding.Forward(tokenIds));
         for (int i = 0; i < layers.Length; i++)
         {
-            var mask = config.IsFullAttention(i) ? fullMask : slidingMask;
-            hidden = layers[i].Forward(hidden, mask);
+            int band = config.IsFullAttention(i) ? -1 : config.SlidingWindow;
+            hidden = layers[i].Forward(hidden, band, validLength);
         }
         return finalNorm.Forward(hidden);
     }
