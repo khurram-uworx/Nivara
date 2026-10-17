@@ -2988,7 +2988,8 @@ class Program
     {
         int headDim = config.HiddenSize / config.NumAttentionHeads;
         int kvWidth = config.NumKeyValueHeads * headDim;
-        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth);
+        int cacheCapacity = Math.Max(16, promptIds.Count + maxNewTokens);
+        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth, cacheCapacity);
         var sequence = new List<int>(promptIds);
         int generated = 0;
         var genSw = Stopwatch.StartNew();
