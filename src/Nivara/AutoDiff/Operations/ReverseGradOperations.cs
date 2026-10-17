@@ -506,7 +506,9 @@ public static class ReverseGradOperations
         ReverseGradTensor<T> value,
         int numHeads,
         T scale,
-        ReverseGradTensor<T>? mask = null)
+        ReverseGradTensor<T>? mask = null,
+        int band = -1,
+        int validLength = -1)
         where T : struct, IFloatingPointIeee754<T>
     {
         if (query == null) throw new ArgumentNullException(nameof(query));
@@ -533,6 +535,11 @@ public static class ReverseGradOperations
         if (mask != null && (mask.Rank != 2 || mask.shape[0] != qLen || mask.shape[1] != kvLen))
             throw new ArgumentException($"Mask must be a {qLen}x{kvLen} additive matrix.");
         GradientUtils.RequireConstant(nameof(mask), mask);
+
+        int vl = validLength < 0 ? kvLen : validLength;
+        if (validLength >= 0 && (vl < 1 || vl > kvLen))
+            throw new ArgumentOutOfRangeException(nameof(validLength), validLength, $"validLength must be within [1, {kvLen}].");
+        bool restricted = band >= 0 || vl != kvLen;
 
         bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
         int scoreLen = qLen * kvLen;
@@ -563,7 +570,7 @@ public static class ReverseGradOperations
 
                     var output = new T[qLen * D];
                     T[]? savedWeights = shouldTrack ? new T[numHeads * scoreLen] : null;
-                    bool[]? savedDeadCells = shouldTrack && !maskSpan.IsEmpty ? new bool[numHeads * scoreLen] : null;
+                    bool[]? savedDeadCells = shouldTrack && (!maskSpan.IsEmpty || restricted) ? new bool[numHeads * scoreLen] : null;
 
                     for (int h = 0; h < numHeads; h++)
                     {
@@ -580,6 +587,13 @@ public static class ReverseGradOperations
                                 ? savedDeadCells.AsSpan(h * scoreLen, scoreLen)
                                 : Span<bool>.Empty;
                             AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan, deadCells, qLen, kvLen);
+                        }
+                        if (restricted)
+                        {
+                            var deadCells = savedDeadCells != null
+                                ? savedDeadCells.AsSpan(h * scoreLen, scoreLen)
+                                : Span<bool>.Empty;
+                            AttentionKernels<T>.ApplyBounds(scoresSpan, deadCells, qLen, kvLen, band, vl);
                         }
 
                         AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
@@ -698,6 +712,17 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("MultiHeadAttention", [qLen, D]));
     }
 
+    public static ReverseGradTensor<T> MultiHeadAttention<T>(
+        ReverseGradTensor<T> query,
+        ReverseGradTensor<T> key,
+        ReverseGradTensor<T> value,
+        int numHeads,
+        T scale,
+        int band,
+        int validLength = -1)
+        where T : struct, IFloatingPointIeee754<T>
+        => MultiHeadAttention<T>(query, key, value, numHeads, scale, null, band, validLength);
+
     /// <summary>
     /// Batched fused multi-head scaled dot-product attention as a single graph
     /// node. The batch overload of <see cref="MultiHeadAttention{T}"/>: query is
@@ -724,7 +749,9 @@ public static class ReverseGradOperations
         ReverseGradTensor<T> value,
         int numHeads,
         T scale,
-        ReverseGradTensor<T>? mask = null)
+        ReverseGradTensor<T>? mask = null,
+        int band = -1,
+        int validLength = -1)
         where T : struct, IFloatingPointIeee754<T>
     {
         if (query == null) throw new ArgumentNullException(nameof(query));
@@ -754,6 +781,11 @@ public static class ReverseGradOperations
         if (mask != null && (mask.Rank != 3 || mask.shape[0] != batch || mask.shape[1] != qLen || mask.shape[2] != kvLen))
             throw new ArgumentException($"Mask must be a {batch}x{qLen}x{kvLen} additive tensor.");
         GradientUtils.RequireConstant(nameof(mask), mask);
+
+        int bvl = validLength < 0 ? kvLen : validLength;
+        if (validLength >= 0 && (bvl < 1 || bvl > kvLen))
+            throw new ArgumentOutOfRangeException(nameof(validLength), validLength, $"validLength must be within [1, {kvLen}].");
+        bool brestricted = band >= 0 || bvl != kvLen;
 
         bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
         int scoreLen = qLen * kvLen;
@@ -792,7 +824,7 @@ public static class ReverseGradOperations
 
                     var output = new T[batch * qLen * D];
                     T[]? savedWeights = shouldTrack ? new T[batch * numHeads * scoreLen] : null;
-                    bool[]? savedDeadCells = shouldTrack && mask != null
+                    bool[]? savedDeadCells = shouldTrack && (mask != null || brestricted)
                         ? new bool[batch * numHeads * scoreLen]
                         : null;
 
@@ -831,6 +863,13 @@ public static class ReverseGradOperations
                                         ? savedDeadCells.AsSpan(b * numHeads * scoreLen + h * scoreLen, scoreLen)
                                         : Span<bool>.Empty;
                                     AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen), deadCells, qLen, kvLen);
+                                }
+                                if (brestricted)
+                                {
+                                    var deadCells = savedDeadCells != null
+                                        ? savedDeadCells.AsSpan(b * numHeads * scoreLen + h * scoreLen, scoreLen)
+                                        : Span<bool>.Empty;
+                                    AttentionKernels<T>.ApplyBounds(scoresSpan, deadCells, qLen, kvLen, band, bvl);
                                 }
 
                                 AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
@@ -978,6 +1017,17 @@ public static class ReverseGradOperations
             },
             AutoDiffDiagnostics.ShapeNote("BatchedMultiHeadAttention", [batch, qLen, D]));
     }
+
+    public static ReverseGradTensor<T> BatchedMultiHeadAttention<T>(
+        ReverseGradTensor<T> query,
+        ReverseGradTensor<T> key,
+        ReverseGradTensor<T> value,
+        int numHeads,
+        T scale,
+        int band,
+        int validLength = -1)
+        where T : struct, IFloatingPointIeee754<T>
+        => BatchedMultiHeadAttention<T>(query, key, value, numHeads, scale, null, band, validLength);
 
     /// <summary>
     /// Repeats grouped key/value heads (GQA) so query, key, and value share an equal head

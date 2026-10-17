@@ -272,8 +272,7 @@ public static class ModernBert
         var tokenizer = LoadTokenizer(modelDir, config);
         var (ids, validLength) = PadTo(tokenizer, SampleSentences[0], 128, config.PadTokenId);
 
-        var fullMask = ModernBertMasks.Build<float>(ids.Length, -1, validLength);
-        var slidingMask = ModernBertMasks.Build<float>(ids.Length, config.SlidingWindow, validLength);
+        // Band + validLength are carried inside the attention kernel; no [L, L] mask is built (#476).
 
         // HuggingFace returns num_layers + 1 states: the post-embedding-norm state, then the output
         // of every layer except the last, then the final-norm state. The last layer's raw output is
@@ -302,8 +301,8 @@ public static class ModernBert
 
         for (int i = 0; i < encoder.layers.Length; i++)
         {
-            var mask = config.IsFullAttention(i) ? fullMask : slidingMask;
-            hidden = encoder.layers[i].Forward(hidden, mask);
+            int band = config.IsFullAttention(i) ? -1 : config.SlidingWindow;
+            hidden = encoder.layers[i].Forward(hidden, band, validLength);
             string kind = config.IsFullAttention(i) ? "full" : "sliding";
             int referenceStage = i < lastLayer ? stage : -1;
             Report(stage, $"layer {i,2} ({kind})", hidden, stages, stageStride, validValues, referenceStage);

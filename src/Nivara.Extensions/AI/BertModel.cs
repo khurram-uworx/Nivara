@@ -72,6 +72,15 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         return oProj.Forward(MultiHeadAttention(Q, K, V, null));
     }
 
+    public ReverseGradTensor<T> ForwardWithValidLength(ReverseGradTensor<T> input, int validLength)
+    {
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
+
+        return oProj.Forward(ReverseGradOperations.MultiHeadAttention(Q, K, V, _numHeads, _scale, null, -1, validLength));
+    }
+
     public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
     {
         var Q = qProj.Forward(input);
