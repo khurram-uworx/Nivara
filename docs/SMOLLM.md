@@ -49,12 +49,13 @@ Adding a causal-LM path surfaced capabilities the Nivara core library did not ye
 
 Greedy argmax agreement with the PyTorch reference (32-token generation):
 
-| Metric | F32 vs Ref | BFloat16 vs Ref | Half (fp16) vs Ref |
+| Metric | F32 vs F32 Ref | BFloat16 vs BF16 Ref | Half (fp16) vs Ref |
 |---|---|---|---|
-| generated-token argmax match | 25/32 | **22/32** | 0/32 |
-| final-position logits cosine | 0.24* | **0.94** | NaN |
+| generated-token argmax match | **32/32** | **22/32** | 0/32 |
+| final-position logits (reference sequence) cosine | **1.0000** | **1.0000** | NaN |
+| final-position logits (reference sequence) max abs diff | 1.7e-5 | 0.625 | NaN |
 
-BF16 is the strongest numeric match (0.94 cosine, mean abs diff 3.63) and is the natural native-on-disk choice. F32 comes close (25/32 tokens) but its *final*-position logits are compared against a divergent suffix once the greedy streams part ways (*), so the cosine is less meaningful. **Half is unusable for SmolLM**: a merely 10-bit mantissa cannot hold the accumulating attention geometry across 30 layers, so the final logits go NaN and the decode collapses to all-pad tokens (0/32). In short: pick BF16 (native) or F32 — never Half — for SmolLM generation.
+The earlier "F32 25/32, cosine 0.24" row was a **cross-dtype, cross-sequence artifact**: the default reference fixture is BF16 PyTorch while the run was F32, and final-position logits were computed on each side's own generated stream. Once greedy decoding diverges (token 25) the two logits are for different inputs, so cosine/max-abs are not meaningful parity numbers. After switching to dtype-matched fixtures and computing the final logits on the PyTorch reference token stream, F32 is bit-clean against F32 PyTorch (32/32, cosine ~1.0) and BF16 is within 0.625 max abs (cosine ~1.0). **Half is unusable for SmolLM**: a merely 10-bit mantissa cannot hold the accumulating attention geometry across 30 layers, so the final logits go NaN and the decode collapses to all-pad tokens (0/32). In short: pick BF16 (native) or F32 — never Half — for SmolLM generation.
 
 See [docs/BFLOAT16.md](BFLOAT16.md) for engine-level BF16 details.
 
