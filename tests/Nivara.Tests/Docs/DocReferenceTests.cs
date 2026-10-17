@@ -33,7 +33,7 @@ public class DocReferenceTests
     /// <c>tests/Nivara.PerformanceTests/README.md</c>, plus one added in
     /// <c>docs/ACCELERATION.md</c>, by the #492 reconciliation.
     /// </summary>
-    const int ExpectedDocumentReferenceCount = 357;
+    const int ExpectedDocumentReferenceCount = 358;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
