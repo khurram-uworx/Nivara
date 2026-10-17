@@ -211,9 +211,6 @@ public sealed unsafe class SilkRuntime : IDisposable
             0, null, null);
         if (err != 0)
             throw new InvalidOperationException($"Silk clEnqueueCopyBuffer({count} floats) failed ({err}).");
-        int finish = cl.Finish(queue);
-        if (finish != 0)
-            throw new InvalidOperationException($"Silk clFinish after copy failed ({finish}).");
     }
 
     public void SetBuffer(string kernelName, uint index, nint buffer)
@@ -248,8 +245,8 @@ public sealed unsafe class SilkRuntime : IDisposable
     }
 
     /// <summary>
-    /// Enqueues <paramref name="kernelName"/> over the given global/local work sizes and blocks
-    /// until it completes. The global size must already be a whole multiple of the local size —
+    /// Enqueues <paramref name="kernelName"/> over the given global/local work sizes (non-blocking).
+    /// The global size must already be a whole multiple of the local size —
     /// the <see cref="SilkKernels"/> geometry helpers guarantee that — because OpenCL rejects a
     /// non-multiple and the guard would otherwise be dead in the kernel.
     /// </summary>
@@ -267,10 +264,17 @@ public sealed unsafe class SilkRuntime : IDisposable
             if (err != 0)
                 throw new InvalidOperationException($"Silk dispatch of '{kernelName}' failed ({err}).");
         }
+    }
 
-        int finish = cl.Finish(queue);
-        if (finish != 0)
-            throw new InvalidOperationException($"Silk clFinish after '{kernelName}' failed ({finish}).");
+    /// <summary>Blocks until every queued command (kernels, copies) on the device queue has
+    /// completed, and checks its completion status. Launches and copies are now non-blocking, so
+    /// callers needing strict synchronization (timing, host reads of non-downloaded data) must
+    /// call this (or use a blocking <see cref="Download"/> / upload).</summary>
+    public void Finish()
+    {
+        int status = cl.Finish(queue);
+        if (status != 0)
+            throw new InvalidOperationException($"Silk clFinish failed ({status}).");
     }
 
     /// <summary>A device buffer plus the float capacity it was allocated for. <see cref="Handle"/> 0 is empty.</summary>
