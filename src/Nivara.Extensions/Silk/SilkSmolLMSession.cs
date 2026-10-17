@@ -20,5 +20,8 @@ public sealed class SilkSmolLMSession : IDisposable
     public string DeviceName => runtime.DeviceName;
     public float[] Forward(int[] tokenIds) => runner.Forward(tokenIds);
     public float[] ForwardLastLogits(int[] tokenIds) => runner.ForwardLastLogits(tokenIds);
+    public float[] ForwardPrefill(int[] tokenIds) => runner.ForwardPrefill(tokenIds);
+    public float[] ForwardCached(int tokenId, int position) => runner.ForwardCached(tokenId, position);
+    public void ResetCache() => runner.ResetCache();
     public void Dispose() { runner.Dispose(); runtime.Dispose(); }
 }
