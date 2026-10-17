@@ -30,7 +30,7 @@ static class Program
 
     static int Main(string[] args)
     {
-        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels, layaForward) = ParseArgs(args);
 
         // Re-recording a fingerprint baseline silently does nothing without --gemm, which is the
         // worst shape for this flag: the run looks successful and the reference is unchanged.
@@ -69,6 +69,9 @@ static class Program
 
         if (mask)
             return ApplyMaskProbe.Run();
+
+        if (layaForward)
+            return LayaForwardProbe.Run();
 
         if (runs > 1)
         {
@@ -1020,7 +1023,7 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool Gemm, bool GpuAlloc, bool CpuGemm, bool GemmLegs, bool WriteGemmBaseline, bool Mask, bool SilkKernels) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool Gemm, bool GpuAlloc, bool CpuGemm, bool GemmLegs, bool WriteGemmBaseline, bool Mask, bool SilkKernels, bool LayaForward) ParseArgs(string[] args)
     {
         string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
@@ -1034,6 +1037,7 @@ static class Program
         bool writeGemmBaseline = false;
         bool mask = false;
         bool silkKernels = false;
+        bool layaForward = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1066,6 +1070,9 @@ static class Program
                 case "--mask":
                     mask = true;
                     break;
+                case "--laya-forward":
+                    layaForward = true;
+                    break;
                 case "--only" when i + 1 < args.Length:
                     only = args[++i];
                     break;
@@ -1083,13 +1090,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--gemm [--write-gemm-baseline]] [--gemm-legs] [--silk-kernels] [--mask] [--gpu-alloc] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--gemm [--write-gemm-baseline]] [--gemm-legs] [--silk-kernels] [--mask] [--laya-forward] [--gpu-alloc] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels, layaForward);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)

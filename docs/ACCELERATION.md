@@ -119,7 +119,10 @@ attention to become the bottleneck. [docs/LAYA.md](LAYA.md) (merged in PR #459, 
 issue was filed) had already measured GEMM at **~99.9% of the arithmetic** with attention at 0.13% at
 S=512, and named #440 (tile-32 / 2x2 GEMM) the leading open item. *(That nomination was later
 measured and did not hold; and the arithmetic-share framing was itself the deeper error — a leg
-profile measures `BatchedAttention` at 57% of the Laya forward, not 0.13%.)* ModernBERT has 1.4 B
+profile measures `BatchedAttention` at 57% of the Laya GPU forward, not 0.13%. The CPU side is the
+same error in the other direction: `--laya-forward` measures attention at 0.75–0.87 s of a
+3.9–4.8 s encoder, not 0.13% of the time and not the 9–13 s a retracted probe reported. See
+[docs/LAYA.md](LAYA.md).)* ModernBERT has 1.4 B
 parameters against DistilBERT's 66 M, so it is a GEMM-throughput problem exactly as DistilBERT was.
 The value delivered here is that the architecture is *portable at all* — a banded RoPE'd gated
 pre-norm encoder now runs on the accelerator and is pinned to the CPU encoder — not that it is faster.

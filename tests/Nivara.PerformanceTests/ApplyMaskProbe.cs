@@ -473,11 +473,27 @@ static class ApplyMaskProbe
                                  scores, mask, outHead, output,
                                  qLen, kvLen, D, heads, headDim, scale);
 
+        Console.WriteLine("  matmul spans are one head (qLen*headDim / kvLen*headDim), sliced as MultiHeadAttention slices them.");
+
         // Warm the whole chain before any sample, so tiered JIT and first-touch faults do not
         // land inside one leg's first measurement.
-        for (int w = 0; w < Warmups; w++) chain.RunUntimed();
+        for (int w = 0; w < Warmups; w++)
+        {
+            if (!chain.RunUntimed())
+            {
+                PrintSpanVoid();
+                return;
+            }
+        }
 
-        for (int r = 0; r < Rounds; r++) chain.RunTimed(samples, r, packHeadsFirst: r % 2 == 0);
+        for (int r = 0; r < Rounds; r++)
+        {
+            if (!chain.RunTimed(samples, r, packHeadsFirst: r % 2 == 0))
+            {
+                PrintSpanVoid();
+                return;
+            }
+        }
 
         if (!AllFinite(scores))
         {
@@ -541,34 +557,33 @@ static class ApplyMaskProbe
         Console.WriteLine($"    Reverting would return {deltaPerLayer:F3} ms/layer, {deltaPerForward:F2} ms per {LayaLayers}-layer forward.");
         Console.WriteLine();
 
-        // A percentage of end-to-end time is deliberately NOT printed here. No forward total was
-        // measured in this run, and the two recorded candidates do not reconcile with this run:
-        // the leg profile above already puts attention alone at layerTotal ms/layer, which over
-        // LayaLayers layers exceeds docs/LAYA.md's recorded ~4.1 s forward on its own. Dividing
-        // a measured delta by a denominator this run contradicts would produce a precise-looking
-        // number with no defensible meaning, which is worse than reporting none.
-        Console.WriteLine("  *** The forward-time reconciliation does not close, and this probe will not paper over it:");
-        Console.WriteLine($"      measured attention alone    : {layerTotal * LayaLayers,10:F0} ms per forward (from the legs above)");
-        Console.WriteLine($"      recorded measured forward   : {RecordedLayaForwardMs,10:F0} ms (docs/LAYA.md)");
-        Console.WriteLine($"      recorded GEMM-only projection: {RecordedLayaGemmProjectedMs,9:F0} ms (tests README - EXCLUDES attention)");
-        Console.WriteLine("      Attention alone is larger than the recorded whole forward, so the recorded figures");
-        Console.WriteLine("      cannot be the denominator for this delta. Possible causes: the recorded forward");
-        Console.WriteLine("      was measured on a different code state or a faster machine; the leg profile is");
-        Console.WriteLine("      inflated by the single-threaded skinny QK^T (K=64, so every MAC is a short");
-        Console.WriteLine("      reduction, versus the recorded [512x1024x3072] projection's deep-K shapes);");
-        Console.WriteLine("      or the recorded forward ran a smaller effective S. NOT RESOLVED HERE - it is not");
-        Console.WriteLine("      this issue's question. Tracked separately so the number is not lost.");
-        Console.WriteLine("      The softmax leg's share swings several-fold between runs of this probe while every");
-        Console.WriteLine("      other leg holds single digits, and its input is deterministic and allocation-free.");
-        Console.WriteLine("      That bimodality is unexplained and is NOT quantified here. Read the attention share");
-        Console.WriteLine("      as a band, not a value, and prefer the ABSOLUTE ms above.");
-        Console.WriteLine("      Until it is resolved, treat the ABSOLUTE ms above as the finding and any");
-        Console.WriteLine("      percentage-of-forward as unmeasured.");
+        // No percentage of a recorded forward. This run did not measure one, and an earlier
+        // revision of this method printed "attention alone is larger than the recorded whole
+        // forward" as a string literal — on 2026-10-15 the numbers above it were 3203 ms against
+        // 4100 ms, and the sentence still said larger. Print the comparison the numbers have.
+        double attentionMs = layerTotal * LayaLayers;
+        string relation = attentionMs > RecordedLayaForwardMs ? "exceeds" : "does not exceed";
+        Console.WriteLine("  *** No percentage of the recorded forward is printed. This run did not measure it.");
+        Console.WriteLine($"      measured attention alone      : {attentionMs,10:F0} ms  (causal mask; every row pays Exp)");
+        Console.WriteLine($"      recorded forward (not this run): {RecordedLayaForwardMs,9:F0} ms  (docs/LAYA.md)");
+        Console.WriteLine($"      recorded GEMM projection      : {RecordedLayaGemmProjectedMs,10:F0} ms  (excludes attention; not this run)");
+        Console.WriteLine($"      This profile's attention {relation} the recorded forward. That is not a reconciliation:");
+        Console.WriteLine("      the forward was not measured in this process, and this mask is causal. A padding");
+        Console.WriteLine("      mask early-outs fully-masked softmax rows; this one does not. Do not divide the");
+        Console.WriteLine("      delta above by either recorded figure.");
         Console.WriteLine();
 
         static void PrintLeg(string name, double perCallMs, int multiplier, double layerTotalMs)
             => Console.WriteLine($"  {name,-22} {perCallMs,9:F4}ms {perCallMs * multiplier,10:F3}ms " +
                                  $"{perCallMs * multiplier / layerTotalMs,8:P1}");
+
+        static void PrintSpanVoid()
+        {
+            Console.WriteLine("  *** VOID: a matmul span was not one head (qLen*headDim / kvLen*headDim).");
+            Console.WriteLine("      MultiplyCore rents, copies and clears by span.Length, so a longer span is not");
+            Console.WriteLine("      a head's cost. No leg number is printed.");
+            Console.WriteLine();
+        }
     }
 
     const int PackIdx = 0, QKIdx = 1, ScaleIdx = 2, MaskIdx = 3, AddIdx = 4, SoftmaxIdx = 5, PVIdx = 6, ScatterIdx = 7;
@@ -590,57 +605,93 @@ static class ApplyMaskProbe
         int qHeadsLen, int kvHeadsLen, float[] scores, float[] mask, float[] outHead, float[] output,
         int qLen, int kvLen, int D, int heads, int headDim, float scale)
     {
-        public void RunUntimed() => Execute(packHeadsFirst: true, samples: null, round: 0);
+        public bool RunUntimed() => Execute(packHeadsFirst: true, samples: null, round: 0);
 
         /// <summary>
         /// One timed pass. Every leg is measured on the output of the leg that feeds it, in the
         /// same round, so drift within a round is shared across legs instead of accumulating
         /// across a whole leg's 30 samples.
         /// </summary>
-        public void RunTimed(double[][] samples, int round, bool packHeadsFirst)
+        public bool RunTimed(double[][] samples, int round, bool packHeadsFirst)
             => Execute(packHeadsFirst, samples, round);
 
-        void Execute(bool packHeadsFirst, double[][]? samples, int round)
+        /// <summary>
+        /// Returns false when a matmul span is not one head. <c>TensorsHelper.MultiplyCore</c>
+        /// rents, copies and <c>clearArray</c>-returns by <c>span.Length</c> — <c>ArrayPool.Rent</c>
+        /// returns at least the requested length and <c>Return(clearArray: true)</c> clears that
+        /// array — so passing the packed multi-head buffer times 16× the bytes production moves
+        /// and then the accounting multiplied that one call by 16. The span passed to the kernel
+        /// is the slice <c>MultiHeadAttention</c> takes.
+        /// </summary>
+        bool Execute(bool packHeadsFirst, double[][]? samples, int round)
         {
+            int headQ = qLen * headDim;
+            int headKV = kvLen * headDim;
+            if (qHeads.Length != heads * headQ || kHeads.Length != heads * headKV || vHeads.Length != heads * headKV)
+                return false;
+
             long t;
 
             if (packHeadsFirst) { t = Stopwatch.GetTimestamp(); Pack(); Record(samples, PackIdx, round, t); }
 
-            // Dependency order from here on: each leg consumes what the previous one wrote.
-            t = Stopwatch.GetTimestamp();
-            GradKernels.MatMulTransposedB(qHeads, kHeads, scores, qLen, headDim, kvLen);
-            Record(samples, QKIdx, round, t);
+            // Sum across heads, then store the mean. heads is constant, so median(mean) * heads
+            // is median(sum): the per-layer column is the work production does, not one call times 16.
+            long qk = 0, scaleTicks = 0, maskTicks = 0, addTicks = 0, softmaxTicks = 0, pv = 0, scatter = 0;
+            for (int h = 0; h < heads; h++)
+            {
+                var qh = qHeads.AsSpan(h * headQ, headQ);
+                var kh = kHeads.AsSpan(h * headKV, headKV);
+                var vh = vHeads.AsSpan(h * headKV, headKV);
+                if (qh.Length != headQ || kh.Length != headKV || vh.Length != headKV)
+                    return false;
 
-            t = Stopwatch.GetTimestamp();
-            TensorPrimitives.Multiply(scores, scale, scores);
-            Record(samples, ScaleIdx, round, t);
+                t = Stopwatch.GetTimestamp();
+                GradKernels.MatMulTransposedB(qh, kh, scores, qLen, headDim, kvLen);
+                qk += Stopwatch.GetTimestamp() - t;
 
-            // The mask under test, then the counterfactual on the SAME buffer, immediately after.
-            // Both are idempotent here and agree bit-for-bit (finite scores, mask in {0,-inf}:
-            // x + 0 == x, -inf + -inf == -inf), so running both is a no-op pair and the delta
-            // compares two routes on identical input.
-            t = Stopwatch.GetTimestamp();
-            AttentionKernels<float>.ApplyMask(scores, mask);
-            Record(samples, MaskIdx, round, t);
+                t = Stopwatch.GetTimestamp();
+                TensorPrimitives.Multiply(scores, scale, scores);
+                scaleTicks += Stopwatch.GetTimestamp() - t;
 
-            t = Stopwatch.GetTimestamp();
-            TensorPrimitives.Add(scores, mask, scores);
-            Record(samples, AddIdx, round, t);
+                // The mask under test, then the counterfactual on the SAME buffer, immediately after.
+                // Both are idempotent here and agree bit-for-bit (finite scores, mask in {0,-inf}:
+                // x + 0 == x, -inf + -inf == -inf), so running both is a no-op pair and the delta
+                // compares two routes on identical input.
+                t = Stopwatch.GetTimestamp();
+                AttentionKernels<float>.ApplyMask(scores, mask);
+                maskTicks += Stopwatch.GetTimestamp() - t;
 
-            t = Stopwatch.GetTimestamp();
-            AttentionKernels<float>.SoftmaxRows(scores, qLen, kvLen);
-            Record(samples, SoftmaxIdx, round, t);
+                t = Stopwatch.GetTimestamp();
+                TensorPrimitives.Add(scores, mask, scores);
+                addTicks += Stopwatch.GetTimestamp() - t;
 
-            t = Stopwatch.GetTimestamp();
-            GradKernels.MatMul(scores, vHeads, outHead, qLen, kvLen, headDim);
-            Record(samples, PVIdx, round, t);
+                t = Stopwatch.GetTimestamp();
+                AttentionKernels<float>.SoftmaxRows(scores, qLen, kvLen);
+                softmaxTicks += Stopwatch.GetTimestamp() - t;
 
-            t = Stopwatch.GetTimestamp();
-            AttentionKernels<float>.ScatterHead(
-                outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, 0, headDim);
-            Record(samples, ScatterIdx, round, t);
+                t = Stopwatch.GetTimestamp();
+                GradKernels.MatMul(scores, vh, outHead, qLen, kvLen, headDim);
+                pv += Stopwatch.GetTimestamp() - t;
+
+                t = Stopwatch.GetTimestamp();
+                AttentionKernels<float>.ScatterHead(
+                    outHead.AsSpan(0, headQ), output.AsSpan(), qLen, D, h, headDim);
+                scatter += Stopwatch.GetTimestamp() - t;
+            }
+
+            if (samples is not null)
+            {
+                samples[QKIdx][round] = qk / (double)heads;
+                samples[ScaleIdx][round] = scaleTicks / (double)heads;
+                samples[MaskIdx][round] = maskTicks / (double)heads;
+                samples[AddIdx][round] = addTicks / (double)heads;
+                samples[SoftmaxIdx][round] = softmaxTicks / (double)heads;
+                samples[PVIdx][round] = pv / (double)heads;
+                samples[ScatterIdx][round] = scatter / (double)heads;
+            }
 
             if (!packHeadsFirst) { t = Stopwatch.GetTimestamp(); Pack(); Record(samples, PackIdx, round, t); }
+            return true;
         }
 
         void Pack()
