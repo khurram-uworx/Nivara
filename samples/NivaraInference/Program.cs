@@ -658,6 +658,7 @@ class Program
             case "qwen":
                 if (useSilk)
                 {
+                    if (syntheticWeights) return Qwen.RunSyntheticBenchmarkSilk(plain);
                     if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensors, modelDir);
                     if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
                     return Qwen.RunToolsSilk(tensors, modelDir, useKvCache: !noKvCache, text);

@@ -557,6 +557,31 @@ static class Qwen
         return 0;
     }
 
+    public static int RunSyntheticBenchmarkSilk(bool plain = false)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark -- Silk ===");
+        var config = QwenSyntheticConfig;
+        var tensors = SynthesizeTensors(config);
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+            promptIds[i] = (int)((SyntheticRng()) % (uint)config.VocabSize);
+
+        // Warmup.
+        GenerateSilk(session, config, promptIds, 8, useKvCache: true);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+        sw.Stop();
+        Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
+        return 0;
+    }
+
     static Nivara.Silk.QwenSilkConfig ToSilkConfig(LlamaConfig config) => new()
     {
         HiddenSize = config.HiddenSize,
