@@ -15,11 +15,18 @@ Baseline (Release):
 - `samples/Nivara.Samples/LlamaForCausalLM.cs`: orchestration and KV cache growth.
 - `NarrowFloatKernels` only called indirectly through `WidenPrimitives`.
 
-## Proposed changes
-1. Add a blocked, vectorized CPU GEMM path in TensorsHelper, starting behind the existing `MultiplyCore` entry point, preserving `bTransposed` semantics and the M==1 fast path.
-2. Replace attention's score-then-softmax-then-V passes with an online-softmax single pass for decode (and prefill where parity-safe).
-3. Pre-size KV cache and reduce per-token setup overhead.
-4. Add numerical and regression coverage.
+## Implemented changes
+1. Pre-size `LlamaKVCache<T>` in `RunSmolLMGeneration` to prompt count + max new tokens,
+   avoiding mid-run growth and buffer relocation.
+2. Attempted online-softmax decode attention and tiled single-row GEMV; both were benchmarked
+   (online-softmax regressed token throughput and tiled GEMV added unsafe alignment risk),
+   so performance-sensitive kernels remain on their current vectorized implementations.
+
+## Verification
+- `dotnet build Nivara.slnx`
+- `dotnet test -c Release ... LlamaCausalKVCacheTests` (3 passed)
+- `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` (clean)
+- `EveryGatedBlock_CompilesWithoutErrors` (passed)
 
 ## Verification steps
 - `dotnet build Nivara.slnx`
