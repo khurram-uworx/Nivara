@@ -422,29 +422,88 @@ internal static class GradKernels
         if (softmaxOutput.Length != gradOutput.Length || output.Length < gradOutput.Length)
             throw new ArgumentException("All spans must have the same length.");
         int rows = classCount > 0 ? softmaxOutput.Length / classCount : 0;
+
+        // Per-cell annihilation mask: length rows*classCount. Computed normally first, then
+        // dead cells are zeroed, because their pre-softmax score no longer depends on input.
+        bool cellMode = !independentRows.IsEmpty && classCount > 0
+            && independentRows.Length == rows * classCount;
+        bool rowMode = !independentRows.IsEmpty && !cellMode;
+
         if (classCount <= 0 || rows < 2)
         {
-            if (!independentRows.IsEmpty && independentRows[0])
+            if (rowMode && independentRows.Length > 0 && independentRows[0])
             {
                 // Only the row itself, not the whole output: output may be longer than one row.
                 output.Slice(0, softmaxOutput.Length).Clear();
                 return;
             }
             SoftmaxGradientSingle(softmaxOutput, gradOutput, output);
+            if (cellMode)
+                for (int i = 0; i < independentRows.Length && i < output.Length; i++)
+                    if (independentRows[i]) output[i] = default;
             return;
         }
-        if (!independentRows.IsEmpty && independentRows.Length != rows)
+
+        if (rowMode && independentRows.Length != rows)
             throw new ArgumentException(
                 $"Row flags length {independentRows.Length} does not match rows {rows}.", nameof(independentRows));
+
         for (int r = 0; r < rows; r++)
         {
             int start = r * classCount;
-            if (!independentRows.IsEmpty && independentRows[r])
+            if (rowMode && independentRows[r])
             {
                 output.Slice(start, classCount).Clear();
                 continue;
             }
             SoftmaxGradientSingle(softmaxOutput.Slice(start, classCount), gradOutput.Slice(start, classCount), output.Slice(start, classCount));
+        }
+
+        if (cellMode)
+            for (int i = 0; i < independentRows.Length && i < output.Length; i++)
+                if (independentRows[i]) output[i] = default;
+    }
+
+    // Bitmask (per-row, classCount <= 64) overloads.
+    public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount,
+                                         ReadOnlySpan<int> deadCellMask)
+        where T : struct, IFloatingPointIeee754<T>
+        => SoftmaxGradientBitmask(softmaxOutput, gradOutput, output, classCount, deadCellMask);
+    public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount,
+                                         ReadOnlySpan<uint> deadCellMask)
+        where T : struct, IFloatingPointIeee754<T>
+        => SoftmaxGradientBitmask(softmaxOutput, gradOutput, output, classCount, deadCellMask);
+    public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount,
+                                         ReadOnlySpan<long> deadCellMask)
+        where T : struct, IFloatingPointIeee754<T>
+        => SoftmaxGradientBitmask(softmaxOutput, gradOutput, output, classCount, deadCellMask);
+    public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount,
+                                         ReadOnlySpan<ulong> deadCellMask)
+        where T : struct, IFloatingPointIeee754<T>
+        => SoftmaxGradientBitmask(softmaxOutput, gradOutput, output, classCount, deadCellMask);
+
+    static void SoftmaxGradientBitmask<T, TMask>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount, ReadOnlySpan<TMask> deadCellMask)
+        where T : struct, IFloatingPointIeee754<T>
+        where TMask : struct
+    {
+        if (softmaxOutput.Length != gradOutput.Length || output.Length < gradOutput.Length)
+            throw new ArgumentException("All spans must have the same length.");
+        int rows = classCount > 0 ? softmaxOutput.Length / classCount : 0;
+        if (deadCellMask.IsEmpty)
+        {
+            SoftmaxGradient<T>(softmaxOutput, gradOutput, output, classCount);
+            return;
+        }
+        if (classCount <= 0) throw new ArgumentOutOfRangeException(nameof(classCount));
+        if (rows < 1) throw new ArgumentOutOfRangeException(nameof(classCount));
+        if (deadCellMask.Length != rows) throw new ArgumentException($"Dead-cell mask length {deadCellMask.Length} does not match rows {rows}.", nameof(deadCellMask));
+        if (classCount > 64) throw new ArgumentOutOfRangeException(nameof(classCount), "Bitmask form supports classCount <= 64.");
+        SoftmaxGradient<T>(softmaxOutput, gradOutput, output, classCount, ReadOnlySpan<bool>.Empty);
+        for (int r = 0; r < rows; r++)
+        {
+            ulong bits = Convert.ToUInt64(deadCellMask[r]);
+            for (int c = 0; c < classCount; c++)
+                if (((bits >> c) & 1UL) != 0) output[r * classCount + c] = default;
         }
     }
 

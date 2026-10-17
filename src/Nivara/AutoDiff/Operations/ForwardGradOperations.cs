@@ -1622,7 +1622,7 @@ public static class ForwardGradOperations
 
             var output = new T[qLen * D];
             T[]? savedWeights = trackTangent ? new T[numHeads * scoreLen] : null;
-            bool[]? savedScoreIndependentRows = trackTangent && !maskSpan.IsEmpty ? new bool[numHeads * qLen] : null;
+            bool[]? savedDeadCells = trackTangent && !maskSpan.IsEmpty ? new bool[numHeads * scoreLen] : null;
 
             for (int h = 0; h < numHeads; h++)
             {
@@ -1635,10 +1635,10 @@ public static class ForwardGradOperations
                 TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                 if (!maskSpan.IsEmpty)
                 {
-                    var rowFlags = savedScoreIndependentRows != null
-                        ? savedScoreIndependentRows.AsSpan(h * qLen, qLen)
+                    var deadCells = savedDeadCells != null
+                        ? savedDeadCells.AsSpan(h * scoreLen, scoreLen)
                         : Span<bool>.Empty;
-                    AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan, rowFlags, qLen, kvLen);
+                    AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan, deadCells, qLen, kvLen);
                 }
 
                 AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
@@ -1704,10 +1704,10 @@ public static class ForwardGradOperations
                         }
 
                         TensorPrimitives.Multiply(tScoresSpan, scale, tScoresSpan);
-                        var rowFlags = savedScoreIndependentRows != null
-                            ? savedScoreIndependentRows.AsSpan(h * qLen, qLen)
+                        var deadCells = savedDeadCells != null
+                            ? savedDeadCells.AsSpan(h * scoreLen, scoreLen)
                             : ReadOnlySpan<bool>.Empty;
-                        AttentionKernels<T>.SoftmaxBackwardRows(pHead, tScoresSpan, qLen, kvLen, rowFlags);
+                        AttentionKernels<T>.SoftmaxBackwardRows(pHead, tScoresSpan, qLen, kvLen, deadCells);
 
                         var tOutSpan = tOutHead.AsSpan(0, qLen * headDim);
                         GradKernels.MatMul(tScores, vh, tOutHead, qLen, kvLen, headDim);
@@ -1828,7 +1828,7 @@ public static class ForwardGradOperations
 
             var output = new T[batch * qLen * D];
             T[]? savedWeights = trackTangent ? new T[batch * numHeads * scoreLen] : null;
-            bool[]? savedScoreIndependentRows = trackTangent && mask != null ? new bool[batch * numHeads * qLen] : null;
+            bool[]? savedDeadCells = trackTangent && mask != null ? new bool[batch * numHeads * scoreLen] : null;
 
             for (int b = 0; b < batch; b++)
             {
@@ -1854,10 +1854,10 @@ public static class ForwardGradOperations
                         TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                         if (!maskSpan.IsEmpty)
                         {
-                            var rowFlags = savedScoreIndependentRows != null
-                                ? savedScoreIndependentRows.AsSpan(b * numHeads * qLen + h * qLen, qLen)
+                            var deadCells = savedDeadCells != null
+                                ? savedDeadCells.AsSpan(b * numHeads * scoreLen + h * scoreLen, scoreLen)
                                 : Span<bool>.Empty;
-                            AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen), rowFlags, qLen, kvLen);
+                            AttentionKernels<T>.ApplyMask(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen), deadCells, qLen, kvLen);
                         }
 
                         AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
@@ -1962,10 +1962,10 @@ public static class ForwardGradOperations
                                 }
 
                                 TensorPrimitives.Multiply(tScoresSpan, scale, tScoresSpan);
-                                var rowFlags = savedScoreIndependentRows != null
-                                    ? savedScoreIndependentRows.AsSpan(b * numHeads * qLen + h * qLen, qLen)
+                                var deadCells = savedDeadCells != null
+                                    ? savedDeadCells.AsSpan(b * numHeads * scoreLen + h * scoreLen, scoreLen)
                                     : ReadOnlySpan<bool>.Empty;
-                                AttentionKernels<T>.SoftmaxBackwardRows(pHead, tScoresSpan, qLen, kvLen, rowFlags);
+                                AttentionKernels<T>.SoftmaxBackwardRows(pHead, tScoresSpan, qLen, kvLen, deadCells);
 
                                 var tOutSpan = tOutHead.AsSpan(0, qLen * headDim);
                                 GradKernels.MatMul(tScores, vh, tOutHead, qLen, kvLen, headDim);
