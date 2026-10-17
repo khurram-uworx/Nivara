@@ -2,7 +2,7 @@ using Nivara.AI;
 
 namespace Nivara.Silk;
 
-public sealed class SilkSmolLMSession
+public sealed class SilkSmolLMSession : IDisposable
 {
     readonly SilkRuntime runtime;
     readonly SilkSmolLMGpuRunner runner;

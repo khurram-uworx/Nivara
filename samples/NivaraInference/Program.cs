@@ -56,6 +56,7 @@ class Program
         ["distilbert_sst"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
+        ["smollm"] = ["", "benchmark", "generate"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -363,7 +364,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm).");
             return 1;
         }
 
@@ -625,6 +626,11 @@ class Program
                 if (fp16) return ModernBert.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half", seqLengths, warmup, iterations);
                 return ModernBert.Run<float, float>(tensors, modelDir, mode, "F32", seqLengths, warmup, iterations);
             case "smollm":
+                if (useSilk)
+                {
+                    if (benchmark) return BenchmarkSmolLMSilk(tensors);
+                    return RunSmolLMSilk(tensors);
+                }
                 if (mode == "ab")
                 {
                     if (bf16) return SmolLMAb(tensorsBf16);
@@ -2440,6 +2446,133 @@ class Program
         {
             NivaraPrimitives.UseWidenSimd = priorWiden;
         }
+        return 0;
+    }
+
+    static Nivara.Silk.SmolLMConfig ToSilkConfig(LlamaConfig config) => new()
+    {
+        HiddenSize = config.HiddenSize,
+        NumHiddenLayers = config.NumHiddenLayers,
+        NumAttentionHeads = config.NumAttentionHeads,
+        NumKeyValueHeads = config.NumKeyValueHeads,
+        IntermediateSize = config.IntermediateSize,
+        VocabSize = config.VocabSize,
+        MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+        RmsNormEps = config.RmsNormEps,
+        RopeTheta = config.RopeTheta,
+    };
+
+    static int RunSmolLMSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== SmolLM-135M Causal LM (F32, Silk) ===");
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Precision: F32");
+        Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
+                          $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +
+                          $"intermediate={config.IntermediateSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        ConsumeGeneratedSilk(session, modelDir, tokenizer, config);
+        return 0;
+    }
+
+    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGenerationSilk(
+        Nivara.Silk.SilkSmolLMSession session, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
+    {
+        var sequence = new List<int>(promptIds);
+        int generated = 0;
+        var genSw = Stopwatch.StartNew();
+        while (generated < maxNewTokens)
+        {
+            var logits = session.ForwardLastLogits(sequence.ToArray());
+            int vocab = config.VocabSize;
+            int best = 0;
+            double bestVal = logits[0];
+            for (int i = 1; i < vocab; i++)
+                if (logits[i] > bestVal) { bestVal = logits[i]; best = i; }
+            sequence.Add(best);
+            generated++;
+            if (best == config.EosTokenId) break;
+        }
+        genSw.Stop();
+        return (generated, genSw.ElapsedMilliseconds, sequence);
+    }
+
+    static void ConsumeGeneratedSilk(
+        Nivara.Silk.SilkSmolLMSession session,
+        string modelDir,
+        Gpt2BpeTokenizer tokenizer,
+        LlamaConfig config)
+    {
+        const string Prompt = "The capital of France is";
+        const int MaxNewTokens = 32;
+
+        var promptIds = tokenizer.Encode(Prompt);
+        Console.WriteLine($"Prompt: \"{Prompt}\"");
+        Console.WriteLine($"Prompt token ids ({promptIds.Count}): [{string.Join(", ", promptIds)}]");
+        Console.WriteLine();
+
+        var (generated, genMs, sequence) = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+        var generatedIds = sequence.Skip(promptIds.Count).ToList();
+
+        Console.WriteLine($"Generated {generated} tokens in {genMs} ms " +
+                          $"({genMs / Math.Max(1, generated)} ms/token)");
+        Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
+        Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
+        Console.WriteLine();
+
+        var refIds = TryLoadSmolLMReferenceTokenStream(modelDir, "F32");
+        var logitsSequence = (IReadOnlyList<int>)(refIds ?? sequence.ToArray());
+        var prefix = new int[logitsSequence.Count - 1];
+        for (int i = 0; i < prefix.Length; i++) prefix[i] = logitsSequence[i];
+        var lastLogits = session.ForwardLastLogits(prefix);
+
+        CompareSmolLmFixtures(modelDir, promptIds.Count, sequence, lastLogits, "F32");
+    }
+
+    static int BenchmarkSmolLMSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== SmolLM-135M Benchmark (F32, Silk) ===");
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        const string Prompt = "The capital of France is";
+        var promptIds = tokenizer.Encode(Prompt);
+        const int MaxNewTokens = 32;
+
+        var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+
+        var runs = new (long Ms, int Generated)[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+            runs[i] = (timing.Milliseconds, timing.Generated);
+            Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
+                              $"{timing.Milliseconds / Math.Max(1, timing.Generated)} ms/token)");
+        }
+        Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+        long medianMs = runs[1].Ms;
+        int medianTokens = runs[1].Generated;
+        Console.WriteLine();
+        Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
+                          $"{medianMs / Math.Max(1, medianTokens):F1} ms/token)");
         return 0;
     }
 
