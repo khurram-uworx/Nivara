@@ -317,10 +317,13 @@ internal static class SilkKernelsGate
     }
 
     static void RunGemm(Nivara.Silk.SilkRuntime silk, string kernel, int aRows, int bCols)
-        => silk.Run(
+    {
+        silk.Run(
             kernel,
             [(nuint)Nivara.Silk.SilkKernels.GemmGlobalRows(aRows), (nuint)Nivara.Silk.SilkKernels.GemmGlobalCols(bCols)],
             [(nuint)Nivara.Silk.SilkKernels.GemmTileSize, (nuint)Nivara.Silk.SilkKernels.GemmTileSize]);
+        silk.Finish();
+    }
 
     // ── attention ─────────────────────────────────────────────────
 
@@ -415,6 +418,7 @@ internal static class SilkKernelsGate
                     Nivara.Silk.SilkKernels.Attention,
                     [(nuint)Nivara.Silk.SilkKernels.AttentionGlobal(total)],
                     [(nuint)Nivara.Silk.SilkKernels.AttentionGroupSize]);
+                silk.Finish();
             },
             () => silk.Download(sout, q.Length));
     }
@@ -488,6 +492,7 @@ internal static class SilkKernelsGate
                     Nivara.Silk.SilkKernels.LayerNormResidual,
                     [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(rows)],
                     [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
+                silk.Finish();
             },
             () => silk.Download(sy, elements));
     }
@@ -572,6 +577,7 @@ internal static class SilkKernelsGate
                     Nivara.Silk.SilkKernels.EmbedSum,
                     [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(elements)],
                     [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
+                silk.Finish();
             },
             () => silk.Download(sy, elements));
     }
@@ -632,6 +638,7 @@ internal static class SilkKernelsGate
                     Nivara.Silk.SilkKernels.GatherRows,
                     [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(elements)],
                     [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
+                silk.Finish();
             },
             () => silk.Download(sout, elements));
     }
@@ -1047,6 +1054,7 @@ internal static class SilkKernelsGate
                 silk.Run(Nivara.Silk.SilkKernels.RmsNorm,
                     [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(rows)],
                     [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
+                silk.Finish();
             };
             Func<float[]> readSilk = () => silk.Download(sy, n);
 
@@ -1167,10 +1175,13 @@ internal static class SilkKernelsGate
     }
 
     static void RunLinear(Nivara.Silk.SilkRuntime silk, string kernel, int total)
-        => silk.Run(
+    {
+        silk.Run(
             kernel,
             [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(total)],
             [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
+        silk.Finish();
+    }
 
     // ── measurement + verdict ─────────────────────────────────────
 
