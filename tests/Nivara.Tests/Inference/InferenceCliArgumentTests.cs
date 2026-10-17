@@ -84,9 +84,9 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("modernbert", "benchmark", "--seq", "0"), "--seq expects positive integers");
 
     [Test]
-    public void Seq_OverCpuDenseMaskLimit_Rejected() =>
+    public void Seq_LargeLengthOnCpu_ReachesModelLookup() =>
         AssertRejected(Run("modernbert", "benchmark", "--seq", "4096"),
-            "exceeds the CPU path's dense-mask limit");
+            "Model file not found");
 
     [Test]
     public void Seq_MissingValue_Rejected() =>
