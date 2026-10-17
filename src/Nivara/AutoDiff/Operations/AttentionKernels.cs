@@ -341,6 +341,49 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// special case and rejects <c>NaN</c> (whose <c>==</c> is always false) so a poisoned row is
     /// never silently reported as score-independent.
     /// </param>
+    /// <summary>
+    /// Applies the sliding-window band and the padding boundary as computed bounds rather than a
+    /// materialised [rows, cols] mask: out-of-range cells become -inf and are marked dead. With
+    /// <paramref name="band"/> &lt; 0 and <paramref name="validLength"/> == <paramref name="cols"/>
+    /// this is a no-op. <paramref name="deadCells"/> may be empty (no tracking).
+    /// </summary>
+    public static void ApplyBounds(Span<T> scores, Span<bool> deadCells, int rows, int cols, int band, int validLength)
+    {
+        int vl = validLength < 0 ? cols : validLength;
+        if (band < 0 && vl >= cols) return;
+        if (vl <= 0 || vl > cols)
+            throw new ArgumentOutOfRangeException(nameof(validLength), validLength, $"validLength must be within [1, {cols}].");
+        bool tracking = deadCells.Length == (long)rows * cols;
+
+        for (int i = 0; i < rows; i++)
+        {
+            int first = band < 0 ? 0 : Math.Max(0, i - band);
+            int last = band < 0 ? vl - 1 : Math.Min(vl - 1, i + band);
+            int rowBase = i * cols;
+
+            if (first > last)
+            {
+                for (int j = 0; j < cols; j++)
+                {
+                    scores[rowBase + j] = T.NegativeInfinity;
+                    if (tracking) deadCells[rowBase + j] = true;
+                }
+                continue;
+            }
+
+            for (int j = 0; j < first; j++)
+            {
+                scores[rowBase + j] = T.NegativeInfinity;
+                if (tracking) deadCells[rowBase + j] = true;
+            }
+            for (int j = last + 1; j < cols; j++)
+            {
+                scores[rowBase + j] = T.NegativeInfinity;
+                if (tracking) deadCells[rowBase + j] = true;
+            }
+        }
+    }
+
     static T MaskedCell(T score, T mask, out bool dead)
     {
         if (mask == T.NegativeInfinity)
