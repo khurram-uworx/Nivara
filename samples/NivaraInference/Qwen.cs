@@ -520,6 +520,43 @@ static class Qwen
         return 0;
     }
 
+    public static int RunBenchmarkSilk(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"),
+            Path.Combine(modelDir, "merges.txt"),
+            unkToken: "<​|endoftext|>",
+            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+        var prompt = QwenChatTemplate.RenderPlain(PlainPrompt);
+        var promptIds = tokenizer.Encode(prompt).ToList();
+
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Prompt tokens: {promptIds.Count}; decode cap {MaxNewTokensSynthetic}");
+
+        // Warmup.
+        GenerateSilk(session, config, promptIds, 8, useKvCache: true);
+
+        var runs = new long[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+            sw.Stop();
+            runs[i] = sw.ElapsedMilliseconds;
+            Console.WriteLine($"  run {i + 1}: {ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
+        }
+        Array.Sort(runs);
+        Console.WriteLine($"Median: {runs[1]} ms total ({(runs[1] > 0 ? MaxNewTokensSynthetic * 1000.0 / runs[1] : 0):F2} tok/s synthetic ceiling)");
+        return 0;
+    }
+
     static Nivara.Silk.QwenSilkConfig ToSilkConfig(LlamaConfig config) => new()
     {
         HiddenSize = config.HiddenSize,

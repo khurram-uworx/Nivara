@@ -57,6 +57,7 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
         ["smollm"] = ["", "benchmark", "generate"],
+        ["qwen"] = ["", "benchmark", "tools"],
         ["mobilenet_v2"] = ["", "benchmark", "compare"],
         ["resnet18"] = ["", "benchmark", "compare"],
     };
@@ -655,6 +656,12 @@ class Program
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, simdWiden) : RunSmolLM(tensorsHalf, simdWiden);
                 return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
             case "qwen":
+                if (useSilk)
+                {
+                    if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensors, modelDir);
+                    if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
+                    return Qwen.RunToolsSilk(tensors, modelDir, useKvCache: !noKvCache, text);
+                }
                 if (syntheticWeights)
                     return bf16
                         ? (plain ? Qwen.RunSyntheticBenchmark<BFloat16>(plain: true) : Qwen.RunSyntheticBenchmark<BFloat16>())
