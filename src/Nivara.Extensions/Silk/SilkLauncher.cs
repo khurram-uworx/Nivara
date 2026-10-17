@@ -154,6 +154,55 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.GeGlu, rows * intermediate);
     }
 
+    public static void RmsNorm(SilkRuntime runtime, nint src, nint gamma, nint y, int rows, int cols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNorm, 0, src);
+        runtime.SetBuffer(SilkKernels.RmsNorm, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNorm, 2, y);
+        runtime.SetUInt32(SilkKernels.RmsNorm, 3, (uint)rows);
+        runtime.SetUInt32(SilkKernels.RmsNorm, 4, (uint)cols);
+        runtime.SetFloat32(SilkKernels.RmsNorm, 5, eps);
+        Linear(runtime, SilkKernels.RmsNorm, rows);
+    }
+
+    public static void Silu(SilkRuntime runtime, nint src, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Silu, 0, src);
+        runtime.SetBuffer(SilkKernels.Silu, 1, y);
+        runtime.SetUInt32(SilkKernels.Silu, 2, (uint)n);
+        Linear(runtime, SilkKernels.Silu, n);
+    }
+
+    public static void SwiGlu(SilkRuntime runtime, nint gate, nint up, nint y, int rows, int intermediate)
+    {
+        runtime.SetBuffer(SilkKernels.SwiGlu, 0, gate);
+        runtime.SetBuffer(SilkKernels.SwiGlu, 1, up);
+        runtime.SetBuffer(SilkKernels.SwiGlu, 2, y);
+        runtime.SetUInt32(SilkKernels.SwiGlu, 3, (uint)rows);
+        runtime.SetUInt32(SilkKernels.SwiGlu, 4, (uint)intermediate);
+        Linear(runtime, SilkKernels.SwiGlu, rows * intermediate);
+    }
+
+    public static void CausalGqaAttention(
+        SilkRuntime runtime, nint q, nint k, nint v, nint output,
+        int seqLen, int numHeads, int numKvHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.CausalGqaAttention, 0, q);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttention, 1, k);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttention, 2, v);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttention, 3, output);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttention, 4, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttention, 5, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttention, 6, (uint)numKvHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttention, 7, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.CausalGqaAttention, 8, scale);
+        int total = seqLen * numHeads;
+        runtime.Run(
+            SilkKernels.CausalGqaAttention,
+            [(nuint)SilkKernels.LinearGlobal(total)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     public static void EmbedSum(
         SilkRuntime runtime, nint ids, nint posIds, nint word, nint pos, nint tokenType, nint y,
         int total, int hidden, int includeTokenType)

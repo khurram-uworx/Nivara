@@ -21,9 +21,10 @@ public class DocReferenceTests
     /// <c>GpuSeam</c>, <c>SilkLauncher</c>, <c>SilkModernBertSession</c>, <c>SilkLayaSession</c>)
     /// minus the deleted samples <c>IBertEncoderRunner.cs</c>. 698 = 696 +
     /// <c>docs/BLAS-MKL.md</c> and <c>tests/Nivara.PerformanceTests/LayaForwardProbe.cs</c>
-    /// added by the #492 reconciliation.
+    /// added by the #492 reconciliation. 700 = 698 + the two SmolLM Silk files
+    /// (<c>SilkSmolLMGpuRunner.cs</c>, <c>SilkSmolLMSession.cs</c>) added by #628.
     /// </summary>
-    const int ExpectedFileCount = 698;
+    const int ExpectedFileCount = 700;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered. Pinned deliberately.
