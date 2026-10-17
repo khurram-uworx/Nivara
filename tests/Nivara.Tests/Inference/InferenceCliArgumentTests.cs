@@ -282,17 +282,17 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("smollm", "--silk", "--precision", "bf16"), "--silk is F32-only");
 
     [Test]
-    public void Silk_OnModelWithoutSilkKernels_Rejected() =>
-        AssertRejected(Run("qwen", "--silk"),
-            "--silk is not supported for 'qwen' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm, mobilenet_v2, resnet18).");
+    public void SilkQwen_DistillMode_Rejected() =>
+        AssertRejected(Run("qwen", "--silk", "distill"),
+            "--silk does not support mode 'distill' for 'qwen'");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
     {
-        CliResult result = Run("qwen", "--silk");
+        CliResult result = Run("qwen", "--silk", "distill");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
             "the --silk guard must run before the model-file check; 'qwen' weights are never present");
-        AssertRejected(result, "--silk is not supported for 'qwen'");
+        AssertRejected(result, "--silk does not support mode 'distill'");
     }
 
     [Test]

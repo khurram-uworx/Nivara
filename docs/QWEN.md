@@ -270,4 +270,13 @@ A future `--qwen gguf` sub-mode would load the Qwen checkpoint as GGUF through a
 
 ## GPU path
 
-Qwen does not yet have a GPU runner. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md) (the probe-first investigation that established the Level Zero access-chain wall and the DX12/ComputeSharp fallback recommendation). The bf16 benchmark/synthetic support (#407) lives in the sample.
+Qwen now has an F32 Silk runner (`--qwen ... --silk`: tools, plain, benchmark). `--ilgpu` is still not supported. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
+
+## Benchmark protocol (Qwen)
+
+Commands:
+- Python CPU reference: `python samples/NivaraInference/Python/qwen_benchmark.py`
+- Nivara CPU: `qwen benchmark` / `qwen benchmark --plain`
+- Nivara GPU (Silk): `qwen --silk benchmark` / `qwen --silk benchmark --plain` (real checkpoint required)
+
+Status: tracked in #662. Figures are intentionally not included yet because the real Qwen checkpoint must be present locally under `samples/data/qwen2.5-0.5b-instruct`; synthetic runs are available via `--synthetic-weights` for shape-level validation.

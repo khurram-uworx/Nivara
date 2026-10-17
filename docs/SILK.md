@@ -525,7 +525,9 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
 
 - **`SilkModes`** is the allow-list — `minilm` / `distilbert` / `distilbert_sst` / `modernbert` /
   `laya` × `{"", benchmark, compare}`. Still narrower than the CPU mode lists (`compare_diag` stays
-  rejected). SmolLM, Qwen, and vision are #628, #629, and #630.
+  rejected). Qwen × `{"", benchmark, tools}` now joins them for F32 causal LM decode (#629); vision
+  remains #630. SmolLM and Qwen are causal decoders (not encoders) and own their runners:
+  `SilkSmolLMGpuRunner` / `SilkQwenGpuRunner`.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by

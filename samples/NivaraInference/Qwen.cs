@@ -9,6 +9,7 @@ using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
 using Nivara.Samples;
 using System.Numerics;
+using Nivara.Silk;
 using System.Numerics.Tensors;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -369,6 +370,225 @@ static class Qwen
         decodeMs = decodeSw.Elapsed.TotalMilliseconds;
         return gen;
     }
+
+    /// <summary>Silk (OpenCL) greedy decode counterpart of <see cref="Generate{T}"/>. Keeps the same
+    /// stop-before-append semantics on Qwen stop ids. The CPU and Silk paths use identical sampling.</summary>
+    public static List<int> GenerateSilk(
+        SilkQwenSession session, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
+    {
+        session.ResetCache();
+        float[] logits;
+        if (useKvCache)
+            logits = session.ForwardPrefill(promptIds.ToArray());
+        else
+            logits = session.Forward(promptIds.ToArray());
+
+        int position = promptIds.Count;
+        var gen = new List<int>();
+        for (int t = 0; t < maxNewTokens && gen.Count < config.MaxPositionEmbeddings; t++)
+        {
+            int next = ArgMaxLastRowSilk(logits, config.VocabSize);
+            if (QwenIds.StopIds.Contains(next))
+                break;
+            gen.Add(next);
+            logits = useKvCache
+                ? session.ForwardCached(next, position++)
+                : session.Forward(BuildSequence(promptIds, gen));
+        }
+        return gen;
+    }
+
+    static int ArgMaxLastRowSilk(float[] logits, int vocab)
+    {
+        int offset = logits.Length - vocab;
+        if (offset < 0) offset = 0;
+        int best = 0;
+        float bestVal = logits[offset];
+        for (int i = 1; i < vocab; i++)
+        {
+            float v = logits[offset + i];
+            if (v > bestVal) { bestVal = v; best = i; }
+        }
+        return best;
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Silk entry points
+    // ----------------------------------------------------------------------------------
+
+    public static int RunToolsSilk(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        bool useKvCache,
+        string text)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Native Function Calling (getWeather) -- Silk ===");
+        Console.WriteLine($"Device: GPU (Silk)  Precision: F32 (BF16-upcast)  KV cache: {(useKvCache ? "on" : "off")}");
+        Console.WriteLine();
+
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"),
+            Path.Combine(modelDir, "merges.txt"),
+            unkToken: "<​|endoftext|>",
+            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
+        Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
+                          $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, vocab={config.VocabSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        string userText = string.IsNullOrWhiteSpace(text) ? "What's the weather in Paris?" : text;
+        string toolJson = QwenChatTemplate.ToolJson(
+            WeatherToolName, WeatherToolDesc,
+            [("city", "string", CityParamDesc, true)]);
+        string systemMessage = QwenChatTemplate.BuildToolsSystemMessage(toolJson);
+
+        string firstPrompt = QwenChatTemplate.RenderFirstTurn(systemMessage, userText);
+        var firstPromptIds = tokenizer.Encode(firstPrompt).ToList();
+        Console.WriteLine($"User: {userText}");
+        Console.WriteLine($"Rendered prompt tokens: {firstPromptIds.Count}");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var toolTurnIds = GenerateSilk(session, config, firstPromptIds, MaxNewTokens, useKvCache);
+        sw.Stop();
+        string toolTurnText = tokenizer.Decode(toolTurnIds);
+        Console.WriteLine($"Tool-call turn: {toolTurnIds.Count} tokens in {sw.Elapsed.TotalSeconds:F1}s " +
+                          $"({sw.ElapsedMilliseconds / Math.Max(1, toolTurnIds.Count)} ms/token)");
+        Console.WriteLine(toolTurnText);
+        Console.WriteLine();
+
+        var parsed = QwenToolParser.TryParseToolCall(toolTurnText);
+        string toolName = QwenToolParser.JsonString(parsed, "name") ?? WeatherToolName;
+        string city = QwenToolParser.ArgumentString(parsed, "city") ?? "Paris";
+        Console.WriteLine($"Parsed tool call: name={toolName}, city={city}");
+        Console.WriteLine();
+
+        string weatherResult = GoGetWeather(city);
+        Console.WriteLine($"Tool result: {weatherResult}");
+        Console.WriteLine();
+
+        string finalPrompt = QwenChatTemplate.RenderToolLoop(systemMessage, userText, toolTurnText, weatherResult);
+        var finalPromptIds = tokenizer.Encode(finalPrompt).ToList();
+
+        sw.Restart();
+        var finalTurnIds = GenerateSilk(session, config, finalPromptIds, MaxNewTokens, useKvCache);
+        sw.Stop();
+        string finalAnswer = tokenizer.Decode(finalTurnIds);
+        Console.WriteLine($"Final answer turn: {finalTurnIds.Count} tokens in {sw.Elapsed.TotalSeconds:F1}s");
+        Console.WriteLine($"Assistant: {finalAnswer}");
+        Console.WriteLine();
+
+        bool ok = finalAnswer.Contains("partly cloudy", StringComparison.OrdinalIgnoreCase);
+        Console.WriteLine(ok
+            ? "Final answer reflects the tool observation (likely semantic success)."
+            : "Note: final answer did not mention the observed weather — inspect above.");
+        Console.WriteLine();
+        return ok ? 0 : 2;
+    }
+
+    public static int RunPlainSilk(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir, string? userText)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) -- Silk ===");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"),
+            Path.Combine(modelDir, "merges.txt"),
+            unkToken: "<​|endoftext|>",
+            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+
+        var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
+        var promptIds = tokenizer.Encode(prompt).ToList();
+        Console.WriteLine($"Prompt ({promptIds.Count} tokens): {prompt.Replace("\\n", "\\\\n")}");
+
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var ids = GenerateSilk(session, config, promptIds, MaxNewTokens, useKvCache: true);
+        sw.Stop();
+        Console.WriteLine();
+        Console.WriteLine($"Assistant: {tokenizer.Decode(ids)}");
+        Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F1}s");
+        return 0;
+    }
+
+    public static int RunBenchmarkSilk(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
+        var (_, config, tokenizer) = Qwen.LoadModel(tensors, modelDir);
+        var prompt = QwenChatTemplate.RenderPlain(PlainPrompt);
+        var promptIds = tokenizer.Encode(prompt).ToList();
+
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Prompt tokens: {promptIds.Count}; decode cap {MaxNewTokensSynthetic}");
+
+        // Warmup.
+        GenerateSilk(session, config, promptIds, 8, useKvCache: true);
+
+        var runs = new long[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+            sw.Stop();
+            runs[i] = sw.ElapsedMilliseconds;
+            Console.WriteLine($"  run {i + 1}: {ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
+        }
+        Array.Sort(runs);
+        Console.WriteLine($"Median: {runs[1]} ms total ({(runs[1] > 0 ? MaxNewTokensSynthetic * 1000.0 / runs[1] : 0):F2} tok/s synthetic ceiling)");
+        return 0;
+    }
+
+    public static int RunSyntheticBenchmarkSilk(bool plain = false)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark -- Silk ===");
+        var config = QwenSyntheticConfig;
+        var tensors = SynthesizeTensors(config);
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+            promptIds[i] = (int)((SyntheticRng()) % (uint)config.VocabSize);
+
+        // Warmup.
+        GenerateSilk(session, config, promptIds, 8, useKvCache: true);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+        sw.Stop();
+        Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
+        return 0;
+    }
+
+    static Nivara.Silk.QwenSilkConfig ToSilkConfig(LlamaConfig config) => new()
+    {
+        HiddenSize = config.HiddenSize,
+        NumHiddenLayers = config.NumHiddenLayers,
+        NumAttentionHeads = config.NumAttentionHeads,
+        NumKeyValueHeads = config.NumKeyValueHeads,
+        IntermediateSize = config.IntermediateSize,
+        VocabSize = config.VocabSize,
+        MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+        RmsNormEps = config.RmsNormEps,
+        RopeTheta = config.RopeTheta,
+    };
 
     static int[] BuildSequence(IReadOnlyList<int> promptIds, List<int> gen)
     {
