@@ -105,6 +105,6 @@ Ollaya (`http://localhost:11435`, model `laya:en`); Ollama 0.35+ now serves the 
 
 ## GitHub issues log
 
-- [ ] (none yet — create with `gh issue create --repo khurram-uworx/Nivara` if deferred work
-  is found during execution, e.g. gating the happy path against a mock server, or supporting
-  additional decision models)
+- [ ] #673 — `InferenceCliArgumentTests` fails on dev machines with the Qwen checkpoint
+  present (it assumes the checkpoint is absent; only true on CI). Discovered while running
+  the fixture during commit 2. Pre-existing, not caused by this branch.

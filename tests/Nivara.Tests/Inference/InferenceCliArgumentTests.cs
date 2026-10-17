@@ -16,7 +16,7 @@ namespace Nivara.Tests.Inference;
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
-/// scopes (#580). #589 requires each reject to be observable before the first disk touch, so the
+/// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision). #589 requires each reject to be observable before the first disk touch, so the
 /// ordering cases and the <c>qwen</c> happy paths use <c>qwen</c> (its checkpoint is never present:
 /// <c>samples/data/qwen2.5-0.5b-instruct/</c> is gitignored and no <c>*.safetensors</c> is tracked)
 /// and the mode cases pin the message, not the exit code — a guard that fell through to the
@@ -373,6 +373,23 @@ public class InferenceCliArgumentTests
             "is only supported for the qwen benchmark mode");
         AssertRejected(Run("qwen", "distill", "--synthetic-weights"),
             "supports only the 'benchmark' mode");
+    }
+
+    /// <summary>
+    /// The TypeSafe demo is a model key whose run is an HTTP client, not a checkpoint, so its
+    /// dispatch sits before the model-file lookup. Each reject therefore has to name its own guard
+    /// rather than fall through to "Model file not found". The happy path is deliberately absent:
+    /// it needs a live decision server, which a CI runner does not have.
+    /// </summary>
+    [Test]
+    public void Typesafe_BeyondItsCliSurface_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "benchmark"), "Unsupported mode 'benchmark' for 'typesafe'");
+            AssertRejected(Run("typesafe", "--ilgpu"), "--ilgpu is not supported for 'typesafe'");
+            AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
+        });
     }
 
     [Test]

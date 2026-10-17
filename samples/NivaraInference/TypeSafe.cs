@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Text;
 using TypeSafeAI;
 
 namespace NivaraInference;
@@ -11,9 +7,9 @@ public static class TypeSafe
     private const string OllayaUrl = "http://localhost:11435";
     private const string OllayaModel = "laya:en";
 
-    public static async Task Run(object ctx)
+    public static async Task<int> Run()
     {
-        Console.WriteLine("=== NivaraChat — TypeSafeAI News Assessment ===\n");
+        Console.WriteLine("=== NivaraInference — TypeSafeAI News Assessment ===\n");
         Console.WriteLine($"Connecting to Ollaya at {OllayaUrl} (model: {OllayaModel})...\n");
 
         var client = new TypeSafeClient(new TypeSafeClientOptions
@@ -50,6 +46,7 @@ public static class TypeSafe
         Console.WriteLine($"Assessing {newsItems.Length} AI/ML news items...\n");
         Console.WriteLine(new string('─', 80));
 
+        int failures = 0;
         for (int i = 0; i < newsItems.Length; i++)
         {
             var item = newsItems[i];
@@ -75,13 +72,21 @@ public static class TypeSafe
             }
             catch (Exception ex)
             {
+                failures++;
                 Console.WriteLine($"  [ERROR] {ex.GetType().Name}: {ex.Message}");
             }
 
             Console.WriteLine(new string('─', 80));
         }
 
+        if (failures == newsItems.Length)
+        {
+            Console.Error.WriteLine($"\nAll {failures} assessments failed. Is the Ollaya server running at {OllayaUrl}?");
+            return 1;
+        }
+
         Console.WriteLine("\nDone.");
+        return 0;
     }
 }
 
