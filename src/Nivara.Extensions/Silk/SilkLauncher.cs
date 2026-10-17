@@ -203,6 +203,26 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void DecodeGqaAttention(
+        SilkRuntime runtime, nint q, nint kCache, nint vCache, nint output,
+        int kvLen, int numHeads, int numKvHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttention, 0, q);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttention, 1, kCache);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttention, 2, vCache);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttention, 3, output);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttention, 4, (uint)kvLen);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttention, 5, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttention, 6, (uint)numKvHeads);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttention, 7, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.DecodeGqaAttention, 8, scale);
+        int total = numHeads;
+        runtime.Run(
+            SilkKernels.DecodeGqaAttention,
+            [(nuint)SilkKernels.LinearGlobal(total)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     public static void EmbedSum(
         SilkRuntime runtime, nint ids, nint posIds, nint word, nint pos, nint tokenType, nint y,
         int total, int hidden, int includeTokenType)

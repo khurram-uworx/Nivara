@@ -51,6 +51,11 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
     int[]? posIdHost;
 
+    // KV cache (device, per layer). Capacity = seqCap positions.
+    readonly nint[] kCache;
+    readonly nint[] vCache;
+    int cachedLen;
+
     public SilkSmolLMGpuRunner(
         SilkRuntime runtime,
         SmolLMConfig config,
@@ -88,6 +93,14 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             layers = new LayerWeights[config.NumHiddenLayers];
             for (int i = 0; i < layers.Length; i++)
                 layers[i] = new LayerWeights(this, tensors, i);
+
+            kCache = new nint[config.NumHiddenLayers];
+            vCache = new nint[config.NumHiddenLayers];
+            for (int i = 0; i < config.NumHiddenLayers; i++)
+            {
+                kCache[i] = runtime.Allocate(maxPos * kvDim);
+                vCache[i] = runtime.Allocate(maxPos * kvDim);
+            }
 
             rotary = new RotaryEmbedding<float>(headDim, maxPos, ropeTheta);
         }
@@ -188,6 +201,144 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         return last;
     }
 
+    public void ResetCache() => cachedLen = 0;
+
+    public int CachedLength => cachedLen;
+
+    /// <summary>Prefills the cache with <paramref name="tokenIds"/> and returns last-row logits.</summary>
+    public float[] ForwardPrefill(int[] tokenIds)
+    {
+        int seqLen = tokenIds.Length;
+        if (seqLen <= 0) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+        if (seqLen > seqCap) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+        cachedLen = 0;
+
+        EnsureWorkspace(seqLen);
+        EnsureRopeTables(seqLen);
+
+        if (posIdHost is null || posIdHost.Length < seqLen)
+            posIdHost = new int[seqLen];
+        for (int p = 0; p < seqLen; p++) posIdHost[p] = p;
+
+        runtime.Upload(idsBuf.Handle, tokenIds.AsSpan(0, seqLen));
+        runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
+
+        // gather embedding -> x
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+
+        for (int li = 0; li < layers.Length; li++)
+        {
+            LayerWeights w = layers[li];
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+
+            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
+            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+
+            // capture K/V (RoPE'd) into cache
+            runtime.CopyBuffer(k.Handle, kCache[li], 0, 0, seqLen * kvDim);
+            runtime.CopyBuffer(v.Handle, vCache[li], 0, 0, seqLen * kvDim);
+
+            SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
+
+            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+
+            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
+
+            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
+        }
+
+        // final norm over whole chunk
+        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+        // last row logits
+        nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
+        nint logitsBuf = runtime.Allocate(vocabSize);
+        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        var logits = runtime.Download(logitsBuf, vocabSize);
+        runtime.Release(logitsBuf);
+        runtime.Release(lastRowView);
+
+        cachedLen = seqLen;
+        return logits;
+    }
+
+    /// <summary>Decodes one token at <paramref name="position"/>, appending to cache, returns logits.</summary>
+    public float[] ForwardCached(int tokenId, int position)
+    {
+        if (position < 0) throw new ArgumentOutOfRangeException(nameof(position));
+        if (position + 1 > seqCap) throw new ArgumentOutOfRangeException(nameof(position));
+
+        EnsureWorkspace(1);
+
+        if (posIdHost is null || posIdHost.Length < 1)
+            posIdHost = new int[1];
+        posIdHost[0] = position;
+
+        runtime.Upload(idsBuf.Handle, new int[] { tokenId });
+        runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
+
+        // gather embedding -> x (single row)
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
+
+        for (int li = 0; li < layers.Length; li++)
+        {
+            LayerWeights w = layers[li];
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, 1, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, 1, hiddenDim, qDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, 1, hiddenDim, kvDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, 1, hiddenDim, kvDim);
+
+            // RoPE at position
+            EnsureRopeTables(position + 1);
+            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
+            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numKvHeads, headDim, headDim / 2);
+
+            // append k/v to cache at row position
+            runtime.CopyBuffer(k.Handle, kCache[li], 0, position * kvDim, kvDim);
+            runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
+
+            int kvLen = position + 1;
+            SilkLauncher.DecodeGqaAttention(runtime, q.Handle, kCache[li], vCache[li], context.Handle, kvLen, numHeads, numKvHeads, headDim, scale);
+
+            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, 1, qDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, hiddenDim);
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, 1, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, 1, hiddenDim, intermediateDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, 1, hiddenDim, intermediateDim);
+
+            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, intermediateDim);
+
+            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, 1, intermediateDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, hiddenDim);
+        }
+
+        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, 1, hiddenDim, eps);
+
+        nint logitsBuf = runtime.Allocate(vocabSize);
+        SilkLauncher.Gemm(runtime, normed.Handle, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        var logits = runtime.Download(logitsBuf, vocabSize);
+        runtime.Release(logitsBuf);
+
+        if (position + 1 > cachedLen) cachedLen = position + 1;
+        return logits;
+    }
+
     void EnsureWorkspace(int seqLen)
     {
         int rows = seqLen;
@@ -233,6 +384,8 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
     public void Dispose()
     {
         foreach (var l in layers ?? Array.Empty<LayerWeights>()) l.Dispose(runtime);
+        if (kCache != null) foreach (var b in kCache) runtime.Release(b);
+        if (vCache != null) foreach (var b in vCache) runtime.Release(b);
         runtime.Release(tokEmb);
         runtime.Release(finalNormW);
         if (tokEmbTransposed != 0) runtime.Release(tokEmbTransposed);

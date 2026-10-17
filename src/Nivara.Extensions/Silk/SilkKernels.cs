@@ -80,6 +80,7 @@ internal static class SilkKernels
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
     public const string CausalGqaAttention = "causal_gqa_attention";
+    public const string DecodeGqaAttention = "decode_gqa_attention";
 
     // Vision (conv) kernels.
     public const string Conv2d = "conv2d";
@@ -94,7 +95,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, Silu, SwiGlu, CausalGqaAttention,
+        RmsNorm, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
@@ -874,6 +875,80 @@ internal static class SilkKernels
                     sum += input[inIdx];
                 }
             output[idx] = sum / (float)(H * W);
+        }
+
+        /* Decode (single-query) GQA attention. q: [numHeads*headDim], kCache/vCache: [kvLen, numKvHeads*headDim].
+           One work item per query head; attends j=0..kvLen-1 with KV-repeat. */
+        __kernel void decode_gqa_attention(
+            __global const float* q,
+            __global const float* kCache,
+            __global const float* vCache,
+            __global float* out,
+            const uint kvLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint h = get_global_id(0);
+            if (h >= numHeads) return;
+
+            uint repeat = numHeads / numKvHeads;
+            uint kvHead = h / repeat;
+
+            uint Dkv = numKvHeads * headDim;
+            uint qBase = h * headDim;
+            uint kBaseHead = kvHead * headDim;
+            uint vBaseHead = kvHead * headDim;
+
+            // max
+            float mx = -INFINITY;
+            for (uint j = 0; j < kvLen; ++j)
+            {
+                float acc = 0.0f;
+                uint kBase = j * Dkv + kBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    acc += q[qBase + d] * kCache[kBase + d];
+                float s = acc * scale;
+                if (s > mx) mx = s;
+            }
+
+            if (kvLen == 0u)
+            {
+                for (uint d = 0; d < headDim; ++d)
+                    out[qBase + d] = 0.0f;
+                return;
+            }
+
+            // sum
+            float sum = 0.0f;
+            for (uint j = 0; j < kvLen; ++j)
+            {
+                float acc = 0.0f;
+                uint kBase = j * Dkv + kBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    acc += q[qBase + d] * kCache[kBase + d];
+                float s = acc * scale;
+                sum += exp(s - mx);
+            }
+
+            // weighted V
+            for (uint d = 0; d < headDim; ++d)
+            {
+                float accv = 0.0f;
+                for (uint j = 0; j < kvLen; ++j)
+                {
+                    float acc = 0.0f;
+                    uint kBase = j * Dkv + kBaseHead;
+                    for (uint dd = 0; dd < headDim; ++dd)
+                        acc += q[qBase + dd] * kCache[kBase + dd];
+                    float s = acc * scale;
+                    float p = exp(s - mx) / sum;
+                    uint vBase = j * Dkv + vBaseHead;
+                    accv += p * vCache[vBase + d];
+                }
+                out[qBase + d] = accv;
+            }
         }
         """;
 }

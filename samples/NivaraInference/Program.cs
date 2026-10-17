@@ -2701,20 +2701,30 @@ class Program
     static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGenerationSilk(
         Nivara.Silk.SilkSmolLMSession session, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
     {
+        session.ResetCache();
+        var logits = session.ForwardPrefill(promptIds.ToArray());
+        int position = promptIds.Count;
         var sequence = new List<int>(promptIds);
         int generated = 0;
         var genSw = Stopwatch.StartNew();
+        // prefill time included? Keep parity with CPU: count decode only? CPU GenerateCore counts prefill separately.
+        // Here we measure whole generation including prefill to match original.
+        int vocab = config.VocabSize;
         while (generated < maxNewTokens)
         {
-            var logits = session.ForwardLastLogits(sequence.ToArray());
-            int vocab = config.VocabSize;
             int best = 0;
             double bestVal = logits[0];
             for (int i = 1; i < vocab; i++)
                 if (logits[i] > bestVal) { bestVal = logits[i]; best = i; }
+            if (best == config.EosTokenId)
+            {
+                sequence.Add(best);
+                generated++;
+                break;
+            }
             sequence.Add(best);
             generated++;
-            if (best == config.EosTokenId) break;
+            logits = session.ForwardCached(best, position++);
         }
         genSw.Stop();
         return (generated, genSw.ElapsedMilliseconds, sequence);
@@ -2976,18 +2986,23 @@ class Program
         LlamaForCausalLM<T> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
         where T : struct, IFloatingPointIeee754<T>
     {
+        int headDim = config.HiddenSize / config.NumAttentionHeads;
+        int kvWidth = config.NumKeyValueHeads * headDim;
+        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth);
         var sequence = new List<int>(promptIds);
         int generated = 0;
         var genSw = Stopwatch.StartNew();
+        var logits = model.ForwardPrefill(promptIds.ToArray(), cache);
+        int position = promptIds.Count;
+        int vocab = config.VocabSize;
         while (generated < maxNewTokens)
         {
-            var logits = model.Forward(sequence.ToArray());
-            int vocab = config.VocabSize;
-            int next = ArgMaxLastRow(logits, logits.Shape[0], vocab);
+            int next = ArgMaxLastRow(logits, 1, vocab);
             sequence.Add(next);
             generated++;
             if (next == config.EosTokenId)
                 break;
+            logits = model.ForwardCached(next, position++, cache);
         }
         genSw.Stop();
         return (generated, genSw.ElapsedMilliseconds, sequence);
