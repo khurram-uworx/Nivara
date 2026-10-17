@@ -279,4 +279,48 @@ Commands:
 - Nivara CPU: `qwen benchmark` / `qwen benchmark --plain`
 - Nivara GPU (Silk): `qwen --silk benchmark` / `qwen --silk benchmark --plain` (real checkpoint required)
 
-Status: tracked in #662. Figures are intentionally not included yet because the real Qwen checkpoint must be present locally under `samples/data/qwen2.5-0.5b-instruct`; synthetic runs are available via `--synthetic-weights` for shape-level validation.
+Status: measured on 2026-10-17 (see *Measured Qwen results* below).
+
+## Measured Qwen results (2026-10-17)
+
+All runs were executed in **Release** (`dotnet run -c Release`) with one warm-up pass followed by three timed passes; the median of the three is reported. The checkpoint is `samples/data/qwen2.5-0.5b-instruct` (494,032,768 parameters); precision is `F32` (BF16-on-disk, SIMD-widened to F32 at load, ~1.9 GB resident).
+
+### Environment
+
+| Item | Value |
+|---|---|
+| Machine | Intel(R) Core(TM) Ultra 7 255H (16 logical processors), Windows 11 |
+| .NET runtime | 11.0.0 |
+| Python / PyTorch | Python 3.12.9, PyTorch 2.13.0 (CPU), transformers 5.14.1 |
+| GPU / OpenCL device | Intel(R) Graphics |
+| Token counting | PyTorch counts the terminating EOS id; Nivara stops *before* appending a stop id, so its counts can be one less for the same output |
+
+### Results (median of 3 timed passes)
+
+| Surface | Prompt tokens | Generated tokens | Median total ms | Avg ms/token | Tok/s | Prefill ms | Decode ms/token | Speedup (cache vs full) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Python (PyTorch / HF) `generate`, plain prompt | 36 | 8 (incl. EOS) | 1137 | 142.1 | 7.04 | (inside `generate`) | (inside `generate`) | n/a |
+| Nivara CPU, tools prompt (`qwen benchmark`) | 206 | 19 | 8828 | 449.6 | 2.2 | 3895 | 259.6 | 11.6x |
+| Nivara CPU, plain prompt (`qwen benchmark --plain`) | 36 | 7 | 1585 | 227.7 | 4.4 | 782 | 114.7 | 7.2x |
+| Nivara Silk (OpenCL GPU), plain prompt (`qwen --silk benchmark`) | 36 | 7 | 915 | ~130 (median run) | ~7.7 (per generated token) | (not reported) | (not reported) | n/a (KV-cache path only) |
+
+Notes:
+- PyTorch and the Nivara plain run share the same 36 rendered prompt tokens.
+- Nivara CPU plain decode (cached path) cost 227.7 ms/token averaged over the whole run and 114.7 ms/token on the decode phase alone; the full re-forward path cost 1,393.5 ms/token on the decode phase.
+- Silk measures only the KV-cached decode loop and has no full-forward comparison. Per-run: run 1 7 tokens in 0.94 s (134 ms/token), run 2 0.91 s (130 ms/token), run 3 0.92 s (130 ms/token); median 915 ms total. Model build took 5,178 ms.
+
+### Synthetic-weight validation (no checkpoint required)
+
+`qwen benchmark --synthetic-weights` (random Qwen-shaped weights; timing is shape-driven only):
+
+| Surface | Prompt tokens | Generated tokens | Median | KV cache | Full forward | Speedup |
+|---|---:|---:|---:|---|---|---:|
+| Nivara CPU, synthetic | 64 | 24 | 3696 ms | 155.6 ms/token (prefill 986 ms, decode 112.9 ms/token) | 2518.5 ms/token (prefill 1971 ms, decode 2226.3 ms/token) | 16.2x |
+
+### Interpretation
+
+- On the real checkpoint the plain-prompt run is the closest surface to PyTorch. Nivara's decode phase measured 114.7 ms/token against PyTorch's roughly 142 ms/token end-to-end on the 7-token answer produced here.
+- The tools prompt is much larger (206 prompt tokens) and its prefill dominates (3,895 ms); decode is 259.6 ms/token.
+- The GPU (Silk/OpenCL, Intel Graphics) run reached about 130 ms/token, faster than the CPU plain run to the same 7-token answer, with a one-time 5,178 ms model build.
+- Speedup figures measure **cache vs. full re-forward inside Nivara**, not vs. PyTorch. PyTorch numbers are the distance-to-library reference only.
+
