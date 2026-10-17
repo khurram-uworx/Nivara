@@ -81,12 +81,21 @@ internal static class SilkKernels
     public const string SwiGlu = "swiglu";
     public const string CausalGqaAttention = "causal_gqa_attention";
 
+    // Vision (conv) kernels.
+    public const string Conv2d = "conv2d";
+    public const string BatchNormEval = "batchnorm_eval";
+    public const string Relu = "relu";
+    public const string Relu6 = "relu6";
+    public const string MaxPool2d = "maxpool2d";
+    public const string AdaptiveAvgPool2d = "adaptive_avgpool2d";
+
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
         RmsNorm, Silu, SwiGlu, CausalGqaAttention,
+        Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
@@ -719,6 +728,152 @@ internal static class SilkKernels
                 }
                 out[qBase + d] = accv;
             }
+        }
+
+        __kernel void conv2d(
+            __global const float* input,
+            __global const float* weight,
+            __global const float* bias,
+            __global float* output,
+            const uint N, const uint C, const uint H, const uint W,
+            const uint outC, const uint kH, const uint kW,
+            const uint strideH, const uint strideW,
+            const uint padTop, const uint padBottom, const uint padLeft, const uint padRight,
+            const uint groups, const uint hasBias,
+            const uint oH, const uint oW)
+        {
+            uint idx = get_global_id(0);
+            uint total = N * outC * oH * oW;
+            if (idx >= total) return;
+            uint ow = idx % oW;
+            uint tmp = idx / oW;
+            uint oh = tmp % oH;
+            tmp = tmp / oH;
+            uint oc = tmp % outC;
+            uint n = tmp / outC;
+
+            uint inC = C;
+            uint inCperGroup = inC / groups;
+            uint outCperGroup = outC / groups;
+            uint g = oc / outCperGroup;
+
+            float acc = 0.0f;
+            for (uint icg = 0; icg < inCperGroup; ++icg)
+            {
+                uint ic = g * inCperGroup + icg;
+                for (uint kh = 0; kh < kH; ++kh)
+                {
+                    int ih = (int)(oh * strideH + kh) - (int)padTop;
+                    if (ih < 0 || ih >= (int)H) continue;
+                    for (uint kw = 0; kw < kW; ++kw)
+                    {
+                        int iw = (int)(ow * strideW + kw) - (int)padLeft;
+                        if (iw < 0 || iw >= (int)W) continue;
+                        uint inIdx = ((n * inC + ic) * H + (uint)ih) * W + (uint)iw;
+                        uint wIdx = ((oc * inCperGroup + icg) * kH + kh) * kW + kw;
+                        acc += input[inIdx] * weight[wIdx];
+                    }
+                }
+            }
+            if (hasBias != 0u)
+                acc += bias[oc];
+            uint outIdx = ((n * outC + oc) * oH + oh) * oW + ow;
+            output[outIdx] = acc;
+        }
+
+        __kernel void batchnorm_eval(
+            __global const float* x,
+            __global const float* mean,
+            __global const float* var,
+            __global const float* gamma,
+            __global const float* beta,
+            __global float* y,
+            const uint N, const uint C, const uint HW,
+            const float eps, const uint hasAffine)
+        {
+            uint idx = get_global_id(0);
+            uint total = N * C * HW;
+            if (idx >= total) return;
+            uint c = (idx / HW) % C;
+            float invStd = 1.0f / sqrt(var[c] + eps);
+            float g = (hasAffine != 0u) ? gamma[c] : 1.0f;
+            float b = (hasAffine != 0u) ? beta[c] : 0.0f;
+            y[idx] = (x[idx] - mean[c]) * invStd * g + b;
+        }
+
+        __kernel void relu(__global const float* x, __global float* y, const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            float v = x[idx];
+            y[idx] = v > 0.0f ? v : 0.0f;
+        }
+
+        __kernel void relu6(__global const float* x, __global float* y, const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            float v = x[idx];
+            if (v < 0.0f) v = 0.0f;
+            if (v > 6.0f) v = 6.0f;
+            y[idx] = v;
+        }
+
+        __kernel void maxpool2d(
+            __global const float* input,
+            __global float* output,
+            const uint N, const uint C, const uint H, const uint W,
+            const uint kH, const uint kW,
+            const uint strideH, const uint strideW,
+            const uint padTop, const uint padBottom, const uint padLeft, const uint padRight,
+            const uint oH, const uint oW)
+        {
+            uint idx = get_global_id(0);
+            uint total = N * C * oH * oW;
+            if (idx >= total) return;
+            uint ow = idx % oW;
+            uint tmp = idx / oW;
+            uint oh = tmp % oH;
+            tmp = tmp / oH;
+            uint c = tmp % C;
+            uint n = tmp / C;
+
+            float mx = -INFINITY;
+            for (uint kh = 0; kh < kH; ++kh)
+            {
+                int ih = (int)(oh * strideH + kh) - (int)padTop;
+                if (ih < 0 || ih >= (int)H) continue;
+                for (uint kw = 0; kw < kW; ++kw)
+                {
+                    int iw = (int)(ow * strideW + kw) - (int)padLeft;
+                    if (iw < 0 || iw >= (int)W) continue;
+                    uint inIdx = ((n * C + c) * H + (uint)ih) * W + (uint)iw;
+                    float v = input[inIdx];
+                    if (v > mx) mx = v;
+                }
+            }
+            if (mx == -INFINITY) mx = 0.0f;
+            output[idx] = mx;
+        }
+
+        __kernel void adaptive_avgpool2d(
+            __global const float* input,
+            __global float* output,
+            const uint N, const uint C, const uint H, const uint W)
+        {
+            uint idx = get_global_id(0);
+            uint total = N * C;
+            if (idx >= total) return;
+            uint c = idx % C;
+            uint n = idx / C;
+            float sum = 0.0f;
+            for (uint h = 0; h < H; ++h)
+                for (uint w = 0; w < W; ++w)
+                {
+                    uint inIdx = ((n * C + c) * H + h) * W + w;
+                    sum += input[inIdx];
+                }
+            output[idx] = sum / (float)(H * W);
         }
         """;
 }

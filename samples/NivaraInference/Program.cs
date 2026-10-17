@@ -57,6 +57,8 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
         ["smollm"] = ["", "benchmark", "generate"],
+        ["mobilenet_v2"] = ["", "benchmark", "compare"],
+        ["resnet18"] = ["", "benchmark", "compare"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -364,7 +366,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm, mobilenet_v2, resnet18).");
             return 1;
         }
 
@@ -543,10 +545,22 @@ class Program
         switch (modelType)
         {
             case "mobilenet_v2":
+                if (useSilk)
+                {
+                    if (benchmark) return RunMobileNetV2SilkBenchmark(tensors);
+                    if (compare) return RunMobileNetV2SilkCompare(tensors);
+                    return RunMobileNetV2SilkInference(tensors, mode);
+                }
                 if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
                 if (compare) return RunCompare(tensors, "mobilenet_v2");
                 return benchmark ? RunMobileNetV2Benchmark(tensors) : RunMobileNetV2Inference(tensors, mode);
             case "resnet18":
+                if (useSilk)
+                {
+                    if (benchmark) return RunResNet18SilkBenchmark(tensors);
+                    if (compare) return RunResNet18SilkCompare(tensors);
+                    return RunResNet18SilkInference(tensors, mode);
+                }
                 if (compareDiag) return RunCompareDiag(tensors, "resnet18");
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
@@ -846,6 +860,207 @@ class Program
             return 0;
         }
         return RunImageInference(model, mode);
+    }
+
+
+    static int RunMobileNetV2SilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors, string mode)
+    {
+        Console.WriteLine("Building MobileNetV2 (Silk)...");
+        using var runtime = new Nivara.Silk.SilkRuntime();
+        var runner = new Nivara.Silk.SilkMobileNetV2GpuRunner(runtime, tensors);
+        Console.WriteLine($"Device: {runtime.DeviceName}");
+        Console.WriteLine();
+
+        float[] input;
+        if (string.IsNullOrEmpty(mode))
+        {
+            var t = CreateRandomInput(1, 3, 224, 224);
+            t.Data.TryGetSpan(out var sp);
+            input = sp.ToArray();
+        }
+        else
+        {
+            if (!File.Exists(mode))
+            {
+                Console.Error.WriteLine($"Image not found: {mode}");
+                return 1;
+            }
+            using var img = new Bitmap(mode);
+            var tt = PreprocessImage(img, 224);
+            tt.Data.TryGetSpan(out var sp);
+            input = sp.ToArray();
+        }
+
+        var sw = Stopwatch.StartNew();
+        var logits = runner.Forward(input);
+        sw.Stop();
+        Console.WriteLine($"Forward pass: {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output: {logits.Length} logits");
+        PrintTopK(ReverseGradTensor<float>.FromArray(logits));
+        return 0;
+    }
+
+    static int RunMobileNetV2SilkBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MobileNetV2 Silk Benchmark ===");
+        Console.WriteLine($"Device: Silk ({new Nivara.Silk.SilkRuntime().DeviceName})");
+        Console.WriteLine();
+        using var runtime = new Nivara.Silk.SilkRuntime();
+        var runner = new Nivara.Silk.SilkMobileNetV2GpuRunner(runtime, tensors);
+
+        Console.WriteLine("Warmup (3 passes)...");
+        for (int i = 0; i < 3; i++)
+        {
+            var dummy = CreateRandomInput(1, 3, 224, 224);
+            dummy.Data.TryGetSpan(out var sp);
+            runner.Forward(sp.ToArray());
+        }
+        Console.WriteLine();
+
+        Console.WriteLine("Benchmark: synthetic 224x224 input (10 passes)...");
+        var times = new List<double>();
+        for (int i = 0; i < 10; i++)
+        {
+            var input = CreateRandomInput(1, 3, 224, 224);
+            input.Data.TryGetSpan(out var sp);
+            var sw = Stopwatch.StartNew();
+            var output = runner.Forward(sp.ToArray());
+            sw.Stop();
+            double ms = sw.ElapsedMilliseconds + sw.ElapsedTicks / (double)Stopwatch.Frequency * 1000.0;
+            times.Add(ms);
+            Console.WriteLine($"  Run {i + 1,2}: {ms:F1} ms");
+        }
+        Console.WriteLine($"  Average: {times.Average():F1} ms  (min={times.Min():F1}, max={times.Max():F1})");
+        return 0;
+    }
+
+    static int RunMobileNetV2SilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        string inputPath = Path.Combine("samples", "data", "compare_input.bin");
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine($"Input file not found: {inputPath}");
+            return 1;
+        }
+        var rawBytes = File.ReadAllBytes(inputPath);
+        float[] inputData = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
+
+        using var runtime = new Nivara.Silk.SilkRuntime();
+        var runner = new Nivara.Silk.SilkMobileNetV2GpuRunner(runtime, tensors);
+        Console.WriteLine("Running forward pass...");
+        var sw = Stopwatch.StartNew();
+        var logits = runner.Forward(inputData);
+        sw.Stop();
+        Console.WriteLine($"Forward pass: {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output: {logits.Length} logits");
+        Console.Write("  [");
+        for (int i = 0; i < Math.Min(10, logits.Length); i++)
+        {
+            Console.Write($"{logits[i]:F6}");
+            if (i < 9) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+        return 0;
+    }
+
+    static int RunResNet18SilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors, string mode)
+    {
+        Console.WriteLine("Building ResNet-18 (Silk)...");
+        using var runtime = new Nivara.Silk.SilkRuntime();
+        var runner = new Nivara.Silk.SilkResNet18GpuRunner(runtime, tensors);
+        Console.WriteLine($"Device: {runtime.DeviceName}");
+        Console.WriteLine();
+
+        float[] input;
+        if (string.IsNullOrEmpty(mode))
+        {
+            var t = CreateRandomInput(1, 3, 224, 224);
+            t.Data.TryGetSpan(out var sp);
+            input = sp.ToArray();
+        }
+        else
+        {
+            if (!File.Exists(mode))
+            {
+                Console.Error.WriteLine($"Image not found: {mode}");
+                return 1;
+            }
+            using var img = new Bitmap(mode);
+            var tt = PreprocessImage(img, 224);
+            tt.Data.TryGetSpan(out var sp);
+            input = sp.ToArray();
+        }
+
+        var sw = Stopwatch.StartNew();
+        var logits = runner.Forward(input);
+        sw.Stop();
+        Console.WriteLine($"Forward pass: {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output: {logits.Length} logits");
+        PrintTopK(ReverseGradTensor<float>.FromArray(logits));
+        return 0;
+    }
+
+    static int RunResNet18SilkBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== ResNet-18 Silk Benchmark ===");
+        using var runtime = new Nivara.Silk.SilkRuntime();
+        var runner = new Nivara.Silk.SilkResNet18GpuRunner(runtime, tensors);
+
+        Console.WriteLine("Warmup (3 passes)...");
+        for (int i = 0; i < 3; i++)
+        {
+            var dummy = CreateRandomInput(1, 3, 224, 224);
+            dummy.Data.TryGetSpan(out var sp);
+            runner.Forward(sp.ToArray());
+        }
+        Console.WriteLine();
+
+        Console.WriteLine("Benchmark: synthetic 224x224 input (10 passes)...");
+        var times = new List<double>();
+        for (int i = 0; i < 10; i++)
+        {
+            var input = CreateRandomInput(1, 3, 224, 224);
+            input.Data.TryGetSpan(out var sp);
+            var sw = Stopwatch.StartNew();
+            var output = runner.Forward(sp.ToArray());
+            sw.Stop();
+            double ms = sw.ElapsedMilliseconds + sw.ElapsedTicks / (double)Stopwatch.Frequency * 1000.0;
+            times.Add(ms);
+            Console.WriteLine($"  Run {i + 1,2}: {ms:F1} ms");
+        }
+        Console.WriteLine($"  Average: {times.Average():F1} ms  (min={times.Min():F1}, max={times.Max():F1})");
+        return 0;
+    }
+
+    static int RunResNet18SilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        string inputPath = Path.Combine("samples", "data", "compare_input.bin");
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine($"Input file not found: {inputPath}");
+            return 1;
+        }
+        var rawBytes = File.ReadAllBytes(inputPath);
+        float[] inputData = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
+
+        using var runtime = new Nivara.Silk.SilkRuntime();
+        var runner = new Nivara.Silk.SilkResNet18GpuRunner(runtime, tensors);
+        Console.WriteLine("Running forward pass...");
+        var sw = Stopwatch.StartNew();
+        var logits = runner.Forward(inputData);
+        sw.Stop();
+        Console.WriteLine($"Forward pass: {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output: {logits.Length} logits");
+        Console.Write("  [");
+        for (int i = 0; i < Math.Min(10, logits.Length); i++)
+        {
+            Console.Write($"{logits[i]:F6}");
+            if (i < 9) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+        return 0;
     }
 
     static int RunResNet18Inference(
