@@ -155,6 +155,7 @@ internal static class SilkKernelsGate
                 }
 
                 legs.AddRange(MeasureModernBertPorts(ilgpu, silk, buffers));
+                legs.AddRange(MeasureSmolLMKernels(silk, buffers));
                 return Report(legs);
             }
             finally
@@ -998,6 +999,171 @@ internal static class SilkKernelsGate
                 RunLinear(silk, Nivara.Silk.SilkKernels.GeGlu, dstN);
             },
             () => silk.Download(sy, dstN));
+    }
+
+    // ---- SmolLM (Llama-family) kernel cells: CPU reference (no ILGPU counterpart) ----
+
+    static List<Leg> MeasureSmolLMKernels(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        var legs = new List<Leg>();
+
+        const int hidden = 576;
+        const int intermediate = 1536;
+        const int numHeads = 9;
+        const int numKvHeads = 3;
+        const int headDim = 64;
+        const float eps = 1e-5f;
+        const int seq = 32;
+        const int rows = 128;
+
+        uint seed;
+
+        // rms_norm: CPU reference = RMSNormKernel.PerRowRMSNormForwardKernel (gamma = ones)
+        {
+            int n = rows * hidden;
+            var src = new float[n];
+            seed = 0x50700001u;
+            for (int i = 0; i < n; i++) src[i] = GemmBenchmark.NextUniformF(ref seed);
+            var gamma = new float[hidden];
+            Array.Fill(gamma, 1f);
+            var cpuOut = new float[n];
+            Action runCpu = () => Nivara.AutoDiff.Nn.RMSNormKernel<float>.PerRowRMSNormForwardKernel(src, cpuOut, rows, hidden, eps);
+            Func<float[]> readCpu = () => cpuOut;
+
+            nint sx = silk.Allocate(n); buffers.Add(sx);
+            nint sg = silk.Allocate(hidden); buffers.Add(sg);
+            nint sy = silk.Allocate(n); buffers.Add(sy);
+            silk.Upload(sx, src);
+            silk.Upload(sg, gamma);
+
+            Action runSilk = () =>
+            {
+                silk.SetBuffer(Nivara.Silk.SilkKernels.RmsNorm, 0, sx);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.RmsNorm, 1, sg);
+                silk.SetBuffer(Nivara.Silk.SilkKernels.RmsNorm, 2, sy);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.RmsNorm, 3, (uint)rows);
+                silk.SetUInt32(Nivara.Silk.SilkKernels.RmsNorm, 4, (uint)hidden);
+                silk.SetFloat32(Nivara.Silk.SilkKernels.RmsNorm, 5, eps);
+                silk.Run(Nivara.Silk.SilkKernels.RmsNorm,
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGlobal(rows)],
+                    [(nuint)Nivara.Silk.SilkKernels.LinearGroupSize]);
+            };
+            Func<float[]> readSilk = () => silk.Download(sy, n);
+
+            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.RmsNorm, $"smollm r{rows} c{hidden}", runCpu, readCpu, runSilk, readSilk));
+        }
+
+        // silu
+        {
+            int n = rows * intermediate;
+            var src = new float[n];
+            seed = 0x51100001u;
+            for (int i = 0; i < n; i++) src[i] = GemmBenchmark.NextUniformF(ref seed);
+            var cpuOut = new float[n];
+            Action runCpu = () => Nivara.AutoDiff.Operations.GradKernels.Silu<float>(src, cpuOut);
+            Func<float[]> readCpu = () => cpuOut;
+
+            nint sx = silk.Allocate(n); buffers.Add(sx);
+            nint sy = silk.Allocate(n); buffers.Add(sy);
+            silk.Upload(sx, src);
+
+            Action runSilk = () =>
+            {
+                Nivara.Silk.SilkLauncher.Silu(silk, sx, sy, n);
+            };
+            Func<float[]> readSilk = () => silk.Download(sy, n);
+
+            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.Silu, $"smollm n{n}", runCpu, readCpu, runSilk, readSilk));
+        }
+
+        // swiglu
+        {
+            int n = rows * intermediate;
+            var gate = new float[n];
+            var up = new float[n];
+            seed = 0x57100001u;
+            for (int i = 0; i < n; i++) gate[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < n; i++) up[i] = GemmBenchmark.NextUniformF(ref seed);
+            var temp = new float[n];
+            var cpuOut = new float[n];
+            Action runCpu = () =>
+            {
+                Nivara.AutoDiff.Operations.GradKernels.Silu<float>(gate, temp);
+                System.Numerics.Tensors.TensorPrimitives.Multiply(temp.AsSpan(), up.AsSpan(), cpuOut.AsSpan());
+            };
+            Func<float[]> readCpu = () => cpuOut;
+
+            nint sg = silk.Allocate(n); buffers.Add(sg);
+            nint su = silk.Allocate(n); buffers.Add(su);
+            nint sy = silk.Allocate(n); buffers.Add(sy);
+            silk.Upload(sg, gate);
+            silk.Upload(su, up);
+
+            Action runSilk = () => Nivara.Silk.SilkLauncher.SwiGlu(silk, sg, su, sy, rows, intermediate);
+            Func<float[]> readSilk = () => silk.Download(sy, n);
+
+            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.SwiGlu, $"smollm r{rows} i{intermediate}", runCpu, readCpu, runSilk, readSilk));
+        }
+
+        // causal_gqa_attention
+        {
+            int qLen = seq;
+            int d = numHeads * headDim;
+            int kvWidth = numKvHeads * headDim;
+            int qn = qLen * d;
+            int kn = qLen * kvWidth;
+            var q = new float[qn];
+            var k = new float[kn];
+            var v = new float[kn];
+            seed = 0x5CA90001u;
+            for (int i = 0; i < q.Length; i++) q[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < k.Length; i++) k[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < v.Length; i++) v[i] = GemmBenchmark.NextUniformF(ref seed);
+            float scale = 1f / MathF.Sqrt(headDim);
+            var cpuOut = new float[qn];
+            Action runCpu = () => Nivara.AutoDiff.Operations.AttentionKernels<float>.BatchedAttention(q, k, v, cpuOut, qLen, numHeads, numKvHeads, headDim, scale);
+            Func<float[]> readCpu = () => cpuOut;
+
+            nint sq = silk.Allocate(qn); buffers.Add(sq);
+            nint sk = silk.Allocate(kn); buffers.Add(sk);
+            nint sv = silk.Allocate(kn); buffers.Add(sv);
+            nint so = silk.Allocate(qn); buffers.Add(so);
+            silk.Upload(sq, q);
+            silk.Upload(sk, k);
+            silk.Upload(sv, v);
+
+            silk.EnsureAttentionLocalMemory(headDim);
+            Action runSilk = () => Nivara.Silk.SilkLauncher.CausalGqaAttention(silk, sq, sk, sv, so, qLen, numHeads, numKvHeads, headDim, scale);
+            Func<float[]> readSilk = () => silk.Download(so, qn);
+
+            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.CausalGqaAttention, $"smollm s{qLen} h{numHeads}/{numKvHeads} d{headDim}", runCpu, readCpu, runSilk, readSilk));
+        }
+
+        return legs;
+    }
+
+    static Leg MeasureCpuReference(
+        string kernel,
+        string shape,
+        Action runCpu,
+        Func<float[]> readCpu,
+        Action runSilk,
+        Func<float[]> readSilk)
+    {
+        runCpu();
+        runSilk();
+        double cpuUs = GemmBenchmark.TimeBest(runCpu, Warmups, Rounds);
+        double silkUs = GemmBenchmark.TimeBest(runSilk, Warmups, Rounds);
+        return new Leg
+        {
+            Kernel = kernel,
+            Shape = shape,
+            RequireBytes = false,
+            Reference = readCpu(),
+            Actual = readSilk(),
+            IlgpuUs = cpuUs,
+            SilkUs = silkUs,
+        };
     }
 
     static void RunLinear(Nivara.Silk.SilkRuntime silk, string kernel, int total)
