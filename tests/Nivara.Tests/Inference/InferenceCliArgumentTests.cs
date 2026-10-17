@@ -284,7 +284,7 @@ public class InferenceCliArgumentTests
     [Test]
     public void Silk_OnModelWithoutSilkKernels_Rejected() =>
         AssertRejected(Run("qwen", "--silk"),
-            "--silk is not supported for 'qwen' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm).");
+            "--silk is not supported for 'qwen' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm, mobilenet_v2, resnet18).");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
