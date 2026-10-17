@@ -189,6 +189,19 @@ public sealed unsafe class SilkRuntime : IDisposable
         return values;
     }
 
+    /// <summary>Blocking read of <paramref name="count"/> ints.</summary>
+    public int[] DownloadInt(nint buffer, int count)
+    {
+        var values = new int[count];
+        fixed (int* p = values)
+        {
+            int err = cl.EnqueueReadBuffer(queue, buffer, true, 0, (nuint)(count * sizeof(int)), p, 0, null, null);
+            if (err != 0)
+                throw new InvalidOperationException($"Silk readback of {count} ints failed ({err}).");
+        }
+        return values;
+    }
+
     void WriteRaw(nint buffer, void* p, ulong bytes)
     {
         int err = cl.EnqueueWriteBuffer(queue, buffer, true, 0, (nuint)bytes, p, 0, null, null);

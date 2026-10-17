@@ -56,6 +56,11 @@ public sealed class SilkQwenGpuRunner : IDisposable
     readonly nint[] vCache;
     int cachedLen;
 
+    // Device-side argmax partial buffers (#663).
+    nint partialArgmaxIdx;
+    nint partialArgmaxVal;
+    int argmaxGroups;
+
     public SilkQwenGpuRunner(
         SilkRuntime runtime,
         QwenSilkConfig config,
@@ -103,6 +108,10 @@ public sealed class SilkQwenGpuRunner : IDisposable
             }
 
             rotary = new RotaryEmbedding<float>(headDim, maxPos, ropeTheta);
+
+            argmaxGroups = (vocabSize + 255) / 256;
+            partialArgmaxIdx = runtime.Allocate(argmaxGroups);
+            partialArgmaxVal = runtime.Allocate(argmaxGroups);
         }
         catch
         {
@@ -202,6 +211,213 @@ public sealed class SilkQwenGpuRunner : IDisposable
         var last = new float[vocabSize];
         Array.Copy(all, (seqLen - 1) * vocabSize, last, 0, vocabSize);
         return last;
+    }
+
+    /// <summary>Device-side argmax over the last row of a full forward (#663).</summary>
+    public int ForwardLastArgmax(int[] tokenIds) => ForwardArgmax(tokenIds);
+
+    public int ForwardArgmax(int[] tokenIds)
+    {
+        int seqLen = tokenIds.Length;
+        if (seqLen <= 0) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+        if (seqLen > seqCap) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+
+        EnsureWorkspace(seqLen);
+        EnsureRopeTables(seqLen);
+
+        if (posIdHost is null || posIdHost.Length < seqLen)
+            posIdHost = new int[seqLen];
+        for (int p = 0; p < seqLen; p++) posIdHost[p] = p;
+
+        runtime.Upload(idsBuf.Handle, tokenIds.AsSpan(0, seqLen));
+        runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
+
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+
+        for (int li = 0; li < layers.Length; li++)
+        {
+            LayerWeights w = layers[li];
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+            SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
+
+            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
+            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+
+            SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
+
+            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+
+            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
+
+            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
+        }
+
+        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+        nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
+        nint logitsBuf = runtime.Allocate(vocabSize);
+        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        int argmax = ArgMaxDevice(logitsBuf, vocabSize);
+        runtime.Release(logitsBuf);
+        runtime.Release(lastRowView);
+        return argmax;
+    }
+
+    public int ForwardPrefillArgmax(int[] tokenIds)
+    {
+        int seqLen = tokenIds.Length;
+        if (seqLen <= 0) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+        if (seqLen > seqCap) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+        cachedLen = 0;
+
+        EnsureWorkspace(seqLen);
+        EnsureRopeTables(seqLen);
+
+        if (posIdHost is null || posIdHost.Length < seqLen)
+            posIdHost = new int[seqLen];
+        for (int p = 0; p < seqLen; p++) posIdHost[p] = p;
+
+        runtime.Upload(idsBuf.Handle, tokenIds.AsSpan(0, seqLen));
+        runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
+
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+
+        for (int li = 0; li < layers.Length; li++)
+        {
+            LayerWeights w = layers[li];
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+            SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
+
+            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
+            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+
+            runtime.CopyBuffer(k.Handle, kCache[li], 0, 0, seqLen * kvDim);
+            runtime.CopyBuffer(v.Handle, vCache[li], 0, 0, seqLen * kvDim);
+
+            SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
+
+            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+
+            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
+
+            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
+        }
+
+        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, seqLen, hiddenDim, eps);
+
+        nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
+        nint logitsBuf = runtime.Allocate(vocabSize);
+        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        int argmax = ArgMaxDevice(logitsBuf, vocabSize);
+        runtime.Release(logitsBuf);
+        runtime.Release(lastRowView);
+
+        cachedLen = seqLen;
+        return argmax;
+    }
+
+    public int ForwardCachedArgmax(int tokenId, int position)
+    {
+        if (position < 0) throw new ArgumentOutOfRangeException(nameof(position));
+        if (position + 1 > seqCap) throw new ArgumentOutOfRangeException(nameof(position));
+
+        EnsureWorkspace(1);
+
+        if (posIdHost is null || posIdHost.Length < 1)
+            posIdHost = new int[1];
+        posIdHost[0] = position;
+
+        runtime.Upload(idsBuf.Handle, new int[] { tokenId });
+        runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
+
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
+
+        for (int li = 0; li < layers.Length; li++)
+        {
+            LayerWeights w = layers[li];
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, 1, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, 1, hiddenDim, qDim);
+            SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, 1, qDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, 1, hiddenDim, kvDim);
+            SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, 1, kvDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, 1, hiddenDim, kvDim);
+            SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, 1, kvDim);
+
+            EnsureRopeTables(position + 1);
+            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
+            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numKvHeads, headDim, headDim / 2);
+
+            runtime.CopyBuffer(k.Handle, kCache[li], 0, position * kvDim, kvDim);
+            runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
+
+            int kvLen = position + 1;
+            SilkLauncher.DecodeGqaAttention(runtime, q.Handle, kCache[li], vCache[li], context.Handle, kvLen, numHeads, numKvHeads, headDim, scale);
+
+            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, 1, qDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, hiddenDim);
+
+            SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, 1, hiddenDim, eps);
+
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, 1, hiddenDim, intermediateDim);
+            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, 1, hiddenDim, intermediateDim);
+
+            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, intermediateDim);
+
+            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, 1, intermediateDim, hiddenDim);
+            SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, hiddenDim);
+        }
+
+        SilkLauncher.RmsNorm(runtime, x.Handle, finalNormW, normed.Handle, 1, hiddenDim, eps);
+
+        nint logitsBuf = runtime.Allocate(vocabSize);
+        SilkLauncher.Gemm(runtime, normed.Handle, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        int argmax = ArgMaxDevice(logitsBuf, vocabSize);
+        runtime.Release(logitsBuf);
+
+        if (position + 1 > cachedLen) cachedLen = position + 1;
+        return argmax;
+    }
+
+    int ArgMaxDevice(nint logits, int count)
+    {
+        SilkLauncher.ArgMaxPartial(runtime, logits, partialArgmaxIdx, partialArgmaxVal, count, argmaxGroups);
+        var indices = runtime.DownloadInt(partialArgmaxIdx, argmaxGroups);
+        var values = runtime.Download(partialArgmaxVal, argmaxGroups);
+        int best = indices[0];
+        float bestVal = values[0];
+        for (int i = 1; i < argmaxGroups; i++)
+            if (values[i] > bestVal) { bestVal = values[i]; best = indices[i]; }
+        return best;
     }
 
     public void ResetCache() => cachedLen = 0;
@@ -398,6 +614,8 @@ public sealed class SilkQwenGpuRunner : IDisposable
         runtime.Release(tokEmb);
         runtime.Release(finalNormW);
         if (tokEmbTransposed != 0) runtime.Release(tokEmbTransposed);
+        if (partialArgmaxIdx != 0) runtime.Release(partialArgmaxIdx);
+        if (partialArgmaxVal != 0) runtime.Release(partialArgmaxVal);
         // workspace buffers released by runtime dispose (owned by runner? they are allocated via Ensure -> Allocate, not tracked). Release best-effort:
     }
 

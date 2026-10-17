@@ -270,6 +270,21 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
             [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
 
+    public static void ArgMaxPartial(
+        SilkRuntime runtime, nint input, nint partialIndex, nint partialValue, int n, int groups)
+    {
+        if (groups <= 0) throw new ArgumentOutOfRangeException(nameof(groups));
+        if (n < 0) throw new ArgumentOutOfRangeException(nameof(n));
+        runtime.SetBuffer(SilkKernels.ArgMax, 0, input);
+        runtime.SetBuffer(SilkKernels.ArgMax, 1, partialIndex);
+        runtime.SetBuffer(SilkKernels.ArgMax, 2, partialValue);
+        runtime.SetUInt32(SilkKernels.ArgMax, 3, (uint)n);
+        runtime.Run(
+            SilkKernels.ArgMax,
+            [(nuint)(groups * 256)],
+            [(nuint)256]);
+    }
+
     public static void Conv2d(
         SilkRuntime runtime, nint input, nint weight, nint bias, nint output,
         int N, int C, int H, int W, int outC, int kH, int kW,

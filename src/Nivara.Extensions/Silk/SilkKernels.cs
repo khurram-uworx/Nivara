@@ -82,6 +82,9 @@ internal static class SilkKernels
     public const string CausalGqaAttention = "causal_gqa_attention";
     public const string DecodeGqaAttention = "decode_gqa_attention";
 
+    // Device-side reduction for causal-LM greedy decode (#663).
+    public const string ArgMax = "argmax";
+
     // Vision (conv) kernels.
     public const string Conv2d = "conv2d";
     public const string BatchNormEval = "batchnorm_eval";
@@ -95,7 +98,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention,
+        RmsNorm, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
@@ -955,6 +958,53 @@ internal static class SilkKernels
             float invSum = 1.0f / sum;
             for (uint d = 0; d < headDim; ++d)
                 out[qBase + d] = accv[d] * invSum;
+        }
+
+        /* Partial reduction for device-side argmax (#663). Each work-group reduces up to
+           256 contiguous elements to one (index, value) pair; the host walks the partials. */
+        __kernel void argmax(
+            __global const float* input,
+            __global int* partialIndex,
+            __global float* partialValue,
+            const uint n)
+        {
+            __local float lval[256];
+            __local int lidx[256];
+            uint lid = get_local_id(0);
+            uint gid = get_global_id(0);
+            uint lsize = get_local_size(0);
+
+            float bestVal = -INFINITY;
+            int bestIdx = -1;
+            if (gid < n)
+            {
+                bestVal = input[gid];
+                bestIdx = (int)gid;
+            }
+
+            lval[lid] = bestVal;
+            lidx[lid] = bestIdx;
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            for (uint stride = lsize / 2; stride > 0; stride >>= 1)
+            {
+                if (lid < stride)
+                {
+                    if (lval[lid + stride] > lval[lid])
+                    {
+                        lval[lid] = lval[lid + stride];
+                        lidx[lid] = lidx[lid + stride];
+                    }
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            if (lid == 0)
+            {
+                uint gi = get_group_id(0);
+                partialIndex[gi] = lidx[0];
+                partialValue[gi] = lval[0];
+            }
         }
         """;
 }
