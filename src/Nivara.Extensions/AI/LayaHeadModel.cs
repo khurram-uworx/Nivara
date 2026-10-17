@@ -428,19 +428,6 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
         return head;
     }
 
-    /// <summary>
-    /// <see cref="LayaHeadScoring.PrefixMask"/> at <typeparamref name="T"/>, which is the only
-    /// place the mask's shape is decided: one entry per position, not per valid token.
-    /// </summary>
-    static ReverseGradTensor<T> BuildPrefixMask(int seqLen, int validLength)
-    {
-        var mask = LayaHeadScoring.PrefixMask(seqLen, validLength);
-        var data = new T[seqLen];
-        for (int i = 0; i < seqLen; i++)
-            data[i] = mask[i] >= 0.5f ? T.One : T.Zero;
-        return ReverseGradTensor<T>.FromArray(data);
-    }
-
     static T[] ToTensor(double[] values)
     {
         var converted = new T[values.Length];
