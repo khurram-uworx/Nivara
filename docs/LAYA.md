@@ -6,6 +6,27 @@ This is a reflection of what we built and what we learned while porting Laya's t
 
 Related: the encoder's GPU reflection in [docs/ACCELERATION.md](ACCELERATION.md) §1, the backend probe in the inference sample's README.
 
+## Where Laya fits: the TypeSafe decision-model ecosystem
+
+Laya is not served by a text-completion API. It is a **decision model**: the caller declares its
+questions up front — a choice, a yes/no, a score — and the server returns a typed answer with a
+confidence for each, rather than free-form text. The wire protocol for that is the **TypeSafe
+"System One"** API, and two local servers speak it today:
+
+- **Ollaya** — the local decision-model server used by this project, serving `laya:en` at
+  `http://localhost:11435`. It arrived first and is the default in the inference sample.
+- **Ollama 0.35+** — exposes the *same* `POST /v1/systemone` route at `http://localhost:11434`,
+  alongside its own decision models `nimble` (9B), `tev1` (4B) and `tev1:0.8b` (0.8B). See the
+  [Ollama decision-model announcement](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models).
+
+Because the route is identical, the two are interchangeable from a client's point of view: only
+the base URL and the model name change. That is the shape OpenAI's Chat Completions API gave text
+models — one request/response contract that many servers implement, so a decision model becomes a
+drop-in behind a stable endpoint. It is roughly what "OpenAI Chat Completions" is becoming for
+decision models. The `typesafe` demo in
+[`samples/NivaraInference`](../samples/NivaraInference/README.md) leans on exactly that property:
+one TypeSafe client, and `--ollama` swaps the server.
+
 ## Model overview
 
 A ModernBERT-large encoder — the same architecture as [docs/MODERNBERT.md](MODERNBERT.md), nested under the `encoder.` prefix — plus a typed decision head. The checkpoint is **842.6 MB of F16** (206 tensors, 421,293,830 parameters), widened to F32 at load, so the resident set is about 1.7 GB.

@@ -108,3 +108,8 @@ Ollaya (`http://localhost:11435`, model `laya:en`); Ollama 0.35+ now serves the 
 - [ ] #673 — `InferenceCliArgumentTests` fails on dev machines with the Qwen checkpoint
   present (it assumes the checkpoint is absent; only true on CI). Discovered while running
   the fixture during commit 2. Pre-existing, not caused by this branch.
+- [ ] #674 — `DocReferenceTests` tolerated-mentions gate fails whenever `docs/TODO.md` exists,
+  i.e. on every `iterative-work` branch while its plan is live (the test asserts via
+  `DocumentFaults`, which needs the target to be absent). Discovered while running the Docs
+  gate during commit 4. Pre-existing workflow/gate conflict; resolves for this branch when
+  TODO.md is deleted at G2.

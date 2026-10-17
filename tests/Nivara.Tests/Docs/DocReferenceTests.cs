@@ -32,8 +32,11 @@ public class DocReferenceTests
     /// <c>tests/Nivara.PerformanceTests/ApplyMaskProbe.cs</c> and one from
     /// <c>tests/Nivara.PerformanceTests/README.md</c>, plus one added in
     /// <c>docs/ACCELERATION.md</c>, by the #492 reconciliation.
+    /// 360 = 358 + the two <c>docs/LAYA.md</c> references the TypeSafe/Ollama section added to
+    /// <c>samples/NivaraInference/README.md</c> (a markdown link counts twice: its text and its
+    /// target).
     /// </summary>
-    const int ExpectedDocumentReferenceCount = 358;
+    const int ExpectedDocumentReferenceCount = 360;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
