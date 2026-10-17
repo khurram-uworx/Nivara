@@ -34,7 +34,7 @@ public sealed class SilkResNet18GpuRunner : IDisposable
         stemBnMean = sm; stemBnVar = sv; stemBnGamma = sg; stemBnBeta = sb;
 
         // stages
-        int[][] stageChannels = { new[]{64,64}, new[]{64,128}, new[]{128,256}, new[]{256,512} };
+        int[][] stageChannels = { new[] { 64, 64 }, new[] { 64, 128 }, new[] { 128, 256 }, new[] { 256, 512 } };
         int[] strides = { 1, 2, 2, 2 };
         blocks = new BlockWeights[8];
         int bi = 0;

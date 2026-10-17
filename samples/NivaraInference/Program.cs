@@ -366,7 +366,7 @@ class Program
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm).");
+            Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: minilm, distilbert, distilbert_sst, modernbert, laya, smollm, mobilenet_v2, resnet18).");
             return 1;
         }
 

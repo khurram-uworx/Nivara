@@ -38,8 +38,8 @@ public sealed class SilkMobileNetV2GpuRunner : IDisposable
         stemPwW = U(tensors["mobilenet_v2.conv_stem.reduce_1x1.convolution.weight"].Data);
         (stemPwMean, stemPwVar, stemPwGamma, stemPwBeta) = UBn(tensors, "mobilenet_v2.conv_stem.reduce_1x1");
 
-        int[] expands = { 96,144,144,192,192,192,384,384,384,384,576,576,576,960,960,960 };
-        int[] outs = { 24,24,32,32,32,64,64,64,64,96,96,96,160,160,160,320 };
+        int[] expands = { 96, 144, 144, 192, 192, 192, 384, 384, 384, 384, 576, 576, 576, 960, 960, 960 };
+        int[] outs = { 24, 24, 32, 32, 32, 64, 64, 64, 64, 96, 96, 96, 160, 160, 160, 320 };
         blocks = new BlockWeights[16];
         int inCh = 16;
         for (int i = 0; i < 16; i++)
@@ -157,9 +157,9 @@ public sealed class SilkMobileNetV2GpuRunner : IDisposable
         int curH = oH, curW = oW;
         nint curBuf = ii;
 
-        int[] expands = { 96,144,144,192,192,192,384,384,384,384,576,576,576,960,960,960 };
-        int[] outs = { 24,24,32,32,32,64,64,64,64,96,96,96,160,160,160,320 };
-        int[] strides = { 1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1 };
+        int[] expands = { 96, 144, 144, 192, 192, 192, 384, 384, 384, 384, 576, 576, 576, 960, 960, 960 };
+        int[] outs = { 24, 24, 32, 32, 32, 64, 64, 64, 64, 96, 96, 96, 160, 160, 160, 320 };
+        int[] strides = { 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1 };
 
         for (int bi = 0; bi < 16; bi++)
         {
