@@ -2,21 +2,32 @@ using TypeSafeAI;
 
 namespace NivaraInference;
 
+/// <summary>
+/// TypeSafeAI news assessment against a local decision-model server. Ollaya and Ollama 0.35+
+/// expose the same TypeSafe <c>/v1/systemone</c> API, so the same client runs on either — only
+/// the base URL and the model name change.
+/// </summary>
 public static class TypeSafe
 {
     private const string OllayaUrl = "http://localhost:11435";
     private const string OllayaModel = "laya:en";
+    private const string OllamaUrl = "http://localhost:11434";
+    private const string OllamaModel = "tev1:0.8b";
 
-    public static async Task<int> Run()
+    public static async Task<int> Run(bool useOllama, string? ollamaUrl)
     {
+        string url = useOllama ? ollamaUrl ?? OllamaUrl : OllayaUrl;
+        string model = useOllama ? OllamaModel : OllayaModel;
+        string server = useOllama ? "Ollama" : "Ollaya";
+
         Console.WriteLine("=== NivaraInference — TypeSafeAI News Assessment ===\n");
-        Console.WriteLine($"Connecting to Ollaya at {OllayaUrl} (model: {OllayaModel})...\n");
+        Console.WriteLine($"Connecting to {server} at {url} (model: {model})...\n");
 
         var client = new TypeSafeClient(new TypeSafeClientOptions
         {
-            ApiKey = "ollaya-local",
-            BaseUrl = new Uri(OllayaUrl),
-            DefaultModel = OllayaModel,
+            ApiKey = useOllama ? "ollama-local" : "ollaya-local",
+            BaseUrl = new Uri(url),
+            DefaultModel = model,
             Timeout = TimeSpan.FromSeconds(30),
             MaxRetries = 1,
         });
@@ -81,7 +92,7 @@ public static class TypeSafe
 
         if (failures == newsItems.Length)
         {
-            Console.Error.WriteLine($"\nAll {failures} assessments failed. Is the Ollaya server running at {OllayaUrl}?");
+            Console.Error.WriteLine($"\nAll {failures} assessments failed. Is the {server} server running at {url}?");
             return 1;
         }
 
