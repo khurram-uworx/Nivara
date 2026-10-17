@@ -75,11 +75,18 @@ internal static class SilkKernels
     public const string GemmQkv = "gemm_row4_qkv";
     public const string Attention = "batched_attention";
 
+    // SmolLM (Llama-family causal LM) kernels.
+    public const string RmsNorm = "rms_norm";
+    public const string Silu = "silu";
+    public const string SwiGlu = "swiglu";
+    public const string CausalGqaAttention = "causal_gqa_attention";
+
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
+        RmsNorm, Silu, SwiGlu, CausalGqaAttention,
     ];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
@@ -588,6 +595,133 @@ internal static class SilkKernels
 
             for (uint d = 0; d < headDim; ++d)
                 attnOut[outBase + dOffset + d] = acc[d * MAXHEADDIM + lane];
+        }
+
+        /* RMSNorm: no mean subtraction, affine gamma only. One work item per row. y may alias x. */
+        __kernel void rms_norm(
+            __global const float* x,
+            __global const float* gamma,
+            __global float* y,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint r = get_global_id(0);
+            if (r >= rows) return;
+            uint off = r * cols;
+            float sumSq = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+            {
+                float v = x[off + c];
+                sumSq += v * v;
+            }
+            float rms = sqrt(sumSq / (float)cols + eps);
+            float inv = 1.0f / rms;
+            for (uint c = 0; c < cols; ++c)
+                y[off + c] = x[off + c] * inv * gamma[c];
+        }
+
+        /* Elementwise SiLU. */
+        __kernel void silu(
+            __global const float* x,
+            __global float* y,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            float v = x[idx];
+            y[idx] = v / (1.0f + exp(-v));
+        }
+
+        /* Fused SwiGLU: first half gate, second half up. y = silu(gate) * up. */
+        __kernel void swiglu(
+            __global const float* x,
+            __global float* y,
+            const uint rows,
+            const uint intermediate)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * intermediate) return;
+            uint col = idx % intermediate;
+            uint row = idx / intermediate;
+            uint xBase = row * 2u * intermediate;
+            float gate = x[xBase + col];
+            float up = x[xBase + intermediate + col];
+            float siluGate = gate / (1.0f + exp(-gate));
+            y[idx] = siluGate * up;
+        }
+
+        /* Causal GQA attention. q: [seq, numHeads*headDim], k/v: [seq, numKvHeads*headDim].
+           One work item per (qPos, head). Attends j=0..qPos with KV-repeat. */
+        __kernel void causal_gqa_attention(
+            __global const float* q,
+            __global const float* k,
+            __global const float* v,
+            __global float* out,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint idx = get_global_id(0);
+            uint total = seqLen * numHeads;
+            if (idx >= total) return;
+
+            uint qPos = idx / numHeads;
+            uint h = idx % numHeads;
+            uint repeat = numHeads / numKvHeads;
+            uint kvHead = h / repeat;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint qBase = qPos * Dq + h * headDim;
+            uint kBaseHead = kvHead * headDim;
+            uint vBaseHead = kvHead * headDim;
+
+            // scores over j=0..qPos
+            // First pass: max
+            float mx = -INFINITY;
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                float acc = 0.0f;
+                uint kBase = j * Dkv + kBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    acc += q[qBase + d] * k[kBase + d];
+                float s = acc * scale;
+                if (s > mx) mx = s;
+            }
+
+            float sum = 0.0f;
+            // We need exp(s-mx) for each j; recompute. Store not needed beyond sum then weighted.
+            // Second pass: sum
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                float acc = 0.0f;
+                uint kBase = j * Dkv + kBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    acc += q[qBase + d] * k[kBase + d];
+                float s = acc * scale;
+                sum += exp(s - mx);
+            }
+
+            // Third pass: weighted V
+            for (uint d = 0; d < headDim; ++d)
+            {
+                float accv = 0.0f;
+                for (uint j = 0; j <= qPos; ++j)
+                {
+                    float acc = 0.0f;
+                    uint kBase = j * Dkv + kBaseHead;
+                    for (uint dd = 0; dd < headDim; ++dd)
+                        acc += q[qBase + dd] * k[kBase + dd];
+                    float s = acc * scale;
+                    float p = exp(s - mx) / sum;
+                    uint vBase = j * Dkv + vBaseHead;
+                    accv += p * v[vBase + d];
+                }
+                out[qBase + d] = accv;
+            }
         }
         """;
 }
