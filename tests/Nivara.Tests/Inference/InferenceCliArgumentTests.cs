@@ -28,7 +28,10 @@ public class InferenceCliArgumentTests
 {
     readonly record struct CliResult(int ExitCode, string StdOut, string StdErr);
 
-    const int ProcessTimeoutMs = 30_000;
+    // Host-adaptive: cold `dotnet` startup for this heavy sample can exceed a fixed 30 s on a slow
+    // machine even though the CLI itself is correct. Calibrated in TheSampleMustBeBuilt (see below).
+    // NIVARA_CLI_TIMEOUT_MS overrides the bound absolutely; NIVARA_CLI_TIMEOUT_MULTIPLIER scales it.
+    static int ProcessTimeoutMs = 30_000;
     const string ModelLookupMessage = "Model file not found";
 
     static readonly string DllPath = Path.Combine(AppContext.BaseDirectory, "NivaraInference.dll");
@@ -40,6 +43,22 @@ public class InferenceCliArgumentTests
         Assert.That(File.Exists(DllPath), Is.True,
             $"NivaraInference.dll was not found at {DllPath}. Build the solution before testing; "
             + "this project references samples/NivaraInference so 'dotnet build' produces it.");
+
+        // Calibrate the per-process timeout to this host's cold-start speed: run the usage path once
+        // (no model load) and give the real invocations a 10x margin over that, floored at 30 s. This
+        // keeps the gate on CI's 30 s bound while not reporting a false failure on a slow machine.
+        // The gate's assertions are functional (exit code + stderr message), not timing, so it is
+        // deliberately NOT marked [Category("Performance")] — categorising it would drop the
+        // argument-surface gate from CI's filtered suite.
+        int canaryMs = MeasureCanary();
+        int calibrated = Math.Max(30_000, canaryMs * 10);
+        if (int.TryParse(Environment.GetEnvironmentVariable("NIVARA_CLI_TIMEOUT_MS"), out int overrideMs)
+            && overrideMs > 0)
+            calibrated = Math.Max(calibrated, overrideMs);
+        if (double.TryParse(Environment.GetEnvironmentVariable("NIVARA_CLI_TIMEOUT_MULTIPLIER"),
+                            out double multiplier) && multiplier > 0)
+            calibrated = (int)(calibrated * multiplier);
+        ProcessTimeoutMs = calibrated;
     }
 
     [Test]
@@ -436,6 +455,33 @@ public class InferenceCliArgumentTests
             $"expected exit code 1, got {result.ExitCode}. stderr:{Environment.NewLine}{result.StdErr}");
         Assert.That(result.StdErr, Does.Contain(message),
             $"stderr did not contain the guard message. stderr:{Environment.NewLine}{result.StdErr}");
+    }
+
+    static int MeasureCanary()
+    {
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = RepoRoot,
+        };
+        startInfo.ArgumentList.Add(DllPath);
+
+        var stopwatch = Stopwatch.StartNew();
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start 'dotnet' for the canary.");
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(60_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new InvalidOperationException("NivaraInference canary did not exit within 60 s.");
+        }
+        stopwatch.Stop();
+        _ = stdout.GetAwaiter().GetResult();
+        _ = stderr.GetAwaiter().GetResult();
+        return (int)stopwatch.ElapsedMilliseconds;
     }
 
     static CliResult Run(params string[] args)
