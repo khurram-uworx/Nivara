@@ -4,6 +4,12 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ## [Unreleased]
 
+### Added
+
+- Silk Qwen parity coverage for #660: synthetic Silk vs CPU argmax/logit smoke, KV-cache (useKvCache on/off) equivalence, model-gated Paris weather tool loop, and --qwen-decode-attn large-kvLen DecodeAttention benchmark.
+- Fixed corrupted zero-width character in two Qwen Silk tokenizer unkToken literals, which broke --silk tools / --silk plain.
+
+
 ### Changed
 
 - **Silk OpenCL backend and the BERT-family model layer now ship from `Nivara.Extensions`** — the
