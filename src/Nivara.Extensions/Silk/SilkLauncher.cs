@@ -237,8 +237,43 @@ internal static class SilkLauncher
         nint Wo, nint residual, nint outBuf, int kvLen, int numHeads, int numKvHeads,
         int headDim, int qDim, int hiddenDim, float scale)
     {
+        if (runtime.CanFuseDecodeOproj(numHeads, headDim))
+        {
+            DecodeGqaAttentionOprojFused(runtime, q, kCache, vCache, Wo, residual, outBuf,
+                kvLen, numHeads, numKvHeads, headDim, hiddenDim, scale);
+            return;
+        }
+
         DecodeGqaAttention(runtime, q, kCache, vCache, contextScratch, kvLen, numHeads, numKvHeads, headDim, scale);
         GemmGemvAdd(runtime, contextScratch, Wo, outBuf, residual, qDim, hiddenDim);
+    }
+
+    /// <summary>True single-work-group fused decode attention + O-projection (#691). Requires
+    /// <see cref="SilkRuntime.CanFuseDecodeOproj"/> to be true; otherwise use
+    /// <see cref="DecodeGqaAttentionOproj"/>.</summary>
+    public static void DecodeGqaAttentionOprojFused(
+        SilkRuntime runtime, nint q, nint kCache, nint vCache, nint Wo, nint residual,
+        nint outBuf, int kvLen, int numHeads, int numKvHeads, int headDim, int hiddenDim,
+        float scale)
+    {
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttentionOprojFused, 0, q);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttentionOprojFused, 1, kCache);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttentionOprojFused, 2, vCache);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttentionOprojFused, 3, Wo);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttentionOprojFused, 4, residual);
+        runtime.SetBuffer(SilkKernels.DecodeGqaAttentionOprojFused, 5, outBuf);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttentionOprojFused, 6, (uint)kvLen);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttentionOprojFused, 7, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttentionOprojFused, 8, (uint)numKvHeads);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttentionOprojFused, 9, (uint)headDim);
+        runtime.SetUInt32(SilkKernels.DecodeGqaAttentionOprojFused, 10, (uint)hiddenDim);
+        runtime.SetFloat32(SilkKernels.DecodeGqaAttentionOprojFused, 11, scale);
+        runtime.EnsureFusedDecodeOprojLocalMemory(numHeads, headDim);
+        int groupSize = numHeads * SilkKernels.AttentionGroupSize;
+        runtime.Run(
+            SilkKernels.DecodeGqaAttentionOprojFused,
+            [(nuint)groupSize],
+            [(nuint)groupSize]);
     }
 
     public static void EmbedSum(
