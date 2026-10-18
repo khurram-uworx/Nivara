@@ -71,9 +71,10 @@ __kernel void rms_norm_gemv(
 - The decode kernel drops `aRows` (the launcher asserts it is 1 and the tile-shaped C1 body's
   `outRow < aRows` guards were the only use). The *launcher* signature keeps `aRows`, so the call
   sites do not move between C1 and C2.
-- Per group, `32 lanes x 4 columns = 128 columns`, which divides every real width exactly
-  (Qwen: 896/128 = 7 + 1 + 1 = 9 groups for QKV, 4864/128 = 38 for gate/up, 151936/128 = 1187 for the
-  head; SmolLM 576 and 192 produce a tail group, which the guards exercise).
+- Per group, `32 lanes x 4 columns = 128 columns`, which divides every Qwen width exactly
+  (896/128 = 7 + 1 + 1 = 9 groups for QKV, 4864/128 = 38 for gate/up, 151936/128 = 1187 for the
+  head; SmolLM 576 and 192 produce a tail group, whose surplus lanes the `col >= bCols` early return
+  discards).
 - Slot selection uses the existing pointer pattern; `hasBias == 0` means the store is the plain
   accumulator (no `acc + 0.0f`, which would canonicalize `-0.0f` and break identity).
 - `hasBias` precedent: `conv2d` already carries this exact flag
@@ -131,6 +132,35 @@ what attributes each win to its own benchmark round; merging them would report o
 effects. One kernel throughout (not a `rms_norm_qkv`/`rms_norm_gate_up` pair that a later commit
 deletes): the multi-slot factoring is identical in both shapes, and a name that lives for one commit
 is a name nobody can find again.
+
+## Stage log
+
+- **Stage 2 (C1, `78cb8b35`)**: tile-shaped `rms_norm_gemv`, eight cached call sites, exact-equality
+  fixture, SILK.md table, CHANGELOG. Verified: Release build clean (0 warnings); `dotnet format`
+  clean; Gpu+Qwen 29 passed / 2 skipped; the new fixture 3/3 on a real OpenCL device; Docs 67/67.
+  Round 1 measured (see Round log).
+- **Stage 3 (C2)**: decode-shaped. New `GEMVLANES` 32 / `GEMVCOLS` 128 macros, the
+  `GemvGroupSize` / `GemvBlockCols` / `GemvGroupCols` constants and `GemvGlobalCols`; the kernel
+  dropped `aRows` and the shared-memory tile; the launcher rejects `aRows != 1`. The launcher
+  signature is unchanged, so the eight call sites and the C1 fixture's assertions did not move.
+  - *Deviation from this plan, recorded*: the fixture did gain two tests. C1's widths are all whole
+    lanes (96 / 24 / 40 / 200), so nothing exercised the per-lane `avail` bound that keeps a lane
+    whose span runs past the width in bounds. Rather than leave that path unverified the fixture
+    gained a biased 25/26/27 case and a bias-free 27 case; its three C1 assertions are untouched and
+    still pass bit-identical. The fixtures' `<remarks>` paragraph was rewritten because it named C1's
+    guard expressions (`outCol < bCols` and friends), which C2 removed.
+  - *Choice, recorded*: the `avail` guards were kept rather than replaced by a `cols % BLOCK == 0`
+    precondition on the launcher. The tile kernel they replace guards each of its four columns the
+    same way, so this is the house pattern, and three loop-invariant predicates cost nothing in a
+    kernel that reads four floats per multiply-add.
+  - New device-free `SilkGemvGeometryTests`: macro/constant agreement, whole-group arithmetic,
+    zero idle lanes on every Qwen width, the SmolLM tail, no `aRows` in the fused kernel's signature
+    against `aRows` still in the tied-head tile kernel's, and the batch rejection.
+    `DocReferenceTests.ExpectedFileCount` 711 -> 712 with the arithmetic extended.
+- Found while editing `docs/SILK.md` in stage 3: two of its `SilkKernels.cs:` citations are stale on
+  `main` (`:69` for `KernelNames`, which stage 3 moves to 117; `:331` for `GEMM_ROW4_ACCUMULATE`, now
+  381). The citation gate only requires a cited line to *exist*, so it cannot see this. Fixed in its
+  own commit rather than folded into stage 3.
 
 ## Verification
 
