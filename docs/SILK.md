@@ -387,7 +387,7 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 
 ### 11.1 The kernel set
 
-`KernelNames` (`SilkKernels.cs:69`) is the build/creation order:
+`KernelNames` (`SilkKernels.cs:117`) is the build/creation order:
 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
@@ -441,7 +441,7 @@ returns zero — which is how a trailing output slot is omitted rather than laun
 
 ### 11.3 Bit-identity: the macro and the pragma
 
-The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:331`)
+The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:381`)
 deliberately: the byte-identity claim rests on every variant adding the same f32
 values to the same accumulators in the same order, so the text must not be able to drift between
 them. The store after the macro is the only difference. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
