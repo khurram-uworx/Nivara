@@ -1080,6 +1080,9 @@ static class Program
                 case "--laya-forward":
                     layaForward = true;
                     break;
+                case "--silk-laya-forward":
+                    silkLayaForward = true;
+                    break;
                 case "--only" when i + 1 < args.Length:
                     only = args[++i];
                     break;
