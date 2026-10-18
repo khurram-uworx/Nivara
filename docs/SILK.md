@@ -432,7 +432,7 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `swiglu` | `gate, up, y, rows, intermediate` | fused SwiGLU: `silu(gate) * up` |
 | `causal_gqa_attention` | `q, k, v, out, seqLen, numHeads, numKvHeads, headDim, scale` | causal GQA attention for prefill (attends j=0..qPos, KV-repeat) |
 | `decode_gqa_attention` | `q, kCache, vCache, out, kvLen, numHeads, numKvHeads, headDim, scale` | single-query decode attention over the KV cache (online softmax; one work-group per head, kvLen split across lanes) |
-| `gemm_gemv_add` | `a, b, c, residual, aCols, bCols` | flat single-row GEMV + residual add for cached-decode O-projection (#672) |
+| `gemm_gemv_add` | `a, b, c, residual, aCols, bCols` | flat single-row GEMV + residual add for cached-decode O-projection (#672, #681). Silk-only: no ILGPU counterpart; correctness pinned by exact equality to `gemm_row4_add` (aRows=1) and the CPU-reference gate cell, not by the ILGPU byte-identity list. |
 | `mlp_block` | `x, gamma, Wgate, Wup, Wdown, out, residual, hidden, intermediate, eps` | fused single-token MLP block for cached decode: RMSNorm, gate/up, SwiGLU, down-projection, residual (#672) |
 | `argmax` | `input, partialIndex, partialValue, n` | device-side partial argmax reduction (256 elements per work-group) |
 | `conv2d` | `input, weight, bias, output, N, C, H, W, outC, kH, kW, strideH, strideW, pad*, groups, hasBias, oH, oW` | NCHW convolution (grouped) |
@@ -471,6 +471,12 @@ outputs at rounding scale, systematically wrong and invisible to any tolerance.
 
 Transcendentals (`exp` in the softmax and the GELU erf) are **not** assumed identical to ILGPU's
 `XMath.Exp`; those cells gate on the model's numeric bound instead (§14).
+
+`gemm_gemv_add` (#681) is a Silk-only decode shape with no ILGPU counterpart, so it is
+deliberately **not** in the ILGPU byte-identity list. Its contraction is the same ascending-K
+`mul+add` as `gemm_row4_add` with `aRows == 1`, and that equivalence is pinned by
+`SilkGemmGemvAddTests` (bit-identity) plus the `MeasureCpuReference` cell in
+`SilkKernelsGate`.
 
 ## 12. The runtime (`SilkRuntime`)
 
