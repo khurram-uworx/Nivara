@@ -2,6 +2,11 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Nivara.AI;
+using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Nivara.Silk;
 using TypeSafeAI;
 
 namespace NivaraInference;
@@ -230,5 +235,94 @@ public static class NivaraTypeSafeLayaMapping
                 sb.Append(node.ToJsonString());
                 return;
         }
+    }
+}
+
+public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
+{
+    readonly string modelDir;
+    readonly object gate = new();
+    readonly Laya.AgentConfig agent;
+    readonly ModernBertConfig encoderConfig;
+    readonly Gpt2BpeTokenizer tokenizer;
+    readonly LayaCalibration calibration;
+    readonly ILayaGpuSession session;
+    readonly Stopwatch loadSw = Stopwatch.StartNew();
+    bool disposed;
+
+    public NivaraTypeSafeClient(string modelDir)
+    {
+        this.modelDir = modelDir;
+        string path = Path.Combine(modelDir, "model.safetensors");
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"Model file not found: {path}", path);
+
+        agent = Laya.LoadAgentConfig(modelDir);
+        encoderConfig = Laya.LoadEncoderConfig(modelDir);
+        tokenizer = Laya.LoadTokenizer(modelDir);
+        calibration = new LayaCalibration(agent.Temperature, agent.TemperatureByOptions);
+
+        var tensors = SafeTensorsLoader.Read(path);
+        session = SilkLayaSession.Open(encoderConfig, tensors, agent.HeadLayers);
+        loadSw.Stop();
+    }
+
+    public string DeviceName => session.DeviceName;
+    public long LoadMilliseconds => loadSw.ElapsedMilliseconds;
+
+    public IModelsResource Models { get; } = new ModelsResource();
+
+    public Task<SystemOneResponse> SystemOneAsync(
+        SystemOneRequest request, RequestOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var stateText = NivaraTypeSafeLayaMapping.ContentToText(request.State);
+        var stateIds = tokenizer.Encode(stateText.Replace("[MASK]", " ", StringComparison.Ordinal));
+
+        var answers = new Dictionary<string, Answer>(StringComparer.Ordinal);
+        int inputTokens = 0;
+
+        lock (gate)
+        {
+            foreach (var (id, question) in request.Questions)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var layaQuestion = NivaraTypeSafeLayaMapping.ToLayaQuestion(id, question);
+                var sequence = LayaPromptBuilder.BuildSequence(
+                    tokenizer, stateText, layaQuestion, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
+                var output = session.Forward(sequence.Ids, sequence.Length, layaQuestion.Type, sequence.Markers);
+                var decision = calibration.Decode(layaQuestion, output.Logits, output.ActionProbability);
+                answers[id] = NivaraTypeSafeLayaMapping.ToAnswer(question, decision);
+                inputTokens += sequence.Length;
+            }
+        }
+
+        var nouls = answers.Where(kv => kv.Value is NoulAnswer)
+            .ToDictionary(kv => kv.Key, kv => (NoulAnswer)kv.Value);
+        var choices = answers.Where(kv => kv.Value is ChoiceAnswer)
+            .ToDictionary(kv => kv.Key, kv => (ChoiceAnswer)kv.Value);
+        var scores = answers.Where(kv => kv.Value is ScoreAnswer)
+            .ToDictionary(kv => kv.Key, kv => (ScoreAnswer)kv.Value);
+
+        var response = new SystemOneResponse
+        {
+            Model = "convaiinnovations/laya",
+            Answers = answers,
+            Usage = new Usage { InputTokens = inputTokens, OutputTokens = 0 },
+        };
+        return Task.FromResult(response);
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        session.Dispose();
+    }
+
+    sealed class ModelsResource : IModelsResource
+    {
+        public Task<ModelsResponse> ListAsync(RequestOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Model listing is not supported by the in-process engine.");
     }
 }
