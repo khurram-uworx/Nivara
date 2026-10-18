@@ -913,7 +913,9 @@ internal static class SilkKernels
         }
 
         /* Decode (single-query) GQA attention. q: [numHeads*headDim], kCache/vCache: [kvLen, numKvHeads*headDim].
-           One work item per query head; attends j=0..kvLen-1 with KV-repeat. */
+           One work-group per query head; kvLen is split across the group's lanes and the per-lane
+           online-softmax partials (mx, sum, accv[]) are merged with the associative combination, so
+           the device is no longer limited to one thread per head. */
         __kernel void decode_gqa_attention(
             __global const float* q,
             __global const float* kCache,
@@ -925,8 +927,11 @@ internal static class SilkKernels
             const uint headDim,
             const float scale)
         {
-            uint h = get_global_id(0);
+            uint h = get_group_id(0);
             if (h >= numHeads) return;
+
+            uint lid = get_local_id(0);
+            uint gsize = get_local_size(0);
 
             uint repeat = numHeads / numKvHeads;
             uint kvHead = h / repeat;
@@ -936,22 +941,18 @@ internal static class SilkKernels
             uint kBaseHead = kvHead * headDim;
             uint vBaseHead = kvHead * headDim;
 
-            // Fused online-softmax attention: each q*k is computed once; running max
-            // (mx) and unnormalised accumulators (sum, accv[]) are rescaled in place.
-            if (kvLen == 0u)
-            {
-                for (uint d = 0; d < headDim; ++d)
-                    out[qBase + d] = 0.0f;
-                return;
-            }
+            __local float lmx[ATTNGROUP];
+            __local float lsum[ATTNGROUP];
+            __local float laccv[ATTNGROUP * MAXHEADDIM];
 
-            float accv[64];
+            // Per-lane online-softmax partial (same ascending-j / ascending-d order as before).
+            float mx = -INFINITY;
+            float sum = 0.0f;
+            float accv[MAXHEADDIM];
             for (uint d = 0; d < headDim; ++d)
                 accv[d] = 0.0f;
 
-            float mx = -INFINITY;
-            float sum = 0.0f;
-            for (uint j = 0; j < kvLen; ++j)
+            for (uint j = lid; j < kvLen; j += gsize)
             {
                 float acc = 0.0f;
                 uint kBase = j * Dkv + kBaseHead;
@@ -978,16 +979,53 @@ internal static class SilkKernels
                     accv[d] += w * vCache[vBase + d];
             }
 
-            if (mx == -INFINITY)
+            lmx[lid] = mx;
+            lsum[lid] = sum;
+            for (uint d = 0; d < headDim; ++d)
+                laccv[lid * MAXHEADDIM + d] = accv[d];
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            // Merge partials: associative online-softmax combination.
+            for (uint stride = gsize / 2; stride > 0; stride >>= 1)
             {
-                for (uint d = 0; d < headDim; ++d)
-                    out[qBase + d] = 0.0f;
-                return;
+                if (lid < stride)
+                {
+                    uint other = lid + stride;
+                    float mx_a = lmx[lid];
+                    float mx_b = lmx[other];
+                    float mx_new = mx_a > mx_b ? mx_a : mx_b;
+
+                    float corr_a = (mx_a == -INFINITY) ? 0.0f : exp(mx_a - mx_new);
+                    float corr_b = (mx_b == -INFINITY) ? 0.0f : exp(mx_b - mx_new);
+
+                    float sum_new = lsum[lid] * corr_a + lsum[other] * corr_b;
+                    for (uint d = 0; d < headDim; ++d)
+                        laccv[lid * MAXHEADDIM + d] =
+                            laccv[lid * MAXHEADDIM + d] * corr_a +
+                            laccv[other * MAXHEADDIM + d] * corr_b;
+
+                    lmx[lid] = mx_new;
+                    lsum[lid] = sum_new;
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
             }
 
-            float invSum = 1.0f / sum;
-            for (uint d = 0; d < headDim; ++d)
-                out[qBase + d] = accv[d] * invSum;
+            if (lid == 0)
+            {
+                float mx_final = lmx[0];
+                float sum_final = lsum[0];
+                if (mx_final == -INFINITY || sum_final == 0.0f)
+                {
+                    for (uint d = 0; d < headDim; ++d)
+                        out[qBase + d] = 0.0f;
+                }
+                else
+                {
+                    float invSum = 1.0f / sum_final;
+                    for (uint d = 0; d < headDim; ++d)
+                        out[qBase + d] = laccv[0 * MAXHEADDIM + d] * invSum;
+                }
+            }
         }
 
         /* Partial reduction for device-side argmax (#663). Each work-group reduces up to
