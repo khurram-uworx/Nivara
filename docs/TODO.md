@@ -99,16 +99,34 @@ Experiments run as probe-local legs first; only the winner touches `src/Nivara/T
 - Phase 3: probe variants first, then targeted perf gate (`--compare`) and targeted tests
   `TensorsHelperTests`, `GradKernelsTests`. Full suite only with human confirmation.
 
+## Outcome summary
+
+- Phase 1 landed: `InferenceDiagnostics` now records the fused CPU inference path.
+  Representative Laya pass (valid=512, real checkpoint, 28 layers, 226 ops):
+  CPU-Encoder-GeGLU 54.5%, CPU-Encoder-Attention 24.3%, CPU-Encoder-QKV 14.0%,
+  CPU-Encoder-OProj 5.2%; instrumented total 4968.6 ms vs forward 5461 ms.
+  Norms/RoPE/residual are each under 1%.
+- Phase 2 landed: `--cpu-gemm` now uses 5 warmups plus 20 interleaved rounds and reports
+  medians, and adds a `NoRentCopy` leg. The `NoRentCopy` leg does not improve on
+  `AutoDiff` (within run-to-run noise), so the hypothesised `RentCopy`/`clearArray`
+  cost is not the 6x small-M gap; that gap is not reproduced under the interleaved protocol
+  (single-row swings are run-to-run noise). `AutoDiff` vs `Blocked` is ~1% at both S=128
+  and S=512, so there is no shape-regime case for porting the blocked kernel into core.
+- Phase 3 (managed `MultiplyCore`): exit criteria not met (no material gain while preserving
+  S=512). No edit to `TensorsHelper.cs`. `ShouldParallelize` and pooled-buffer handling
+  stay as they are.
+- Phase 4 (native BLAS, `docs/BLAS-MKL.md` §5-§7) remains deferred per the decision rule;
+  the managed legs already sit within ~1% of each other, so native would now need to beat the
+  interleaved `AutoDiff` median, not a stale best-of-5 row.
+
 ## Planned commits
 
+Actual landed commits on `khurram/458`:
 1. `docs: plan #458 CPU gap attribution and small-M GEMM in TODO.md`
-2. `feat: add InferenceDiagnostics and instrument ModernBert encoder`
-3. `test: cover InferenceDiagnostics disabled path`
-4. `feat: interleave --cpu-gemm small-M measurement and add no-rent-copy leg`
-5. `docs: update --cpu-gemm small-M protocol and medians`
-6. `test: add TensorsHelper perf variant gates` (probe-only experiments)
-7. `perf: apply winning managed GEMM tweak to MultiplyCore` (if warranted)
-8. `docs: remove TODO.md — plan executed`
+2. `feat: add InferenceDiagnostics for fused CPU inference path`
+3. `feat: instrument fused ModernBERT inference path for per-op attribution`
+4. `perf: interleave --cpu-gemm small-M measurement and add no-rent-copy leg`
+5. `test: cover InferenceDiagnostics disabled path`
 
 ## GitHub issues log
 
