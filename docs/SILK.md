@@ -392,7 +392,7 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
  Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
- RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd,
+ RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock,
  Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d]
 ```
 
@@ -432,6 +432,8 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `swiglu` | `gate, up, y, rows, intermediate` | fused SwiGLU: `silu(gate) * up` |
 | `causal_gqa_attention` | `q, k, v, out, seqLen, numHeads, numKvHeads, headDim, scale` | causal GQA attention for prefill (attends j=0..qPos, KV-repeat) |
 | `decode_gqa_attention` | `q, kCache, vCache, out, kvLen, numHeads, numKvHeads, headDim, scale` | single-query decode attention over the KV cache (online softmax; one work-group per head, kvLen split across lanes) |
+| `gemm_gemv_add` | `a, b, c, residual, aCols, bCols` | flat single-row GEMV + residual add for cached-decode O-projection (#672) |
+| `mlp_block` | `x, gamma, Wgate, Wup, Wdown, out, residual, hidden, intermediate, eps` | fused single-token MLP block for cached decode: RMSNorm, gate/up, SwiGLU, down-projection, residual (#672) |
 | `argmax` | `input, partialIndex, partialValue, n` | device-side partial argmax reduction (256 elements per work-group) |
 | `conv2d` | `input, weight, bias, output, N, C, H, W, outC, kH, kW, strideH, strideW, pad*, groups, hasBias, oH, oW` | NCHW convolution (grouped) |
 | `batchnorm_eval` | `x, mean, var, gamma, beta, y, N, C, HW, eps, hasAffine` | batch norm in eval mode |
