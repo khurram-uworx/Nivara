@@ -279,4 +279,42 @@ public class Gpt2BpeTokenizerTests
     {
         Assert.That(ModernBertTokenizer.Encode("[unused1]"), Is.EqualTo(new[] { 50286 }));
     }
+
+    [Test]
+    public void LoadFromTokenizerJson_DerivesNfcFromNormalizerBlock()
+    {
+        string path = Path.Combine(ModernBertDir, "tokenizer.json");
+        if (!File.Exists(path))
+            Assert.Ignore("ModernBERT tokenizer absent; skipping NFC derivation verification.");
+
+        // Default (no override) must follow the file's declared NFC normalizer.
+        var tokenizer = Gpt2BpeTokenizer.LoadFromTokenizerJson(path, unkToken: "[UNK]");
+        const string decomposed = "cafe\u0301";
+        Assert.That(tokenizer.Encode(decomposed).Count, Is.LessThan(
+            Gpt2BpeTokenizer.LoadFromTokenizerJson(path, unkToken: "[UNK]", normalizeNfc: false).Encode(decomposed).Count));
+    }
+
+    [Test]
+    public void LoadFromTokenizerJson_UnsupportedNormalizer_ThrowsNamingTransform()
+    {
+        const string unk = "[UNK]";
+        var vocab = new Dictionary<string, int> { ["a"] = 0, [unk] = 1 };
+        string json = "{\"model\":{\"vocab\":" + System.Text.Json.JsonSerializer.Serialize(vocab)
+            + ",\"merges\":[]},\"normalizer\":{\"type\":\"nmt_nfkc\"}}";
+
+        string dir = Path.Combine(Path.GetTempPath(), "nivara-nfc-tests");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "unsupported-normalizer.json");
+        File.WriteAllText(path, json);
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(
+                () => Gpt2BpeTokenizer.LoadFromTokenizerJson(path, unkToken: unk));
+            Assert.That(ex!.Message, Does.Contain("nmt_nfkc"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -81,8 +81,9 @@ public sealed class Gpt2BpeTokenizer
         string vocabPath,
         string mergesPath,
         string unkToken = "<|endoftext|>",
-        string? tokenizerJsonPath = null)
-        : this(JsonVocab(File.ReadAllText(vocabPath)), ReadMergesFile(mergesPath), tokenizerJsonPath, unkToken, normalizeNfc: false)
+        string? tokenizerJsonPath = null,
+        bool? normalizeNfc = null)
+        : this(JsonVocab(File.ReadAllText(vocabPath)), ReadMergesFile(mergesPath), tokenizerJsonPath, unkToken, normalizeNfc)
     {
     }
 
@@ -91,21 +92,27 @@ public sealed class Gpt2BpeTokenizer
         List<(string, string)> merges,
         string? tokenizerJsonPath,
         string unkToken,
-        bool normalizeNfc)
+        bool? normalizeNfcOverride = null)
     {
         this.vocab = vocab;
-        this.normalizeNfc = normalizeNfc;
         idToToken = new Dictionary<int, string>(vocab.Count);
         foreach (var (token, id) in vocab)
             idToToken[id] = token;
 
         addedTokens = new Dictionary<string, int>();
         addedTokenIds = new HashSet<int>();
+        declaredSplitRegex = null;
         if (tokenizerJsonPath != null)
         {
             var json = File.ReadAllText(tokenizerJsonPath);
             MergeAddedTokens(json);
             declaredSplitRegex = LoadSplitRegex(json);
+            bool derived = ReadNormalizer(json);
+            this.normalizeNfc = normalizeNfcOverride ?? derived;
+        }
+        else
+        {
+            this.normalizeNfc = normalizeNfcOverride ?? false;
         }
 
         if (!vocab.TryGetValue(unkToken, out unkTokenId) && !addedTokens.TryGetValue(unkToken, out unkTokenId))
@@ -131,7 +138,7 @@ public sealed class Gpt2BpeTokenizer
     public static Gpt2BpeTokenizer LoadFromTokenizerJson(
         string tokenizerJsonPath,
         string unkToken = "<|endoftext|>",
-        bool normalizeNfc = true)
+        bool? normalizeNfc = null)
     {
         var json = File.ReadAllText(tokenizerJsonPath);
         using var doc = JsonDocument.Parse(json);
@@ -315,7 +322,7 @@ public sealed class Gpt2BpeTokenizer
         {
             // Qwen pipeline: split the RAW normalized text with the declared regex (Isolated),
             //  byte-map each chunk, then BPE per chunk — merges never cross chunk boundaries.
-            var normalized = text.Normalize(NormalizationForm.FormC);
+            var normalized = normalizeNfc ? text.Normalize(NormalizationForm.FormC) : text;
             foreach (var chunk in PretokenizeSplit(normalized, declaredSplitRegex))
                 AppendChunkIds(ids, chunk);
             return ids;
@@ -364,7 +371,7 @@ public sealed class Gpt2BpeTokenizer
 
         if (declaredSplitRegex != null)
         {
-            var normalized = text.Normalize(NormalizationForm.FormC);
+            var normalized = normalizeNfc ? text.Normalize(NormalizationForm.FormC) : text;
             foreach (var chunk in PretokenizeSplit(normalized, declaredSplitRegex))
                 foreach (var piece in Bpe(MapBytesToChars(chunk)))
                     result.Add(piece);
@@ -502,6 +509,61 @@ public sealed class Gpt2BpeTokenizer
         return pattern == null
             ? null
             : new Regex(pattern, RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    }
+
+    /// <summary>
+    /// Reads the <c>normalizer</c> block from a tokenizer.json and returns whether NFC
+    /// normalization should be applied. Throws <see cref="InvalidOperationException"/> when
+    /// the file declares a transform this tokenizer does not support, naming that transform.
+    /// </summary>
+    static bool ReadNormalizer(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("normalizer", out var norm) || norm.ValueKind == JsonValueKind.Null)
+            return false;
+        return ReadNormalizerElement(norm);
+    }
+
+    static bool ReadNormalizerElement(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Null)
+            return false;
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            bool any = false;
+            foreach (var item in element.EnumerateArray())
+                any |= ReadNormalizerElement(item);
+            return any;
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            string? type = element.GetString();
+            return type switch
+            {
+                "NFC" => true,
+                null or "" or "None" or "Identity" => false,
+                _ => throw new InvalidOperationException(
+                    $"Unsupported normalizer transform '{type}'."),
+            };
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException(
+                $"Unsupported normalizer block '{element.ValueKind}'.");
+
+        string? t = element.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : null;
+        return t switch
+        {
+            null or "" or "None" or "Identity" => false,
+            "NFC" => true,
+            "Sequence" => element.TryGetProperty("normalizers", out var list) && list.ValueKind == JsonValueKind.Array
+                ? ReadNormalizerElement(list)
+                : false,
+            _ => throw new InvalidOperationException(
+                $"Unsupported normalizer transform '{t}'."),
+        };
     }
 
     static string? TryReadRegexPattern(JsonElement split)
