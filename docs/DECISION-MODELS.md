@@ -69,9 +69,10 @@ dotnet run --project samples/NivaraInference -c Release -- typesafe ollama bench
 ```
 
 The protocol is the repo's existing one, the same as `laya benchmark`: **1 warmup + 3 timed passes
-per news item, median reported**. It deliberately does not take `--warmup` / `--iters` — those are
-`modernbert benchmark` options, pinned as such by the CLI's scope guard; extending that scope is
-tracked in [#676](https://github.com/khurram-uworx/Nivara/issues/676).
+per news item, median reported** — the defaults, kept so an invocation that does not ask for more
+samples sees no change. `--warmup N` and `--iters N` raise the counts (this scope was opened by
+[#676](https://github.com/khurram-uworx/Nivara/issues/676)); `--seq` remains `modernbert
+benchmark`-only, since it names a sequence shape rather than a sample count.
 
 **A sample is a whole HTTP round trip** — client serialization + transport + engine inference — so
 these numbers are *not* comparable with `laya benchmark`, which times an in-process forward pass
