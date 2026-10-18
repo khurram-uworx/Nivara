@@ -13,7 +13,7 @@ one engine against another.
 
 ## Engines
 
-Two local engines speak the same route today:
+Three local engines speak the same route today:
 
 | Engine | Default URL | Default model | What else it holds |
 |--------|-------------|---------------|--------------------|
@@ -21,7 +21,7 @@ Two local engines speak the same route today:
 | **Ollama 0.35+** | `http://localhost:11434` | `tev1:0.8b` | `nimble` (9B), `tev1` (4B) — see the [announcement](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models) |
 | **Nivara (in-process)** | in-process (Silk F32) | `convaiinnovations/laya` | no HTTP round trip; one engine forward per question; forwards serialised per request |
 
-Because the route is identical, the two are interchangeable from a client's point of view: only
+Because the route is identical, the engines are interchangeable from a client's point of view: only
 the base URL and the model name change. That is the shape OpenAI's Chat Completions API gave text
 models — one request/response contract that many servers implement, so a decision model becomes a
 drop-in behind a stable endpoint. It is roughly what "OpenAI Chat Completions" is becoming for
@@ -49,12 +49,20 @@ dotnet run --project samples/NivaraInference -c Release -- typesafe             
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama                     # Ollama, tev1:0.8b
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama --model tev1:0.8b   # model made explicit
 dotnet run --project samples/NivaraInference -c Release -- typesafe --url http://host:11434 --model tev1:0.8b
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara                     # in-process Silk F32
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara benchmark           # timed in-process assessments
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara verify              # compare in-process vs Ollaya
 ```
 
-- **`engine`** is `ollaya` (the default) or `ollama`. It is a positional because engines are a
-  table, not a set of flags: a third engine later is one row, not another boolean to type.
-- **`mode`** is empty (the news assessment) or `benchmark`. The two positional token sets are
-  disjoint, which is what lets one slot hold both.
+`verify` keeps the typed decision as the hard gate and reports per-item/per-question deltas on
+per-option probability, `AnswerConfidence`, and score. Observed maxima on the six news items:
+per-option probability 0.0000, score 0.0000, `AnswerConfidence` 0.2507; the probability and
+score deltas are the quantities expected to stay within 1e-3.
+
+- **`engine`** is `ollaya` (the default), `ollama`, or `nivara`. It is a positional because engines
+  are a table, not a set of flags: a third engine later is one row, not another boolean to type.
+- **`mode`** is empty (the news assessment), `benchmark`, or `verify`. The two positional token
+  sets are disjoint, which is what lets one slot hold both.
 - **`--url`** takes a *required* absolute http(s) URL. Required rather than optional is a parsing
   decision: an optional value is a non-flag token that competes with the mode, and a mode read as a
   URL rejects a well-formed command.
@@ -69,6 +77,7 @@ yes/no questions and two score questions — and prints the answer and confidenc
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- typesafe benchmark
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama benchmark
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara benchmark
 ```
 
 The protocol is the repo's existing one, the same as `laya benchmark`: **1 warmup + 3 timed passes
@@ -77,26 +86,41 @@ samples sees no change. `--warmup N` and `--iters N` raise the counts (this scop
 [#676](https://github.com/khurram-uworx/Nivara/issues/676)); `--seq` remains `modernbert
 benchmark`-only, since it names a sequence shape rather than a sample count.
 
-**A sample is a whole HTTP round trip** — client serialization + transport + engine inference — so
-these numbers are *not* comparable with `laya benchmark`, which times an in-process forward pass
-over weights. The CLI prints that caveat in its own output so a reader does not line the tables up.
+A sample is a whole decision-model round trip through `/v1/systemone` (client serialization +
+transport + engine inference) — for the in-process `nivara` engine there is no transport, but each
+sample is still a whole `SystemOneAsync` call of six encoder forwards on the device. These numbers
+are *not* comparable with `laya benchmark`, which times a single in-process forward pass over
+weights. The in-process row is not transport-dominated, while the HTTP rows are; read the ratios
+within a row, not across rows.
 
-First numbers, both engines on one machine (Windows, .NET 11, Release build), sequential, one
-request at a time — two runs of the same command, back to back:
+Side by side, run one, one machine (Windows, .NET 11, Release build, sequential, one request at
+a time):
 
 | Engine | Model | Overall median | items/s |
 |--------|-------|----------------|---------|
-| Ollaya | `laya:en` | 653.5–862 ms | 1.2–1.5 |
-| Ollama | `tev1:0.8b` | 2457.5–2743.5 ms | 0.4 |
+| Ollaya | `laya:en` | 653.5 ms | 1.5 |
+| Ollama | `tev1:0.8b` | 2457.5 ms | 0.4 |
+| Nivara (in-process) | `convaiinnovations/laya` | 1417 ms | 0.7 |
 
-The overall median is the median of the six per-item medians — for an even count that is the mean
-of the two middle values, which is why the figures carry a `.5`. The ranges are two back-to-back
-runs: within a run each item's maximum sits within ~3% of its median, but absolute latency drifts
-run to run (Ollaya's overall moved +32% between the two runs, Ollama's +12%), so use these to
-compare engines only by re-running both, not as fixed figures. What held is the ordering and the
-ratio — Ollama was 3.8× Ollaya in run one and 3.2× in run two.
+Per news item (median ms, run one):
 
-Per item, run one — Ollaya:
+| Item | Ollaya | Nivara (in-process) | Ollama |
+|------|--------|---------------------|--------|
+| 1 | 668 | 1456 | 2267 |
+| 2 | 613 | 1386 | 2361 |
+| 3 | 719 | 1597 | 2483 |
+| 4 | 630 | 1387 | 2432 |
+| 5 | 655 | 1416 | 2910 |
+| 6 | 652 | 1418 | 2730 |
+| **Overall median** | **653.5** | **1417** | **2457.5** |
+
+What the items show: Nivara is consistently faster than Ollama and slower than Ollaya on this
+machine; within a run each item's maximum sat within ~3% of its median. Absolute latency drifts run
+to run (Ollaya's overall moved +32% between two back-to-back runs, Ollama's +12%), so use these to
+compare engines only by re-running both. Nivara model load was 4881 ms and the first (warmup) request
+includes kernel compilation.
+
+Per-engine detail, run one — Ollaya:
 
 ```
   item       median        min        max
@@ -110,7 +134,7 @@ Per item, run one — Ollaya:
 Overall: median 653.5 ms per assessment across 6 items, 1.5 items/s sequential at those medians.
 ```
 
-Per item, run one — Ollama:
+Per-engine detail, run one — Ollama:
 
 ```
   item       median        min        max
@@ -124,35 +148,9 @@ Per item, run one — Ollama:
 Overall: median 2457.5 ms per assessment across 6 items, 0.4 items/s sequential at those medians.
 ```
 
-Run two, same commands with nothing changed in between: Ollaya overall median **862 ms**
-(1.2 items/s), Ollama **2743.5 ms** (0.4 items/s). Both numbers moved; the ordering and the
-ratio band did not. `items/s` is derived from the per-item medians, so it describes sequential
-latency at those medians, not batched capacity — and it is the ratio, not either absolute, that a
-reader should carry away.
+Per-engine detail, run one — Nivara (in-process):
 
-Every figure above comes from the CLI's own output, so re-running the two commands replaces them
-with your machine's numbers in the same shape.
-
-
-The in-process `nivara` row is not comparable with the HTTP rows above (no transport) nor with
-`laya benchmark` (one forward): its sample is a whole `SystemOneAsync` call, six encoder forwards on
-the device.
-
-## In-process (Nivara) benchmark
-
-`typesafe nivara benchmark` runs the same 1-warmup + 3-timed-pass protocol, with each sample a whole
-`SystemOneAsync` call (six encoder forwards on the device, no transport). It is not comparable with
-the HTTP rows above or with `laya benchmark` (one forward); it is here for order of magnitude only.
-
-First numbers (Windows, .NET 11, Release, Intel Graphics OpenCL, sequential):
-
-| Engine | Model | Device | Overall median | items/s |
-|--------|-------|--------|----------------|---------|
-| Nivara (in-process) | `convaiinnovations/laya` | Intel Graphics (Silk F32) | 1417 ms | 0.7 |
-
-Per item:
-
-```text
+```
   item       median        min        max
      1    1456 ms    1455 ms    1632 ms
      2    1386 ms    1381 ms    1400 ms
@@ -164,7 +162,22 @@ Per item:
 Overall: median 1417 ms per assessment across 6 items, 0.7 items/s sequential at those medians.
 ```
 
-Model load 4881 ms; the first (warmup) request includes kernel compilation.
+Run two, same commands back to back with nothing changed in between: Ollaya overall
+median **862 ms** (1.2 items/s), Ollama **2743.5 ms** (0.4 items/s). Both numbers moved; the
+ordering and the ratio band did not. `items/s` is derived from the per-item medians, so it
+describes sequential latency at those medians, not batched capacity — and it is the ratio, not
+either absolute, that a reader should carry away.
+
+Every figure above comes from the CLI's own output, so re-running the three commands replaces
+them with your machine's numbers in the same shape.
+
+## Correctness check: `typesafe nivara verify`
+
+`typesafe nivara verify` keeps the typed decision as the hard gate and reports per-item/per-question
+deltas on per-option probability, `AnswerConfidence`, and score. Current run on the six news items:
+per-option probability 0.0000, score 0.0000, `AnswerConfidence` 0.2507; the probability and score
+deltas are the quantities expected to stay within 1e-3. The command exits non-zero only on a typed
+decision disagreement.
 
 ## See also
 

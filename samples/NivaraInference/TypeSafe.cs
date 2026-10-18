@@ -337,6 +337,7 @@ public static class TypeSafe
                 bool agree = DecisionsAgree(left, right);
                 if (!agree) failures++;
                 Console.WriteLine($"  {id}: {(agree ? "AGREE" : "DISAGREE")}  in={Summarize(left)}  http={Summarize(right)}");
+                Console.WriteLine($"    deltas: {DescribeDeltas(left, right)}");
             }
         }
 
@@ -355,6 +356,82 @@ public static class TypeSafe
         if (left is NoulAnswer ln && right is NoulAnswer rn)
             return (ln.Probability >= 0.5) == (rn.Probability >= 0.5);
         return false;
+    }
+
+    private const double VerifyDeltaTolerance = 1e-3;
+
+    private static double AnswerConfidence(Answer answer) => answer switch
+    {
+        ChoiceAnswer c => c.Confidence,
+        ScoreAnswer s => s.Confidence,
+        NoulAnswer n when n.AdditionalData is not null
+            && n.AdditionalData.TryGetValue("answer_confidence", out var element)
+            && element.TryGetDouble(out double value) => value,
+        NoulAnswer n when n.AdditionalData is not null
+            && n.AdditionalData.TryGetValue("confidence", out var confidenceElement)
+            && confidenceElement.TryGetDouble(out double confidenceValue) => confidenceValue,
+        _ => double.NaN,
+    };
+
+    private static string FormatDelta(double delta)
+        => double.IsNaN(delta) ? "n/a" : (delta >= 0 ? "+" : "") + delta.ToString("F4");
+
+    private static string WorstTag(double worst)
+        => double.IsNaN(worst) ? "n/a"
+            : (worst <= VerifyDeltaTolerance ? $"max|Δ|={worst:F4} (within {VerifyDeltaTolerance:g})" : $"max|Δ|={worst:F4} (OUT OF TOLERANCE {VerifyDeltaTolerance:g})");
+
+    private static string DescribeDeltas(Answer left, Answer right) => (left, right) switch
+    {
+        (ChoiceAnswer lc, ChoiceAnswer rc) => DescribeChoiceDeltas(lc, rc),
+        (ScoreAnswer ls, ScoreAnswer rs) => DescribeScoreDeltas(ls, rs),
+        (NoulAnswer ln, NoulAnswer rn) => DescribeNoulDeltas(ln, rn),
+        _ => $"type mismatch: {left.GetType().Name} vs {right.GetType().Name}",
+    };
+
+    private static string DescribeChoiceDeltas(ChoiceAnswer left, ChoiceAnswer right)
+    {
+        double worst = 0;
+        var parts = new List<string>();
+        foreach (string key in left.Probabilities.Keys.Union(right.Probabilities.Keys).OrderBy(k => k, StringComparer.Ordinal))
+        {
+            double lp = left.Probabilities.TryGetValue(key, out double lValue) ? lValue : double.NaN;
+            double rp = right.Probabilities.TryGetValue(key, out double rValue) ? rValue : double.NaN;
+            double delta = double.IsNaN(lp) || double.IsNaN(rp) ? double.NaN : lp - rp;
+            if (!double.IsNaN(delta) && Math.Abs(delta) > worst) worst = Math.Abs(delta);
+            parts.Add($"{key}:{FormatDelta(delta)}");
+        }
+        double confidenceDelta = left.Confidence - right.Confidence;
+        if (Math.Abs(confidenceDelta) > worst) worst = Math.Abs(confidenceDelta);
+        return $"choice-prob [{string.Join(", ", parts)}]; AnswerConfidence Δ={FormatDelta(confidenceDelta)}; {WorstTag(worst)}";
+    }
+
+    private static string DescribeScoreDeltas(ScoreAnswer left, ScoreAnswer right)
+    {
+        double worst = Math.Abs(left.Score - right.Score);
+        var probParts = new List<string>();
+        foreach (int key in left.Probabilities.Keys.Union(right.Probabilities.Keys).OrderBy(k => k))
+        {
+            double lp = left.Probabilities.TryGetValue(key, out double lValue) ? lValue : double.NaN;
+            double rp = right.Probabilities.TryGetValue(key, out double rValue) ? rValue : double.NaN;
+            double delta = double.IsNaN(lp) || double.IsNaN(rp) ? double.NaN : lp - rp;
+            if (!double.IsNaN(delta) && Math.Abs(delta) > worst) worst = Math.Abs(delta);
+            probParts.Add($"{key}:{FormatDelta(delta)}");
+        }
+        double confidenceDelta = left.Confidence - right.Confidence;
+        if (Math.Abs(confidenceDelta) > worst) worst = Math.Abs(confidenceDelta);
+        return $"score Δ={FormatDelta(left.Score - right.Score)}; level-prob [{string.Join(", ", probParts)}]; AnswerConfidence Δ={FormatDelta(confidenceDelta)}; {WorstTag(worst)}";
+    }
+
+    private static string DescribeNoulDeltas(NoulAnswer left, NoulAnswer right)
+    {
+        double probabilityDelta = left.Probability - right.Probability;
+        double worst = Math.Abs(probabilityDelta);
+        double lc = AnswerConfidence(left);
+        double rc = AnswerConfidence(right);
+        double confidenceDelta = double.IsNaN(lc) || double.IsNaN(rc) ? double.NaN : lc - rc;
+        if (!double.IsNaN(confidenceDelta) && Math.Abs(confidenceDelta) > worst) worst = Math.Abs(confidenceDelta);
+        string confidenceText = double.IsNaN(confidenceDelta) ? "n/a" : $"AnswerConfidence Δ={FormatDelta(confidenceDelta)}";
+        return $"probability Δ={FormatDelta(probabilityDelta)}; {confidenceText}; {WorstTag(worst)}";
     }
 
     private static string Summarize(Answer answer) => answer switch
