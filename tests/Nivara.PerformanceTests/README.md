@@ -330,14 +330,17 @@ milliseconds. (Same class of instability as the single-row variance noted under
 `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm`
 
 Measures what the CPU can do at the same shapes the GPU gate uses, so the two backends are
-compared on identical inputs rather than across harnesses. Three legs, all gated
-`maxAbs(leg - double-precision truth) <= 1e-3` against the same truth the GPU gate uses:
+compared on identical inputs rather than across harnesses. **Four legs** as of #458, all gated
+`maxAbs(leg - double-precision truth) <= 1e-3` against the same truth the GPU gate uses. Timing is
+5 untimed warmups per leg followed by 20 interleaved rounds (first-measured leg alternates each
+round); the printed `best ms` column is the median of those 20 rounds, not best-of-N.
 
 | leg | what it is |
 |---|---|
 | `AutoDiff` | `GradKernels.MatMulTransposedB`, B as `[N x K]`, no per-call transpose - what the AutoDiff path calls |
 | `BTranspose` | `GradKernels.MatMul`, B as `[K x N]`, transposes B on every call |
 | `Blocked` | probe-local `Parallel.For` + `Vector<float>` register accumulators held across the whole K loop, A and B read in place with no `RentCopy` and no staging copy |
+| `NoRentCopy` | probe-local copy of `MultiplyCore`'s parallel path that reads A in place (no `RentCopy`, no `clearArray`) — isolates the pooled-copy cost; added in #458 |
 
 `Blocked` exists because there is no BCL matrix multiply to compare against
 (`TensorPrimitives.Dot` is the *vector* dot product; `Tensor.MatrixMultiply` has not
@@ -381,7 +384,13 @@ pays the transpose on every call. Their 2414 vs 2791 ms gap (1.16x overall, 1.51
 `laya head ff2`) is therefore the measured cost of not hoisting it, and hoisting it is what
 the GPU path already does.
 
-**Not delivered.** The plan also asked for the pooled `bT` staging buffer and
+**#458 protocol change (2026-10).** `--cpu-gemm` now reports the median of 20 interleaved rounds
+instead of best-of-5 per leg, and includes the `NoRentCopy` leg. Under that protocol the
+`NoRentCopy` leg does not improve on `AutoDiff`, and `Blocked` sits within ~1% of `AutoDiff`
+at both M=128 and M=512. `AutoDiff` vs `BTranspose` remains the real, layout-driven gap. The
+6-10x "small-M GEMM inefficiency" recorded under best-of-5 is not reproduced under
+interleaved measurement and is treated as run-to-run noise, most likely `ArrayPool`
+`clearArray` interacting with GC. The pooled-copy cost (`RentCopy`) is real but sub-percent.
 `RentCopy(a)` to be reported separately, on the grounds that they are copies rather than
 GEMM work. The `bT` half of that is what the `AutoDiff`/`BTranspose` pair above measures, so
 it is covered. The `RentCopy` half was not measured: it sits inside the parallel path that
