@@ -431,7 +431,7 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `silu` | `x, y, n` | elementwise SiLU (swish) activation |
 | `swiglu` | `gate, up, y, rows, intermediate` | fused SwiGLU: `silu(gate) * up` |
 | `causal_gqa_attention` | `q, k, v, out, seqLen, numHeads, numKvHeads, headDim, scale` | causal GQA attention for prefill (attends j=0..qPos, KV-repeat) |
-| `decode_gqa_attention` | `q, kCache, vCache, out, kvLen, numHeads, numKvHeads, headDim, scale` | single-query decode attention over the KV cache (online softmax) |
+| `decode_gqa_attention` | `q, kCache, vCache, out, kvLen, numHeads, numKvHeads, headDim, scale` | single-query decode attention over the KV cache (online softmax; one work-group per head, kvLen split across lanes) |
 | `argmax` | `input, partialIndex, partialValue, n` | device-side partial argmax reduction (256 elements per work-group) |
 | `conv2d` | `input, weight, bias, output, N, C, H, W, outC, kH, kW, strideH, strideW, pad*, groups, hasBias, oH, oW` | NCHW convolution (grouped) |
 | `batchnorm_eval` | `x, mean, var, gamma, beta, y, N, C, HW, eps, hasAffine` | batch norm in eval mode |
