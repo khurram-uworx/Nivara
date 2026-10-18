@@ -1,7 +1,7 @@
 # TODO — Parameterize the decision-model and add `typesafe benchmark`
 
-Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya dispatch and
-`--ollama` support are already on it and pushed as PR #675).
+Branch: `khurram/typesafe` (continuing the landed work — the demo move and Ollaya dispatch are
+already on it and pushed as PR #675).
 
 ## Problem
 
@@ -9,7 +9,7 @@ Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya
    Both servers hold models the demo cannot reach, so a user with a different decision model
    installed has no way to run it.
 2. There is no way to measure a decision model's latency through this CLI, so comparing decision
-   models or the two backend servers (Ollaya vs Ollama) means eyeballing the assessment output.
+   models or the two backend engines (Ollaya vs Ollama) means eyeballing the assessment output.
 
 ## Decisions confirmed with the human
 
@@ -17,11 +17,22 @@ Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya
   flags, not encoded into the URL). Defaults stay Ollaya `laya:en` / Ollama `tev1:0.8b`.
 - Benchmark = **"warmup + median"**, the repo's existing protocol.
 - Ollaya is started by the human (`ollaya serve`), not by this work.
-- **Restrict to the told models.** Both servers currently hold exactly one decision model each —
-  Ollaya `laya:en`, Ollama `tev1:0.8b` — and not every model on a server is a decision model
+- **Restrict to the told models.** Both engines currently hold exactly one decision model each —
+  Ollaya `laya:en`, Ollama `tev1:0.8b` — and not every model on an engine is a decision model
   (Ollama's `beam:cloud` answers `400 beam is not a decision model`). So examples, docs and
-  verification use only those two; `--model` stays a general override because the server is the
+  verification use only those two; `--model` stays a general override because the engine is the
   authority on what is a decision model.
+- **CLI shape reworked to `typesafe [engine] [mode] [--url <url>] [--model <name>]`**, replacing
+  phase 1's `--ollama [url]`. The human's reasoning: a third engine later should be a row in a
+  table, not another boolean flag. Three things forced this over keeping `--ollama`:
+  (a) its *optional* value is a non-flag token that competes with the mode, which really did
+  misparse `typesafe --ollama benchmark` as a URL and reject a well-formed command — a
+  required-value `--url` has no such token; (b) one boolean flag per engine does not scale to a
+  third provider; (c) `--url` says what it does where `--ollama <url>` did not. **No alias** for
+  `--ollama`: this is the first implementation and it never merged, so the flag simply does not
+  exist. The human also settled the terminology: *engine* (not server/provider) in prose.
+- **No `--warmup`/`--iters` on `typesafe benchmark`** — see #676; `laya benchmark` is explicitly
+  *not* part of that issue, since it is an in-process path rather than a round trip.
 
 ## Grounding (verified before implementation)
 
@@ -68,34 +79,72 @@ Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya
    - Usage: document the mode.
    - Gate tests: `typesafe benchmark --warmup 1` → rejected by the existing modernbert-only scope
      (pins that the fixed protocol is not silently swappable); coverage doc line updated.
-3. **Docs** — `samples/NivaraInference/README.md` (quick-start lines for `--model` and
-   `typesafe benchmark`, and the section) plus a sentence in `docs/LAYA.md`'s ecosystem overview.
-   Prose/bash only → no snippet-gate impact, but `DocReferenceTests`' pinned document-reference
-   count moves if a `docs/…md` link is added (re-pin deliberately).
+3. **Docs — one new document, not two patched ones** (the human's call, after the content landed in
+   both the sample README and `docs/LAYA.md`): **`docs/DECISION-MODELS.md`** holds the ecosystem
+   (what a decision model is, the TypeSafe route, the two engines, "not every model is a decision
+   model"), the demo's command line, and `typesafe benchmark`'s protocol **plus the measured
+   numbers from PR #675**. `samples/NivaraInference/README.md` keeps a table, five commands and a
+   link; `docs/LAYA.md`'s ecosystem section shrinks from ~20 lines to a pointer, so neither is
+   polluted. Re-pinned `DocReferenceTests`: `ExpectedFileCount` 709 → 710 (+ the new file) and
+   `ExpectedDocumentReferenceCount` 360 → 363 (+1 README link, −1 README's old `docs/LAYA.md` link,
+   +1 in `docs/LAYA.md`, +2 `docs/LAYA.md` mentions in the new doc — the extractor only counts
+   `docs/…md` occurrences, so the parts sum to +3).
+
+## Commits (status)
+
+1. `3deb0fce` **`--model <name>` (typesafe-only)** — value consumed even when nonsense (the `--text`
+   pattern), scope guard, resolved into `TypeSafeClientOptions.DefaultModel` (the SDK's per-request
+   resolution at `TypeSafeClient.cs:72` makes this the one parameterization point; no SDK change),
+   usage text, two gate cases. **Live-verified on both engines.**
+2. **CLI rework to `typesafe [engine] [mode] [--url <url>] [--model <name>]`** — `--ollama` removed
+   (no alias; it never merged), engine as a positional over a table in `TypeSafe.cs`, `--url` as a
+   required value, `--url`/`--model` scope guards, engine-positional + `--url` gate cases. Verified:
+   build clean, 4 targeted cases pass.
+3. **`typesafe benchmark`** — `SupportedModes["typesafe"]` gains `"benchmark"`, runner in
+   `TypeSafe.cs` (1 warmup + 3 timed per item, per-item median/min/max, overall median + items/s,
+   exit 1 when every request failed), shared question set/news items so the timed request is the
+   demo's request, usage text, `--warmup`/`--iters` rejection cases. Verified: build clean,
+   6 targeted cases pass.
+4. **Docs** — `docs/DECISION-MODELS.md` new; README and `docs/LAYA.md` slimmed to pointers; pins
+   re-set as above; this plan updated.
 
 ## Verification steps
 
-- `dotnet build Nivara.slnx -c Release` after each code commit.
-- Targeted: `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"`.
-  Known pre-existing environmental failures: the two Qwen checkpoint cases (#673).
-- Live, on both servers (happy path is deliberately ungated — CI has no servers), restricted to
-  the told decision models: `typesafe`, `typesafe --model laya:en`, `typesafe benchmark`,
-  `typesafe --ollama`, `typesafe --ollama --model tev1:0.8b`, `typesafe --ollama benchmark`.
-- `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` + the documentation
-  snippet gate before concluding. Full suite only with the human's go-ahead.
+- `dotnet build … -c Release` after each code commit ✅ (0 warnings, 0 errors) — **Release only**,
+  per the Debug-build rule for any timing-bearing measurement.
+- Targeted gate: `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"` →
+  **44 passed / 2 failed**, the two pre-existing environmental Qwen checkpoint cases (#673);
+  total 44 → 46 with the new cases ✅.
+- Live, on **both engines** (happy path deliberately ungated — CI has no engines), restricted to the
+  told decision models — all exit 0 ✅: `typesafe`, `typesafe ollama`,
+  `typesafe --url http://localhost:11435 --model laya:en`, `typesafe benchmark`,
+  `typesafe ollama benchmark`.
+- Reject paths, all exit 1 with their pinned message ✅: `typesafe bogus`, `typesafe ollama bogus`,
+  `typesafe ollama ollaya`, `minilm ollama`, `minilm --url …`, `typesafe --url` (missing),
+  `typesafe --url not-a-url`, `typesafe --model` (missing/blank), `minilm --model …`,
+  `typesafe benchmark --warmup 1`.
+- Benchmark results posted to PR #675 and copied into `docs/DECISION-MODELS.md`; **two runs
+  recorded** because absolute latency drifted ~30% run to run while the ordering held
+  (Ollama 3.4× then 2.8× Ollaya). The doc says to re-run both rather than trust the absolutes.
+- Remaining: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`, the
+  documentation snippet gate, and `DocReferenceTests`. Full suite only with the human's go-ahead.
 
 ## Blast radius
 
-- `samples/NivaraInference/Program.cs` — one parse branch, one scope guard, one dictionary entry,
-  usage lines. All existing guards and pinned messages untouched.
-- `samples/NivaraInference/TypeSafe.cs` — `Run` signature, model resolution, new benchmark runner.
-  Sole caller is the one dispatch site in `Program.cs`.
-- `tests/Nivara.Tests/Inference/InferenceCliArgumentTests.cs` — new reject cases + a coverage
-  line. Existing cases unaffected (`typesafe` was already a key; `--model` is new).
-- docs only otherwise. **No `src/` changes; no public library contract; CHANGELOG not required.**
+- `samples/NivaraInference/Program.cs` — one parse branch (`--url`), one engine-positional branch,
+  two scope guards, dispatch, usage lines. The pinned `--warmup`/`--iters`, `--ilgpu`,
+  `--precision` and mode-allow-list messages are untouched.
+- `samples/NivaraInference/TypeSafe.cs` — engine table + `Resolve`/`CreateClient`/`BuildQuestions`
+  helpers, `Run`, `Benchmark`. Sole caller is the one dispatch site in `Program.cs`.
+- `tests/Nivara.Tests/Inference/InferenceCliArgumentTests.cs` — `Ollama_Beyond…` replaced by
+  `Url_BeyondItsScopeOrWithoutAValue_Rejected`; new `EnginePositional_…` and `Model_…`;
+  `typesafe benchmark` cases inside `SeqWarmupIters_OnNonModernBertModel_Rejected`; `benchmark` is
+  no longer asserted as an unsupported mode for `typesafe` (it is one now).
+- docs: `docs/DECISION-MODELS.md` (new), `docs/LAYA.md`, `samples/NivaraInference/README.md`.
+  **No `src/` changes; no public library contract; CHANGELOG not required.**
 
 ## GitHub issues log
 
-- [ ] #NNN — deferred: allow `--warmup`/`--iters` on `typesafe benchmark` (they are pinned to
-  modernbert by #474's gate message), so users can raise the sample count for stable medians
-  against a slow server. Create with `gh issue create --repo khurram-uworx/Nivara` while working.
+- [x] #676 — created: allow `--warmup`/`--iters` on `typesafe benchmark` (pinned to modernbert by
+  #474's gate message) so users can raise the sample count against a slow engine. Scoped to
+  `typesafe` only — `laya benchmark` is an in-process path and deliberately out of scope.

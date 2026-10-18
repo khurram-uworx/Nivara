@@ -22,9 +22,11 @@ public class DocReferenceTests
     /// minus the deleted samples <c>IBertEncoderRunner.cs</c>. 698 = 696 +
     /// <c>docs/BLAS-MKL.md</c> and <c>tests/Nivara.PerformanceTests/LayaForwardProbe.cs</c>
     /// added by the #492 reconciliation. 700 = 698 + the two SmolLM Silk files
-    /// (<c>SilkSmolLMGpuRunner.cs</c>, <c>SilkSmolLMSession.cs</c>) added by #628.
+    /// (<c>SilkSmolLMGpuRunner.cs</c>, <c>SilkSmolLMSession.cs</c>) added by #628. 710 = 709 +
+    /// <c>docs/DECISION-MODELS.md</c>, the decision-model ecosystem doc split out of the
+    /// inference sample's README and <c>docs/LAYA.md</c>.
     /// </summary>
-    const int ExpectedFileCount = 709;
+    const int ExpectedFileCount = 710;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered. Pinned deliberately.
@@ -36,7 +38,7 @@ public class DocReferenceTests
     /// <c>samples/NivaraInference/README.md</c> (a markdown link counts twice: its text and its
     /// target).
     /// </summary>
-    const int ExpectedDocumentReferenceCount = 360;
+    const int ExpectedDocumentReferenceCount = 363;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;

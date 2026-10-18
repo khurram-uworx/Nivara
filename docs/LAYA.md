@@ -11,21 +11,11 @@ Related: the encoder's GPU reflection in [docs/ACCELERATION.md](ACCELERATION.md)
 Laya is not served by a text-completion API. It is a **decision model**: the caller declares its
 questions up front — a choice, a yes/no, a score — and the server returns a typed answer with a
 confidence for each, rather than free-form text. The wire protocol for that is the **TypeSafe
-"System One"** API, and two local servers speak it today:
+"System One"** API, which several local engines speak interchangeably, so Laya is a drop-in behind
+a stable endpoint rather than a bespoke server.
 
-- **Ollaya** — the local decision-model server used by this project, serving `laya:en` at
-  `http://localhost:11435`. It arrived first and is the default in the inference sample.
-- **Ollama 0.35+** — exposes the *same* `POST /v1/systemone` route at `http://localhost:11434`,
-  alongside its own decision models `nimble` (9B), `tev1` (4B) and `tev1:0.8b` (0.8B). See the
-  [Ollama decision-model announcement](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models).
-
-Because the route is identical, the two are interchangeable from a client's point of view: only
-the base URL and the model name change. That is the shape OpenAI's Chat Completions API gave text
-models — one request/response contract that many servers implement, so a decision model becomes a
-drop-in behind a stable endpoint. It is roughly what "OpenAI Chat Completions" is becoming for
-decision models. The `typesafe` demo in
-[`samples/NivaraInference`](../samples/NivaraInference/README.md) leans on exactly that property:
-one TypeSafe client, and `--ollama` swaps the server.
+The engines, the `typesafe` demo's command line, and how to time one engine against another are in
+[docs/DECISION-MODELS.md](DECISION-MODELS.md).
 
 ## Model overview
 
