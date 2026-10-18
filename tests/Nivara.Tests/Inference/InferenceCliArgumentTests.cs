@@ -17,7 +17,7 @@ namespace Nivara.Tests.Inference;
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
 /// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
-/// and the <c>--url</c>, <c>--model</c> and engine-positional scope). The <c>typesafe</c>
+/// and the <c>--url</c>, <c>--model</c>, engine-positional and benchmark scope). The <c>typesafe</c>
 /// happy path is
 /// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
 /// observable before the first disk touch, so the ordering cases and the <c>qwen</c> happy paths use
@@ -72,6 +72,11 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("minilm", "benchmark", "--seq", "128"), expected);
         AssertRejected(Run("minilm", "benchmark", "--warmup", "2"), expected);
         AssertRejected(Run("minilm", "benchmark", "--iters", "2"), expected);
+
+        // 'typesafe benchmark' uses the fixed 1-warmup-3-timed protocol on purpose (#676), so it
+        // is held to the same scope: the fixed protocol is not silently swappable.
+        AssertRejected(Run("typesafe", "benchmark", "--warmup", "2"), expected);
+        AssertRejected(Run("typesafe", "benchmark", "--iters", "2"), expected);
     }
 
     [Test]
@@ -383,14 +388,17 @@ public class InferenceCliArgumentTests
     /// The TypeSafe demo is a model key whose run is an HTTP client, not a checkpoint, so its
     /// dispatch sits before the model-file lookup. Each reject therefore has to name its own guard
     /// rather than fall through to "Model file not found". The happy path is deliberately absent:
-    /// it needs a live decision engine, which a CI runner does not have.
+    /// it needs a live decision engine, which a CI runner does not have — and neither does it
+    /// assert <c>benchmark</c> as unsupported here, because it is a supported mode (the pinned
+    /// reason it cannot take <c>--warmup</c>/<c>--iters</c> is in
+    /// <see cref="SeqWarmupIters_OnNonModernBertModel_Rejected"/>).
     /// </summary>
     [Test]
     public void Typesafe_BeyondItsCliSurface_Rejected()
     {
         Assert.Multiple(() =>
         {
-            AssertRejected(Run("typesafe", "benchmark"), "Unsupported mode 'benchmark' for 'typesafe'");
+            AssertRejected(Run("typesafe", "predict"), "Unsupported mode 'predict' for 'typesafe'");
             AssertRejected(Run("typesafe", "--ilgpu"), "--ilgpu is not supported for 'typesafe'");
             AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
         });

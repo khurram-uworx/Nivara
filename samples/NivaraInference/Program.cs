@@ -37,7 +37,7 @@ class Program
         ["qwen"] = ["", "tools", "distill", "benchmark"],
         // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
         // checkpoint, and it dispatches before the model-file lookup below.
-        ["typesafe"] = [""],
+        ["typesafe"] = ["", "benchmark"],
     };
 
     static readonly Dictionary<string, string[]> GpuModes = new()
@@ -318,11 +318,15 @@ class Program
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
             Console.WriteLine("TypeSafe (no checkpoint; calls a decision-model engine over HTTP):");
-            Console.WriteLine("  typesafe [engine]   engine: ollaya (default) | ollama. Both engines expose the TypeSafe");
-            Console.WriteLine("                    /v1/systemone API. Defaults per engine:");
+            Console.WriteLine("  typesafe [engine] [mode]   engine: ollaya (default) | ollama; mode: benchmark. Both");
+            Console.WriteLine("                    engines expose the TypeSafe /v1/systemone API. Defaults per engine:");
             Console.WriteLine("                    Ollaya http://localhost:11435 laya:en, Ollama http://localhost:11434 tev1:0.8b.");
             Console.WriteLine("      e.g. 'typesafe'                   news assessment on Ollaya");
             Console.WriteLine("           'typesafe ollama'            news assessment on Ollama");
+            Console.WriteLine("           'typesafe ollama benchmark'  timed assessments on Ollama");
+            Console.WriteLine("  typesafe benchmark  1 warmup + 3 timed passes per news item, median reported. A sample is a");
+            Console.WriteLine("                    full HTTP round trip, so these numbers are not comparable with 'laya");
+            Console.WriteLine("                    benchmark' (in-process forward passes).");
             Console.WriteLine("  --url <url>       Engine endpoint instead of the default; must be an absolute http(s) URL.");
             Console.WriteLine("  --model <name>    Decision model to load on that engine; e.g. 'typesafe ollama --model tev1:0.8b'.");
             Console.WriteLine("                    Not every model an engine holds is a decision model; the engine rejects the others.");
@@ -587,7 +591,9 @@ class Program
         // The TypeSafe demo has no checkpoint: it calls a decision-model engine over HTTP, so it
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
         if (modelType == "typesafe")
-            return TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult();
+            return mode == "benchmark"
+                ? TypeSafe.Benchmark(engine, urlArg, modelArg).GetAwaiter().GetResult()
+                : TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult();
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");

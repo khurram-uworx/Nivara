@@ -13,6 +13,10 @@ namespace NivaraInference;
 /// Engines are a table, not a set of CLI flags: the CLI takes one as a positional
 /// (<c>typesafe &lt;engine&gt; [mode]</c>), so adding a third engine is one row here.
 /// </para>
+/// <para>
+/// <c>typesafe benchmark</c> times the same request the demo sends, so both paths share their
+/// question set and news items; only the loop differs.
+/// </para>
 /// </summary>
 public static class TypeSafe
 {
@@ -24,6 +28,9 @@ public static class TypeSafe
         ["ollaya"] = new("ollaya", "http://localhost:11435", "laya:en"),
         ["ollama"] = new("ollama", "http://localhost:11434", "tev1:0.8b"),
     };
+
+    private const int WarmupPasses = 1;
+    private const int TimedPasses = 3;
 
     /// <summary>Engine used when the CLI is given none.</summary>
     public const string DefaultEngine = "ollaya";
@@ -108,6 +115,103 @@ public static class TypeSafe
         }
 
         Console.WriteLine("\nDone.");
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>typesafe benchmark</c>. The same protocol as <c>laya benchmark</c> — one warmup pass then
+    /// a fixed number of timed passes, median reported — but the unit of work is different: a
+    /// sample here is a whole <c>/v1/systemone</c> round trip (client serialization + transport +
+    /// server inference), whereas <c>laya benchmark</c> times an in-process forward pass. The two
+    /// sets of numbers are therefore not comparable, and the output says so rather than letting a
+    /// reader line the tables up.
+    /// </summary>
+    public static async Task<int> Benchmark(string engine, string? urlOverride, string? modelOverride)
+    {
+        var (target, url, model) = Resolve(engine, urlOverride, modelOverride);
+
+        Console.WriteLine("=== NivaraInference — TypeSafeAI Decision-Model Benchmark ===\n");
+        Console.WriteLine($"Connecting to {DisplayName(target)} at {url} (model: {model})...\n");
+
+        var client = CreateClient(target, url, model);
+
+        // Built the same way the demo builds it, so the timed request is the demo's request.
+        var q = BuildQuestions().Set;
+
+        Console.WriteLine($"{WarmupPasses} warmup + {TimedPasses} timed passes per news item, median reported.");
+        Console.WriteLine("Each sample is one full /v1/systemone round trip: client + transport + engine");
+        Console.WriteLine("inference. 'laya benchmark' times in-process forward passes, so its numbers are");
+        Console.WriteLine("not comparable with these.");
+        Console.WriteLine();
+        Console.WriteLine($"  {"item",-6} {"median",10} {"min",10} {"max",10}");
+
+        var medians = new List<long>(NewsItems.Length);
+        int failedItems = 0;
+
+        for (int i = 0; i < NewsItems.Length; i++)
+        {
+            var item = NewsItems[i];
+            var samples = new long[TimedPasses];
+            int recorded = 0;
+            string? error = null;
+
+            try
+            {
+                for (int pass = 0; pass < WarmupPasses; pass++)
+                    await client.SystemOneAsync(item, q);
+            }
+            catch (Exception ex)
+            {
+                error = $"{ex.GetType().Name}: {ex.Message}";
+            }
+
+            while (error is null && recorded < TimedPasses)
+            {
+                var sw = Stopwatch.StartNew();
+                try
+                {
+                    await client.SystemOneAsync(item, q);
+                }
+                catch (Exception ex)
+                {
+                    error = $"{ex.GetType().Name}: {ex.Message}";
+                    break;
+                }
+                sw.Stop();
+                samples[recorded++] = sw.ElapsedMilliseconds;
+            }
+
+            if (recorded == 0)
+            {
+                failedItems++;
+                Console.WriteLine($"  {i + 1,4}          [ERROR] {error}");
+                continue;
+            }
+
+            Array.Sort(samples, 0, recorded);
+            long median = samples[recorded / 2];
+            medians.Add(median);
+            Console.WriteLine($"  {i + 1,4} {median,7} ms {samples[0],7} ms {samples[recorded - 1],7} ms");
+        }
+
+        if (medians.Count == 0)
+        {
+            Console.Error.WriteLine(
+                $"\nAll {NewsItems.Length} assessments failed. Is the {DisplayName(target)} engine running at {url}?");
+            return 1;
+        }
+
+        long[] ordered = [.. medians];
+        Array.Sort(ordered);
+        long overall = ordered[^((ordered.Length + 1) / 2)];
+        double totalMs = medians.Sum();
+
+        Console.WriteLine();
+        Console.WriteLine($"Overall: median {overall} ms per assessment across {medians.Count} items" +
+            $"{(failedItems > 0 ? $" ({failedItems} failed, excluded)" : "")}, " +
+            $"{1000.0 * medians.Count / totalMs:F1} items/s sequential at those medians.");
+        Console.WriteLine(
+            failedItems == 0 ? "\nDone." : $"\n{failedItems} of {NewsItems.Length} items failed; see the rows above.");
         return 0;
     }
 
