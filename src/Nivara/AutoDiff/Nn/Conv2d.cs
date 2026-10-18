@@ -5,7 +5,6 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
 
 namespace Nivara.AutoDiff.Nn;
 

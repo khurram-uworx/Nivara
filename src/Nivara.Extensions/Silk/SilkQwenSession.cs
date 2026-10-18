@@ -1,5 +1,3 @@
-using Nivara.AI;
-
 namespace Nivara.Silk;
 
 public sealed class SilkQwenSession : IDisposable

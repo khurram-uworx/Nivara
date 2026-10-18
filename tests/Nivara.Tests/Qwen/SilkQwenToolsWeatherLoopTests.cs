@@ -1,8 +1,6 @@
 using Nivara.AI;
-using Nivara.Silk;
 using Nivara.Samples;
-using NivaraChat.Qwen;
-using Microsoft.Extensions.AI;
+using Nivara.Silk;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Qwen;

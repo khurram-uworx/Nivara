@@ -1,5 +1,4 @@
 using Nivara.Silk;
-using Nivara.Samples;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Qwen;

@@ -1,5 +1,3 @@
-using System;
-
 namespace Nivara.Silk;
 
 public sealed class SilkMobileNetV2GpuRunner : IDisposable

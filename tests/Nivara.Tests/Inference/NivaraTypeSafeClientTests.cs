@@ -1,9 +1,7 @@
-using NUnit.Framework;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using TypeSafeAI;
-using NivaraInference;
 using Nivara.AI;
+using NivaraInference;
+using NUnit.Framework;
+using TypeSafeAI;
 
 namespace Nivara.Tests.Inference;
 

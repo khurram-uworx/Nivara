@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using TypeSafeAI;
 
-using System.IO;
-
 namespace NivaraInference;
 
 /// <summary>

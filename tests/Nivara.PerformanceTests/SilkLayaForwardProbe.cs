@@ -1,7 +1,7 @@
-using System.Text.Json;
 using Nivara.AI;
 using Nivara.Silk;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace Nivara.PerformanceTests;
 

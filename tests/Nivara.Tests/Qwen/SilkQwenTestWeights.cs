@@ -1,5 +1,3 @@
-using Nivara.AutoDiff.Nn;
-using Nivara.Silk;
 using Nivara.Samples;
 
 namespace Nivara.Tests.Qwen;
