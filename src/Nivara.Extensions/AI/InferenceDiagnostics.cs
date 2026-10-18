@@ -1,5 +1,6 @@
 using Nivara;
 using Nivara.Diagnostics;
+using System.Numerics;
 
 namespace Nivara.AI;
 
