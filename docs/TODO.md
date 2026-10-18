@@ -131,6 +131,20 @@ capability check. Default: file a follow-up issue and skip B unless measurement 
 7. docs: record #672 measurement outcome
 8. docs: remove TODO.md — plan executed
 
+## Grounding (G1)
+
+- OpenCL device max work-group size on the target iGPU (Intel Graphics) is 256 (typical), so a
+  single-work-group fusion needing `numHeads * AttentionGroupSize` (896 for Qwen) threads is not
+  feasible. A2 therefore cannot truly avoid the context buffer on this hardware; A1's flat GEMV is
+  the realizable win. If a future device reports >= 896, the single-work-group variant can be
+  prototyped behind a capability check.
+- code-memory confirms `DecodeGqaAttention` has only two host call sites (SilkLauncher + parity test)
+  and the launcher is the sole dispatch site, so swapping the runner call site is low-blast.
+- `gemm_row4_add` callers: SilkQwenGpuRunner and SilkSmolLMGpuRunner cached-decode only (plus
+  perf probes). No other consumers.
+- `rms_norm_gemv` is decode-only (aRows must be 1); any new flat GEMV follows the same single-row
+  constraint and must not be used by prefill.
+
 ## GitHub issues log
 
 - (none yet)
