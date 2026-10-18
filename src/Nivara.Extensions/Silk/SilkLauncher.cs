@@ -228,6 +228,19 @@ internal static class SilkLauncher
             [(nuint)groupSize]);
     }
 
+    /// <summary>Combined cached-decode attention + O-projection (#672, Stage A2): runs
+    /// <c>decode_gqa_attention</c> into <paramref name="contextScratch"/> then the flat O-proj
+    /// GEMV. Device work-group limits prevent true single-buffer fusion, so the scratch buffer
+    /// is retained internally.</summary>
+    public static void DecodeGqaAttentionOproj(
+        SilkRuntime runtime, nint q, nint kCache, nint vCache, nint contextScratch,
+        nint Wo, nint residual, nint outBuf, int kvLen, int numHeads, int numKvHeads,
+        int headDim, int qDim, int hiddenDim, float scale)
+    {
+        DecodeGqaAttention(runtime, q, kCache, vCache, contextScratch, kvLen, numHeads, numKvHeads, headDim, scale);
+        GemmGemvAdd(runtime, contextScratch, Wo, outBuf, residual, qDim, hiddenDim);
+    }
+
     public static void EmbedSum(
         SilkRuntime runtime, nint ids, nint posIds, nint word, nint pos, nint tokenType, nint y,
         int total, int hidden, int includeTokenType)
@@ -329,6 +342,51 @@ internal static class SilkLauncher
             SilkKernels.GemmAdd,
             [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
             [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
+
+    /// <summary>Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
+    /// a is [aCols], b is [aCols*bCols] (B row-major), result c = a·B + residual. Single row only.</summary>
+    public static void GemmGemvAdd(
+        SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aCols, int bCols)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        runtime.SetBuffer(SilkKernels.GemmGemvAdd, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmGemvAdd, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmGemvAdd, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmGemvAdd, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmGemvAdd, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAdd, 5, (uint)bCols);
+        int threads = SilkKernels.GemvGlobalCols(bCols);
+        runtime.Run(
+            SilkKernels.GemmGemvAdd,
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    /// <summary>Fused single-token MLP block for cached decode (#672, Stage B): RMSNorm(x) feeds
+    /// gate/up, SwiGLU, down-projection, plus the residual add, in one launch. Single row only.</summary>
+    public static void MlpBlock(
+        SilkRuntime runtime, nint x, nint gamma, nint Wgate, nint Wup, nint Wdown,
+        nint outBuf, nint residual, int hidden, int intermediate, float eps)
+    {
+        if (hidden <= 0) throw new ArgumentOutOfRangeException(nameof(hidden));
+        if (intermediate <= 0) throw new ArgumentOutOfRangeException(nameof(intermediate));
+        if (intermediate > 5120) throw new ArgumentOutOfRangeException(nameof(intermediate), "exceeds MLP_MAX_INTERMEDIATE");
+        runtime.SetBuffer(SilkKernels.MlpBlock, 0, x);
+        runtime.SetBuffer(SilkKernels.MlpBlock, 1, gamma);
+        runtime.SetBuffer(SilkKernels.MlpBlock, 2, Wgate);
+        runtime.SetBuffer(SilkKernels.MlpBlock, 3, Wup);
+        runtime.SetBuffer(SilkKernels.MlpBlock, 4, Wdown);
+        runtime.SetBuffer(SilkKernels.MlpBlock, 5, outBuf);
+        runtime.SetBuffer(SilkKernels.MlpBlock, 6, residual);
+        runtime.SetUInt32(SilkKernels.MlpBlock, 7, (uint)hidden);
+        runtime.SetUInt32(SilkKernels.MlpBlock, 8, (uint)intermediate);
+        runtime.SetFloat32(SilkKernels.MlpBlock, 9, eps);
+        runtime.Run(
+            SilkKernels.MlpBlock,
+            [(nuint)SilkKernels.LinearGroupSize],
+            [(nuint)SilkKernels.LinearGroupSize]);
     }
 
     /// <summary>Fused <c>RMSNorm(x)</c> followed by one to three independent projections, which share

@@ -376,20 +376,11 @@ public sealed class SilkQwenGpuRunner : IDisposable
             runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
 
             int kvLen = position + 1;
-            SilkLauncher.DecodeGqaAttention(runtime, q.Handle, kCache[li], vCache[li], context.Handle, kvLen, numHeads, numKvHeads, headDim, scale);
+            SilkLauncher.DecodeGqaAttentionOproj(runtime, q.Handle, kCache[li], vCache[li], context.Handle,
+                w.Wo, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
 
-            SilkLauncher.GemmAdd(runtime, context.Handle, w.Wo, x.Handle, x.Handle, 1, qDim, hiddenDim);
-
-            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.PostNormW,
-                [
-                    new(w.Wgate, 0, gate.Handle, intermediateDim),
-                    new(w.Wup, 0, up.Handle, intermediateDim),
-                ],
-                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
-
-            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, intermediateDim);
-
-            SilkLauncher.GemmAdd(runtime, mlp.Handle, w.Wdown, x.Handle, x.Handle, 1, intermediateDim, hiddenDim);
+            SilkLauncher.MlpBlock(runtime, x.Handle, w.PostNormW, w.Wgate, w.Wup, w.Wdown,
+                x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
@@ -528,20 +519,11 @@ public sealed class SilkQwenGpuRunner : IDisposable
             runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
 
             int kvLen = position + 1;
-            SilkLauncher.DecodeGqaAttention(runtime, q.Handle, kCache[li], vCache[li], context.Handle, kvLen, numHeads, numKvHeads, headDim, scale);
+            SilkLauncher.DecodeGqaAttentionOproj(runtime, q.Handle, kCache[li], vCache[li], context.Handle,
+                w.Wo, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
 
-            SilkLauncher.GemmAdd(runtime, context.Handle, w.Wo, x.Handle, x.Handle, 1, qDim, hiddenDim);
-
-            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.PostNormW,
-                [
-                    new(w.Wgate, 0, gate.Handle, intermediateDim),
-                    new(w.Wup, 0, up.Handle, intermediateDim),
-                ],
-                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
-
-            SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, intermediateDim);
-
-            SilkLauncher.GemmAdd(runtime, mlp.Handle, w.Wdown, x.Handle, x.Handle, 1, intermediateDim, hiddenDim);
+            SilkLauncher.MlpBlock(runtime, x.Handle, w.PostNormW, w.Wgate, w.Wup, w.Wdown,
+                x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);

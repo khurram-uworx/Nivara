@@ -102,6 +102,12 @@ internal static class SilkKernels
     // Fused multi-op helpers (#657).
     public const string GemmAdd = "gemm_row4_add";
 
+    // Flat single-row GEMV + residual for cached decode O-projection (#672, Stage A1).
+    public const string GemmGemvAdd = "gemm_gemv_add";
+
+    // Fused single-token MLP block for cached decode (#672, Stage B): norm + gate/up + SwiGLU + down + residual.
+    public const string MlpBlock = "mlp_block";
+
     // Device-side reduction for causal-LM greedy decode (#663).
     public const string ArgMax = "argmax";
 
@@ -118,7 +124,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd,
+        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
@@ -1281,6 +1287,95 @@ internal static class SilkKernels
                 if (avail > 1u) c[col + 1u] = a1;
                 if (avail > 2u) c[col + 2u] = a2;
                 if (avail > 3u) c[col + 3u] = a3;
+            }
+        }
+
+        /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
+           a is [aCols], b is [aCols * bCols] row-major (B[k, outCol]), result c[outCol] =
+           sum_k a[k]*b[k*bCols+outCol] + residual[outCol]. One work item per BLOCK output
+           columns, single accumulator over k ascending, no shared-memory staging. */
+        __kernel void gemm_gemv_add(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            __global const float* residual,
+            const uint aCols,
+            const uint bCols)
+        {
+            uint col = get_global_id(0) * BLOCK;
+            if (col >= bCols) return;
+
+            uint avail = bCols - col;
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            for (uint k = 0; k < aCols; ++k)
+            {
+                float av = a[k];
+                uint bBase = k * bCols + col;
+                a0 += av * b[bBase];
+                if (avail > 1u) a1 += av * b[bBase + 1u];
+                if (avail > 2u) a2 += av * b[bBase + 2u];
+                if (avail > 3u) a3 += av * b[bBase + 3u];
+            }
+
+            c[col] = a0 + residual[col];
+            if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+            if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+            if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+        }
+
+        /* Fused single-token MLP block for cached decode (#672, Stage B): RMSNorm(x) feeds
+           gate/up, SwiGLU, down-projection, plus the residual add, in one launch. Shared memory
+           holds the intermediate swiglu vector (max 5120 columns). One work-group of 256 lanes. */
+        #define MLP_MAX_INTERMEDIATE 5120
+        __kernel void mlp_block(
+            __global const float* x,
+            __global const float* gamma,
+            __global const float* Wgate,
+            __global const float* Wup,
+            __global const float* Wdown,
+            __global float* out,
+            __global const float* residual,
+            const uint hidden,
+            const uint intermediate,
+            const float eps)
+        {
+            uint lid = get_local_id(0);
+            uint gsize = get_local_size(0);
+
+            __local float swiglu[MLP_MAX_INTERMEDIATE];
+
+            // norm scale (each lane computes identically; cheap relative to the GEMVs)
+            float ssq = 0.0f;
+            for (uint k = 0; k < hidden; ++k)
+            {
+                float v = x[k];
+                ssq += v * v;
+            }
+            float normScale = 1.0f / sqrt(ssq / (float)hidden + eps);
+
+            // phase 1: gate/up/swiglu into shared memory
+            for (uint i = lid; i < intermediate; i += gsize)
+            {
+                float g = 0.0f, u = 0.0f;
+                for (uint k = 0; k < hidden; ++k)
+                {
+                    float nk = x[k] * normScale * gamma[k];
+                    g += nk * Wgate[k * intermediate + i];
+                    u += nk * Wup[k * intermediate + i];
+                }
+                float siluGate = g / (1.0f + exp(-g));
+                swiglu[i] = siluGate * u;
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            // phase 2: down projection + residual
+            for (uint j = lid; j < hidden; j += gsize)
+            {
+                float acc = 0.0f;
+                for (uint i = 0; i < intermediate; ++i)
+                    acc += swiglu[i] * Wdown[i * hidden + j];
+                out[j] = acc + residual[j];
             }
         }
         """;
