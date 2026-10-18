@@ -78,7 +78,7 @@ internal static class SilkKernels
     // SmolLM (Llama-family causal LM) kernels.
     public const string RmsNorm = "rms_norm";
     public const string RmsNormLmHead = "rms_norm_lm_head";
-    public const string RmsNormGemmBias = "rms_norm_gemm_bias";
+    public const string RmsNormGemv = "rms_norm_gemv";
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
     public const string CausalGqaAttention = "causal_gqa_attention";
@@ -103,7 +103,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, RmsNormLmHead, RmsNormGemmBias, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd,
+        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
@@ -1109,22 +1109,69 @@ internal static class SilkKernels
             }
         }
 
-        /* Fused RMSNorm + GEMM + bias. Norm weights and bias are absorbed into the entry. */
-        __kernel void rms_norm_gemm_bias(
+        /* Fused RMSNorm + multi-output GEMM. The norm weights are absorbed into the entry, the
+           normalization is computed once per group, and that group then writes one of up to three
+           output slots (cached-decode Q/K/V, gate/up, or the tied head). A slot whose column count
+           is zero is unreachable, because its group count is zero, so an unused slot needs no
+           buffers. hasBias == 0 stores the plain accumulator: a zero bias with hasBias != 0 would
+           be acc + 0.0f, which canonicalizes -0.0f and is a different store. */
+        __kernel void rms_norm_gemv(
             __global const float* x,
             __global const float* gamma,
-            __global const float* b,
-            __global const float* bias,
-            __global float* c,
+            __global const float* w0,
+            __global const float* bias0,
+            __global float* out0,
+            __global const float* w1,
+            __global const float* bias1,
+            __global float* out1,
+            __global const float* w2,
+            __global const float* bias2,
+            __global float* out2,
             const uint aRows,
             const uint aCols,
-            const uint bCols,
+            const uint cols0,
+            const uint cols1,
+            const uint cols2,
+            const uint hasBias,
             const float eps)
         {
             uint lid0 = get_local_id(0);
             uint lid1 = get_local_id(1);
             uint outRow = get_global_id(0);
-            uint colBase = get_group_id(1) * TILECOLS;
+
+            uint groups0 = (cols0 + TILECOLS - 1) / TILECOLS;
+            uint groups1 = (cols1 + TILECOLS - 1) / TILECOLS;
+            uint g = get_group_id(1);
+
+            __global const float* b;
+            __global const float* bias;
+            __global float* c;
+            uint bCols;
+            uint colBase;
+            if (g < groups0)
+            {
+                b = w0;
+                bias = bias0;
+                c = out0;
+                bCols = cols0;
+                colBase = g * TILECOLS;
+            }
+            else if (g < groups0 + groups1)
+            {
+                b = w1;
+                bias = bias1;
+                c = out1;
+                bCols = cols1;
+                colBase = (g - groups0) * TILECOLS;
+            }
+            else
+            {
+                b = w2;
+                bias = bias2;
+                c = out2;
+                bCols = cols2;
+                colBase = (g - groups0 - groups1) * TILECOLS;
+            }
 
             float normScale = 0.0f;
             if (outRow < aRows)
@@ -1177,10 +1224,20 @@ internal static class SilkKernels
             if (outRow < aRows)
             {
                 uint rowBase = outRow * bCols + colBase + lid1 * BLOCK;
-                if (c0 < bCols) c[rowBase + 0] = a0 + bias[c0];
-                if (c1 < bCols) c[rowBase + 1] = a1 + bias[c1];
-                if (c2 < bCols) c[rowBase + 2] = a2 + bias[c2];
-                if (c3 < bCols) c[rowBase + 3] = a3 + bias[c3];
+                if (hasBias != 0u)
+                {
+                    if (c0 < bCols) c[rowBase + 0] = a0 + bias[c0];
+                    if (c1 < bCols) c[rowBase + 1] = a1 + bias[c1];
+                    if (c2 < bCols) c[rowBase + 2] = a2 + bias[c2];
+                    if (c3 < bCols) c[rowBase + 3] = a3 + bias[c3];
+                }
+                else
+                {
+                    if (c0 < bCols) c[rowBase + 0] = a0;
+                    if (c1 < bCols) c[rowBase + 1] = a1;
+                    if (c2 < bCols) c[rowBase + 2] = a2;
+                    if (c3 < bCols) c[rowBase + 3] = a3;
+                }
             }
         }
         """;

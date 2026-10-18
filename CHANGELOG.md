@@ -12,6 +12,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **Silk cached decode fuses its projection norms (#670)** — the single-token decode path ran one
+  norm-fused kernel per projection, recomputing `RMSNorm(x)` and re-reading `x` for each. Q/K/V now
+  take one `rms_norm_gemv` launch with three output slots instead of three launches, and gate/up one
+  instead of two, so the normalization is computed once per group.
+  `rms_norm_gemm_bias` is gone — the Qwen cached Q/K/V calls were its only call sites — and
+  SmolLM's bias-free cached Q/K/V move off `rms_norm_lm_head`, which keeps the prefill and
+  single-row heads.
+
 - **Silk OpenCL backend and the BERT-family model layer now ship from `Nivara.Extensions`** — the
   hand-authored OpenCL stack (`SilkKernels`, `SilkRuntime`, the three runners, the two sessions) moved
   from `samples/Nivara.Samples/Gpu/` to `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`), and

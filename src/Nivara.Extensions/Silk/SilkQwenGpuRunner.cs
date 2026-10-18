@@ -360,9 +360,13 @@ public sealed class SilkQwenGpuRunner : IDisposable
         {
             LayerWeights w = layers[li];
 
-            SilkLauncher.RmsNormGemmBias(runtime, x.Handle, w.InputNormW, w.Wq, w.QBias, q.Handle, 1, hiddenDim, qDim, eps);
-            SilkLauncher.RmsNormGemmBias(runtime, x.Handle, w.InputNormW, w.Wk, w.KBias, k.Handle, 1, hiddenDim, kvDim, eps);
-            SilkLauncher.RmsNormGemmBias(runtime, x.Handle, w.InputNormW, w.Wv, w.VBias, v.Handle, 1, hiddenDim, kvDim, eps);
+            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.InputNormW,
+                [
+                    new(w.Wq, w.QBias, q.Handle, qDim),
+                    new(w.Wk, w.KBias, k.Handle, kvDim),
+                    new(w.Wv, w.VBias, v.Handle, kvDim),
+                ],
+                hasBias: true, aRows: 1, aCols: hiddenDim, eps: eps);
 
             EnsureRopeTables(position + 1);
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
@@ -376,8 +380,12 @@ public sealed class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.GemmAdd(runtime, context.Handle, w.Wo, x.Handle, x.Handle, 1, qDim, hiddenDim);
 
-            SilkLauncher.RmsNormLmHead(runtime, x.Handle, w.PostNormW, w.Wgate, gate.Handle, 1, hiddenDim, intermediateDim, eps);
-            SilkLauncher.RmsNormLmHead(runtime, x.Handle, w.PostNormW, w.Wup, up.Handle, 1, hiddenDim, intermediateDim, eps);
+            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.PostNormW,
+                [
+                    new(w.Wgate, 0, gate.Handle, intermediateDim),
+                    new(w.Wup, 0, up.Handle, intermediateDim),
+                ],
+                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, intermediateDim);
 
@@ -500,9 +508,13 @@ public sealed class SilkQwenGpuRunner : IDisposable
         {
             LayerWeights w = layers[li];
 
-            SilkLauncher.RmsNormGemmBias(runtime, x.Handle, w.InputNormW, w.Wq, w.QBias, q.Handle, 1, hiddenDim, qDim, eps);
-            SilkLauncher.RmsNormGemmBias(runtime, x.Handle, w.InputNormW, w.Wk, w.KBias, k.Handle, 1, hiddenDim, kvDim, eps);
-            SilkLauncher.RmsNormGemmBias(runtime, x.Handle, w.InputNormW, w.Wv, w.VBias, v.Handle, 1, hiddenDim, kvDim, eps);
+            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.InputNormW,
+                [
+                    new(w.Wq, w.QBias, q.Handle, qDim),
+                    new(w.Wk, w.KBias, k.Handle, kvDim),
+                    new(w.Wv, w.VBias, v.Handle, kvDim),
+                ],
+                hasBias: true, aRows: 1, aCols: hiddenDim, eps: eps);
 
             // RoPE at position
             EnsureRopeTables(position + 1);
@@ -518,8 +530,12 @@ public sealed class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.GemmAdd(runtime, context.Handle, w.Wo, x.Handle, x.Handle, 1, qDim, hiddenDim);
 
-            SilkLauncher.RmsNormLmHead(runtime, x.Handle, w.PostNormW, w.Wgate, gate.Handle, 1, hiddenDim, intermediateDim, eps);
-            SilkLauncher.RmsNormLmHead(runtime, x.Handle, w.PostNormW, w.Wup, up.Handle, 1, hiddenDim, intermediateDim, eps);
+            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.PostNormW,
+                [
+                    new(w.Wgate, 0, gate.Handle, intermediateDim),
+                    new(w.Wup, 0, up.Handle, intermediateDim),
+                ],
+                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, intermediateDim);
 
