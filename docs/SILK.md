@@ -594,8 +594,9 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
   The `--silk-kernels` cells are what localise a failure; the compares are what say the
   assembled forward is right. **The benchmark A/B has been run too** — ModernBERT and Laya timing
   (back-to-back `--silk` / `--ilgpu benchmark`, AC, same session, 1 warmup + 3 timed median) is in
-  [docs/ACCELERATION.md](ACCELERATION.md) §1: Silk at parity at 128 and ~25% ahead at 4096, and
-  ahead on all four Laya questions. The compare and the benchmark remain separate verdicts.
+  the cross-backend rows are now historical; the current acceleration results and Silk-only scope are in
+  [docs/ACCELERATION.md](ACCELERATION.md), and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
+  The compare and the benchmark remain separate verdicts.
 
 ## 15. Adding a model to the Silk path
 
