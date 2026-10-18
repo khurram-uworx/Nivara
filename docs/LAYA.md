@@ -17,6 +17,10 @@ a stable endpoint rather than a bespoke server.
 The engines, the `typesafe` demo's command line, and how to time one engine against another are in
 [docs/DECISION-MODELS.md](DECISION-MODELS.md).
 
+The sample exposes Laya in-process through the `typesafe nivara` engine (see
+[docs/DECISION-MODELS.md](DECISION-MODELS.md)): the `NivaraTypeSafeClient` reuses
+`LayaPromptBuilder`, `SilkLayaSession`, and `LayaCalibration` instead of an HTTP hop.
+
 ## Model overview
 
 A ModernBERT-large encoder — the same architecture as [docs/MODERNBERT.md](MODERNBERT.md), nested under the `encoder.` prefix — plus a typed decision head. The checkpoint is **842.6 MB of F16** (206 tensors, 421,293,830 parameters), widened to F32 at load, so the resident set is about 1.7 GB.

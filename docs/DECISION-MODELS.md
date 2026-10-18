@@ -19,6 +19,7 @@ Two local engines speak the same route today:
 |--------|-------------|---------------|--------------------|
 | **Ollaya** | `http://localhost:11435` | `laya:en` | one model |
 | **Ollama 0.35+** | `http://localhost:11434` | `tev1:0.8b` | `nimble` (9B), `tev1` (4B) — see the [announcement](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models) |
+| **Nivara (in-process)** | in-process (Silk F32) | `convaiinnovations/laya` | no HTTP round trip; one engine forward per question; forwards serialised per request |
 
 Because the route is identical, the two are interchangeable from a client's point of view: only
 the base URL and the model name change. That is the shape OpenAI's Chat Completions API gave text
@@ -40,6 +41,8 @@ than a checked list on the client.
 ```
 NivaraInference typesafe [engine] [mode] [--url <url>] [--model <name>]
 ```
+
+`engine` may now also be `nivara` (in-process Silk F32, default model `convaiinnovations/laya`); `mode` may now also be `verify`.
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- typesafe                            # Ollaya, laya:en
@@ -129,6 +132,11 @@ reader should carry away.
 
 Every figure above comes from the CLI's own output, so re-running the two commands replaces them
 with your machine's numbers in the same shape.
+
+
+The in-process `nivara` row is not comparable with the HTTP rows above (no transport) nor with
+`laya benchmark` (one forward): its sample is a whole `SystemOneAsync` call, six encoder forwards on
+the device.
 
 ## See also
 
