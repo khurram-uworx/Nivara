@@ -5,6 +5,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -211,35 +212,82 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
             int groupInputSize = n * cPerGroup * spatialIn;
             int groupOutputSize = n * oPerGroup * spatialOut;
 
-            var groupInBuf = ArrayPool<T>.Shared.Rent(groupInputSize);
-            var groupOutBuf = ArrayPool<T>.Shared.Rent(groupOutputSize);
-            try
-            {
-                var groupInput = groupInBuf.AsSpan(0, groupInputSize);
-                var groupOutput = groupOutBuf.AsSpan(0, groupOutputSize);
+            // Hoist spans into arrays so the group loop can run in parallel without
+            // capturing ref-struct spans in the delegate (ArrayPool is thread-safe).
+            var inputArr = inputSpan.ToArray();
+            var weightArr = weightSpan.ToArray();
+            var biasArr = biasSpan.IsEmpty ? Array.Empty<T>() : biasSpan.ToArray();
 
-                for (int g = 0; g < groups; g++)
+            bool parallelGroups = groups >= 2
+                && (long)groups * n * oH * oW * groupPatchSize * Math.Max(1, oPerGroup) >= (2 << 20);
+
+            if (parallelGroups)
+            {
+                Parallel.For(0, groups, g =>
                 {
-                    for (int b = 0; b < n; b++)
-                        inputSpan.Slice((b * c + g * cPerGroup) * spatialIn, cPerGroup * spatialIn)
-                            .CopyTo(groupInput.Slice(b * cPerGroup * spatialIn));
+                    var groupInBuf = ArrayPool<T>.Shared.Rent(groupInputSize);
+                    var groupOutBuf = ArrayPool<T>.Shared.Rent(groupOutputSize);
+                    try
+                    {
+                        var groupInput = groupInBuf.AsSpan(0, groupInputSize);
+                        var groupOutput = groupOutBuf.AsSpan(0, groupOutputSize);
 
-                    var weightGroup = weightSpan.Slice(g * oPerGroup * groupPatchSize, oPerGroup * groupPatchSize);
-                    var biasGroup = biasSpan.IsEmpty ? ReadOnlySpan<T>.Empty : biasSpan.Slice(g * oPerGroup, oPerGroup);
-                    groupOutput.Clear();
+                        for (int b = 0; b < n; b++)
+                            inputArr.AsSpan((b * c + g * cPerGroup) * spatialIn, cPerGroup * spatialIn)
+                                .CopyTo(groupInput.Slice(b * cPerGroup * spatialIn));
 
-                    ConvForwardKernel(groupInput, weightGroup, biasGroup, groupOutput,
-                        n, cPerGroup, h, w, kW, stride, paddingTop, paddingLeft, oH, oW, groupPatchSize, totalPatches, oPerGroup);
+                        var weightGroup = weightArr.AsSpan(g * oPerGroup * groupPatchSize, oPerGroup * groupPatchSize);
+                        var biasGroup = biasArr.Length > 0
+                            ? biasArr.AsSpan(g * oPerGroup, oPerGroup)
+                            : ReadOnlySpan<T>.Empty;
+                        groupOutput.Clear();
 
-                    for (int b = 0; b < n; b++)
-                        groupOutput.Slice(b * oPerGroup * spatialOut, oPerGroup * spatialOut)
-                            .CopyTo(outputData.AsSpan((b * outChannels + g * oPerGroup) * spatialOut));
-                }
+                        ConvForwardKernel(groupInput, weightGroup, biasGroup, groupOutput,
+                            n, cPerGroup, h, w, kW, stride, paddingTop, paddingLeft, oH, oW, groupPatchSize, totalPatches, oPerGroup);
+
+                        for (int b = 0; b < n; b++)
+                            groupOutput.Slice(b * oPerGroup * spatialOut, oPerGroup * spatialOut)
+                                .CopyTo(outputData.AsSpan((b * outChannels + g * oPerGroup) * spatialOut));
+                    }
+                    finally
+                    {
+                        ArrayPool<T>.Shared.Return(groupInBuf, clearArray: true);
+                        ArrayPool<T>.Shared.Return(groupOutBuf, clearArray: true);
+                    }
+                });
             }
-            finally
+            else
             {
-                ArrayPool<T>.Shared.Return(groupInBuf, clearArray: true);
-                ArrayPool<T>.Shared.Return(groupOutBuf, clearArray: true);
+                var groupInBuf = ArrayPool<T>.Shared.Rent(groupInputSize);
+                var groupOutBuf = ArrayPool<T>.Shared.Rent(groupOutputSize);
+                try
+                {
+                    var groupInput = groupInBuf.AsSpan(0, groupInputSize);
+                    var groupOutput = groupOutBuf.AsSpan(0, groupOutputSize);
+
+                    for (int g = 0; g < groups; g++)
+                    {
+                        for (int b = 0; b < n; b++)
+                            inputSpan.Slice((b * c + g * cPerGroup) * spatialIn, cPerGroup * spatialIn)
+                                .CopyTo(groupInput.Slice(b * cPerGroup * spatialIn));
+
+                        var weightGroup = weightSpan.Slice(g * oPerGroup * groupPatchSize, oPerGroup * groupPatchSize);
+                        var biasGroup = biasSpan.IsEmpty ? ReadOnlySpan<T>.Empty : biasSpan.Slice(g * oPerGroup, oPerGroup);
+                        groupOutput.Clear();
+
+                        ConvForwardKernel(groupInput, weightGroup, biasGroup, groupOutput,
+                            n, cPerGroup, h, w, kW, stride, paddingTop, paddingLeft, oH, oW, groupPatchSize, totalPatches, oPerGroup);
+
+                        for (int b = 0; b < n; b++)
+                            groupOutput.Slice(b * oPerGroup * spatialOut, oPerGroup * spatialOut)
+                                .CopyTo(outputData.AsSpan((b * outChannels + g * oPerGroup) * spatialOut));
+                    }
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(groupInBuf, clearArray: true);
+                    ArrayPool<T>.Shared.Return(groupOutBuf, clearArray: true);
+                }
             }
         }
 
@@ -395,42 +443,115 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         }
 
         int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
+        if (tileSize < 1) tileSize = 1;
         int positionsPerBatch = oH * oW;
+        int tileCount = (totalPatches + tileSize - 1) / tileSize;
 
-        var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
+        bool parallel = tileCount > 1
+            && totalPatches >= 4
+            && (long)totalPatches * patchSize * outChannels >= (2 << 20);
+
+        // Hoist spans into arrays so the tile loop can run in parallel without
+        // capturing ref-struct spans in the delegate.
+        T[]? inputArr = null;
+        T[]? weightArr = null;
+        T[]? biasArr = null;
+        T[]? outputArr = null;
+
+        if (parallel)
+        {
+            inputArr = inputData.ToArray();
+            weightArr = weightSpan.ToArray();
+            biasArr = biasSpan.IsEmpty ? Array.Empty<T>() : biasSpan.ToArray();
+            outputArr = ArrayPool<T>.Shared.Rent(outputData.Length);
+        }
+
         try
         {
-            var scratch = scratchBuf.AsSpan(0, tileSize * patchSize);
-
-            for (int tileStart = 0; tileStart < totalPatches; tileStart += tileSize)
+            if (parallel)
             {
-                int tileLen = Math.Min(tileSize, totalPatches - tileStart);
-                var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
-
-                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, paddingTop, paddingLeft, oH, oW, tileStart, tileLen, locs);
-
-                for (int t = 0; t < tileLen; t++)
+                Parallel.For(0, tileCount, tileIdx =>
                 {
-                    var loc = locs[t];
-                    var patchSpan = scratch.Slice(t * patchSize, patchSize);
-                    int outBase = (loc.Batch * outChannels) * positionsPerBatch + loc.OH * oW + loc.OW;
+                    int tileStart = tileIdx * tileSize;
+                    int tileLen = Math.Min(tileSize, totalPatches - tileStart);
 
-                    for (int oc = 0; oc < outChannels; oc++)
+                    var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
+
+                    var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
+                    try
                     {
-                        var weightSlice = weightSpan.Slice(oc * patchSize, patchSize);
-                        T dot = TensorPrimitives.Dot(patchSpan, weightSlice);
+                        var scratch = scratchBuf.AsSpan(0, tileSize * patchSize);
+                        Im2Col.Im2ColTile(inputArr!.AsSpan(), scratch, c, h, w, kW, kW, stride, stride, paddingTop, paddingLeft, oH, oW, tileStart, tileLen, locs);
 
-                        if (biasSpan.Length > 0)
-                            dot += biasSpan[oc];
+                        for (int t = 0; t < tileLen; t++)
+                        {
+                            var loc = locs[t];
+                            var patchSpan = scratch.Slice(t * patchSize, patchSize);
+                            int outBase = (loc.Batch * outChannels) * positionsPerBatch + loc.OH * oW + loc.OW;
 
-                        outputData[outBase + oc * positionsPerBatch] = dot;
+                            for (int oc = 0; oc < outChannels; oc++)
+                            {
+                                var weightSlice = weightArr!.AsSpan(oc * patchSize, patchSize);
+                                T dot = TensorPrimitives.Dot(patchSpan, weightSlice);
+
+                                if (biasArr!.Length > 0)
+                                    dot += biasArr[oc];
+
+                                outputArr![outBase + oc * positionsPerBatch] = dot;
+                            }
+                        }
                     }
+                    finally
+                    {
+                        ArrayPool<T>.Shared.Return(scratchBuf, clearArray: true);
+                    }
+                });
+
+                outputArr!.AsSpan(0, outputData.Length).CopyTo(outputData);
+            }
+            else
+            {
+                var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
+                try
+                {
+                    var scratch = scratchBuf.AsSpan(0, tileSize * patchSize);
+
+                    for (int tileStart = 0; tileStart < totalPatches; tileStart += tileSize)
+                    {
+                        int tileLen = Math.Min(tileSize, totalPatches - tileStart);
+                        var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
+
+                        Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, paddingTop, paddingLeft, oH, oW, tileStart, tileLen, locs);
+
+                        for (int t = 0; t < tileLen; t++)
+                        {
+                            var loc = locs[t];
+                            var patchSpan = scratch.Slice(t * patchSize, patchSize);
+                            int outBase = (loc.Batch * outChannels) * positionsPerBatch + loc.OH * oW + loc.OW;
+
+                            for (int oc = 0; oc < outChannels; oc++)
+                            {
+                                var weightSlice = weightSpan.Slice(oc * patchSize, patchSize);
+                                T dot = TensorPrimitives.Dot(patchSpan, weightSlice);
+
+                                if (biasSpan.Length > 0)
+                                    dot += biasSpan[oc];
+
+                                outputData[outBase + oc * positionsPerBatch] = dot;
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(scratchBuf, clearArray: true);
                 }
             }
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(scratchBuf, clearArray: true);
+            if (outputArr != null)
+                ArrayPool<T>.Shared.Return(outputArr, clearArray: true);
         }
     }
 
