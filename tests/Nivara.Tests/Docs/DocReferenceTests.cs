@@ -34,7 +34,7 @@ public class DocReferenceTests
     const int ExpectedFileCount = 719;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
-    const int ExpectedCodeCitationCount = 126;
+    const int ExpectedCodeCitationCount = 127;
 
     [Test]
     public void EveryReferenceInTheProductTrees_Resolves()
