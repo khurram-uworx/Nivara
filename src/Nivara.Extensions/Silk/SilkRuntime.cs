@@ -114,6 +114,50 @@ public sealed unsafe class SilkRuntime : IDisposable
     }
 
     /// <summary>
+    /// Returns true when the device can run the fused decode attention + O-projection kernel:
+    /// enough work-items per group for all heads and enough local memory for the context tile.
+    /// </summary>
+    public bool CanFuseDecodeOproj(int numHeads, int headDim)
+    {
+        if (numHeads <= 0 || headDim <= 0) return false;
+        if (MaxWorkGroupSize < (ulong)numHeads * (ulong)SilkKernels.AttentionGroupSize) return false;
+        try
+        {
+            EnsureFusedDecodeOprojLocalMemory(numHeads, headDim);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Rejects a configuration the fused O-projection tile cannot hold (mirrors
+    /// <see cref="EnsureAttentionLocalMemory"/>): local memory must hold the per-head
+    /// context plus one head's online-softmax partials.
+    /// </summary>
+    public void EnsureFusedDecodeOprojLocalMemory(int numHeads, int headDim)
+    {
+        if (headDim > SilkKernels.MaxHeadDim)
+            throw new InvalidOperationException(
+                $"Silk fused O-proj supports headDim up to {SilkKernels.MaxHeadDim}; got {headDim}.");
+
+        if (numHeads > 64)
+            throw new InvalidOperationException(
+                $"Silk fused O-proj supports up to 64 heads; got {numHeads}.");
+
+        ulong needed = ((ulong)numHeads * (ulong)headDim
+                      + (ulong)SilkKernels.AttentionGroupSize
+                      + (ulong)SilkKernels.AttentionGroupSize
+                      + (ulong)SilkKernels.AttentionGroupSize * (ulong)SilkKernels.MaxHeadDim)
+                     * sizeof(float);
+        if (LocalMemorySize < needed)
+            throw new InvalidOperationException(
+                $"Silk fused O-proj needs {needed} B of local memory per work-group; {DeviceName} reports {LocalMemorySize} B.");
+    }
+
+    /// <summary>
     /// Grows <paramref name="buffer"/> when it is smaller than <paramref name="floatCount"/>,
     /// allocating it on first use. Never shrinks. The same shape as
     /// <c>GpuBuffers.Ensure</c>:

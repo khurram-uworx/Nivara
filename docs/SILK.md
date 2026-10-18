@@ -387,12 +387,12 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 
 ### 11.1 The kernel set
 
-`KernelNames` (`SilkKernels.cs:117`) is the build/creation order:
+`KernelNames` (`SilkKernels.cs:126`) is the build/creation order:
 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
  Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
- RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock,
+ RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock, DecodeGqaAttentionOprojFused,
  Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d]
 ```
 
@@ -433,6 +433,7 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `causal_gqa_attention` | `q, k, v, out, seqLen, numHeads, numKvHeads, headDim, scale` | causal GQA attention for prefill (attends j=0..qPos, KV-repeat) |
 | `decode_gqa_attention` | `q, kCache, vCache, out, kvLen, numHeads, numKvHeads, headDim, scale` | single-query decode attention over the KV cache (online softmax; one work-group per head, kvLen split across lanes) |
 | `gemm_gemv_add` | `a, b, c, residual, aCols, bCols` | flat single-row GEMV + residual add for cached-decode O-projection (#672, #681). Silk-only: no ILGPU counterpart; correctness pinned by exact equality to `gemm_row4_add` (aRows=1) and the CPU-reference gate cell, not by the ILGPU byte-identity list. |
+| `decode_gqa_attention_oproj_fused` | `q, kCache, vCache, Wo, residual, out, kvLen, numHeads, numKvHeads, headDim, hiddenDim, scale` | true single-work-group fused decode attention + O-projection (#691). Only runs when `MaxWorkGroupSize >= numHeads * AttentionGroupSize`; otherwise `DecodeGqaAttentionOproj` falls back to `decode_gqa_attention` + `gemm_gemv_add`. |
 | `mlp_block` | `x, gamma, Wgate, Wup, Wdown, out, residual, hidden, intermediate, eps` | fused single-token MLP block for cached decode: RMSNorm, gate/up, SwiGLU, down-projection, residual (#672) |
 | `argmax` | `input, partialIndex, partialValue, n` | device-side partial argmax reduction (256 elements per work-group) |
 | `conv2d` | `input, weight, bias, output, N, C, H, W, outC, kH, kW, strideH, strideW, pad*, groups, hasBias, oH, oW` | NCHW convolution (grouped) |
@@ -459,7 +460,7 @@ returns zero — which is how a trailing output slot is omitted rather than laun
 
 ### 11.3 Bit-identity: the macro and the pragma
 
-The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:381`)
+The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:390`)
 deliberately: the byte-identity claim rests on every variant adding the same f32
 values to the same accumulators in the same order, so the text must not be able to drift between
 them. The store after the macro is the only difference. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
