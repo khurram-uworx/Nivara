@@ -64,4 +64,4 @@ Model name is the exact HF repo id `convaiinnovations/laya`; checkpoint root `sa
 
 ## GitHub issues log
 
-- [ ] (step 7) file follow-up: promote `NivaraTypeSafeClient` into `Nivara.Extensions` + backend selector.
+- [x] #700 — promote `NivaraTypeSafeClient` into `Nivara.Extensions` + backend selector (filed during execution)
