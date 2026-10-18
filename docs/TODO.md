@@ -161,6 +161,13 @@ is a name nobody can find again.
   `main` (`:69` for `KernelNames`, which stage 3 moves to 117; `:331` for `GEMM_ROW4_ACCUMULATE`, now
   381). The citation gate only requires a cited line to *exist*, so it cannot see this. Fixed in its
   own commit rather than folded into stage 3.
+- Not part of any stage: `InferenceCliArgumentTests` spawned the sample with the repository as its
+  working directory, and the sample resolves `samples/data/<model>/model.safetensors` against that
+  directory — so on a machine keeping the gitignored qwen checkpoint (988 MB, dated 2026-10-17) two
+  of its tests loaded the weights and ran real generation where they expect the model-file check:
+  2 failed / 45 passed in 3 m 11 s, the first killed by the fixture's 30 s bound. The fixture now runs
+  every invocation in an empty temporary directory, which is 47/47 in 10 s. Fixed in its own commit;
+  the defect predates the branch and the checkpoint is what exposed it.
 
 ## Verification
 
