@@ -53,17 +53,22 @@ column — the same contraction the tile kernels perform, which is what makes th
 ```
 __kernel void rms_norm_gemv(
     __global const float* x, __global const float* gamma,
-    __global const float* w0, __global const float* b0, __global float* c0,
-    __global const float* w1, __global const float* b1, __global float* c1,
-    __global const float* w2, __global const float* b2, __global float* c2,
+    __global const float* w0, __global const float* b0, __global float* out0,
+    __global const float* w1, __global const float* b1, __global float* out1,
+    __global const float* w2, __global const float* b2, __global float* out2,
     const uint aCols, const uint cols0, const uint cols1, const uint cols2,
-    const uint nSlots, const uint hasBias, const float eps)
+    const uint hasBias, const float eps)
 ```
 
 - `normScale` computed from the row exactly as `rms_norm` / `rms_norm_lm_head` do (ascending-k single
   accumulator, `1.0f / sqrt(ssq / aCols + eps)`).
 - Group -> `(slot, colBase)` mapping through per-slot group counts, so no work-group straddles two
-  slots. `get_group_id(0)` walks slot 0's groups, then slot 1's, then slot 2's.
+  slots: the group index walks slot 0's groups, then slot 1's, then slot 2's. There is no `nSlots`
+  argument — a slot is reachable iff its column count is positive, and a separate count could
+  disagree with the widths it is meant to describe.
+- The decode kernel drops `aRows` (the launcher asserts it is 1 and the tile-shaped C1 body's
+  `outRow < aRows` guards were the only use). The *launcher* signature keeps `aRows`, so the call
+  sites do not move between C1 and C2.
 - Per group, `32 lanes x 4 columns = 128 columns`, which divides every real width exactly
   (Qwen: 896/128 = 7 + 1 + 1 = 9 groups for QKV, 4864/128 = 38 for gate/up, 151936/128 = 1187 for the
   head; SmolLM 576 and 192 produce a tail group, which the guards exercise).
@@ -112,14 +117,18 @@ a plan change.
 | # | Commit | Content | Guard |
 |---|---|---|---|
 | 1 | `docs: plan the Silk cached-decode projection fusion in TODO.md` | this file | — |
-| 2 | `feat(silk): fuse cached-decode QKV and gate/up norms into one entry each` | `rms_norm_qkv` + `rms_norm_gate_up` (tile-shaped, i.e. the existing body text with a slot mapping), `SilkLauncher` methods, the 8 call sites in the 4 cached methods, remove `rms_norm_gemm_bias`, SILK.md table, CHANGELOG, exact-equality fixture | new bit-exactness test + catalog test |
-| 3 | `perf(silk): decode-shape the fused projection kernels` | same signatures; bodies/grid become the row-1 GEMV; device-free geometry helper + test | commit 2's bit-exactness test (must stay green unchanged) |
+| 2 | `feat(silk): fuse cached-decode QKV and gate/up norms into one entry each` | `rms_norm_gemv` (tile-shaped: the existing body text plus a per-slot group mapping), `SilkLauncher.RmsNormGemv`, the 8 call sites in the 4 cached methods, remove `rms_norm_gemm_bias`, SILK.md table, CHANGELOG, exact-equality fixture | new bit-exactness test + catalog test |
+| 3 | `perf(silk): decode-shape the fused projection kernel` | the launcher signature is unchanged; the kernel body and grid become the row-1 GEMV, and the launcher asserts `aRows == 1`; device-free geometry test | commit 2's bit-exactness test (must stay green unchanged) |
 | 4 | `perf(silk): decode-shape the cached tied-LM-head projection` | Qwen cached heads -> new kernel; SmolLM cached head `RmsNorm`+`Gemm` -> one call; head case in the fixture; SILK.md wording; CHANGELOG | fixture head case |
 | 5 | `docs: remove TODO.md — plan executed` | after both G2 reviews clear | — |
 
-Note on commit 2: it is deliberately tile-shaped (a copy of the existing body with per-slot group
-ranges for QKV and a slot loop for gate/up). That is throwaway relative to commit 3, but it is what
-attributes the launch-count win separately from the lane-utilization win in the benchmark rounds.
+Note on commit 2: it is deliberately tile-shaped — the same body and the same total work-group count
+as the launches it replaces, with only the enqueue count reduced (3 -> 1 for QKV, 2 -> 1 for
+gate/up). Commit 3 then changes the geometry, which is the lane-utilization win. Keeping them apart is
+what attributes each win to its own benchmark round; merging them would report one number for two
+effects. One kernel throughout (not a `rms_norm_qkv`/`rms_norm_gate_up` pair that a later commit
+deletes): the multi-slot factoring is identical in both shapes, and a name that lives for one commit
+is a name nobody can find again.
 
 ## Verification
 
