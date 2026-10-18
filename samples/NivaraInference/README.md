@@ -326,3 +326,14 @@ python smollm_generate_reference.py --dtype bfloat16
 ```
 
 Keep both dtype pairs same-dtype on CPU so the ratio and the F32-vs-BF16 memory/performance tradeoff are meaningful.
+
+
+## TypeSafe (in-process)
+
+`typesafe nivara` answers the same news question set as the HTTP engines, but runs the Laya head on the Silk backend in-process.
+
+```powershell
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara benchmark
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara verify
+```
