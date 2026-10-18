@@ -608,12 +608,31 @@ internal static class SilkKernels
             int jFirst = band < 0 ? 0 : max(0, qp - band);
             int jLast = band < 0 ? sl - 1 : min(sl - 1, qp + band);
 
+            // seqLen <= 512 covers the attention shapes this backend is benchmarked on; higher values keep
+            // the original recompute path to avoid fixed-size local bounds.
+            float scoreCache[512];
+            int cacheReady = sl <= 512 ? 1 : 0;
+            int range = jLast - jFirst + 1;
+
             float mx = -INFINITY;
-            for (int j = jFirst; j <= jLast; ++j)
+            if (cacheReady)
             {
-                float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
-                if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
-                if (s > mx) mx = s;
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    scoreCache[j - jFirst] = s;
+                    if (s > mx) mx = s;
+                }
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    if (s > mx) mx = s;
+                }
             }
 
             if (mx == -INFINITY)
@@ -624,25 +643,48 @@ internal static class SilkKernels
             }
 
             float sum = 0.0f;
-            for (int j = jFirst; j <= jLast; ++j)
+            if (cacheReady)
             {
-                float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
-                if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
-                sum += exp(s - mx);
+                for (int j = 0; j < range; ++j)
+                    sum += exp(scoreCache[j] - mx);
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    sum += exp(s - mx);
+                }
             }
 
             uint lane = get_local_id(0);
             for (uint d = 0; d < headDim; ++d)
                 acc[d * MAXHEADDIM + lane] = 0.0f;
 
-            for (int j = jFirst; j <= jLast; ++j)
+            if (cacheReady)
             {
-                float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
-                if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
-                float p = exp(s - mx) / sum;
-                uint vBase = (b * seqLen + (uint)j) * D + dOffset;
-                for (uint d = 0; d < headDim; ++d)
-                    acc[d * MAXHEADDIM + lane] += p * v[vBase + d];
+                for (int j = 0; j < range; ++j)
+                {
+                    float s = scoreCache[j];
+                    float p = exp(s - mx) / sum;
+                    int jGlobal = jFirst + j;
+                    uint vBase = (b * seqLen + (uint)jGlobal) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        acc[d * MAXHEADDIM + lane] += p * v[vBase + d];
+                }
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    float p = exp(s - mx) / sum;
+                    uint vBase = (b * seqLen + (uint)j) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        acc[d * MAXHEADDIM + lane] += p * v[vBase + d];
+                }
             }
 
             for (uint d = 0; d < headDim; ++d)

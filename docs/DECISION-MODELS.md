@@ -38,7 +38,7 @@ than a checked list on the client.
 
 `typesafe` loads no weights; it is the HTTP client. The command line is:
 
-```
+```text
 NivaraInference typesafe [engine] [mode] [--url <url>] [--model <name>]
 ```
 
@@ -80,98 +80,39 @@ dotnet run --project samples/NivaraInference -c Release -- typesafe ollama bench
 dotnet run --project samples/NivaraInference -c Release -- typesafe nivara benchmark
 ```
 
-The protocol is the repo's existing one, the same as `laya benchmark`: **1 warmup + 3 timed passes
-per news item, median reported** — the defaults, kept so an invocation that does not ask for more
-samples sees no change. `--warmup N` and `--iters N` raise the counts (this scope was opened by
-[#676](https://github.com/khurram-uworx/Nivara/issues/676)); `--seq` remains `modernbert
-benchmark`-only, since it names a sequence shape rather than a sample count.
+The protocol is the repo's existing one: **1 warmup + 3 timed passes per news item, median
+reported**, with a whole `/v1/systemone` round trip as the unit of work. The Nivara row has no
+transport but is still a `SystemOneAsync` call. These numbers are **not** comparable with
+`laya benchmark`, which times one in-process forward pass over weights.
 
-A sample is a whole decision-model round trip through `/v1/systemone` (client serialization +
-transport + engine inference) — for the in-process `nivara` engine there is no transport, but each
-sample is still a whole `SystemOneAsync` call of six encoder forwards on the device. These numbers
-are *not* comparable with `laya benchmark`, which times a single in-process forward pass over
-weights. The in-process row is not transport-dominated, while the HTTP rows are; read the ratios
-within a row, not across rows.
+Run one, one machine (Windows, .NET 11, Release build, sequential, one request at a time):
 
-Side by side, run one, one machine (Windows, .NET 11, Release build, sequential, one request at
-a time):
+| Engine | Median | Min | Max | items/s | Model load |
+|--------|--------|-----|-----|---------|------------|
+| Ollaya | 653.5 ms | 667 ms | 683 ms | 1.5 | — |
+| Nivara | **1216 ms** | 1216 ms | 1224 ms | 0.8 | 4914 ms |
+| Ollama | 2457.5 ms | 2278 ms | 2451 ms | 0.4 | — |
 
-| Engine | Model | Overall median | items/s |
-|--------|-------|----------------|---------|
-| Ollaya | `laya:en` | 653.5 ms | 1.5 |
-| Ollama | `tev1:0.8b` | 2457.5 ms | 0.4 |
-| Nivara (in-process) | `convaiinnovations/laya` | 1417 ms | 0.7 |
+Per news item (median ms, min–max range):
 
-Per news item (median ms, run one):
+| Item | Ollaya | Nivara | Ollama |
+|------|--------|--------|--------|
+| 1 | 668 (667–683) | 1219 (1216–1224) | 2267 (2267–2278) |
+| 2 | 613 (604–615) | 1184 (1182–1186) | 2361 (2272–2365) |
+| 3 | 719 (712–719) | 1368 (1360–1384) | 2483 (2476–2501) |
+| 4 | 630 (621–631) | 1273 (1190–1275) | 2432 (2408–2451) |
+| 5 | 655 (651–655) | 1211 (1209–1225) | 2910 (2482–2937) |
+| 6 | 652 (650–656) | 1213 (1208–1216) | 2730 (2722–2789) |
+| **Overall median** | **653.5** | **1216** | **2457.5** |
 
-| Item | Ollaya | Nivara (in-process) | Ollama |
-|------|--------|---------------------|--------|
-| 1 | 668 | 1456 | 2267 |
-| 2 | 613 | 1386 | 2361 |
-| 3 | 719 | 1597 | 2483 |
-| 4 | 630 | 1387 | 2432 |
-| 5 | 655 | 1416 | 2910 |
-| 6 | 652 | 1418 | 2730 |
-| **Overall median** | **653.5** | **1417** | **2457.5** |
-
-What the items show: Nivara is consistently faster than Ollama and slower than Ollaya on this
-machine; within a run each item's maximum sat within ~3% of its median. Absolute latency drifts run
-to run (Ollaya's overall moved +32% between two back-to-back runs, Ollama's +12%), so use these to
-compare engines only by re-running both. Nivara model load was 4881 ms and the first (warmup) request
-includes kernel compilation.
-
-Per-engine detail, run one — Ollaya:
-
-```
-  item       median        min        max
-     1     668 ms     667 ms     683 ms
-     2     613 ms     604 ms     615 ms
-     3     719 ms     712 ms     719 ms
-     4     630 ms     621 ms     631 ms
-     5     655 ms     651 ms     655 ms
-     6     652 ms     650 ms     656 ms
-
-Overall: median 653.5 ms per assessment across 6 items, 1.5 items/s sequential at those medians.
-```
-
-Per-engine detail, run one — Ollama:
-
-```
-  item       median        min        max
-     1    2267 ms    2267 ms    2278 ms
-     2    2361 ms    2272 ms    2365 ms
-     3    2483 ms    2476 ms    2501 ms
-     4    2432 ms    2408 ms    2451 ms
-     5    2910 ms    2482 ms    2937 ms
-     6    2730 ms    2722 ms    2789 ms
-
-Overall: median 2457.5 ms per assessment across 6 items, 0.4 items/s sequential at those medians.
-```
-
-Per-engine detail, run one — Nivara (in-process):
-
-```
-  item       median        min        max
-     1    1456 ms    1455 ms    1632 ms
-     2    1386 ms    1381 ms    1400 ms
-     3    1597 ms    1596 ms    1605 ms
-     4    1387 ms    1386 ms    1389 ms
-     5    1416 ms    1416 ms    1421 ms
-     6    1418 ms    1418 ms    1419 ms
-
-Overall: median 1417 ms per assessment across 6 items, 0.7 items/s sequential at those medians.
-```
-
-Run two, same commands back to back with nothing changed in between: Ollaya overall
-median **862 ms** (1.2 items/s), Ollama **2743.5 ms** (0.4 items/s). Both numbers moved; the
-ordering and the ratio band did not. `items/s` is derived from the per-item medians, so it
-describes sequential latency at those medians, not batched capacity — and it is the ratio, not
-either absolute, that a reader should carry away.
-
-Every figure above comes from the CLI's own output, so re-running the three commands replaces
-them with your machine's numbers in the same shape.
+Nivara is consistently faster than Ollama and slower than Ollaya in this machine's measured run.
+Absolute latency drifts run to run (Ollaya's overall moved +32% between two back-to-back runs,
+Ollama's +12%), so use these to compare engines only by re-running both. Re-running the three
+commands replaces every figure with your machine's numbers in the same shape.
 
 ## Correctness check: `typesafe nivara verify`
+
+This compares the in-process Nivara (Silk F32, `convaiinnovations/laya`) client against an HTTP Laya engine (Ollaya `laya:en` by default, overridable with `--url`/`--model`). It exits non-zero only on a typed-decision disagreement, and the printed deltas show the model agreement quantitatively.
 
 `typesafe nivara verify` keeps the typed decision as the hard gate and reports per-item/per-question
 deltas on per-option probability, `AnswerConfidence`, and score. Current run on the six news items:

@@ -31,7 +31,7 @@ public class DocReferenceTests
     /// geometry it relies on is reshaped. 715 = 714 + the #681 bit-identity fixture,
     /// <c>tests/Nivara.Tests/Gpu/SilkGemmGemvAddTests.cs</c>.
     /// </summary>
-    const int ExpectedFileCount = 718;
+    const int ExpectedFileCount = 719;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;

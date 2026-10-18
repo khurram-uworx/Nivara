@@ -33,6 +33,8 @@ is available.
 Each scenario reports **ops/s**, **ns/op**, **bytes/op** (`GC.GetAllocatedBytesForCurrentThread`
 delta), and **gen0/op** (`GC.CollectionCount(0)` delta).
 
+- --silk-laya-forward — Silk Laya GPU forward profile on ModernBERT-large checkerboards (F32, requires the Laya checkpoint): 1 warmup + 3 timed passes at seq lengths 40/48/119/512; exits 0 on clean structural guards, 1 on a void.
+
 ## Running
 
 ```pwsh
