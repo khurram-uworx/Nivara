@@ -37,9 +37,11 @@ The same shape wastes the tied LM head, which is the largest single decode GEMM.
 | down | 105 M | `gemm_row4_add` | unchanged — follow-up issue |
 | o_proj | 19 M | `gemm_row4_add` | unchanged — follow-up issue |
 
-Launches per layer: 13 today (3 QKV + 2 gate/up + 2 rotary + 2 cache copy + 1 attention + 1 o_proj
-add + 1 SwiGLU + 1 down add) -> **10** after the fusion. Head launches per token: Qwen 1 -> 1 (kernel
-swapped), SmolLM 2 -> 1 (the `RmsNorm` + `Gemm` pair collapses into the fused call).
+Per-layer commands in the cached loop: 13 today (3 QKV + 2 gate/up + 2 rotary + 2 KV-cache copy +
+1 attention + 1 o_proj add + 1 SwiGLU + 1 down add) -> **10** after the fusion — which is 11 -> 8
+kernel launches, because two of those commands are `runtime.CopyBuffer` calls, not launches. Head
+launches per token: Qwen 1 -> 1 (kernel swapped), SmolLM 2 -> 1 (the `RmsNorm` + `Gemm` pair
+collapses into the fused call).
 
 ## Design
 
