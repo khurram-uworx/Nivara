@@ -324,7 +324,8 @@ class Program
             Console.WriteLine("      e.g. 'typesafe'                   news assessment on Ollaya");
             Console.WriteLine("           'typesafe ollama'            news assessment on Ollama");
             Console.WriteLine("           'typesafe ollama benchmark'  timed assessments on Ollama");
-            Console.WriteLine("  typesafe benchmark  1 warmup + 3 timed passes per news item, median reported. A sample is a");
+            Console.WriteLine("  typesafe benchmark  1 warmup + 3 timed passes per news item, median reported (--warmup N /");
+            Console.WriteLine("                    --iters N raise them; defaults keep the 1 + 3 protocol). A sample is a");
             Console.WriteLine("                    full HTTP round trip, so these numbers are not comparable with 'laya");
             Console.WriteLine("                    benchmark' (in-process forward passes).");
             Console.WriteLine("  --url <url>       Engine endpoint instead of the default; must be an absolute http(s) URL.");
@@ -346,7 +347,8 @@ class Program
             Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu / --silk. The CPU path no");
             Console.WriteLine("                   longer builds a dense [L, L] mask (#476), so it has no dense-mask cap; a");
             Console.WriteLine("                   length above max_position_embeddings is skipped. A length below the");
-            Console.WriteLine("                   sentence truncates it.");
+            Console.WriteLine("                   sentence truncates it. (--seq is modernbert-only; --warmup / --iters");
+            Console.WriteLine("                   below also take 'typesafe benchmark' — #676).");
             Console.WriteLine("  --warmup N       Untimed passes before timing (default 1)");
             Console.WriteLine("  --iters N        Timed passes; the median is reported (default 3)");
             Console.WriteLine();
@@ -404,15 +406,27 @@ class Program
 
         if (seqArg is not null || warmupArg is not null || itersArg is not null)
         {
-            if (modelType != "modernbert")
+            // Model scope: --seq is a shape parameter and stays modernbert-only; --warmup/--iters
+            // parameterize the sampling protocol of both 'modernbert benchmark' (in-process passes)
+            // and 'typesafe benchmark' (HTTP round trips), which is what #676 opens up.
+            if (seqArg is not null && modelType != "modernbert")
             {
-                Console.Error.WriteLine("--seq / --warmup / --iters are options of 'modernbert benchmark' only; no other model's benchmark takes them.");
+                Console.Error.WriteLine("--seq is an option of 'modernbert benchmark' only; no other model's benchmark takes it.");
                 return 1;
             }
 
+            if ((warmupArg is not null || itersArg is not null) && modelType is not ("modernbert" or "typesafe"))
+            {
+                Console.Error.WriteLine("--warmup / --iters are options of 'modernbert benchmark' and 'typesafe benchmark' only; no other model's benchmark takes them.");
+                return 1;
+            }
+
+            // Mode scope: whichever of the flags above the run takes, it needs the benchmark mode
+            // — a warmup count means nothing for a one-shot 'modernbert' or 'typesafe' run.
             if (mode != "benchmark")
             {
-                Console.Error.WriteLine($"--seq / --warmup / --iters need the 'benchmark' mode; got '{got}'. Drop the flag or add 'benchmark'.");
+                string flags = modelType == "typesafe" ? "--warmup / --iters" : "--seq / --warmup / --iters";
+                Console.Error.WriteLine($"{flags} need the 'benchmark' mode; got '{got}'. Drop the flag or add 'benchmark'.");
                 return 1;
             }
 
@@ -590,9 +604,11 @@ class Program
 
         // The TypeSafe demo has no checkpoint: it calls a decision-model engine over HTTP, so it
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
+        // warmup/iterations default to the same 1 + 3 the benchmark used before #676, so an
+        // invocation that does not ask for more samples sees no change.
         if (modelType == "typesafe")
             return mode == "benchmark"
-                ? TypeSafe.Benchmark(engine, urlArg, modelArg).GetAwaiter().GetResult()
+                ? TypeSafe.Benchmark(engine, urlArg, modelArg, warmup, iterations).GetAwaiter().GetResult()
                 : TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult();
 
         string modelDir = Path.Combine("samples", "data", resolvedType);

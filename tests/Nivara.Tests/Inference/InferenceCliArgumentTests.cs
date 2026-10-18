@@ -68,15 +68,34 @@ public class InferenceCliArgumentTests
     [Test]
     public void SeqWarmupIters_OnNonModernBertModel_Rejected()
     {
-        const string expected = "are options of 'modernbert benchmark' only";
-        AssertRejected(Run("minilm", "benchmark", "--seq", "128"), expected);
-        AssertRejected(Run("minilm", "benchmark", "--warmup", "2"), expected);
-        AssertRejected(Run("minilm", "benchmark", "--iters", "2"), expected);
+        // --seq names a shape, so it stays modernbert-only; --warmup / --iters parameterize the
+        // sampling protocol, which #676 opened to 'typesafe benchmark' as well.
+        AssertRejected(Run("minilm", "benchmark", "--seq", "128"),
+            "--seq is an option of 'modernbert benchmark' only");
+        AssertRejected(Run("minilm", "benchmark", "--warmup", "2"),
+            "--warmup / --iters are options of 'modernbert benchmark' and 'typesafe benchmark' only");
+        AssertRejected(Run("minilm", "benchmark", "--iters", "2"),
+            "--warmup / --iters are options of 'modernbert benchmark' and 'typesafe benchmark' only");
+        AssertRejected(Run("typesafe", "benchmark", "--seq", "128"),
+            "--seq is an option of 'modernbert benchmark' only");
+    }
 
-        // 'typesafe benchmark' uses the fixed 1-warmup-3-timed protocol on purpose (#676), so it
-        // is held to the same scope: the fixed protocol is not silently swappable.
-        AssertRejected(Run("typesafe", "benchmark", "--warmup", "2"), expected);
-        AssertRejected(Run("typesafe", "benchmark", "--iters", "2"), expected);
+    /// <summary>
+    /// <c>typesafe benchmark</c> takes <c>--warmup</c>/<c>--iters</c> since #676. The proof that
+    /// they clear the scope guard is a rejection at the *next* guard — value validation, or the
+    /// benchmark-mode gate — which runs before any HTTP dispatch, so the gate needs no live
+    /// decision engine to observe the flags reaching their consumer.
+    /// </summary>
+    [Test]
+    public void WarmupIters_OnTypesafeBeyondItsScope_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "benchmark", "--warmup", "0"), "--warmup expects a positive integer");
+            AssertRejected(Run("typesafe", "benchmark", "--iters", "0"), "--iters expects a positive integer");
+            AssertRejected(Run("typesafe", "--warmup", "2"), "--warmup / --iters need the 'benchmark' mode; got 'typesafe'");
+            AssertRejected(Run("typesafe", "--iters", "2"), "--warmup / --iters need the 'benchmark' mode; got 'typesafe'");
+        });
     }
 
     [Test]
@@ -389,9 +408,9 @@ public class InferenceCliArgumentTests
     /// dispatch sits before the model-file lookup. Each reject therefore has to name its own guard
     /// rather than fall through to "Model file not found". The happy path is deliberately absent:
     /// it needs a live decision engine, which a CI runner does not have — and neither does it
-    /// assert <c>benchmark</c> as unsupported here, because it is a supported mode (the pinned
-    /// reason it cannot take <c>--warmup</c>/<c>--iters</c> is in
-    /// <see cref="SeqWarmupIters_OnNonModernBertModel_Rejected"/>).
+    /// assert <c>benchmark</c> as unsupported here, because it is a supported mode (the scope of
+    /// <c>--warmup</c>/<c>--iters</c> on it, opened by #676, is pinned in
+    /// <see cref="WarmupIters_OnTypesafeBeyondItsScope_Rejected"/>).
     /// </summary>
     [Test]
     public void Typesafe_BeyondItsCliSurface_Rejected()

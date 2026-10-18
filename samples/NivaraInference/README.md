@@ -124,6 +124,7 @@ dotnet run --project samples/NivaraInference -c Release -- typesafe ollama      
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama --model tev1:0.8b   # model made explicit
 dotnet run --project samples/NivaraInference -c Release -- typesafe benchmark                  # time the round trip
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama benchmark
+dotnet run --project samples/NivaraInference -c Release -- typesafe benchmark --warmup 2 --iters 10  # more samples (#676)
 ```
 
 It sends six AI/ML news headlines through one typed question set — a category choice, three yes/no
@@ -132,6 +133,10 @@ non-zero when every assessment failed (the visible symptom of an engine that is 
 `--url` and `--model` are `typesafe`-only options; any other model rejects them, and not every
 model an engine holds is a decision model — the engine itself answers `400 … is not a decision
 model` for the rest.
+
+`--warmup N` and `--iters N` on `typesafe benchmark` raise the sample count above the default
+1 warmup + 3 timed passes (the defaults are unchanged); `--seq` remains `modernbert benchmark`-only,
+since it names a sequence shape, not a sample count.
 
 The engines, what a decision model is, `typesafe benchmark`'s protocol and its measured numbers
 are in **[docs/DECISION-MODELS.md](../../docs/DECISION-MODELS.md)**.

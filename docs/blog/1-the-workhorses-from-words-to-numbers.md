@@ -87,7 +87,7 @@ token ids comes out. MiniLM's tokenizer is WordPiece (`MiniLMTokenizer.Load/Enco
 - `[CLS]` and `[SEP]` are added around the sentence (`addSpecialTokens: true`,
   `BertModel.cs:449`). Standard BERT ids: `[PAD]=0`, `[UNK]=100`, `[CLS]=101`, `[SEP]=102`,
   `[MASK]=103` — the program prints the first 10 input token ids so you can verify
-  (`samples/NivaraInference/Program.cs:653-657`).
+  (`samples/NivaraInference/Program.cs:669-673`).
 - Sequences are padded to `maxLen = 128` with the padding token (`BertModel.cs:459-461`),
   and an attention mask `[0,1]` marks real vs padded positions (attention reads it in
   post 3).
