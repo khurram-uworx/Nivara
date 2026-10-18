@@ -78,7 +78,7 @@ internal static class CpuGemmProbe
         Console.WriteLine();
         Console.WriteLine($"  Legs     : {Leg.AutoDiff} (GradKernels.MatMulTransposedB), {Leg.BTranspose} (GradKernels.MatMul), {Leg.Blocked} (Parallel.For + register accumulators)");
         Console.WriteLine($"  Gate     : maxAbs(leg - dp-truth) <= {GateMaxAbs}");
-        Console.WriteLine($"  Timing   : {Warmups} warmup + best-of-{TimedRounds}");
+        Console.WriteLine($"  Timing   : {Warmups} untimed warmup per leg, then interleaved rounds per cell, median reported (see methodology)");
         Console.WriteLine($"  Layout   : the two in-tree legs differ only in B's layout — MatMul takes [K x N]");
         Console.WriteLine($"             and transposes per call, MatMulTransposedB takes [N x K] ready-made.");
         Console.WriteLine($"             Both compute A[M x K] · B[K x N]. Blocked reads the same [N x K].");
@@ -165,13 +165,15 @@ internal static class CpuGemmProbe
                 for (int r = 0; r < InterleavedRounds; r++)
                     samples[r] = rounds[li, r];
                 legMs[li] = MedianTicks(samples);
-                bestMs[(shape.Name, order[li])] = legMs[li];
             }
 
             long freq = Stopwatch.Frequency;
             double msConv = 1000.0 / freq;
             for (int li = 0; li < order.Length; li++)
+            {
                 legMs[li] *= msConv;
+                bestMs[(shape.Name, order[li])] = legMs[li];
+            }
 
             double baselineMs = legMs[Array.IndexOf(order, Leg.BTranspose)];
             double baselineGmacs = shape.Macs / (baselineMs * 1e6);
