@@ -1,20 +1,21 @@
-# Plan: Issue #450 — Fused pre-norm block for ModernBERT
+# Plan: Issue #457 — Conv2d grouped/depthwise forward parallelism
 
 ## Problem
 
-A 28-layer ModernBERT forward is 28 separate module forwards. The masks were the
-dominant cost and are already gone (#447/#476); what remains is per-layer module
-overhead and per-op tensor allocation. Land a fused pre-norm block (per-layer band +
-theta + GeGLU epilogue) on the CPU inference path, mirroring the Llama
-`ForwardCachedFused` idiom, so `modernbert benchmark` exercises it.
+Issue #457: Conv2d grouped/depthwise forward path is single-threaded. MobileNetV2
+(1x3x224x224) takes ~731.7 ms vs PyTorch ~22.4 ms (~33x). The issue's cited
+lines (625-655) are stale — they point at ConvInputGradGeneric (backward); the
+actual forward grouped path is Forward's groups != 1 branch (~199-244).
+ConvForwardKernel already uses TensorPrimitives.Dot (SIMD) via im2col; what is
+missing is Parallel.For over groups and over im2col tiles.
 
 ## Proposed changes
 
-- `ModernBertAttention<T>`: expose `NumHeads`, `HeadDim`.
-- `ModernBertLayer<T>`: store `hiddenSize`; add `ForwardFused(input, output, band, validLength)`.
-- `ModernBertEncoder<T>.Forward(int[], int)`: use fused path when `!GradEnabled`, else per-op chain.
-- Tests: parity vs per-op chain (1e-5), layer-0 missing norm, NaN-row guarantee, alloc guard.
-- Docs: update `docs/MODERNBERT.md` performance rows.
+- Conv2d.Forward grouped branch: parallelize over groups (gated), hoisting
+  input/weight/bias spans into arrays so the delegate does not capture ref-structs.
+- ConvForwardKernel: parallelize over im2col tiles (gated), renting scratch per tile.
+- Leave ConvForward1x1, all backward kernels, layout, and grouped semantics unchanged
+  (bit-identical parity).
 
 ## GitHub issues log
 
@@ -22,19 +23,22 @@ theta + GeGLU epilogue) on the CPU inference path, mirroring the Llama
 
 ## Verification
 
-- build, targeted tests, format check; human-run benchmark + compare.
+- build (dotnet build Nivara.slnx)
+- targeted tests: Conv2dTests, DepthwiseSeparableConv2dTests (Release)
+- format check (dotnet format whitespace --verify-no-changes)
+- human-run MobileNetV2/ResNet-18 compare scripts (not agent-run)
 
 ## Planned commits
 
-1. docs: plan #450 in TODO.md
-2. feat: expose ModernBertAttention.NumHeads/HeadDim and store hiddenSize
-3. feat: add ModernBertLayer.ForwardFused
-4. feat: route ModernBertEncoder inference through fused layers
-5. test: ModernBert fused block parity/NaN/alloc
-6. docs: record #450 perf update
+1. docs: plan #457 in TODO.md
+2. perf(autodiff): parallelize Conv2d grouped forward over channel groups
+3. perf(autodiff): parallelize ConvForwardKernel over im2col tiles
+4. test: Conv2d parity under parallel paths (if needed)
+5. docs: remove TODO.md — plan executed
 
 ## Blast radius
 
-- `ModernBertLayer`, `ModernBertAttention`, `ModernBertEncoder.Forward(int[],int)`.
-- Downstream: sample `modernbert` benchmark/compare, Laya (uses ModernBertEncoder), GPU runners unaffected (separate code paths).
-- Tests: new + existing ModernBert/banded attention tests.
+- src/Nivara/AutoDiff/Nn/Conv2d.cs (Forward grouped branch, ConvForwardKernel).
+- Downstream: MobileNetV2 sample inference, DepthwiseSeparableConv2d, any grouped Conv2d user.
+- Tests: Conv2dTests (6), DepthwiseSeparableConv2dTests (1).
+- Backward untouched; training behavior unchanged.
