@@ -304,7 +304,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|verify|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed passes and report median timing");
@@ -318,12 +318,15 @@ class Program
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
             Console.WriteLine("TypeSafe (no checkpoint; calls a decision-model engine over HTTP):");
-            Console.WriteLine("  typesafe [engine] [mode]   engine: ollaya (default) | ollama; mode: benchmark. Both");
+            Console.WriteLine("  typesafe [engine] [mode]   engine: ollaya (default) | ollama | nivara (in-process); mode: default | benchmark | verify. Both");
             Console.WriteLine("                    engines expose the TypeSafe /v1/systemone API. Defaults per engine:");
             Console.WriteLine("                    Ollaya http://localhost:11435 laya:en, Ollama http://localhost:11434 tev1:0.8b.");
             Console.WriteLine("      e.g. 'typesafe'                   news assessment on Ollaya");
             Console.WriteLine("           'typesafe ollama'            news assessment on Ollama");
             Console.WriteLine("           'typesafe ollama benchmark'  timed assessments on Ollama");
+            Console.WriteLine("           'typesafe nivara'            in-process assessment (Silk F32)");
+            Console.WriteLine("           'typesafe nivara benchmark'  timed in-process assessments");
+            Console.WriteLine("           'typesafe nivara verify'     in-process vs an HTTP engine (Ollaya by default)");
             Console.WriteLine("  typesafe benchmark  1 warmup + 3 timed passes per news item, median reported (--warmup N /");
             Console.WriteLine("                    --iters N raise them; defaults keep the 1 + 3 protocol). A sample is a");
             Console.WriteLine("                    full HTTP round trip, so these numbers are not comparable with 'laya");
