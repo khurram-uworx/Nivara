@@ -105,7 +105,9 @@ If a measurement ever shows a difference, it is a defect, not rounding.
 Per-lane redundant reduction (no barrier, `x` L1-hot, ~25% extra issue) versus one lane reducing and
 broadcasting through `__local` (also bit-identical, adds a serial `aCols`-long add chain per group).
 Start per-lane; if the C2 benchmark shows the norm dominating, hoist it — that is a C2 follow-up, not
-a plan change.
+a plan change. The benchmark never reached the point of deciding it: rounds 2 and 3 cannot attribute a
+change to a commit on this machine ("Speed gate outcome" below), so the per-lane form ships as written
+and the hoist stays open for whoever can measure it in one session.
 
 ### Removals (only non-additive part)
 
@@ -157,9 +159,10 @@ is a name nobody can find again.
     zero idle lanes on every Qwen width, the SmolLM tail, no `aRows` in the fused kernel's signature
     against `aRows` still in the tied-head tile kernel's, and the batch rejection.
     `DocReferenceTests.ExpectedFileCount` 711 -> 712 with the arithmetic extended.
-  - Round 2 measured (see Round log): Silk plain decode 199.7 -> 157 ms/token, 1.27x, against a control
-    that was 1.72x slower than round 1's; this round's three files are hash- and timestamp-verified as
-    coming from the single run.
+  - Round 2 measured (see Round log): Silk plain decode 199.7 -> 157 ms/token against a control that was
+    1.72x slower than round 1's; this round's three files are hash- and timestamp-verified as coming from
+    the single run. The 1.27x ratio is **not attributed** to this commit — round 3 superseded that
+    inference ("Speed gate outcome").
 - Found while editing `docs/SILK.md` in stage 3: two of its `SilkKernels.cs:` citations are stale on
   `main` (`:69` for `KernelNames`, which stage 3 moves to 117; `:331` for `GEMM_ROW4_ACCUMULATE`, now
   381). The citation gate only requires a cited line to *exist*, so it cannot see this. Fixed in its
@@ -193,7 +196,11 @@ is a name nobody can find again.
     a capability list — the kernel takes one to three slots, and the one-slot form was implemented and
     tested in that commit — but it reads as a usage claim, and this stage is what makes it one. The
     row is left as it stands; the row that had gone stale was `rms_norm_lm_head`'s.
-  - Speed gate: round 3 pending (see Round log).
+  - Speed gate: round 3 measured (see Round log) — 1296 ms / 185 ms/token, with the two controls
+    disagreeing about the round's state. C3's Qwen-side change keeps the launch count at 1 and swaps the
+    geometry, so this block is not the instrument that can see it; the launch-count reduction C3 makes is
+    on SmolLM, which the block does not run. See "Speed gate outcome" for what that means for the
+    branch's speed claim.
 
 ## Verification
 
@@ -223,7 +230,9 @@ Not to be run by the agent without asking: the full `dotnet test` suite.
 Per `docs/QWEN.md` § "Benchmark commands for agents (human-run, too slow for agents)", quoted
 verbatim and run from the repo root in PowerShell, **once after commit 2, once after commit 3, once
 after commit 4**. Each run deletes `data\qwen-bench` first, so the files read afterwards are from that
-run only.
+run only. All three rounds were run by the agent, at the user's explicit request — `docs/QWEN.md`
+otherwise treats this block as human-run. What the three rounds do and do not support is in "Speed
+gate outcome" below; it is less than the plan assumed when it was written.
 
 ```powershell
 Remove-Item -Recurse -Force "data\qwen-bench" -ErrorAction SilentlyContinue
@@ -234,22 +243,26 @@ dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benc
 dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > data\qwen-bench\silk_tools.txt 2>&1
 ```
 
-Consumed afterwards (read, never re-run): `silk_tools.txt` for decode ms/token; `cpu_*.txt` is the
-unchanged control. The agent never polls or re-runs. If a round shows a regression, the staged commits
-exist so the offending stage can be held out.
+Consumed afterwards (read, never re-run without being asked): `silk_tools.txt` for decode ms/token;
+`cpu_*.txt` is the unchanged control. The agent does not poll a running round, and does not re-run one on
+its own initiative — each of the three rounds below was run by it at the user's explicit request. If a
+round shows a regression, the staged commits exist so the offending stage can be held out.
 
 ### Round log
 
 The 2026-10-17 figures in `docs/QWEN.md` § Results are **not** a usable baseline for this machine
 state: in round 1 the control moved by the same factor as the measured path, which no Silk change can
-touch. Rounds are therefore compared with each other, but only after reading the round's own control,
-which is what the control column is for. Both rounds so far moved the control away from the recorded
-baseline, and round 2 moved it in the opposite direction to the measured path.
+touch. Rounds were therefore compared with each other, each read against its own control — and round 3
+shows that this does not work here: the round's two controls disagree with each other about its state,
+and the measured path moves *opposite* to the control in both intervals. What the table supports is a
+band, not a per-commit delta. See "Speed gate outcome" below, which supersedes the round-2
+attribution.
 
 | Round | Commit | Silk plain decode | Control: CPU plain decode | Notes |
 |---|---|---|---|---|
-| 1 | `78cb8b35` (C1) | 1398 ms / 7 tokens, 199.7 ms/token (runs 207 / 196 / 199) | 161.9 ms/token | model build 11,347 ms |
-| 2 | `9ab34e22` (C2) | 1102 ms / 7 tokens, 157 ms/token (runs 166 / 157 / 157) | 278.9 ms/token | model build 12,448 ms |
+| 1 | `78cb8b35` (C1) | 1398 ms / 7 tokens, 199.7 ms/token (runs 207 / 196 / 199) | 161.9 ms/token | model build 11,347 ms; CPU tools decode 220.3 ms/token |
+| 2 | `9ab34e22` (C2) | 1102 ms / 7 tokens, 157 ms/token (runs 166 / 157 / 157) | 278.9 ms/token | model build 12,448 ms; CPU tools decode 422.6 ms/token |
+| 3 | `ff78f9a2` (C3) | 1296 ms / 7 tokens, 185 ms/token (runs 195 / 177 / 185) | 243.7 ms/token | model build 11,068 ms; CPU tools decode 219.4 ms/token |
 
 Round 1 detail:
 
@@ -260,12 +273,13 @@ Round 1 detail:
   Silk change can touch, is 1.41x slower today than the 2026-10-17 record (114.7 -> 161.9 ms/token)
   and the CPU plain total is 1.57x slower; Silk's model build — weight upload and program
   compilation, untouched by this change — is 2.19x slower (5,178 -> 11,347 ms). The Silk/control
-  ratio is 1.23x today against 1.13x recorded, i.e. the same band. The valid comparison is round 2
-  against round 1.
+  ratio is 1.23x today against 1.13x recorded, i.e. the same band — itself a ratio reading, and the round
+  log now treats ratios here as uncontrolled ("Speed gate outcome"). The comparison this plan intended
+  was round 2 against round 1; why that method did not hold is the outcome section's subject.
 - The three generated-token count (7) and the 36-token prompt match the recorded row, so the shape
   is comparable even though the machine state is not.
 
-Round 2 detail:
+Round 2 detail (its attribution is superseded by round 3 — see "Speed gate outcome"):
 
 - Provenance: this is the first round whose three files are verifiably from one run. All four commands
   reported exit 0, and the run window is `16:18:43`–`16:31:46` (build 16:19, `cpu_plain` 16:20,
@@ -280,27 +294,86 @@ Round 2 detail:
   `--silk`, so this movement cannot be attributed to the branch. Rounds 1 and 2 are therefore not
   like-for-like either — but the host got slower, not faster, so the direction of the Silk change is
   still readable even though the size is not.
-- Silk plain decode 199.7 -> 157 ms/token (median total 1398 -> 1102 ms, 1.27x). Both repeat sets are
-  tight (207/196/199 and 166/157/157), and the Silk run was 42 ms/token cheaper while the host driving
-  every one of its launches was 1.72x slower on CPU decode, so 1.27x is a floor, not the effect size in
-  equal conditions. Per-token cost is GPU-resident — 8 launches/layer x 24 layers is ~192 launches
-  against ~160 ms of GPU time, i.e. single-digit milliseconds of host work — so host drift can move
-  this by little more than the launch overhead, not by the 42 ms.
+- Measured: Silk plain decode 199.7 -> 157 ms/token (median total 1398 -> 1102 ms, 1.27x); repeat sets
+  207/196/199 and 166/157/157. The inference drawn here at the time — that the control's 1.72x slowdown
+  makes 1.27x a floor rather than an effect size, because per-token cost is GPU-resident so host drift
+  can move it by little more than the launch overhead — is **superseded**: round 3 moved the control the
+  other way and Silk moved the other way with it. The number stands as measured; the attribution drawn
+  from it does not.
 - The model build (11,347 -> 12,448 ms, 1.10x) and the CPU full-forward medians moved the *other* way
   (plain 22,955 -> 20,796 ms, tools 198,115 -> 180,207 ms). A uniform machine slowdown would move all
   of these together; they disagree in sign, so this is drift between runs rather than a step change in
   machine state.
-- Silk/control ratio 1.23x in round 1 (against 1.13x recorded) and 0.56x in round 2 (157 vs 278.9).
-  The ratio moved mostly because its denominator moved, so the ratio is not the claim here; the
-  like-for-like claim available is the Silk-vs-Silk one, 1.27x.
-- Attribution: commit 3 (C2) is the only Silk change between the two runs — the decode-shaped geometry
-  (`GEMVLANES = 32` x `BLOCK = 4` = 128 columns/group, flat 1-D launch) in place of the tile shape. So
-  the 1.27x is attributable to lane utilization, not to the enqueue-count change commit 2 carried,
-  which round 1 already measured with.
-- What this round cannot say: whether 1.27x is the full effect, and whether the control's 1.72x is
-  load from another process or a machine-state step, since nothing else was recorded about the host.
-  A controlled same-session A/B (the kernels gate's CPU-reference cells) would answer the first
-  question; the block cannot, by construction.
+- Silk/control ratio 1.23x in round 1 (against 1.13x recorded) and 0.56x in round 2 (157 vs 278.9). The
+  ratio moved mostly because its denominator moved. Ratios of this kind are recorded, not used: round 3
+  shows the denominator is not a proxy for the conditions that set the numerator, so a ratio here is
+  uncontrolled too.
+- Attribution: commit 3 (C2) was the only Silk change between the two runs — the decode-shaped geometry
+  (`GEMVLANES = 32` x `BLOCK = 4` = 128 columns/group, flat 1-D launch) in place of the tile shape. The
+  attribution of the 1.27x to that geometry is **superseded** by round 3, which does not reproduce it
+  under a control matching round 1's.
+- What this round cannot say, restated after round 3: whether the 1.27x was the change or the machine.
+  The block answers neither, by construction.
+
+Round 3 detail:
+
+- Provenance: all four commands reported exit 0, and the three files are stamped `16:49` (`cpu_plain`),
+  `16:59` (`cpu_tools`) and `17:00` (`silk_tools`) with hashes `31D1D40B8367` / `FEA27363CCF0` /
+  `A5D745127531`, none of which matches round 2's. Round 2's raw files were copied out to
+  `%TEMP%\qwen-bench-round2\` before the run deleted `data\qwen-bench`, with the copy hash-verified
+  against the source first, so the folder again holds one run's files and round 2's figures remain
+  checkable against what produced them.
+- Measured: Silk plain decode 157 -> 185 ms/token (median total 1102 -> 1296 ms, 1.18x slower), runs
+  195 / 177 / 185 — an 18 ms spread, wider than round 2's 166 / 157 / 157 at 9 ms. Both are far tighter
+  than the ~40 ms the median moves between rounds, which is the sample saying the within-round spread is
+  not the source of the between-round differences.
+- Controls, both from this run: CPU plain decode 278.9 -> 243.7 ms/token (1.13x faster than round 2, still
+  1.51x round 1's 161.9; KV-cache median 3047 ms for 7 tokens, prefill 1342 ms) and CPU tools decode
+  422.6 -> 219.4 ms/token (1.93x faster than round 2 and 1.00x round 1's 220.3; KV-cache median 8191 ms
+  for 19 tokens, prefill 8647 ms). The two controls disagree about this round's state: the tools control
+  says the decode conditions are back to round 1's, the plain control says they are still 1.51x off.
+  Nothing else was recorded about the host, so nothing breaks the tie.
+- The sign is wrong for control-normalization again: in round 1 -> 2 the control got slower and Silk got
+  faster, in round 2 -> 3 the control got faster and Silk got slower. Two intervals is thin evidence, but
+  it points away from the assumption the round-2 record relied on — that the CPU control tracks whatever
+  sets the Silk number. Full-forward medians moved as well (plain 20,796 -> 19,334 ms, tools 180,207 ->
+  185,525 ms), in opposite directions to each other.
+- Scope: this block runs Qwen only. C3's Qwen-side change is a geometry swap with **no** change in launch
+  count (the head was already one launch on Qwen), while C3's launch-count reduction (SmolLM's head, 2 -> 1
+  per layer) is on a model this block never runs. Round 3 therefore has little to say about C3's mechanism
+  even on a quiet machine — and round 3's job was to measure C3.
+- What this round cannot say: whether the 1.18x slowdown is C3, the machine, or a mix. Given rounds 1-2,
+  "the machine" is the better-supported of the three.
+
+### Speed gate outcome
+
+Three rounds, one per stage, all run by the agent at the user's request:
+
+| Round | Commit | Silk plain decode | Control: CPU plain | Control: CPU tools |
+|---|---|---|---|---|
+| 1 | `78cb8b35` (C1) | 199.7 ms/token | 161.9 ms/token | 220.3 ms/token |
+| 2 | `9ab34e22` (C2) | 157 ms/token | 278.9 ms/token | 422.6 ms/token |
+| 3 | `ff78f9a2` (C3) | 185 ms/token | 243.7 ms/token | 219.4 ms/token |
+
+- **No per-commit attribution is supported.** Silk varies by 1.27x across rounds; the controls vary by up
+  to 1.93x; the two controls disagree with each other about round 3; and the measured path moves opposite
+  to the control in both intervals. On this machine the block cannot separate a ~10-30% effect from state
+  it does not measure. Round 2's 1.27x is recorded as measured and no longer as attributable.
+- **No regression is observed.** Every round's Silk decode lies in a 157-200 ms/token band, and no round's
+  Silk figure is worse than round 1's while its own control was also worse. That is the strongest
+  statement the data carries, and it is a weak one.
+- **The mechanism claim does not rest on the block.** C1 takes the cached layer from 11 kernel launches to
+  8 (`SilkQwenGpuRunner`/`SilkSmolLMGpuRunner`) and C3 takes SmolLM's head from 2 to 1; both are readable
+  in the source, and the fused kernel reproduces the kernels it replaced bit for bit (the fixture plus the
+  `--silk-kernels` byte-identity posture). The Speed gate was to put a number on that. It did not.
+- **The instrument that can attribute it** is a same-session A/B: the competing kernels timed against each
+  other in one process, interleaved and repeated, so state drift hits both sides. `rms_norm_lm_head` (tile)
+  and `rms_norm_gemv` (flat, one slot) coexist after C3, so C3's geometry change is directly measurable
+  that way — the same pair the fixture already asserts is bit-identical. C1/C2's replacements no longer
+  have a counterpart in the tree (`rms_norm_gemm_bias` was deleted), so their geometry would have to be
+  re-measured from `main` or left unmeasured. Adding that cell to
+  `tests/Nivara.PerformanceTests/SilkKernelsGate.cs` and running it is a human decision, as is whether
+  #670 ships with a timing number at all — this plan is the only place one was promised.
 
 ## Blast radius
 
