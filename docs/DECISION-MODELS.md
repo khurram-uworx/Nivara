@@ -49,7 +49,15 @@ dotnet run --project samples/NivaraInference -c Release -- typesafe             
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama                     # Ollama, tev1:0.8b
 dotnet run --project samples/NivaraInference -c Release -- typesafe ollama --model tev1:0.8b   # model made explicit
 dotnet run --project samples/NivaraInference -c Release -- typesafe --url http://host:11434 --model tev1:0.8b
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara                     # in-process Silk F32
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara benchmark           # timed in-process assessments
+dotnet run --project samples/NivaraInference -c Release -- typesafe nivara verify              # compare in-process vs Ollaya
 ```
+
+`verify` keeps the typed decision as the hard gate and reports per-item/per-question deltas on
+per-option probability, `AnswerConfidence`, and score. Observed maxima on the six news items:
+per-option probability 0.0000, score 0.0000, `AnswerConfidence` 0.2507; the probability and
+score deltas are the quantities expected to stay within 1e-3.
 
 - **`engine`** is `ollaya` (the default) or `ollama`. It is a positional because engines are a
   table, not a set of flags: a third engine later is one row, not another boolean to type.
