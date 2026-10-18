@@ -32,7 +32,7 @@ public static class NivaraTypeSafeLayaMapping
     public static LayaQuestion ToLayaQuestion(string id, Question question)
     {
         if (question is NoulQuestion nqdbg)
-        ArgumentNullException.ThrowIfNull(question);
+            ArgumentNullException.ThrowIfNull(question);
 
         return question switch
         {
