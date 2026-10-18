@@ -115,7 +115,7 @@ Per news item (median ms, run one):
 | **Overall median** | **653.5** | **1216** | **2457.5** |
 
 What the items show: Nivara is consistently faster than Ollama and slower than Ollaya on this
-machine; within a run each item's maximum sat within ~3% of its median. Absolute latency drifts run
+machine; within a run each item's maximum sat within ~3% of its median. This run reflects the Silk atched_attention score-cache change: per-query masked scores are computed once per pass target instead of three times. Absolute latency drifts run
 to run (Ollaya's overall moved +32% between two back-to-back runs, Ollama's +12%), so use these to
 compare engines only by re-running both. Nivara model load was 4881 ms and the first (warmup) request
 includes kernel compilation.
