@@ -6,6 +6,17 @@ This is a reflection of what we built and what we learned while porting Laya's t
 
 Related: the encoder's GPU reflection in [docs/ACCELERATION.md](ACCELERATION.md) §1, the backend probe in the inference sample's README.
 
+## Where Laya fits: the TypeSafe decision-model ecosystem
+
+Laya is not served by a text-completion API. It is a **decision model**: the caller declares its
+questions up front — a choice, a yes/no, a score — and the server returns a typed answer with a
+confidence for each, rather than free-form text. The wire protocol for that is the **TypeSafe
+"System One"** API, which several local engines speak interchangeably, so Laya is a drop-in behind
+a stable endpoint rather than a bespoke server.
+
+The engines, the `typesafe` demo's command line, and how to time one engine against another are in
+[docs/DECISION-MODELS.md](DECISION-MODELS.md).
+
 ## Model overview
 
 A ModernBERT-large encoder — the same architecture as [docs/MODERNBERT.md](MODERNBERT.md), nested under the `encoder.` prefix — plus a typed decision head. The checkpoint is **842.6 MB of F16** (206 tensors, 421,293,830 parameters), widened to F32 at load, so the resident set is about 1.7 GB.

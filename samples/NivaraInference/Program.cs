@@ -35,6 +35,9 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
+        // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
+        // checkpoint, and it dispatches before the model-file lookup below.
+        ["typesafe"] = ["", "benchmark"],
     };
 
     static readonly Dictionary<string, string[]> GpuModes = new()
@@ -118,6 +121,12 @@ class Program
         bool plain = false;
         bool useGpu = false;
         bool useSilk = false;
+        string engine = TypeSafe.DefaultEngine;
+        bool engineSet = false;
+        string? urlArg = null;
+        bool urlSet = false;
+        string? modelArg = null;
+        bool modelSet = false;
         int teacherExamples = 0;
         int seed = 42;
         bool teacherExamplesSet = false;
@@ -199,6 +208,48 @@ class Program
                 useGpu = true;
             else if (args[i] == "--silk")
                 useSilk = true;
+            else if (args[i] == "--url")
+            {
+                // A required value, validated here because every other value-taking flag in this CLI
+                // validates its own. Required rather than optional matters for parsing: an optional
+                // value is a non-flag token that can be mistaken for the mode, which is how a
+                // well-formed 'typesafe ollama benchmark' ends up rejected as a bad URL. A flag that
+                // names its own value leaves the mode slot to the mode alone.
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--url needs a value.");
+                    return 1;
+                }
+
+                urlArg = args[i + 1];
+                if (!Uri.TryCreate(urlArg, UriKind.Absolute, out Uri? endpoint) ||
+                    (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
+                {
+                    Console.Error.WriteLine($"--url expects an absolute http(s) URL; got '{urlArg}'.");
+                    return 1;
+                }
+                urlSet = true;
+                i++;
+            }
+            else if (args[i] == "--model")
+            {
+                // The value is consumed even when the flag is last, so a missing value can never
+                // fall through to the positional-mode branch below and be read as a mode name.
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--model needs a value.");
+                    return 1;
+                }
+
+                modelArg = args[i + 1];
+                if (string.IsNullOrWhiteSpace(modelArg))
+                {
+                    Console.Error.WriteLine("--model expects a non-empty model name.");
+                    return 1;
+                }
+                modelSet = true;
+                i++;
+            }
             else if (args[i] == "--gpu")
             {
                 // The flag was renamed when the Silk path arrived. Rejected rather than aliased
@@ -236,16 +287,27 @@ class Program
                 textSet = true;
                 i++;
             }
+            else if (modelType == "typesafe" && !engineSet && TypeSafe.IsEngine(args[i]))
+            {
+                // The first positional of a 'typesafe' run names the engine. A token that is not an
+                // engine name falls through to the mode below, so 'typesafe benchmark' and
+                // 'typesafe ollama benchmark' both parse — the two token sets are disjoint, which
+                // is what makes one positional slot safe for both. engineSet keeps a *second* engine
+                // token from being re-read as an engine, so 'typesafe ollama ollaya' reaches the
+                // mode allow-list and is rejected there instead of silently keeping the first one.
+                engine = args[i];
+                engineSet = true;
+            }
             else if (mode.Length == 0)
                 mode = args[i];
         }
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
-            Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
+            Console.WriteLine("  benchmark         Run timed passes and report median timing");
             Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
             Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
@@ -254,6 +316,20 @@ class Program
             Console.WriteLine("  tools             Native Qwen2.5 function calling (getWeather tool loop)");
             Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
+            Console.WriteLine();
+            Console.WriteLine("TypeSafe (no checkpoint; calls a decision-model engine over HTTP):");
+            Console.WriteLine("  typesafe [engine] [mode]   engine: ollaya (default) | ollama; mode: benchmark. Both");
+            Console.WriteLine("                    engines expose the TypeSafe /v1/systemone API. Defaults per engine:");
+            Console.WriteLine("                    Ollaya http://localhost:11435 laya:en, Ollama http://localhost:11434 tev1:0.8b.");
+            Console.WriteLine("      e.g. 'typesafe'                   news assessment on Ollaya");
+            Console.WriteLine("           'typesafe ollama'            news assessment on Ollama");
+            Console.WriteLine("           'typesafe ollama benchmark'  timed assessments on Ollama");
+            Console.WriteLine("  typesafe benchmark  1 warmup + 3 timed passes per news item, median reported. A sample is a");
+            Console.WriteLine("                    full HTTP round trip, so these numbers are not comparable with 'laya");
+            Console.WriteLine("                    benchmark' (in-process forward passes).");
+            Console.WriteLine("  --url <url>       Engine endpoint instead of the default; must be an absolute http(s) URL.");
+            Console.WriteLine("  --model <name>    Decision model to load on that engine; e.g. 'typesafe ollama --model tev1:0.8b'.");
+            Console.WriteLine("                    Not every model an engine holds is a decision model; the engine rejects the others.");
             Console.WriteLine();
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
@@ -417,6 +493,23 @@ class Program
             return 1;
         }
 
+        // --url and --model parameterize the engine the 'typesafe' demo talks to; no other run
+        // reads them, so reject them loudly rather than let an invocation look like it did
+        // something. The engine positional needs no guard of its own: for any other model it is
+        // simply a mode, and the allow-list below rejects it.
+        if (urlSet && modelType != "typesafe")
+        {
+            Console.Error.WriteLine($"--url is a 'typesafe' option only; got '{got}'.");
+            return 1;
+        }
+
+        // --model picks which model on that engine to load; same reasoning as --url.
+        if (modelSet && modelType != "typesafe")
+        {
+            Console.Error.WriteLine($"--model is a 'typesafe' option only; got '{got}'.");
+            return 1;
+        }
+
         // The mode allow-list (#587). An unrecognised mode used to fall through to the model's default
         // runner: the vision models printed "Image not found" and exited 0, and qwen ran the tools demo.
         if (!IsSupportedMode(modelType, mode))
@@ -494,6 +587,13 @@ class Program
             Console.Error.WriteLine($"--simd-widen only changes minilm / distilbert / distilbert_sst / modernbert / laya at --precision bf16|fp16 outside 'compare'; '{got}' does not read the widen kernels. Drop the flag.");
             return 1;
         }
+
+        // The TypeSafe demo has no checkpoint: it calls a decision-model engine over HTTP, so it
+        // dispatches here, before the model-file lookup below (which assumes a safetensors file).
+        if (modelType == "typesafe")
+            return mode == "benchmark"
+                ? TypeSafe.Benchmark(engine, urlArg, modelArg).GetAwaiter().GetResult()
+                : TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult();
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");

@@ -16,11 +16,15 @@ namespace Nivara.Tests.Inference;
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
-/// scopes (#580). #589 requires each reject to be observable before the first disk touch, so the
-/// ordering cases and the <c>qwen</c> happy paths use <c>qwen</c> (its checkpoint is never present:
-/// <c>samples/data/qwen2.5-0.5b-instruct/</c> is gitignored and no <c>*.safetensors</c> is tracked)
-/// and the mode cases pin the message, not the exit code — a guard that fell through to the
-/// model-file check would exit <c>1</c> with a different message.
+/// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
+/// and the <c>--url</c>, <c>--model</c>, engine-positional and benchmark scope). The <c>typesafe</c>
+/// happy path is
+/// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
+/// observable before the first disk touch, so the ordering cases and the <c>qwen</c> happy paths use
+/// <c>qwen</c> (its checkpoint is never present: <c>samples/data/qwen2.5-0.5b-instruct/</c> is
+/// gitignored and no <c>*.safetensors</c> is tracked) and the mode cases pin the message, not the
+/// exit code — a guard that fell through to the model-file check would exit <c>1</c> with a
+/// different message.
 /// </para>
 /// </summary>
 [TestFixture]
@@ -68,6 +72,11 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("minilm", "benchmark", "--seq", "128"), expected);
         AssertRejected(Run("minilm", "benchmark", "--warmup", "2"), expected);
         AssertRejected(Run("minilm", "benchmark", "--iters", "2"), expected);
+
+        // 'typesafe benchmark' uses the fixed 1-warmup-3-timed protocol on purpose (#676), so it
+        // is held to the same scope: the fixed protocol is not silently swappable.
+        AssertRejected(Run("typesafe", "benchmark", "--warmup", "2"), expected);
+        AssertRejected(Run("typesafe", "benchmark", "--iters", "2"), expected);
     }
 
     [Test]
@@ -373,6 +382,80 @@ public class InferenceCliArgumentTests
             "is only supported for the qwen benchmark mode");
         AssertRejected(Run("qwen", "distill", "--synthetic-weights"),
             "supports only the 'benchmark' mode");
+    }
+
+    /// <summary>
+    /// The TypeSafe demo is a model key whose run is an HTTP client, not a checkpoint, so its
+    /// dispatch sits before the model-file lookup. Each reject therefore has to name its own guard
+    /// rather than fall through to "Model file not found". The happy path is deliberately absent:
+    /// it needs a live decision engine, which a CI runner does not have — and neither does it
+    /// assert <c>benchmark</c> as unsupported here, because it is a supported mode (the pinned
+    /// reason it cannot take <c>--warmup</c>/<c>--iters</c> is in
+    /// <see cref="SeqWarmupIters_OnNonModernBertModel_Rejected"/>).
+    /// </summary>
+    [Test]
+    public void Typesafe_BeyondItsCliSurface_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "predict"), "Unsupported mode 'predict' for 'typesafe'");
+            AssertRejected(Run("typesafe", "--ilgpu"), "--ilgpu is not supported for 'typesafe'");
+            AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
+        });
+    }
+
+    /// <summary>
+    /// <c>--url</c> points the <c>typesafe</c> demo at an engine and is read by no other run. Its
+    /// value is required — unlike an optional-value flag it can never be confused with the mode
+    /// that follows it, which is how a well-formed <c>typesafe ollama benchmark</c> used to be
+    /// rejected as a bad URL.
+    /// </summary>
+    [Test]
+    public void Url_BeyondItsScopeOrWithoutAValue_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("minilm", "--url", "http://localhost:11434"), "--url is a 'typesafe' option only");
+            AssertRejected(Run("typesafe", "--url"), "--url needs a value.");
+            AssertRejected(Run("typesafe", "--url", "not-a-url"), "--url expects an absolute http(s) URL");
+        });
+    }
+
+    /// <summary>
+    /// The first positional of a <c>typesafe</c> run is the engine when it names one, and the mode
+    /// otherwise; the two token sets are disjoint, which is what lets one slot hold both. Asserted
+    /// through the allow-list rather than a connection attempt, so the gate needs no engine: an
+    /// engine token that is not a mode still parses (no URL error), a second engine token is read
+    /// as a mode and rejected, and the same token is an unsupported mode for any other model.
+    /// </summary>
+    [Test]
+    public void EnginePositional_IsReadAsEngineOrModeByNameOnly()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "bogus"), "Unsupported mode 'bogus' for 'typesafe'");
+            AssertRejected(Run("typesafe", "ollama", "bogus"), "Unsupported mode 'bogus' for 'typesafe'");
+            AssertRejected(Run("typesafe", "ollama", "ollaya"), "Unsupported mode 'ollaya' for 'typesafe'");
+            AssertRejected(Run("minilm", "ollama"), "Unsupported mode 'ollama' for 'minilm'");
+        });
+    }
+
+    /// <summary>
+    /// <c>--model</c> names the model to load on the selected decision-model server and is read only
+    /// by the <c>typesafe</c> run, so it is rejected elsewhere; the value is consumed even when it is
+    /// the last token, so it cannot fall through to the positional-mode branch and be read as a mode
+    /// name. The happy path (an override that the live server accepts) is deliberately not gated: it
+    /// needs a decision-model server, which a CI runner does not have.
+    /// </summary>
+    [Test]
+    public void Model_BeyondItsScopeOrWithoutAValue_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("minilm", "--model", "laya:en"), "--model is a 'typesafe' option only");
+            AssertRejected(Run("typesafe", "--model"), "--model needs a value.");
+            AssertRejected(Run("typesafe", "--model", "   "), "--model expects a non-empty model name");
+        });
     }
 
     [Test]

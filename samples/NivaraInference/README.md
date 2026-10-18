@@ -39,6 +39,10 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert compare_di
 dotnet run --project samples/NivaraInference -c Release -- laya                 # decision head over the fixture questions (CPU reference)
 dotnet run --project samples/NivaraInference -c Release -- laya compare         # prompt + logit + decision gate vs the laya 0.3.20 wheel
 
+# TypeSafe decision-model demo — no weights; calls a decision-model engine over HTTP
+dotnet run --project samples/NivaraInference -c Release -- typesafe             # Ollaya (laya:en)
+dotnet run --project samples/NivaraInference -c Release -- typesafe ollama      # Ollama (tev1:0.8b)
+
 # Benchmark (10 passes each)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
@@ -102,6 +106,35 @@ For architecture, verification, performance, and GPU-path details per model:
 | Qwen2.5-0.5B-Instruct | [docs/QWEN.md](../../docs/QWEN.md) |
 | Laya | [docs/LAYA.md](../../docs/LAYA.md) |
 | GPU acceleration (all models) | [docs/ACCELERATION.md](../../docs/ACCELERATION.md) |
+
+## TypeSafe decision-model demo (`typesafe`)
+
+`typesafe` loads no weights. It is an HTTP client for the **TypeSafe "System One"** decision-model
+API, which both **Ollaya** and **Ollama 0.35+** expose at the same `POST /v1/systemone` route. The
+command line is `typesafe [engine] [mode] [--url <url>] [--model <name>]`:
+
+| Engine | Default URL | Default model | How to select |
+|--------|-------------|---------------|---------------|
+| Ollaya | `http://localhost:11435` | `laya:en` | default, or `ollaya` |
+| Ollama | `http://localhost:11434` | `tev1:0.8b` | `ollama` |
+
+```bash
+dotnet run --project samples/NivaraInference -c Release -- typesafe                            # Ollaya, laya:en
+dotnet run --project samples/NivaraInference -c Release -- typesafe ollama                     # Ollama, tev1:0.8b
+dotnet run --project samples/NivaraInference -c Release -- typesafe ollama --model tev1:0.8b   # model made explicit
+dotnet run --project samples/NivaraInference -c Release -- typesafe benchmark                  # time the round trip
+dotnet run --project samples/NivaraInference -c Release -- typesafe ollama benchmark
+```
+
+It sends six AI/ML news headlines through one typed question set — a category choice, three yes/no
+questions and two score questions — and prints the answer and confidence for each, exiting
+non-zero when every assessment failed (the visible symptom of an engine that is not running).
+`--url` and `--model` are `typesafe`-only options; any other model rejects them, and not every
+model an engine holds is a decision model — the engine itself answers `400 … is not a decision
+model` for the rest.
+
+The engines, what a decision model is, `typesafe benchmark`'s protocol and its measured numbers
+are in **[docs/DECISION-MODELS.md](../../docs/DECISION-MODELS.md)**.
 
 ## Usage
 
