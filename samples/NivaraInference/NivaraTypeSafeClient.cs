@@ -31,6 +31,7 @@ public static class NivaraTypeSafeLayaMapping
 
     public static LayaQuestion ToLayaQuestion(string id, Question question)
     {
+        if (question is NoulQuestion nqdbg)
         ArgumentNullException.ThrowIfNull(question);
 
         return question switch
@@ -54,11 +55,11 @@ public static class NivaraTypeSafeLayaMapping
                 Id = id,
                 Type = LayaQuestionType.Noul,
                 Instructions = ContentToText(nq.Instructions),
-                NoulFalseCriterion = ContentToText(nq.Criteria!.No),
-                NoulTrueCriterion = ContentToText(nq.Criteria!.Yes),
+                NoulFalseCriterion = nq.Criteria is null ? string.Empty : ContentToText(nq.Criteria!.No),
+                NoulTrueCriterion = nq.Criteria is null ? string.Empty : ContentToText(nq.Criteria!.Yes),
             },
             _ => throw new ArgumentException(
-                $"Unsupported question type '{question.GetType().Name}'", nameof(question)),
+                $"Unsupported question type '{question!.GetType().Name}'", nameof(question)),
         };
     }
 
@@ -287,12 +288,12 @@ public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
             foreach (var (id, question) in request.Questions)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var layaQuestion = NivaraTypeSafeLayaMapping.ToLayaQuestion(id, question);
+                var layaQuestion = NivaraTypeSafeLayaMapping.ToLayaQuestion(id, question!);
                 var sequence = LayaPromptBuilder.BuildSequence(
                     tokenizer, stateText, layaQuestion, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
                 var output = session.Forward(sequence.Ids, sequence.Length, layaQuestion.Type, sequence.Markers);
                 var decision = calibration.Decode(layaQuestion, output.Logits, output.ActionProbability);
-                answers[id] = NivaraTypeSafeLayaMapping.ToAnswer(question, decision);
+                answers[id] = NivaraTypeSafeLayaMapping.ToAnswer(question!, decision);
                 inputTokens += sequence.Length;
             }
         }
