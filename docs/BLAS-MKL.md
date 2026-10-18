@@ -291,7 +291,7 @@ Recorded so the probe's successor does not re-derive it. Not authorized by this 
 ## References
 
 - [ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md) — options A/B/C and the M3 gate this page executes.
-- [ACCELERATION.md](ACCELERATION.md) — the GPU side of the same gap; §"Not done" names the native BLAS bridge as the CPU follow-up to [#458](https://github.com/khurram-uworx/Nivara/issues/458).
+- [ACCELERATION.md](ACCELERATION.md) §7 — the GPU side of the same gap; open work names the native BLAS bridge as the CPU follow-up to [#458](https://github.com/khurram-uworx/Nivara/issues/458).
 - [`tests/Nivara.PerformanceTests/README.md`](../tests/Nivara.PerformanceTests/README.md) — `--cpu-gemm` as it stands (three legs, the projected Laya table, the run-to-run caveat).
 - `src/Nivara/Tensors/TensorsHelper.cs` — `MultiplyCore`, and the note that `Tensor.MatrixMultiply` has not shipped.
 - Issues: [#458](https://github.com/khurram-uworx/Nivara/issues/458) (the CPU gap; GEMM cleared at S=512, not at S=128) · [#435](https://github.com/khurram-uworx/Nivara/issues/435) (the GEMM harness this probe extends) · [#133](https://github.com/khurram-uworx/Nivara/issues/133) (provider-seam decision, open) · [#444](https://github.com/khurram-uworx/Nivara/issues/444) (GPU consumer of that seam) · [#457](https://github.com/khurram-uworx/Nivara/issues/457) (vision conv — not this bridge).
