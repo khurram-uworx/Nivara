@@ -3,8 +3,8 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using System.Buffers;
 using System.Numerics;
-
 namespace Nivara.Samples;
 
 /// <summary>
@@ -216,28 +216,37 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     {
         int L = inputIds.Length;
         int hidden = Embed.EmbeddingDim;
-        var h0 = new T[L * hidden];
-        var h1 = new T[L * hidden];
+        int chunk = L * hidden;
 
-        Embed.Weight!.Tensor.Data.TryGetSpan(out var embedSpan);
-        for (int t = 0; t < L; t++)
-            embedSpan.Slice(inputIds[t] * hidden, hidden).CopyTo(h0.AsSpan(t * hidden, hidden));
-
-        var cur = h0;
-        var alt = h1;
-        for (int i = 0; i < layers.Length; i++)
+        var h0 = ArrayPool<T>.Shared.Rent(Math.Max(chunk, 1));
+        var h1 = ArrayPool<T>.Shared.Rent(Math.Max(chunk, 1));
+        try
         {
-            layers[i].ForwardPrefillFused(cur, alt, 0, cache.keys[i], cache.values[i]);
-            (cur, alt) = (alt, cur);
-        }
+            Embed.Weight!.Tensor.Data.TryGetSpan(out var embedSpan);
+            for (int t = 0; t < L; t++)
+                embedSpan.Slice(inputIds[t] * hidden, hidden).CopyTo(h0.AsSpan(t * hidden, hidden));
 
-        // Final norm over the whole chunk in place (plus gamma multiply), then the tied LM head GEMV on
-        // the last hidden row only, into a fresh [1, vocab] logits buffer (the required return value).
-        finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
-        LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, L, hidden, double.CreateChecked(finalNorm.Eps));
-        var logits = new T[vocabSize];
-        LlamaFusedKernels.MatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
-        return ReverseGradTensor<T>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
+            var cur = h0;
+            var alt = h1;
+            for (int i = 0; i < layers.Length; i++)
+            {
+                layers[i].ForwardPrefillFused(cur.AsSpan(0, chunk), alt.AsSpan(0, chunk), 0, cache.keys[i], cache.values[i]);
+                (cur, alt) = (alt, cur);
+            }
+
+            // Final norm over the whole chunk in place (plus gamma multiply), then the tied LM head GEMV on
+            // the last hidden row only, into a fresh [1, vocab] logits buffer (the required return value).
+            finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
+            LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, L, hidden, double.CreateChecked(finalNorm.Eps));
+            var logits = new T[vocabSize];
+            LlamaFusedKernels.MatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
+            return ReverseGradTensor<T>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(h0);
+            ArrayPool<T>.Shared.Return(h1);
+        }
     }
 }
 
