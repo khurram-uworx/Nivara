@@ -3,7 +3,7 @@
 Same-host repeated profile of the eight GpuProbe legs for `dot16`, `silu` and
 `gemv`, measured on **this** host per issue #553. It is the **Iris Xe half** of the
 correction that #552 (Arc 140T) carries the other half of. The `README.md` decision
-table, `docs/ILGPU.md`, `docs/ACCELERATION.md` and the per-leg case-study docs are
+table, `docs/ILGPU.md`, `docs/SILK.md` and the per-leg case-study docs are
 **not** edited from this file alone — those corrections land jointly, once both hosts
 are measured, with the two readings side by side (tracked in #599).
 

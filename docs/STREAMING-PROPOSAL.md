@@ -7,7 +7,7 @@
 > *proposed* shape, not something a reader can call. For the streaming contract that does
 > ship, see [`docs/STREAMING.md`](STREAMING.md).
 >
-> This is the design detail behind [ACCELERATION.md](ACCELERATION.md)'s single roadmap line and
+> This is the design detail behind [SILK.md](SILK.md)'s single roadmap line and
 > [docs/STREAMING.md](STREAMING.md)'s shipped-behavior reference. Its snippets deliberately do not
 > compile, which is why this file is the repository's designated *ungated* proposal document
 > (`DocumentationSnippetTests.ProposalDocuments_AreExcludedByNameNotByGlob`).
@@ -336,7 +336,7 @@ No `MemoryBudget` primitive is created. No blocking. Identical to today.
 
 - **Issue:** [#325 — Spill-to-disk for streaming execution memory budget enforcement](https://github.com/khurram-uworx/Nivara/issues/325)
 - **Shipped streaming behavior:** [`docs/STREAMING.md`](STREAMING.md)
-- **Acceleration index / roadmap:** [`docs/ACCELERATION.md`](ACCELERATION.md)
+- **Acceleration index / roadmap:** [`docs/SILK.md`](SILK.md)
 - **Budget tracker:** `src/Nivara/Execution/StreamingBudgetTracker.cs`
 - **Strategy:** `src/Nivara/Execution/StreamingExecutionStrategy.cs`
 - **Context:** `src/Nivara/Execution/NivaraExecutionContext.cs`

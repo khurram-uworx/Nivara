@@ -126,7 +126,7 @@ var adults = frame.Query<Person>()
 
 For detailed examples and tutorials, see [**GETTING-STARTED.md**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md).
 
-For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including a character-level GPT trained on Nivara AutoDiff, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, a variational autoencoder for synthetic pattern generation, a PyTorch parity benchmark suite showing <0.04% loss-curve divergence, a MiniLM inference pipeline, a DistilBERT fine-tuning pipeline for SST-2 (samples/NivaraFineTuning), a MobileNetV2/ResNet-18 inference pipeline (samples/NivaraInference), and a time-series anomaly detection sample (samples/NivaraTimeSeries).
+For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including a character-level GPT trained on Nivara AutoDiff, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, a variational autoencoder for synthetic pattern generation, a PyTorch parity benchmark suite showing <0.04% loss-curve divergence, a MiniLM inference pipeline, a DistilBERT fine-tuning pipeline for SST-2 (samples/NivaraFineTuning), a MobileNetV2/ResNet-18 inference pipeline (samples/NivaraInference), and a time-series anomaly detection sample (samples/NivaraTimeSeries). The `samples/NivaraInference` CLI runs a promoted Silk OpenCL backend (`--silk`) for `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, `laya`, `smollm`, `qwen`, `mobilenet_v2`, and `resnet18` (F32-only; see `docs/SILK.md`).
 
 ---
 

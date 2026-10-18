@@ -542,7 +542,7 @@ internal static class GemmBenchmark
 
         if (status.AclLineStatus == 0)
         {
-            Console.WriteLine("WARNING: on battery — the iGPU throttles flat, GMAC/s numbers are INVALID (docs/ACCELERATION.md §1 battery lesson).");
+            Console.WriteLine("WARNING: on battery — the iGPU throttles flat, GMAC/s numbers are INVALID (docs/SILK.md §1 battery lesson).");
             Console.WriteLine("         The correctness gate is battery-safe and still runs.");
         }
         else if (status.AclLineStatus == 1)

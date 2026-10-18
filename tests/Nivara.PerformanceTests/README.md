@@ -75,7 +75,7 @@ a throwaway harness:
   synchronized launches, reporting GMAC/s; exit code 0 = pass, N = failed cells,
   10 = UNBUILT (no OpenCL GPU). Runs on AC power only — the harness warns on battery
   because the iGPU throttles flat (the correctness leg still runs). Re-run after any
-  driver/IGC bump and compare the GMAC/s column (docs/ACCELERATION.md §1). The baseline below was
+  driver/IGC bump and compare the GMAC/s column (docs/SILK.md §1). The baseline below was
   recorded on this machine's first run.
 
   **The four #440 geometries additionally assert byte-identity to Row4**, and are kept as a
@@ -129,7 +129,7 @@ Ultra 7 255H (Arc iGPU via OpenCL/ILGPU 1.5.3), AC line. 36 cells, all PASS
 The maxAbs values reproduce the documented f32-vs-DP summation-order floor exactly
 (K=768 → 4.0e-5, K=3072 → 1.7e-4), leaving ~25–250× margin to the 1e-3 gate and ~6 orders
 to the Row4 `colBase`-class bug signal (~40). GMAC/s is load-sensitive (this run read the
-Arc iGPU at ~half the idle-machine scenario benchmark 303–379 GMAC/s, docs/ACCELERATION.md §1) —
+Arc iGPU at ~half the idle-machine scenario benchmark 303–379 GMAC/s, docs/SILK.md §1) —
 the correctness gate is the primary contract; compare GMAC/s moves, not absolutes.
 
 #### GEMM gate baseline (2026-09-27, Laya shapes extended)

@@ -353,7 +353,7 @@ public static class Laya
     /// four fixture questions, max |diff| 1.657e-5, act probability exact.
     ///
     /// That is worth the space because it came in 90× under a budget the encoder alone spends 56% of,
-    /// and the reason is not luck. <c>docs/ACCELERATION.md</c> records the encoder gate at maxRel
+    /// and the reason is not luck. <c>docs/SILK.md</c> records the encoder gate at maxRel
     /// 5.577e-4, which measures the raw <c>[L, 1024]</c> hidden state — 28 layers of F32
     /// reduction-order drift landing undiluted on the compared quantity. This gate compares one
     /// scalar per marker, from a <c>1024 → 1</c> projection taken <em>after</em> the scorer's

@@ -87,7 +87,11 @@ See the [NivaraInference README](../samples/NivaraInference/README.md) for full 
 
 ## GPU path
 
-Status: **Completed — probe answers recorded. No production code.**
+SmolLM now also runs on the promoted Silk OpenCL backend: `smollm --silk`
+(default / `benchmark` / `generate`), F32-only, via `SilkSmolLMGpuRunner`. CPU remains the reference and
+the promoted backend is Silk; battery-only perf numbers are not published here.
+
+Status: **Completed — probe answers recorded. No production code.** (probe section retained for history)
 
 ### Problem
 

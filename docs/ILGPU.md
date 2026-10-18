@@ -1,5 +1,8 @@
 # ILGPU on the Arc 140T from .NET — Lessons from the GpuProbe
 
+> **Status:** retained for reference only. The ILGPU path is not being developed further;
+> **Silk** is the promoted GPU backend going forward. See [SILK.md](SILK.md).
+
 > **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
 
 This is the fifth GPU-backend case-study doc (after [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md), [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md),

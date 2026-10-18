@@ -1,6 +1,6 @@
 # Silk.NET OpenCL GPU Probe — Lessons from the GpuProbe
 
-> **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
+> **Series:** [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](../docs/ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
 
 All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU; the reported driver **1.15.37858** is the Level Zero `driverVersion`, not a Windows GPU driver) running Windows 10.0.26200 and .NET 11.0. The Silk.NET OpenCL leg of `tests/Nivara.GpuProbe` uses **Silk.NET.OpenCL 2.23.0** (thin .NET Foundation bindings to the OpenCL C API) to discover platforms/devices and to run OpenCL C kernels directly on the in-box OpenCL ICD + Intel driver. The goal is a vendor-neutral baseline (especially Intel/AMD iGPUs) for apples-to-apples comparisons with other backends. Whether this device can do native BF16 or FP16 arithmetic — and whether FP16 is faster — is measured in [Precision on this iGPU](#precision-on-this-igpu-bf16-and-fp16), not inferred from the extension string.
 
@@ -376,6 +376,8 @@ mutually exclusive with `--ilgpu`.
 | `SilkBertEncoderRunner.cs` | the Silk counterpart of `BertEncoderGpuRunner` — same weight layout, same operation order, same fused epilogues |
 | `SilkModernBertGpuRunner.cs` | the Silk counterpart of `ModernBertGpuRunner` — bias-free GEMM, row-interleaved QKV split, CPU-uploaded RoPE, per-layer band |
 | `SilkLayaHeadGpuRunner.cs` | the Silk counterpart of `LayaHeadGpuRunner` — biased norms, fused biased QKV, host-side act-head features |
+| `SilkMobileNetV2GpuRunner.cs` | the Silk counterpart for MobileNetV2 — inverted residuals, depthwise separable grouped conv, ReLU6, adaptive average pooling |
+| `SilkResNet18GpuRunner.cs` | the Silk counterpart for ResNet-18 — BasicBlocks, identity/projection shortcuts, 7×7 stem conv, global average pooling |
 | `SilkModernBertSession.cs` / `SilkLayaSession.cs` | the Silk session implementations. The CLI sees `Forward`, not a device buffer |
 | `src/Nivara.Extensions/AI/GpuSeam.cs` | `IBertEncoderRunner`, `IModernBertGpuSession`, `ILayaGpuSession` and the open delegates (`namespace Nivara.AI`). The ILGPU session classes stay in `samples/Nivara.Samples/Gpu/` and implement them |
 
@@ -555,13 +557,26 @@ the global band, and the four act-head features stay on `LayaHeadScoring`. A che
 
 The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays backend-private.
 
+## 13b. Vision (MobileNetV2 / ResNet-18)
+
+`SilkMobileNetV2GpuRunner` and `SilkResNet18GpuRunner` reuse the vision kernel family added in
+section 11.1:
+`conv2d` (grouped NCHW convolution, including MobileNetV2's depthwise layers), `batchnorm_eval`,
+`relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. Both runners convert the model's tensors into
+the same transposed/packed host layout the other runners use, upload weights once per process, and
+expose the standard forward returning logits. Their contract matches the BERT-family runners:
+F32-only, modes `default` / `benchmark` / `compare`, gated against the in-process CPU path at
+`|gpu−cpu| ≤ 1e-3·(1+|cpu|)`.
+
 ## 14. CLI surface and the gate
 
 - **`SilkModes`** is the allow-list — `minilm` / `distilbert` / `distilbert_sst` / `modernbert` /
   `laya` × `{"", benchmark, compare}`. Still narrower than the CPU mode lists (`compare_diag` stays
-  rejected). Qwen × `{"", benchmark, tools}` now joins them for F32 causal LM decode (#629); vision
-  remains #630. SmolLM and Qwen are causal decoders (not encoders) and own their runners:
-  `SilkSmolLMGpuRunner` / `SilkQwenGpuRunner`.
+  rejected). Qwen × `{"", benchmark, tools}` now joins them for F32 causal LM decode (#629) and
+  vision × `{"", benchmark, compare}` for MobileNetV2/ResNet-18 landed as #630. SmolLM and Qwen
+  are causal decoders (not encoders) and own their runners:
+  `SilkSmolLMGpuRunner` / `SilkQwenGpuRunner` / `SilkMobileNetV2GpuRunner` /
+  `SilkResNet18GpuRunner`. All Silk paths are F32-only.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by
@@ -594,7 +609,7 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
   The `--silk-kernels` cells are what localise a failure; the compares are what say the
   assembled forward is right. **The benchmark A/B has been run too** — ModernBERT and Laya timing
   (back-to-back `--silk` / `--ilgpu benchmark`, AC, same session, 1 warmup + 3 timed median) is in
-  [docs/ACCELERATION.md](ACCELERATION.md) §1: Silk at parity at 128 and ~25% ahead at 4096, and
+  §14 below: Silk at parity at 128 and ~25% ahead at 4096, and
   ahead on all four Laya questions. The compare and the benchmark remain separate verdicts.
 
 ## 15. Adding a model to the Silk path
@@ -625,4 +640,4 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
 - [Silk.NET OpenCL](https://github.com/dotnet/Silk.NET)
 - [OpenCL 1.2 Specification](https://registry.khronos.org/OpenCL/specs/opencl-1.2.pdf)
 - [Khronos OpenCL](https://www.khronos.org/opencl/)
-- Series: [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
+- Series: [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](../docs/ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)

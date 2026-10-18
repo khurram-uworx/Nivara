@@ -128,7 +128,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   earlier `int?`/nullable-context overload had silently derived 100,000 from the 1 GB default, disagreeing
   with `NivaraQuery<T>.AsStream`). The redundant `AsStream(int chunkSize, long memoryBudget)` overload is
   removed — it forced `ChunkSize`, so its budget was inert on the stream path. Recorded as
-  `docs/adr/006-streaming-memory-budget-exposure.md`; `docs/STREAMING.md` and `docs/ACCELERATION.md` are
+  `docs/adr/006-streaming-memory-budget-exposure.md`; `docs/STREAMING.md` and `docs/SILK.md` are
   corrected, including the claim that the bounded channel enforces the budget on the `AsStream` path (that
   channel belongs to the materializing path).
 
@@ -205,7 +205,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   the citation gate read the repository root plus `docs/` and recognised only `File.cs:NN` (the blind
   spot #549 tracked), so a broken link from `samples/`, `tests/` or `src/` was invisible, and a
   `docs/…md` reference was invisible everywhere. #625 is the worked example: `BERT-GPU.md` was renamed twice and merged into
-  `docs/ACCELERATION.md`, and twelve sites still cited it — ten `.cs` comments under `samples/` and
+  `docs/SILK.md`, and twelve sites still cited it — ten `.cs` comments under `samples/` and
   `tests/`, plus `samples/NivaraChat/README.md` and `tests/Nivara.PerformanceTests/README.md` — none of
   which the gate had ever read. `DocReferenceExtractor` widens the input to root `*.md`, `docs/**/*.md`
   and `src|samples|tests/**/*.{md,cs}` (skipping build output and the gate's own fixtures) and widens
@@ -352,7 +352,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - **`NivaraInference --help` lists the models that accept `--gpu` today (#478)** — the top-level
   help block named `distilbert / distilbert_sst / minilm only, this phase`, but the dispatch switch
-  has a `useGpu` branch for five models and `docs/ACCELERATION.md` publishes GPU tables for `laya`
+  has a `useGpu` branch for five models and `docs/SILK.md` publishes GPU tables for `laya`
   and `modernbert`. The heading now reads `minilm / distilbert / distilbert_sst / modernbert / laya`;
   the stale `this phase` qualifier is dropped because the line below it already carries the F32-only
   fact. Help text only — no dispatch or behavior change.
@@ -374,7 +374,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   the bound: the chunked path enumerates the source through a pull-based async iterator
   (`IQuerySource.ToAsyncEnumerable`), so at most one chunk frame is in flight between consumer
   pulls — strictly tighter than the channel's `[2, 16]`, and adding a channel would invert the
-  documented pull-based backpressure. `docs/STREAMING.md` and `docs/ACCELERATION.md` now scope the
+  documented pull-based backpressure. `docs/STREAMING.md` and `docs/SILK.md` now scope the
   channel to the materializing path and state the one-frame bound, ADR-006 records the resolution,
   and `StreamingBackpressureTests.StreamChunksAsync_PullBased_ProducerNeverRunsAheadOfConsumer`
   pins it. **No source change.**
@@ -938,7 +938,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   `ModernBert.RunBenchmark`'s warmup while doing 3 passes where the C# side does 1. The published
   figures are unchanged; only the claim about how they were produced was wrong. The PyTorch side
   also runs 3 warmup passes against Nivara's 1, so the ModernBERT ratio compares medians taken
-  under different warmup counts — `--warmup 3` now matches the two sides. `docs/ACCELERATION.md`
+  under different warmup counts — `--warmup 3` now matches the two sides. `docs/SILK.md`
   §1's note that the 4096 row cannot be re-measured alone is superseded by `--seq`.
 
 ## [1.4.0] - 2026-08-21

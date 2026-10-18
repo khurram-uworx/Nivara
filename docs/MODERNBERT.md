@@ -68,7 +68,7 @@ Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates shor
 
 ## GPU path
 
-`ModernBertGpuRunner` + `modernbert --ilgpu` (issue #449). `modernbert --silk` is the same contract on the hand-authored OpenCL backend: F32 only, modes `default` / `benchmark` / `compare`, the band inside the kernel, and the same 4096 benchmark lengths. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry. `modernbert --silk compare` passes (AC, 2026-10-13) at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the same figures as the ILGPU gate.
+`SilkModernBertGpuRunner` + `modernbert --silk` is the promoted Silk OpenCL backend: F32 only, modes `default` / `benchmark` / `compare`, the band inside the kernel, and 4096-length benchmarks. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry. `modernbert --silk compare` passes (AC, 2026-10-13) at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001.
 
 The gate is GPU-vs-CPU in-process (no PyTorch fixture needed). Fixture seqLen 128, 26 valid positions:
 
@@ -77,4 +77,4 @@ The gate is GPU-vs-CPU in-process (no PyTorch fixture needed). Fixture seqLen 12
 | valid | **2.861E-005** | 5.577E-004 | 1.0000001 | 0 |
 | padding | 6.866E-004 | 4.867E-003 | — | 0 |
 
-Benchmark rows scale with sequence length: the #449-session ILGPU rows read 128 → 400 ms, 512 → 2.30 s, 2048 → 19.6 s, 4096 → 63.0 s. The same-session **Silk-vs-ILGPU A/B** (AC, 2026-10-13, both backends, 1 warmup + 3 timed median) reads 128 → 341.6 vs 343.8 ms, 512 → 1533.8 vs 1402.0 ms, 2048 → 13.40 vs 10.84 s, 4096 → 43.55 vs 32.71 s — Silk at parity at 128 and ~25% ahead at 4096; the ratio is the comparable quantity, not a cross-session absolute. `modernbert --ilgpu benchmark` defaults to exactly those four lengths, and `--seq` times a subset — the 4096 row that the CPU path cannot reach is now one flag away rather than a source edit. See [docs/ACCELERATION.md](ACCELERATION.md) §1 for full details.
+Benchmark rows scale with sequence length; the same-session Silk run reads 128 → 341.6 ms, 512 → 1533.8 ms, 2048 → 13.40 s, 4096 → 43.55 s (1 warmup + 3 timed median, AC, 2026-10-13). `modernbert --silk benchmark` defaults to 128/512/2048/4096, and `--seq` times a subset — the 4096 row that the CPU path cannot reach is now one flag away rather than a source edit. See [SILK.md §13a](SILK.md) for details. Comparative figures for the sample-only implementation backend live in [ILGPU.md](../docs/ILGPU.md).

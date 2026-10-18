@@ -57,6 +57,15 @@ The vision gap is now tracked as issue **#457** (SIMD + row parallelism for the 
 | MobileNetV2 | `compare` vs PyTorch | output match |
 | ResNet-18 | `compare` vs PyTorch | output match |
 
+## GPU path
+
+Both vision models run on the Silk OpenCL backend (`mobilenet_v2 --silk`,
+`resnet18 --silk`): F32-only, modes `default` / `benchmark` / `compare`, gated against the
+in-process CPU path at `|gpu−cpu| ≤ 1e-3·(1+|cpu|)`. The kernels are the vision family in
+[SILK.md §11.1](SILK.md) (`conv2d`, `batchnorm_eval`, `relu`/`relu6`, `maxpool2d`,
+`adaptive_avgpool2d`) driven by `SilkMobileNetV2GpuRunner` / `SilkResNet18GpuRunner`. CPU remains
+the reference; Silk is the promoted GPU backend. Battery-only perf numbers are not published.
+
 ## Performance
 
 | Model | PyTorch | Nivara | Slowdown |

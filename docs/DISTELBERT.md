@@ -113,29 +113,13 @@ Half uses a 10-bit mantissa (vs BF16's 7), which is why its logits land closer t
 
 ## Performance
 
-See [docs/ACCELERATION.md](ACCELERATION.md) §1 for GPU benchmark tables. CPU benchmarks live in the [NivaraInference README](../samples/NivaraInference/README.md).
+See [docs/SILK.md](SILK.md) §1 for GPU benchmark tables. CPU benchmarks live in the [NivaraInference README](../samples/NivaraInference/README.md).
 
 ## GPU path
 
-All three models run on an OpenCL iGPU. Two backends exist: **ILGPU** (`--ilgpu`, the default GPU
-path) and the hand-authored **Silk.NET** stack (`--silk`); `--silk` and `--ilgpu` are mutually
-exclusive and both are F32-only.
-
-### ILGPU (`--ilgpu`)
-
-ILGPU 1.5.3 on the shared `BertEncoderGpuRunner`. Measured (128 tokens, AC power):
-
-| Model | GPU | CPU | vs CPU |
-|-------|-----|-----|--------|
-| DistilBERT | 65.3 ms | 194.7 ms | ~3.0× faster |
-| SST-2 | 64.0 ms | 166.4 ms | ~2.6× faster |
-| MiniLM | 26.8 ms | 76.3 ms | ~2.9× faster |
-
-M2 kernel fusion (issue #437) brought MiniLM to 24.3 ms and DistilBERT to 63.1 ms. Dispatches went
-from ~113–119 to **44–48** per forward. All parity gates stayed byte-identical at every step
-(hidden-state `maxRel 3.2e-6`, logits `maxRel 6.7e-7`, SST-2 argmax 8/8, MiniLM hidden
-`maxRel 1.0e-5`). See [docs/ILGPU.md](ILGPU.md) Part 2 for the implementation and lessons, and
-[docs/ACCELERATION.md](ACCELERATION.md) §1 for the cross-backend results.
+All three models run on the promoted Silk OpenCL backend (`--silk`, F32-only); CPU remains the
+reference. Comparative notes and implementation details for the sample-only ILGPU backend live in
+[ILGPU.md](../docs/ILGPU.md).
 
 ### `--silk` (Silk.NET, hand-authored OpenCL C)
 
@@ -159,7 +143,7 @@ The same three models also run through the second backend: hand-authored OpenCL 
   ≈0.94×**; DistilBERT SST-2 **52.1 ms vs 57.0 ms, ≈0.91×**. Silk is at least at parity and modestly
   ahead, with a tighter run-to-run spread (Silk ≈1–3 ms, ILGPU up to ≈8 ms). One host (Arc 140T), one
   session (2026-10-13) — read it as parity-to-slightly-ahead, not a win. The absolute ILGPU values sit
-  ≈10% below the post-M2 rows in [ACCELERATION.md](ACCELERATION.md) §1 — a different session's clock
+  ≈10% below the post-M2 rows in [SILK.md](SILK.md) §1 — a different session's clock
   state, not a protocol change — so compare the ratio, not the absolute milliseconds. Per kernel, the
   `--silk-kernels` gate holds all 32 outputs bit-identical on AC, with Silk ahead on
   `batched_attention` (0.80–0.85).
