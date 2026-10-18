@@ -171,6 +171,29 @@ is a name nobody can find again.
   2 failed / 45 passed in 3 m 11 s, the first killed by the fixture's 30 s bound. The fixture now runs
   every invocation in an empty temporary directory, which is 47/47 in 10 s. Fixed in its own commit;
   the defect predates the branch and the checkpoint is what exposed it.
+- **Stage 4 (C3, `ff78f9a2`)**: the cached tied-LM-head projection. Qwen's two cached heads
+  (`ForwardCachedArgmax`, `ForwardCached`) drop `rms_norm_lm_head` for a one-slot `rms_norm_gemv`;
+  SmolLM's two drop `rms_norm` + `gemm` for the same one slot, which is one launch fewer per token
+  and removes the last write of the normalized row to memory in the cached path. Nothing is removed
+  this time: `rms_norm_lm_head` still serves the prefill head and the two `ForwardLast*` heads, which
+  take a row view instead of being a decode step. Verified: Release build 0 warnings; `dotnet format`
+  clean; Gpu + Qwen 30 passed / 2 skipped / 0 failed, up from 29 / 2, with all six fixture cases
+  running on device rather than skipping; Docs 67/67 with the unrelated untracked
+  `docs/plan/TYPESAFE-LAYA.md` stashed aside for the run and restored SHA-256-identical.
+  - New fixture case `RmsNormGemv_SmolLmCachedHead_MatchesRmsNormThenGemm` at widths 24, 96 and 200
+    replays what SmolLM's head replaced — `rms_norm` writing the normalized row, then `gemm` reading
+    it back — as two launches and asserts the one-slot fused call is bit-identical. Qwen's side of the
+    head was already covered by the one-bias-free-slot case, which compares against
+    `rms_norm_lm_head` itself. The identity holds because both norm kernels reduce the same way: each
+    accumulates `sumSq += v * v` over ascending columns in one thread and never splits the reduction,
+    and `1.0f / sqrt(z)` is `1.0f / rms` for a correctly-rounded `sqrt` — which is also why the fused
+    kernel can apply the scale inside the contraction instead of to a stored row.
+  - *Disclosure, recorded*: `docs/SILK.md`'s `rms_norm_gemv` row has listed the tied head among its
+    fused shapes since stage 2 (`78cb8b35`), a commit before any tied-head call site existed. That is
+    a capability list — the kernel takes one to three slots, and the one-slot form was implemented and
+    tested in that commit — but it reads as a usage claim, and this stage is what makes it one. The
+    row is left as it stands; the row that had gone stale was `rms_norm_lm_head`'s.
+  - Speed gate: round 3 pending (see Round log).
 
 ## Verification
 
@@ -186,6 +209,12 @@ dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "FullyQua
 The Docs run is the whole namespace because `docs/SILK.md` changes (six pinned counts live in two
 fixtures). The new SILK.md rows carry no `File.cs:NN` citation and no `docs/….md` reference, so no
 pinned count should move; if one does, that is a finding, not a bump.
+
+`docs/plan/TYPESAFE-LAYA.md` is untracked, belongs to another workstream, and carries two dangling
+`docs/PLAN.md` references, so the Docs run fails on it (3 failed / 64 passed) independently of this
+branch. Stash it aside for the run — `git stash push -u -- docs/plan/TYPESAFE-LAYA.md`, run the
+suite, `git stash pop` — and confirm the file returns SHA-256-identical; that is how the 67/67 runs
+above were taken. Do not edit or commit that file from this branch.
 
 Not to be run by the agent without asking: the full `dotnet test` suite.
 
