@@ -78,51 +78,56 @@ these numbers are *not* comparable with `laya benchmark`, which times an in-proc
 over weights. The CLI prints that caveat in its own output so a reader does not line the tables up.
 
 First numbers, both engines on one machine (Windows, .NET 11, Release build), sequential, one
-request at a time:
+request at a time — two runs of the same command, back to back:
 
 | Engine | Model | Overall median | items/s |
 |--------|-------|----------------|---------|
-| Ollaya | `laya:en` | 688–905 ms | 1.1–1.5 |
-| Ollama | `tev1:0.8b` | 2325–2514 ms | 0.4–0.5 |
+| Ollaya | `laya:en` | 653.5–862 ms | 1.2–1.5 |
+| Ollama | `tev1:0.8b` | 2457.5–2743.5 ms | 0.4 |
 
-The ranges are two runs of the same command. Within a run the per-item spread is tight, but
-absolute latency drifts run to run — so use these to compare engines only by re-running both, not
-as fixed figures. The ordering held in both runs.
+The overall median is the median of the six per-item medians — for an even count that is the mean
+of the two middle values, which is why the figures carry a `.5`. The ranges are two back-to-back
+runs: within a run each item's maximum sits within ~3% of its median, but absolute latency drifts
+run to run (Ollaya's overall moved +32% between the two runs, Ollama's +12%), so use these to
+compare engines only by re-running both, not as fixed figures. What held is the ordering and the
+ratio — Ollama was 3.8× Ollaya in run one and 3.2× in run two.
 
-Per item, first run — Ollaya:
-
-```
-  item       median        min        max
-     1     696 ms     676 ms     731 ms
-     2     633 ms     628 ms     637 ms
-     3     750 ms     742 ms     753 ms
-     4     656 ms     652 ms     664 ms
-     5     683 ms     682 ms     692 ms
-     6     688 ms     687 ms     694 ms
-
-Overall: median 688 ms per assessment across 6 items, 1.5 items/s sequential at those medians.
-```
-
-Per item, first run — Ollama:
+Per item, run one — Ollaya:
 
 ```
   item       median        min        max
-     1    1944 ms    1937 ms    1952 ms
-     2    1938 ms    1918 ms    1958 ms
-     3    2052 ms    2050 ms    2136 ms
-     4    2365 ms    2356 ms    2387 ms
-     5    2357 ms    2355 ms    2377 ms
-     6    2325 ms    2322 ms    2356 ms
+     1     668 ms     667 ms     683 ms
+     2     613 ms     604 ms     615 ms
+     3     719 ms     712 ms     719 ms
+     4     630 ms     621 ms     631 ms
+     5     655 ms     651 ms     655 ms
+     6     652 ms     650 ms     656 ms
 
-Overall: median 2325 ms per assessment across 6 items, 0.5 items/s sequential at those medians.
+Overall: median 653.5 ms per assessment across 6 items, 1.5 items/s sequential at those medians.
 ```
 
-Second run, same commands, after the command line was reworked (the measurement protocol did not
-change): Ollaya overall median **905 ms** (1.1 items/s), Ollama overall median **2514 ms**
-(0.4 items/s) — Ollama 2.8× Ollaya, against 3.4× in the first run. That ratio is what to read off
-these tables, not the absolutes.
+Per item, run one — Ollama:
 
-Raw output is also recorded in [PR #675](https://github.com/khurram-uworx/Nivara/pull/675).
+```
+  item       median        min        max
+     1    2267 ms    2267 ms    2278 ms
+     2    2361 ms    2272 ms    2365 ms
+     3    2483 ms    2476 ms    2501 ms
+     4    2432 ms    2408 ms    2451 ms
+     5    2910 ms    2482 ms    2937 ms
+     6    2730 ms    2722 ms    2789 ms
+
+Overall: median 2457.5 ms per assessment across 6 items, 0.4 items/s sequential at those medians.
+```
+
+Run two, same commands with nothing changed in between: Ollaya overall median **862 ms**
+(1.2 items/s), Ollama **2743.5 ms** (0.4 items/s). Both numbers moved; the ordering and the
+ratio band did not. `items/s` is derived from the per-item medians, so it describes sequential
+latency at those medians, not batched capacity — and it is the ratio, not either absolute, that a
+reader should carry away.
+
+Every figure above comes from the CLI's own output, so re-running the two commands replaces them
+with your machine's numbers in the same shape.
 
 ## See also
 
