@@ -169,6 +169,30 @@ Consumed afterwards (read, never re-run): `silk_tools.txt` for decode ms/token; 
 unchanged control. The agent never polls or re-runs. If a round shows a regression, the staged commits
 exist so the offending stage can be held out.
 
+### Round log
+
+The 2026-10-17 figures in `docs/QWEN.md` § Results are **not** a usable baseline for this machine
+state: in round 1 the control moved by the same factor as the measured path, which no Silk change can
+touch. Rounds are therefore compared with each other, in the same conditions.
+
+| Round | Commit | Silk plain decode | Control: CPU plain decode | Notes |
+|---|---|---|---|---|
+| 1 | `78cb8b35` (C1) | 1398 ms / 7 tokens, 199.7 ms/token (runs 207 / 196 / 199) | 161.9 ms/token | model build 11,347 ms |
+
+Round 1 detail:
+
+- `silk_tools.txt` is a misnomer: `qwen --silk benchmark` reports `Prompt tokens: 36`, the plain
+  prompt — the surface `docs/QWEN.md:343` already labels "plain prompt". Only the file name says
+  "tools". Recorded as a follow-up below.
+- 199.7 ms/token is not evidence of a regression *or* of an improvement. The CPU control, which no
+  Silk change can touch, is 1.41x slower today than the 2026-10-17 record (114.7 -> 161.9 ms/token)
+  and the CPU plain total is 1.57x slower; Silk's model build — weight upload and program
+  compilation, untouched by this change — is 2.19x slower (5,178 -> 11,347 ms). The Silk/control
+  ratio is 1.23x today against 1.13x recorded, i.e. the same band. The valid comparison is round 2
+  against round 1.
+- The three generated-token count (7) and the 36-token prompt match the recorded row, so the shape
+  is comparable even though the machine state is not.
+
 ## Blast radius
 
 Source:
@@ -187,9 +211,11 @@ Tests:
 
 - `tests/Nivara.Tests/Gpu/SilkKernelsCatalogTests.cs` — automatically requires each new name to appear
   as `__kernel void <name>(`.
-- New: `tests/Nivara.Tests/Gpu/SilkDecodeProjectionTests.cs` (device-gated, `Assert.Ignore` without a
-  device) — bit-pattern equality against the single-projection kernels, including tail widths.
-- New: device-free geometry assertions for the per-slot group/column arithmetic.
+- New: `tests/Nivara.Tests/Gpu/SilkRmsNormGemvTests.cs` (device-gated, `Assert.Ignore` without a
+  device) — bit-pattern equality against the single-projection kernels, including tail widths. (The
+  plan first named this file `SilkDecodeProjectionTests.cs`; it took the kernel's name instead.)
+- New: device-free geometry assertions for the per-slot group/column arithmetic — added with the
+  decode-shaped geometry (commit 3), since the tile-shaped kernel uses the existing `GemmGlobalCols`.
 - `tests/Nivara.Tests/Qwen/SilkQwenParityTests.cs`, `SilkQwenKvCacheTests.cs`,
   `SilkQwenToolsWeatherLoopTests.cs` — must stay green (self-skip without a device).
 - `tests/Nivara.PerformanceTests/SilkKernelsGate.cs` `MeasureSmolLMKernels` — two `MeasureCpuReference`
@@ -209,6 +235,13 @@ column-index guard bug hides. `tests/Nivara.Tests` already has internals access
   6%; #657 explicitly says keep prefill individual.
 - Pre-existing doc drift: the `KernelNames` quote in `docs/SILK.md` § 11.1 is stale (SmolLM/vision
   kernels missing). Untouched.
+- Pre-existing doc drift found in round 1: the `docs/QWEN.md` block names the third output
+  `silk_tools.txt`, but `qwen --silk benchmark` measures the **plain** prompt (36 tokens) — the same
+  surface the results table labels "plain prompt". Either the file name or the table row is wrong;
+  the file name is the cheaper fix. Untouched: it is a docs-block change outside #670's scope.
+- Pre-existing message drift found while checking the Silk invocation was legal:
+  `samples/NivaraInference/Program.cs:460` omits `qwen` from the `--silk` model list although
+  `SilkModes["qwen"]` accepts it (`Program.cs:63`). Untouched.
 
 ## Probe and harness lifecycle
 
