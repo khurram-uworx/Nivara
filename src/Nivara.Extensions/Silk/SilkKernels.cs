@@ -105,6 +105,9 @@ internal static class SilkKernels
     // Flat single-row GEMV + residual for cached decode O-projection (#672, Stage A1).
     public const string GemmGemvAdd = "gemm_gemv_add";
 
+    // True single-work-group fused decode attention + O-projection (#691). Only usable
+    // when the device exposes at least numHeads * AttentionGroupSize work-items per group.
+    public const string DecodeGqaAttentionOprojFused = "decode_gqa_attention_oproj_fused";
     // Fused single-token MLP block for cached decode (#672, Stage B): norm + gate/up + SwiGLU + down + residual.
     public const string MlpBlock = "mlp_block";
 
@@ -124,7 +127,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock,
+        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock, DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
     ];
 
@@ -1376,6 +1379,157 @@ internal static class SilkKernels
                 for (uint i = 0; i < intermediate; ++i)
                     acc += swiglu[i] * Wdown[i * hidden + j];
                 out[j] = acc + residual[j];
+            }
+        }
+        /* Fused single-work-group decode attention + O-projection (#691). One work-group of
+           numHeads * ATTNGROUP threads computes every head's attention context into the shared
+           ctx[] array, barriers, then does the O-projection (GEMV + residual) over hiddenDim
+           output columns. No global context buffer is written. Only usable when the device
+           exposes at least numHeads * ATTNGROUP work-items per group. */
+        #define FUSED_MAX_HEADS 64
+        __kernel void decode_gqa_attention_oproj_fused(
+            __global const float* q,
+            __global const float* kCache,
+            __global const float* vCache,
+            __global const float* Wo,
+            __global const float* residual,
+            __global float* out,
+            const uint kvLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const uint hiddenDim,
+            const float scale)
+        {
+            uint lid = get_local_id(0);
+            uint gsize = get_local_size(0);
+            const uint groupSizePerHead = ATTNGROUP;
+
+            uint head = lid / groupSizePerHead;
+            uint lane = lid % groupSizePerHead;
+
+            __local float ctx[FUSED_MAX_HEADS * MAXHEADDIM];
+            __local float lmx[ATTNGROUP];
+            __local float lsum[ATTNGROUP];
+            __local float laccv[ATTNGROUP * MAXHEADDIM];
+
+            uint repeat = numHeads / numKvHeads;
+            uint qDim = numHeads * headDim;
+
+            for (uint curHead = 0; curHead < numHeads; ++curHead)
+            {
+                if (head == curHead)
+                {
+                    uint kvHead = curHead / repeat;
+                    uint qBase = curHead * headDim;
+                    uint kBaseHead = kvHead * headDim;
+                    uint vBaseHead = kvHead * headDim;
+                    uint Dkv = numKvHeads * headDim;
+
+                    float mx = -INFINITY;
+                    float sum = 0.0f;
+                    float accv[MAXHEADDIM];
+                    for (uint d = 0; d < headDim; ++d) accv[d] = 0.0f;
+
+                    for (uint j = lane; j < kvLen; j += groupSizePerHead)
+                    {
+                        float acc = 0.0f;
+                        uint kBase = j * Dkv + kBaseHead;
+                        for (uint d = 0; d < headDim; ++d)
+                            acc += q[qBase + d] * kCache[kBase + d];
+                        float s = acc * scale;
+
+                        if (s > mx)
+                        {
+                            if (mx != -INFINITY)
+                            {
+                                float corr = exp(mx - s);
+                                sum *= corr;
+                                for (uint d = 0; d < headDim; ++d)
+                                    accv[d] *= corr;
+                            }
+                            mx = s;
+                        }
+
+                        float w = exp(s - mx);
+                        sum += w;
+                        uint vBase = j * Dkv + vBaseHead;
+                        for (uint d = 0; d < headDim; ++d)
+                            accv[d] += w * vCache[vBase + d];
+                    }
+
+                    lmx[lane] = mx;
+                    lsum[lane] = sum;
+                    for (uint d = 0; d < headDim; ++d)
+                        laccv[lane * MAXHEADDIM + d] = accv[d];
+                }
+
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                // Tree reduction across the head's lanes (matches decode_gqa_attention order).
+                if (head == curHead)
+                {
+                    for (uint stride = groupSizePerHead / 2; stride > 0; stride >>= 1)
+                    {
+                        if (lane < stride)
+                        {
+                            uint other = lane + stride;
+                            float mx_a = lmx[lane];
+                            float mx_b = lmx[other];
+                            float mx_new = mx_a > mx_b ? mx_a : mx_b;
+
+                            float corr_a = (mx_a == -INFINITY) ? 0.0f : exp(mx_a - mx_new);
+                            float corr_b = (mx_b == -INFINITY) ? 0.0f : exp(mx_b - mx_new);
+
+                            float sum_new = lsum[lane] * corr_a + lsum[other] * corr_b;
+                            for (uint d = 0; d < headDim; ++d)
+                                laccv[lane * MAXHEADDIM + d] =
+                                    laccv[lane * MAXHEADDIM + d] * corr_a +
+                                    laccv[other * MAXHEADDIM + d] * corr_b;
+
+                            lmx[lane] = mx_new;
+                            lsum[lane] = sum_new;
+                        }
+                        barrier(CLK_LOCAL_MEM_FENCE);
+                    }
+                }
+                else
+                {
+                    // Non-participating threads still reach the barriers inside the loop.
+                    for (uint stride = groupSizePerHead / 2; stride > 0; stride >>= 1)
+                    {
+                        barrier(CLK_LOCAL_MEM_FENCE);
+                    }
+                }
+
+                if (head == curHead && lane == 0)
+                {
+                    float mx_final = lmx[0];
+                    float sum_final = lsum[0];
+                    if (mx_final == -INFINITY || sum_final == 0.0f)
+                    {
+                        for (uint d = 0; d < headDim; ++d)
+                            ctx[curHead * headDim + d] = 0.0f;
+                    }
+                    else
+                    {
+                        float invSum = 1.0f / sum_final;
+                        for (uint d = 0; d < headDim; ++d)
+                            ctx[curHead * headDim + d] = laccv[0 * MAXHEADDIM + d] * invSum;
+                    }
+                }
+
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            // O-projection pass (all threads).
+            barrier(CLK_LOCAL_MEM_FENCE);
+            for (uint col = lid; col < hiddenDim; col += gsize)
+            {
+                float acc = 0.0f;
+                for (uint k = 0; k < qDim; ++k)
+                    acc += ctx[k] * Wo[k * hiddenDim + col];
+                out[col] = acc + residual[col];
             }
         }
         """;
