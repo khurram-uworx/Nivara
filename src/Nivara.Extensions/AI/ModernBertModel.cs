@@ -1,7 +1,10 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
+using System.Buffers;
 using System.Numerics;
+using System.Numerics.Tensors;
 using System.Text.Json;
 
 namespace Nivara.AI;
@@ -279,6 +282,14 @@ public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloati
     readonly int numHeads;
     readonly T scale;
 
+    /// <summary>Gets the rotary embedding (carries the per-layer theta).</summary>
+    public RotaryEmbedding<T> Rope => rope;
+
+    /// <summary>Gets the number of attention heads.</summary>
+    public int NumHeads => numHeads;
+    /// <summary>Gets the per-head dimension.</summary>
+    public int HeadDim => rope.HeadDim;
+
     public ModernBertAttention(ModernBertConfig config, float ropeTheta)
     {
         qProj = new Linear<T>(config.HiddenSize, config.HiddenSize, bias: false);
@@ -363,13 +374,19 @@ public sealed class ModernBertMlp<T> : Module<T> where T : struct, IFloatingPoin
 /// </summary>
 public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
+    readonly int hiddenSize;
+
     public readonly LayerNorm<T>? attnNorm;
     public readonly ModernBertAttention<T> attn;
     public readonly LayerNorm<T> mlpNorm;
     public readonly ModernBertMlp<T> mlp;
 
+    /// <summary>Gets the hidden (embedding) dimension.</summary>
+    public int HiddenSize => hiddenSize;
+
     public ModernBertLayer(ModernBertConfig config, int layerIndex)
     {
+        hiddenSize = config.HiddenSize;
         if (layerIndex != 0)
             attnNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
         attn = new ModernBertAttention<T>(config, config.RopeTheta(layerIndex));
@@ -399,6 +416,203 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
         var normed = attnNorm != null ? attnNorm.Forward(input) : input;
         var hidden = ReverseGradOperations.Add(input, attn.Forward(normed, band, validLength));
         return ReverseGradOperations.Add(hidden, mlp.Forward(mlpNorm.Forward(hidden)));
+    }
+
+    /// <summary>
+    /// Inference-only fused whole-layer forward. Replicates <see cref="Forward(ReverseGradTensor{T}, int, int)"/>
+    /// using the shared span kernels (LayerNorm, banded attention, RoPE, GeGLU) with zero
+    /// steady-state heap allocations. <paramref name="band"/> is -1 for full attention;
+    /// <paramref name="validLength"/> is the number of leading real tokens.
+    /// Throws inside a <see cref="GradientUtils.Grad()"/> scope.
+    /// </summary>
+    public void ForwardFused(ReadOnlySpan<T> input, Span<T> output, int band, int validLength)
+    {
+        if (input.Length == 0 || input.Length % hiddenSize != 0)
+            throw new ArgumentException($"Input length {input.Length} must be a positive multiple of hidden size {hiddenSize}.");
+        int seqLen = input.Length / hiddenSize;
+        if (output.Length < input.Length)
+            throw new ArgumentException($"Output span (length {output.Length}) must hold {input.Length} elements.");
+        if (validLength <= 0 || validLength > seqLen)
+            throw new ArgumentOutOfRangeException(nameof(validLength), validLength, $"validLength must be within [1, {seqLen}].");
+        if (GradientUtils.IsGradEnabled)
+            throw new InvalidOperationException("ForwardFused is inference-only; do not call it inside GradientUtils.Grad().");
+
+        int numHeads = attn.NumHeads;
+        int headDim = attn.HeadDim;
+        int qWidth = numHeads * headDim; // == hiddenSize for MHA
+        int intermediateSize = mlp.inputProj.OutFeatures;
+        T scale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
+        T eps = mlpNorm.Eps;
+
+        // Scratch buffers (rented; returned in finally).
+        var normBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var qBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var kBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var vBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var scores = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * seqLen, 1));
+        var context = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var attnOut = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var residual = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var mlpNormBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var actBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * intermediateSize, 1));
+        var gateBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * intermediateSize, 1));
+        var mlpOut = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        try
+        {
+            var normSpan = normBuf.AsSpan(0, seqLen * hiddenSize);
+            var qSpan = qBuf.AsSpan(0, seqLen * qWidth);
+            var kSpan = kBuf.AsSpan(0, seqLen * qWidth);
+            var vSpan = vBuf.AsSpan(0, seqLen * qWidth);
+            var scoresSpan = scores.AsSpan(0, seqLen * seqLen);
+            var contextSpan = context.AsSpan(0, seqLen * qWidth);
+            var attnOutSpan = attnOut.AsSpan(0, seqLen * hiddenSize);
+            var residualSpan = residual.AsSpan(0, seqLen * hiddenSize);
+            var mlpNormSpan = mlpNormBuf.AsSpan(0, seqLen * hiddenSize);
+            var actSpan = actBuf.AsSpan(0, seqLen * intermediateSize);
+            var gateSpan = gateBuf.AsSpan(0, seqLen * intermediateSize);
+            var mlpOutSpan = mlpOut.AsSpan(0, seqLen * hiddenSize);
+
+            // 1. Attention norm (or identity on layer 0).
+            if (attnNorm != null)
+            {
+                var gamma = WeightSpan(attnNorm.Weight);
+                var beta = attnNorm.Bias != null ? WeightSpan(attnNorm.Bias) : ReadOnlySpan<T>.Empty;
+                var lnOut = LayerNormKernel<T>.ForwardInference(input, seqLen, hiddenSize, gamma, beta, attnNorm.Eps);
+                lnOut.AsSpan(0, seqLen * hiddenSize).CopyTo(normSpan);
+            }
+            else
+            {
+                input.CopyTo(normSpan);
+            }
+
+            // 2. Q/K/V projections.
+            var wQ = WeightSpan(attn.qProj.Weight);
+            var wK = WeightSpan(attn.kProj.Weight);
+            var wV = WeightSpan(attn.vProj.Weight);
+            GradKernels.MatMulTransposedB(normSpan, wQ, qBuf, seqLen, hiddenSize, qWidth);
+            GradKernels.MatMulTransposedB(normSpan, wK, kBuf, seqLen, hiddenSize, qWidth);
+            GradKernels.MatMulTransposedB(normSpan, wV, vBuf, seqLen, hiddenSize, qWidth);
+
+            // 3. RoPE in place.
+            attn.Rope.GetPositionTables(0, seqLen, out var cos, out var sin);
+            int half = headDim / 2;
+            for (int r = 0; r < seqLen; r++)
+            {
+                var rowC = cos.Slice(r * half, half);
+                var rowS = sin.Slice(r * half, half);
+                for (int b = 0; b < numHeads; b++)
+                {
+                    GradKernels.RotaryForward(qSpan.Slice(r * qWidth + b * headDim, headDim), rowC, rowS,
+                        qSpan.Slice(r * qWidth + b * headDim, headDim));
+                    GradKernels.RotaryForward(kSpan.Slice(r * qWidth + b * headDim, headDim), rowC, rowS,
+                        kSpan.Slice(r * qWidth + b * headDim, headDim));
+                }
+            }
+
+            // 4. Banded attention per head.
+            for (int h = 0; h < numHeads; h++)
+            {
+                // Gather Q/K/V head slices into contiguous per-head buffers is handled by
+                // indexing into the packed layout; here we operate on strided head columns
+                // by copying into temp head-major buffers.
+            }
+            // Use packed head-major buffers for the matmul path (matches autodiff kernel).
+            var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var outHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            try
+            {
+                AttentionKernels<T>.PackHeads(qSpan, qHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
+                AttentionKernels<T>.PackHeads(kSpan, kHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
+                AttentionKernels<T>.PackHeads(vSpan, vHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
+
+                for (int h = 0; h < numHeads; h++)
+                {
+                    var qh = qHeads.AsSpan(h * seqLen * headDim, seqLen * headDim);
+                    var kh = kHeads.AsSpan(h * seqLen * headDim, seqLen * headDim);
+                    var vh = vHeads.AsSpan(h * seqLen * headDim, seqLen * headDim);
+                    var oh = outHeads.AsSpan(h * seqLen * headDim, seqLen * headDim);
+
+                    GradKernels.MatMulTransposedB(qh, kh, scores, seqLen, headDim, seqLen);
+                    TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
+                    AttentionKernels<T>.ApplyBounds(scoresSpan, Span<bool>.Empty, seqLen, seqLen, band, validLength);
+                    AttentionKernels<T>.SoftmaxRows(scoresSpan, seqLen, seqLen);
+                    var outHeadBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * headDim, 1));
+                    try
+                    {
+                        GradKernels.MatMul(scoresSpan, vh, outHeadBuf, seqLen, seqLen, headDim);
+                        outHeadBuf.AsSpan(0, seqLen * headDim).CopyTo(oh);
+                    }
+                    finally
+                    {
+                        ArrayPool<T>.Shared.Return(outHeadBuf);
+                    }
+                }
+
+                // Scatter heads back into context (width = hidden).
+                for (int h = 0; h < numHeads; h++)
+                {
+                    var oh = outHeads.AsSpan(h * seqLen * headDim, seqLen * headDim);
+                    AttentionKernels<T>.ScatterHead(oh, contextSpan, seqLen, hiddenSize, h, headDim);
+                }
+            }
+            finally
+            {
+                ArrayPool<T>.Shared.Return(qHeads);
+                ArrayPool<T>.Shared.Return(kHeads);
+                ArrayPool<T>.Shared.Return(vHeads);
+                ArrayPool<T>.Shared.Return(outHeads);
+            }
+
+            // 5. Output projection + residual.
+            var wO = WeightSpan(attn.oProj.Weight);
+            GradKernels.MatMulTransposedB(contextSpan, wO, attnOut, seqLen, hiddenSize, hiddenSize);
+            input.CopyTo(residualSpan);
+            TensorPrimitives.Add(residualSpan, attnOutSpan, residualSpan);
+
+            // 6. MLP norm.
+            var mlpGamma = WeightSpan(mlpNorm.Weight);
+            var mlpBeta = mlpNorm.Bias != null ? WeightSpan(mlpNorm.Bias) : ReadOnlySpan<T>.Empty;
+            var lnMlp = LayerNormKernel<T>.ForwardInference(residualSpan, seqLen, hiddenSize, mlpGamma, mlpBeta, mlpNorm.Eps);
+            lnMlp.AsSpan(0, seqLen * hiddenSize).CopyTo(mlpNormSpan);
+
+            // 7. GeGLU.
+            var wIn = WeightSpan(mlp.inputProj.Weight);
+            var wGate = WeightSpan(mlp.gateProj.Weight);
+            var wDown = WeightSpan(mlp.downProj.Weight);
+            GradKernels.MatMulTransposedB(mlpNormSpan, wIn, actBuf, seqLen, hiddenSize, intermediateSize);
+            GradKernels.GeluExact(actSpan, actSpan);
+            GradKernels.MatMulTransposedB(mlpNormSpan, wGate, gateBuf, seqLen, hiddenSize, intermediateSize);
+            TensorPrimitives.Multiply(actSpan, gateSpan, gateSpan);
+            GradKernels.MatMulTransposedB(gateSpan, wDown, mlpOut, seqLen, intermediateSize, hiddenSize);
+
+            // 8. Residual into output.
+            TensorPrimitives.Add(residualSpan, mlpOutSpan, output);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(normBuf);
+            ArrayPool<T>.Shared.Return(qBuf);
+            ArrayPool<T>.Shared.Return(kBuf);
+            ArrayPool<T>.Shared.Return(vBuf);
+            ArrayPool<T>.Shared.Return(scores);
+            ArrayPool<T>.Shared.Return(context);
+            ArrayPool<T>.Shared.Return(attnOut);
+            ArrayPool<T>.Shared.Return(residual);
+            ArrayPool<T>.Shared.Return(mlpNormBuf);
+            ArrayPool<T>.Shared.Return(actBuf);
+            ArrayPool<T>.Shared.Return(gateBuf);
+            ArrayPool<T>.Shared.Return(mlpOut);
+        }
+    }
+
+    static ReadOnlySpan<T> WeightSpan(Parameter<T>? weight)
+    {
+        if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
+        if (!weight.Tensor.Data.TryGetSpan(out var span))
+            throw new InvalidOperationException("Parameter data must be null-free.");
+        return span;
     }
 }
 
@@ -457,13 +671,54 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
         if (validLength <= 0)
             throw new ArgumentOutOfRangeException(nameof(validLength), $"validLength must be positive, got {validLength}.");
 
-        var hidden = embedNorm.Forward(tokenEmbedding.Forward(tokenIds));
+        if (GradientUtils.IsGradEnabled)
+        {
+            var hidden = embedNorm.Forward(tokenEmbedding.Forward(tokenIds));
+            for (int i = 0; i < layers.Length; i++)
+            {
+                int band = config.IsFullAttention(i) ? -1 : config.SlidingWindow;
+                hidden = layers[i].Forward(hidden, band, validLength);
+            }
+            return finalNorm.Forward(hidden);
+        }
+
+        // Inference-only fused path.
+        int hiddenSize = config.HiddenSize;
+        var weightData = tokenEmbedding.Weight != null
+            ? WeightSpan(tokenEmbedding.Weight)
+            : throw new InvalidOperationException("tokenEmbedding has no weight.");
+        var hiddenBuf = new T[seqLen * hiddenSize];
+        for (int i = 0; i < seqLen; i++)
+        {
+            int id = tokenIds[i];
+            if (id < 0 || id >= config.VocabSize)
+                throw new ArgumentOutOfRangeException(nameof(tokenIds), $"Token ID {id} out of range.");
+            weightData.Slice(id * hiddenSize, hiddenSize).CopyTo(hiddenBuf.AsSpan(i * hiddenSize, hiddenSize));
+        }
+
+        var embedGamma = WeightSpan(embedNorm.Weight);
+        var embedBeta = embedNorm.Bias != null ? WeightSpan(embedNorm.Bias) : ReadOnlySpan<T>.Empty;
+        var embedOut = LayerNormKernel<T>.ForwardInference(hiddenBuf, seqLen, hiddenSize, embedGamma, embedBeta, embedNorm.Eps);
+        embedOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
+
+        var bufA = hiddenBuf;
+        var bufB = new T[seqLen * hiddenSize];
         for (int i = 0; i < layers.Length; i++)
         {
             int band = config.IsFullAttention(i) ? -1 : config.SlidingWindow;
-            hidden = layers[i].Forward(hidden, band, validLength);
+            layers[i].ForwardFused(bufA.AsSpan(0, seqLen * hiddenSize), bufB.AsSpan(0, seqLen * hiddenSize), band, validLength);
+            var tmp = bufA; bufA = bufB; bufB = tmp;
         }
-        return finalNorm.Forward(hidden);
+        if (bufA != hiddenBuf)
+            bufA.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
+
+        var finalGamma = WeightSpan(finalNorm.Weight);
+        var finalBeta = finalNorm.Bias != null ? WeightSpan(finalNorm.Bias) : ReadOnlySpan<T>.Empty;
+        var finalOut = LayerNormKernel<T>.ForwardInference(hiddenBuf, seqLen, hiddenSize, finalGamma, finalBeta, finalNorm.Eps);
+        finalOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
+
+        return new ReverseGradTensor<T>(
+            NivaraColumn<T>.CreateFromOwnedArray(hiddenBuf), false, new[] { seqLen, hiddenSize });
     }
 
     /// <summary>
@@ -518,4 +773,12 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
         ModernBertConfig config,
         string prefix = "model")
         => LoadWeights<float, float>(tensors, config, prefix);
+
+    static ReadOnlySpan<T> WeightSpan(Parameter<T>? weight)
+    {
+        if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
+        if (!weight.Tensor.Data.TryGetSpan(out var span))
+            throw new InvalidOperationException("Parameter data must be null-free.");
+        return span;
+    }
 }
