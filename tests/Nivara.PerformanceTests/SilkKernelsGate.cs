@@ -1148,7 +1148,143 @@ internal static class SilkKernelsGate
             legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.CausalGqaAttention, $"smollm s{qLen} h{numHeads}/{numKvHeads} d{headDim}", runCpu, readCpu, runSilk, readSilk));
         }
 
+        // rms_norm_gemv, biased 3-slot (the cached Q/K/V shape, #670). The widths are SmolLM's
+        // because this function measures the SmolLM-family kernels; hasBias is a kernel property, and
+        // it is exercised here with the flag value the biased model (Qwen) passes.
+        {
+            int kvWidth = hidden / 3;
+            var x = Randoms(hidden, 0x67000001u);
+            var gamma = Randoms(hidden, 0x67000002u);
+            var w0 = Randoms(hidden * hidden, 0x67000003u);
+            var w1 = Randoms(hidden * kvWidth, 0x67000004u);
+            var w2 = Randoms(hidden * kvWidth, 0x67000005u);
+            var b0 = Randoms(hidden, 0x67000006u);
+            var b1 = Randoms(kvWidth, 0x67000007u);
+            var b2 = Randoms(kvWidth, 0x67000008u);
+            var c0 = new float[hidden];
+            var c1 = new float[kvWidth];
+            var c2 = new float[kvWidth];
+
+            Action runCpu = () =>
+            {
+                RmsNormGemvCpu(x, gamma, w0, b0, c0, hidden, eps);
+                RmsNormGemvCpu(x, gamma, w1, b1, c1, kvWidth, eps);
+                RmsNormGemvCpu(x, gamma, w2, b2, c2, kvWidth, eps);
+            };
+            Func<float[]> readCpu = () => [.. c0, .. c1, .. c2];
+
+            nint sx = silk.Allocate(hidden); buffers.Add(sx);
+            nint sg = silk.Allocate(hidden); buffers.Add(sg);
+            nint sw0 = silk.Allocate(w0.Length); buffers.Add(sw0);
+            nint sw1 = silk.Allocate(w1.Length); buffers.Add(sw1);
+            nint sw2 = silk.Allocate(w2.Length); buffers.Add(sw2);
+            nint sb0 = silk.Allocate(b0.Length); buffers.Add(sb0);
+            nint sb1 = silk.Allocate(b1.Length); buffers.Add(sb1);
+            nint sb2 = silk.Allocate(b2.Length); buffers.Add(sb2);
+            nint sc0 = silk.Allocate(c0.Length); buffers.Add(sc0);
+            nint sc1 = silk.Allocate(c1.Length); buffers.Add(sc1);
+            nint sc2 = silk.Allocate(c2.Length); buffers.Add(sc2);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(sw0, w0);
+            silk.Upload(sw1, w1);
+            silk.Upload(sw2, w2);
+            silk.Upload(sb0, b0);
+            silk.Upload(sb1, b1);
+            silk.Upload(sb2, b2);
+
+            Action runSilk = () =>
+            {
+                Nivara.Silk.SilkLauncher.RmsNormGemv(silk, sx, sg,
+                    [new(sw0, sb0, sc0, hidden), new(sw1, sb1, sc1, kvWidth), new(sw2, sb2, sc2, kvWidth)],
+                    hasBias: true, aRows: 1, aCols: hidden, eps: eps);
+                silk.Finish();
+            };
+            Func<float[]> readSilk = () =>
+                [.. silk.Download(sc0, hidden), .. silk.Download(sc1, kvWidth), .. silk.Download(sc2, kvWidth)];
+
+            legs.Add(MeasureCpuReference(
+                Nivara.Silk.SilkKernels.RmsNormGemv,
+                $"qkv h{hidden} q{hidden} kv{kvWidth} biased",
+                runCpu, readCpu, runSilk, readSilk));
+        }
+
+        // rms_norm_gemv, bias-free 2-slot (the cached gate/up shape, #670).
+        {
+            var x = Randoms(hidden, 0x67100001u);
+            var gamma = Randoms(hidden, 0x67000002u);
+            var w0 = Randoms(hidden * intermediate, 0x67000003u);
+            var w1 = Randoms(hidden * intermediate, 0x67000004u);
+            var c0 = new float[intermediate];
+            var c1 = new float[intermediate];
+
+            Action runCpu = () =>
+            {
+                RmsNormGemvCpu(x, gamma, w0, null, c0, intermediate, eps);
+                RmsNormGemvCpu(x, gamma, w1, null, c1, intermediate, eps);
+            };
+            Func<float[]> readCpu = () => [.. c0, .. c1];
+
+            nint sx = silk.Allocate(hidden); buffers.Add(sx);
+            nint sg = silk.Allocate(hidden); buffers.Add(sg);
+            nint sw0 = silk.Allocate(w0.Length); buffers.Add(sw0);
+            nint sw1 = silk.Allocate(w1.Length); buffers.Add(sw1);
+            nint sc0 = silk.Allocate(c0.Length); buffers.Add(sc0);
+            nint sc1 = silk.Allocate(c1.Length); buffers.Add(sc1);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(sw0, w0);
+            silk.Upload(sw1, w1);
+
+            Action runSilk = () =>
+            {
+                Nivara.Silk.SilkLauncher.RmsNormGemv(silk, sx, sg,
+                    [new(sw0, 0, sc0, intermediate), new(sw1, 0, sc1, intermediate)],
+                    hasBias: false, aRows: 1, aCols: hidden, eps: eps);
+                silk.Finish();
+            };
+            Func<float[]> readSilk = () => [.. silk.Download(sc0, intermediate), .. silk.Download(sc1, intermediate)];
+
+            legs.Add(MeasureCpuReference(
+                Nivara.Silk.SilkKernels.RmsNormGemv, $"gate-up h{hidden} i{intermediate}", runCpu, readCpu, runSilk, readSilk));
+        }
+
         return legs;
+    }
+
+    static float[] Randoms(int count, uint seed)
+    {
+        var values = new float[count];
+        for (int i = 0; i < count; i++) values[i] = GemmBenchmark.NextUniformF(ref seed);
+        return values;
+    }
+
+    /// <summary>Host replay of one <c>rms_norm_gemv</c> slot. <c>rms_norm_gemv</c> is Silk-only — no
+    /// ILGPU kernel reproduces it — so this replay is its reference, the way the other SmolLM-family
+    /// kernels are measured here. The reduction is the kernel's: one accumulator over ascending K,
+    /// <c>1 / sqrt(ssq / cols + eps)</c>, then the same ascending-K
+    /// <c>acc += (x[k] * scale * gamma[k]) * w[k, j]</c>, and the bias in the store.</summary>
+    static void RmsNormGemvCpu(
+        float[] x, float[] gamma, float[] weight, float[]? bias, float[] output, int cols, float eps)
+    {
+        int aCols = x.Length;
+        float ssq = 0.0f;
+        for (int k = 0; k < aCols; k++)
+        {
+            float v = x[k];
+            ssq += v * v;
+        }
+        float scale = 1.0f / MathF.Sqrt(ssq / aCols + eps);
+        for (int j = 0; j < cols; j++)
+        {
+            float acc = 0.0f;
+            for (int k = 0; k < aCols; k++)
+            {
+                float xv = x[k] * scale * gamma[k];
+                acc += xv * weight[k * cols + j];
+            }
+            output[j] = bias is null ? acc : acc + bias[j];
+        }
     }
 
     static Leg MeasureCpuReference(

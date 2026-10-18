@@ -387,7 +387,7 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 
 ### 11.1 The kernel set
 
-`KernelNames` (`SilkKernels.cs:69`) is the build/creation order:
+`KernelNames` (`SilkKernels.cs:117`) is the build/creation order:
 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
@@ -400,7 +400,7 @@ i.e. the original eight (`embed_sum`, `gather_rows`, `layer_norm_residual`, the 
 source order.
 
 Each is a port of the same-shape ILGPU kernel with the operation order preserved — same strictly
-ascending K-reduction, same tile geometry, same fused epilogues:
+ascending K-reduction, same tile geometry where the kernel is tiled, same fused epilogues:
 
 | kernel | signature (abridged) | purpose |
 |---|---|---|
@@ -417,8 +417,8 @@ ascending K-reduction, same tile geometry, same fused epilogues:
 | `add_bias` | `x, bias, y, rows, cols` | Laya type-embedding broadcast, in place |
 | `gemm_row4` | `a, b, c, aRows, aCols, bCols` | bias-free Row4 store. Not `gemm_row4_bias` with a zero bias: `acc + 0.0f` canonicalizes `-0` |
 | `rms_norm` | `x, gamma, y, rows, cols, eps` | `RMSNorm(x)` |
-| `rms_norm_lm_head` | `x, gamma, weight, logits, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ weight` (final head; also used for bias-free cached decode projections) |
-| `rms_norm_gemm_bias` | `x, gamma, b, bias, c, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ b + bias` (cached Q/K/V projections) |
+| `rms_norm_lm_head` | `x, gamma, weight, logits, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ weight` (prefill, including the last-row-only prefill head; the cached decode head uses `rms_norm_gemv`) |
+| `rms_norm_gemv` | `x, gamma, w0, bias0, out0, w1, bias1, out1, w2, bias2, out2, aCols, cols0, cols1, cols2, hasBias, eps` | cached-decode projections: one `RMSNorm(x)` feeding up to three GEMMs (Q/K/V, gate/up, tied head). Decode-shaped — single row, so there is no row dimension to leave idle: a flat 1-D launch, one thread per `BLOCK` columns, no shared-memory staging. A slot of zero columns is unreachable, and `hasBias` 0 stores the plain accumulator — a zero bias would be `acc + 0.0f`, the same distinction `gemm_row4` draws |
 | `gemm_row4_add` | `a, b, c, residual, aRows, aCols, bCols` | Row4 GEMM plus residual add in the store (O/down projections in cached decode) |
 | `split_columns` | `src, dst, rows, blockCols, parts, part` | ModernBERT QKV is row-interleaved; a contiguous sub-view is right for row 0 and wrong after it |
 | `rotary` | `x, posIds, cosTab, sinTab, y, rows, numHeads, headDim` | half-split RoPE, in place on q and k. Tables are inputs. The pair width is not named `half`: this driver treats that as a type name and rejects the program |
@@ -428,15 +428,20 @@ ascending K-reduction, same tile geometry, same fused epilogues:
 
 `GemmTileSize` 16, `GemmBlockCols` 4, `GemmTileCols` 64, `GemmRowStride` 80, `LinearGroupSize` 256,
 `AttentionGroupSize` 64, `MaxHeadDim` 64, `GlobalAttentionBand` −1 — the same numbers the ILGPU
-`GpuBuffers` carries. The helpers are pure functions (`GemmGlobalRows`, `GemmGlobalCols`,
-`LinearGlobal`, `AttentionGlobal`, `RoundUp`) so they unit-check without a device.
+`GpuBuffers` carries. The decode shape adds `GemvGroupSize` 32, `GemvBlockCols` 4 and
+`GemvGroupCols` 128: a flat launch, because a one-row problem has no row dimension to fill and the
+tile form left 240 of a group's 256 threads discarding results. The helpers are pure functions
+(`GemmGlobalRows`, `GemmGlobalCols`, `GemvGlobalCols`, `LinearGlobal`, `AttentionGlobal`, `RoundUp`)
+so they unit-check without a device.
 `GemmGlobalCols` counts *groups*, not threads: a group is 16 threads wide but covers 64 output
 columns, so returning `RoundUp(bCols, GemmTileCols)` would over-launch by `GemmBlockCols`× and the
-surplus groups would run the whole K-loop and then discard every result.
+surplus groups would run the whole K-loop and then discard every result. `GemvGlobalCols` is that
+same arithmetic one group wider (`RoundUp(cols, GemvGroupCols) / GemvBlockCols`), and a zero width
+returns zero — which is how a trailing output slot is omitted rather than launched and discarded.
 
 ### 11.3 Bit-identity: the macro and the pragma
 
-The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:331`)
+The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:381`)
 deliberately: the byte-identity claim rests on every variant adding the same f32
 values to the same accumulators in the same order, so the text must not be able to drift between
 them. The store after the macro is the only difference. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT

@@ -8,6 +8,11 @@ namespace Nivara.Silk;
 /// </summary>
 internal static class SilkLauncher
 {
+    /// <summary>One output slot of <see cref="RmsNormGemv"/>: its weight matrix, an optional bias
+    /// row, its destination, and its output width. Trailing slots are omitted rather than passed as
+    /// four zeros, so a call site cannot wire a slot's width to another slot's buffer.</summary>
+    public readonly record struct GemvSlot(nint Weight, nint Bias, nint Output, int Cols);
+
     public static void Gather(SilkRuntime runtime, nint table, nint ids, nint y, int n, int hidden)
     {
         runtime.SetBuffer(SilkKernels.GatherRows, 0, table);
@@ -326,26 +331,62 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
     }
 
-    public static void RmsNormGemmBias(
-        SilkRuntime runtime, nint x, nint gamma, nint b, nint bias, nint c,
-        int aRows, int aCols, int bCols, float eps)
+    /// <summary>Fused <c>RMSNorm(x)</c> followed by one to three independent projections, which share
+    /// the one normalization: cached-decode Q/K/V, gate/up, or the tied head. Decode only — the
+    /// kernel is the flat one-row form, so <paramref name="aRows"/> must be 1 and the prefill heads
+    /// keep their individual tile kernels (#657).</summary>
+    public static void RmsNormGemv(
+        SilkRuntime runtime,
+        nint x,
+        nint gamma,
+        ReadOnlySpan<GemvSlot> slots,
+        bool hasBias,
+        int aRows,
+        int aCols,
+        float eps)
     {
-        if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aRows != 1)
+            throw new ArgumentOutOfRangeException(
+                nameof(aRows), aRows, "rms_norm_gemv is the single-row decode shape; prefill keeps the tile kernels");
         if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
-        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
-        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 0, x);
-        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 1, gamma);
-        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 2, b);
-        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 3, bias);
-        runtime.SetBuffer(SilkKernels.RmsNormGemmBias, 4, c);
-        runtime.SetUInt32(SilkKernels.RmsNormGemmBias, 5, (uint)aRows);
-        runtime.SetUInt32(SilkKernels.RmsNormGemmBias, 6, (uint)aCols);
-        runtime.SetUInt32(SilkKernels.RmsNormGemmBias, 7, (uint)bCols);
-        runtime.SetFloat32(SilkKernels.RmsNormGemmBias, 8, eps);
+        if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        GemvSlot s0 = slots[0];
+        GemvSlot s1 = slots.Length > 1 ? slots[1] : default;
+        GemvSlot s2 = slots.Length > 2 ? slots[2] : default;
+        if (s0.Cols <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s1.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s2.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 2, s0.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 3, s0.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 4, s0.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 5, s1.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 6, s1.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 7, s1.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 8, s2.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 9, s2.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemv, 10, s2.Output);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 11, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 12, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 13, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 14, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 15, hasBias ? 1u : 0u);
+        runtime.SetFloat32(SilkKernels.RmsNormGemv, 16, eps);
+
+        // One work-group per GEMVCOLS output columns, and each slot's group count lands on a whole
+        // group, so a group never straddles two slots and the kernel recovers its slot from
+        // get_group_id(0) alone. A zero-width slot adds no group.
+        int threads =
+            SilkKernels.GemvGlobalCols(s0.Cols)
+            + SilkKernels.GemvGlobalCols(s1.Cols)
+            + SilkKernels.GemvGlobalCols(s2.Cols);
         runtime.Run(
-            SilkKernels.RmsNormGemmBias,
-            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
-            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+            SilkKernels.RmsNormGemv,
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
     }
 
     public static void Conv2d(

@@ -21,10 +21,17 @@ namespace Nivara.Tests.Inference;
 /// happy path is
 /// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
 /// observable before the first disk touch, so the ordering cases and the <c>qwen</c> happy paths use
-/// <c>qwen</c> (its checkpoint is never present: <c>samples/data/qwen2.5-0.5b-instruct/</c> is
-/// gitignored and no <c>*.safetensors</c> is tracked) and the mode cases pin the message, not the
-/// exit code — a guard that fell through to the model-file check would exit <c>1</c> with a
-/// different message.
+/// <c>qwen</c> and the mode cases pin the message, not the exit code — a guard that fell through to
+/// the model-file check would exit <c>1</c> with a different message.
+/// </para>
+/// <para>
+/// <b>No checkpoint in reach.</b> The sample resolves a model directory against its working directory
+/// (<c>samples/data/&lt;model&gt;/model.safetensors</c>). The qwen checkpoint is gitignored, which is
+/// exactly what lets a developer keep the one the benchmark workflow asks for, so spawning the sample
+/// from the repository root made the qwen happy paths load the weights and run real generation
+/// instead of reaching the model-file check. Every invocation therefore runs in an empty temporary
+/// directory, which makes "no checkpoint is present" a property of this gate rather than of the
+/// machine it runs on.
 /// </para>
 /// </summary>
 [TestFixture]
@@ -39,7 +46,14 @@ public class InferenceCliArgumentTests
     const string ModelLookupMessage = "Model file not found";
 
     static readonly string DllPath = Path.Combine(AppContext.BaseDirectory, "NivaraInference.dll");
-    static readonly string RepoRoot = FindRepoRoot();
+
+    // The sample resolves the model directory against its working directory
+    // (samples/data/<model>/model.safetensors), so spawning it with the repository as the working
+    // directory made this gate depend on which checkpoints the developer keeps: the qwen happy paths
+    // below observe "Model file not found" as the deepest reachable point, and a real checkpoint turns
+    // that one-second exit into a full generation run. Every invocation runs in an empty directory, so
+    // "no checkpoint is present" is a property of the gate rather than of the machine it runs on.
+    static readonly string CliWorkingDirectory = CreateEmptyWorkingDirectory();
 
     [OneTimeSetUp]
     public void TheSampleMustBeBuilt()
@@ -64,6 +78,9 @@ public class InferenceCliArgumentTests
             calibrated = (int)(calibrated * multiplier);
         ProcessTimeoutMs = calibrated;
     }
+
+    [OneTimeTearDown]
+    public void RemoveCliWorkingDirectory() => Directory.Delete(CliWorkingDirectory, recursive: true);
 
     [Test]
     public void SeqWarmupIters_OnNonModernBertModel_Rejected()
@@ -145,7 +162,7 @@ public class InferenceCliArgumentTests
     {
         CliResult result = Run("qwen", "--ilgpu");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
-            "the --ilgpu guard must run before the model-file check; 'qwen' weights are never present");
+            "the --ilgpu guard must run before the model-file check; no checkpoint is in reach");
         AssertRejected(result, "--ilgpu is not supported for 'qwen'");
     }
 
@@ -319,7 +336,7 @@ public class InferenceCliArgumentTests
     {
         CliResult result = Run("qwen", "--silk", "distill");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
-            "the --silk guard must run before the model-file check; 'qwen' weights are never present");
+            "the --silk guard must run before the model-file check; no checkpoint is in reach");
         AssertRejected(result, "--silk does not support mode 'distill'");
     }
 
@@ -492,8 +509,8 @@ public class InferenceCliArgumentTests
 
     /// <summary>
     /// The counterpart to the rejects above: every accepted qwen mode still reaches the weight load.
-    /// <c>qwen</c>'s checkpoint is never present, so "Model file not found" is the deepest point this
-    /// gate can observe; the point is that no guard fires before it.
+    /// The sample runs outside the repository, so no checkpoint is in reach and "Model file not found"
+    /// is the deepest point this gate can observe; the point is that no guard fires before it.
     /// </summary>
     [Test]
     public void QwenAcceptedModes_ReachTheModelFileLookup()
@@ -570,7 +587,7 @@ public class InferenceCliArgumentTests
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = RepoRoot,
+            WorkingDirectory = CliWorkingDirectory,
         };
         startInfo.ArgumentList.Add(DllPath);
 
@@ -597,7 +614,7 @@ public class InferenceCliArgumentTests
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = RepoRoot,
+            WorkingDirectory = CliWorkingDirectory,
         };
         startInfo.ArgumentList.Add(DllPath);
         foreach (string arg in args)
@@ -621,14 +638,10 @@ public class InferenceCliArgumentTests
         return new CliResult(process.ExitCode, stdoutText, stderrText);
     }
 
-    static string FindRepoRoot()
+    static string CreateEmptyWorkingDirectory()
     {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Nivara.slnx")))
-                return dir.FullName;
-        }
-
-        throw new InvalidOperationException($"Nivara.slnx not found above {AppContext.BaseDirectory}.");
+        string path = Path.Combine(Path.GetTempPath(), "nivara-cli-args-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
     }
 }

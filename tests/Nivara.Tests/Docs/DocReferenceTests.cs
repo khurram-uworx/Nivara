@@ -24,9 +24,13 @@ public class DocReferenceTests
     /// added by the #492 reconciliation. 700 = 698 + the two SmolLM Silk files
     /// (<c>SilkSmolLMGpuRunner.cs</c>, <c>SilkSmolLMSession.cs</c>) added by #628. 710 = 709 +
     /// <c>docs/DECISION-MODELS.md</c>, the decision-model ecosystem doc split out of the
-    /// inference sample's README and <c>docs/LAYA.md</c>.
+    /// inference sample's README and <c>docs/LAYA.md</c>. 711 = 710 + the #670 fused-decode
+    /// fixture, <c>tests/Nivara.Tests/Gpu/SilkRmsNormGemvTests.cs</c>. 712 = 711 + the #670
+    /// device-free geometry fixture, <c>tests/Nivara.Tests/Gpu/SilkGemvGeometryTests.cs</c>, which
+    /// was split out of that one so the bit-identity fixture stays byte-identical while the
+    /// geometry it relies on is reshaped.
     /// </summary>
-    const int ExpectedFileCount = 710;
+    const int ExpectedFileCount = 712;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered. Pinned deliberately.
