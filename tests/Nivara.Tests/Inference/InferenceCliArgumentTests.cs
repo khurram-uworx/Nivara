@@ -17,7 +17,8 @@ namespace Nivara.Tests.Inference;
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
 /// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
-/// and the <c>--ollama</c>, <c>--model</c> and benchmark scope). The <c>typesafe</c> happy path is
+/// and the <c>--url</c>, <c>--model</c> and engine-positional scope). The <c>typesafe</c>
+/// happy path is
 /// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
 /// observable before the first disk touch, so the ordering cases and the <c>qwen</c> happy paths use
 /// <c>qwen</c> (its checkpoint is never present: <c>samples/data/qwen2.5-0.5b-instruct/</c> is
@@ -382,7 +383,7 @@ public class InferenceCliArgumentTests
     /// The TypeSafe demo is a model key whose run is an HTTP client, not a checkpoint, so its
     /// dispatch sits before the model-file lookup. Each reject therefore has to name its own guard
     /// rather than fall through to "Model file not found". The happy path is deliberately absent:
-    /// it needs a live decision server, which a CI runner does not have.
+    /// it needs a live decision engine, which a CI runner does not have.
     /// </summary>
     [Test]
     public void Typesafe_BeyondItsCliSurface_Rejected()
@@ -396,17 +397,38 @@ public class InferenceCliArgumentTests
     }
 
     /// <summary>
-    /// <c>--ollama</c> selects the decision-model server for the <c>typesafe</c> run and nothing
-    /// else reads it, so it is rejected outside that model; a supplied endpoint must be an absolute
-    /// http(s) URL, because the value would otherwise reach <c>new Uri(…)</c> and throw.
+    /// <c>--url</c> points the <c>typesafe</c> demo at an engine and is read by no other run. Its
+    /// value is required — unlike an optional-value flag it can never be confused with the mode
+    /// that follows it, which is how a well-formed <c>typesafe ollama benchmark</c> used to be
+    /// rejected as a bad URL.
     /// </summary>
     [Test]
-    public void Ollama_BeyondItsScopeOrWithABadUrl_Rejected()
+    public void Url_BeyondItsScopeOrWithoutAValue_Rejected()
     {
         Assert.Multiple(() =>
         {
-            AssertRejected(Run("minilm", "--ollama"), "--ollama is a 'typesafe' option only");
-            AssertRejected(Run("typesafe", "--ollama", "not-a-url"), "--ollama expects an absolute http(s) URL");
+            AssertRejected(Run("minilm", "--url", "http://localhost:11434"), "--url is a 'typesafe' option only");
+            AssertRejected(Run("typesafe", "--url"), "--url needs a value.");
+            AssertRejected(Run("typesafe", "--url", "not-a-url"), "--url expects an absolute http(s) URL");
+        });
+    }
+
+    /// <summary>
+    /// The first positional of a <c>typesafe</c> run is the engine when it names one, and the mode
+    /// otherwise; the two token sets are disjoint, which is what lets one slot hold both. Asserted
+    /// through the allow-list rather than a connection attempt, so the gate needs no engine: an
+    /// engine token that is not a mode still parses (no URL error), a second engine token is read
+    /// as a mode and rejected, and the same token is an unsupported mode for any other model.
+    /// </summary>
+    [Test]
+    public void EnginePositional_IsReadAsEngineOrModeByNameOnly()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "bogus"), "Unsupported mode 'bogus' for 'typesafe'");
+            AssertRejected(Run("typesafe", "ollama", "bogus"), "Unsupported mode 'bogus' for 'typesafe'");
+            AssertRejected(Run("typesafe", "ollama", "ollaya"), "Unsupported mode 'ollaya' for 'typesafe'");
+            AssertRejected(Run("minilm", "ollama"), "Unsupported mode 'ollama' for 'minilm'");
         });
     }
 

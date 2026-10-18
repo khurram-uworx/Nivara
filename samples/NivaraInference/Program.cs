@@ -121,8 +121,10 @@ class Program
         bool plain = false;
         bool useGpu = false;
         bool useSilk = false;
-        bool useOllama = false;
-        string? ollamaUrl = null;
+        string engine = TypeSafe.DefaultEngine;
+        bool engineSet = false;
+        string? urlArg = null;
+        bool urlSet = false;
         string? modelArg = null;
         bool modelSet = false;
         int teacherExamples = 0;
@@ -206,23 +208,28 @@ class Program
                 useGpu = true;
             else if (args[i] == "--silk")
                 useSilk = true;
-            else if (args[i] == "--ollama")
+            else if (args[i] == "--url")
             {
-                // Same shape as NivaraChat's --ollama: the bare flag selects the default URL, and a
-                // following non-flag token overrides it. The value is validated here because every
-                // other value-taking flag in this CLI validates its own.
-                useOllama = true;
-                if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                // A required value, validated here because every other value-taking flag in this CLI
+                // validates its own. Required rather than optional matters for parsing: an optional
+                // value is a non-flag token that can be mistaken for the mode, which is how a
+                // well-formed 'typesafe ollama benchmark' ends up rejected as a bad URL. A flag that
+                // names its own value leaves the mode slot to the mode alone.
+                if (i + 1 >= args.Length)
                 {
-                    ollamaUrl = args[i + 1];
-                    if (!Uri.TryCreate(ollamaUrl, UriKind.Absolute, out Uri? endpoint) ||
-                        (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
-                    {
-                        Console.Error.WriteLine($"--ollama expects an absolute http(s) URL; got '{ollamaUrl}'.");
-                        return 1;
-                    }
-                    i++;
+                    Console.Error.WriteLine("--url needs a value.");
+                    return 1;
                 }
+
+                urlArg = args[i + 1];
+                if (!Uri.TryCreate(urlArg, UriKind.Absolute, out Uri? endpoint) ||
+                    (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
+                {
+                    Console.Error.WriteLine($"--url expects an absolute http(s) URL; got '{urlArg}'.");
+                    return 1;
+                }
+                urlSet = true;
+                i++;
             }
             else if (args[i] == "--model")
             {
@@ -280,6 +287,17 @@ class Program
                 textSet = true;
                 i++;
             }
+            else if (modelType == "typesafe" && !engineSet && TypeSafe.IsEngine(args[i]))
+            {
+                // The first positional of a 'typesafe' run names the engine. A token that is not an
+                // engine name falls through to the mode below, so 'typesafe benchmark' and
+                // 'typesafe ollama benchmark' both parse — the two token sets are disjoint, which
+                // is what makes one positional slot safe for both. engineSet keeps a *second* engine
+                // token from being re-read as an engine, so 'typesafe ollama ollaya' reaches the
+                // mode allow-list and is rejected there instead of silently keeping the first one.
+                engine = args[i];
+                engineSet = true;
+            }
             else if (mode.Length == 0)
                 mode = args[i];
         }
@@ -289,7 +307,7 @@ class Program
             Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
-            Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
+            Console.WriteLine("  benchmark         Run timed passes and report median timing");
             Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
             Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
@@ -299,13 +317,15 @@ class Program
             Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
-            Console.WriteLine("TypeSafe (no checkpoint; calls a decision-model server over HTTP):");
-            Console.WriteLine("  typesafe          TypeSafeAI news assessment. Default: Ollaya at http://localhost:11435,");
-            Console.WriteLine("                    model laya:en.");
-            Console.WriteLine("  --ollama [url]    Use a local Ollama server instead (default http://localhost:11434, model");
-            Console.WriteLine("                    tev1:0.8b). Both servers expose the TypeSafe /v1/systemone API.");
-            Console.WriteLine("  --model <name>    Model to load on the selected server; e.g. 'typesafe --ollama --model tev1:0.8b'.");
-            Console.WriteLine("                    Defaults: laya:en on Ollaya, tev1:0.8b on Ollama.");
+            Console.WriteLine("TypeSafe (no checkpoint; calls a decision-model engine over HTTP):");
+            Console.WriteLine("  typesafe [engine]   engine: ollaya (default) | ollama. Both engines expose the TypeSafe");
+            Console.WriteLine("                    /v1/systemone API. Defaults per engine:");
+            Console.WriteLine("                    Ollaya http://localhost:11435 laya:en, Ollama http://localhost:11434 tev1:0.8b.");
+            Console.WriteLine("      e.g. 'typesafe'                   news assessment on Ollaya");
+            Console.WriteLine("           'typesafe ollama'            news assessment on Ollama");
+            Console.WriteLine("  --url <url>       Engine endpoint instead of the default; must be an absolute http(s) URL.");
+            Console.WriteLine("  --model <name>    Decision model to load on that engine; e.g. 'typesafe ollama --model tev1:0.8b'.");
+            Console.WriteLine("                    Not every model an engine holds is a decision model; the engine rejects the others.");
             Console.WriteLine();
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
@@ -469,15 +489,17 @@ class Program
             return 1;
         }
 
-        // --ollama picks which decision-model server the 'typesafe' demo talks to; no other run
-        // reads it, so reject it loudly rather than let it look like it did something.
-        if (useOllama && modelType != "typesafe")
+        // --url and --model parameterize the engine the 'typesafe' demo talks to; no other run
+        // reads them, so reject them loudly rather than let an invocation look like it did
+        // something. The engine positional needs no guard of its own: for any other model it is
+        // simply a mode, and the allow-list below rejects it.
+        if (urlSet && modelType != "typesafe")
         {
-            Console.Error.WriteLine($"--ollama is a 'typesafe' option only; got '{got}'.");
+            Console.Error.WriteLine($"--url is a 'typesafe' option only; got '{got}'.");
             return 1;
         }
 
-        // --model picks which model on that server to load; same reasoning as --ollama.
+        // --model picks which model on that engine to load; same reasoning as --url.
         if (modelSet && modelType != "typesafe")
         {
             Console.Error.WriteLine($"--model is a 'typesafe' option only; got '{got}'.");
@@ -562,10 +584,10 @@ class Program
             return 1;
         }
 
-        // The TypeSafe demo has no checkpoint: it calls a decision-model server over HTTP, so it
+        // The TypeSafe demo has no checkpoint: it calls a decision-model engine over HTTP, so it
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
         if (modelType == "typesafe")
-            return TypeSafe.Run(useOllama, ollamaUrl, modelArg).GetAwaiter().GetResult();
+            return TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult();
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");
