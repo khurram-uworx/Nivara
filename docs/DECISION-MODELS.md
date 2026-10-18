@@ -100,19 +100,19 @@ a time):
 |--------|-------|----------------|---------|
 | Ollaya | `laya:en` | 653.5 ms | 1.5 |
 | Ollama | `tev1:0.8b` | 2457.5 ms | 0.4 |
-| Nivara (in-process) | `convaiinnovations/laya` | 1417 ms | 0.7 |
+| Nivara (in-process) | `convaiinnovations/laya` | 1435.5 ms | 0.7 |
 
 Per news item (median ms, run one):
 
 | Item | Ollaya | Nivara (in-process) | Ollama |
 |------|--------|---------------------|--------|
-| 1 | 668 | 1456 | 2267 |
-| 2 | 613 | 1386 | 2361 |
-| 3 | 719 | 1597 | 2483 |
-| 4 | 630 | 1387 | 2432 |
-| 5 | 655 | 1416 | 2910 |
-| 6 | 652 | 1418 | 2730 |
-| **Overall median** | **653.5** | **1417** | **2457.5** |
+| 1 | 668 | 1463 | 2267 |
+| 2 | 613 | 1394 | 2361 |
+| 3 | 719 | 1613 | 2483 |
+| 4 | 630 | 1402 | 2432 |
+| 5 | 655 | 1436 | 2910 |
+| 6 | 652 | 1435 | 2730 |
+| **Overall median** | **653.5** | **1435.5** | **2457.5** |
 
 What the items show: Nivara is consistently faster than Ollama and slower than Ollaya on this
 machine; within a run each item's maximum sat within ~3% of its median. Absolute latency drifts run
@@ -152,14 +152,14 @@ Per-engine detail, run one — Nivara (in-process):
 
 ```
   item       median        min        max
-     1    1456 ms    1455 ms    1632 ms
-     2    1386 ms    1381 ms    1400 ms
-     3    1597 ms    1596 ms    1605 ms
-     4    1387 ms    1386 ms    1389 ms
-     5    1416 ms    1416 ms    1421 ms
-     6    1418 ms    1418 ms    1419 ms
+     1    1463 ms    1455 ms    1466 ms
+     2    1394 ms    1394 ms    1403 ms
+     3    1613 ms    1610 ms    1614 ms
+     4    1402 ms    1400 ms    1414 ms
+     5    1436 ms    1436 ms    1437 ms
+     6    1435 ms    1434 ms    1448 ms
 
-Overall: median 1417 ms per assessment across 6 items, 0.7 items/s sequential at those medians.
+Overall: median 1435.5 ms per assessment across 6 items, 0.7 items/s sequential at those medians.
 ```
 
 Run two, same commands back to back with nothing changed in between: Ollaya overall
