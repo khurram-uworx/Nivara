@@ -564,7 +564,7 @@ public static class Laya
         string path = Path.Combine(modelDir, "tokenizer", "tokenizer.json");
         if (!File.Exists(path))
             throw new FileNotFoundException($"Tokenizer not found: {path}", path);
-        return Gpt2BpeTokenizer.LoadFromTokenizerJson(path, "[UNK]", normalizeNfc: true);
+        return Gpt2BpeTokenizer.LoadFromTokenizerJson(path, "[UNK]");
     }
 
     static (int[] Ids, int ValidLength) PadTo(int[] ids, int maxLength, int padTokenId)

@@ -29,7 +29,7 @@ A ModernBERT-large encoder — the same architecture as [docs/MODERNBERT.md](MOD
 - **`act_head` is reproduced and is not a signal.** It reads ~1.0 on the shipped checkpoint regardless of input (upstream NandhaKishorM/laya#185). The sample prints that caveat next to the number. Gate on `answer_confidence`, not on it, and not on the uncalibrated entropy `confidence`.
 - **The reported choice is the option key**, not the rendered `"key: description"`.
 - **Verification**: `laya compare` against the wheel, not a transcription. Prompt ids and markers byte-exact on the four fixture questions; marker logits max |diff| 1.3e-5 (`choice2`) and 2e-6 on the other three; typed decision and temperature bucket match, including the clamp. Bound `|diff| <= 1e-3·(1 + |ref|)`. Prompt parity fails the gate on its own, before any forward.
-- **Tokenizer**: `tokenizer/tokenizer.json`, not the model root. Same loader as ModernBERT (`LoadFromTokenizerJson`, NFC on). Laya writes BPE merges as JSON arrays; the reader accepts both that form and the string form ModernBERT and SmolLM use.
+- **Tokenizer**: `tokenizer/tokenizer.json`, not the model root. Same loader as ModernBERT (`LoadFromTokenizerJson`, NFC derived from the file's `normalizer` block). Laya writes BPE merges as JSON arrays; the reader accepts both that form and the string form ModernBERT and SmolLM use.
 
 ### The load path
 
