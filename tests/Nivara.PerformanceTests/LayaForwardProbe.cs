@@ -496,11 +496,12 @@ internal static class LayaForwardProbe
     {
         Console.WriteLine("--- diagnostics pass (shares of the instrumented total only) ---");
         Console.WriteLine("The tracker takes a lock per op. These durations are not the forward above and are not a denominator.");
-        Console.WriteLine("Ops that do not call AutoDiffDiagnostics.Measure (norms, activations) are absent. Absence is not a zero.");
+        Console.WriteLine("Op families now recorded for the fused CPU inference path (CPU-Encoder-*) plus AutoDiff MatMuls. Absence means the path did not run that family in this forward.");
         var ids = BuildIds(PairValid, config.VocabSize, config.PadTokenId);
         DiagnosticsTracker.ClearRecordedOperations();
         DiagnosticsTracker.IsEnabled = true;
         AutoDiffDiagnostics.Enabled = true;
+        InferenceDiagnostics.Enabled = true;
         try
         {
             encoder.Forward(ids, PairValid);
@@ -509,6 +510,7 @@ internal static class LayaForwardProbe
         {
             DiagnosticsTracker.IsEnabled = false;
             AutoDiffDiagnostics.Enabled = false;
+            InferenceDiagnostics.Enabled = false;
         }
 
         var ops = DiagnosticsTracker.GetRecordedOperations();

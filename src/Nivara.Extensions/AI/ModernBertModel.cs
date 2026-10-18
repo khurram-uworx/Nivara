@@ -2,6 +2,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Diagnostics;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -443,6 +444,7 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
         int intermediateSize = mlp.inputProj.OutFeatures;
         T scale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
         T eps = mlpNorm.Eps;
+        bool diag = InferenceDiagnostics.IsEnabled;
 
         // Scratch buffers (rented; returned in finally).
         var normBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
@@ -472,6 +474,7 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             var gateSpan = gateBuf.AsSpan(0, seqLen * intermediateSize);
             var mlpOutSpan = mlpOut.AsSpan(0, seqLen * hiddenSize);
 
+            var mAttnNorm = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 1. Attention norm (or identity on layer 0).
             if (attnNorm != null)
             {
@@ -484,7 +487,9 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             {
                 input.CopyTo(normSpan);
             }
+            if (diag) mAttnNorm.Record("CPU-Encoder-AttnNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
 
+            var mQkv = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 2. Q/K/V projections.
             var wQ = WeightSpan(attn.qProj.Weight);
             var wK = WeightSpan(attn.kProj.Weight);
@@ -492,7 +497,9 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             GradKernels.MatMulTransposedB(normSpan, wQ, qBuf, seqLen, hiddenSize, qWidth);
             GradKernels.MatMulTransposedB(normSpan, wK, kBuf, seqLen, hiddenSize, qWidth);
             GradKernels.MatMulTransposedB(normSpan, wV, vBuf, seqLen, hiddenSize, qWidth);
+            if (diag) mQkv.Record("CPU-Encoder-QKV", global::Nivara.KernelSelector.DetermineKernelType<T>(3 * seqLen * hiddenSize), 3 * seqLen * hiddenSize, typeof(T), false, null);
 
+            var mRope = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 3. RoPE in place.
             attn.Rope.GetPositionTables(0, seqLen, out var cos, out var sin);
             int half = headDim / 2;
@@ -508,7 +515,9 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
                         kSpan.Slice(r * qWidth + b * headDim, headDim));
                 }
             }
+            if (diag) mRope.Record("CPU-Encoder-RoPE", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * qWidth), seqLen * qWidth, typeof(T), false, null);
 
+            var mAttention = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 4. Banded attention per head.
             for (int h = 0; h < numHeads; h++)
             {
@@ -564,19 +573,25 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
                 ArrayPool<T>.Shared.Return(vHeads);
                 ArrayPool<T>.Shared.Return(outHeads);
             }
+            if (diag) mAttention.Record("CPU-Encoder-Attention", global::Nivara.KernelSelector.DetermineKernelType<T>(numHeads * seqLen * seqLen), numHeads * seqLen * seqLen, typeof(T), false, null);
 
+            var mOProj = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 5. Output projection + residual.
             var wO = WeightSpan(attn.oProj.Weight);
             GradKernels.MatMulTransposedB(contextSpan, wO, attnOut, seqLen, hiddenSize, hiddenSize);
             input.CopyTo(residualSpan);
             TensorPrimitives.Add(residualSpan, attnOutSpan, residualSpan);
+            if (diag) mOProj.Record("CPU-Encoder-OProj", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
 
+            var mLpNorm = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 6. MLP norm.
             var mlpGamma = WeightSpan(mlpNorm.Weight);
             var mlpBeta = mlpNorm.Bias != null ? WeightSpan(mlpNorm.Bias) : ReadOnlySpan<T>.Empty;
             var lnMlp = LayerNormKernel<T>.ForwardInference(residualSpan, seqLen, hiddenSize, mlpGamma, mlpBeta, mlpNorm.Eps);
             lnMlp.AsSpan(0, seqLen * hiddenSize).CopyTo(mlpNormSpan);
+            if (diag) mLpNorm.Record("CPU-Encoder-MlpNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
 
+            var mGeGlu = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 7. GeGLU.
             var wIn = WeightSpan(mlp.inputProj.Weight);
             var wGate = WeightSpan(mlp.gateProj.Weight);
@@ -586,9 +601,12 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             GradKernels.MatMulTransposedB(mlpNormSpan, wGate, gateBuf, seqLen, hiddenSize, intermediateSize);
             TensorPrimitives.Multiply(actSpan, gateSpan, gateSpan);
             GradKernels.MatMulTransposedB(gateSpan, wDown, mlpOut, seqLen, intermediateSize, hiddenSize);
+            if (diag) mGeGlu.Record("CPU-Encoder-GeGLU", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * intermediateSize), seqLen * intermediateSize * 3, typeof(T), false, null);
 
+            var mResid = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 8. Residual into output.
             TensorPrimitives.Add(residualSpan, mlpOutSpan, output);
+            if (diag) mResid.Record("CPU-Encoder-Residual", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
         }
         finally
         {
@@ -684,6 +702,7 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
 
         // Inference-only fused path.
         int hiddenSize = config.HiddenSize;
+        bool diag = InferenceDiagnostics.IsEnabled;
         var weightData = tokenEmbedding.Weight != null
             ? WeightSpan(tokenEmbedding.Weight)
             : throw new InvalidOperationException("tokenEmbedding has no weight.");
@@ -696,10 +715,12 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
             weightData.Slice(id * hiddenSize, hiddenSize).CopyTo(hiddenBuf.AsSpan(i * hiddenSize, hiddenSize));
         }
 
+        var mEmbed = diag ? DiagnosticsTracker.StartMeasurement() : default;
         var embedGamma = WeightSpan(embedNorm.Weight);
         var embedBeta = embedNorm.Bias != null ? WeightSpan(embedNorm.Bias) : ReadOnlySpan<T>.Empty;
         var embedOut = LayerNormKernel<T>.ForwardInference(hiddenBuf, seqLen, hiddenSize, embedGamma, embedBeta, embedNorm.Eps);
         embedOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
+        if (diag) mEmbed.Record("CPU-Encoder-EmbedNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
 
         var bufA = hiddenBuf;
         var bufB = new T[seqLen * hiddenSize];
@@ -712,10 +733,12 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
         if (bufA != hiddenBuf)
             bufA.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
 
+        var mFinal = diag ? DiagnosticsTracker.StartMeasurement() : default;
         var finalGamma = WeightSpan(finalNorm.Weight);
         var finalBeta = finalNorm.Bias != null ? WeightSpan(finalNorm.Bias) : ReadOnlySpan<T>.Empty;
         var finalOut = LayerNormKernel<T>.ForwardInference(hiddenBuf, seqLen, hiddenSize, finalGamma, finalBeta, finalNorm.Eps);
         finalOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
+        if (diag) mFinal.Record("CPU-Encoder-FinalNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
 
         return new ReverseGradTensor<T>(
             NivaraColumn<T>.CreateFromOwnedArray(hiddenBuf), false, new[] { seqLen, hiddenSize });
