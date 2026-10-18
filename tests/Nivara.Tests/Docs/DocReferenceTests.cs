@@ -28,9 +28,10 @@ public class DocReferenceTests
     /// fixture, <c>tests/Nivara.Tests/Gpu/SilkRmsNormGemvTests.cs</c>. 712 = 711 + the #670
     /// device-free geometry fixture, <c>tests/Nivara.Tests/Gpu/SilkGemvGeometryTests.cs</c>, which
     /// was split out of that one so the bit-identity fixture stays byte-identical while the
-    /// geometry it relies on is reshaped.
+    /// geometry it relies on is reshaped. 715 = 714 + the #681 bit-identity fixture,
+    /// <c>tests/Nivara.Tests/Gpu/SilkGemmGemvAddTests.cs</c>.
     /// </summary>
-    const int ExpectedFileCount = 714;
+    const int ExpectedFileCount = 715;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
