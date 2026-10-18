@@ -30,10 +30,11 @@ per-request overhead in the type-safe Nivara route.
 5. docs: remove TODO.md — plan executed
 
 ## GitHub issues log
-- (none created yet)
+- #706 — Track Silk Laya attention-path performance work
 
 ## Blast radius
 - `samples/NivaraInference/NivaraTypeSafeClient.cs`
 - `src/Nivara.Extensions/Silk/SilkLayaSession.cs`, `SilkLayaHeadGpuRunner.cs`
 - `tests/Nivara.PerformanceTests`
 - Silk compare/parity tests remain the guardrails.
+
