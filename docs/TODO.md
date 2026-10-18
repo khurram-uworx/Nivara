@@ -373,7 +373,8 @@ Three rounds, one per stage, all run by the agent at the user's request:
   have a counterpart in the tree (`rms_norm_gemm_bias` was deleted), so their geometry would have to be
   re-measured from `main` or left unmeasured. Adding that cell to
   `tests/Nivara.PerformanceTests/SilkKernelsGate.cs` and running it is a human decision, as is whether
-  #670 ships with a timing number at all — this plan is the only place one was promised.
+  #670 ships with a timing number at all — this plan is the only place one was promised. The question is
+  filed as **#682** so that deleting this document does not delete it.
 
 ## Blast radius
 
@@ -436,3 +437,4 @@ in place; no temp project is created.
 ## GitHub issues log
 
 - [ ] #681 — Silk: decode-shaped `gemm_row4_add` for down/o_proj (remaining 6%-utilization decode GEMMs) (created while working on #670)
+- [ ] #682 — Silk: measure decode-shape kernel geometry as a same-session A/B (created while working on #670; the Speed gate below could not attribute the change, so the question is filed rather than dropped)
