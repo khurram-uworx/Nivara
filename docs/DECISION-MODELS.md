@@ -112,6 +112,8 @@ commands replaces every figure with your machine's numbers in the same shape.
 
 ## Correctness check: `typesafe nivara verify`
 
+This compares the in-process Nivara (Silk F32, `convaiinnovations/laya`) client against an HTTP Laya engine (Ollaya `laya:en` by default, overridable with `--url`/`--model`). It exits non-zero only on a typed-decision disagreement, and the printed deltas show the model agreement quantitatively.
+
 `typesafe nivara verify` keeps the typed decision as the hard gate and reports per-item/per-question
 deltas on per-option probability, `AnswerConfidence`, and score. Current run on the six news items:
 per-option probability 0.0000, score 0.0000, `AnswerConfidence` 0.2507; the probability and score
