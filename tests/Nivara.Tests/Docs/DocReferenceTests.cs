@@ -30,7 +30,7 @@ public class DocReferenceTests
     /// was split out of that one so the bit-identity fixture stays byte-identical while the
     /// geometry it relies on is reshaped.
     /// </summary>
-    const int ExpectedFileCount = 713;
+    const int ExpectedFileCount = 714;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
