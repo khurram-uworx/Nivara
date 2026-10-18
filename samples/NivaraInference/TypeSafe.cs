@@ -38,9 +38,6 @@ public static class TypeSafe
     /// <summary>Whether the CLI's first <c>typesafe</c> positional names an engine or a mode.</summary>
     public static bool IsEngine(string name) => Engines.ContainsKey(name);
 
-    /// <summary>Engine names, for the usage text and the unsupported-mode message.</summary>
-    public static IEnumerable<string> EngineNames => Engines.Values.Select(e => e.Name);
-
     private static readonly string[] NewsItems =
     {
         "Laya:en v2.1 released — TypeSafe AI ships updated System One decision model with 15% faster inference and improved calibration on edge cases. Available now via Ollaya local server.",
@@ -145,13 +142,14 @@ public static class TypeSafe
         Console.WriteLine();
         Console.WriteLine($"  {"item",-6} {"median",10} {"min",10} {"max",10}");
 
-        var medians = new List<long>(NewsItems.Length);
+        var medians = new List<double>(NewsItems.Length);
         int failedItems = 0;
+        int partialItems = 0;
 
         for (int i = 0; i < NewsItems.Length; i++)
         {
             var item = NewsItems[i];
-            var samples = new long[TimedPasses];
+            var samples = new double[TimedPasses];
             int recorded = 0;
             string? error = null;
 
@@ -188,10 +186,17 @@ public static class TypeSafe
                 continue;
             }
 
+            // A timed pass that threw after some samples were recorded does not discard them, but
+            // the row is marked: a median over fewer passes is reported, never silently averaged
+            // into the summary as though the full protocol had run.
+            if (error is not null)
+                partialItems++;
+
             Array.Sort(samples, 0, recorded);
-            long median = samples[recorded / 2];
+            double median = Median(samples, recorded);
             medians.Add(median);
-            Console.WriteLine($"  {i + 1,4} {median,7} ms {samples[0],7} ms {samples[recorded - 1],7} ms");
+            Console.WriteLine($"  {i + 1,4} {median,7:0.#} ms {samples[0],7} ms {samples[recorded - 1],7} ms" +
+                (error is null ? "" : $"  [PARTIAL {recorded}/{TimedPasses} timed passes: {error}]"));
         }
 
         if (medians.Count == 0)
@@ -201,19 +206,37 @@ public static class TypeSafe
             return 1;
         }
 
-        long[] ordered = [.. medians];
+        double[] ordered = [.. medians];
         Array.Sort(ordered);
-        long overall = ordered[^((ordered.Length + 1) / 2)];
+        double overall = Median(ordered, ordered.Length);
         double totalMs = medians.Sum();
+        string throughput = totalMs > 0
+            ? $"{1000.0 * medians.Count / totalMs:F1} items/s sequential at those medians"
+            : "every median rounds to 0 ms, so no items/s figure";
+
+        var notes = new List<string>(2);
+        if (failedItems > 0)
+            notes.Add($"{failedItems} failed, excluded");
+        if (partialItems > 0)
+            notes.Add($"{partialItems} partial");
 
         Console.WriteLine();
-        Console.WriteLine($"Overall: median {overall} ms per assessment across {medians.Count} items" +
-            $"{(failedItems > 0 ? $" ({failedItems} failed, excluded)" : "")}, " +
-            $"{1000.0 * medians.Count / totalMs:F1} items/s sequential at those medians.");
-        Console.WriteLine(
-            failedItems == 0 ? "\nDone." : $"\n{failedItems} of {NewsItems.Length} items failed; see the rows above.");
+        Console.WriteLine($"Overall: median {overall:0.#} ms per assessment across {medians.Count} items" +
+            $"{(notes.Count > 0 ? $" ({string.Join(", ", notes)})" : "")}, {throughput}.");
+        Console.WriteLine(notes.Count == 0
+            ? "\nDone."
+            : $"\n{failedItems} of {NewsItems.Length} items failed, {partialItems} partial; see the rows above.");
         return 0;
     }
+
+    /// <summary>
+    /// The statistical median of <paramref name="count"/> sorted samples: the middle element for an
+    /// odd count, the mean of the two middle elements for an even one. Indexing a single middle
+    /// element instead reports the upper middle for even counts, which on this benchmark's
+    /// bimodal per-item spread was 2325 ms where the median of the same rows is 2188.5 ms.
+    /// </summary>
+    static double Median(double[] sorted, int count)
+        => count % 2 == 1 ? sorted[count / 2] : (sorted[count / 2 - 1] + sorted[count / 2]) / 2.0;
 
     /// <summary>
     /// The engine named on the command line, with the overrides applied. An unknown engine cannot
