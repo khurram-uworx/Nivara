@@ -1249,6 +1249,47 @@ internal static class SilkKernelsGate
                 Nivara.Silk.SilkKernels.RmsNormGemv, $"gate-up h{hidden} i{intermediate}", runCpu, readCpu, runSilk, readSilk));
         }
 
+        // gemm_gemv_add: decode-shaped GEMM + residual (o_proj). Silk-only, so the
+        // reference is the ascending-K mul+add contraction the kernel performs.
+        {
+            int aCols = hidden;
+            int bCols = hidden;
+            var a = Randoms(aCols, 0x68100001u);
+            var b = Randoms(aCols * bCols, 0x68100002u);
+            var residual = Randoms(bCols, 0x68100003u);
+            var cpuOut = new float[bCols];
+
+            Action runCpu = () =>
+            {
+                for (int j = 0; j < bCols; j++)
+                {
+                    float acc = 0.0f;
+                    for (int k = 0; k < aCols; k++)
+                        acc += a[k] * b[k * bCols + j];
+                    cpuOut[j] = acc + residual[j];
+                }
+            };
+            Func<float[]> readCpu = () => cpuOut;
+
+            nint sa = silk.Allocate(a.Length); buffers.Add(sa);
+            nint sb = silk.Allocate(b.Length); buffers.Add(sb);
+            nint sres = silk.Allocate(residual.Length); buffers.Add(sres);
+            nint sc = silk.Allocate(bCols); buffers.Add(sc);
+            silk.Upload(sa, a);
+            silk.Upload(sb, b);
+            silk.Upload(sres, residual);
+
+            Action runSilk = () =>
+            {
+                Nivara.Silk.SilkLauncher.GemmGemvAdd(silk, sa, sb, sc, sres, aCols, bCols);
+                silk.Finish();
+            };
+            Func<float[]> readSilk = () => silk.Download(sc, bCols);
+
+            legs.Add(MeasureCpuReference(
+                Nivara.Silk.SilkKernels.GemmGemvAdd, $"o-proj a{aCols} b{bCols}", runCpu, readCpu, runSilk, readSilk));
+        }
+
         return legs;
     }
 
