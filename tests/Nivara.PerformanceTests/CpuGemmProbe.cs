@@ -1,6 +1,8 @@
 using Nivara.AutoDiff.Operations;
+using System.Buffers;
 using System.Diagnostics;
 using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace Nivara.PerformanceTests;
 
@@ -64,6 +66,9 @@ internal static class CpuGemmProbe
 
         /// <summary>Probe-local register-blocked Parallel.For reference (the ceiling).</summary>
         Blocked,
+
+        /// <summary>Probe-local copy of MultiplyCore's parallel path, reading A in place (no RentCopy, no clearArray).</summary>
+        NoRentCopy,
     }
 
     public static int Run(string[] args)
@@ -101,42 +106,75 @@ internal static class CpuGemmProbe
 
             double[] truth = DpTruth(a, bt, m, k, n);
 
-            // Measure every leg before printing any: the speedup column is relative to
-            // MatMul, so the baseline has to exist before the first row is formatted.
-            var order = new[] { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked };
+            var resultAuto = new float[m * n];
+            var resultBTrans = new float[m * n];
+            var resultBlocked = new float[m * n];
+            var resultNoRent = new float[m * n];
+
+            var runs = new Action[]
+            {
+                () => GradKernels.MatMulTransposedB(a, bt, resultAuto, m, k, n),
+                () => GradKernels.MatMul(a, b, resultBTrans, m, k, n),
+                () => BlockedGemm(a, bt, resultBlocked, m, k, n),
+                () => NoRentCopyGemm(a, bt, resultNoRent, m, k, n),
+            };
+            var results = new[] { resultAuto, resultBTrans, resultBlocked, resultNoRent };
+
+            var order = new[] { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked, Leg.NoRentCopy };
             var legMs = new double[order.Length];
             var legAbs = new double[order.Length];
+            const int InterleavedRounds = 20;
+            var rounds = new double[order.Length, InterleavedRounds];
 
+            // Correctness gate: run every leg once and check against DP truth.
             for (int li = 0; li < order.Length; li++)
             {
-                var leg = order[li];
-                var result = new float[m * n];
-                // MatMulTransposedB means "B is already transposed": it copies b into its
-                // staging buffer verbatim and then slices bT[j*K .. +K] as output column j,
-                // so b must be [N x K]. MatMul takes [K x N] and transposes per call. Both
-                // compute A[M x K] · B[K x N]; Blocked reads the same [N x K] as the former.
-                Action run = leg switch
-                {
-                    Leg.AutoDiff => () => GradKernels.MatMulTransposedB(a, bt, result, m, k, n),
-                    Leg.BTranspose => () => GradKernels.MatMul(a, b, result, m, k, n),
-                    _ => () => BlockedGemm(a, bt, result, m, k, n),
-                };
-
-                run();
-                legMs[li] = TimeBest(run, Warmups, TimedRounds);
-
+                runs[li]();
                 double maxAbs = 0.0;
                 for (int i = 0; i < truth.Length; i++)
-                    maxAbs = Math.Max(maxAbs, Math.Abs(result[i] - truth[i]));
+                    maxAbs = Math.Max(maxAbs, Math.Abs(results[li][i] - truth[i]));
                 legAbs[li] = maxAbs;
-
                 if (maxAbs > GateMaxAbs)
                     failures++;
-
-                bestMs[(shape.Name, leg)] = legMs[li];
             }
 
-            double baselineGmacs = shape.Macs / (legMs[Array.IndexOf(order, Leg.BTranspose)] * 1e6);
+            // Untimed warmup of every leg.
+            for (int w = 0; w < Warmups; w++)
+                for (int li = 0; li < order.Length; li++)
+                    runs[li]();
+
+            // Interleaved rounds: alternate which leg is measured first so load drift
+            // cannot systematically penalise the first-measured route.
+            for (int r = 0; r < InterleavedRounds; r++)
+            {
+                var roundOrder = (r % 2 == 0)
+                    ? new[] { 0, 1, 2, 3 }
+                    : new[] { 3, 2, 1, 0 };
+                foreach (int li in roundOrder)
+                {
+                    long start = Stopwatch.GetTimestamp();
+                    runs[li]();
+                    rounds[li, r] = Stopwatch.GetTimestamp() - start;
+                }
+            }
+
+            // Medians (more stable than best-of-N for this protocol).
+            for (int li = 0; li < order.Length; li++)
+            {
+                var samples = new double[InterleavedRounds];
+                for (int r = 0; r < InterleavedRounds; r++)
+                    samples[r] = rounds[li, r];
+                legMs[li] = MedianTicks(samples);
+                bestMs[(shape.Name, order[li])] = legMs[li];
+            }
+
+            long freq = Stopwatch.Frequency;
+            double msConv = 1000.0 / freq;
+            for (int li = 0; li < order.Length; li++)
+                legMs[li] *= msConv;
+
+            double baselineMs = legMs[Array.IndexOf(order, Leg.BTranspose)];
+            double baselineGmacs = shape.Macs / (baselineMs * 1e6);
             for (int li = 0; li < order.Length; li++)
             {
                 double gmacs = shape.Macs / (legMs[li] * 1e6);
@@ -305,6 +343,51 @@ internal static class CpuGemmProbe
                 }
             }
         });
+    }
+
+    static void NoRentCopyGemm(float[] a, float[] bt, float[] result, int m, int k, int n)
+    {
+        int bLen = n * k;
+        var bT = ArrayPool<float>.Shared.Rent(bLen);
+        try
+        {
+            bt.AsSpan(0, bLen).CopyTo(bT.AsSpan(0, bLen));
+            bool parallel = m >= 4 && (long)m * k * n >= (2 << 20);
+            if (parallel)
+            {
+                Parallel.For(0, m, i =>
+                {
+                    int aOff = i * k;
+                    int outOff = i * n;
+                    var aSpan = a.AsSpan(aOff, k);
+                    for (int j = 0; j < n; j++)
+                        result[outOff + j] = TensorPrimitives.Dot(aSpan, bT.AsSpan(j * k, k));
+                });
+            }
+            else
+            {
+                for (int i = 0; i < m; i++)
+                {
+                    int aOff = i * k;
+                    int outOff = i * n;
+                    var aSpan = a.AsSpan(aOff, k);
+                    for (int j = 0; j < n; j++)
+                        result[outOff + j] = TensorPrimitives.Dot(aSpan, bT.AsSpan(j * k, k));
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(bT, clearArray: true);
+        }
+    }
+
+    static double MedianTicks(double[] values)
+    {
+        var sorted = (double[])values.Clone();
+        Array.Sort(sorted);
+        int n = sorted.Length;
+        return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
     }
 
     static float Uniform(ref uint state)
