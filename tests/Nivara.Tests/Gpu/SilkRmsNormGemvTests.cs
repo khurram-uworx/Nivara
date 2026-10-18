@@ -24,6 +24,12 @@ namespace Nivara.Tests.Gpu;
 /// <c>col &gt;= bCols</c> early return fires — and three of them end mid-*lane*, which is where the
 /// per-lane <c>avail</c> bound fires.
 /// </para>
+/// <para>
+/// The tied head is covered from both sides of its history: Qwen's cached head replaces
+/// <c>rms_norm_lm_head</c> (the one bias-free slot), and SmolLM's replaces the <c>rms_norm</c> plus
+/// <c>gemm</c> pair — replayed by the last test as two launches, with the normalized row written to
+/// memory and reloaded between them.
+/// </para>
 /// </remarks>
 public sealed class SilkRmsNormGemvTests
 {
@@ -130,6 +136,26 @@ public sealed class SilkRmsNormGemvTests
         AssertBitIdentical(reference[0], fused[0], "bias-free straddling slot (cols 27)");
     }
 
+    [Test]
+    public void RmsNormGemv_SmolLmCachedHead_MatchesRmsNormThenGemm()
+    {
+        using var silk = Device();
+        var rng = new Random(675);
+        float[] x = Randoms(ACols, rng);
+        float[] gamma = Randoms(ACols, rng);
+        int[] widths = [NarrowCols, WideCols, 200];
+
+        foreach (int cols in widths)
+        {
+            SlotData[] slots = [new(Randoms(ACols * cols, rng), [], cols)];
+
+            float[][] fused = RunFused(silk, x, gamma, slots, hasBias: false);
+            float[] reference = RunNormThenGemm(silk, x, gamma, slots[0]);
+
+            AssertBitIdentical(reference, fused[0], $"SmolLM cached head (RmsNorm + Gemm, cols {cols})");
+        }
+    }
+
     static SilkRuntime Device()
     {
         try
@@ -208,6 +234,29 @@ public sealed class SilkRmsNormGemvTests
             foreach (nint handle in owned) silk.Release(handle);
         }
         return result;
+    }
+
+    static float[] RunNormThenGemm(SilkRuntime silk, float[] x, float[] gamma, SlotData slot)
+    {
+        var owned = new List<nint>();
+        try
+        {
+            nint sx = Upload(silk, owned, x);
+            nint sg = Upload(silk, owned, gamma);
+            nint weight = Upload(silk, owned, slot.Weight);
+            nint normed = Allocate(silk, owned, x.Length);
+            nint output = Allocate(silk, owned, slot.Cols);
+
+            SilkLauncher.RmsNorm(silk, sx, sg, normed, 1, x.Length, Eps);
+            SilkLauncher.Gemm(silk, normed, weight, output, 1, x.Length, slot.Cols);
+            silk.Finish();
+
+            return silk.Download(output, slot.Cols);
+        }
+        finally
+        {
+            foreach (nint handle in owned) silk.Release(handle);
+        }
     }
 
     static nint Upload(SilkRuntime silk, List<nint> owned, float[] data)

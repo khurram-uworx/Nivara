@@ -17,8 +17,11 @@ All notable changes to Nivara are documented here. Released versions are publish
   take one `rms_norm_gemv` launch with three output slots instead of three launches, and gate/up one
   instead of two, so the normalization is computed once per group.
   `rms_norm_gemm_bias` is gone — the Qwen cached Q/K/V calls were its only call sites — and
-  SmolLM's bias-free cached Q/K/V move off `rms_norm_lm_head`, which keeps the prefill and
-  single-row heads.
+  SmolLM's bias-free cached Q/K/V move off `rms_norm_lm_head`, which keeps the prefill and last-row
+  prefill heads. The tied LM head is fused the same way: Qwen's cached head is one `rms_norm_gemv`
+  slot instead of a one-row `rms_norm_lm_head` tile launch, and SmolLM's is one launch instead of
+  `rms_norm` plus `gemm` — so the cached decode path no longer writes the normalized row to memory
+  at all.
 
 - **Silk OpenCL backend and the BERT-family model layer now ship from `Nivara.Extensions`** — the
   hand-authored OpenCL stack (`SilkKernels`, `SilkRuntime`, the three runners, the two sessions) moved

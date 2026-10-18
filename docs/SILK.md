@@ -417,7 +417,7 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `add_bias` | `x, bias, y, rows, cols` | Laya type-embedding broadcast, in place |
 | `gemm_row4` | `a, b, c, aRows, aCols, bCols` | bias-free Row4 store. Not `gemm_row4_bias` with a zero bias: `acc + 0.0f` canonicalizes `-0` |
 | `rms_norm` | `x, gamma, y, rows, cols, eps` | `RMSNorm(x)` |
-| `rms_norm_lm_head` | `x, gamma, weight, logits, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ weight` (prefill and single-row heads) |
+| `rms_norm_lm_head` | `x, gamma, weight, logits, aRows, aCols, bCols, eps` | fused `RMSNorm(x) @ weight` (prefill, including the last-row-only prefill head; the cached decode head uses `rms_norm_gemv`) |
 | `rms_norm_gemv` | `x, gamma, w0, bias0, out0, w1, bias1, out1, w2, bias2, out2, aCols, cols0, cols1, cols2, hasBias, eps` | cached-decode projections: one `RMSNorm(x)` feeding up to three GEMMs (Q/K/V, gate/up, tied head). Decode-shaped — single row, so there is no row dimension to leave idle: a flat 1-D launch, one thread per `BLOCK` columns, no shared-memory staging. A slot of zero columns is unreachable, and `hasBias` 0 stores the plain accumulator — a zero bias would be `acc + 0.0f`, the same distinction `gemm_row4` draws |
 | `gemm_row4_add` | `a, b, c, residual, aRows, aCols, bCols` | Row4 GEMM plus residual add in the store (O/down projections in cached decode) |
 | `split_columns` | `src, dst, rows, blockCols, parts, part` | ModernBERT QKV is row-interleaved; a contiguous sub-view is right for row 0 and wrong after it |
