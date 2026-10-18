@@ -157,6 +157,9 @@ is a name nobody can find again.
     zero idle lanes on every Qwen width, the SmolLM tail, no `aRows` in the fused kernel's signature
     against `aRows` still in the tied-head tile kernel's, and the batch rejection.
     `DocReferenceTests.ExpectedFileCount` 711 -> 712 with the arithmetic extended.
+  - Round 2 measured (see Round log): Silk plain decode 199.7 -> 157 ms/token, 1.27x, against a control
+    that was 1.72x slower than round 1's; this round's three files are hash- and timestamp-verified as
+    coming from the single run.
 - Found while editing `docs/SILK.md` in stage 3: two of its `SilkKernels.cs:` citations are stale on
   `main` (`:69` for `KernelNames`, which stage 3 moves to 117; `:331` for `GEMM_ROW4_ACCUMULATE`, now
   381). The citation gate only requires a cited line to *exist*, so it cannot see this. Fixed in its
@@ -210,11 +213,14 @@ exist so the offending stage can be held out.
 
 The 2026-10-17 figures in `docs/QWEN.md` § Results are **not** a usable baseline for this machine
 state: in round 1 the control moved by the same factor as the measured path, which no Silk change can
-touch. Rounds are therefore compared with each other, in the same conditions.
+touch. Rounds are therefore compared with each other, but only after reading the round's own control,
+which is what the control column is for. Both rounds so far moved the control away from the recorded
+baseline, and round 2 moved it in the opposite direction to the measured path.
 
 | Round | Commit | Silk plain decode | Control: CPU plain decode | Notes |
 |---|---|---|---|---|
 | 1 | `78cb8b35` (C1) | 1398 ms / 7 tokens, 199.7 ms/token (runs 207 / 196 / 199) | 161.9 ms/token | model build 11,347 ms |
+| 2 | `9ab34e22` (C2) | 1102 ms / 7 tokens, 157 ms/token (runs 166 / 157 / 157) | 278.9 ms/token | model build 12,448 ms |
 
 Round 1 detail:
 
@@ -229,6 +235,43 @@ Round 1 detail:
   against round 1.
 - The three generated-token count (7) and the 36-token prompt match the recorded row, so the shape
   is comparable even though the machine state is not.
+
+Round 2 detail:
+
+- Provenance: this is the first round whose three files are verifiably from one run. All four commands
+  reported exit 0, and the run window is `16:18:43`–`16:31:46` (build 16:19, `cpu_plain` 16:20,
+  `cpu_tools` 16:31, `silk_tools` 16:31); the three SHA-256 hashes differ from round 1's. Round 1's did
+  not have that property: its `cpu_plain.txt` was stamped 00:18 while its `cpu_tools.txt` and
+  `silk_tools.txt` were stamped 15:31 and 15:32, so round 1's control figure came from a different run
+  than its Silk figure. Round 1's numbers still stand as measured, but its control is weaker evidence
+  than it reads, and a round is only readable once this check has been made.
+- Control moved *against* the measured path: CPU plain decode 161.9 -> 278.9 ms/token (1.72x slower),
+  CPU tools decode 220.3 -> 422.6 ms/token (1.92x slower). C2 (`9ab34e22`) changes
+  `src/Nivara.Extensions/Silk/`, `docs/SILK.md` and its tests only, and neither control command passes
+  `--silk`, so this movement cannot be attributed to the branch. Rounds 1 and 2 are therefore not
+  like-for-like either — but the host got slower, not faster, so the direction of the Silk change is
+  still readable even though the size is not.
+- Silk plain decode 199.7 -> 157 ms/token (median total 1398 -> 1102 ms, 1.27x). Both repeat sets are
+  tight (207/196/199 and 166/157/157), and the Silk run was 42 ms/token cheaper while the host driving
+  every one of its launches was 1.72x slower on CPU decode, so 1.27x is a floor, not the effect size in
+  equal conditions. Per-token cost is GPU-resident — 8 launches/layer x 24 layers is ~192 launches
+  against ~160 ms of GPU time, i.e. single-digit milliseconds of host work — so host drift can move
+  this by little more than the launch overhead, not by the 42 ms.
+- The model build (11,347 -> 12,448 ms, 1.10x) and the CPU full-forward medians moved the *other* way
+  (plain 22,955 -> 20,796 ms, tools 198,115 -> 180,207 ms). A uniform machine slowdown would move all
+  of these together; they disagree in sign, so this is drift between runs rather than a step change in
+  machine state.
+- Silk/control ratio 1.23x in round 1 (against 1.13x recorded) and 0.56x in round 2 (157 vs 278.9).
+  The ratio moved mostly because its denominator moved, so the ratio is not the claim here; the
+  like-for-like claim available is the Silk-vs-Silk one, 1.27x.
+- Attribution: commit 3 (C2) is the only Silk change between the two runs — the decode-shaped geometry
+  (`GEMVLANES = 32` x `BLOCK = 4` = 128 columns/group, flat 1-D launch) in place of the tile shape. So
+  the 1.27x is attributable to lane utilization, not to the enqueue-count change commit 2 carried,
+  which round 1 already measured with.
+- What this round cannot say: whether 1.27x is the full effect, and whether the control's 1.72x is
+  load from another process or a machine-state step, since nothing else was recorded about the host.
+  A controlled same-session A/B (the kernels gate's CPU-reference cells) would answer the first
+  question; the block cannot, by construction.
 
 ## Blast radius
 
