@@ -644,4 +644,21 @@ public class InferenceCliArgumentTests
         Directory.CreateDirectory(path);
         return path;
     }
+
+    [Test]
+    public void Typesafe_Nivara_Rejects()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("typesafe", "ollama", "verify"), "'verify' requires the 'nivara' engine.");
+            AssertRejected(Run("typesafe", "nivara", "--url", "http://localhost:11435"),
+                "--url is not supported for the in-process 'nivara' engine.");
+            AssertRejected(Run("typesafe", "nivara", "--model", "tev1:0.8b"),
+                "--model must name 'convaiinnovations/laya' for the 'nivara' engine.");
+            AssertRejected(Run("typesafe", "nivara", "verify", "--model", "laya"),
+                "--model is not supported for 'typesafe nivara verify'.");
+            AssertRejected(Run("typesafe", "nivara", "bogus"), "Unsupported mode 'bogus' for 'typesafe'");
+        });
+    }
+
 }
