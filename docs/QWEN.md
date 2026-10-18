@@ -306,7 +306,7 @@ dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benc
 dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benchmark > data\qwen-bench\cpu_tools.txt 2>&1
 
 # 4. Real-checkpoint Silk/OpenCL GPU run (requires samples/data/qwen2.5-0.5b-instruct and an OpenCL GPU)
-dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > data\qwen-bench\silk_tools.txt 2>&1
+dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > data\qwen-bench\silk_plain.txt 2>&1
 ```
 
 Synthetic-weight runs (`qwen --synthetic-weights ...`) are only useful when `samples/data/qwen2.5-0.5b-instruct` is unavailable; when the real checkpoint is present they should be skipped.
@@ -315,7 +315,7 @@ Outputs consumed by the agent after confirmation (read, don't re-run):
 
 - `cpu_plain.txt` — plain-prompt CPU prefill/decode ms/token and tok/s
 - `cpu_tools.txt` — tools-prompt CPU prefill/decode ms/token and tok/s
-- `silk_tools.txt` — Silk/OpenCL decode ms/token and tok/s
+- `silk_plain.txt` — Silk/OpenCL decode ms/token and tok/s
 
 The Python reference step (`python samples/NivaraInference/Python/qwen_benchmark.py`) is not part of this automated block; run it separately if the PyTorch baseline is needed, since it depends on a separate Python/PyTorch environment.
 
