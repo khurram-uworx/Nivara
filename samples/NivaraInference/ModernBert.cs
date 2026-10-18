@@ -875,7 +875,7 @@ public static class ModernBert
 
         // The declared unk_token is [UNK]; the checkpoint's model.merges and model.vocab live inline
         // in tokenizer.json, so there is no vocab.json / merges.txt pair to read.
-        return Gpt2BpeTokenizer.LoadFromTokenizerJson(tokenizerPath, "[UNK]", normalizeNfc: true);
+        return Gpt2BpeTokenizer.LoadFromTokenizerJson(tokenizerPath, "[UNK]");
     }
 
     static int[] Encode(Gpt2BpeTokenizer tokenizer, string text)
