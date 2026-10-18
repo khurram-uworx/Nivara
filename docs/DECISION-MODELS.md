@@ -3,14 +3,14 @@
 A **decision model** is not a text-completion model. The caller declares its questions up front —
 a choice, a yes/no, a score — and the server returns a typed answer with a confidence for each,
 rather than free-form text. The wire protocol for that is the **TypeSafe "System One"** API: one
-`POST /v1/systemone` contract that a decision model sits behind the way OpenAI Chat Completions
-sits behind text models.
-
-[docs/LAYA.md](LAYA.md) describes the decision head itself — a typed head on ModernBERT-large. This
-page is the ecosystem around it: which engines serve decision models, how the `typesafe` demo in
-[`samples/NivaraInference`](../samples/NivaraInference/README.md) talks to them, and how to compare
+     1    1219 ms    1216 ms    1224 ms
+     2    1184 ms    1182 ms    1186 ms
+     3    1368 ms    1360 ms    1384 ms
+     4    1273 ms    1190 ms    1275 ms
+     5    1211 ms    1209 ms    1225 ms
+     6    1213 ms    1208 ms    1216 ms
 one engine against another.
-
+Overall: median 1216 ms per assessment across 6 items, 0.8 items/s sequential at those medians.
 ## Engines
 
 Three local engines speak the same route today:
@@ -100,19 +100,19 @@ a time):
 |--------|-------|----------------|---------|
 | Ollaya | `laya:en` | 653.5 ms | 1.5 |
 | Ollama | `tev1:0.8b` | 2457.5 ms | 0.4 |
-| Nivara (in-process) | `convaiinnovations/laya` | 1435.5 ms | 0.7 |
+| Nivara (in-process) | `convaiinnovations/laya` | 1216 ms | 0.8 |
 
 Per news item (median ms, run one):
 
 | Item | Ollaya | Nivara (in-process) | Ollama |
 |------|--------|---------------------|--------|
-| 1 | 668 | 1463 | 2267 |
-| 2 | 613 | 1394 | 2361 |
-| 3 | 719 | 1613 | 2483 |
-| 4 | 630 | 1402 | 2432 |
-| 5 | 655 | 1436 | 2910 |
-| 6 | 652 | 1435 | 2730 |
-| **Overall median** | **653.5** | **1435.5** | **2457.5** |
+| 1 | 668 | 1219 | 2267 |
+| 2 | 613 | 1184 | 2361 |
+| 3 | 719 | 1368 | 2483 |
+| 4 | 630 | 1273 | 2432 |
+| 5 | 655 | 1211 | 2910 |
+| 6 | 652 | 1213 | 2730 |
+| **Overall median** | **653.5** | **1216** | **2457.5** |
 
 What the items show: Nivara is consistently faster than Ollama and slower than Ollaya on this
 machine; within a run each item's maximum sat within ~3% of its median. Absolute latency drifts run
