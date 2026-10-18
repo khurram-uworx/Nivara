@@ -221,11 +221,11 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.DecodeGqaAttention, 6, (uint)numKvHeads);
         runtime.SetUInt32(SilkKernels.DecodeGqaAttention, 7, (uint)headDim);
         runtime.SetFloat32(SilkKernels.DecodeGqaAttention, 8, scale);
-        int total = numHeads;
+        int groupSize = SilkKernels.AttentionGroupSize;
         runtime.Run(
             SilkKernels.DecodeGqaAttention,
-            [(nuint)SilkKernels.LinearGlobal(total)],
-            [(nuint)SilkKernels.LinearGroupSize]);
+            [(nuint)(numHeads * groupSize)],
+            [(nuint)groupSize]);
     }
 
     public static void EmbedSum(
