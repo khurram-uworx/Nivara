@@ -147,4 +147,4 @@ capability check. Default: file a follow-up issue and skip B unless measurement 
 
 ## GitHub issues log
 
-- (none yet)
+- [x] #691 — true single-buffer O-proj fusion deferred (device work-group limit) (created while working on #672 Stage A2)
