@@ -66,7 +66,7 @@ New:
 - `samples/NivaraInference/NivaraTypeSafeClient.cs` — the client, the model resource, the content
   serializer, and the Laya↔TypeSafe mapping.
 - `tests/Nivara.Tests/Inference/NivaraTypeSafeClientTests.cs` — mapping + content tests (no model).
-- `docs/PLAN.md` — this file (see the pin arithmetic in §10; it is inside the docs gate's scan scope).
+- `docs/plan/TYPESAFE-LAYA.md` — this file (see the pin arithmetic in §10; it is inside the docs gate's scan scope).
 
 Changed:
 
@@ -280,7 +280,7 @@ dotnet run --project samples/NivaraInference -c Release -- typesafe nivara verif
    chosen rule (a model name that silently loads a different checkpoint would be a false claim). Say
    if you would rather it accept a directory name under `samples/data/` instead.
 3. **The plan's home.** This file is in the docs gate's scan scope and moves three of its pins; the
-   repo's designated transient plan file is the excluded one, excluded by name. Keep `docs/PLAN.md`
+   repo's designated transient plan file is the excluded one, excluded by name. Keep `docs/plan/TYPESAFE-LAYA.md`
    and move the pins, or move this to the excluded path and leave them alone?
 
 ## 12. Definition of done

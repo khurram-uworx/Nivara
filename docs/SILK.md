@@ -391,13 +391,18 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
- Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention]
+ Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
+ RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd,
+ Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d]
 ```
 
-i.e. the original eight (`embed_sum`, `gather_rows`, `layer_norm_residual`, the four Row4 epilogues,
-`batched_attention`) plus the seven ModernBERT/Laya ports (`layer_norm`, `add`, `add_bias`,
-`split_columns`, `rotary`, `geglu`, `gemm_row4`). The array order is the creation list, not the
-source order.
+i.e. four families: the original eight BERT encoder kernels (`embed_sum`, `gather_rows`,
+`layer_norm_residual`, the four Row4 epilogues, `batched_attention`); the seven ModernBERT/Laya
+ports (`layer_norm`, `add`, `add_bias`, `split_columns`, `rotary`, `geglu`, `gemm_row4`); the
+Qwen/SmolLM decode kernels (`rms_norm`, `rms_norm_lm_head`, `rms_norm_gemv`, `silu`, `swiglu`,
+`causal_gqa_attention`, `decode_gqa_attention`, `argmax`, `gemm_row4_add`); and the vision
+kernels (`conv2d`, `batchnorm_eval`, `relu`, `relu6`, `maxpool2d`, `adaptive_avgpool2d`). The
+array order is the creation list, not the source order.
 
 Each is a port of the same-shape ILGPU kernel with the operation order preserved — same strictly
 ascending K-reduction, same tile geometry where the kernel is tiled, same fused epilogues:
@@ -423,6 +428,17 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `split_columns` | `src, dst, rows, blockCols, parts, part` | ModernBERT QKV is row-interleaved; a contiguous sub-view is right for row 0 and wrong after it |
 | `rotary` | `x, posIds, cosTab, sinTab, y, rows, numHeads, headDim` | half-split RoPE, in place on q and k. Tables are inputs. The pair width is not named `half`: this driver treats that as a type name and rejects the program |
 | `geglu` | `x, y, rows, intermediate` | `gelu(first half) * second half`. Reversing the halves still looks plausible |
+| `silu` | `x, y, n` | elementwise SiLU (swish) activation |
+| `swiglu` | `gate, up, y, rows, intermediate` | fused SwiGLU: `silu(gate) * up` |
+| `causal_gqa_attention` | `q, k, v, out, seqLen, numHeads, numKvHeads, headDim, scale` | causal GQA attention for prefill (attends j=0..qPos, KV-repeat) |
+| `decode_gqa_attention` | `q, kCache, vCache, out, kvLen, numHeads, numKvHeads, headDim, scale` | single-query decode attention over the KV cache (online softmax) |
+| `argmax` | `input, partialIndex, partialValue, n` | device-side partial argmax reduction (256 elements per work-group) |
+| `conv2d` | `input, weight, bias, output, N, C, H, W, outC, kH, kW, strideH, strideW, pad*, groups, hasBias, oH, oW` | NCHW convolution (grouped) |
+| `batchnorm_eval` | `x, mean, var, gamma, beta, y, N, C, HW, eps, hasAffine` | batch norm in eval mode |
+| `relu` | `x, y, n` | elementwise ReLU |
+| `relu6` | `x, y, n` | elementwise clamp to [0, 6] |
+| `maxpool2d` | `input, output, N, C, H, W, kH, kW, strideH, strideW, pad*, oH, oW` | 2D max pooling |
+| `adaptive_avgpool2d` | `input, output, N, C, H, W` | global average pool to 1x1 |
 
 ### 11.2 Geometry
 

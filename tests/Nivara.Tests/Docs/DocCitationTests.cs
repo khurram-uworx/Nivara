@@ -32,7 +32,7 @@ public class DocCitationTests
     /// <c>docs/BLAS-MKL.md</c>, taking <c>docs/</c> from 41 to 42. The decision-model work added
     /// <c>docs/DECISION-MODELS.md</c>, taking <c>docs/</c> from 42 to 43 and this count from 51 to 52.
     /// </summary>
-    const int ExpectedDocumentCount = 52;
+    const int ExpectedDocumentCount = 53;
 
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()
