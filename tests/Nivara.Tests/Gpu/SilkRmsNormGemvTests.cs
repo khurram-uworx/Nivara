@@ -16,11 +16,13 @@ namespace Nivara.Tests.Gpu;
 /// exists to catch — and the documented byte-identity against ILGPU rests on the same argument.
 /// </para>
 /// <para>
-/// The modelled widths divide the tile evenly (Qwen 896 / 128 / 4864 / 151936, SmolLM 576 / 192 /
-/// 1536), so on a real model the column guards never fire. The widths here are deliberately odd —
-/// <c>aCols</c> is not a multiple of <c>GemmTileSize</c>, and two of the slots end mid-group — which
-/// is the only place the <c>aCol &lt; aCols</c>, <c>bRow &lt; aCols</c> and <c>outCol &lt; bCols</c>
-/// guards are exercised at all.
+/// On a real model the fused kernel's bounds are barely exercised: Qwen's widths (896 / 128 / 4864 /
+/// 151936) and SmolLM's 1536 are whole numbers of 128-column groups, and SmolLM's 576 and 192 are
+/// whole numbers of 4-column lanes, so every live lane owns a full <c>BLOCK</c> span and only a
+/// SmolLM group is short. The widths here leave the edges deliberately: <c>aCols</c> is not a
+/// multiple of <c>GemmTileSize</c>, some slots end mid-group — which is where the
+/// <c>col &gt;= bCols</c> early return fires — and three of them end mid-*lane*, which is where the
+/// per-lane <c>avail</c> bound fires.
 /// </para>
 /// </remarks>
 public sealed class SilkRmsNormGemvTests
@@ -90,6 +92,42 @@ public sealed class SilkRmsNormGemvTests
         float[][] reference = RunSingleProjections(silk, x, gamma, slots, hasBias: false);
 
         AssertBitIdentical(reference[0], fused[0], "single slot (head shape)");
+    }
+
+    [Test]
+    public void RmsNormGemv_WidthsThatStraddleALane_MatchesSingleProjectionKernel()
+    {
+        using var silk = Device();
+        var rng = new Random(673);
+        float[] x = Randoms(ACols, rng);
+        float[] gamma = Randoms(ACols, rng);
+        SlotData[] slots =
+        [
+            new(Randoms(ACols * 25, rng), Randoms(25, rng), 25),
+            new(Randoms(ACols * 26, rng), Randoms(26, rng), 26),
+            new(Randoms(ACols * 27, rng), Randoms(27, rng), 27),
+        ];
+
+        float[][] fused = RunFused(silk, x, gamma, slots, hasBias: true);
+        float[][] singles = RunSingleProjections(silk, x, gamma, slots, hasBias: true);
+
+        for (int s = 0; s < slots.Length; s++)
+            AssertBitIdentical(singles[s], fused[s], $"biased straddling slot {s} (cols {slots[s].Cols})");
+    }
+
+    [Test]
+    public void RmsNormGemv_BiasFreeStraddlingWidth_MatchesSingleProjectionKernel()
+    {
+        using var silk = Device();
+        var rng = new Random(674);
+        float[] x = Randoms(ACols, rng);
+        float[] gamma = Randoms(ACols, rng);
+        SlotData[] slots = [new(Randoms(ACols * 27, rng), [], 27)];
+
+        float[][] fused = RunFused(silk, x, gamma, slots, hasBias: false);
+        float[][] reference = RunSingleProjections(silk, x, gamma, slots, hasBias: false);
+
+        AssertBitIdentical(reference[0], fused[0], "bias-free straddling slot (cols 27)");
     }
 
     static SilkRuntime Device()

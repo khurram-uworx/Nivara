@@ -53,6 +53,21 @@ internal static class SilkKernels
     /// <summary>Group size for the fused attention launch (one work item per (b, h, q)).</summary>
     public const int AttentionGroupSize = 64;
 
+    /// <summary>Group size for the fused decode GEMV (one work item per <see cref="GemvBlockCols"/>
+    /// consecutive output columns, one row).</summary>
+    public const int GemvGroupSize = 32;
+
+    /// <summary>Output columns per thread in the fused decode GEMV. The same value the tile kernels
+    /// use (<see cref="GemmBlockCols"/>, the single <c>#define BLOCK</c> in the source); declared
+    /// separately because the two geometries are independent even though they share the macro.</summary>
+    public const int GemvBlockCols = 4;
+
+    /// <summary>Output columns covered by one decode work-group
+    /// (<c>GemvGroupSize * GemvBlockCols</c>). Every modelled width — 896, 128, 4864, 151936 —
+    /// is a whole number of these, so the decode shape launches no idle lane there; SmolLM's 576
+    /// and 192 are not, and that tail is what the kernel's <c>col &gt;= bCols</c> guard is for.</summary>
+    public const int GemvGroupCols = GemvGroupSize * GemvBlockCols;
+
     /// <summary>Compile-time bound on the attention kernel's per-thread accumulator tile.</summary>
     public const int MaxHeadDim = 64;
 
@@ -119,6 +134,14 @@ internal static class SilkKernels
     /// then discard every result (the <c>outCol &lt; bCols</c> guard), which is pure waste.</summary>
     public static int GemmGlobalCols(int bCols) => RoundUp(bCols, GemmTileCols) / GemmBlockCols;
 
+    /// <summary>Global work size (dim 0) for the fused decode GEMV over <paramref name="cols"/>
+    /// output columns. The launch is flat — one row, so there is no row dimension — and the group
+    /// count is <c>ceil(cols / GemvGroupCols)</c>, giving
+    /// <c>RoundUp(cols, GemvGroupCols) / GemvBlockCols</c> threads. A zero width contributes no
+    /// group, which is how a trailing slot is omitted; the group count the kernel recomputes from
+    /// the slot column counts is the same arithmetic.</summary>
+    public static int GemvGlobalCols(int cols) => RoundUp(cols, GemvGroupCols) / GemvBlockCols;
+
     /// <summary>Global work size for a flat 1-D launch guarded by an <c>idx &gt;= n</c> early return.</summary>
     public static int LinearGlobal(int total) => RoundUp(Math.Max(1, total), LinearGroupSize);
 
@@ -136,6 +159,8 @@ internal static class SilkKernels
         #define ROWSTRIDE 80
         #define MAXHEADDIM 64
         #define ATTNGROUP 64
+        #define GEMVLANES 32
+        #define GEMVCOLS 128
 
         inline float gelu_exact(float v)
         {
@@ -1109,12 +1134,22 @@ internal static class SilkKernels
             }
         }
 
-        /* Fused RMSNorm + multi-output GEMM. The norm weights are absorbed into the entry, the
-           normalization is computed once per group, and that group then writes one of up to three
-           output slots (cached-decode Q/K/V, gate/up, or the tied head). A slot whose column count
-           is zero is unreachable, because its group count is zero, so an unused slot needs no
+        /* Fused RMSNorm + multi-output GEMV for single-token decode: one row, and up to three
+           projections that share its one normalization (cached-decode Q/K/V, gate/up, or the tied
+           head). The launch is flat - there is no row dimension to leave idle, which is the whole
+           point: the tile form launched TILE rows for a one-row problem and ran 16/256 threads
+           useful. A group holds GEMVLANES threads, each owning BLOCK consecutive output columns,
+           so the group covers GEMVCOLS columns and consecutive lanes read consecutive spans of b -
+           coalesced, with no shared-memory staging needed. Every result column keeps a single
+           accumulator summed over k ascending, and the normalized activation is the same
+           expression the tile form staged (x * normScale * gamma), so a column's sum is the same
+           sequence of float multiplies and adds the tile form performed.
+
+           A slot whose column count is zero contributes no group, so an unused slot needs no
            buffers. hasBias == 0 stores the plain accumulator: a zero bias with hasBias != 0 would
-           be acc + 0.0f, which canonicalizes -0.0f and is a different store. */
+           be acc + 0.0f, which canonicalizes -0.0f and is a different store.
+
+           No barrier appears here, so the early returns below cannot deadlock a group. */
         __kernel void rms_norm_gemv(
             __global const float* x,
             __global const float* gamma,
@@ -1127,7 +1162,6 @@ internal static class SilkKernels
             __global const float* w2,
             __global const float* bias2,
             __global float* out2,
-            const uint aRows,
             const uint aCols,
             const uint cols0,
             const uint cols1,
@@ -1135,13 +1169,9 @@ internal static class SilkKernels
             const uint hasBias,
             const float eps)
         {
-            uint lid0 = get_local_id(0);
-            uint lid1 = get_local_id(1);
-            uint outRow = get_global_id(0);
-
-            uint groups0 = (cols0 + TILECOLS - 1) / TILECOLS;
-            uint groups1 = (cols1 + TILECOLS - 1) / TILECOLS;
-            uint g = get_group_id(1);
+            uint g = get_group_id(0);
+            uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
+            uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
 
             __global const float* b;
             __global const float* bias;
@@ -1154,7 +1184,7 @@ internal static class SilkKernels
                 bias = bias0;
                 c = out0;
                 bCols = cols0;
-                colBase = g * TILECOLS;
+                colBase = g * GEMVCOLS;
             }
             else if (g < groups0 + groups1)
             {
@@ -1162,7 +1192,7 @@ internal static class SilkKernels
                 bias = bias1;
                 c = out1;
                 bCols = cols1;
-                colBase = (g - groups0) * TILECOLS;
+                colBase = (g - groups0) * GEMVCOLS;
             }
             else
             {
@@ -1170,74 +1200,49 @@ internal static class SilkKernels
                 bias = bias2;
                 c = out2;
                 bCols = cols2;
-                colBase = (g - groups0 - groups1) * TILECOLS;
+                colBase = (g - groups0 - groups1) * GEMVCOLS;
             }
 
-            float normScale = 0.0f;
-            if (outRow < aRows)
+            uint col = colBase + get_local_id(0) * BLOCK;
+            if (col >= bCols)
+                return;
+
+            float ssq = 0.0f;
+            for (uint k = 0; k < aCols; ++k)
             {
-                uint rbase = outRow * aCols;
-                float ssq = 0.0f;
-                for (uint k = 0; k < aCols; ++k)
-                {
-                    float v = x[rbase + k];
-                    ssq += v * v;
-                }
-                normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+                float v = x[k];
+                ssq += v * v;
             }
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            /* A lane's last columns run past bCols when the width is not a whole number of
+               BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+            uint avail = bCols - col;
 
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-            __local float smem[TILE * ROWSTRIDE];
-            for (uint k0 = 0; k0 < aCols; k0 += TILE)
+            for (uint k = 0; k < aCols; ++k)
             {
-                uint aCol = k0 + lid1;
-                uint bRow = k0 + lid0;
-                smem[lid0 + lid1 * TILE] =
-                    (outRow < aRows && aCol < aCols)
-                    ? (x[outRow * aCols + aCol] * normScale * gamma[aCol])
-                    : 0.0f;
-                for (uint w = 0; w < BLOCK; ++w)
-                {
-                    uint outCol = colBase + lid1 * BLOCK + w;
-                    smem[lid0 + (TILE + lid1 * BLOCK + w) * TILE] =
-                        (bRow < aCols && outCol < bCols)
-                        ? b[bRow * bCols + outCol]
-                        : 0.0f;
-                }
-                barrier(CLK_LOCAL_MEM_FENCE);
-                for (uint k = 0; k < TILE; ++k)
-                {
-                    float av = smem[lid0 + k * TILE];
-                    uint bBase = TILE + lid1 * BLOCK;
-                    a0 += av * smem[k + (bBase + 0) * TILE];
-                    a1 += av * smem[k + (bBase + 1) * TILE];
-                    a2 += av * smem[k + (bBase + 2) * TILE];
-                    a3 += av * smem[k + (bBase + 3) * TILE];
-                }
-                barrier(CLK_LOCAL_MEM_FENCE);
+                float av = x[k] * normScale * gamma[k];
+                uint bBase = k * bCols + col;
+                a0 += av * b[bBase];
+                if (avail > 1u) a1 += av * b[bBase + 1u];
+                if (avail > 2u) a2 += av * b[bBase + 2u];
+                if (avail > 3u) a3 += av * b[bBase + 3u];
             }
 
-            uint c0 = colBase + lid1 * BLOCK + 0;
-            uint c1 = colBase + lid1 * BLOCK + 1;
-            uint c2 = colBase + lid1 * BLOCK + 2;
-            uint c3 = colBase + lid1 * BLOCK + 3;
-            if (outRow < aRows)
+            if (hasBias != 0u)
             {
-                uint rowBase = outRow * bCols + colBase + lid1 * BLOCK;
-                if (hasBias != 0u)
-                {
-                    if (c0 < bCols) c[rowBase + 0] = a0 + bias[c0];
-                    if (c1 < bCols) c[rowBase + 1] = a1 + bias[c1];
-                    if (c2 < bCols) c[rowBase + 2] = a2 + bias[c2];
-                    if (c3 < bCols) c[rowBase + 3] = a3 + bias[c3];
-                }
-                else
-                {
-                    if (c0 < bCols) c[rowBase + 0] = a0;
-                    if (c1 < bCols) c[rowBase + 1] = a1;
-                    if (c2 < bCols) c[rowBase + 2] = a2;
-                    if (c3 < bCols) c[rowBase + 3] = a3;
-                }
+                c[col] = a0 + bias[col];
+                if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+            }
+            else
+            {
+                c[col] = a0;
+                if (avail > 1u) c[col + 1u] = a1;
+                if (avail > 2u) c[col + 2u] = a2;
+                if (avail > 3u) c[col + 3u] = a3;
             }
         }
         """;

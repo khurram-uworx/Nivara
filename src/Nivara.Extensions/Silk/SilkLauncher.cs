@@ -332,7 +332,9 @@ internal static class SilkLauncher
     }
 
     /// <summary>Fused <c>RMSNorm(x)</c> followed by one to three independent projections, which share
-    /// the one normalization: cached-decode Q/K/V, gate/up, or the tied head.</summary>
+    /// the one normalization: cached-decode Q/K/V, gate/up, or the tied head. Decode only — the
+    /// kernel is the flat one-row form, so <paramref name="aRows"/> must be 1 and the prefill heads
+    /// keep their individual tile kernels (#657).</summary>
     public static void RmsNormGemv(
         SilkRuntime runtime,
         nint x,
@@ -343,7 +345,9 @@ internal static class SilkLauncher
         int aCols,
         float eps)
     {
-        if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aRows != 1)
+            throw new ArgumentOutOfRangeException(
+                nameof(aRows), aRows, "rms_norm_gemv is the single-row decode shape; prefill keeps the tile kernels");
         if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
         if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
 
@@ -365,25 +369,24 @@ internal static class SilkLauncher
         runtime.SetBuffer(SilkKernels.RmsNormGemv, 8, s2.Weight);
         runtime.SetBuffer(SilkKernels.RmsNormGemv, 9, s2.Bias);
         runtime.SetBuffer(SilkKernels.RmsNormGemv, 10, s2.Output);
-        runtime.SetUInt32(SilkKernels.RmsNormGemv, 11, (uint)aRows);
-        runtime.SetUInt32(SilkKernels.RmsNormGemv, 12, (uint)aCols);
-        runtime.SetUInt32(SilkKernels.RmsNormGemv, 13, (uint)s0.Cols);
-        runtime.SetUInt32(SilkKernels.RmsNormGemv, 14, (uint)s1.Cols);
-        runtime.SetUInt32(SilkKernels.RmsNormGemv, 15, (uint)s2.Cols);
-        runtime.SetUInt32(SilkKernels.RmsNormGemv, 16, hasBias ? 1u : 0u);
-        runtime.SetFloat32(SilkKernels.RmsNormGemv, 17, eps);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 11, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 12, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 13, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 14, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemv, 15, hasBias ? 1u : 0u);
+        runtime.SetFloat32(SilkKernels.RmsNormGemv, 16, eps);
 
-        // One thread-group per 64 output columns, and every slot's group count lands on a whole
-        // group, so a group never straddles two slots and the kernel can recover its slot from
-        // get_group_id(1) alone.
+        // One work-group per GEMVCOLS output columns, and each slot's group count lands on a whole
+        // group, so a group never straddles two slots and the kernel recovers its slot from
+        // get_group_id(0) alone. A zero-width slot adds no group.
         int threads =
-            SilkKernels.GemmGlobalCols(s0.Cols)
-            + SilkKernels.GemmGlobalCols(s1.Cols)
-            + SilkKernels.GemmGlobalCols(s2.Cols);
+            SilkKernels.GemvGlobalCols(s0.Cols)
+            + SilkKernels.GemvGlobalCols(s1.Cols)
+            + SilkKernels.GemvGlobalCols(s2.Cols);
         runtime.Run(
             SilkKernels.RmsNormGemv,
-            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)threads],
-            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
     }
 
     public static void Conv2d(
