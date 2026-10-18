@@ -193,7 +193,7 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 
 - **L2 normalization** (`BertModel.cs:376-397`): divide every element by the vector's
   magnitude, producing a **unit vector** (the sample prints `L2 norm: ~1.0`,
-  `samples/NivaraInference/Program.cs:1080`).
+  `samples/NivaraInference/Program.cs:1096`).
 - Why: magnitude stops mattering, direction survives — so
   `cosine(a,b) = dot(a,b) / (|a|·|b|) = dot(a,b)` for unit vectors. Two sentences are
   "similar" iff their 384-d directions are close. This closes the loop on the running

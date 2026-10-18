@@ -85,7 +85,7 @@ cosine(A, B) should be high, cosine(A, C) low, cosine(C, E) high.
 ```
 
 Live demo: `dotnet run --project samples/NivaraInference -c Release -- minilm similarity`
-(the exact sentence list lives in `samples/NivaraInference/Program.cs:1185-1192`).
+(the exact sentence list lives in `samples/NivaraInference/Program.cs:1201-1208`).
 
 ## The signal chain (the map everything hangs off)
 

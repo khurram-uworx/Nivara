@@ -29,8 +29,8 @@ public static class TypeSafe
         ["ollama"] = new("ollama", "http://localhost:11434", "tev1:0.8b"),
     };
 
-    private const int WarmupPasses = 1;
-    private const int TimedPasses = 3;
+    private const int DefaultWarmupPasses = 1;
+    private const int DefaultTimedPasses = 3;
 
     /// <summary>Engine used when the CLI is given none.</summary>
     public const string DefaultEngine = "ollaya";
@@ -116,14 +116,15 @@ public static class TypeSafe
     }
 
     /// <summary>
-    /// <c>typesafe benchmark</c>. The same protocol as <c>laya benchmark</c> — one warmup pass then
-    /// a fixed number of timed passes, median reported — but the unit of work is different: a
+    /// <c>typesafe benchmark</c>. The same protocol as <c>laya benchmark</c> — a warmup pass then a
+    /// number of timed passes, median reported — but the unit of work is different: a
     /// sample here is a whole <c>/v1/systemone</c> round trip (client serialization + transport +
     /// server inference), whereas <c>laya benchmark</c> times an in-process forward pass. The two
     /// sets of numbers are therefore not comparable, and the output says so rather than letting a
-    /// reader line the tables up.
+    /// reader line the tables up. The sample count is configurable via <c>--warmup</c>/<c>--iters</c>
+    /// (issue #676); defaults keep the 1-warmup-3-timed protocol.
     /// </summary>
-    public static async Task<int> Benchmark(string engine, string? urlOverride, string? modelOverride)
+    public static async Task<int> Benchmark(string engine, string? urlOverride, string? modelOverride, int warmup = DefaultWarmupPasses, int iters = DefaultTimedPasses)
     {
         var (target, url, model) = Resolve(engine, urlOverride, modelOverride);
 
@@ -135,7 +136,7 @@ public static class TypeSafe
         // Built the same way the demo builds it, so the timed request is the demo's request.
         var q = BuildQuestions().Set;
 
-        Console.WriteLine($"{WarmupPasses} warmup + {TimedPasses} timed passes per news item, median reported.");
+        Console.WriteLine($"{warmup} warmup + {iters} timed passes per news item, median reported.");
         Console.WriteLine("Each sample is one full /v1/systemone round trip: client + transport + engine");
         Console.WriteLine("inference. 'laya benchmark' times in-process forward passes, so its numbers are");
         Console.WriteLine("not comparable with these.");
@@ -149,13 +150,13 @@ public static class TypeSafe
         for (int i = 0; i < NewsItems.Length; i++)
         {
             var item = NewsItems[i];
-            var samples = new double[TimedPasses];
+            var samples = new double[iters];
             int recorded = 0;
             string? error = null;
 
             try
             {
-                for (int pass = 0; pass < WarmupPasses; pass++)
+                for (int pass = 0; pass < warmup; pass++)
                     await client.SystemOneAsync(item, q);
             }
             catch (Exception ex)
@@ -163,7 +164,7 @@ public static class TypeSafe
                 error = $"{ex.GetType().Name}: {ex.Message}";
             }
 
-            while (error is null && recorded < TimedPasses)
+            while (error is null && recorded < iters)
             {
                 var sw = Stopwatch.StartNew();
                 try
@@ -196,7 +197,7 @@ public static class TypeSafe
             double median = Median(samples, recorded);
             medians.Add(median);
             Console.WriteLine($"  {i + 1,4} {median,7:0.#} ms {samples[0],7} ms {samples[recorded - 1],7} ms" +
-                (error is null ? "" : $"  [PARTIAL {recorded}/{TimedPasses} timed passes: {error}]"));
+                (error is null ? "" : $"  [PARTIAL {recorded}/{iters} timed passes: {error}]"));
         }
 
         if (medians.Count == 0)
