@@ -37,7 +37,7 @@ class Program
         ["qwen"] = ["", "tools", "distill", "benchmark"],
         // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
         // checkpoint, and it dispatches before the model-file lookup below.
-        ["typesafe"] = ["", "benchmark"],
+        ["typesafe"] = ["", "benchmark", "verify"],
     };
 
     static readonly Dictionary<string, string[]> GpuModes = new()
@@ -517,10 +517,29 @@ class Program
             return 1;
         }
 
+        if (urlSet && modelType == "typesafe" && engine == "nivara")
+        {
+            Console.Error.WriteLine("--url is not supported for the in-process 'nivara' engine.");
+            return 1;
+        }
+
         // --model picks which model on that engine to load; same reasoning as --url.
         if (modelSet && modelType != "typesafe")
         {
             Console.Error.WriteLine($"--model is a 'typesafe' option only; got '{got}'.");
+            return 1;
+        }
+
+        if (modelSet && modelType == "typesafe" && engine == "nivara" && mode == "verify")
+        {
+            Console.Error.WriteLine("--model is not supported for 'typesafe nivara verify'.");
+            return 1;
+        }
+
+        if (modelSet && modelType == "typesafe" && engine == "nivara" && mode != "verify"
+            && modelArg != "convaiinnovations/laya")
+        {
+            Console.Error.WriteLine("--model must name 'convaiinnovations/laya' for the 'nivara' engine.");
             return 1;
         }
 
@@ -606,10 +625,19 @@ class Program
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
         // warmup/iterations default to the same 1 + 3 the benchmark used before #676, so an
         // invocation that does not ask for more samples sees no change.
+        if (modelType == "typesafe" && mode == "verify" && engine != "nivara")
+        {
+            Console.Error.WriteLine("'verify' requires the 'nivara' engine.");
+            return 1;
+        }
+
         if (modelType == "typesafe")
-            return mode == "benchmark"
-                ? TypeSafe.Benchmark(engine, urlArg, modelArg, warmup, iterations).GetAwaiter().GetResult()
-                : TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult();
+            return mode switch
+            {
+                "benchmark" => TypeSafe.Benchmark(engine, urlArg, modelArg, warmup, iterations).GetAwaiter().GetResult(),
+                "verify" => TypeSafe.Verify(engine, urlArg, modelArg).GetAwaiter().GetResult(),
+                _ => TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult(),
+            };
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");

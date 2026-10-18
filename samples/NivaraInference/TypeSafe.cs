@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using TypeSafeAI;
 
+using System.IO;
+
 namespace NivaraInference;
 
 /// <summary>
@@ -21,12 +23,13 @@ namespace NivaraInference;
 public static class TypeSafe
 {
     /// <summary>Where to send the request, and what to call it by default.</summary>
-    private sealed record Engine(string Name, string Url, string Model);
+    private sealed record Engine(string Name, string Url, string Model, bool InProcess = false);
 
     private static readonly Dictionary<string, Engine> Engines = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ollaya"] = new("ollaya", "http://localhost:11435", "laya:en"),
         ["ollama"] = new("ollama", "http://localhost:11434", "tev1:0.8b"),
+        ["nivara"] = new("nivara", "", "convaiinnovations/laya", true),
     };
 
     private const int DefaultWarmupPasses = 1;
@@ -63,9 +66,17 @@ public static class TypeSafe
         var (target, url, model) = Resolve(engine, urlOverride, modelOverride);
 
         Console.WriteLine("=== NivaraInference — TypeSafeAI News Assessment ===\n");
-        Console.WriteLine($"Connecting to {DisplayName(target)} at {url} (model: {model})...\n");
+        if (target.InProcess)
+            Console.WriteLine($"Loading {model} in-process (Silk F32)...\n");
+        else
+            Console.WriteLine($"Connecting to {DisplayName(target)} at {url} (model: {model})...\n");
 
         var client = CreateClient(target, url, model);
+        if (client is NivaraTypeSafeClient ts)
+        {
+            Console.WriteLine($"Device: {ts.DeviceName}, load: {ts.LoadMilliseconds} ms");
+            Console.WriteLine("Note: the first request includes kernel compilation.\n");
+        }
         var questions = BuildQuestions();
         var q = questions.Set;
 
@@ -129,9 +140,17 @@ public static class TypeSafe
         var (target, url, model) = Resolve(engine, urlOverride, modelOverride);
 
         Console.WriteLine("=== NivaraInference — TypeSafeAI Decision-Model Benchmark ===\n");
-        Console.WriteLine($"Connecting to {DisplayName(target)} at {url} (model: {model})...\n");
+        if (target.InProcess)
+            Console.WriteLine($"Loading {model} in-process (Silk F32)...\n");
+        else
+            Console.WriteLine($"Connecting to {DisplayName(target)} at {url} (model: {model})...\n");
 
         var client = CreateClient(target, url, model);
+        if (client is NivaraTypeSafeClient ts)
+        {
+            Console.WriteLine($"Device: {ts.DeviceName}, load: {ts.LoadMilliseconds} ms");
+            Console.WriteLine("Note: the first request includes kernel compilation.\n");
+        }
 
         // Built the same way the demo builds it, so the timed request is the demo's request.
         var q = BuildQuestions().Set;
@@ -248,14 +267,19 @@ public static class TypeSafe
         string engine, string? urlOverride, string? modelOverride)
     {
         var target = Engines[engine];
-        return (target, urlOverride ?? target.Url, modelOverride ?? target.Model);
+        string url = target.InProcess ? string.Empty : (urlOverride ?? target.Url);
+        return (target, url, modelOverride ?? target.Model);
     }
 
     private static string DisplayName(Engine engine) =>
         char.ToUpperInvariant(engine.Name[0]) + engine.Name[1..];
 
-    private static TypeSafeClient CreateClient(Engine engine, string url, string model) =>
-        new(new TypeSafeClientOptions
+    private static ITypeSafeClient CreateClient(Engine engine, string url, string model)
+    {
+        if (engine.InProcess)
+            return new NivaraTypeSafeClient(Path.Combine("samples", "data", "laya"));
+
+        return new TypeSafeClient(new TypeSafeClientOptions
         {
             ApiKey = $"{engine.Name}-local",
             BaseUrl = new Uri(url),
@@ -263,6 +287,83 @@ public static class TypeSafe
             Timeout = TimeSpan.FromSeconds(30),
             MaxRetries = 1,
         });
+    }
+
+    /// <summary>
+    /// <c>typesafe nivara verify</c>: compares the in-process client against an HTTP engine
+    /// (default Ollaya, overridable with <c>--url</c>) on every news item and question.
+    /// </summary>
+    public static async Task<int> Verify(string engine, string? urlOverride, string? modelOverride)
+    {
+        if (engine != "nivara")
+            return 1;
+
+        string httpUrl = urlOverride ?? "http://localhost:11435";
+        string httpModel = modelOverride is null ? "laya:en" : modelOverride;
+
+        using var inProcess = new NivaraTypeSafeClient(Path.Combine("samples", "data", "laya"));
+        using var httpClient = new TypeSafeClient(new TypeSafeClientOptions
+        {
+            ApiKey = "ollaya-local",
+            BaseUrl = new Uri(httpUrl),
+            DefaultModel = httpModel,
+            Timeout = TimeSpan.FromSeconds(60),
+            MaxRetries = 1,
+        });
+
+        var questions = BuildQuestions();
+        var q = questions.Set;
+
+        Console.WriteLine("=== NivaraInference - TypeSafe verify (in-process vs HTTP) ===\n");
+        Console.WriteLine($"In-process device: {inProcess.DeviceName}");
+        Console.WriteLine($"HTTP side: {httpUrl} ({httpModel})\n");
+
+        int failures = 0;
+        for (int i = 0; i < NewsItems.Length; i++)
+        {
+            string item = NewsItems[i];
+            Console.WriteLine($"[{i + 1}] {item}");
+
+            QuestionSetResult a, b;
+            try { a = await inProcess.SystemOneAsync(item, q); }
+            catch (Exception ex) { Console.WriteLine($"  in-process error: {ex.GetType().Name}: {ex.Message}"); failures++; continue; }
+            try { b = await httpClient.SystemOneAsync(item, q); }
+            catch (Exception ex) { Console.WriteLine($"  http error: {ex.GetType().Name}: {ex.Message}"); failures++; continue; }
+
+            foreach (string id in q.Keys)
+            {
+                Answer left = a.Response.Answers[id];
+                Answer right = b.Response.Answers[id];
+                bool agree = DecisionsAgree(left, right);
+                if (!agree) failures++;
+                Console.WriteLine($"  {id}: {(agree ? "AGREE" : "DISAGREE")}  in={Summarize(left)}  http={Summarize(right)}");
+            }
+        }
+
+        Console.WriteLine(failures == 0
+            ? "\nAll typed decisions agree."
+            : $"\n{failures} disagreement(s).");
+        return failures == 0 ? 0 : 1;
+    }
+
+    private static bool DecisionsAgree(Answer left, Answer right)
+    {
+        if (left is ChoiceAnswer lc && right is ChoiceAnswer rc)
+            return string.Equals(lc.Choice, rc.Choice, StringComparison.Ordinal);
+        if (left is ScoreAnswer ls && right is ScoreAnswer rs)
+            return (int)Math.Round(ls.Score) == (int)Math.Round(rs.Score);
+        if (left is NoulAnswer ln && right is NoulAnswer rn)
+            return (ln.Probability >= 0.5) == (rn.Probability >= 0.5);
+        return false;
+    }
+
+    private static string Summarize(Answer answer) => answer switch
+    {
+        ChoiceAnswer c => $"{c.Choice} ({c.Confidence:P0})",
+        ScoreAnswer s => $"{s.Score:F2} ({s.Confidence:P0})",
+        NoulAnswer n => $"{n.Probability:P0}",
+        _ => answer.GetType().Name,
+    };
 
     private static NewsQuestions BuildQuestions()
     {

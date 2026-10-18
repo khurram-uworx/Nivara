@@ -90,14 +90,14 @@ public static class Laya
     }
 
     /// <summary>The agent config's subset that the sample actually consumes.</summary>
-    sealed record AgentConfig(
+    internal sealed record AgentConfig(
         int MaxLen,
         int HeadMaxLen,
         int HeadLayers,
         double[] Temperature,
         IReadOnlyDictionary<string, double> TemperatureByOptions);
 
-    static AgentConfig LoadAgentConfig(string modelDir)
+    internal static AgentConfig LoadAgentConfig(string modelDir)
     {
         string path = Path.Combine(modelDir, "rl_agent_config.json");
         if (!File.Exists(path))
@@ -547,7 +547,7 @@ public static class Laya
         return (encoder, head, sw.ElapsedMilliseconds);
     }
 
-    static ModernBertConfig LoadEncoderConfig(string modelDir)
+    internal static ModernBertConfig LoadEncoderConfig(string modelDir)
     {
         // The encoder config lives in a subdirectory, not at the model root: Laya ships the
         // backbone's config alongside the backbone rather than flattening it into one file.
@@ -557,7 +557,7 @@ public static class Laya
         return ModernBertConfig.FromJson(File.ReadAllText(path));
     }
 
-    static Gpt2BpeTokenizer LoadTokenizer(string modelDir)
+    internal static Gpt2BpeTokenizer LoadTokenizer(string modelDir)
     {
         // The tokenizer lives in its own subdirectory. Loading the model root's tokenizer.json
         // would fail, and failing here rather than emitting garbage ids is the point.
