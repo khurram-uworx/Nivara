@@ -138,6 +138,34 @@ The in-process `nivara` row is not comparable with the HTTP rows above (no trans
 `laya benchmark` (one forward): its sample is a whole `SystemOneAsync` call, six encoder forwards on
 the device.
 
+## In-process (Nivara) benchmark
+
+`typesafe nivara benchmark` runs the same 1-warmup + 3-timed-pass protocol, with each sample a whole
+`SystemOneAsync` call (six encoder forwards on the device, no transport). It is not comparable with
+the HTTP rows above or with `laya benchmark` (one forward); it is here for order of magnitude only.
+
+First numbers (Windows, .NET 11, Release, Intel Graphics OpenCL, sequential):
+
+| Engine | Model | Device | Overall median | items/s |
+|--------|-------|--------|----------------|---------|
+| Nivara (in-process) | `convaiinnovations/laya` | Intel Graphics (Silk F32) | 1417 ms | 0.7 |
+
+Per item:
+
+```text
+  item       median        min        max
+     1    1456 ms    1455 ms    1632 ms
+     2    1386 ms    1381 ms    1400 ms
+     3    1597 ms    1596 ms    1605 ms
+     4    1387 ms    1386 ms    1389 ms
+     5    1416 ms    1416 ms    1421 ms
+     6    1418 ms    1418 ms    1419 ms
+
+Overall: median 1417 ms per assessment across 6 items, 0.7 items/s sequential at those medians.
+```
+
+Model load 4881 ms; the first (warmup) request includes kernel compilation.
+
 ## See also
 
 - [docs/LAYA.md](LAYA.md) — the decision head, its calibration, and the wheel-pinned comparison.
