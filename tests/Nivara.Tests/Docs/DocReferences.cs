@@ -42,6 +42,9 @@ static partial class DocReferenceExtractor
     /// naming the review it fixes, or a roadmap line recording that a doc was retired. The pin only
     /// moves when a new one is added deliberately; a test asserts every entry is still present in its
     /// file, so an entry whose reference is fixed or removed fails rather than rotting in place.
+    /// Entries whose target is the scan-excluded plan document cannot be observed while that document
+    /// exists — the reference then resolves, so the counterfactual has nothing to show — and the
+    /// presence test skips them mid-plan; CI, which runs without a plan, checks every entry.
     /// </summary>
     static readonly HashSet<(string File, string Target)> Tolerated =
     [

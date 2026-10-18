@@ -906,6 +906,16 @@ All notable changes to Nivara are documented here. Released versions are publish
   copy-pasted pair. Fully-masked rows still clamp to zeros via the separate
   `max == -inf` guard in `GradKernels`, which remains the second line of defence.
 
+### Fixed
+
+- **Docs gate: the tolerated-mentions test no longer fails while the iterative-work plan document exists (#674, #678)** —
+  `DocReferenceTests.ToleratedHistoricalMentions_ArePresent_AndOnlyTheAllowlistKeepsThemGreen`
+  asserted that each allowlist target is *missing on disk*, so any session running the Docs gate
+  mid-plan saw a red test that meant nothing about its own change. The presence check now skips an
+  allowlist entry whose target is the scan-excluded plan document (`docs/TODO.md`) while that
+  document exists; CI runs on a plan-less tree, so every allowlist entry is still fully checked
+  before merge.
+
 ### Documentation
 
 - **ModernBERT benchmark pass counts corrected (#474)** — the `NivaraInference` README annotated
