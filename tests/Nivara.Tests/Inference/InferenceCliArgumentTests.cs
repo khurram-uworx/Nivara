@@ -17,7 +17,7 @@ namespace Nivara.Tests.Inference;
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
 /// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
-/// and the <c>--ollama</c> model scope and URL value). The <c>typesafe</c> happy path is
+/// and the <c>--ollama</c>, <c>--model</c> and benchmark scope). The <c>typesafe</c> happy path is
 /// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
 /// observable before the first disk touch, so the ordering cases and the <c>qwen</c> happy paths use
 /// <c>qwen</c> (its checkpoint is never present: <c>samples/data/qwen2.5-0.5b-instruct/</c> is
@@ -407,6 +407,24 @@ public class InferenceCliArgumentTests
         {
             AssertRejected(Run("minilm", "--ollama"), "--ollama is a 'typesafe' option only");
             AssertRejected(Run("typesafe", "--ollama", "not-a-url"), "--ollama expects an absolute http(s) URL");
+        });
+    }
+
+    /// <summary>
+    /// <c>--model</c> names the model to load on the selected decision-model server and is read only
+    /// by the <c>typesafe</c> run, so it is rejected elsewhere; the value is consumed even when it is
+    /// the last token, so it cannot fall through to the positional-mode branch and be read as a mode
+    /// name. The happy path (an override that the live server accepts) is deliberately not gated: it
+    /// needs a decision-model server, which a CI runner does not have.
+    /// </summary>
+    [Test]
+    public void Model_BeyondItsScopeOrWithoutAValue_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("minilm", "--model", "laya:en"), "--model is a 'typesafe' option only");
+            AssertRejected(Run("typesafe", "--model"), "--model needs a value.");
+            AssertRejected(Run("typesafe", "--model", "   "), "--model expects a non-empty model name");
         });
     }
 

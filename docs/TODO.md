@@ -17,6 +17,11 @@ Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya
   flags, not encoded into the URL). Defaults stay Ollaya `laya:en` / Ollama `tev1:0.8b`.
 - Benchmark = **"warmup + median"**, the repo's existing protocol.
 - Ollaya is started by the human (`ollaya serve`), not by this work.
+- **Restrict to the told models.** Both servers currently hold exactly one decision model each —
+  Ollaya `laya:en`, Ollama `tev1:0.8b` — and not every model on a server is a decision model
+  (Ollama's `beam:cloud` answers `400 beam is not a decision model`). So examples, docs and
+  verification use only those two; `--model` stays a general override because the server is the
+  authority on what is a decision model.
 
 ## Grounding (verified before implementation)
 
@@ -33,13 +38,16 @@ Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya
   inference, which is exactly what "compare the backends" means.
 - **`--warmup` / `--iters` are pinned to modernbert.** `Program.cs:358` rejects them for any other
   model, and `InferenceCliArgumentTests.SeqWarmupIters_OnNonModernBertModel_Rejected` pins the
-  message *"are options of 'modernbert benchmark' only"* for `minilm benchmark`. `laya benchmark`
-  does not take them either. So `typesafe benchmark` uses the fixed protocol and does not accept
-  them; extending the scope would churn a pinned gate for no benefit here (tracked below as
-  deferred work).
+  message *"are options of 'modernbert benchmark' only"* for `minilm benchmark`. So
+  `typesafe benchmark` uses the fixed protocol and does not accept them — extending the scope is
+  tracked as deferred work (#676). Note `laya benchmark` / `modernbert benchmark` are **different
+  paths**: they time in-process forward passes over weights, whereas `typesafe benchmark` times an
+  HTTP round trip to a server, so the two are not comparable numbers and must be labelled as such.
+  `--seq` stays modernbert-only (a shape parameter is meaningless for a fixed question set).
 - **No `--model` flag exists** in `Program.cs` (verified) — nothing collides.
-- **Both servers verified live**: `GET :11434/v1/models` → 9 models (incl. `tev1:0.8b`, `beam:cloud`);
-  `GET :11435/v1/models` → `laya:en`.
+- **Both servers verified live**: `GET :11434/v1/models` → 9 models, of which only `tev1:0.8b` is a
+  decision model (`beam:cloud` answers `400 beam is not a decision model`);
+  `GET :11435/v1/models` → `laya:en`, the only model Ollaya holds.
 
 ## Planned commits
 
@@ -70,9 +78,9 @@ Branch: `khurram/typesafe` (continuing the landed work — the demo move, Ollaya
 - `dotnet build Nivara.slnx -c Release` after each code commit.
 - Targeted: `dotnet test -c Release --filter "FullyQualifiedName~InferenceCliArgumentTests"`.
   Known pre-existing environmental failures: the two Qwen checkpoint cases (#673).
-- Live, on both servers (happy path is deliberately ungated — CI has no servers):
-  `typesafe`, `typesafe --model <x>`, `typesafe benchmark`, `typesafe --ollama`,
-  `typesafe --ollama --model beam:cloud`, `typesafe --ollama benchmark`.
+- Live, on both servers (happy path is deliberately ungated — CI has no servers), restricted to
+  the told decision models: `typesafe`, `typesafe --model laya:en`, `typesafe benchmark`,
+  `typesafe --ollama`, `typesafe --ollama --model tev1:0.8b`, `typesafe --ollama benchmark`.
 - `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` + the documentation
   snippet gate before concluding. Full suite only with the human's go-ahead.
 

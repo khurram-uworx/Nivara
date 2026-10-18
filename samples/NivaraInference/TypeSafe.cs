@@ -5,7 +5,9 @@ namespace NivaraInference;
 /// <summary>
 /// TypeSafeAI news assessment against a local decision-model server. Ollaya and Ollama 0.35+
 /// expose the same TypeSafe <c>/v1/systemone</c> API, so the same client runs on either — only
-/// the base URL and the model name change.
+/// the base URL and the model name change. Each server has a default model (Ollaya
+/// <c>laya:en</c>, Ollama <c>tev1:0.8b</c>); <c>--model</c> overrides it with any decision model
+/// that the connected server has (a non-decision model is rejected by the server itself).
 /// </summary>
 public static class TypeSafe
 {
@@ -14,10 +16,10 @@ public static class TypeSafe
     private const string OllamaUrl = "http://localhost:11434";
     private const string OllamaModel = "tev1:0.8b";
 
-    public static async Task<int> Run(bool useOllama, string? ollamaUrl)
+    public static async Task<int> Run(bool useOllama, string? ollamaUrl, string? modelOverride)
     {
         string url = useOllama ? ollamaUrl ?? OllamaUrl : OllayaUrl;
-        string model = useOllama ? OllamaModel : OllayaModel;
+        string model = modelOverride ?? (useOllama ? OllamaModel : OllayaModel);
         string server = useOllama ? "Ollama" : "Ollaya";
 
         Console.WriteLine("=== NivaraInference — TypeSafeAI News Assessment ===\n");

@@ -123,6 +123,8 @@ class Program
         bool useSilk = false;
         bool useOllama = false;
         string? ollamaUrl = null;
+        string? modelArg = null;
+        bool modelSet = false;
         int teacherExamples = 0;
         int seed = 42;
         bool teacherExamplesSet = false;
@@ -222,6 +224,25 @@ class Program
                     i++;
                 }
             }
+            else if (args[i] == "--model")
+            {
+                // The value is consumed even when the flag is last, so a missing value can never
+                // fall through to the positional-mode branch below and be read as a mode name.
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--model needs a value.");
+                    return 1;
+                }
+
+                modelArg = args[i + 1];
+                if (string.IsNullOrWhiteSpace(modelArg))
+                {
+                    Console.Error.WriteLine("--model expects a non-empty model name.");
+                    return 1;
+                }
+                modelSet = true;
+                i++;
+            }
             else if (args[i] == "--gpu")
             {
                 // The flag was renamed when the Silk path arrived. Rejected rather than aliased
@@ -283,6 +304,8 @@ class Program
             Console.WriteLine("                    model laya:en.");
             Console.WriteLine("  --ollama [url]    Use a local Ollama server instead (default http://localhost:11434, model");
             Console.WriteLine("                    tev1:0.8b). Both servers expose the TypeSafe /v1/systemone API.");
+            Console.WriteLine("  --model <name>    Model to load on the selected server; e.g. 'typesafe --ollama --model tev1:0.8b'.");
+            Console.WriteLine("                    Defaults: laya:en on Ollaya, tev1:0.8b on Ollama.");
             Console.WriteLine();
             Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
@@ -454,6 +477,13 @@ class Program
             return 1;
         }
 
+        // --model picks which model on that server to load; same reasoning as --ollama.
+        if (modelSet && modelType != "typesafe")
+        {
+            Console.Error.WriteLine($"--model is a 'typesafe' option only; got '{got}'.");
+            return 1;
+        }
+
         // The mode allow-list (#587). An unrecognised mode used to fall through to the model's default
         // runner: the vision models printed "Image not found" and exited 0, and qwen ran the tools demo.
         if (!IsSupportedMode(modelType, mode))
@@ -535,7 +565,7 @@ class Program
         // The TypeSafe demo has no checkpoint: it calls a decision-model server over HTTP, so it
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
         if (modelType == "typesafe")
-            return TypeSafe.Run(useOllama, ollamaUrl).GetAwaiter().GetResult();
+            return TypeSafe.Run(useOllama, ollamaUrl, modelArg).GetAwaiter().GetResult();
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");
