@@ -416,15 +416,17 @@ column-index guard bug hides. `tests/Nivara.Tests` already has internals access
   it touches the family carrying the ILGPU byte-identity claim and the `--silk-kernels` gate.
 - Qwen prefill single-row heads (`SilkQwenGpuRunner.cs` prefill/`Forward` heads) keep the tile kernel at
   6%; #657 explicitly says keep prefill individual.
-- Pre-existing doc drift: the `KernelNames` quote in `docs/SILK.md` § 11.1 is stale (SmolLM/vision
-  kernels missing). Untouched.
+- Pre-existing doc drift: the `KernelNames` quote in `docs/SILK.md` § 11.1 is stale (it lists 15 of the
+  array's 29 names, and the prose partitioning them no longer covers the array). Untouched — correcting
+  the pointer is this branch's business, rewriting the excerpt is a docs decision. Filed as **#683**.
 - Pre-existing doc drift found in round 1: the `docs/QWEN.md` block names the third output
   `silk_tools.txt`, but `qwen --silk benchmark` measures the **plain** prompt (36 tokens) — the same
   surface the results table labels "plain prompt". Either the file name or the table row is wrong;
-  the file name is the cheaper fix. Untouched: it is a docs-block change outside #670's scope.
+  the file name is the cheaper fix. Untouched: it is a docs-block change outside #670's scope. Filed as
+  **#685**.
 - Pre-existing message drift found while checking the Silk invocation was legal:
   `samples/NivaraInference/Program.cs:460` omits `qwen` from the `--silk` model list although
-  `SilkModes["qwen"]` accepts it (`Program.cs:63`). Untouched.
+  `SilkModes["qwen"]` accepts it (`Program.cs:63`). Untouched. Filed as **#684**.
 
 ## Probe and harness lifecycle
 
@@ -438,3 +440,6 @@ in place; no temp project is created.
 
 - [ ] #681 — Silk: decode-shaped `gemm_row4_add` for down/o_proj (remaining 6%-utilization decode GEMMs) (created while working on #670)
 - [ ] #682 — Silk: measure decode-shape kernel geometry as a same-session A/B (created while working on #670; the Speed gate below could not attribute the change, so the question is filed rather than dropped)
+- [ ] #683 — docs: SILK.md's quoted `KernelNames` block lists 15 of the 29 names (created while working on #670)
+- [ ] #684 — `--silk` rejection message omits `qwen`, which `SilkModes` accepts (created while working on #670)
+- [ ] #685 — docs: the QWEN.md benchmark block writes Silk output to `silk_tools.txt` while measuring the plain prompt (created while working on #670)
