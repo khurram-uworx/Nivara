@@ -1,40 +1,116 @@
-# Plan: Silk/Laya attention-route performance (khurram/typesafe-laya-perf)
+# Plan: Issue #458 — CPU transformer gap (attribution, small-M GEMM)
 
 ## Problem
-The Silk Laya path's dominant cost is attention: `BatchedAttention` is ~57% of the forward (#447).
-GEMM tiling is currently measured-null on this iGPU, and CPU-side gaps (#458/#457) are a separate track.
-Before changing kernels, establish a measurable attention profile/baseline and reduce avoidable
-per-request overhead in the type-safe Nivara route.
 
-## Proposed changes
-1. Add a profiling/perf scenario in `tests/Nivara.PerformanceTests` for the Laya attention path
-   (packed QKV, cache pressure, sequence lengths, median timing), rather than a scratch project.
-2. Reduce per-request overhead in `NivaraTypeSafeClient.SystemOneAsync`:
-   - reuse prompt-building/state-tokenization where safe
-   - keep device work batched
-   - avoid preventable host synchronization
-3. Recondition GEMM tiling only after attention measurements are captured on one addressing form.
-4. Record any out-of-scope findings as GitHub issues immediately.
+The Nivara CPU transformer path is ~6.1-6.5x slower than PyTorch at the BERT-scale forwards
+documented in `samples/NivaraInference/README.md`. Two sub-gaps are open:
+
+1. A *non-GEMM* cost: at Laya shapes (S=512, d=1024, 28 layers) the in-tree GEMM sustains
+   66-80 GMAC/s while end-to-end is ~26 GMAC/s equivalent — ~3x of the gap is outside
+   GEMM. The mechanism is unmeasured; `ModernBertEncoder` runs `GradKernels`,
+   `LayerNormKernel`, `AttentionKernels`, and `TensorPrimitives` directly, so none of it is
+   captured by `AutoDiffDiagnostics`.
+2. A *small-M GEMM* inefficiency: at S=128 the in-tree path is 6-10x behind the probe-local
+   `Blocked` leg on `distilbert qkv/o` and `fc1`, but the probe that measured it took
+   best-of-5 per leg sequentially, which the README already flags as the #482 flakiness
+   pattern. Single rows swing up to 6.5x run-to-run.
+
+The GEMM *ceiling* at S=512 was measured and cleared (2414 ms projected, `AutoDiff`); the
+`Blocked` leg did not win. Any fix must not regress that result.
+
+## Selected scope
+
+- Phase 1 — per-op attribution for the CPU inference path (instrument + report).
+- Phase 2 — re-stabilise the small-M GEMM comparison (interleaved, report medians).
+- Phase 3 — evaluate managed `MultiplyCore` fixes against **both** M=128 and M=512.
+
+Deliberately deferred (tracked, not implemented here):
+- Native BLAS leg / provider seam (see `docs/BLAS-MKL.md` §5-§7, issues #133/#444).
+  Only worth doing once Phase 2's medians and Phase 3's managed ceiling are on record.
+
+## Phase 1 — Per-op attribution
+
+### Changes planned
+
+1. Add `InferenceDiagnostics` mirroring `AutoDiffDiagnostics`:
+   - file: `src/Nivara/Extensions/AI/InferenceDiagnostics.cs` (or `src/Nivara/AutoDiff/InferenceDiagnostics.cs`).
+   - `Enabled` (default false), `Measure/Measure<T,TResult>` wrapping `DiagnosticsTracker`.
+   - Gate by `Enabled` so disabled runs take the fast path (no lock acquisition).
+2. Instrument `ModernBertEncoder`'s forward/inference layer loop with blocks:
+   - attn norm (LayerNorm), Q/K/V projections, RoPE, QK^T, scale/apply-bounds, softmax,
+     PV matmul, o-projection + residual, MLP norm, GeGLU (act/gate + down), final residual.
+   - Each block records `operationType = "CPU-Encoder-..."`, `inputLength` = elements touched,
+     kernel label via `KernelSelector.DetermineKernelType<T>(length)` where meaningful, else
+     the fixed label the block genuinely represents.
+3. Keep overhead visible: report instrumented total alongside uninstrumented forward and an
+   explicit absent-ops list. Do not present shares as a % of the uninstrumented forward.
+4. Expose from `--laya-forward`'s diagnostics pass.
+5. Tests: no-op when disabled (zero tracker entries), plus any doc-snippet gates if added.
+
+### Blast radius
+- `ModernBertEncoder` forward only; no change to inference outputs or alloc contract.
+- `DiagnosticsTracker` reuse; no new storage.
+- Consumers: `LayaForwardProbe`, `NivaraInference` sample (diagnostics surface, off by default).
+
+## Phase 2 — Re-stabilise small-M GEMM
+
+### Changes planned
+
+1. Rework `--cpu-gemm` small-M reporting to the `--mask` protocol:
+   - 5 warmups per leg per shape, 30 interleaved rounds, first-measured leg alternates
+   - each round, report per-leg median tick counts, ranges, win counts.
+2. Add probe-local `AutoDiffNoRentCopy` leg (mirrors `MultiplyCore` but reads A in place)
+   alongside `AutoDiff`, `BTranspose`, `Blocked`.
+3. Report roll-up (citable) separately from per-row medians (with ranges and win counts).
+4. Update `tests/Nivara.PerformanceTests/README.md` and `docs/BLAS-MKL.md` §4/§6 with the new
+   protocol and the now-trusted numbers; revise the "6-10x ±6.5x swing" language.
+5. No core test deltas; correctness is already gated (`maxAbs <= 1e-3`).
+
+### Blast radius
+- `tests/Nivara.PerformanceTests/CpuGemmProbe.cs` only (probe).
+- Docs: README + BLAS-MKL.
+
+## Phase 3 — Managed GEMM evaluation
+
+Experiments run as probe-local legs first; only the winner touches `src/Nivara/Tensors/TensorsHelper.cs`.
+
+1. **Serial threshold**: force `ShouldParallelize = false` for M=128; derive an M-based cut.
+2. **Remove `RentCopy`**: read A in place (as `Blocked` does), confirm DP-truth parity.
+3. **`clearArray` cost**: measure returning pooled buffers without clearing.
+4. **Adaptive blocked path**: use blocked accumulator loop when M is below a documented
+   cutoff; keep Dot-per-element loop above it.
+5. Patch `TensorsHelper.MultiplyCore` for the winning variant; run perf gate and tensor tests.
+6. Update `docs/BLAS-MKL.md`. If managed closes the small-M gap, the native bar rises.
+
+### Exit criteria (both required)
+- M=128 roll-up improves materially vs current `AutoDiff`, no correctness regression.
+- S=512 roll-up stays within noise.
+
+### Blast radius
+- `TensorsHelper.MultiplyCore`, `MultiplyRowFloat/Double/Scalar`, `MultiplyCoreFloat/Double/Generic`,
+  `ShouldParallelize`, `RentCopy`.
+- Callers via `GradKernels.MatMul{,TransposedB}`, `Linear<T>`, BERT/ModernBERT/Laya inference,
+  attention. Correctness gate is mandatory before commit.
 
 ## Verification
-- Silk `compare`/parity remains exact for any kernel experiment.
-- `GpuAttentionBandTests` and related attention tests pass.
-- All perf runs use Release and the repository A/B methodology.
-- `dotnet format` whitespace check before PR.
+
+- Instrumented diagnostics run (`--laya-forward`) with absent-ops listed.
+- `--cpu-gemm` interleaved small-M run; review medians + win counts.
+- Phase 3: probe variants first, then targeted perf gate (`--compare`) and targeted tests
+  `TensorsHelperTests`, `GradKernelsTests`. Full suite only with human confirmation.
 
 ## Planned commits
-1. docs: plan silk-laya-perf in TODO.md
-2. perf: add attention scenario coverage
-3. perf: reduce per-request overhead in type-safe Laya route
-4. (optional, evidence-gated) attention experiment
-5. docs: remove TODO.md — plan executed
+
+1. `docs: plan #458 CPU gap attribution and small-M GEMM in TODO.md`
+2. `feat: add InferenceDiagnostics and instrument ModernBert encoder`
+3. `test: cover InferenceDiagnostics disabled path`
+4. `feat: interleave --cpu-gemm small-M measurement and add no-rent-copy leg`
+5. `docs: update --cpu-gemm small-M protocol and medians`
+6. `test: add TensorsHelper perf variant gates` (probe-only experiments)
+7. `perf: apply winning managed GEMM tweak to MultiplyCore` (if warranted)
+8. `docs: remove TODO.md — plan executed`
 
 ## GitHub issues log
-- #706 — Track Silk Laya attention-path performance work
 
-## Blast radius
-- `samples/NivaraInference/NivaraTypeSafeClient.cs`
-- `src/Nivara.Extensions/Silk/SilkLayaSession.cs`, `SilkLayaHeadGpuRunner.cs`
-- `tests/Nivara.PerformanceTests`
-- Silk compare/parity tests remain the guardrails.
-
+- [x] #458 — CPU transformer path gap (parent, this issue)
+- (create additional tracked issues here as deferred work is discovered during execution)
