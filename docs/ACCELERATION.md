@@ -20,10 +20,10 @@ verdicts stay in [ILGPU.md](ILGPU.md) as history. The shipped streaming contract
 [STREAMING.md](STREAMING.md); the backend case studies are in
 [`tests/Nivara.GpuProbe/`](../tests/Nivara.GpuProbe/README.md).
 
-Scope today: MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, and Laya, F32 only, with `default`,
-`benchmark`, and `compare` modes. Qwen, SmolLM, and the vision kernels already exist in the translation unit, but
-their CLI coverage is still expanding. Silk is distributed as Silk.NET.OpenCL 2.23.0 and compiles OpenCL C in-process
-on the Intel OpenCL ICD.
+Scope today: the measured paths in this index, MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, and Laya, are F32
+only, with `default`, `benchmark`, and `compare` modes. The same Silk backend also runs SmolLM, Qwen,
+MobileNetV2, and ResNet-18, with the Qwen and vision modes described in SILK.md. Silk is distributed as
+Silk.NET.OpenCL 2.23.0 and compiles OpenCL C in-process on the Intel OpenCL ICD.
 
 ## Why this route
 
@@ -192,7 +192,7 @@ mutual exclusion, model scope before model-file lookup, F32-only, and no `--gpu`
 
 ## 7. Open work
 
-- Expand Nivara GPU coverage to SmolLM, Qwen causal decode, and the vision model runners (#628-#630).
+- Publish benchmark tables and gate snapshots for the SmolLM, Qwen, MobileNetV2, and ResNet-18 Silk runners in this index (#628-#630).
 - Cross-backend GEMM regression harness: #435.
 - ModernBERT's 4096-row re-measurement: #447.
 - LayerNorm one-work-item-per-row: #467.

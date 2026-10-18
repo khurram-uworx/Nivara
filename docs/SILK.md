@@ -361,10 +361,11 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 
 ## 10. What the path is, and what is in it
 
-`--silk` runs the BERT-family encoder through hand-authored OpenCL C
-(`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It exists to evaluate a
-vendor-neutral, non-ILGPU route on a real model. Scope today: **MiniLM, DistilBERT,
-DistilBERT+SST-2, ModernBERT, and Laya**, F32 only, modes `default` / `benchmark` / `compare`;
+`--silk` runs encoders, causal decoders, and vision convolution through hand-authored OpenCL C
+(`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
+real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
+Qwen, MobileNetV2, and ResNet-18**, F32 only. Qwen and the vision models expose their own mode
+sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`, and it is
 mutually exclusive with `--ilgpu`.
 
 | file | role |
@@ -376,7 +377,11 @@ mutually exclusive with `--ilgpu`.
 | `SilkBertEncoderRunner.cs` | the Silk counterpart of `BertEncoderGpuRunner` — same weight layout, same operation order, same fused epilogues |
 | `SilkModernBertGpuRunner.cs` | the Silk counterpart of `ModernBertGpuRunner` — bias-free GEMM, row-interleaved QKV split, CPU-uploaded RoPE, per-layer band |
 | `SilkLayaHeadGpuRunner.cs` | the Silk counterpart of `LayaHeadGpuRunner` — biased norms, fused biased QKV, host-side act-head features |
-| `SilkModernBertSession.cs` / `SilkLayaSession.cs` | the Silk session implementations. The CLI sees `Forward`, not a device buffer |
+| `SilkSmolLMGpuRunner.cs` | SmolLM causal decode — RMSNorm, SwiGLU, causal GQA attention, cached KV, argmax |
+| `SilkQwenGpuRunner.cs` | Qwen causal decode, benchmark, and tool paths |
+| `SilkMobileNetV2GpuRunner.cs` | vision inference — grouped conv, batchnorm, pooling |
+| `SilkResNet18GpuRunner.cs` | vision inference — grouped conv, batchnorm, pooling |
+| `SilkModernBertSession.cs` / `SilkLayaSession.cs` / `SilkSmolLMSession.cs` / `SilkQwenSession.cs` | the Silk session implementations. The CLI sees `Forward` or the session's `Run`, not a device buffer |
 | `src/Nivara.Extensions/AI/GpuSeam.cs` | `IBertEncoderRunner`, `IModernBertGpuSession`, `ILayaGpuSession` and the open delegates (`namespace Nivara.AI`). The ILGPU session classes stay in `samples/Nivara.Samples/Gpu/` and implement them |
 
 `Nivara.Extensions.csproj` pins `Silk.NET.OpenCL` 2.23.0. `SilkKernels` and `SilkLauncher` are
@@ -555,13 +560,27 @@ the global band, and the four act-head features stay on `LayaHeadScoring`. A che
 
 The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays backend-private.
 
+## 13b. Causal decoders and vision runners
+
+`SilkSmolLMGpuRunner` and `SilkQwenGpuRunner` run the cached causal-LM decode path rather than an
+encoder. They use the same `SilkRuntime`, plus `rms_norm`, `swiglu`, `causal_gqa_attention`,
+`decode_gqa_attention`, `decode_gqa_attention_oproj_fused`, `mlp_block`, `gemm_gemv_add`, and `argmax`.
+Qwen exposes `benchmark`, plain, tools, and KV-cache modes through `SilkQwenSession`; SmolLM exposes
+`benchmark` and `generate`.
+
+`SilkMobileNetV2GpuRunner` and `SilkResNet18GpuRunner` run the vision stack: `conv2d`, `batchnorm_eval`,
+`relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side
+geometry helpers, and are the kernels listed in `KernelNames` under the vision family.
+
+As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
+
 ## 14. CLI surface and the gate
 
-- **`SilkModes`** is the allow-list — `minilm` / `distilbert` / `distilbert_sst` / `modernbert` /
-  `laya` × `{"", benchmark, compare}`. Still narrower than the CPU mode lists (`compare_diag` stays
-  rejected). Qwen × `{"", benchmark, tools}` now joins them for F32 causal LM decode (#629); vision
-  remains #630. SmolLM and Qwen are causal decoders (not encoders) and own their runners:
-  `SilkSmolLMGpuRunner` / `SilkQwenGpuRunner`.
+- **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
+  `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
+  `benchmark`, `tools`); `mobilenet_v2` and `resnet18` (empty, `benchmark`, `compare`). `compare_diag`
+  stays rejected. SmolLM and Qwen are causal decoders (not encoders) and own their runners, as do the
+  MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by
