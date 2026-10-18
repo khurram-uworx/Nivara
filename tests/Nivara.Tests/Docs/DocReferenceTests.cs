@@ -37,8 +37,11 @@ public class DocReferenceTests
     /// 360 = 358 + the two <c>docs/LAYA.md</c> references the TypeSafe/Ollama section added to
     /// <c>samples/NivaraInference/README.md</c> (a markdown link counts twice: its text and its
     /// target).
+    /// 364 = 363 + the <c>docs/TODO.md</c> mention the #674/#678 Fixed entry adds to
+    /// <c>CHANGELOG.md</c> — a tolerated historical mention, suppressed by the existing allowlist
+    /// entry, but still a discovered reference and counted here.
     /// </summary>
-    const int ExpectedDocumentReferenceCount = 363;
+    const int ExpectedDocumentReferenceCount = 364;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 126;
@@ -103,6 +106,13 @@ public class DocReferenceTests
     {
         foreach (var (file, target) in DocReferenceExtractor.ToleratedReferences)
         {
+            // The transient plan document's absence is what makes the counterfactual observable, so
+            // while it exists (an iterative-work session mid-plan) its three entries cannot be checked
+            // and are skipped; CI runs on a plan-less tree, where every entry is checked in full.
+            if (DocSnippetExtractor.ScanExcludedDocuments.Contains(target, StringComparer.Ordinal)
+                && File.Exists(Path.Combine(DocSnippetExtractor.RepoRoot, target)))
+                continue;
+
             var raw = DocReferenceExtractor.DocumentFaults(file, tolerate: false)
                 .Where(f => f.Reference == target);
 
