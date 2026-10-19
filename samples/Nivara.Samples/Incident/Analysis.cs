@@ -264,44 +264,98 @@ public static class Analysis
         double gpuMs = 0;
         long transferBytes = 0;
 
+        transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
+
         if (useGpu || gpuForce)
         {
-            var swGpu = System.Diagnostics.Stopwatch.StartNew();
-            SilkRuntime? runtime = null;
-            try
+            int sampleSize = Math.Min(rowCount, GpuProfitability.SampleSize);
+            double sampleCpuMs = GpuProfitability.CalibrateCpuMs(
+                serviceIds, statusCodes, durations, groupCount, sampleSize);
+            double estimatedCpuMs = GpuProfitability.EstimateCpuMs(sampleCpuMs, sampleSize, rowCount);
+            double estimatedGpuMs = GpuProfitability.EstimateGpuMs(rowCount, transferBytes);
+
+            var (offload, decisionReason, estCpu, estGpu) = GpuProfitability.Decide(
+                useGpu, gpuForce, estimatedCpuMs, estimatedGpuMs);
+            reason = decisionReason;
+            cpuMs = estCpu;
+            // keep estimated values for diagnostics even if we later run CPU
+            estimatedCpuMs = estCpu;
+            estimatedGpuMs = estGpu;
+
+            if (offload)
             {
-                runtime = new SilkRuntime();
-                var (counts, errors, sums) = SilkAnalytics.GroupedHashReduce(
-                    runtime, serviceIds, statusCodes, durations, groupCount);
-
-                var idToService = new string[groupCount];
-                foreach (var kvp in serviceToId)
-                    idToService[kvp.Value] = kvp.Key;
-
-                for (int g = 0; g < groupCount; g++)
+                var swGpu = System.Diagnostics.Stopwatch.StartNew();
+                SilkRuntime? runtime = null;
+                try
                 {
-                    services[idToService[g]] = (errors[g], counts[g], sums[g]);
-                }
-                usedGpu = true;
-                reason = gpuForce ? "forced" : "profitable (heuristic pending)";
-            }
-            catch (Exception ex)
-            {
-                reason = "gpu unavailable: " + ex.Message;
-                usedGpu = false;
-            }
-            finally
-            {
-                runtime?.Dispose();
-            }
-            swGpu.Stop();
-            gpuMs = swGpu.Elapsed.TotalMilliseconds;
-            transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
-        }
+                    runtime = new SilkRuntime();
+                    var (counts, errors, sums) = SilkAnalytics.GroupedHashReduce(
+                        runtime, serviceIds, statusCodes, durations, groupCount);
 
-        if (!usedGpu)
+                    var idToService = new string[groupCount];
+                    foreach (var kvp in serviceToId)
+                        idToService[kvp.Value] = kvp.Key;
+
+                    for (int g = 0; g < groupCount; g++)
+                    {
+                        services[idToService[g]] = (errors[g], counts[g], sums[g]);
+                    }
+                    usedGpu = true;
+                    gpuMs = swGpu.Elapsed.TotalMilliseconds;
+                }
+                catch (Exception ex)
+                {
+                    reason = "gpu unavailable: " + ex.Message;
+                    usedGpu = false;
+                    gpuMs = 0;
+
+                    // CPU fallback
+                    var swCpu = System.Diagnostics.Stopwatch.StartNew();
+                    var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
+                    for (int i = 0; i < rowCount; i++)
+                    {
+                        var svc = serviceNames[i];
+                        if (!cpuServices.TryGetValue(svc, out var acc))
+                            acc = (0, 0, 0);
+                        acc.Total++;
+                        acc.TotalDuration += (double)durationCol.GetValue(i)!;
+                        if (statusCodes[i] >= 500) acc.Errors++;
+                        cpuServices[svc] = acc;
+                    }
+                    swCpu.Stop();
+                    cpuMs = swCpu.Elapsed.TotalMilliseconds;
+                    services = cpuServices;
+                }
+                finally
+                {
+                    runtime?.Dispose();
+                }
+                if (usedGpu)
+                    swGpu.Stop();
+            }
+            else
+            {
+                // Not profitable: run CPU.
+                var swCpu = System.Diagnostics.Stopwatch.StartNew();
+                var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
+                for (int i = 0; i < rowCount; i++)
+                {
+                    var svc = serviceNames[i];
+                    if (!cpuServices.TryGetValue(svc, out var acc))
+                        acc = (0, 0, 0);
+                    acc.Total++;
+                    acc.TotalDuration += (double)durationCol.GetValue(i)!;
+                    if (statusCodes[i] >= 500) acc.Errors++;
+                    cpuServices[svc] = acc;
+                }
+                swCpu.Stop();
+                cpuMs = swCpu.Elapsed.TotalMilliseconds;
+                gpuMs = 0;
+                services = cpuServices;
+            }
+        }
+        else
         {
-            // CPU reference / fallback
             var swCpu = System.Diagnostics.Stopwatch.StartNew();
             var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
             for (int i = 0; i < rowCount; i++)
@@ -316,13 +370,9 @@ public static class Analysis
             }
             swCpu.Stop();
             cpuMs = swCpu.Elapsed.TotalMilliseconds;
+            gpuMs = 0;
             services = cpuServices;
-            if (!useGpu && !gpuForce)
-                reason = "gpu not requested";
-        }
-        else
-        {
-            cpuMs = 0;
+            reason = "gpu not requested";
         }
 
         LastGpuOffloadDecision = new GpuOffloadDecision(
