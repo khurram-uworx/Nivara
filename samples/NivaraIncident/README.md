@@ -276,8 +276,28 @@ unmeasured row.
 - Polars uses idiomatic operations (`rolling_mean`, `group_by`, `join_asof`) rather than porting Nivara's exact algorithm.
 - No warmup passes — each analysis reads fresh from disk/cache.
 
-## Limitations
+## GPU offload
 
+The `analyze` command supports an opt-in GPU path for the grouped aggregation pilot:
+
+```bash
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
+  -- analyze --dataset ./samples/data/incident-lab --scenario A --gpu
+
+# Force the GPU path even when the profitability gate says no (for measurement):
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
+  -- analyze --dataset ./samples/data/incident-lab --scenario A --gpu --gpu-force
+```
+
+- `--gpu` is profitability-gated: the GPU path runs only when the estimated GPU cost
+  (kernel + host/device transfers) is below the estimated CPU cost.
+- `--gpu-force` bypasses the gate for honest measurement runs.
+- Each run prints a `GPU decision:` line: `offloaded`, `reason`, `cpu`/`gpu` ms, and
+  `transfer` bytes.
+- GPU availability is required (OpenCL GPU). On machines without one, `--gpu` reports
+  "gpu unavailable" and falls back to the CPU path.
+
+## Limitations
 - **Boundary operations still materialize** — `Sort`, `GroupBy`, `Join`, `Distinct`, rank-family windows, and broadcast aggregates execute once over concatenated data, so the incident benchmark's Sort-before-window analyses yield a single chunk regardless of `--stream`. Visible via `ExecutionDiagnostics.StreamMaterializationCount`; see `docs/STREAMING.md`.
 - **`NivaraFrameExtensions.GroupBy` simple overload is key-only** — the parameterless `GroupBy(frame, keyColumns)` returns grouped keys only; use the two-argument `GroupBy(frame, keys, aggregations)` overload or typed LINQ for real aggregations.
 - **No learning rate scheduling or advanced query optimization** — straightforward execution, no adaptive strategies.
