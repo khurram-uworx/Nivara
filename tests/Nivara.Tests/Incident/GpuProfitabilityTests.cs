@@ -75,4 +75,29 @@ public class GpuProfitabilityTests
             () => GpuProfitability.CalibrateCpuMs(new[] { 0 }, Array.Empty<int>(), new[] { 1f }, 1, 1),
             Throws.ArgumentException);
     }
+
+    [Test]
+    public void EstimateCpuMs_IncreasesWithRowCount()
+    {
+        double small = GpuProfitability.EstimateCpuMs(10, 1000, 1000);
+        double large = GpuProfitability.EstimateCpuMs(10, 1000, 10000);
+        Assert.That(large, Is.GreaterThan(small));
+    }
+
+    [Test]
+    public void EstimateGpuMs_IncreasesWithTransferBytes()
+    {
+        double small = GpuProfitability.EstimateGpuMs(1000, 1_000);
+        double large = GpuProfitability.EstimateGpuMs(1000, 100_000);
+        Assert.That(large, Is.GreaterThan(small));
+    }
+
+    [Test]
+    public void Decide_FlipsToProfitable_AsCpuEstimateGrows()
+    {
+        var (notProfitable, _, _, _) = GpuProfitability.Decide(true, false, 10, 100);
+        var (profitable, _, _, _) = GpuProfitability.Decide(true, false, 1000, 100);
+        Assert.That(notProfitable, Is.False);
+        Assert.That(profitable, Is.True);
+    }
 }
