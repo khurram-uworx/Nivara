@@ -44,6 +44,12 @@ dotnet run --project samples/NivaraIncident.Cli -- bench-stream --dataset ./samp
 # Kernel vectorization report
 dotnet run --project samples/NivaraIncident.Cli -- bench-kernels --dataset ./samples/data/incident-lab --scenario A
 
+# GPU-vs-CPU grouped aggregation benchmark
+dotnet run --project samples/NivaraIncident.Cli -c Release -- bench-gpu --dataset ./samples/data/incident-lab --scenario A --iterations 5
+
+# Analyze with profitability-gated GPU offload
+dotnet run --project samples/NivaraIncident.Cli -c Release -- analyze --dataset ./samples/data/incident-lab --scenario A --gpu
+
 # Run analyses with chunked streaming output
 dotnet run --project samples/NivaraIncident.Cli -- analyze --dataset ./samples/data/incident-lab --scenario A --stream --chunk-size 50000
 
@@ -68,9 +74,12 @@ dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./samples/
 | `--chunk-size <int>` | `100000` | Rows per chunk (replay and `--stream`) |
 | `--stream` | — | Stream analysis results in chunks (analyze only) |
 | `--benchmark` | — | Time each analysis individually (analyze only) |
-| `bench-stream` | — | Streaming vs eager memory/elapsed sweep (standalone mode) |
-| `bench-kernels` | — | Kernel vectorization visibility report (standalone mode) |
-| `streamix` | — | Run Streamix streaming scenarios (fault-tolerant, windowed, AutoDiff) |
+| `bench-stream` | - | Streaming vs eager memory/elapsed sweep (standalone mode) |
+| `bench-kernels` | - | Kernel vectorization visibility report (standalone mode) |
+| `bench-gpu` | - | GPU-vs-CPU grouped aggregation benchmark (availability-guarded) |
+| `streamix` | - | Run Streamix streaming scenarios (fault-tolerant, windowed, AutoDiff) |
+| `--gpu` | - | Enable profitability-gated GPU offload (pilot: Grouped Aggregation only) |
+| `--gpu-force` | - | Force the GPU path even when the profitability gate says no (measurement only) |
 
 ## What it exercises
 
@@ -216,6 +225,41 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 | **No ternary on `ColumnExpression`** | Cannot write `cond ? litA : litB` in expression trees. | Computed derived columns after `Collect()` or used separate columns. |
 | **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. Filed as [#307](https://github.com/khurram-uworx/Nivara/issues/307). |
 | **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Measured in Phase 4 bench-stream: peak memory reflects full-frame materialization, not chunk-bounded streaming. Filed as [#308](https://github.com/khurram-uworx/Nivara/issues/308). |
+
+## GPU offload (Phase 4 pilot)
+
+The pilot offloads only **Grouped Aggregation** through the Silk (OpenCL) backend. Other
+analyses stay on CPU in this phase.
+
+Profitability rule: the GPU path is chosen only when the estimated GPU cost
+(`EstimatedGpuFixedMs + transfer / EstimatedGpuBytesPerMs + rows * EstimatedGpuMsPerRow`)
+is less than `0.9 * estimated CPU cost`. The decision and its numbers are printed for
+every run.
+
+Commands (run on AC power):
+
+```bash
+# Generate datasets at the sizes used for the curves below
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 10000   --dataset samples/data/bench-gpu-10k  --scenario A
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 100000  --dataset samples/data/bench-gpu-100k --scenario A
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 1000000 --dataset samples/data/bench-gpu-1m   --scenario A
+
+# Measure each size
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-gpu --dataset samples/data/bench-gpu-10k  --scenario A --iterations 5
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-gpu --dataset samples/data/bench-gpu-100k --scenario A --iterations 5
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-gpu --dataset samples/data/bench-gpu-1m   --scenario A --iterations 5
+```
+
+Results (fill in from a human run on AC power):
+
+| Rows | CPU forced (ms) | GPU forced (ms) | GPU/CPU | Decision | Device |
+|------|-----------------|-----------------|---------|----------|--------|
+| 10,000   | TBD | TBD | TBD | TBD | TBD |
+| 100,000  | TBD | TBD | TBD | TBD | TBD |
+| 1,000,000 | TBD | TBD | TBD | TBD | TBD |
+
+`--gpu-force` runs the GPU path even when the gate declines, which is how the GPU-forced
+column above is produced.
 
 ## Performance
 

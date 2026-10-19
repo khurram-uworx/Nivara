@@ -2,6 +2,7 @@ using Nivara;
 using Nivara.Diagnostics;
 using Nivara.Expressions;
 using Nivara.Samples.Incident;
+using Nivara.Silk;
 using System.Diagnostics;
 
 var mode = args.Length > 0 ? args[0] : "";
@@ -52,6 +53,10 @@ switch (mode)
         foreach (var sid in scenarioIds)
             BenchKernels(datasetPath, Scenarios.Get(sid));
         break;
+    case "bench-gpu":
+        foreach (var sid in scenarioIds)
+            BenchGpu(datasetPath, Scenarios.Get(sid), iterations);
+        break;
     case "replay":
         foreach (var sid in scenarioIds)
             await Replay(datasetPath, Scenarios.Get(sid), chunkSize);
@@ -84,8 +89,10 @@ void Generate(string dsPath, string sid, int sc, long rec)
 
 async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bool doBenchmark, int iters, bool useGpu = false, bool gpuForce = false)
 {
-    Console.WriteLine($"Scenario: {sc.Id} — {sc.Name}");
+    Console.WriteLine($"Scenario: {sc.Id} - {sc.Name}");
     Console.WriteLine($"Dataset: {dsPath}");
+    if (useGpu)
+        Console.WriteLine("GPU offload pilot: only Grouped Aggregation uses the GPU; other analyses stay on CPU.");
     Console.WriteLine();
 
     if (doBenchmark)
@@ -137,7 +144,16 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
         RunBenchmarkIteration("Regional Partitioning", iters, warmup,
             () => Analysis.AnalyzeRegionalPartitioning(dsPath, sc));
 
-        RunBenchmarkIteration("Grouped Aggregation", iters, warmup,
+        if (useGpu)
+        {
+            RunBenchmarkIteration("Grouped Agg (CPU forced)", iters, warmup,
+                () => Analysis.AnalyzeGroupedAggregation(dsPath, sc, false, false));
+
+            RunBenchmarkIteration("Grouped Agg (GPU forced)", iters, warmup,
+                () => Analysis.AnalyzeGroupedAggregation(dsPath, sc, true, true));
+        }
+
+        RunBenchmarkIteration(useGpu ? "Grouped Agg (gated)" : "Grouped Aggregation", iters, warmup,
             () => Analysis.AnalyzeGroupedAggregation(dsPath, sc, useGpu, gpuForce));
 
         RunBenchmarkIteration("Typed LINQ Grouped Agg", iters, warmup,
@@ -341,6 +357,79 @@ void BenchKernels(string dsPath, IncidentScenario sc)
     Console.WriteLine("  (Analyses B, E) run outside Nivara kernels and are not measured here.");
 }
 
+void BenchGpu(string dsPath, IncidentScenario sc, int iters)
+{
+    Console.WriteLine($"=== GPU Offload Benchmark: {sc.Id} - {sc.Name} ===");
+    Console.WriteLine($"Dataset: {dsPath}");
+    Console.WriteLine($"Iterations: {iters}");
+    Console.WriteLine($"Margin: {GpuProfitability.Margin}  SampleSize: {GpuProfitability.SampleSize}");
+    Console.WriteLine();
+
+    SilkRuntime runtime;
+    try
+    {
+        runtime = new SilkRuntime();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  no OpenCL GPU available: {ex.Message}");
+        return;
+    }
+
+    using (runtime)
+    {
+        Console.WriteLine($"  Device: {runtime.DeviceName}");
+        Console.WriteLine();
+
+        int warmup = 1;
+        int totalRuns = warmup + iters;
+
+        long rows = 0;
+        var cpuTimes = new double[iters];
+        for (int run = 0; run < totalRuns; run++)
+        {
+            GC.Collect(2, GCCollectionMode.Forced, true);
+            var sw = Stopwatch.StartNew();
+            using var frame = Analysis.AnalyzeGroupedAggregation(dsPath, sc, false, false);
+            sw.Stop();
+            rows = frame.RowCount;
+            if (run >= warmup)
+                cpuTimes[run - warmup] = sw.Elapsed.TotalMilliseconds;
+        }
+
+        var gpuTimes = new double[iters];
+        for (int run = 0; run < totalRuns; run++)
+        {
+            GC.Collect(2, GCCollectionMode.Forced, true);
+            var sw = Stopwatch.StartNew();
+            using var frame = Analysis.AnalyzeGroupedAggregation(dsPath, sc, true, true);
+            sw.Stop();
+            if (run >= warmup)
+                gpuTimes[run - warmup] = sw.Elapsed.TotalMilliseconds;
+        }
+
+        double cpuMedian = Median(cpuTimes);
+        double gpuMedian = Median(gpuTimes);
+        double ratio = cpuMedian > 0 ? gpuMedian / cpuMedian : 0;
+
+        Console.WriteLine($"  Rows: {rows:N0}");
+        Console.WriteLine($"  CPU forced median: {cpuMedian:F1} ms");
+        Console.WriteLine($"  GPU forced median: {gpuMedian:F1} ms");
+        Console.WriteLine($"  GPU/CPU ratio: {ratio:F3}");
+        Console.WriteLine();
+
+        // Gated run for the decision record.
+        Analysis.AnalyzeGroupedAggregation(dsPath, sc, true, false);
+        var decision = Analysis.LastGpuOffloadDecision;
+        if (decision != null)
+        {
+            Console.WriteLine($"  Gated decision: offloaded={decision.Offloaded}");
+            Console.WriteLine($"    reason: {decision.Reason}");
+            Console.WriteLine($"    cpu={decision.CpuMs:F1} ms  gpu={decision.GpuMs:F1} ms  transfer={decision.TransferBytes} bytes");
+        }
+    }
+}
+
 void PrintTopOps(OperationSummary summary)
 {
     if (summary.KernelTypes.Count > 0)
@@ -467,6 +556,7 @@ void PrintUsage()
     Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>] [--gpu] [--gpu-force]");
     Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
+    Console.WriteLine("  NivaraIncident.Cli bench-gpu     --dataset <path> --scenario <A|B|C|D|all> [--iterations <N>]");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
     Console.WriteLine("  NivaraIncident.Cli streamix      --dataset <path> --scenario <A|B|C|D|all> [--chunk-size <N>]");
 }
