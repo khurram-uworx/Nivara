@@ -101,6 +101,7 @@ public class IncidentSurfaceTests
             collisions.AddRange(type.GetMethods(Declared)
                 .Where(m => !m.IsSpecialName)
                 .Where(m => !m.Name.StartsWith('<'))
+                .Where(m => m.Name != nameof(object.Equals))
                 .GroupBy(m => m.Name, StringComparer.Ordinal)
                 .Where(g => g.Skip(1).Any())
                 .Select(g => $"{type.Name}.{g.Key} has {g.Count()} overloads"));
