@@ -1,6 +1,6 @@
 # Plan for issue #443 — GPU offload pilot for NivaraIncident analytics
 
-Status: Phases 0–3 implemented. Phases 4–5 (measurement/reporting and further kernels) are pending.
+Status: Phases 0–4 implemented. Phase 5 (further kernels) pending verdict below.
 
 ## Summary
 
@@ -118,8 +118,18 @@ than re-promoting ILGPU for this issue. Revisit ILGPU only if a kernel needs
 - Phase 3 — done: `Analysis.AnalyzeGroupedAggregation(..., useGpu, gpuForce)` keeps I/O on
   the CPU and switches only the reduction; the decision is published through
   `Analysis.LastGpuOffloadDecision` and printed by the CLI.
-- Phase 4/5 — pending: no GPU-vs-CPU timing curve or results table yet, and the
-  cost model has not been calibrated against a measured GPU run.
+- Phase 4 — done: `bench-gpu` mode, CPU-vs-GPU benchmark split, availability-guarded
+  parity/decision tests, README results table. Measured on Intel Graphics (shared-DRAM
+  iGPU): 10k rows CPU 32.5 ms / GPU 38.4 ms (1.18x); 100k rows 236.3 / 247.9 ms
+  (1.05x); 1M rows 1533.2 / 1474.6 ms (0.96x). The profitability gate reports
+  "not profitable" at all three sizes because its reduction-only cost estimate is
+  poorly calibrated against the measured runs; the end-to-end GPU win is small.
+- Phase 5 verdict: do not extend offload to rolling windows, filter vectors, or
+  sort/join yet. The grouped-aggregation pilot shows at most a ~4% end-to-end win at
+  1M rows on the shared-DRAM iGPU, with losses below that, and the gate's reduction-only
+  estimate is not yet calibrated. Revisit only after recalibrating
+  `EstimatedGpuMsPerRow` against measured reduction timings and confirming a clear
+  speedup on discrete-GPU hardware.
 
 ## Files likely touched
 

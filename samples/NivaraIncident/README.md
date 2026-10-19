@@ -254,9 +254,9 @@ Results (fill in from a human run on AC power):
 
 | Rows | CPU forced (ms) | GPU forced (ms) | GPU/CPU | Decision | Device |
 |------|-----------------|-----------------|---------|----------|--------|
-| 10,000   | TBD | TBD | TBD | TBD | TBD |
-| 100,000  | TBD | TBD | TBD | TBD | TBD |
-| 1,000,000 | TBD | TBD | TBD | TBD | TBD |
+| 10,000   | 32.5  | 38.4  | 1.18  | not profitable | Intel Graphics |
+| 100,000  | 236.3 | 247.9 | 1.05  | not profitable | Intel Graphics |
+| 1,000,000 | 1533.2 | 1474.6 | 0.96 | not profitable | Intel Graphics |
 
 `--gpu-force` runs the GPU path even when the gate declines, which is how the GPU-forced
 column above is produced.
