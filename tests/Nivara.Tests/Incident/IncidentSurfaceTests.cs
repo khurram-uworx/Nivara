@@ -345,6 +345,15 @@ public class IncidentSurfaceTests
                 return Task.CompletedTask;
             },
 
+            [Key(nameof(Analysis), nameof(Analysis.LastGpuOffloadDecision))] = _ =>
+            {
+                using var frame = Analysis.AnalyzeGroupedAggregation(tempDir, scenario);
+                Assert.That(frame.RowCount, Is.GreaterThan(0));
+                Assert.That(Analysis.LastGpuOffloadDecision, Is.Not.Null,
+                    "AnalyzeGroupedAggregation must publish a GpuOffloadDecision");
+                return Task.CompletedTask;
+            },
+
             [Key(nameof(Analysis), nameof(Analysis.AnalyzeGroupedAggregationWithTypedLinq))] = _ =>
             {
                 using var frame = Analysis.AnalyzeGroupedAggregationWithTypedLinq(tempDir, scenario);
