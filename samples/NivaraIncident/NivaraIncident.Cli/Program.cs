@@ -143,6 +143,10 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
         RunBenchmarkIteration("Typed LINQ Grouped Agg", iters, warmup,
             () => Analysis.AnalyzeGroupedAggregationWithTypedLinq(dsPath, sc));
 
+        var benchDecision = Analysis.LastGpuOffloadDecision;
+        if (benchDecision != null)
+            Console.WriteLine($"  GPU decision: offloaded={benchDecision.Offloaded} reason={benchDecision.Reason} cpu={benchDecision.CpuMs:F1}ms gpu={benchDecision.GpuMs:F1}ms transfer={benchDecision.TransferBytes} bytes");
+
         return;
     }
 
@@ -180,6 +184,9 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
     Console.WriteLine();
     Console.WriteLine("=== Grouped Aggregation ===");
     PrintFrameSummary(Analysis.AnalyzeGroupedAggregation(dsPath, sc, useGpu, gpuForce));
+    var groupedDecision = Analysis.LastGpuOffloadDecision;
+    if (groupedDecision != null)
+        Console.WriteLine($"  GPU decision: offloaded={groupedDecision.Offloaded} reason={groupedDecision.Reason} cpu={groupedDecision.CpuMs:F1}ms gpu={groupedDecision.GpuMs:F1}ms transfer={groupedDecision.TransferBytes} bytes");
 
     Console.WriteLine();
     Console.WriteLine("=== Typed LINQ Grouped Aggregation ===");
@@ -457,7 +464,7 @@ void PrintUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  NivaraIncident.Cli generate      --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
-    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>]");
+    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>] [--gpu] [--gpu-force]");
     Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
