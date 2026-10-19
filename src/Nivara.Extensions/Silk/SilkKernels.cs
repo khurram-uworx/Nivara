@@ -114,6 +114,9 @@ internal static class SilkKernels
     // Device-side reduction for causal-LM greedy decode (#663).
     public const string ArgMax = "argmax";
 
+    // Analytics (incident) kernels.
+    public const string GroupedHashReducePartial = "grouped_hash_reduce_partial";
+
     // Vision (conv) kernels.
     public const string Conv2d = "conv2d";
     public const string BatchNormEval = "batchnorm_eval";
@@ -129,6 +132,7 @@ internal static class SilkKernels
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
         RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock, DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
+        GroupedHashReducePartial,
     ];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
@@ -1572,6 +1576,48 @@ internal static class SilkKernels
                 for (uint k = 0; k < qDim; ++k)
                     acc += ctx[k] * Wo[k * hiddenDim + col];
                 out[col] = acc + residual[col];
+            }
+        }
+
+        __kernel void grouped_hash_reduce_partial(
+            __global const int* serviceIds,
+            __global const int* statusCodes,
+            __global const float* durations,
+            __global int* partialCounts,
+            __global int* partialErrors,
+            __global float* partialSums,
+            const uint n,
+            const uint groupCount)
+        {
+            uint gid = get_global_id(0);
+            uint globalSize = get_global_size(0);
+            uint wg = get_group_id(0);
+
+            int localCounts[64];
+            int localErrors[64];
+            float localSums[64];
+            for (uint g = 0; g < groupCount; ++g)
+            {
+                localCounts[g] = 0;
+                localErrors[g] = 0;
+                localSums[g] = 0.0f;
+            }
+
+            for (uint i = gid; i < n; i += globalSize)
+            {
+                uint g = (uint)serviceIds[i];
+                localCounts[g]++;
+                if (statusCodes[i] >= 500)
+                    localErrors[g]++;
+                localSums[g] += durations[i];
+            }
+
+            uint baseOffset = wg * groupCount;
+            for (uint g = 0; g < groupCount; ++g)
+            {
+                partialCounts[baseOffset + g] = localCounts[g];
+                partialErrors[baseOffset + g] = localErrors[g];
+                partialSums[baseOffset + g] = localSums[g];
             }
         }
         """;
