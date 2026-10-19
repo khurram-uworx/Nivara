@@ -263,7 +263,6 @@ public static class Analysis
         double cpuMs = 0;
         double gpuMs = 0;
         long transferBytes = 0;
-        var swCpu = System.Diagnostics.Stopwatch.StartNew();
 
         if (useGpu || gpuForce)
         {
@@ -300,12 +299,10 @@ public static class Analysis
             transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
         }
 
-        swCpu.Stop();
-        cpuMs = swCpu.Elapsed.TotalMilliseconds;
-
         if (!usedGpu)
         {
             // CPU reference / fallback
+            var swCpu = System.Diagnostics.Stopwatch.StartNew();
             var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
             for (int i = 0; i < rowCount; i++)
             {
@@ -317,9 +314,15 @@ public static class Analysis
                 if (statusCodes[i] >= 500) acc.Errors++;
                 cpuServices[svc] = acc;
             }
+            swCpu.Stop();
+            cpuMs = swCpu.Elapsed.TotalMilliseconds;
             services = cpuServices;
             if (!useGpu && !gpuForce)
                 reason = "gpu not requested";
+        }
+        else
+        {
+            cpuMs = 0;
         }
 
         LastGpuOffloadDecision = new GpuOffloadDecision(
