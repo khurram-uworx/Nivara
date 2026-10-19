@@ -3014,6 +3014,7 @@ class Program
         MaxPositionEmbeddings = config.MaxPositionEmbeddings,
         RmsNormEps = config.RmsNormEps,
         RopeTheta = config.RopeTheta,
+        AttentionBias = config.AttentionBias,
     };
 
     static int RunSmolLMSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)

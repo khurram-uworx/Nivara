@@ -25,6 +25,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
     readonly float ropeTheta;
     readonly int seqCap;
     readonly int vocabSize;
+    readonly bool qkvBias;
 
     readonly nint tokEmb;
     readonly nint finalNormW;
@@ -84,6 +85,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         ropeTheta = config.RopeTheta;
         seqCap = maxPos;
         vocabSize = config.VocabSize;
+        qkvBias = config.AttentionBias || tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
         runtime.EnsureAttentionLocalMemory(headDim);
 
         try
@@ -153,7 +155,12 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
-
+            if (qkvBias)
+            {
+                SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
+                SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
+                SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
+            }
             // RoPE in place
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
             SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
@@ -238,7 +245,12 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
-
+            if (qkvBias)
+            {
+                SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
+                SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
+                SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
+            }
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
             SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
 
@@ -297,7 +309,12 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
-
+            if (qkvBias)
+            {
+                SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
+                SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
+                SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
+            }
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
             SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
 
@@ -355,11 +372,11 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.RmsNormGemv(runtime, x.Handle, w.InputNormW,
                 [
-                    new(w.Wq, 0, q.Handle, qDim),
-                    new(w.Wk, 0, k.Handle, kvDim),
-                    new(w.Wv, 0, v.Handle, kvDim),
+                    new(w.Wq, w.QBias, q.Handle, qDim),
+                    new(w.Wk, w.KBias, k.Handle, kvDim),
+                    new(w.Wv, w.VBias, v.Handle, kvDim),
                 ],
-                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+                hasBias: qkvBias, aRows: 1, aCols: hiddenDim, eps: eps);
 
             EnsureRopeTables(position + 1);
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
@@ -433,7 +450,12 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
-
+            if (qkvBias)
+            {
+                SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
+                SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
+                SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
+            }
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
             SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
 
@@ -496,11 +518,11 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.RmsNormGemv(runtime, x.Handle, w.InputNormW,
                 [
-                    new(w.Wq, 0, q.Handle, qDim),
-                    new(w.Wk, 0, k.Handle, kvDim),
-                    new(w.Wv, 0, v.Handle, kvDim),
+                    new(w.Wq, w.QBias, q.Handle, qDim),
+                    new(w.Wk, w.KBias, k.Handle, kvDim),
+                    new(w.Wv, w.VBias, v.Handle, kvDim),
                 ],
-                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+                hasBias: qkvBias, aRows: 1, aCols: hiddenDim, eps: eps);
 
             // RoPE at position
             EnsureRopeTables(position + 1);
@@ -593,6 +615,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         public nint InputNormW;
         public nint PostNormW;
         public nint Wq, Wk, Wv, Wo;
+        public nint QBias, KBias, VBias;
         public nint Wgate, Wup, Wdown;
 
         public LayerWeights(SilkSmolLMGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, int i)
@@ -604,6 +627,12 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             Wk = UploadT(owner, tensors, $"{p}.self_attn.k_proj.weight");
             Wv = UploadT(owner, tensors, $"{p}.self_attn.v_proj.weight");
             Wo = UploadT(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            if (owner.qkvBias)
+            {
+                QBias = UploadBias(owner, tensors, $"{p}.self_attn.q_proj.bias");
+                KBias = UploadBias(owner, tensors, $"{p}.self_attn.k_proj.bias");
+                VBias = UploadBias(owner, tensors, $"{p}.self_attn.v_proj.bias");
+            }
             Wgate = UploadT(owner, tensors, $"{p}.mlp.gate_proj.weight");
             Wup = UploadT(owner, tensors, $"{p}.mlp.up_proj.weight");
             Wdown = UploadT(owner, tensors, $"{p}.mlp.down_proj.weight");
@@ -625,10 +654,21 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             return buf;
         }
 
+        static nint UploadBias(SilkSmolLMGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
+        {
+            var t = WeightLayout.Req(tensors, key, "Silk");
+            nint buf = owner.runtime.Allocate(t.Data.Length);
+            owner.runtime.Upload(buf, t.Data);
+            return buf;
+        }
+
         public void Dispose(SilkRuntime rt)
         {
             rt.Release(InputNormW); rt.Release(PostNormW);
             rt.Release(Wq); rt.Release(Wk); rt.Release(Wv); rt.Release(Wo);
+            if (QBias != 0) rt.Release(QBias);
+            if (KBias != 0) rt.Release(KBias);
+            if (VBias != 0) rt.Release(VBias);
             rt.Release(Wgate); rt.Release(Wup); rt.Release(Wdown);
         }
     }
@@ -645,4 +685,5 @@ public sealed record SmolLMConfig
     public int MaxPositionEmbeddings { get; init; } = 2048;
     public float RmsNormEps { get; init; } = 1e-5f;
     public float RopeTheta { get; init; } = 10000f;
+    public bool AttentionBias { get; init; } = false;
 }
