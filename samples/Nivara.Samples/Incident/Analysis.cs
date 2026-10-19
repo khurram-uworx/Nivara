@@ -301,7 +301,7 @@ public static class Analysis
                 if (!cpuServices.TryGetValue(svc, out var acc))
                     acc = (0, 0, 0);
                 acc.Total++;
-                acc.TotalDuration += durations[i];
+                acc.TotalDuration += (double)durationCol.GetValue(i)!;
                 if (statusCodes[i] >= 500) acc.Errors++;
                 cpuServices[svc] = acc;
             }
