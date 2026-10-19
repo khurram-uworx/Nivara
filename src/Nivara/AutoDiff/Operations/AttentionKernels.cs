@@ -455,112 +455,156 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
             throw new ArgumentOutOfRangeException(nameof(kCache));
         if (output.Length < numHeads * headDim) throw new ArgumentOutOfRangeException(nameof(output));
 
-        var scores = ArrayPool<T>.Shared.Rent(Math.Max(kvLen, 1));
-        try
+        bool floatVectors = typeof(T) == typeof(float)
+            && (Vector512.IsHardwareAccelerated || Vector.IsHardwareAccelerated);
+        output.Clear();
+
+        if (floatVectors)
         {
-            var scoresSpan = scores.AsSpan(0, kvLen);
-            // Float accelerates on any SIMD-capable runtime; otherwise the scalar
-            // loop below (the generic fallback) handles every T.
-            bool floatVectors = typeof(T) == typeof(float)
-                && (Vector512.IsHardwareAccelerated || Vector.IsHardwareAccelerated);
-            output.Clear();
+            var qF = MemoryMarshal.Cast<T, float>(q);
+            var kF = MemoryMarshal.Cast<T, float>(kCache);
+            var vF = MemoryMarshal.Cast<T, float>(vCache);
+            var outF = MemoryMarshal.Cast<T, float>(output);
+            float scaleF = float.CreateChecked(scale);
+
+            for (int qh = 0; qh < numHeads; qh++)
+            {
+                int kvHead = qh / repeat;
+                int kvBase = kvHead * headDim;
+                var qHeadF = qF.Slice(qh * headDim, headDim);
+                var outHeadF = outF.Slice(qh * headDim, headDim);
+                outHeadF.Clear();
+
+                float m = float.NegativeInfinity;
+                float sum = 0f;
+
+                for (int j = 0; j < kvLen; j++)
+                {
+                    float s = scaleF * TensorPrimitives.Dot(qHeadF, kF.Slice(j * kvWidth + kvBase, headDim));
+
+                    if (s > m)
+                    {
+                        if (m != float.NegativeInfinity)
+                        {
+                            float corr = MathF.Exp(m - s);
+                            sum *= corr;
+                            int d = 0;
+                            if (Vector512.IsHardwareAccelerated)
+                            {
+                                for (; d + Vector512<float>.Count <= headDim; d += Vector512<float>.Count)
+                                {
+                                    var acc = Vector512.LoadUnsafe(ref MemoryMarshal.GetReference(outHeadF), (nuint)d);
+                                    acc *= corr;
+                                    Vector512.StoreUnsafe(acc, ref MemoryMarshal.GetReference(outHeadF), (nuint)d);
+                                }
+                            }
+                            else
+                            {
+                                for (; d + Vector<float>.Count <= headDim; d += Vector<float>.Count)
+                                {
+                                    var acc = Vector.LoadUnsafe(ref MemoryMarshal.GetReference(outHeadF), (nuint)d);
+                                    acc *= corr;
+                                    Vector.StoreUnsafe(acc, ref MemoryMarshal.GetReference(outHeadF), (nuint)d);
+                                }
+                            }
+                            for (; d < headDim; d++)
+                                outHeadF[d] *= corr;
+                        }
+                        m = s;
+                    }
+
+                    float w = MathF.Exp(s - m);
+                    sum += w;
+
+                    int vOffset = j * kvWidth + kvBase;
+                    int d2 = 0;
+                    if (Vector512.IsHardwareAccelerated)
+                    {
+                        for (; d2 + Vector512<float>.Count <= headDim; d2 += Vector512<float>.Count)
+                        {
+                            var acc = Vector512.LoadUnsafe(ref MemoryMarshal.GetReference(outHeadF), (nuint)d2);
+                            var vw = Vector512.Create(w);
+                            var vv = Vector512.LoadUnsafe(ref MemoryMarshal.GetReference(vF), (nuint)(vOffset + d2));
+                            acc = Vector512.FusedMultiplyAdd(vw, vv, acc);
+                            Vector512.StoreUnsafe(acc, ref MemoryMarshal.GetReference(outHeadF), (nuint)d2);
+                        }
+                    }
+                    else
+                    {
+                        for (; d2 + Vector<float>.Count <= headDim; d2 += Vector<float>.Count)
+                        {
+                            var acc = Vector.LoadUnsafe(ref MemoryMarshal.GetReference(outHeadF), (nuint)d2);
+                            var vw = new Vector<float>(w);
+                            var vv = Vector.LoadUnsafe(ref MemoryMarshal.GetReference(vF), (nuint)(vOffset + d2));
+                            acc = Vector.FusedMultiplyAdd(vw, vv, acc);
+                            Vector.StoreUnsafe(acc, ref MemoryMarshal.GetReference(outHeadF), (nuint)d2);
+                        }
+                    }
+                    for (; d2 < headDim; d2++)
+                        outHeadF[d2] += w * vF[vOffset + d2];
+                }
+
+                if (m == float.NegativeInfinity)
+                {
+                    outHeadF.Clear();
+                }
+                else
+                {
+                    for (int d = 0; d < headDim; d++)
+                        outHeadF[d] /= sum;
+                }
+            }
+        }
+        else
+        {
             for (int qh = 0; qh < numHeads; qh++)
             {
                 int kvHead = qh / repeat;
                 var qHead = q.Slice(qh * headDim, headDim);
-                for (int j = 0; j < kvLen; j++)
-                    scoresSpan[j] = scale * TensorPrimitives.Dot(qHead, kCache.Slice(j * kvWidth + kvHead * headDim, headDim));
-                SoftmaxRows(scoresSpan, 1, kvLen);
                 var outHead = output.Slice(qh * headDim, headDim);
-                if (floatVectors)
+                outHead.Clear();
+
+                T m = T.NegativeInfinity;
+                T sum = T.Zero;
+
+                for (int j = 0; j < kvLen; j++)
                 {
-                    var scoresF = MemoryMarshal.Cast<T, float>(scoresSpan);
-                    var vCacheF = MemoryMarshal.Cast<T, float>(vCache);
-                    var outHeadF = MemoryMarshal.Cast<T, float>(outHead);
-                    if (Vector512.IsHardwareAccelerated)
-                        VPhaseFloat512(scoresF, vCacheF, outHeadF, kvLen, kvWidth, kvHead, headDim);
-                    else
-                        VPhaseFloat(scoresF, vCacheF, outHeadF, kvLen, kvWidth, kvHead, headDim);
+                    var kRow = kCache.Slice(j * kvWidth + kvHead * headDim, headDim);
+                    T s = scale * TensorPrimitives.Dot(qHead, kRow);
+
+                    if (s > m)
+                    {
+                        if (m != T.NegativeInfinity)
+                        {
+                            T corr = T.Exp(m - s);
+                            sum *= corr;
+                            for (int d = 0; d < headDim; d++)
+                                outHead[d] *= corr;
+                        }
+                        m = s;
+                    }
+
+                    T w = T.Exp(s - m);
+                    sum += w;
+
+                    var vRow = vCache.Slice(j * kvWidth + kvHead * headDim, headDim);
+                    for (int d = 0; d < headDim; d++)
+                        outHead[d] += w * vRow[d];
+                }
+
+                if (m == T.NegativeInfinity)
+                {
+                    outHead.Clear();
                 }
                 else
                 {
-                    for (int j = 0; j < kvLen; j++)
-                    {
-                        var vRow = vCache.Slice(j * kvWidth + kvHead * headDim, headDim);
-                        T w = scoresSpan[j];
-                        for (int d = 0; d < headDim; d++)
-                            outHead[d] += w * vRow[d];
-                    }
+                    for (int d = 0; d < headDim; d++)
+                        outHead[d] /= sum;
                 }
             }
         }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(scores);
-        }
     }
 
-    /// <summary>Vector512 (AVX-512) V-phase: each 16-lane block of the head
-    /// accumulates across all KV rows in one zmm register via broadcast-FMA.
-    /// Tail (headDim not a multiple of 16) is handled scalar.</summary>
-    static void VPhaseFloat512(ReadOnlySpan<float> scores, ReadOnlySpan<float> vCache, Span<float> outHead, int kvLen, int kvWidth, int kvHead, int headDim)
-    {
-        int kvBase = kvHead * headDim;
-        int width = Vector512<float>.Count;
-        ref float vRef = ref MemoryMarshal.GetReference(vCache);
-        ref float oRef = ref MemoryMarshal.GetReference(outHead);
-        int d = 0;
-        for (; d + width <= headDim; d += width)
-        {
-            var acc = Vector512<float>.Zero;
-            for (int j = 0; j < kvLen; j++)
-            {
-                var wVec = Vector512.Create(scores[j]);
-                var vRow = Vector512.LoadUnsafe(ref vRef, (nuint)(j * kvWidth + kvBase + d));
-                acc = Vector512.FusedMultiplyAdd(wVec, vRow, acc);
-            }
-            Vector512.StoreUnsafe(acc, ref oRef, (nuint)d);
-        }
-        for (; d < headDim; d++)
-        {
-            float s = 0;
-            for (int j = 0; j < kvLen; j++)
-                s += scores[j] * vCache[j * kvWidth + kvBase + d];
-            outHead[d] = s;
-        }
-    }
-
-    /// <summary>Portable variable-width SIMD V-phase (<see cref="Vector{T}"/>, sized
-    /// to the host — SSE2/AVX2/NEON on non-AVX-512 machines). Same d-blocked
-    /// broadcast-FMA structure as the Vector512 kernel.</summary>
-    static void VPhaseFloat(ReadOnlySpan<float> scores, ReadOnlySpan<float> vCache, Span<float> outHead, int kvLen, int kvWidth, int kvHead, int headDim)
-    {
-        int kvBase = kvHead * headDim;
-        int width = Vector<float>.Count;
-        ref float vRef = ref MemoryMarshal.GetReference(vCache);
-        ref float oRef = ref MemoryMarshal.GetReference(outHead);
-        int d = 0;
-        for (; d + width <= headDim; d += width)
-        {
-            var acc = Vector<float>.Zero;
-            for (int j = 0; j < kvLen; j++)
-            {
-                var wVec = new Vector<float>(scores[j]);
-                var vRow = Vector.LoadUnsafe(ref vRef, (nuint)(j * kvWidth + kvBase + d));
-                acc = Vector.FusedMultiplyAdd(wVec, vRow, acc);
-            }
-            Vector.StoreUnsafe(acc, ref oRef, (nuint)d);
-        }
-        for (; d < headDim; d++)
-        {
-            float s = 0;
-            for (int j = 0; j < kvLen; j++)
-                s += scores[j] * vCache[j * kvWidth + kvBase + d];
-            outHead[d] = s;
-        }
-    }
-
-    /// <summary>
     /// Batched (multi-row) GQA prefill attention over a chunk of <c>qLen</c> rows with a
     /// causal mask, mirroring <see cref="DecodeAttention"/>'s no-materialization contract.
     ///

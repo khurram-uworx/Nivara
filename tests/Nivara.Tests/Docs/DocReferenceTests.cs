@@ -40,7 +40,7 @@ public class DocReferenceTests
     /// <c>tests/Nivara.Tests/Incident/GpuIncidentTests.cs</c>, and
     /// <c>tests/Nivara.Tests/Incident/GpuProfitabilityTests.cs</c>.
     /// </summary>
-    const int ExpectedFileCount = 729;
+    const int ExpectedFileCount = 730;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 127;

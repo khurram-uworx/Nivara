@@ -66,8 +66,35 @@ public class LlamaCausalKVCacheTests
 
         CompareCachedVsFull(model, tokens);
     }
-}
 
+    [Test]
+    public void LlamaKVCache_MaxCapacity_PreallocatesAndBlocksGrowth()
+    {
+        using var cache = new LlamaKVCache<float>(2, 16, maxCapacity: 32);
+        Assert.That(cache.Capacity, Is.EqualTo(32));
+        Assert.That(cache.MaxCapacity, Is.EqualTo(32));
+        Assert.Throws<ArgumentOutOfRangeException>(() => cache.Ensure(33));
+        Assert.That(cache.Capacity, Is.EqualTo(32));
+    }
+
+    [Test]
+    public void LlamaKVCache_DefaultCapacity_GrowsAsBefore()
+    {
+        using var cache = new LlamaKVCache<float>(2, 16, initialCapacity: 2);
+        Assert.That(cache.Capacity, Is.EqualTo(2));
+        cache.Ensure(5);
+        Assert.That(cache.Capacity, Is.GreaterThanOrEqualTo(5));
+    }
+
+    [Test]
+    public void LlamaKVCache_Reset_PreservesPreallocatedCapacity()
+    {
+        using var cache = new LlamaKVCache<float>(2, 16, maxCapacity: 32);
+        cache.Reset();
+        Assert.That(cache.Capacity, Is.EqualTo(32));
+    }
+
+}
 [TestFixture]
 public class SamplingTests
 {

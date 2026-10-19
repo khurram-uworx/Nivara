@@ -188,7 +188,16 @@ static class TensorsHelper
             try
             {
                 if (parallel)
-                    Parallel.For(0, aRows, i => MultiplyRowFloat(aCopy!, bT, result, i, aCols, bCols));
+                {
+                    int rowTiles = (aRows + 31) / 32;
+                    Parallel.For(0, rowTiles, tileIndex =>
+                    {
+                        int rowStart = tileIndex * 32;
+                        int rowEnd = Math.Min(rowStart + 32, aRows);
+                        for (int i = rowStart; i < rowEnd; i++)
+                            MultiplyRowFloat(aCopy!, bT, result, i, aCols, bCols);
+                    });
+                }
                 else
                     for (int i = 0; i < aRows; i++)
                         MultiplyRowFloat(a, bT, result, i, aCols, bCols);
@@ -223,7 +232,16 @@ static class TensorsHelper
             try
             {
                 if (parallel)
-                    Parallel.For(0, aRows, i => MultiplyRowDouble(aCopy!, bT, result, i, aCols, bCols));
+                {
+                    int rowTiles = (aRows + 31) / 32;
+                    Parallel.For(0, rowTiles, tileIndex =>
+                    {
+                        int rowStart = tileIndex * 32;
+                        int rowEnd = Math.Min(rowStart + 32, aRows);
+                        for (int i = rowStart; i < rowEnd; i++)
+                            MultiplyRowDouble(aCopy!, bT, result, i, aCols, bCols);
+                    });
+                }
                 else
                     for (int i = 0; i < aRows; i++)
                         MultiplyRowDouble(a, bT, result, i, aCols, bCols);
@@ -258,7 +276,16 @@ static class TensorsHelper
             try
             {
                 if (parallel)
-                    Parallel.For(0, aRows, i => MultiplyRowScalar(aCopy!, bT, result, i, aCols, bCols));
+                {
+                    int rowTiles = (aRows + 31) / 32;
+                    Parallel.For(0, rowTiles, tileIndex =>
+                    {
+                        int rowStart = tileIndex * 32;
+                        int rowEnd = Math.Min(rowStart + 32, aRows);
+                        for (int i = rowStart; i < rowEnd; i++)
+                            MultiplyRowScalar(aCopy!, bT, result, i, aCols, bCols);
+                    });
+                }
                 else
                     for (int i = 0; i < aRows; i++)
                         MultiplyRowScalar(a, bT, result, i, aCols, bCols);
