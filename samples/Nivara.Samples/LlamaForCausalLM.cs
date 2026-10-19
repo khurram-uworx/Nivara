@@ -335,7 +335,7 @@ public sealed record LlamaConfig : LLamaConfigLike
     public float RmsNormEps { get; init; } = 1e-5f;
     public float RopeTheta { get; init; } = 10000f;
     public bool TieWordEmbeddings { get; init; } = true;
-    public int BosTokenId { get; init; } = 1;
+    public bool AttentionBias { get; init; } = true;    public int BosTokenId { get; init; } = 1;
     public int EosTokenId { get; init; } = 2;
     public int PadTokenId { get; init; } = 2;
     public string HiddenAct { get; init; } = "silu";
@@ -380,7 +380,7 @@ public sealed record LlamaConfig : LLamaConfigLike
         if (pascal == "EosTokenId") return "eos_token_id";
         if (pascal == "PadTokenId") return "pad_token_id";
         if (pascal == "HiddenAct") return "hidden_act";
-        return pascal.ToLowerInvariant();
+        if (pascal == "AttentionBias") return "attention_bias";        return pascal.ToLowerInvariant();
     }
 }
 

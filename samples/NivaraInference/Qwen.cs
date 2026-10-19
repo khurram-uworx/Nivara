@@ -288,9 +288,9 @@ public static class Qwen
     }
 
     /// <summary>Fabricates the exact tensor keys <see cref="LlamaLoader.Load{TModel, TWeight}"/>
-    /// expects (including the q/k/v biases so Qwen's qkvBias inference engages).</summary>
-    static Dictionary<string, (float[] Data, int[] Shape)> SynthesizeTensors(LlamaConfig config)
-    {
+    /// expects. q/k/v biases are emitted only when <see cref="LlamaConfig.AttentionBias"/>
+    /// is true (Qwen-style); SmolLM/Llama checkpoints have none.</summary>
+    public static Dictionary<string, (float[] Data, int[] Shape)> SynthesizeTensors(LlamaConfig config)    {
         var tensors = new Dictionary<string, (float[] Data, int[] Shape)>();
         int h = config.HiddenSize;
         int kvHidden = config.NumKeyValueHeads * (h / config.NumAttentionHeads);
@@ -302,12 +302,14 @@ public static class Qwen
             AddSynthetic(tensors, $"{p}.input_layernorm.weight", h);
             AddSynthetic(tensors, $"{p}.post_attention_layernorm.weight", h);
             AddSynthetic(tensors, $"{p}.self_attn.q_proj.weight", h, h);
-            AddSynthetic(tensors, $"{p}.self_attn.q_proj.bias", h);
             AddSynthetic(tensors, $"{p}.self_attn.k_proj.weight", kvHidden, h);
-            AddSynthetic(tensors, $"{p}.self_attn.k_proj.bias", kvHidden);
             AddSynthetic(tensors, $"{p}.self_attn.v_proj.weight", kvHidden, h);
-            AddSynthetic(tensors, $"{p}.self_attn.v_proj.bias", kvHidden);
-            AddSynthetic(tensors, $"{p}.self_attn.o_proj.weight", h, h);
+            if (config.AttentionBias)
+            {
+                AddSynthetic(tensors, $"{p}.self_attn.q_proj.bias", h);
+                AddSynthetic(tensors, $"{p}.self_attn.k_proj.bias", kvHidden);
+                AddSynthetic(tensors, $"{p}.self_attn.v_proj.bias", kvHidden);
+            }            AddSynthetic(tensors, $"{p}.self_attn.o_proj.weight", h, h);
             AddSynthetic(tensors, $"{p}.mlp.gate_proj.weight", config.IntermediateSize, h);
             AddSynthetic(tensors, $"{p}.mlp.up_proj.weight", config.IntermediateSize, h);
             AddSynthetic(tensors, $"{p}.mlp.down_proj.weight", h, config.IntermediateSize);
