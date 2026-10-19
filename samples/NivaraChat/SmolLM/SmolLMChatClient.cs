@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.Samples;
+using NivaraChat.Shared;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -36,6 +37,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
     readonly float topP;
     readonly bool useKvCache;
     readonly Random rng;
+    readonly TokenizePrefixCache tokenizeCache = new();
     readonly int numLayers;
     readonly int kvWidth;
 
@@ -69,6 +71,8 @@ internal sealed class SmolLMChatClient<T> : IChatClient
     public ChatClientMetadata? Metadata { get; } =
         new ChatClientMetadata("Nivara", null, "SmolLM-135M-Instruct (LlamaForCausalLM + GPT-2 BPE)");
 
+    public int TokenizeCacheHits => tokenizeCache.Hits;
+
     public object? GetService(Type serviceType, object? key = null) => null;
 
     public Task<ChatResponse> GetResponseAsync(
@@ -86,7 +90,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(EncodePrompt(prompt));
+        var ids = new List<int>(tokenizeCache.Encode(prompt, p => EncodePrompt(p)));
 
         using var cache = useKvCache
             ? new LlamaKVCache<T>(numLayers, kvWidth)
@@ -131,7 +135,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
     string Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
     {
         var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(EncodePrompt(prompt));
+        var ids = new List<int>(tokenizeCache.Encode(prompt, p => EncodePrompt(p)));
 
         using var cache = useKvCache
             ? new LlamaKVCache<T>(numLayers, kvWidth)
@@ -187,77 +191,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         if (lastRow.Length < vocab)
             lastRow = lastRow[..vocab];
 
-        if (isGreedy)
-            return ArgMax(lastRow, vocab);
-
-        // Temperature-scaled softmax with numeric stability (subtract max).
-        var exp = new double[vocab];
-        double max = double.CreateChecked(lastRow[0]);
-        for (int i = 1; i < vocab; i++)
-        {
-            double v = double.CreateChecked(lastRow[i]);
-            if (v > max) max = v;
-        }
-
-        double sum = 0;
-        for (int i = 0; i < vocab; i++)
-        {
-            double v = double.CreateChecked(lastRow[i]);
-            exp[i] = Math.Exp((v - max) / temperature);
-            sum += exp[i];
-        }
-
-        if (sum <= 0 || !double.IsFinite(sum))
-            return ArgMax(lastRow, vocab);
-
-        // Normalize to probabilities.
-        for (int i = 0; i < vocab; i++)
-            exp[i] /= sum;
-
-        // Optional top-p (nucleus) filtering: keep only the smallest set of tokens whose
-        // cumulative probability exceeds topP; renormalize and sample from those.
-        if (topP < 1f)
-        {
-            var order = new int[vocab];
-            for (int i = 0; i < vocab; i++) order[i] = i;
-            Array.Sort(order, (a, b) => exp[b].CompareTo(exp[a]));
-
-            double cum = 0;
-            int cut = vocab;
-            for (int i = 0; i < vocab; i++)
-            {
-                cum += exp[order[i]];
-                if (cum >= topP)
-                {
-                    cut = i + 1;
-                    break;
-                }
-            }
-
-            double keptSum = 0;
-            for (int i = 0; i < cut; i++)
-                keptSum += exp[order[i]];
-
-            double r = rng.NextDouble() * keptSum;
-            double acc = 0;
-            for (int i = 0; i < cut; i++)
-            {
-                acc += exp[order[i]];
-                if (r <= acc)
-                    return order[i];
-            }
-            return order[0];
-        }
-
-        double rFull = rng.NextDouble() * sum;
-        double accFull = 0;
-        for (int i = 0; i < vocab; i++)
-        {
-            accFull += exp[i];
-            if (rFull <= accFull)
-                return i;
-        }
-        return ArgMax(lastRow, vocab);
+        return TokenSampling.Sample(lastRow, vocab, isGreedy ? 0f : temperature, isGreedy ? 1f : topP, rng);
     }
 
     /// <summary>Returns the model's final-position logits (<c>[vocab]</c>) as a span.</summary>
@@ -270,22 +204,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         return offset >= 0 && span.Length >= offset + vocab ? span.Slice(offset, vocab) : span;
     }
 
-    /// <summary>Returns the argmax vocabulary index of the final-position logits.</summary>
-    static int ArgMax(ReadOnlySpan<T> lastRow, int vocab)
-    {
-        int best = 0;
-        double bestValue = double.CreateChecked(lastRow[0]);
-        for (int i = 1; i < vocab; i++)
-        {
-            double v = double.CreateChecked(lastRow[i]);
-            if (v > bestValue)
-            {
-                bestValue = v;
-                best = i;
-            }
-        }
-        return best;
-    }
+
 
     /// <summary>
     /// Encodes the rendered prompt into token ids, keeping special tokens (<c>&lt;|im_start|&gt;</c>,
