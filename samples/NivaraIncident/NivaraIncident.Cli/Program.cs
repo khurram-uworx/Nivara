@@ -419,7 +419,7 @@ void BenchGpu(string dsPath, IncidentScenario sc, int iters)
         Console.WriteLine();
 
         // Gated run for the decision record.
-        Analysis.AnalyzeGroupedAggregation(dsPath, sc, true, false);
+        using (Analysis.AnalyzeGroupedAggregation(dsPath, sc, true, false)) { }
         var decision = Analysis.LastGpuOffloadDecision;
         if (decision != null)
         {
