@@ -415,7 +415,7 @@ public class InferenceCliArgumentTests
     public void SyntheticWeights_OutsideScope_Rejected()
     {
         AssertRejected(Run("minilm", "--synthetic-weights"),
-            "is only supported for the qwen benchmark mode");
+            "is only supported for the qwen and smollm benchmark modes");
         AssertRejected(Run("qwen", "distill", "--synthetic-weights"),
             "supports only the 'benchmark' mode");
     }

@@ -13,6 +13,8 @@ int chunkSize = 100_000;
 bool stream = false;
 bool benchmark = false;
 int iterations = 5;
+bool gpu = false;
+bool gpuForce = false;
 
 for (int i = 1; i < args.Length; i++)
 {
@@ -24,6 +26,8 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--iterations" && i + 1 < args.Length) iterations = int.Parse(args[++i]);
     else if (args[i] == "--stream") stream = true;
     else if (args[i] == "--benchmark") benchmark = true;
+    else if (args[i] == "--gpu") gpu = true;
+    else if (args[i] == "--gpu-force") gpuForce = true;
 }
 
 var scenarioIds = scenarioId.Equals("all", StringComparison.OrdinalIgnoreCase)
@@ -38,7 +42,7 @@ switch (mode)
         break;
     case "analyze":
         foreach (var sid in scenarioIds)
-            await Analyze(datasetPath, Scenarios.Get(sid), stream, chunkSize, benchmark, iterations);
+            await Analyze(datasetPath, Scenarios.Get(sid), stream, chunkSize, benchmark, iterations, gpu, gpuForce);
         break;
     case "bench-stream":
         foreach (var sid in scenarioIds)
@@ -78,7 +82,7 @@ void Generate(string dsPath, string sid, int sc, long rec)
     Console.WriteLine($"Output: {dsPath}");
 }
 
-async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bool doBenchmark, int iters)
+async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bool doBenchmark, int iters, bool useGpu = false, bool gpuForce = false)
 {
     Console.WriteLine($"Scenario: {sc.Id} — {sc.Name}");
     Console.WriteLine($"Dataset: {dsPath}");
@@ -134,10 +138,14 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
             () => Analysis.AnalyzeRegionalPartitioning(dsPath, sc));
 
         RunBenchmarkIteration("Grouped Aggregation", iters, warmup,
-            () => Analysis.AnalyzeGroupedAggregation(dsPath, sc));
+            () => Analysis.AnalyzeGroupedAggregation(dsPath, sc, useGpu, gpuForce));
 
         RunBenchmarkIteration("Typed LINQ Grouped Agg", iters, warmup,
             () => Analysis.AnalyzeGroupedAggregationWithTypedLinq(dsPath, sc));
+
+        var benchDecision = Analysis.LastGpuOffloadDecision;
+        if (benchDecision != null)
+            Console.WriteLine($"  GPU decision: offloaded={benchDecision.Offloaded} reason={benchDecision.Reason} cpu={benchDecision.CpuMs:F1}ms gpu={benchDecision.GpuMs:F1}ms transfer={benchDecision.TransferBytes} bytes");
 
         return;
     }
@@ -175,7 +183,10 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
 
     Console.WriteLine();
     Console.WriteLine("=== Grouped Aggregation ===");
-    PrintFrameSummary(Analysis.AnalyzeGroupedAggregation(dsPath, sc));
+    PrintFrameSummary(Analysis.AnalyzeGroupedAggregation(dsPath, sc, useGpu, gpuForce));
+    var groupedDecision = Analysis.LastGpuOffloadDecision;
+    if (groupedDecision != null)
+        Console.WriteLine($"  GPU decision: offloaded={groupedDecision.Offloaded} reason={groupedDecision.Reason} cpu={groupedDecision.CpuMs:F1}ms gpu={groupedDecision.GpuMs:F1}ms transfer={groupedDecision.TransferBytes} bytes");
 
     Console.WriteLine();
     Console.WriteLine("=== Typed LINQ Grouped Aggregation ===");
@@ -453,7 +464,7 @@ void PrintUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  NivaraIncident.Cli generate      --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
-    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>]");
+    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>] [--gpu] [--gpu-force]");
     Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");

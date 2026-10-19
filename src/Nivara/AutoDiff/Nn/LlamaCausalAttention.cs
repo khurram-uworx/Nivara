@@ -17,6 +17,7 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     readonly int numHeads;
     readonly int numKeyValueHeads;
     readonly int headDim;
+    readonly bool qkvBias;
 
     /// <summary>Gets the query projection linear.</summary>
     public Linear<T> QProj { get; }
@@ -38,6 +39,9 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     public int NumKeyValueHeads => numKeyValueHeads;
     /// <summary>Gets the per-head dimension.</summary>
     public int HeadDim => headDim;
+
+    /// <summary>Gets whether the query/key/value projections carry a bias vector.</summary>
+    public bool QkvBias => qkvBias;
     /// <summary>Gets the rotary position embedding tables (fused-kernel path).</summary>
     internal RotaryEmbedding<T> Rotary => rotary;
 
@@ -71,6 +75,7 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         this.hiddenSize = hiddenSize;
         this.numHeads = numHeads;
         this.numKeyValueHeads = numKeyValueHeads;
+        this.qkvBias = qkvBias;
         headDim = hiddenSize / numHeads;
         attnScale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
 

@@ -21,6 +21,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     internal readonly RMSNorm<T> finalNorm;
     internal readonly int vocabSize;
     internal readonly bool tieWordEmbeddings;
+    internal readonly bool qkvBias;
 
     // Fused decode ping-pong scratch (inference-only; not registered with the module system).
     T[]? fusedH0;
@@ -31,6 +32,10 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
 
     /// <summary>Gets whether the LM head reuses the input embedding weights.</summary>
     public bool TieWordEmbeddings => tieWordEmbeddings;
+
+    /// <summary>Gets whether the self-attention query/key/value projections carry a bias
+    /// (Qwen2-style models; canonical Llama/SmolLM do not).</summary>
+    public bool QkvBias => qkvBias;
 
     public LlamaForCausalLM(
         int vocabSize,
@@ -47,6 +52,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     {
         this.vocabSize = vocabSize;
         this.tieWordEmbeddings = tieWordEmbeddings;
+        this.qkvBias = qkvBias;
 
         Embed = new Embedding<T>(vocabSize, hiddenSize);
         layers = new LlamaDecoderBlock<T>[numHiddenLayers];
@@ -400,9 +406,11 @@ public static class LlamaLoader
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         // Qwen2-style checkpoints carry bias on the query/key/value projections; canonical
-        // Llama/SmolLM do not. The checkpoint is authoritative — mirror transformers' inference
-        // of use_qkv_bias from the loaded weights rather than requiring a config flag.
-        bool qkvBias = tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
+        // Llama/SmolLM do not. Honor an explicit config flag in addition to tensor presence so a
+        // config that declares bias but ships tensors under alternate naming still loads, while
+        // configs that declare no bias remain unaffected. Tensor presence keeps real checkpoints
+        // authoritative.
+        bool qkvBias = config.AttentionBias || tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
 
         var model = new LlamaForCausalLM<TModel>(
             config.VocabSize,
@@ -457,5 +465,6 @@ public interface LLamaConfigLike
     int MaxPositionEmbeddings { get; }
     float RopeTheta { get; }
     bool TieWordEmbeddings { get; }
+    bool AttentionBias { get; }
 }
 
