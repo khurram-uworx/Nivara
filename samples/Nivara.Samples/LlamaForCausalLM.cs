@@ -406,9 +406,11 @@ public static class LlamaLoader
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         // Qwen2-style checkpoints carry bias on the query/key/value projections; canonical
-        // Llama/SmolLM do not. The checkpoint is authoritative — mirror transformers' inference
-        // of use_qkv_bias from the loaded weights rather than requiring a config flag.
-        bool qkvBias = tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
+        // Llama/SmolLM do not. Honor an explicit config flag in addition to tensor presence so a
+        // config that declares bias but ships tensors under alternate naming still loads, while
+        // configs that declare no bias remain unaffected. Tensor presence keeps real checkpoints
+        // authoritative.
+        bool qkvBias = config.AttentionBias || tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
 
         var model = new LlamaForCausalLM<TModel>(
             config.VocabSize,
@@ -463,5 +465,6 @@ public interface LLamaConfigLike
     int MaxPositionEmbeddings { get; }
     float RopeTheta { get; }
     bool TieWordEmbeddings { get; }
+    bool AttentionBias { get; }
 }
 
