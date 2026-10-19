@@ -21,6 +21,25 @@ class Program
 {
     const double GateRelTol = 1e-3; // GPU-vs-CPU f32 parity bound: |gpu − ref| ≤ GateRelTol·(1+|ref|)
 
+    /// <summary>SmolLM-135M-shaped config for the synthetic (fabricated-weights) benchmark.
+    /// AttentionBias=false matches the bias-free SmolLM/Llama checkpoint, so SynthesizeTensors
+    /// emits no q/k/v biases and the result loads with qkvBias==false.</summary>
+    static readonly LlamaConfig SmolLMSyntheticConfig = new()
+    {
+        HiddenSize = 576,
+        NumHiddenLayers = 30,
+        NumAttentionHeads = 9,
+        NumKeyValueHeads = 3,
+        IntermediateSize = 1536,
+        VocabSize = 49152,
+        MaxPositionEmbeddings = 2048,
+        RmsNormEps = 1e-5f,
+        RopeTheta = 10000f,
+        TieWordEmbeddings = true,
+        HiddenAct = "silu",
+        AttentionBias = false,
+    };
+
     // The CLI surface, in one place. Every guard below and the dispatch switch read these tables, and
     // tests/Nivara.Tests/Inference/InferenceCliArgumentTests.cs pins the (model, mode) pairs: a model
     // whose dispatch gains or loses a path must be updated here, or the gate fails.
@@ -138,6 +157,7 @@ class Program
         string? warmupArg = null;
         string? itersArg = null;
         bool isQwen = modelType == "qwen";
+        bool isSmolLM = modelType == "smollm";
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--precision")
@@ -568,15 +588,21 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && !isQwen)
+        if (syntheticWeights && !isQwen && !isSmolLM)
         {
-            Console.Error.WriteLine("--synthetic-weights is only supported for the qwen benchmark mode.");
+            Console.Error.WriteLine("--synthetic-weights is only supported for the qwen and smollm benchmark modes.");
             return 1;
         }
 
         if (syntheticWeights && isQwen && mode.Length > 0 && mode != "benchmark")
         {
             Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
+            return 1;
+        }
+
+        if (syntheticWeights && isSmolLM && mode.Length > 0 && mode is not ("benchmark" or "ab"))
+        {
+            Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' and 'ab' modes for smollm.");
             return 1;
         }
 
@@ -647,9 +673,9 @@ class Program
 
         if (!File.Exists(modelPath))
         {
-            if (syntheticWeights && isQwen)
+            if (syntheticWeights && (isQwen || isSmolLM))
             {
-                Console.WriteLine("--synthetic-weights: no model file required; fabricating Qwen2.5-0.5B-shaped weights.");
+                Console.WriteLine("--synthetic-weights: no model file required; fabricating synthetic weights.");
                 Console.WriteLine();
             }
             else
@@ -790,9 +816,16 @@ class Program
             case "smollm":
                 if (useSilk)
                 {
+                    if (syntheticWeights) return RunSmolLMSyntheticBenchmarkSilk();
                     if (benchmark) return BenchmarkSmolLMSilk(tensors);
                     return RunSmolLMSilk(tensors);
                 }
+                if (syntheticWeights)
+                    return bf16
+                        ? (mode == "ab" ? RunSmolLMSyntheticAb<BFloat16>() : RunSmolLMSyntheticBenchmark<BFloat16>())
+                        : (fp16
+                            ? (mode == "ab" ? RunSmolLMSyntheticAb<Half>() : RunSmolLMSyntheticBenchmark<Half>())
+                            : (mode == "ab" ? RunSmolLMSyntheticAb<float>() : RunSmolLMSyntheticBenchmark<float>()));
                 if (mode == "ab")
                 {
                     if (bf16) return SmolLMAb(tensorsBf16);
@@ -2816,6 +2849,157 @@ class Program
         {
             NivaraPrimitives.UseWidenSimd = priorWiden;
         }
+        return 0;
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Synthetic (fabricated-weights) SmolLM benchmark — no checkpoint required.
+    // ----------------------------------------------------------------------------------
+
+    static int RunSmolLMSyntheticBenchmark<T>() where T : struct, IFloatingPointIeee754<T>
+    {
+        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
+        bool priorWiden = NivaraPrimitives.UseWidenSimd;
+        if (narrow) NivaraPrimitives.UseWidenSimd = true;
+        try
+        {
+            string precisionName = PrecisionName(typeof(T));
+            Console.WriteLine("=== SmolLM-135M (synthetic weights): KV-cache decode benchmark ===");
+            Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
+
+            var tensorsF32 = Qwen.SynthesizeTensors(SmolLMSyntheticConfig);
+            var tensors = tensorsF32.ToDictionary(kv => kv.Key,
+                kv => (Array.ConvertAll(kv.Value.Data, static f => T.CreateChecked(f)), kv.Value.Shape));
+
+            var buildSw = Stopwatch.StartNew();
+            var model = LlamaLoader.Load<T, T>(SmolLMSyntheticConfig, tensors);
+            buildSw.Stop();
+            Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+            Console.WriteLine();
+
+            uint rng = 0x9E3779B9;
+            var promptIds = new int[64];
+            for (int i = 0; i < promptIds.Length; i++)
+            {
+                rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+                promptIds[i] = (int)(rng % (uint)SmolLMSyntheticConfig.VocabSize);
+            }
+            const int MaxNewTokens = 32;
+
+            var warmup = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+            Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+
+            var runs = new (long Ms, int Generated)[3];
+            for (int i = 0; i < 3; i++)
+            {
+                var timing = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+                runs[i] = (timing.Milliseconds, timing.Generated);
+                Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
+                                  $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
+            }
+            Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+            Console.WriteLine();
+            Console.WriteLine($"Median: {runs[1].Ms} ms ({runs[1].Generated} tokens, " +
+                              $"{runs[1].Generated * 1000.0 / Math.Max(1, runs[1].Ms):F2} tok/s)");
+            return 0;
+        }
+        finally
+        {
+            NivaraPrimitives.UseWidenSimd = priorWiden;
+        }
+    }
+
+    static int RunSmolLMSyntheticAb<T>() where T : struct, IFloatingPointIeee754<T>
+    {
+        string precisionName = PrecisionName(typeof(T));
+        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
+        Console.WriteLine($"=== SmolLM-135M (synthetic weights): A/B Scalar vs SIMD Widen ({precisionName}) ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
+        if (!narrow)
+            Console.WriteLine("Note: F32 widening is transparent (no-op). Timing differences are noise.");
+        Console.WriteLine();
+
+        var tensorsF32 = Qwen.SynthesizeTensors(SmolLMSyntheticConfig);
+        var tensors = tensorsF32.ToDictionary(kv => kv.Key,
+            kv => (Array.ConvertAll(kv.Value.Data, static f => T.CreateChecked(f)), kv.Value.Shape));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = LlamaLoader.Load<T, T>(SmolLMSyntheticConfig, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        uint rng = 0x9E3779B9;
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+        {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            promptIds[i] = (int)(rng % (uint)SmolLMSyntheticConfig.VocabSize);
+        }
+        const int MaxNewTokens = 32;
+
+        if (typeof(T) == typeof(Half))
+        {
+            Console.WriteLine("Note: Half (fp16) is unsupported for SmolLM generation (NaN logits).");
+            Console.WriteLine();
+            NivaraPrimitives.UseWidenSimd = true;
+            var fallback = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+            Console.WriteLine($"Generated {fallback.Generated} tokens in {fallback.Milliseconds} ms " +
+                              $"({fallback.Generated * 1000.0 / Math.Max(1, fallback.Milliseconds):F2} tok/s)");
+            NivaraPrimitives.UseWidenSimd = false;
+            return 0;
+        }
+
+        // Warmup.
+        NivaraPrimitives.UseWidenSimd = false;
+        RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+
+        NivaraPrimitives.UseWidenSimd = false;
+        var scalar = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+        Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
+                          $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s)");
+
+        NivaraPrimitives.UseWidenSimd = true;
+        var widened = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+        Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
+                          $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s)");
+        NivaraPrimitives.UseWidenSimd = false;
+
+        Console.WriteLine();
+        double ratio = scalar.Milliseconds > 0 ? (double)scalar.Milliseconds / widened.Milliseconds : 0;
+        Console.WriteLine($"Scalar/Widen ratio: {ratio:F2}x  (values > 1 mean widen is faster)");
+        Console.WriteLine();
+        return 0;
+    }
+
+    static int RunSmolLMSyntheticBenchmarkSilk()
+    {
+        Console.WriteLine("=== SmolLM-135M (synthetic weights): KV-cache decode benchmark -- Silk ===");
+        var config = SmolLMSyntheticConfig;
+        var tensors = Qwen.SynthesizeTensors(config);
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        uint rng = 0x9E3779B9;
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+        {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            promptIds[i] = (int)(rng % (uint)config.VocabSize);
+        }
+
+        // Warmup.
+        RunSmolLMGenerationSilk(session, promptIds, config, 8);
+
+        var sw = Stopwatch.StartNew();
+        var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
+        sw.Stop();
+        Console.WriteLine($"{ids.Generated} tokens in {sw.Elapsed.TotalSeconds:F2}s " +
+                          $"({(ids.Generated > 0 ? sw.ElapsedMilliseconds / ids.Generated : 0)} ms/token)");
         return 0;
     }
 
