@@ -61,15 +61,15 @@ public class GpuIncidentTests
         }
     }
 
-    static Dictionary<string, (long Total, double Avg)> IndexByService(NivaraFrame frame)
+    static Dictionary<string, (int Total, double Avg)> IndexByService(NivaraFrame frame)
     {
         var serviceCol = frame.GetColumn<string>("Service");
         var totalCol = frame.GetColumn<int>("TotalRequests");
         var avgCol = frame.GetColumn<double>("AvgDurationMs");
-        var result = new Dictionary<string, (long Total, double Avg)>();
+        var result = new Dictionary<string, (int Total, double Avg)>();
         for (int i = 0; i < frame.RowCount; i++)
         {
-            result[(string)serviceCol.GetValue(i)!] = ((long)totalCol.GetValue(i)!, (double)avgCol.GetValue(i)!);
+            result[(string)serviceCol.GetValue(i)!] = ((int)totalCol.GetValue(i)!, (double)avgCol.GetValue(i)!);
         }
         return result;
     }

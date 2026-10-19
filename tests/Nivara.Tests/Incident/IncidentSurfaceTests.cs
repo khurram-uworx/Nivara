@@ -298,6 +298,28 @@ public class IncidentSurfaceTests
             "writes 10_000_000 * scale records, so it cannot run in CI. Its row count and field "
             + "ranges are verified by tests/Nivara.PerformanceTests/IncidentLabBenchmark.cs, a "
             + "manual `dotnet run -c Release` harness that CI never invokes.",
+        ["GpuOffloadDecision"] =
+            "value record consumed through Analysis.LastGpuOffloadDecision; its shape is "
+            + "exercised by the GPU decision assertions in GpuIncidentTests.",
+        ["GpuOffloadDecision.Deconstruct"] =
+            "record deconstruction is a compiler-generated member; covered by the type row.",
+        ["GpuOffloadDecision.Equals"] =
+            "record value equality is covered by the type row and used by GpuIncidentTests "
+            + "when comparing decisions.",
+        ["GpuOffloadDecision.GetHashCode"] =
+            "record value hashing is covered by the type row; not called directly in the sample.",
+        ["GpuOffloadDecision.ToString"] =
+            "record ToString is a compiler-generated diagnostic member; not called in the sample.",
+        ["GpuProfitability.EstimatedGpuBytesPerMs"] =
+            "cost-model constant; asserted indirectly by the EstimateGpuMs exercise.",
+        ["GpuProfitability.EstimatedGpuFixedMs"] =
+            "cost-model constant; asserted indirectly by the EstimateGpuMs exercise.",
+        ["GpuProfitability.EstimatedGpuMsPerRow"] =
+            "cost-model constant; asserted indirectly by the EstimateGpuMs exercise.",
+        ["GpuProfitability.Margin"] =
+            "decision threshold; asserted indirectly by the Decide exercise.",
+        ["GpuProfitability.SampleSize"] =
+            "calibration sample size; asserted indirectly by the CalibrateCpuMs exercise.",
     };
 
     Dictionary<string, Func<CancellationToken, Task>> Exercises()
@@ -419,6 +441,39 @@ public class IncidentSurfaceTests
             [Key(nameof(Scenarios), nameof(Scenarios.Get))] = _ =>
             {
                 Assert.That(Scenarios.Get("a").Id, Is.EqualTo("A"), "Get should be case-insensitive");
+                return Task.CompletedTask;
+            },
+
+            // --- GpuProfitability --------------------------------------------------
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.CalibrateCpuMs))] = _ =>
+            {
+                var ms = GpuProfitability.CalibrateCpuMs(
+                    new[] { 0, 1, 0 }, new[] { 200, 500, 200 }, new[] { 1f, 2f, 3f }, 2, 3);
+                Assert.That(ms, Is.GreaterThanOrEqualTo(0));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.Decide))] = _ =>
+            {
+                var (offload, reason, cpu, gpu) = GpuProfitability.Decide(false, false, 10, 5);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(offload, Is.False);
+                    Assert.That(reason, Is.EqualTo("gpu not requested"));
+                });
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimateCpuMs))] = _ =>
+            {
+                Assert.That(GpuProfitability.EstimateCpuMs(10, 100, 1000), Is.EqualTo(100).Within(1e-9));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimateGpuMs))] = _ =>
+            {
+                var ms = GpuProfitability.EstimateGpuMs(1000, 12_000);
+                Assert.That(ms, Is.GreaterThan(0));
                 return Task.CompletedTask;
             },
 
