@@ -204,7 +204,7 @@ public static class Analysis
             .Collect();
     }
 
-    public static NivaraFrame AnalyzeGroupedAggregation(string datasetPath, IncidentScenario scenario)
+    public static NivaraFrame AnalyzeGroupedAggregation(string datasetPath, IncidentScenario scenario, bool useGpu = false, bool gpuForce = false)
     {
         using var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
         var incidentStart = scenario.IncidentStart.Ticks;
