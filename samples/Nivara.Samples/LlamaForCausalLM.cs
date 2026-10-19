@@ -15,11 +15,15 @@ namespace Nivara.Samples;
 /// </summary>
 public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>Gets the configured maximum number of positions for this model.</summary>
+    public int MaxPositionEmbeddings => maxPositionEmbeddings;
+
     /// <summary>Gets the token embedding table (reused as the tied LM head).</summary>
     public Embedding<T> Embed { get; }
     internal readonly LlamaDecoderBlock<T>[] layers;
     internal readonly RMSNorm<T> finalNorm;
     internal readonly int vocabSize;
+    internal readonly int maxPositionEmbeddings;
     internal readonly bool tieWordEmbeddings;
     internal readonly bool qkvBias;
 
@@ -51,6 +55,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         bool qkvBias = false)
     {
         this.vocabSize = vocabSize;
+        this.maxPositionEmbeddings = maxPositionEmbeddings;
         this.tieWordEmbeddings = tieWordEmbeddings;
         this.qkvBias = qkvBias;
 
@@ -189,6 +194,18 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         return logits;
     }
 
+    /// <summary>
+    /// Grows <paramref name="cache"/> to at least <see cref="MaxPositionEmbeddings"/> when it is
+    /// using dynamic growth, so later decode steps do not reallocate. Caches constructed with an
+    /// explicit maximum capacity are left unchanged.
+    /// </summary>
+    public void PrepareCache(LlamaKVCache<T> cache)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        if (cache.MaxCapacity == 0)
+            cache.Ensure(MaxPositionEmbeddings);
+    }
+
     ReverseGradTensor<T> ForwardCachedFusedCore(int tokenId, int positionOffset, LlamaKVCache<T> cache)
     {
         int hidden = Embed.EmbeddingDim;
@@ -266,29 +283,51 @@ public sealed class LlamaKVCache<T> : IDisposable where T : struct, IFloatingPoi
 {
     internal readonly T[][] keys;
     internal readonly T[][] values;
+    readonly int maxCapacity;
     int capacity;
     bool disposed;
 
     /// <summary>Creates a fresh cache sized for <paramref name="numLayers"/> layers.</summary>
-    public LlamaKVCache(int numLayers, int kvWidth, int initialCapacity = 16)
+    public LlamaKVCache(int numLayers, int kvWidth, int initialCapacity = 16, int maxCapacity = 0)
     {
         if (numLayers <= 0) throw new ArgumentOutOfRangeException(nameof(numLayers));
         if (kvWidth <= 0) throw new ArgumentOutOfRangeException(nameof(kvWidth));
         if (initialCapacity < 1) throw new ArgumentOutOfRangeException(nameof(initialCapacity));
+        if (maxCapacity < 0) throw new ArgumentOutOfRangeException(nameof(maxCapacity));
+        if (maxCapacity > 0 && maxCapacity < initialCapacity)
+            throw new ArgumentOutOfRangeException(nameof(maxCapacity), "Maximum capacity must be at least the initial capacity.");
 
         keys = new T[numLayers][];
         values = new T[numLayers][];
-        capacity = initialCapacity;
+
+        if (maxCapacity > 0)
+        {
+            this.maxCapacity = maxCapacity;
+            capacity = maxCapacity;
+            initialCapacity = maxCapacity;
+        }
+        else
+        {
+            this.maxCapacity = 0;
+            capacity = initialCapacity;
+        }
+
         for (int i = 0; i < numLayers; i++)
         {
-            keys[i] = new T[initialCapacity * kvWidth];
-            values[i] = new T[initialCapacity * kvWidth];
+            keys[i] = new T[capacity * kvWidth];
+            values[i] = new T[capacity * kvWidth];
         }
         KvWidth = kvWidth;
     }
 
     /// <summary>Gets the per-KV-head width of each cached row.</summary>
     public int KvWidth { get; }
+
+    /// <summary>Gets the current capacity in cached positions.</summary>
+    public int Capacity => capacity;
+
+    /// <summary>Gets the configured maximum capacity, or 0 when growth is dynamic.</summary>
+    public int MaxCapacity => maxCapacity;
 
     /// <summary>Returns the buffers to their initial size and clears the position counter.</summary>
     public void Reset()
@@ -305,6 +344,10 @@ public sealed class LlamaKVCache<T> : IDisposable where T : struct, IFloatingPoi
     internal void Ensure(int neededLength)
     {
         if (neededLength <= capacity) return;
+        if (maxCapacity > 0)
+            throw new ArgumentOutOfRangeException(nameof(neededLength),
+                $"Requested length {neededLength} exceeds the cache maximum capacity of {maxCapacity}.");
+
         int newCap = Math.Max(capacity * 2, neededLength);
         for (int i = 0; i < keys.Length; i++)
         {
