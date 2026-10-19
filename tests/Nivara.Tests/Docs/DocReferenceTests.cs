@@ -29,9 +29,18 @@ public class DocReferenceTests
     /// device-free geometry fixture, <c>tests/Nivara.Tests/Gpu/SilkGemvGeometryTests.cs</c>, which
     /// was split out of that one so the bit-identity fixture stays byte-identical while the
     /// geometry it relies on is reshaped. 715 = 714 + the #681 bit-identity fixture,
-    /// <c>tests/Nivara.Tests/Gpu/SilkGemmGemvAddTests.cs</c>.
+    /// <c>tests/Nivara.Tests/Gpu/SilkGemmGemvAddTests.cs</c>. 722 = 721 + <c>docs/443-PLAN.md</c>.
+    /// The merge of PR #726 added three counted files without moving the pin —
+    /// <c>samples/Nivara.Samples/Incident/GpuOffload.cs</c>,
+    /// <c>src/Nivara.Extensions/Silk/SilkAnalytics.cs</c>, and
+    /// <c>tests/Nivara.Tests/Qwen/SynthesizeTensorsBiasGatingTests.cs</c> — so the merged tree was
+    /// actually 725 and this gate was red on <c>main</c>. 729 = 725 + the four files the #443
+    /// Phase 2/3 work adds: <c>samples/Nivara.Samples/Incident/GpuProfitability.cs</c>,
+    /// <c>tests/Nivara.Tests/Gpu/SilkGroupedHashReduceTests.cs</c>,
+    /// <c>tests/Nivara.Tests/Incident/GpuIncidentTests.cs</c>, and
+    /// <c>tests/Nivara.Tests/Incident/GpuProfitabilityTests.cs</c>.
     /// </summary>
-    const int ExpectedFileCount = 722;
+    const int ExpectedFileCount = 729;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 127;
