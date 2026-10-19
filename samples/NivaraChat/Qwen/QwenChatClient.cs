@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.Samples;
+using NivaraChat.Shared;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -34,6 +35,7 @@ internal sealed class QwenChatClient<T> : IChatClient
     readonly float topP;
     readonly bool useKvCache;
     readonly Random rng;
+    readonly TokenizePrefixCache tokenizeCache = new();
     readonly IReadOnlyList<string>? knownToolNames;
     readonly Action<string>? turnCallback;
     readonly int numLayers;
@@ -41,6 +43,8 @@ internal sealed class QwenChatClient<T> : IChatClient
 
     public ChatClientMetadata? Metadata { get; } =
         new ChatClientMetadata("Nivara", null, "Qwen2.5-0.5B-Instruct (LlamaForCausalLM + GPT-2 BPE)");
+
+    public int TokenizeCacheHits => tokenizeCache.Hits;
 
     public QwenChatClient(
         LlamaForCausalLM<T> model,
@@ -110,7 +114,7 @@ internal sealed class QwenChatClient<T> : IChatClient
     IReadOnlyList<int> Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
     {
         var prompt = QwenChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(tokenizer.Encode(prompt));
+        var ids = new List<int>(tokenizeCache.Encode(prompt, p => tokenizer.Encode(p)));
 
         using var cache = useKvCache ? new LlamaKVCache<T>(numLayers, kvWidth) : null;
 
@@ -178,82 +182,7 @@ internal sealed class QwenChatClient<T> : IChatClient
         if (lastRow.Length < vocab)
             lastRow = lastRow[..vocab];
 
-        if (temperature <= 0f)
-            return ArgMax(lastRow, vocab);
-
-        var exp = new double[vocab];
-        double max = double.CreateChecked(lastRow[0]);
-        for (int i = 1; i < vocab; i++)
-        {
-            double v = double.CreateChecked(lastRow[i]);
-            if (v > max) max = v;
-        }
-
-        double sum = 0;
-        for (int i = 0; i < vocab; i++)
-        {
-            double v = double.CreateChecked(lastRow[i]);
-            exp[i] = Math.Exp((v - max) / temperature);
-            sum += exp[i];
-        }
-
-        if (sum <= 0 || !double.IsFinite(sum))
-            return ArgMax(lastRow, vocab);
-
-        for (int i = 0; i < vocab; i++)
-            exp[i] /= sum;
-
-        if (topP < 1f)
-        {
-            var order = new int[vocab];
-            for (int i = 0; i < vocab; i++) order[i] = i;
-            Array.Sort(order, (a, b) => exp[b].CompareTo(exp[a]));
-
-            double cum = 0;
-            int cut = vocab;
-            for (int i = 0; i < vocab; i++)
-            {
-                cum += exp[order[i]];
-                if (cum >= topP) { cut = i + 1; break; }
-            }
-
-            double kept = 0;
-            for (int i = 0; i < cut; i++) kept += exp[order[i]];
-
-            double r = rng.NextDouble() * kept;
-            double acc = 0;
-            for (int i = 0; i < cut; i++)
-            {
-                acc += exp[order[i]];
-                if (r <= acc) return order[i];
-            }
-            return order[0];
-        }
-
-        double full = rng.NextDouble() * sum;
-        double total = 0;
-        for (int i = 0; i < vocab; i++)
-        {
-            total += exp[i];
-            if (full <= total) return i;
-        }
-        return ArgMax(lastRow, vocab);
-    }
-
-    static int ArgMax(ReadOnlySpan<T> lastRow, int vocab)
-    {
-        int best = 0;
-        double bestValue = double.CreateChecked(lastRow[0]);
-        for (int i = 1; i < vocab; i++)
-        {
-            double v = double.CreateChecked(lastRow[i]);
-            if (v > bestValue)
-            {
-                bestValue = v;
-                best = i;
-            }
-        }
-        return best;
+        return TokenSampling.Sample(lastRow, vocab, temperature, topP, rng);
     }
 
     string Decode(IReadOnlyList<int> ids) => tokenizer.Decode(ids);
