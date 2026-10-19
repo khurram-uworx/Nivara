@@ -255,8 +255,7 @@ The Qwen inference path started from the pre-Qwen-fast baseline above (two gener
 |---|---|---|
 | P2 — float single-pass sampling + REPL tokenize-prefix cache | **#402** | `temperature > 0` only; default greedy path unaffected |
 | P2 — fuse final RMSNorm + tied LM head into fused decode | **#413** | decode fwd already at the ≈608 KB logits floor; fuses the last chain |
-| P2 — fuse final Norm + LM head into prefill | **#414** | |
-| Backlog — `DecodeAttention` per-dot loop at large `kvLen` | **#399** | small at Qwen chat context; grows toward 32k positions |
+| P2 — fuse final Norm + LM head into prefill | **#414** | seed rows B/op: [8] 934,124 → 877,464; [16] 1,029,580 → 914,795; [64] 1,480,031 → 1,021,444; [256] 4,301,627 → 2,459,899 (h0/h1 rented from ArrayPool; postfix `qwen-decode-block-postfix.json`); gen0 steady-state 0 except 256-tok 0.33 noise || Backlog — `DecodeAttention` per-dot loop at large `kvLen` | **#399** | small at Qwen chat context; grows toward 32k positions |
 | Backlog — RMSNorm gamma as `TensorPrimitives.Multiply` | **#411** | kernel cleanup; no E2E win expected |
 | Backlog — keep BF16 in memory as `ushort` + SIMD-dot (skip load-time widen) | **#387** / **#391** | revisit when `Vector<BFloat16>` SIMD lands |
 | Stretch — GGUF backend | **#390** | load-format only; reuses renderer/parser/loop wiring |
