@@ -226,7 +226,7 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 | **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. Filed as [#307](https://github.com/khurram-uworx/Nivara/issues/307). |
 | **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Measured in Phase 4 bench-stream: peak memory reflects full-frame materialization, not chunk-bounded streaming. Filed as [#308](https://github.com/khurram-uworx/Nivara/issues/308). |
 
-## GPU offload (Phase 4 pilot)
+## GPU Offloading
 
 The pilot offloads only **Grouped Aggregation** through the Silk (OpenCL) backend. Other
 analyses stay on CPU in this phase.
@@ -260,6 +260,29 @@ Results (fill in from a human run on AC power):
 
 `--gpu-force` runs the GPU path even when the gate declines, which is how the GPU-forced
 column above is produced.
+
+### Phase 5 — not being pursued now (revisit criteria)
+
+The original plan (issue #443) proposed extending GPU offload to rolling windows,
+multi-column filter vectors, and radix sort / hash-join keys. **That is not being done
+at this time**, based on the measurements above:
+
+- The only kernel implemented so far (grouped hash-reduction) shows at most a ~4%
+  end-to-end win at 1M rows on the shared-DRAM iGPU, and is slower below that.
+- The profitability gate reports "not profitable" at all three tested sizes.
+- Shared-DRAM iGPUs are memory-bandwidth-bound for these workloads; a discrete GPU
+  is expected to do better, but that has not been measured.
+
+Revisit Phase 5 only after all of the following hold:
+
+1. `EstimatedGpuMsPerRow` in `GpuProfitability` is recalibrated against measured
+   reduction timings (the current constant is a first-pass placeholder).
+2. A clear, reproducible speedup is demonstrated on discrete-GPU hardware.
+3. A new kernel (rolling window, filter vector, or sort/join) is prototyped and
+   shown profitable on its own before being wired into an analysis.
+
+Until then, grouped aggregation stays on CPU by default and `--gpu` remains an
+opt-in, profitability-gated experiment.
 
 ## Performance
 
@@ -319,27 +342,6 @@ unmeasured row.
 - Nivara uses `Stopwatch`; Polars uses `time.perf_counter()`.
 - Polars uses idiomatic operations (`rolling_mean`, `group_by`, `join_asof`) rather than porting Nivara's exact algorithm.
 - No warmup passes — each analysis reads fresh from disk/cache.
-
-## GPU offload
-
-The `analyze` command supports an opt-in GPU path for the grouped aggregation pilot:
-
-```bash
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
-  -- analyze --dataset ./samples/data/incident-lab --scenario A --gpu
-
-# Force the GPU path even when the profitability gate says no (for measurement):
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
-  -- analyze --dataset ./samples/data/incident-lab --scenario A --gpu --gpu-force
-```
-
-- `--gpu` is profitability-gated: the GPU path runs only when the estimated GPU cost
-  (kernel + host/device transfers) is below the estimated CPU cost.
-- `--gpu-force` bypasses the gate for honest measurement runs.
-- Each run prints a `GPU decision:` line: `offloaded`, `reason`, `cpu`/`gpu` ms, and
-  `transfer` bytes.
-- GPU availability is required (OpenCL GPU). On machines without one, `--gpu` reports
-  "gpu unavailable" and falls back to the CPU path.
 
 ## Limitations
 - **Boundary operations still materialize** — `Sort`, `GroupBy`, `Join`, `Distinct`, rank-family windows, and broadcast aggregates execute once over concatenated data, so the incident benchmark's Sort-before-window analyses yield a single chunk regardless of `--stream`. Visible via `ExecutionDiagnostics.StreamMaterializationCount`; see `docs/STREAMING.md`.
