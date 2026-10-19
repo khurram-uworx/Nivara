@@ -191,6 +191,17 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// the narrow types.
     /// </para>
     /// <para>
+    /// Decision (<c>#491</c>, 2026-10-19): no fast path is taken. The loop stays the single
+    /// <c>ApplyMask</c> path for every <c>T</c>, including <c>float</c>/<c>double</c>. The float
+    /// wide-prefill regression is real but its end-to-end share is not established (the
+    /// <c>QK^T</c> premise that would have made it the lever was retracted by <c>#492</c>), and
+    /// <c>Half</c>/<c>BFloat16</c> cannot use <c>Vector256.ConditionalSelect</c> and already win
+    /// with this loop, so a type-dispatched path would have to beat the baseline here without
+    /// regressing them. Revisit if a corrected forward establishes a material share, if a
+    /// portable <c>Vector&lt;T&gt;</c> select beats this loop on float, or if a GB/s probe shows
+    /// the JIT is not already auto-vectorizing it.
+    /// </para>
+    /// <para>
     /// The lengths must match exactly. <c>TensorPrimitives.Add</c>, which this replaces, enforced
     /// that; the loop on its own would only fault on a short mask and silently truncate a long
     /// one, so a mis-shaped mask would become a wrong answer instead of an exception.
