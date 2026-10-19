@@ -46,6 +46,9 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <summary>Gets the hidden (embedding) dimension.</summary>
     public int HiddenSize => hiddenSize;
 
+    /// <summary>Gets whether the self-attention query/key/value projections carry a bias.</summary>
+    public bool QkvBias => Attention.QkvBias;
+
     /// <summary>
     /// Creates a Llama decoder block.
     /// </summary>

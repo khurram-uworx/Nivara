@@ -21,6 +21,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     internal readonly RMSNorm<T> finalNorm;
     internal readonly int vocabSize;
     internal readonly bool tieWordEmbeddings;
+    internal readonly bool qkvBias;
 
     // Fused decode ping-pong scratch (inference-only; not registered with the module system).
     T[]? fusedH0;
@@ -31,6 +32,10 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
 
     /// <summary>Gets whether the LM head reuses the input embedding weights.</summary>
     public bool TieWordEmbeddings => tieWordEmbeddings;
+
+    /// <summary>Gets whether the self-attention query/key/value projections carry a bias
+    /// (Qwen2-style models; canonical Llama/SmolLM do not).</summary>
+    public bool QkvBias => qkvBias;
 
     public LlamaForCausalLM(
         int vocabSize,
@@ -47,6 +52,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     {
         this.vocabSize = vocabSize;
         this.tieWordEmbeddings = tieWordEmbeddings;
+        this.qkvBias = qkvBias;
 
         Embed = new Embedding<T>(vocabSize, hiddenSize);
         layers = new LlamaDecoderBlock<T>[numHiddenLayers];
