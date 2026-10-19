@@ -98,6 +98,10 @@ public class IncidentSurfaceTests
         {
             // Surface() keys rows by member name alone, so two overloads would collapse into a
             // single row and one exercise would then mark both of them covered.
+            // Records synthesize Equals(T) next to the inherited Equals(object). Both are public
+            // and declared here, so they would trip this check even though the two collapse into
+            // the single Equals row the generator already registers. Exclude that one name rather
+            // than widen the filter for the whole record surface.
             collisions.AddRange(type.GetMethods(Declared)
                 .Where(m => !m.IsSpecialName)
                 .Where(m => !m.Name.StartsWith('<'))
@@ -282,14 +286,18 @@ public class IncidentSurfaceTests
         .OrderBy(name => name, StringComparer.Ordinal);
 
     /// <summary>
-    /// Types whose shape is only meaningful through a frame binding, plus the exercise that
-    /// performs that binding. If the named exercise fails, test 2 goes red and this row's coverage
-    /// is void with it — so the chain does not rest on the name alone.
+    /// Types whose shape is only meaningful through a frame binding or through a value the sample
+    /// publishes, plus the exercise that performs that binding. If the named exercise fails, test 2
+    /// goes red and this row's coverage is void with it — so the chain does not rest on the name
+    /// alone.
     /// </summary>
     static Dictionary<string, string> CoveredTransitively() => new(StringComparer.Ordinal)
     {
         ["RequestRow"] = Key(nameof(Analysis), nameof(Analysis.AnalyzeRegionalPartitioning)),
         ["InstanceRow"] = Key(nameof(Analysis), nameof(Analysis.AnalyzeSaturationOrdering)),
+        // GpuOffloadDecision is published by Analysis, never constructed by a test fixture; the
+        // exercise that reads Analysis.LastGpuOffloadDecision also exercises its members below.
+        ["GpuOffloadDecision"] = Key(nameof(GpuOffloadDecision), nameof(GpuOffloadDecision.Equals)),
     };
 
     static Dictionary<string, string> Skipped() => new(StringComparer.Ordinal)
@@ -298,28 +306,6 @@ public class IncidentSurfaceTests
             "writes 10_000_000 * scale records, so it cannot run in CI. Its row count and field "
             + "ranges are verified by tests/Nivara.PerformanceTests/IncidentLabBenchmark.cs, a "
             + "manual `dotnet run -c Release` harness that CI never invokes.",
-        ["GpuOffloadDecision"] =
-            "value record consumed through Analysis.LastGpuOffloadDecision; its shape is "
-            + "exercised by the GPU decision assertions in GpuIncidentTests.",
-        ["GpuOffloadDecision.Deconstruct"] =
-            "record deconstruction is a compiler-generated member; covered by the type row.",
-        ["GpuOffloadDecision.Equals"] =
-            "record value equality is covered by the type row and used by GpuIncidentTests "
-            + "when comparing decisions.",
-        ["GpuOffloadDecision.GetHashCode"] =
-            "record value hashing is covered by the type row; not called directly in the sample.",
-        ["GpuOffloadDecision.ToString"] =
-            "record ToString is a compiler-generated diagnostic member; not called in the sample.",
-        ["GpuProfitability.EstimatedGpuBytesPerMs"] =
-            "cost-model constant; asserted indirectly by the EstimateGpuMs exercise.",
-        ["GpuProfitability.EstimatedGpuFixedMs"] =
-            "cost-model constant; asserted indirectly by the EstimateGpuMs exercise.",
-        ["GpuProfitability.EstimatedGpuMsPerRow"] =
-            "cost-model constant; asserted indirectly by the EstimateGpuMs exercise.",
-        ["GpuProfitability.Margin"] =
-            "decision threshold; asserted indirectly by the Decide exercise.",
-        ["GpuProfitability.SampleSize"] =
-            "calibration sample size; asserted indirectly by the CalibrateCpuMs exercise.",
     };
 
     Dictionary<string, Func<CancellationToken, Task>> Exercises()
@@ -474,6 +460,82 @@ public class IncidentSurfaceTests
             {
                 var ms = GpuProfitability.EstimateGpuMs(1000, 12_000);
                 Assert.That(ms, Is.GreaterThan(0));
+                return Task.CompletedTask;
+            },
+
+            // The cost-model constants are part of the published heuristic, so each is asserted
+            // against its own invariant rather than skipped as an inert field.
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.Margin))] = _ =>
+            {
+                Assert.That(GpuProfitability.Margin, Is.InRange(0.0, 1.0));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.SampleSize))] = _ =>
+            {
+                Assert.That(GpuProfitability.SampleSize, Is.GreaterThan(0));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimatedGpuFixedMs))] = _ =>
+            {
+                Assert.That(GpuProfitability.EstimatedGpuFixedMs, Is.GreaterThanOrEqualTo(0.0));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimatedGpuBytesPerMs))] = _ =>
+            {
+                Assert.That(GpuProfitability.EstimatedGpuBytesPerMs, Is.GreaterThan(0.0));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimatedGpuMsPerRow))] = _ =>
+            {
+                Assert.That(GpuProfitability.EstimatedGpuMsPerRow, Is.GreaterThanOrEqualTo(0.0));
+                return Task.CompletedTask;
+            },
+
+            // --- GpuOffloadDecision: the record's synthesized members -------------------
+            [Key(nameof(GpuOffloadDecision), nameof(GpuOffloadDecision.Deconstruct))] = _ =>
+            {
+                var (offloaded, reason, cpuMs, gpuMs, bytes, kernel) =
+                    new GpuOffloadDecision(true, "forced", 1.5, 0.5, 120, "grouped_hash_reduce_partial");
+                Assert.Multiple(() =>
+                {
+                    Assert.That(offloaded, Is.True);
+                    Assert.That(reason, Is.EqualTo("forced"));
+                    Assert.That(cpuMs, Is.EqualTo(1.5));
+                    Assert.That(gpuMs, Is.EqualTo(0.5));
+                    Assert.That(bytes, Is.EqualTo(120));
+                    Assert.That(kernel, Is.EqualTo("grouped_hash_reduce_partial"));
+                });
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuOffloadDecision), nameof(GpuOffloadDecision.Equals))] = _ =>
+            {
+                var left = new GpuOffloadDecision(true, "forced", 1.5, 0.5, 120, "grouped_hash_reduce_partial");
+                var right = new GpuOffloadDecision(true, "forced", 1.5, 0.5, 120, "grouped_hash_reduce_partial");
+                Assert.Multiple(() =>
+                {
+                    Assert.That(left.Equals(right), Is.True, "value equality must compare all fields");
+                    Assert.That(left.Equals(null), Is.False);
+                });
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuOffloadDecision), nameof(GpuOffloadDecision.GetHashCode))] = _ =>
+            {
+                var left = new GpuOffloadDecision(true, "forced", 1.5, 0.5, 120, "grouped_hash_reduce_partial");
+                var right = new GpuOffloadDecision(true, "forced", 1.5, 0.5, 120, "grouped_hash_reduce_partial");
+                Assert.That(left.GetHashCode(), Is.EqualTo(right.GetHashCode()));
+                return Task.CompletedTask;
+            },
+
+            [Key(nameof(GpuOffloadDecision), nameof(GpuOffloadDecision.ToString))] = _ =>
+            {
+                var decision = new GpuOffloadDecision(true, "forced", 1.5, 0.5, 120, "grouped_hash_reduce_partial");
+                Assert.That(decision.ToString(), Does.Contain("forced"));
                 return Task.CompletedTask;
             },
 

@@ -274,13 +274,12 @@ public static class Analysis
             double estimatedCpuMs = GpuProfitability.EstimateCpuMs(sampleCpuMs, sampleSize, rowCount);
             double estimatedGpuMs = GpuProfitability.EstimateGpuMs(rowCount, transferBytes);
 
-            var (offload, decisionReason, estCpu, estGpu) = GpuProfitability.Decide(
+            var (offload, decisionReason, estimatedCpu, _) = GpuProfitability.Decide(
                 useGpu, gpuForce, estimatedCpuMs, estimatedGpuMs);
             reason = decisionReason;
-            cpuMs = estCpu;
-            // keep estimated values for diagnostics even if we later run CPU
-            estimatedCpuMs = estCpu;
-            estimatedGpuMs = estGpu;
+            // When the GPU path runs, cpuMs is the CPU cost the gate predicted for it, not a
+            // measured value; the alternative would be to run the CPU work we just decided to skip.
+            cpuMs = estimatedCpu;
 
             if (offload)
             {
