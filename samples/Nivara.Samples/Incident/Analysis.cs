@@ -256,17 +256,19 @@ public static class Analysis
                 ("TotalRequests", NivaraColumn<int>.Create(Array.Empty<int>())));
         }
 
-        var services = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
-
         bool usedGpu = false;
-        string reason = "cpu path";
-        double cpuMs = 0;
+        string reason;
+        double cpuMs;
         double gpuMs = 0;
-        long transferBytes = 0;
+        long transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
+        Dictionary<string, (int Errors, int Total, double TotalDuration)> services;
 
-        transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
-
-        if (useGpu || gpuForce)
+        if (!useGpu && !gpuForce)
+        {
+            (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
+            reason = "gpu not requested";
+        }
+        else
         {
             int sampleSize = Math.Min(rowCount, GpuProfitability.SampleSize);
             double sampleCpuMs = GpuProfitability.CalibrateCpuMs(
@@ -281,8 +283,14 @@ public static class Analysis
             // measured value; the alternative would be to run the CPU work we just decided to skip.
             cpuMs = estimatedCpu;
 
-            if (offload)
+            if (!offload)
             {
+                // Not profitable: run the CPU reduction.
+                (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
+            }
+            else
+            {
+                services = [];
                 var swGpu = System.Diagnostics.Stopwatch.StartNew();
                 SilkRuntime? runtime = null;
                 try
@@ -296,82 +304,23 @@ public static class Analysis
                         idToService[kvp.Value] = kvp.Key;
 
                     for (int g = 0; g < groupCount; g++)
-                    {
                         services[idToService[g]] = (errors[g], counts[g], sums[g]);
-                    }
+
                     usedGpu = true;
                     gpuMs = swGpu.Elapsed.TotalMilliseconds;
                 }
                 catch (Exception ex)
                 {
                     reason = "gpu unavailable: " + ex.Message;
-                    usedGpu = false;
-                    gpuMs = 0;
 
-                    // CPU fallback
-                    var swCpu = System.Diagnostics.Stopwatch.StartNew();
-                    var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
-                    for (int i = 0; i < rowCount; i++)
-                    {
-                        var svc = serviceNames[i];
-                        if (!cpuServices.TryGetValue(svc, out var acc))
-                            acc = (0, 0, 0);
-                        acc.Total++;
-                        acc.TotalDuration += (double)durationCol.GetValue(i)!;
-                        if (statusCodes[i] >= 500) acc.Errors++;
-                        cpuServices[svc] = acc;
-                    }
-                    swCpu.Stop();
-                    cpuMs = swCpu.Elapsed.TotalMilliseconds;
-                    services = cpuServices;
+                    // CPU fallback: the GPU path never produced a result.
+                    (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
                 }
                 finally
                 {
                     runtime?.Dispose();
                 }
-                if (usedGpu)
-                    swGpu.Stop();
             }
-            else
-            {
-                // Not profitable: run CPU.
-                var swCpu = System.Diagnostics.Stopwatch.StartNew();
-                var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
-                for (int i = 0; i < rowCount; i++)
-                {
-                    var svc = serviceNames[i];
-                    if (!cpuServices.TryGetValue(svc, out var acc))
-                        acc = (0, 0, 0);
-                    acc.Total++;
-                    acc.TotalDuration += (double)durationCol.GetValue(i)!;
-                    if (statusCodes[i] >= 500) acc.Errors++;
-                    cpuServices[svc] = acc;
-                }
-                swCpu.Stop();
-                cpuMs = swCpu.Elapsed.TotalMilliseconds;
-                gpuMs = 0;
-                services = cpuServices;
-            }
-        }
-        else
-        {
-            var swCpu = System.Diagnostics.Stopwatch.StartNew();
-            var cpuServices = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
-            for (int i = 0; i < rowCount; i++)
-            {
-                var svc = serviceNames[i];
-                if (!cpuServices.TryGetValue(svc, out var acc))
-                    acc = (0, 0, 0);
-                acc.Total++;
-                acc.TotalDuration += (double)durationCol.GetValue(i)!;
-                if (statusCodes[i] >= 500) acc.Errors++;
-                cpuServices[svc] = acc;
-            }
-            swCpu.Stop();
-            cpuMs = swCpu.Elapsed.TotalMilliseconds;
-            gpuMs = 0;
-            services = cpuServices;
-            reason = "gpu not requested";
         }
 
         LastGpuOffloadDecision = new GpuOffloadDecision(
@@ -387,6 +336,25 @@ public static class Analysis
             ("ErrorRate", NivaraColumn<double>.Create(errorRates)),
             ("AvgDurationMs", NivaraColumn<double>.Create(avgDurations)),
             ("TotalRequests", NivaraColumn<int>.Create(svcNames.Select(s => services[s].Total).ToArray())));
+
+        static (Dictionary<string, (int Errors, int Total, double TotalDuration)> Services, double CpuMs)
+            AggregateOnCpu(string[] serviceNames, int[] statusCodes, NivaraColumn<double> durationCol, int rowCount)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var aggregated = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
+            for (int i = 0; i < rowCount; i++)
+            {
+                var svc = serviceNames[i];
+                if (!aggregated.TryGetValue(svc, out var acc))
+                    acc = (0, 0, 0);
+                acc.Total++;
+                acc.TotalDuration += (double)durationCol.GetValue(i)!;
+                if (statusCodes[i] >= 500) acc.Errors++;
+                aggregated[svc] = acc;
+            }
+            sw.Stop();
+            return (aggregated, sw.Elapsed.TotalMilliseconds);
+        }
     }
 
     public static NivaraFrame AnalyzeGroupedAggregationWithTypedLinq(string datasetPath, IncidentScenario scenario)
