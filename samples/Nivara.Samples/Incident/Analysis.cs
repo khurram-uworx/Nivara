@@ -244,6 +244,18 @@ public static class Analysis
             serviceIds[i] = serviceToId[serviceNames[i]];
 
         var groupCount = serviceToId.Count;
+
+        if (rowCount == 0 || groupCount == 0)
+        {
+            LastGpuOffloadDecision = new GpuOffloadDecision(
+                false, "empty result", 0, 0, 0, "grouped_hash_reduce_partial");
+            return NivaraFrame.Create(
+                ("Service", NivaraColumn<string>.Create(Array.Empty<string>())),
+                ("ErrorRate", NivaraColumn<double>.Create(Array.Empty<double>())),
+                ("AvgDurationMs", NivaraColumn<double>.Create(Array.Empty<double>())),
+                ("TotalRequests", NivaraColumn<int>.Create(Array.Empty<int>())));
+        }
+
         var services = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
 
         bool usedGpu = false;
