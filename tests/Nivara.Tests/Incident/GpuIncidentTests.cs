@@ -46,8 +46,12 @@ public class GpuIncidentTests
             using var cpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useGpu: false);
             using var gpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useGpu: true, gpuForce: true);
 
+            var decision = Analysis.LastGpuOffloadDecision;
+            Assert.That(decision, Is.Not.Null);
+            Assert.That(decision!.Offloaded, Is.True,
+                $"a GPU is present but the forced GPU path fell back to CPU: {decision.Reason}");
+
             Assert.That(cpu.RowCount, Is.EqualTo(gpu.RowCount));
-            Assert.That(Analysis.LastGpuOffloadDecision, Is.Not.Null);
 
             var cpuByService = IndexByService(cpu);
             var gpuByService = IndexByService(gpu);

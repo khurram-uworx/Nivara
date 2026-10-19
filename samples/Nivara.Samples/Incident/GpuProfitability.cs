@@ -37,6 +37,8 @@ public static class GpuProfitability
         int n = Math.Min(sampleSize, serviceIds.Length);
         if (n <= 0 || groupCount <= 0) return 0;
 
+        // The accumulators are only here to give the loop observable work to do; the sample's
+        // result is discarded because only its duration feeds the estimate.
         var counts = new int[groupCount];
         var errors = new int[groupCount];
         var sums = new double[groupCount];
