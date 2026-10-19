@@ -32,7 +32,7 @@ public static class SilkAnalytics
 
         int n = serviceIds.Length;
         int workGroups = Math.Min(1024, Math.Max(1, (n + ThreadsPerGroup - 1) / ThreadsPerGroup));
-        int globalSize = workGroups * ThreadsPerGroup;
+        int globalSize = workGroups;
 
         nint inService = runtime.AllocateBytes((ulong)n * sizeof(int));
         nint inStatus = runtime.AllocateBytes((ulong)n * sizeof(int));
@@ -67,7 +67,7 @@ public static class SilkAnalytics
 
             runtime.Run(SilkKernels.GroupedHashReducePartial,
                 new nuint[] { (nuint)globalSize },
-                new nuint[] { ThreadsPerGroup });
+                new nuint[] { 1 });
             runtime.Finish();
 
             int[] pc = runtime.DownloadInt(partialCounts, workGroups * groupCount);
