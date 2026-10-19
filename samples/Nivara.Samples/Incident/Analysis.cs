@@ -3,6 +3,7 @@ using Nivara.IO;
 using Nivara.Linq;
 using Nivara.Operations;
 using Nivara.Query;
+using Nivara.Silk;
 
 namespace Nivara.Samples.Incident;
 
@@ -32,6 +33,8 @@ public sealed class InstanceRow
 
 public static class Analysis
 {
+    public static GpuOffloadDecision? LastGpuOffloadDecision { get; private set; }
+
     public static QueryFrame AnalyzeDegradationOrdering(string datasetPath, IncidentScenario scenario)
     {
         var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
@@ -219,17 +222,110 @@ public static class Analysis
         var statusCol = result.GetColumn<int>("StatusCode");
         var durationCol = result.GetColumn<double>("DurationMs");
 
-        var services = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
-        for (int i = 0; i < result.RowCount; i++)
+        var rowCount = result.RowCount;
+        var serviceNames = new string[rowCount];
+        var statusCodes = new int[rowCount];
+        var durations = new float[rowCount];
+        for (int i = 0; i < rowCount; i++)
         {
-            var svc = (string)serviceCol.GetValue(i)!;
-            if (!services.TryGetValue(svc, out var acc))
-                acc = (0, 0, 0);
-            acc.Total++;
-            acc.TotalDuration += (double)durationCol.GetValue(i)!;
-            if ((int)statusCol.GetValue(i)! >= 500) acc.Errors++;
-            services[svc] = acc;
+            serviceNames[i] = (string)serviceCol.GetValue(i)!;
+            statusCodes[i] = (int)statusCol.GetValue(i)!;
+            durations[i] = (float)(double)durationCol.GetValue(i)!;
         }
+
+        var serviceToId = new Dictionary<string, int>();
+        foreach (var s in serviceNames)
+        {
+            if (!serviceToId.ContainsKey(s))
+                serviceToId[s] = serviceToId.Count;
+        }
+        var serviceIds = new int[rowCount];
+        for (int i = 0; i < rowCount; i++)
+            serviceIds[i] = serviceToId[serviceNames[i]];
+
+        var groupCount = serviceToId.Count;
+
+        if (rowCount == 0 || groupCount == 0)
+        {
+            LastGpuOffloadDecision = new GpuOffloadDecision(
+                false, "empty result", 0, 0, 0, "grouped_hash_reduce_partial");
+            return NivaraFrame.Create(
+                ("Service", NivaraColumn<string>.Create(Array.Empty<string>())),
+                ("ErrorRate", NivaraColumn<double>.Create(Array.Empty<double>())),
+                ("AvgDurationMs", NivaraColumn<double>.Create(Array.Empty<double>())),
+                ("TotalRequests", NivaraColumn<int>.Create(Array.Empty<int>())));
+        }
+
+        bool usedGpu = false;
+        string reason;
+        double cpuMs;
+        double gpuMs = 0;
+        long transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
+        Dictionary<string, (int Errors, int Total, double TotalDuration)> services;
+
+        if (!useGpu && !gpuForce)
+        {
+            (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
+            reason = "gpu not requested";
+        }
+        else
+        {
+            int sampleSize = Math.Min(rowCount, GpuProfitability.SampleSize);
+            double sampleCpuMs = GpuProfitability.CalibrateCpuMs(
+                serviceIds, statusCodes, durations, groupCount, sampleSize);
+            double estimatedCpuMs = GpuProfitability.EstimateCpuMs(sampleCpuMs, sampleSize, rowCount);
+            double estimatedGpuMs = GpuProfitability.EstimateGpuMs(rowCount, transferBytes);
+
+            var (offload, decisionReason, estimatedCpu, _) = GpuProfitability.Decide(
+                useGpu, gpuForce, estimatedCpuMs, estimatedGpuMs);
+            reason = decisionReason;
+            // When the GPU path runs, cpuMs is the CPU cost the gate predicted for it, not a
+            // measured value; the alternative would be to run the CPU work we just decided to skip.
+            cpuMs = estimatedCpu;
+
+            if (!offload)
+            {
+                // Not profitable: run the CPU reduction.
+                (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
+            }
+            else
+            {
+                services = [];
+                var swGpu = System.Diagnostics.Stopwatch.StartNew();
+                SilkRuntime? runtime = null;
+                try
+                {
+                    runtime = new SilkRuntime();
+                    var (counts, errors, sums) = SilkAnalytics.GroupedHashReduce(
+                        runtime, serviceIds, statusCodes, durations, groupCount);
+
+                    var idToService = new string[groupCount];
+                    foreach (var kvp in serviceToId)
+                        idToService[kvp.Value] = kvp.Key;
+
+                    for (int g = 0; g < groupCount; g++)
+                        services[idToService[g]] = (errors[g], counts[g], sums[g]);
+
+                    usedGpu = true;
+                    gpuMs = swGpu.Elapsed.TotalMilliseconds;
+                }
+                catch (Exception ex)
+                {
+                    reason = "gpu unavailable: " + ex.Message;
+
+                    // CPU fallback: the GPU path never produced a result.
+                    (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
+                }
+                finally
+                {
+                    runtime?.Dispose();
+                }
+            }
+        }
+
+        LastGpuOffloadDecision = new GpuOffloadDecision(
+            usedGpu, reason, cpuMs, gpuMs, transferBytes,
+            "grouped_hash_reduce_partial");
 
         var svcNames = services.Keys.OrderBy(k => k).ToArray();
         var errorRates = svcNames.Select(s => services[s].Total > 0 ? (double)services[s].Errors / services[s].Total : 0).ToArray();
@@ -240,6 +336,25 @@ public static class Analysis
             ("ErrorRate", NivaraColumn<double>.Create(errorRates)),
             ("AvgDurationMs", NivaraColumn<double>.Create(avgDurations)),
             ("TotalRequests", NivaraColumn<int>.Create(svcNames.Select(s => services[s].Total).ToArray())));
+
+        static (Dictionary<string, (int Errors, int Total, double TotalDuration)> Services, double CpuMs)
+            AggregateOnCpu(string[] serviceNames, int[] statusCodes, NivaraColumn<double> durationCol, int rowCount)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var aggregated = new Dictionary<string, (int Errors, int Total, double TotalDuration)>();
+            for (int i = 0; i < rowCount; i++)
+            {
+                var svc = serviceNames[i];
+                if (!aggregated.TryGetValue(svc, out var acc))
+                    acc = (0, 0, 0);
+                acc.Total++;
+                acc.TotalDuration += (double)durationCol.GetValue(i)!;
+                if (statusCodes[i] >= 500) acc.Errors++;
+                aggregated[svc] = acc;
+            }
+            sw.Stop();
+            return (aggregated, sw.Elapsed.TotalMilliseconds);
+        }
     }
 
     public static NivaraFrame AnalyzeGroupedAggregationWithTypedLinq(string datasetPath, IncidentScenario scenario)

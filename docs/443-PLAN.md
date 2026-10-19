@@ -1,6 +1,6 @@
 # Plan for issue #443 — GPU offload pilot for NivaraIncident analytics
 
-Status: planning document. No code changes yet.
+Status: Phases 0–3 implemented. Phases 4–5 (measurement/reporting and further kernels) are pending.
 
 ## Summary
 
@@ -105,6 +105,21 @@ than re-promoting ILGPU for this issue. Revisit ILGPU only if a kernel needs
   bandwidth-bound windows).
 - Multi-column filter vectors.
 - Radix sort / hash-join keys (hardest; needs careful memory management).
+
+## Implementation status (2026-10-19)
+
+- Phase 0 — done: `--gpu`/`--gpu-force` plumbing and the `GpuOffloadDecision` record.
+- Phase 1 — done: `SilkAnalytics.GroupedHashReduce` on the `grouped_hash_reduce_partial`
+  OpenCL kernel, availability-guarded.
+- Phase 2 — done: `GpuProfitability` calibrates the CPU cost from a bounded sample and
+  compares it against a launch + transfer + compute model with a `0.9` margin.
+  `--gpu-force` bypasses the gate for measurement runs. The `EstimatedGpuMsPerRow`
+  constant is a first-pass placeholder, not a measured throughput.
+- Phase 3 — done: `Analysis.AnalyzeGroupedAggregation(..., useGpu, gpuForce)` keeps I/O on
+  the CPU and switches only the reduction; the decision is published through
+  `Analysis.LastGpuOffloadDecision` and printed by the CLI.
+- Phase 4/5 — pending: no GPU-vs-CPU timing curve or results table yet, and the
+  cost model has not been calibrated against a measured GPU run.
 
 ## Files likely touched
 
