@@ -373,10 +373,10 @@ and still would not build, so Row4's survival was a property of this build and d
 source. The rule that holds is **stage every tile through one allocation**;
 `tests/Nivara.Tests/Gpu/SharedMemoryAllocationTests.cs` enforces it on the compiled IL.
 
-The two families are on different forms today — Row4 and 1×1 use the wide `Allocate2D`, the #440
-kernels use 1D `Allocate<float>` with hand-computed 2-D offsets — which is a known state, not an
-oversight; the 2D form is 10–20% faster on this device. Leave a kernel's form alone unless it is
-being changed for a measured reason.
+After #470 the two families are on the same wide `Allocate2D` form — the #440 kernels were ported
+from 1D `Allocate<float>` with hand-computed 2-D offsets so the family can be re-measured on one
+addressing form. The 2D form is 10–20% faster on this device. Leave a kernel's form alone unless it
+is being changed for a measured reason.
 
 ## 11. Attention
 

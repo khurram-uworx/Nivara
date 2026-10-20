@@ -188,10 +188,10 @@ internal static class GemmKernels
     // The invariant does not prescribe a form, and the two forms are not equivalent in speed.
     // Row4 and the 1x1 kernel use one wide Allocate2D (A in columns [0,16), B in [16, RowStride),
     // the same 5120 B as before) and measured ~20% faster than the two-allocation form they
-    // replace. The four #440 kernels use the 1D Allocate<float> with hand-computed 2D offsets,
-    // which is docs/ILGPU.md §17 lesson 15's prescribed shape and which costs 10-20% against the 2D form on this
-    // device. Leave a kernel's form alone unless it is being changed for a measured reason: the
-    // two families are on different forms today, which is a known state, not an oversight.
+    // replace. After #470 the four #440 kernels use the same wide Allocate2D form
+    // (A in cols [0,KT), B in cols [KT,KT+TileCols)) with row-strips of KT rows, so all five
+    // geometries are timed on one addressing form. Leave a kernel's form alone unless it is
+    // being changed for a measured reason.
 
     /// <summary>2x2 @ K16: 32x32 output tile, 16x16 group. 4 accumulators, 1.0 shared reads/MAC. Measured slower than Row4 - not adopted.</summary>
     internal static void TiledGemmKernelReg2x2K16(
@@ -207,49 +207,61 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // Single 1D shared allocation, A tile then B tile; see the section banner for why
-        // this is one Allocate and not two Allocate2D calls (#468).
-        const int ASz = TileRows * KT;
-        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
+        // Single wide shared allocation: A in cols [0, KT), B in cols [KT, KT+TileCols).
+        // See the section banner for why this is one Allocate2D and not two (#468).
+        const int RowStride = KT + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, RowStride), new Stride2D.DenseX(RowStride));
 
         int rowBase = Grid.IdxX * TileRows;
         int colBase = Grid.IdxY * TileCols;
         float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
 
+        const int NumStrips = TileRows / KT;
         for (int k0 = 0; k0 < aCols; k0 += KT)
         {
-            // One 256-thread group stages TileRows*KT A values and KT*TileCols B values. Each
-            // work item loads its own strided slice; the 2D bounds test zeroes the halo so
-            // partial tiles contribute no spurious products, matching Row4's edge handling.
-            for (int r = 0; r < TileRows; r += TileSize)
-                for (int kk = 0; kk < KT; kk += TileSize)
-                {
-                    int srcRow = rowBase + r + x;
-                    int srcCol = k0 + kk + y;
-                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
-                        ? a[srcRow * aCols + srcCol] : 0f;
-                }
-            for (int kk = 0; kk < KT; kk += TileSize)
-                for (int cc = 0; cc < TileCols; cc += TileSize)
-                {
-                    int srcRow = k0 + kk + x;
-                    int srcCol = colBase + cc + y;
-                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
-                        ? b[srcRow * bCols + srcCol] : 0f;
-                }
-            Group.Barrier();
-
-            for (int k = 0; k < KT; k++)
+            int stripOfThread = (x * BR) / KT;
+            for (int s = 0; s < NumStrips; s++)
             {
-                float a0 = smem[(x * BR + 0) * KT + k];
-                float a1 = smem[(x * BR + 1) * KT + k];
-                int cb = y * BC;
-                acc00 += a0 * smem[ASz + k * TileCols + (cb + 0)];
-                acc01 += a0 * smem[ASz + k * TileCols + (cb + 1)];
-                acc10 += a1 * smem[ASz + k * TileCols + (cb + 0)];
-                acc11 += a1 * smem[ASz + k * TileCols + (cb + 1)];
+                if (s == stripOfThread)
+                {
+                    for (int r = 0; r < BR; r++)
+                    {
+                        int srcRow = rowBase + x * BR + r;
+                        int slot = x * BR + r - s * KT;
+                        for (int kk = 0; kk < KT; kk += TileSize)
+                        {
+                            int srcCol = k0 + kk + y;
+                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
+                                ? a[srcRow * aCols + srcCol] : 0f;
+                        }
+                    }
+                }
+                for (int kk = 0; kk < KT; kk += TileSize)
+                    for (int cc = 0; cc < TileCols; cc += TileSize)
+                    {
+                        int srcRow = k0 + kk + x;
+                        int srcCol = colBase + cc + y;
+                        smem[kk + x, KT + cc + y] = (srcRow < aCols && srcCol < bCols)
+                            ? b[srcRow * bCols + srcCol] : 0f;
+                    }
+                Group.Barrier();
+
+                if (s == stripOfThread)
+                {
+                    for (int k = 0; k < KT; k++)
+                    {
+                        float a0 = smem[x * BR + 0 - s * KT, k];
+                        float a1 = smem[x * BR + 1 - s * KT, k];
+                        int cb = y * BC;
+                        acc00 += a0 * smem[k, KT + cb + 0];
+                        acc01 += a0 * smem[k, KT + cb + 1];
+                        acc10 += a1 * smem[k, KT + cb + 0];
+                        acc11 += a1 * smem[k, KT + cb + 1];
+                    }
+                }
+                Group.Barrier();
             }
-            Group.Barrier();
         }
 
         int row0 = rowBase + x * BR + 0;
@@ -282,46 +294,61 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // Single 1D shared allocation, A tile then B tile; see the section banner for why
-        // this is one Allocate and not two Allocate2D calls (#468).
-        const int ASz = TileRows * KT;
-        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
+        // Single wide shared allocation: A in cols [0, KT), B in cols [KT, KT+TileCols).
+        // See the section banner for why this is one Allocate2D and not two (#468).
+        const int RowStride = KT + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, RowStride), new Stride2D.DenseX(RowStride));
 
         int rowBase = Grid.IdxX * TileRows;
         int colBase = Grid.IdxY * TileCols;
         float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
 
+        const int NumStrips = TileRows / KT;
         for (int k0 = 0; k0 < aCols; k0 += KT)
         {
-            for (int r = 0; r < TileRows; r += TileSize)
-                for (int kk = 0; kk < KT; kk += TileSize)
-                {
-                    int srcRow = rowBase + r + x;
-                    int srcCol = k0 + kk + y;
-                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
-                        ? a[srcRow * aCols + srcCol] : 0f;
-                }
-            for (int kk = 0; kk < KT; kk += TileSize)
-                for (int cc = 0; cc < TileCols; cc += TileSize)
-                {
-                    int srcRow = k0 + kk + x;
-                    int srcCol = colBase + cc + y;
-                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
-                        ? b[srcRow * bCols + srcCol] : 0f;
-                }
-            Group.Barrier();
-
-            for (int k = 0; k < KT; k++)
+            int stripOfThread = (x * BR) / KT;
+            for (int s = 0; s < NumStrips; s++)
             {
-                float a0 = smem[(x * BR + 0) * KT + k];
-                float a1 = smem[(x * BR + 1) * KT + k];
-                int cb = y * BC;
-                acc00 += a0 * smem[ASz + k * TileCols + (cb + 0)];
-                acc01 += a0 * smem[ASz + k * TileCols + (cb + 1)];
-                acc10 += a1 * smem[ASz + k * TileCols + (cb + 0)];
-                acc11 += a1 * smem[ASz + k * TileCols + (cb + 1)];
+                if (s == stripOfThread)
+                {
+                    for (int r = 0; r < BR; r++)
+                    {
+                        int srcRow = rowBase + x * BR + r;
+                        int slot = x * BR + r - s * KT;
+                        for (int kk = 0; kk < KT; kk += TileSize)
+                        {
+                            int srcCol = k0 + kk + y;
+                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
+                                ? a[srcRow * aCols + srcCol] : 0f;
+                        }
+                    }
+                }
+                for (int kk = 0; kk < KT; kk += TileSize)
+                    for (int cc = 0; cc < TileCols; cc += TileSize)
+                    {
+                        int srcRow = k0 + kk + x;
+                        int srcCol = colBase + cc + y;
+                        smem[kk + x, KT + cc + y] = (srcRow < aCols && srcCol < bCols)
+                            ? b[srcRow * bCols + srcCol] : 0f;
+                    }
+                Group.Barrier();
+
+                if (s == stripOfThread)
+                {
+                    for (int k = 0; k < KT; k++)
+                    {
+                        float a0 = smem[x * BR + 0 - s * KT, k];
+                        float a1 = smem[x * BR + 1 - s * KT, k];
+                        int cb = y * BC;
+                        acc00 += a0 * smem[k, KT + cb + 0];
+                        acc01 += a0 * smem[k, KT + cb + 1];
+                        acc10 += a1 * smem[k, KT + cb + 0];
+                        acc11 += a1 * smem[k, KT + cb + 1];
+                    }
+                }
+                Group.Barrier();
             }
-            Group.Barrier();
         }
 
         for (int r = 0; r < BR; r++)
@@ -348,53 +375,68 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // Single 1D shared allocation, A tile then B tile; see the section banner for why
-        // this is one Allocate and not two Allocate2D calls (#468).
-        const int ASz = TileRows * KT;
-        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
+        // Single wide shared allocation: A in cols [0, KT), B in cols [KT, KT+TileCols).
+        // See the section banner for why this is one Allocate2D and not two (#468).
+        const int RowStride = KT + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, RowStride), new Stride2D.DenseX(RowStride));
 
         int rowBase = Grid.IdxX * TileRows;
         int colBase = Grid.IdxY * TileCols;
         float acc00 = 0f, acc01 = 0f, acc10 = 0f, acc11 = 0f;
         float acc20 = 0f, acc21 = 0f, acc30 = 0f, acc31 = 0f;
 
+        const int NumStrips = TileRows / KT;
         for (int k0 = 0; k0 < aCols; k0 += KT)
         {
-            for (int r = 0; r < TileRows; r += TileSize)
-                for (int kk = 0; kk < KT; kk += TileSize)
-                {
-                    int srcRow = rowBase + r + x;
-                    int srcCol = k0 + kk + y;
-                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
-                        ? a[srcRow * aCols + srcCol] : 0f;
-                }
-            for (int kk = 0; kk < KT; kk += TileSize)
-                for (int cc = 0; cc < TileCols; cc += TileSize)
-                {
-                    int srcRow = k0 + kk + x;
-                    int srcCol = colBase + cc + y;
-                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
-                        ? b[srcRow * bCols + srcCol] : 0f;
-                }
-            Group.Barrier();
-
-            for (int k = 0; k < KT; k++)
+            int stripOfThread = (x * BR) / KT;
+            for (int s = 0; s < NumStrips; s++)
             {
-                int cb = y * BC;
-                float a0 = smem[(x * BR + 0) * KT + k];
-                acc00 += a0 * smem[ASz + k * TileCols + (cb + 0)];
-                acc01 += a0 * smem[ASz + k * TileCols + (cb + 1)];
-                float a1 = smem[(x * BR + 1) * KT + k];
-                acc10 += a1 * smem[ASz + k * TileCols + (cb + 0)];
-                acc11 += a1 * smem[ASz + k * TileCols + (cb + 1)];
-                float a2 = smem[(x * BR + 2) * KT + k];
-                acc20 += a2 * smem[ASz + k * TileCols + (cb + 0)];
-                acc21 += a2 * smem[ASz + k * TileCols + (cb + 1)];
-                float a3 = smem[(x * BR + 3) * KT + k];
-                acc30 += a3 * smem[ASz + k * TileCols + (cb + 0)];
-                acc31 += a3 * smem[ASz + k * TileCols + (cb + 1)];
+                if (s == stripOfThread)
+                {
+                    for (int r = 0; r < BR; r++)
+                    {
+                        int srcRow = rowBase + x * BR + r;
+                        int slot = x * BR + r - s * KT;
+                        for (int kk = 0; kk < KT; kk += TileSize)
+                        {
+                            int srcCol = k0 + kk + y;
+                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
+                                ? a[srcRow * aCols + srcCol] : 0f;
+                        }
+                    }
+                }
+                for (int kk = 0; kk < KT; kk += TileSize)
+                    for (int cc = 0; cc < TileCols; cc += TileSize)
+                    {
+                        int srcRow = k0 + kk + x;
+                        int srcCol = colBase + cc + y;
+                        smem[kk + x, KT + cc + y] = (srcRow < aCols && srcCol < bCols)
+                            ? b[srcRow * bCols + srcCol] : 0f;
+                    }
+                Group.Barrier();
+
+                if (s == stripOfThread)
+                {
+                    for (int k = 0; k < KT; k++)
+                    {
+                        int cb = y * BC;
+                        float a0 = smem[x * BR + 0 - s * KT, k];
+                        acc00 += a0 * smem[k, KT + cb + 0];
+                        acc01 += a0 * smem[k, KT + cb + 1];
+                        float a1 = smem[x * BR + 1 - s * KT, k];
+                        acc10 += a1 * smem[k, KT + cb + 0];
+                        acc11 += a1 * smem[k, KT + cb + 1];
+                        float a2 = smem[x * BR + 2 - s * KT, k];
+                        acc20 += a2 * smem[k, KT + cb + 0];
+                        acc21 += a2 * smem[k, KT + cb + 1];
+                        float a3 = smem[x * BR + 3 - s * KT, k];
+                        acc30 += a3 * smem[k, KT + cb + 0];
+                        acc31 += a3 * smem[k, KT + cb + 1];
+                    }
+                }
+                Group.Barrier();
             }
-            Group.Barrier();
         }
 
         int d = colBase + y * BC;
@@ -439,50 +481,65 @@ internal static class GemmKernels
         int x = Group.IdxX;
         int y = Group.IdxY;
 
-        // Single 1D shared allocation, A tile then B tile; see the section banner for why
-        // this is one Allocate and not two Allocate2D calls (#468).
-        const int ASz = TileRows * KT;
-        var smem = SharedMemory.Allocate<float>(ASz + KT * TileCols);
+        // Single wide shared allocation: A in cols [0, KT), B in cols [KT, KT+TileCols).
+        // See the section banner for why this is one Allocate2D and not two (#468).
+        const int RowStride = KT + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, RowStride), new Stride2D.DenseX(RowStride));
 
         int rowBase = Grid.IdxX * TileRows;
         int colBase = Grid.IdxY * TileCols;
         float acc0 = 0f, acc1 = 0f, acc2 = 0f, acc3 = 0f;
         float acc4 = 0f, acc5 = 0f, acc6 = 0f, acc7 = 0f;
 
+        const int NumStrips = TileRows / KT;
         for (int k0 = 0; k0 < aCols; k0 += KT)
         {
-            for (int r = 0; r < TileRows; r += TileSize)
-                for (int kk = 0; kk < KT; kk += TileSize)
-                {
-                    int srcRow = rowBase + r + x;
-                    int srcCol = k0 + kk + y;
-                    smem[(r + x) * KT + (kk + y)] = (srcRow < aRows && srcCol < aCols)
-                        ? a[srcRow * aCols + srcCol] : 0f;
-                }
-            for (int kk = 0; kk < KT; kk += TileSize)
-                for (int cc = 0; cc < TileCols; cc += TileSize)
-                {
-                    int srcRow = k0 + kk + x;
-                    int srcCol = colBase + cc + y;
-                    smem[ASz + (kk + x) * TileCols + (cc + y)] = (srcRow < aCols && srcCol < bCols)
-                        ? b[srcRow * bCols + srcCol] : 0f;
-                }
-            Group.Barrier();
-
-            for (int k = 0; k < KT; k++)
+            int stripOfThread = (x * BR) / KT;
+            for (int s = 0; s < NumStrips; s++)
             {
-                float aVal = smem[(x * BR) * KT + k];
-                int cb = y * BC;
-                acc0 += aVal * smem[ASz + k * TileCols + (cb + 0)];
-                acc1 += aVal * smem[ASz + k * TileCols + (cb + 1)];
-                acc2 += aVal * smem[ASz + k * TileCols + (cb + 2)];
-                acc3 += aVal * smem[ASz + k * TileCols + (cb + 3)];
-                acc4 += aVal * smem[ASz + k * TileCols + (cb + 4)];
-                acc5 += aVal * smem[ASz + k * TileCols + (cb + 5)];
-                acc6 += aVal * smem[ASz + k * TileCols + (cb + 6)];
-                acc7 += aVal * smem[ASz + k * TileCols + (cb + 7)];
+                if (s == stripOfThread)
+                {
+                    for (int r = 0; r < BR; r++)
+                    {
+                        int srcRow = rowBase + x * BR + r;
+                        int slot = x * BR + r - s * KT;
+                        for (int kk = 0; kk < KT; kk += TileSize)
+                        {
+                            int srcCol = k0 + kk + y;
+                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
+                                ? a[srcRow * aCols + srcCol] : 0f;
+                        }
+                    }
+                }
+                for (int kk = 0; kk < KT; kk += TileSize)
+                    for (int cc = 0; cc < TileCols; cc += TileSize)
+                    {
+                        int srcRow = k0 + kk + x;
+                        int srcCol = colBase + cc + y;
+                        smem[kk + x, KT + cc + y] = (srcRow < aCols && srcCol < bCols)
+                            ? b[srcRow * bCols + srcCol] : 0f;
+                    }
+                Group.Barrier();
+
+                if (s == stripOfThread)
+                {
+                    for (int k = 0; k < KT; k++)
+                    {
+                        float aVal = smem[x * BR - s * KT, k];
+                        int cb = y * BC;
+                        acc0 += aVal * smem[k, KT + cb + 0];
+                        acc1 += aVal * smem[k, KT + cb + 1];
+                        acc2 += aVal * smem[k, KT + cb + 2];
+                        acc3 += aVal * smem[k, KT + cb + 3];
+                        acc4 += aVal * smem[k, KT + cb + 4];
+                        acc5 += aVal * smem[k, KT + cb + 5];
+                        acc6 += aVal * smem[k, KT + cb + 6];
+                        acc7 += aVal * smem[k, KT + cb + 7];
+                    }
+                }
+                Group.Barrier();
             }
-            Group.Barrier();
         }
 
         int outRow = rowBase + x;
