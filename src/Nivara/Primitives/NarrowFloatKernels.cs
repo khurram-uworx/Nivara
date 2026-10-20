@@ -176,7 +176,7 @@ internal static class NarrowFloatKernels
     /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored
     /// as BF16. Widen inside the kernel. SIMD + scalar tail.
     /// </summary>
-    internal static void MatMulTransposedB_Bf16Weights(
+    internal static void MatMulTransposedB(
         ReadOnlySpan<float> a, ReadOnlySpan<BFloat16> b, Span<float> output,
         int aRows, int aCols, int bCols)
     {
@@ -222,7 +222,7 @@ internal static class NarrowFloatKernels
     }
 
     /// <summary>Plain matmul A[aRows,aCols] @ B[aCols,bCols] with B as BF16.</summary>
-    internal static void MatMul_Bf16Weights(
+    internal static void MatMul(
         ReadOnlySpan<float> a, ReadOnlySpan<BFloat16> b, Span<float> output,
         int aRows, int aCols, int bCols)
     {
@@ -249,7 +249,7 @@ internal static class NarrowFloatKernels
     /// <summary>
     /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored as Half.
     /// </summary>
-    internal static void MatMulTransposedB_HalfWeights(
+    internal static void MatMulTransposedB(
         ReadOnlySpan<float> a, ReadOnlySpan<Half> b, Span<float> output,
         int aRows, int aCols, int bCols)
     {

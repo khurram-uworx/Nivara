@@ -19,7 +19,7 @@ public class MixedPrecisionMatmulTests
         var a = new[] { 1f, 2f, 3f, 4f, 5f, 6f };
         var w = Array.ConvertAll(new[] { 7f, 8f, 9f, 10f, 11f, 12f }, x => (BFloat16)x);
         var actual = new float[4];
-        GradKernels.MatMulTransposedB_Bf16Weights(a, w, actual, 2, 3, 2);
+        GradKernels.MatMulTransposedB(a, w, actual, 2, 3, 2);
 
         for (int i = 0; i < 2; i++)
             for (int j = 0; j < 2; j++)
@@ -45,7 +45,7 @@ public class MixedPrecisionMatmulTests
             var wBf = Array.ConvertAll(wF, x => (BFloat16)x);
 
             var actual = new float[rows * bcols];
-            GradKernels.MatMulTransposedB_Bf16Weights(a, wBf, actual, rows, cols, bcols);
+            GradKernels.MatMulTransposedB(a, wBf, actual, rows, cols, bcols);
 
             // reference: widen BF16 -> float, then float matmul
             var wWidened = Array.ConvertAll(wBf, x => (float)x);
@@ -71,7 +71,7 @@ public class MixedPrecisionMatmulTests
             var wH = Array.ConvertAll(wF, x => (Half)x);
 
             var actual = new float[rows * bcols];
-            GradKernels.MatMulTransposedB_HalfWeights(a, wH, actual, rows, cols, bcols);
+            GradKernels.MatMulTransposedB(a, wH, actual, rows, cols, bcols);
 
             var wWidened = Array.ConvertAll(wH, x => (float)x);
             var expected = new float[rows * bcols];
@@ -96,7 +96,7 @@ public class MixedPrecisionMatmulTests
             var wBf = Array.ConvertAll(wF, x => (BFloat16)x);
 
             var actual = new float[rows * bcols];
-            GradKernels.MatMul_Bf16Weights(a, wBf, actual, rows, cols, bcols);
+            GradKernels.MatMul(a, wBf, actual, rows, cols, bcols);
 
             var wWidened = Array.ConvertAll(wBf, x => (float)x);
             var expected = new float[rows * bcols];
