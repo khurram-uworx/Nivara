@@ -302,7 +302,8 @@ public static class StateDictLoader
                 ReverseGradTensor<TWeight>.FromMatrix(biasSlice, 1, rowCount))
         };
         linear.LoadStateDict(state);
-    }    public static void LoadEmbedWidened<TModel, TWeight>(
+    }
+    public static void LoadEmbedWidened<TModel, TWeight>(
         Embedding<TModel, TModel> embed,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         string key)
