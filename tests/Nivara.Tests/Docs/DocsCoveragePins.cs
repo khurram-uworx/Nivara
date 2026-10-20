@@ -66,7 +66,7 @@ internal static class DocsCoveragePins
     /// 746 = 744 + <c>tests/Nivara.Tests/Qwen/SilkQwenBf16ParityTests.cs</c> and
     /// <c>src/Nivara.Extensions/Silk/SilkQwenGpuRunner.Bf16.cs</c>, added by #748.
     /// </summary>
-    internal const int ExpectedFileCount = 752;
+    internal const int ExpectedFileCount = 755;
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     internal const int ExpectedCodeCitationCount = 127;
 
