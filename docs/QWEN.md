@@ -1,6 +1,6 @@
 # Qwen2.5-0.5B-Instruct (Qwen/Qwen2.5-0.5B-Instruct)
 
-Native function calling with **Qwen2.5-0.5B-Instruct** served as a plain `Microsoft.Extensions.AI.IChatClient` over Nivara's in-process `LlamaForCausalLM` engine — no LLM server, no Python runtime. `--qwen tools-weather` runs the real `<tool_call>` → `GetWeather` → `<tool_response>` → final-answer loop, capped at 3 iterations, and closes with a clean natural-language answer.
+Native function calling with **Qwen2.5-0.5B-Instruct** served as a plain `Microsoft.Extensions.AI.IChatClient` over Nivara's in-process `LlamaForCausalLM` engine — no LLM server, no Python runtime. `--qwen tools-weather` runs the real `<tool_call>` → `GetWeather` → `<tool_response>` → final-answer loop, capped at 3 iterations, and closes with a clean natural-language answer. `--qwen tools-nivara` does the same with real Nivara-backed tools (`analyzeSentiment`, `extractEntities`, `validateResponse` from `Nivara.Samples.NivaraAIFunctions`), subset-selectable via `--nivara-tools`.
 
 The code lives in `samples/NivaraChat/Qwen/`; the tests in `tests/Nivara.Tests/Qwen/`.
 

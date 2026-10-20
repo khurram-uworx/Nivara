@@ -106,7 +106,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
 | `--tinyshakespeare` | — | Mode: train/serve a batched TinyShakespeare transformer as `IChatClient` (see `--tinyshakespeare --help` for its options) |
 | `--smollm` | — | Mode: serve the pretrained SmolLM-135M-Instruct causal LM as `IChatClient` (`chat`/`plain` sub-modes; see `--smollm --help`) |
-| `--qwen` | — | Mode: native function calling with Qwen2.5-0.5B-Instruct (`tools-weather`/`chat`/`plain` sub-modes; see `--qwen --help`) |
+| `--qwen` | — | Mode: native function calling with Qwen2.5-0.5B-Instruct (`tools-weather`/`tools-nivara`/`chat`/`plain` sub-modes; see `--qwen --help`) |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -378,9 +378,10 @@ config.json + model.safetensors + vocab.json + merges.txt + tokenizer.json
 ```
 
 - `--qwen tools-weather --text "What's the weather in Paris?"` — the native tool-calling demo: the model emits `<tool_call>\n{"name": "getWeather", "arguments": {"city": "Paris"}}\n</tool_call>`, the `GetWeather` `AIFunction` runs, the result feeds back as `<tool_response>` inside a `user` turn, and the model closes with a clean natural-language answer (loop capped at 3 iterations so a model that never answers still exits cleanly). Interactive REPL when `--text` is omitted.
+- `--qwen tools-nivara --text "Analyze the sentiment of: 'I absolutely love this product!'"` — real Nivara-backed tools (`NivaraAIFunctions` building blocks: `analyzeSentiment`, `extractEntities`, `validateResponse`) invoked by the Qwen loop; subset via `--nivara-tools`. Interactive REPL when `--text` is omitted.
 - `--qwen chat` / `--qwen plain` — interactive multi-turn REPL / single-shot plain-text reply, token-streamed.
 
-Options after `--qwen`: `tools-weather|chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/qwen2.5-0.5b-instruct`), `--precision f32|bf16` (default `f32`; bf16 keeps the BF16 weights native — BF16-on-disk is read as BFloat16 with no widen), `--max-new-tokens <n>` (default 128), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--qwen --help` for the full list.
+Options after `--qwen`: `tools-weather|tools-nivara|chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/qwen2.5-0.5b-instruct`), `--nivara-tools <csv>` (subset for tools-nivara: sentiment,entities,validate,all; default all), `--precision f32|bf16` (default `f32`; bf16 keeps the BF16 weights native — BF16-on-disk is read as BFloat16 with no widen), `--max-new-tokens <n>` (default 128), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--qwen --help` for the full list.
 
 Model files must be present under `samples/data/qwen2.5-0.5b-instruct`:
 

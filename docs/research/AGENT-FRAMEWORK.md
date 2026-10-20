@@ -42,6 +42,12 @@ var options = new ChatOptions
 gatekeeping (always classify before routing), the function-calling loop
 may not fire every time.
 
+**Nivara building block:** `Nivara.Samples.NivaraAIFunctions` (in `samples/Nivara.Samples`)
+exposes `CreateSentimentTool`, `CreateEntityTool`, `CreateValidatorTool`, and
+`CreateRegistered(...)` which wrap trained Nivara text models as `AIFunction`s
+via `AIFunctionFactory.Create` over `[Description]`-decorated delegates (state
+captured in the closure). Exercised end-to-end by `--qwen tools-nivara`.
+
 ### Level 2: IChatClient + DelegatingChatClient Middleware
 
 A Nivara model implements `IChatClient` directly. It does not call an LLM;
