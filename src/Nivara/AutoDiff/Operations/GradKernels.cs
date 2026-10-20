@@ -835,6 +835,12 @@ internal static class GradKernels
         int aRows, int aCols, int bCols)
         => NarrowFloatKernels.MatMul(a, b, output.AsSpan(), aRows, aCols, bCols);
 
+    /// <summary>Plain matmul A[aRows,aCols] @ B[aCols,bCols] with B stored as Half (scalar path).</summary>
+    public static void MatMul(
+        ReadOnlySpan<float> a, ReadOnlySpan<Half> b, float[] output,
+        int aRows, int aCols, int bCols)
+        => NarrowFloatKernels.MatMul(a, b, output.AsSpan(), aRows, aCols, bCols);
+
     /// <summary>
     /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored as Half.
     /// </summary>

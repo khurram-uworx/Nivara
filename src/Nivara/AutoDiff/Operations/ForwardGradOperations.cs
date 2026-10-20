@@ -387,6 +387,243 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(primal, tangent, resultShape);
     }
 
+    public static ForwardGradTensor<float> MatMulTransposedB(
+        ForwardGradTensor<float> a, ForwardGradTensor<BFloat16> b)
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+        if (a.Rank != 2 || b.Rank != 2)
+            throw new ArgumentException("MatMulTransposedB requires rank-2 operands.");
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bCols = b.shape[0];
+        if (b.shape[1] != aCols)
+            throw new ArgumentException(
+                $"MatMulTransposedB dimension mismatch: a is {aRows}x{aCols}, b is {bCols}x{b.shape[1]}. " +
+                $"b's column count ({b.shape[1]}) must equal a's column count ({aCols}).");
+
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new float[aRows * bCols];
+        GradKernels.MatMulTransposedB(aSpan, bSpan, primalArr, aRows, aCols, bCols);
+        var primal = NivaraColumn<float>.CreateFromOwnedArray(primalArr);
+        var resultShape = new[] { aRows, bCols };
+
+        NivaraColumn<float>? tangent = null;
+        var aTan = a.Tangent;
+        var bTan = b.Tangent;
+        if (a.RequiresTangent || b.RequiresTangent)
+        {
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tAB = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aTanSpan, bSpan, tAB, aRows, aCols, bCols);
+                var aTB = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aSpan, bTanSpan, aTB, aRows, aCols, bCols);
+                var tanArr = new float[aRows * bCols];
+                TensorPrimitives.Add(tAB, aTB, tanArr);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aTanSpan, bSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aSpan, bTanSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<float>(primal, tangent, resultShape);
+    }
+
+    public static ForwardGradTensor<float> MatMulTransposedB(
+        ForwardGradTensor<float> a, ForwardGradTensor<Half> b)
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+        if (a.Rank != 2 || b.Rank != 2)
+            throw new ArgumentException("MatMulTransposedB requires rank-2 operands.");
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bCols = b.shape[0];
+        if (b.shape[1] != aCols)
+            throw new ArgumentException(
+                $"MatMulTransposedB dimension mismatch: a is {aRows}x{aCols}, b is {bCols}x{b.shape[1]}. " +
+                $"b's column count ({b.shape[1]}) must equal a's column count ({aCols}).");
+
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new float[aRows * bCols];
+        GradKernels.MatMulTransposedB(aSpan, bSpan, primalArr, aRows, aCols, bCols);
+        var primal = NivaraColumn<float>.CreateFromOwnedArray(primalArr);
+        var resultShape = new[] { aRows, bCols };
+
+        NivaraColumn<float>? tangent = null;
+        var aTan = a.Tangent;
+        var bTan = b.Tangent;
+        if (a.RequiresTangent || b.RequiresTangent)
+        {
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tAB = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aTanSpan, bSpan, tAB, aRows, aCols, bCols);
+                var aTB = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aSpan, bTanSpan, aTB, aRows, aCols, bCols);
+                var tanArr = new float[aRows * bCols];
+                TensorPrimitives.Add(tAB, aTB, tanArr);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aTanSpan, bSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMulTransposedB(aSpan, bTanSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<float>(primal, tangent, resultShape);
+    }
+
+
+    public static ForwardGradTensor<float> MatMul(
+        ForwardGradTensor<float> a, ForwardGradTensor<BFloat16> b)
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+        if (a.Rank != 2 || b.Rank != 2)
+            throw new ArgumentException("MatMul requires rank-2 operands.");
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bCols = b.shape[1];
+        if (aCols != b.shape[0])
+            throw new ArgumentException(
+                $"MatMul dimension mismatch: a is {aRows}x{aCols}, b is {b.shape[0]}x{bCols}. " +
+                $"a's column count ({aCols}) must equal b's row count ({b.shape[0]}).");
+
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new float[aRows * bCols];
+        GradKernels.MatMul(aSpan, bSpan, primalArr, aRows, aCols, bCols);
+        var primal = NivaraColumn<float>.CreateFromOwnedArray(primalArr);
+        var resultShape = new[] { aRows, bCols };
+
+        NivaraColumn<float>? tangent = null;
+        var aTan = a.Tangent;
+        var bTan = b.Tangent;
+        if (a.RequiresTangent || b.RequiresTangent)
+        {
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tAB = new float[aRows * bCols];
+                GradKernels.MatMul(aTanSpan, bSpan, tAB, aRows, aCols, bCols);
+                var aTB = new float[aRows * bCols];
+                GradKernels.MatMul(aSpan, bTanSpan, aTB, aRows, aCols, bCols);
+                var tanArr = new float[aRows * bCols];
+                TensorPrimitives.Add(tAB, aTB, tanArr);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMul(aTanSpan, bSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMul(aSpan, bTanSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<float>(primal, tangent, resultShape);
+    }
+
+    public static ForwardGradTensor<float> MatMul(
+        ForwardGradTensor<float> a, ForwardGradTensor<Half> b)
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+        if (a.Rank != 2 || b.Rank != 2)
+            throw new ArgumentException("MatMul requires rank-2 operands.");
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bCols = b.shape[1];
+        if (aCols != b.shape[0])
+            throw new ArgumentException(
+                $"MatMul dimension mismatch: a is {aRows}x{aCols}, b is {b.shape[0]}x{bCols}. " +
+                $"a's column count ({aCols}) must equal b's row count ({b.shape[0]}).");
+
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new float[aRows * bCols];
+        GradKernels.MatMul(aSpan, bSpan, primalArr, aRows, aCols, bCols);
+        var primal = NivaraColumn<float>.CreateFromOwnedArray(primalArr);
+        var resultShape = new[] { aRows, bCols };
+
+        NivaraColumn<float>? tangent = null;
+        var aTan = a.Tangent;
+        var bTan = b.Tangent;
+        if (a.RequiresTangent || b.RequiresTangent)
+        {
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tAB = new float[aRows * bCols];
+                GradKernels.MatMul(aTanSpan, bSpan, tAB, aRows, aCols, bCols);
+                var aTB = new float[aRows * bCols];
+                GradKernels.MatMul(aSpan, bTanSpan, aTB, aRows, aCols, bCols);
+                var tanArr = new float[aRows * bCols];
+                TensorPrimitives.Add(tAB, aTB, tanArr);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMul(aTanSpan, bSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new float[aRows * bCols];
+                GradKernels.MatMul(aSpan, bTanSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<float>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<float>(primal, tangent, resultShape);
+    }
+
     /// <summary>
     /// Transposes a rank-2 or rank-3 tensor by swapping two axes.
     /// JVP: t_out = TransposeAxes(t_a)
