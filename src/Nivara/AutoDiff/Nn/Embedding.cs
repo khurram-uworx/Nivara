@@ -151,7 +151,11 @@ public class Embedding<TModel, TWeight> : Module<TModel>
         if (shouldTrack)
         {
             var savedTokenIds = (int[])tokenIds.Clone();
-            var gradFn = new OpNode<TModel>("EmbeddingMixed", [], (typedGradOutput) =>
+            var nodeInputs = typeof(TWeight) == typeof(TModel)
+                ? (IReadOnlyList<ReverseGradTensor<TModel>>)
+                    new[] { (ReverseGradTensor<TModel>)(object)weight.Tensor }
+                : (IReadOnlyList<ReverseGradTensor<TModel>>)Array.Empty<ReverseGradTensor<TModel>>();
+            var gradFn = new OpNode<TModel>("EmbeddingMixed", nodeInputs, (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gradSpan);
                 if (!weight.Tensor.RequiresGrad)
