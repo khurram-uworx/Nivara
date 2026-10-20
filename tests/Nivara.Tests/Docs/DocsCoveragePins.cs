@@ -53,8 +53,15 @@ internal static class DocsCoveragePins
     /// <c>tests/Nivara.Tests/Incident/GpuProfitabilityTests.cs</c>.
     /// 735 = 734 + <c>tests/Nivara.Tests/NivaraTorch/LlamaForCausalLMTests.cs</c>, added by the
     /// LlamaForCausalLM torch parity work on khurram/372 without moving the pin.
+    /// 738 = 735 + the three files added by #383: <c>samples/Nivara.Samples/NivaraAIFunctions.cs</c>,
+    /// <c>tests/Nivara.Tests/Qwen/QwenToolsNivaraLoopTests.cs</c>, and
+    /// <c>tests/Nivara.Tests/Samples/NivaraAIFunctionsTests.cs</c>.
+    /// 741 = 738 + the three files added by #325 phase 1:
+    /// <c>src/Nivara/Execution/BudgetEnforcement.cs</c>,
+    /// <c>src/Nivara/Execution/MemoryBudget.cs</c>, and
+    /// <c>tests/Nivara.Tests/Execution/MemoryBudgetTests.cs</c>.
     /// </summary>
-    internal const int ExpectedFileCount = 735;
+    internal const int ExpectedFileCount = 741;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     internal const int ExpectedCodeCitationCount = 127;

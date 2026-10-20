@@ -18,6 +18,18 @@ public class ExecutionContextTests
         Assert.That(context.MemoryBudget, Is.EqualTo(1024 * 1024 * 1024)); // 1GB
         Assert.That(context.CancellationToken, Is.EqualTo(CancellationToken.None));
         Assert.That(context.Progress, Is.Null);
+        Assert.That(context.BudgetEnforcement, Is.EqualTo(BudgetEnforcement.Advisory));
+    }
+
+    [Test]
+    public void Clone_PreservesBudgetEnforcement()
+    {
+        var original = new NivaraExecutionContext(ExecutionStrategy.Streaming)
+        {
+            BudgetEnforcement = BudgetEnforcement.Enforced
+        };
+        var clone = original.Clone();
+        Assert.That(clone.BudgetEnforcement, Is.EqualTo(BudgetEnforcement.Enforced));
     }
 
     [Test]

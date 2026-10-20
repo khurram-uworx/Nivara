@@ -171,9 +171,13 @@ producer never exceeds capacity against a slow consumer).
 `QueryFrame.AsStream` reaches the strategy through `StreamChunksAsync`, which has no bounded
 channel: it pulls chunk after chunk from the source and yields each one, so the consumer's
 own pace is the backpressure. The budget there bounds the *derived chunk size* and drives the
-advisory tracker — it is not a hard in-flight ceiling. A hard byte ceiling on the chunked
-path is not implemented; that is the subject of [#325](https://github.com/khurram-uworx/Nivara/issues/325)
-(spill-to-disk design) and is out of scope here.
+advisory tracker by default.
+
+Phase 1 of [#325](https://github.com/khurram-uworx/Nivara/issues/325) adds an opt-in hard
+ceiling: set `NivaraExecutionContext.BudgetEnforcement = BudgetEnforcement.Enforced` (or use
+`NivaraExecutionContext.WithBudgetEnforcement`) to gate each yielded frame through a byte-aware
+`MemoryBudget`. Advisory remains the default. Phase 2 (spill/external memory for boundary
+operators) is tracked as #743.
 
 The **design** for that hard ceiling — the `MemoryBudget` primitive, the `Advisory`/`Enforced`
 modes, the acquire/release protocol and the acceptance criteria — is the ungated proposal in

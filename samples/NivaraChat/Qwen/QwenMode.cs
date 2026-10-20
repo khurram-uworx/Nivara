@@ -1,7 +1,10 @@
 using Microsoft.Extensions.AI;
 using Nivara.AI;
+using Nivara.AutoDiff.Nn;
 using Nivara.Primitives;
 using Nivara.Samples;
+using NivaraChat.Modes;
+using NivaraChat.Tools;
 using System.Diagnostics;
 using System.Numerics;
 
@@ -29,9 +32,9 @@ public static class QwenMode
             return;
         }
 
-        if (options.Mode is not ("tools-weather" or "chat" or "plain"))
+        if (options.Mode is not ("tools-weather" or "tools-nivara" or "chat" or "plain"))
         {
-            Console.WriteLine("Usage: --qwen {tools-weather|chat|plain} [--text \"...\"] [options]");
+            Console.WriteLine("Usage: --qwen {tools-weather|tools-nivara|chat|plain} [--text \"...\"] [options]");
             PrintHelp();
             return;
         }
@@ -74,6 +77,40 @@ public static class QwenMode
             var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
             var model = LlamaLoader.Load<T, T>(config, tensors);
 
+            string[]? knownNames = null;
+            List<AIFunction>? nivaraTools = null;
+            TextClassifierModel<float>? nivaraSentimentModel = null;
+            TextTokenizer? nivaraSentimentTok = null;
+            TokenClassifierModel<float>? nivaraEntityModel = null;
+            TextTokenizer? nivaraEntityTok = null;
+            TextClassifierModel<float>? nivaraValidatorModel = null;
+            TextTokenizer? nivaraValidatorTok = null;
+
+            if (options.Mode == "tools-weather")
+            {
+                knownNames = [QwenSampleTools.WeatherToolName];
+            }
+            else if (options.Mode == "tools-nivara")
+            {
+                var nivaraModelsDir = Path.Combine(GetRepoRoot(), "samples", "data", "nivarachat");
+                if (!File.Exists(Path.Combine(nivaraModelsDir, "sentiment_model.json")))
+                {
+                    Console.WriteLine($"Nivara models not found in '{nivaraModelsDir}'. Run --train first.");
+                    return;
+                }
+                (nivaraSentimentModel, nivaraSentimentTok) = ModeHelpers.LoadSentimentModel(nivaraModelsDir);
+                (nivaraEntityModel, nivaraEntityTok) = ModeHelpers.LoadEntityModel(nivaraModelsDir);
+                (nivaraValidatorModel, nivaraValidatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
+                NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok);
+
+                nivaraTools = NivaraAIFunctions.CreateRegistered(
+                    nivaraSentimentModel, nivaraSentimentTok,
+                    nivaraEntityModel, nivaraEntityTok,
+                    nivaraValidatorModel, nivaraValidatorTok,
+                    options.NivaraTools ?? "all").ToList();
+                knownNames = nivaraTools.Select(t => t.Name).ToArray();
+            }
+
             using var client = new QwenChatClient<T>(
                 model, tokenizer, config,
                 maxNewTokens: options.MaxNewTokens,
@@ -81,11 +118,26 @@ public static class QwenMode
                 topP: options.HasTopP ? options.TopP : null,
                 seed: options.Seed,
                 useKvCache: options.UseKvCache,
-                knownToolNames: options.Mode == "tools-weather" ? [QwenSampleTools.WeatherToolName] : null);
+                knownToolNames: knownNames);
 
             if (options.Mode == "tools-weather")
             {
                 await RunToolsWeather(client, options.Text);
+                return;
+            }
+
+            if (options.Mode == "tools-nivara")
+            {
+                try
+                {
+                    await RunToolsNivara(client, options.Text, nivaraTools!);
+                }
+                finally
+                {
+                    nivaraSentimentModel?.Dispose();
+                    nivaraEntityModel?.Dispose();
+                    nivaraValidatorModel?.Dispose();
+                }
                 return;
             }
 
@@ -168,6 +220,58 @@ public static class QwenMode
             var final = response.Messages.LastOrDefault(m => m.Role == ChatRole.Assistant);
             if (final is null || string.IsNullOrWhiteSpace(final.Text))
                 Console.WriteLine("(no final text answer produced — tool loop hit the iteration cap)");
+
+            if (initialText is not null)
+                break;
+            prompt = null;
+        }
+    }
+
+    static async Task RunToolsNivara<T>(QwenChatClient<T> client, string? initialText, IReadOnlyList<AIFunction> tools)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.System, QwenChatTemplate.BuildToolsSystemMessage(tools)),
+        };
+        using var loop = new FunctionInvokingChatClient(client)
+        {
+            MaximumIterationsPerRequest = MaxToolLoopIterations,
+        };
+
+        Console.WriteLine($"Native Qwen tool calling (Nivara: {string.Join(", ", tools.Select(t => t.Name))}; loop cap {MaxToolLoopIterations}).\n");
+
+        string? prompt = initialText ?? "Analyze the sentiment of: 'I absolutely love this product, it works great!'";
+        while (true)
+        {
+            if (prompt is null)
+            {
+                Console.Write("You: ");
+                var input = Console.ReadLine()?.Trim();
+                if (input is null || input is "quit" or "exit")
+                    break;
+                if (input.Length == 0)
+                    continue;
+                prompt = input;
+            }
+
+            history.Add(new ChatMessage(ChatRole.User, prompt));
+            Console.WriteLine($"You: {prompt}");
+
+            var sw = Stopwatch.StartNew();
+            var response = await loop.GetResponseAsync(history, new ChatOptions { Tools = tools.Cast<AITool>().ToList() });
+            sw.Stop();
+
+            foreach (var message in response.Messages)
+            {
+                history.Add(message);
+                PrintTurn(message);
+            }
+            Console.WriteLine($"[{response.Messages.Count} turn(s) in {sw.ElapsedMilliseconds} ms]\n");
+
+            var final = response.Messages.LastOrDefault(m => m.Role == ChatRole.Assistant);
+            if (final is null || string.IsNullOrWhiteSpace(final.Text))
+                Console.WriteLine("(no final text answer produced - tool loop hit the iteration cap)");
 
             if (initialText is not null)
                 break;
@@ -281,6 +385,7 @@ public static class QwenMode
             else if (args[i] == "--kv-cache") options.UseKvCache = true;
             else if (args[i] == "--no-kv-cache") options.UseKvCache = false;
             else if (args[i] == "--text" && i + 1 < args.Length) options.Text = args[++i];
+            else if (args[i] == "--nivara-tools" && i + 1 < args.Length) options.NivaraTools = args[++i];
             else if (args[i] is "-h" or "--help") options.ShowHelp = true;
         }
         options.Mode = args.Length > 0 ? args[0] : "";
@@ -294,12 +399,15 @@ public static class QwenMode
 
             Usage:
               dotnet run --project samples/NivaraChat -- --qwen tools-weather [--text "prompt"]
+              dotnet run --project samples/NivaraChat -- --qwen tools-nivara [--text "prompt"] [--nivara-tools sentiment,entities,validate]
               dotnet run --project samples/NivaraChat -- --qwen chat         [--text "prompt"]
               dotnet run --project samples/NivaraChat -- --qwen plain        [--text "prompt"]
 
             Sub-modes:
               tools-weather  Native <tool_call> → GetWeather → <tool_response> → final answer,
                              loop capped at 3 iterations
+              tools-nivara   Native <tool_call> → Nivara tools (analyzeSentiment, extractEntities,
+                             validateResponse) → <tool_response> → final answer, loop capped at 3
               chat           Interactive REPL (or single prompt with --text)
               plain          Single-shot plain-text reply, no REPL
 
@@ -329,6 +437,7 @@ public static class QwenMode
         public int? Seed { get; set; }
         public bool UseKvCache { get; set; } = true;
         public string? Text { get; set; }
+        public string? NivaraTools { get; set; }
         public bool ShowHelp { get; set; }
     }
 }
