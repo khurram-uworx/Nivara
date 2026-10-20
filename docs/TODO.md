@@ -49,4 +49,4 @@ helpers, host weight plumbing, sample CLI. Qwen first; other runners follow same
 
 ## GitHub issues log
 
-- (none yet)
+- [ ] #756 — Silk extend device-side BF16 weights to remaining models + sample CLI wiring (created while working on #748)
