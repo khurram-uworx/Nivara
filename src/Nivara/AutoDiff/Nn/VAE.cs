@@ -130,6 +130,9 @@ public sealed class VAE<T> : Module<T>, IMultipleInputModule<T> where T : struct
         ReverseGradTensor<T> x,
         ReverseGradTensor<T>? condition = null)
     {
+        if (conditionDim > 0 && condition == null)
+            throw new ArgumentException("A condition is required when conditionDim > 0.", nameof(condition));
+
         var input = condition != null
             ? ReverseGradOperations.Concat(new[] { x, condition }, axis: 1)
             : x;
@@ -171,6 +174,9 @@ public sealed class VAE<T> : Module<T>, IMultipleInputModule<T> where T : struct
     /// <returns>The reconstructed output</returns>
     public ReverseGradTensor<T> Decode(ReverseGradTensor<T> z, ReverseGradTensor<T>? condition = null)
     {
+        if (conditionDim > 0 && condition == null)
+            throw new ArgumentException("A condition is required when conditionDim > 0.", nameof(condition));
+
         var input = condition != null
             ? ReverseGradOperations.Concat(new[] { z, condition }, axis: 1)
             : z;
