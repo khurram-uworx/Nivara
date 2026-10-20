@@ -141,7 +141,7 @@ public class Linear<TModel, TWeight> : Module<TModel>
 
         foreach (var (name, source) in stateDict)
         {
-            if (name == "Weight")
+            if (name == "Weight" && typeof(TWeight) != typeof(TModel))
             {
                 ValidateShapePublic(name, source.Shape, weight.Shape);
                 var converted = TypeConverter.Convert<TModel, TWeight>(source, weight.Tensor.RequiresGrad);
