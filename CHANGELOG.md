@@ -6,6 +6,11 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Qwen teacher distillation runs on the Silk backend** — `qwen --silk distill` labels the teacher
+  set through `GenerateSilk` on one reused session, and both backends now share the prompt-and-parse
+  seam inside `RunDistillCore`, so they can only differ in the generation call. `--silk` no longer
+  rejects `distill`, and the GPU teacher skips `LoadModel`, which keeps a second ~1.9 GB CPU copy of
+  the weights out of the process.
 - Silk Qwen parity coverage for #660: synthetic Silk vs CPU argmax/logit smoke, KV-cache (useKvCache on/off) equivalence, model-gated Paris weather tool loop, and --qwen-decode-attn large-kvLen DecodeAttention benchmark.
 - Fixed corrupted zero-width character in two Qwen Silk tokenizer unkToken literals, which broke --silk tools / --silk plain.
 
