@@ -294,6 +294,29 @@ internal static class NarrowFloatKernels
         }
     }
 
+    /// <summary>Plain matmul A[aRows,aCols] @ B[aCols,bCols] with B stored as Half (scalar, strided gather).</summary>
+    internal static void MatMul(
+        ReadOnlySpan<float> a, ReadOnlySpan<Half> b, Span<float> output,
+        int aRows, int aCols, int bCols)
+    {
+        if (aRows < 0 || aCols <= 0 || bCols < 0) throw new ArgumentOutOfRangeException();
+        if (a.Length < (long)aRows * aCols) throw new ArgumentException("a too small", nameof(a));
+        if (b.Length < (long)aCols * bCols) throw new ArgumentException("b too small", nameof(b));
+        if (output.Length < (long)aRows * bCols) throw new ArgumentException("output too small", nameof(output));
+
+        var bu = MemoryMarshal.Cast<Half, ushort>(b);
+        for (int i = 0; i < aRows; i++)
+        {
+            for (int n = 0; n < bCols; n++)
+            {
+                float acc = 0f;
+                for (int k = 0; k < aCols; k++)
+                    acc += a[i * aCols + k] * WidenHalfScalar(bu[k * bCols + n]);
+                output[i * bCols + n] = acc;
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Element-wise binary ops (fully specialized per type and op)
     // ─────────────────────────────────────────────────────────────────────────
