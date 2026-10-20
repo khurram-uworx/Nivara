@@ -947,6 +947,31 @@ public static class Qwen
             sentence => RunTeacherClassify(model, config, tokenizer, sentence));
     }
 
+    /// <summary>Silk (OpenCL) teacher path: the same cache, resume, training and eval as
+    /// <see cref="RunDistill"/>, with only the teacher generation swapped. One session serves every
+    /// sentence — <see cref="GenerateSilk"/> resets the KV cache on entry.</summary>
+    public static int RunDistillSilk(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        int teacherExamples,
+        bool force,
+        int seed)
+    {
+        PrintDistillHeader("Device: GPU (Silk)  Precision: F32 (BF16-upcast)  KV cache: on");
+
+        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        return RunDistillCore(config, modelDir, teacherExamples, force, seed,
+            sentence => ParseClassification(tokenizer.Decode(
+                GenerateSilk(session, config, BuildClassifyTurnIds(tokenizer, sentence), MaxNewTokens, useKvCache: true))));
+    }
+
     static void PrintDistillHeader(string deviceLine)
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Teacher distillation into a tiny sentiment classifier ===");

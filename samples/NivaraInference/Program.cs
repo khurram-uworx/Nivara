@@ -79,7 +79,7 @@ class Program
         ["modernbert"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
         ["smollm"] = ["", "benchmark", "generate"],
-        ["qwen"] = ["", "benchmark", "tools"],
+        ["qwen"] = ["", "benchmark", "tools", "distill"],
         ["mobilenet_v2"] = ["", "benchmark", "compare"],
         ["resnet18"] = ["", "benchmark", "compare"],
     };
@@ -362,8 +362,8 @@ class Program
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
             Console.WriteLine("                     stack (src/Nivara.Extensions/Silk/SilkKernels.cs). 'minilm' /");
             Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
-            Console.WriteLine("                     default/benchmark/compare modes. Competing with --ilgpu, so the");
-            Console.WriteLine("                     two are mutually exclusive.");
+            Console.WriteLine("                     default/benchmark/compare modes; 'qwen' adds tools/distill. Competing");
+            Console.WriteLine("                     with --ilgpu, so the two are mutually exclusive.");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
@@ -839,6 +839,7 @@ class Program
                 if (useSilk)
                 {
                     if (syntheticWeights) return Qwen.RunSyntheticBenchmarkSilk(plain);
+                    if (mode == "distill") return Qwen.RunDistillSilk(tensors, modelDir, teacherExamples, force, seed);
                     if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensors, modelDir);
                     if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
                     return Qwen.RunToolsSilk(tensors, modelDir, useKvCache: !noKvCache, text);
