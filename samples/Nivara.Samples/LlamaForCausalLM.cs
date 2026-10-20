@@ -468,7 +468,7 @@ public static class LlamaLoader
             config.TieWordEmbeddings,
             qkvBias);
 
-        StateDictLoader.LoadEmbedWidened((Embedding<TModel>)(object)model.Embed, tensors, "model.embed_tokens.weight");
+        StateDictLoader.LoadEmbedWidened(model.Embed, tensors, "model.embed_tokens.weight");
         StateDictLoader.LoadRMSNorm(model.finalNorm, tensors, "model.norm");
 
         for (int i = 0; i < model.layers.Length; i++)
@@ -477,13 +477,13 @@ public static class LlamaLoader
             var p = $"model.layers.{i}";
             StateDictLoader.LoadRMSNorm(layer.InputNorm, tensors, $"{p}.input_layernorm");
             StateDictLoader.LoadRMSNorm(layer.PostNorm, tensors, $"{p}.post_attention_layernorm");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.Attention.QProj, tensors, $"{p}.self_attn.q_proj");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.Attention.KProj, tensors, $"{p}.self_attn.k_proj");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.Attention.VProj, tensors, $"{p}.self_attn.v_proj");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.Attention.OProj, tensors, $"{p}.self_attn.o_proj");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.GateProj, tensors, $"{p}.mlp.gate_proj");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.UpProj, tensors, $"{p}.mlp.up_proj");
-            StateDictLoader.LoadLinearWidened((Linear<TModel>)(object)layer.DownProj, tensors, $"{p}.mlp.down_proj");
+            StateDictLoader.LoadLinearWidened(layer.Attention.QProj, tensors, $"{p}.self_attn.q_proj");
+            StateDictLoader.LoadLinearWidened(layer.Attention.KProj, tensors, $"{p}.self_attn.k_proj");
+            StateDictLoader.LoadLinearWidened(layer.Attention.VProj, tensors, $"{p}.self_attn.v_proj");
+            StateDictLoader.LoadLinearWidened(layer.Attention.OProj, tensors, $"{p}.self_attn.o_proj");
+            StateDictLoader.LoadLinearWidened(layer.GateProj, tensors, $"{p}.mlp.gate_proj");
+            StateDictLoader.LoadLinearWidened(layer.UpProj, tensors, $"{p}.mlp.up_proj");
+            StateDictLoader.LoadLinearWidened(layer.DownProj, tensors, $"{p}.mlp.down_proj");
         }
 
         model.Eval();
