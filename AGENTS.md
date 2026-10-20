@@ -83,6 +83,8 @@ See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null
 - **Omit braces** from single-line `if`/`else` bodies when the body fits one line and is on the same line as the condition.
 - **No comments** in generated code unless explaining a non-obvious design decision.
 - **No Hungarian notation** — no prefixes encoding scope or mutability.
+- **Formatting workflow:** run `dotnet format Nivara.slnx whitespace` before committing; CI enforces `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`. The gate is intentionally whitespace-only because the analyzer pass reports `CS8618` false positives in test fixtures (`FrameProjectionTests.cs`, `ColumnExpressionTests.cs`, `MLNetIntegrationTests.cs`, `MLNetConversionTests.cs`, `QueryNodeTests.cs`) whose fields are assigned in `[SetUp]` and suppressed by NUnit.Analyzers (`NUnit3002`) during a normal build but not by `dotnet format`. Do not run the full `dotnet format`/`dotnet format analyzers` locally expecting a clean tree.
+- **Line endings:** `.gitattributes` is `* text=auto eol=lf`, so every text file (including any future `.bat`/`.cmd`) is checked out with LF.
 
 ## Testing Conventions
 

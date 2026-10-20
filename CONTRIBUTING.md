@@ -239,6 +239,18 @@ The project uses:
 - **Unsafe code blocks** allowed for performance-critical paths
 - **System.Numerics.Tensors** for vectorization
 
+### Formatting
+
+CI enforces whitespace formatting with:
+
+```bash
+dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore
+```
+
+Run `dotnet format Nivara.slnx whitespace` before committing; it is the local equivalent of that gate. The gate is intentionally **whitespace-only**: the full `dotnet format` (and `dotnet format analyzers`) pass reports `CS8618` findings in test fixtures such as `tests/Nivara.Tests/FrameProjectionTests.cs`, `tests/Nivara.Tests/Expressions/ColumnExpressionTests.cs`, `tests/Nivara.Tests/MLNet/MLNetIntegrationTests.cs`, `tests/Nivara.Tests/MLNet/MLNetConversionTests.cs`, and `tests/Nivara.Tests/QueryNodeTests.cs`. These are false positives — every field is assigned in `[SetUp]`, and NUnit.Analyzers' `DiagnosticSuppressor` (`NUnit3002`, "initialized in SetUp") suppresses them during a normal build, which is why `dotnet build` is clean (0 warnings). `dotnet format` does not run diagnostic suppressors, so under `TreatWarningsAsErrors=true` those findings appear as errors. Running the full formatter locally therefore shows red that CI never sees.
+
+Repository line endings are normalized by `.gitattributes` (`* text=auto eol=lf`), which applies to every text file. There are no `.bat`/`.cmd` files today, but any added later would be checked out with LF.
+
 ### Package Structure
 
 - **Nivara** (core): Zero external dependencies except System.Numerics.Tensors
