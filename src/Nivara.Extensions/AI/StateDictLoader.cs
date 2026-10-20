@@ -244,6 +244,10 @@ public static class StateDictLoader
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         ArgumentNullException.ThrowIfNull(linear);
+        if (rowOffset < 0)
+            throw new ArgumentOutOfRangeException(nameof(rowOffset), rowOffset, "rowOffset must be non-negative.");
+        if (rowCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rowCount), rowCount, "rowCount must be positive.");
         if (!tensors.TryGetValue($"{prefix}.weight", out var w))
             throw new KeyNotFoundException($"Missing tensor: {prefix}.weight");
 
