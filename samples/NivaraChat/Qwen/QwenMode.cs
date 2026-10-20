@@ -399,12 +399,15 @@ public static class QwenMode
 
             Usage:
               dotnet run --project samples/NivaraChat -- --qwen tools-weather [--text "prompt"]
+              dotnet run --project samples/NivaraChat -- --qwen tools-nivara [--text "prompt"] [--nivara-tools sentiment,entities,validate]
               dotnet run --project samples/NivaraChat -- --qwen chat         [--text "prompt"]
               dotnet run --project samples/NivaraChat -- --qwen plain        [--text "prompt"]
 
             Sub-modes:
               tools-weather  Native <tool_call> → GetWeather → <tool_response> → final answer,
                              loop capped at 3 iterations
+              tools-nivara   Native <tool_call> → Nivara tools (analyzeSentiment, extractEntities,
+                             validateResponse) → <tool_response> → final answer, loop capped at 3
               chat           Interactive REPL (or single prompt with --text)
               plain          Single-shot plain-text reply, no REPL
 
