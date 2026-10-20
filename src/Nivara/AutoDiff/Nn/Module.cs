@@ -142,6 +142,11 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     /// <summary>Gets the read-only list of registered mixed-typed parameters.</summary>
     internal IReadOnlyList<object> MixedParameterObjects => mixedParameters.AsReadOnly();
 
+    internal void RegisterParameterObject(object parameter)
+    {
+        parameters.Add((Parameter<T>)parameter);
+    }
+
     /// <summary>
     /// Returns a deep copy of all parameter tensors keyed by dotted path, suitable for
     /// serialization or for loading into another module of the same architecture.

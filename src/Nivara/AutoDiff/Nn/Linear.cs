@@ -37,7 +37,10 @@ public class Linear<TModel, TWeight> : Module<TModel>
         var weightData = new TWeight[outFeatures * inFeatures];
         var weightTensor = ReverseGradTensor<TWeight>.FromMatrix(weightData, outFeatures, inFeatures, requiresGrad: true);
         weight = new Parameter<TWeight>("Weight", weightTensor);
-        RegisterMixedParameters(weight);
+        if (typeof(TWeight) == typeof(TModel))
+            RegisterParameterObject(weight);
+        else
+            RegisterMixedParameters(weight);
 
         if (bias)
         {
@@ -77,7 +80,10 @@ public class Linear<TModel, TWeight> : Module<TModel>
 
         if (shouldTrack)
         {
-            var gradFn = new OpNode<TModel>("LinearMixed", [input], (typedGradOutput) =>
+            ReverseGradTensor<TModel>[] nodeInputs = typeof(TWeight) == typeof(TModel)
+                ? [input, (ReverseGradTensor<TModel>)(object)weight.Tensor]
+                : [input];
+            var gradFn = new OpNode<TModel>("LinearMixed", nodeInputs, (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gradSpan);
                 weight.Tensor.Data.TryGetSpan(out var weightSpanLocal);

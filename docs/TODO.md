@@ -38,5 +38,6 @@ StateDictLoader.cs, mixed registration, tests AutoDiff contract tests.
 
 ## GitHub issues log
 - [ ] #747 - JVP for mixed kernels (dependency follow-up)
+- [ ] #753 - Mixed-precision Embedding and model integration follow-up (created during #746 execution)
 - [ ] #748 - Silk/GPU BF16 (dependency follow-up)
 - [ ] #749 - memory mapped weights (dependency follow-up)
