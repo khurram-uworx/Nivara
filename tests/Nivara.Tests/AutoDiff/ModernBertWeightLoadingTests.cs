@@ -75,15 +75,17 @@ public class ModernBertWeightLoadingTests
     static float[] LinearWeight(Linear<float, float> linear)
     {
         var tensor = linear.Weight!.Tensor;
-        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
-        return span.ToArray();
+        var data = new float[tensor.Length];
+        tensor.Data.CopyTo(data, 0f);
+        return data;
     }
 
     static float[] EmbeddingWeight(Embedding<float, float> embedding)
     {
         var tensor = embedding.Weight!.Tensor;
-        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
-        return span.ToArray();
+        var data = new float[tensor.Length];
+        tensor.Data.CopyTo(data, 0f);
+        return data;
     }
 
     static float[] NormWeight(LayerNorm<float> norm)
