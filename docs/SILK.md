@@ -578,14 +578,15 @@ As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
 
 - **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
-  `benchmark`, `tools`); `mobilenet_v2` and `resnet18` (empty, `benchmark`, `compare`). `compare_diag`
+  `benchmark`, `tools`, `distill`); `mobilenet_v2` and `resnet18` (empty, `benchmark`, `compare`). `compare_diag`
   stays rejected. SmolLM and Qwen are causal decoders (not encoders) and own their runners, as do the
   MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by
-  `Silk_RejectedBeforeModelFileLookup`, because `qwen` weights are never present and a
-  "Model file not found" would otherwise mask the real reason.
+  `Silk_RejectedBeforeModelFileLookup`, whose vehicle is `minilm --silk similarity`: a mode the CPU
+  path carries and Silk does not, so a "Model file not found" would otherwise mask the real reason.
+  (`qwen --silk distill` held that role until distill became a Silk mode.)
 - **F32-only**: `--silk --precision bf16|fp16` is rejected (there is no bf16/fp16 translation unit).
 - **`--gpu` is rejected, not aliased** to `--ilgpu`, so an old invocation fails loudly.
 - **`OpenSilkEncoder`/`OpenIlgpuEncoder`** share the `OpenEncoder` delegate and one set of entry-point

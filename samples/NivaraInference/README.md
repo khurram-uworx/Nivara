@@ -32,6 +32,7 @@ dotnet run --project samples/NivaraInference -c Release -- smollm               
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # native BF16 (256.6 MB)
 dotnet run --project samples/NivaraInference -c Release -- qwen tools            # function calling (KV cache on)
 dotnet run --project samples/NivaraInference -c Release -- qwen distill --teacher-examples 12  # teacher distillation
+dotnet run --project samples/NivaraInference -c Release -- qwen --silk distill --teacher-examples 12  # same, teacher on the OpenCL GPU
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark        # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert            # ModernBERT-large forward (28-layer hybrid)
 dotnet run --project samples/NivaraInference -c Release -- modernbert compare    # last_hidden_state parity gate vs PyTorch
