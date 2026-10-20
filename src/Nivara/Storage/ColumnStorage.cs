@@ -56,7 +56,7 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
 
         var dataArray = values.ToArray();
 
-        if (detectNulls && !typeof(T).IsValueType)
+        if (detectNulls && (!typeof(T).IsValueType || Nullable.GetUnderlyingType(typeof(T)) != null))
         {
             bool hasNulls = false;
             bool[]? nullMaskArray = null;

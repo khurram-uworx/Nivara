@@ -16,7 +16,8 @@ static class ColumnStorageFactory
     /// <returns>A storage instance</returns>
     internal static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values)
     {
-        return new ColumnStorage<T>(values, detectNulls: !typeof(T).IsValueType);
+        var detectNulls = !typeof(T).IsValueType || Nullable.GetUnderlyingType(typeof(T)) != null;
+        return new ColumnStorage<T>(values, detectNulls: detectNulls);
     }
 
     /// <summary>

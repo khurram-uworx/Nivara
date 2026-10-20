@@ -68,7 +68,7 @@ internal static class QuantileKernel
     {
         // Nullable-element columns (NivaraColumn<T?>) implement IColumn<T?>, not IColumn<T>, so
         // read through that view and rely on the nullable indexer's HasValue.
-        if (column.ElementType == typeof(T?) && column is IColumn<T?> nullableTyped)
+        if (column is IColumn<T?> nullableTyped)
         {
             int nullableCount = 0;
             foreach (var idx in groupIndices)

@@ -115,9 +115,9 @@ public abstract class AggregationFunction
     protected internal static T[] ExtractValidTyped<T>(IColumn column, IReadOnlyList<int> groupIndices)
         where T : struct
     {
-        // Nullable-element columns expose IColumn<T?> (not IColumn<T>), so read through that view
-        // and rely on the nullable indexer's HasValue rather than the null mask.
-        if (column.ElementType == typeof(T?) && column is IColumn<T?> nullableTyped)
+        // Nullable-element columns are stored mask-based but still expose IColumn<T?> rather
+        // than IColumn<T>, so read through that view and skip null positions.
+        if (column is IColumn<T?> nullableTyped)
         {
             int nullableCount = 0;
             foreach (var idx in groupIndices)
