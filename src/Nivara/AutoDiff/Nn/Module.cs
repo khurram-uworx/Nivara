@@ -11,6 +11,7 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
 {
     readonly List<Module<T>> modules = [];
     readonly List<Parameter<T>> parameters = [];
+    readonly List<object> mixedParameters = [];
     bool disposed;
 
     /// <summary>
@@ -69,6 +70,22 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     }
 
     /// <summary>
+    /// Registers parameters whose element type differs from the module's compute
+    /// type <typeparamref name="T"/> (for example BF16/Half weights inside a
+    /// <c>Module&lt;float&gt;</c>). They are owned for disposal and enumerated
+    /// separately from <see cref="GetParameters"/>.
+    /// </summary>
+    /// <typeparam name="TWeight">The parameter's element type.</typeparam>
+    /// <param name="parameters">The mixed-typed parameters to register.</param>
+    public void RegisterMixedParameters<TWeight>(params Parameter<TWeight>[] parameters)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        foreach (var param in parameters)
+            mixedParameters.Add(param);
+    }
+
+    /// <summary>
     /// Returns a flat dictionary of all parameter tensors keyed by dotted path
     /// (e.g. <c>Weight</c>, <c>Module_0.Weight</c>).
     /// </summary>
@@ -122,8 +139,8 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
         return result;
     }
 
-    /// <summary>Gets the read-only list of registered child modules.</summary>
-    public IReadOnlyList<Module<T>> NamedModules() => modules.AsReadOnly();
+    /// <summary>Gets the read-only list of registered mixed-typed parameters.</summary>
+    internal IReadOnlyList<object> MixedParameterObjects => mixedParameters.AsReadOnly();
 
     /// <summary>
     /// Returns a deep copy of all parameter tensors keyed by dotted path, suitable for
@@ -256,6 +273,9 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
 
             foreach (var parameter in parameters)
                 parameter.Dispose();
+
+            foreach (var mixed in mixedParameters)
+                (mixed as IDisposable)?.Dispose();
         }
         disposed = true;
     }
