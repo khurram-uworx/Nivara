@@ -797,13 +797,6 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
         return encoder;
     }
 
-    /// <summary>Loads F32 weights from a safetensors dictionary.</summary>
-    public static ModernBertEncoder<float> LoadWeights(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        ModernBertConfig config,
-        string prefix = "model")
-        => LoadWeights(tensors, config, prefix);
-
     static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
     {
         if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");

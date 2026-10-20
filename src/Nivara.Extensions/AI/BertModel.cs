@@ -534,10 +534,6 @@ public class MiniLMDistilled<TModel, TWeight> : Module<TModel> where TModel : st
         return model;
     }
 
-    public static MiniLMDistilled<float> LoadWeights(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        BertConfig config)
-        => LoadWeights(tensors, config);
 }
 
 public static class MiniLMTokenizer
