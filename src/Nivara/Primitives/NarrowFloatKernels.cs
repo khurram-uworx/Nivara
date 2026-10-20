@@ -167,6 +167,134 @@ internal static class NarrowFloatKernels
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Mixed-precision matmul: float activations × narrow (BF16/Half) weights.
+    // Weights are widened per-lane inside the kernel (correct math — integer
+    // multiply on raw BF16 bits is wrong). Accumulation in float SIMD.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored
+    /// as BF16. Widen inside the kernel. SIMD + scalar tail.
+    /// </summary>
+    internal static void MatMulTransposedB(
+        ReadOnlySpan<float> a, ReadOnlySpan<BFloat16> b, Span<float> output,
+        int aRows, int aCols, int bCols)
+    {
+        if (aRows < 0 || aCols <= 0 || bCols < 0) throw new ArgumentOutOfRangeException();
+        if (a.Length < (long)aRows * aCols) throw new ArgumentException("a too small", nameof(a));
+        if (b.Length < (long)bCols * aCols) throw new ArgumentException("b too small", nameof(b));
+        if (output.Length < (long)aRows * bCols) throw new ArgumentException("output too small", nameof(output));
+
+        var bu = MemoryMarshal.Cast<BFloat16, ushort>(b);
+        bool hw = Vector128.IsHardwareAccelerated;
+        for (int i = 0; i < aRows; i++)
+        {
+            int aBase = i * aCols;
+            for (int k = 0; k < bCols; k++)
+            {
+                int bBase = k * aCols;
+                float acc = 0f;
+                if (hw)
+                {
+                    var accLo = Vector128<float>.Zero;
+                    var accHi = Vector128<float>.Zero;
+                    int j = 0, limit = aCols & ~7;
+                    for (; j < limit; j += 8)
+                    {
+                        var aLo = Vector128.Create(a.Slice(aBase + j));
+                        var aHi = Vector128.Create(a.Slice(aBase + j + 4));
+                        var (wLo, wHi) = WidenBf16(Vector128.Create(bu.Slice(bBase + j, 8)));
+                        accLo += aLo * wLo;
+                        accHi += aHi * wHi;
+                    }
+                    acc = Vector128.Sum(accLo) + Vector128.Sum(accHi);
+                    for (; j < aCols; j++)
+                        acc += a[aBase + j] * WidenBf16Scalar(bu[bBase + j]);
+                }
+                else
+                {
+                    for (int j = 0; j < aCols; j++)
+                        acc += a[aBase + j] * WidenBf16Scalar(bu[bBase + j]);
+                }
+                output[i * bCols + k] = acc;
+            }
+        }
+    }
+
+    /// <summary>Plain matmul A[aRows,aCols] @ B[aCols,bCols] with B as BF16.</summary>
+    internal static void MatMul(
+        ReadOnlySpan<float> a, ReadOnlySpan<BFloat16> b, Span<float> output,
+        int aRows, int aCols, int bCols)
+    {
+        if (aRows < 0 || aCols <= 0 || bCols < 0) throw new ArgumentOutOfRangeException();
+        if (a.Length < (long)aRows * aCols) throw new ArgumentException("a too small", nameof(a));
+        if (b.Length < (long)aCols * bCols) throw new ArgumentException("b too small", nameof(b));
+        if (output.Length < (long)aRows * bCols) throw new ArgumentException("output too small", nameof(output));
+
+        var bu = MemoryMarshal.Cast<BFloat16, ushort>(b);
+        // Strided weight gather makes portable SIMD gather unavailable; use scalar.
+        // (A future optimization can transpose B once and reuse the transposed kernel.)
+        for (int i = 0; i < aRows; i++)
+        {
+            for (int n = 0; n < bCols; n++)
+            {
+                float acc = 0f;
+                for (int k = 0; k < aCols; k++)
+                    acc += a[i * aCols + k] * WidenBf16Scalar(bu[k * bCols + n]);
+                output[i * bCols + n] = acc;
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored as Half.
+    /// </summary>
+    internal static void MatMulTransposedB(
+        ReadOnlySpan<float> a, ReadOnlySpan<Half> b, Span<float> output,
+        int aRows, int aCols, int bCols)
+    {
+        if (aRows < 0 || aCols <= 0 || bCols < 0) throw new ArgumentOutOfRangeException();
+        if (a.Length < (long)aRows * aCols) throw new ArgumentException("a too small", nameof(a));
+        if (b.Length < (long)bCols * aCols) throw new ArgumentException("b too small", nameof(b));
+        if (output.Length < (long)aRows * bCols) throw new ArgumentException("output too small", nameof(output));
+
+        var bu = MemoryMarshal.Cast<Half, ushort>(b);
+        bool hw = Vector128.IsHardwareAccelerated;
+        for (int i = 0; i < aRows; i++)
+        {
+            int aBase = i * aCols;
+            for (int k = 0; k < bCols; k++)
+            {
+                int bBase = k * aCols;
+                float acc = 0f;
+                if (hw)
+                {
+                    var accLo = Vector128<float>.Zero;
+                    var accHi = Vector128<float>.Zero;
+                    int j = 0, limit = aCols & ~7;
+                    for (; j < limit; j += 8)
+                    {
+                        var aLo = Vector128.Create(a.Slice(aBase + j));
+                        var aHi = Vector128.Create(a.Slice(aBase + j + 4));
+                        var (wLo, wHi) = WidenHalf(Vector128.Create(bu.Slice(bBase + j, 8)));
+                        accLo += aLo * wLo;
+                        accHi += aHi * wHi;
+                    }
+                    acc = Vector128.Sum(accLo) + Vector128.Sum(accHi);
+                    for (; j < aCols; j++)
+                        acc += a[aBase + j] * WidenHalfScalar(bu[bBase + j]);
+                }
+                else
+                {
+                    for (int j = 0; j < aCols; j++)
+                        acc += a[aBase + j] * WidenHalfScalar(bu[bBase + j]);
+                }
+                output[i * bCols + k] = acc;
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Element-wise binary ops (fully specialized per type and op)
     // ─────────────────────────────────────────────────────────────────────────
 

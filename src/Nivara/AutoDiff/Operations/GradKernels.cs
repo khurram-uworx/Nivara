@@ -1,3 +1,4 @@
+using Nivara.Primitives;
 using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
@@ -814,6 +815,33 @@ internal static class GradKernels
             output[idx] = T.CreateChecked(double.CreateChecked(gradOutput[idx]) - soft * sumGrad);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Mixed-precision matrix operations (float acts × narrow weights)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored as
+    /// BF16 (widened inside the kernel). Forward pass for BF16-weighted layers.
+    /// </summary>
+    public static void MatMulTransposedB(
+        ReadOnlySpan<float> a, ReadOnlySpan<BFloat16> b, float[] output,
+        int aRows, int aCols, int bCols)
+        => NarrowFloatKernels.MatMulTransposedB(a, b, output.AsSpan(), aRows, aCols, bCols);
+
+    /// <summary>Plain matmul A[aRows,aCols] @ B[aCols,bCols] with B stored as BF16.</summary>
+    public static void MatMul(
+        ReadOnlySpan<float> a, ReadOnlySpan<BFloat16> b, float[] output,
+        int aRows, int aCols, int bCols)
+        => NarrowFloatKernels.MatMul(a, b, output.AsSpan(), aRows, aCols, bCols);
+
+    /// <summary>
+    /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with B stored as Half.
+    /// </summary>
+    public static void MatMulTransposedB(
+        ReadOnlySpan<float> a, ReadOnlySpan<Half> b, float[] output,
+        int aRows, int aCols, int bCols)
+        => NarrowFloatKernels.MatMulTransposedB(a, b, output.AsSpan(), aRows, aCols, bCols);
 
     // ═══════════════════════════════════════════════════════════════
     //  Matrix operations
