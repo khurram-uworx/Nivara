@@ -7,7 +7,7 @@ namespace Nivara.Silk;
 /// <c>LayaHeadGpuRunner</c>. Norms are biased and use eps 1e-5, not the encoder's.
 /// The four act-head features stay on <see cref="LayaHeadScoring"/>.
 /// </summary>
-public sealed class SilkLayaHeadGpuRunner : IDisposable
+public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 {
     readonly SilkRuntime runtime;
     readonly int hiddenDim;

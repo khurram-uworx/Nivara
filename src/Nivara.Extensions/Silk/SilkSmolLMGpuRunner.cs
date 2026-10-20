@@ -8,7 +8,7 @@ namespace Nivara.Silk;
 /// for operation. Prefill-only (no KV cache): generation runs the full forward each step, matching
 /// the CPU cache-free path.
 /// </summary>
-public sealed class SilkSmolLMGpuRunner : IDisposable
+public sealed partial class SilkSmolLMGpuRunner : IDisposable
 {
     readonly SilkRuntime runtime;
     readonly SmolLMConfig config;
@@ -26,6 +26,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
     readonly int seqCap;
     readonly int vocabSize;
     readonly bool qkvBias;
+    readonly bool bf16Weights;
 
     readonly nint tokEmb;
     readonly nint finalNormW;
@@ -86,6 +87,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         seqCap = maxPos;
         vocabSize = config.VocabSize;
         qkvBias = config.AttentionBias || tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
+        this.bf16Weights = false;
         runtime.EnsureAttentionLocalMemory(headDim);
 
         try
@@ -152,9 +154,9 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
             // Q/K/V
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            Gemm(normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
             if (qkvBias)
             {
                 SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
@@ -169,21 +171,21 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
             // O proj + residual
-            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            Gemm(context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             // post norm
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
             // gate/up
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             // swiglu -> mlp (intermediate)
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
             // down + residual
-            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            Gemm(mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -193,7 +195,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         // tied LM head: logits = normed @ tokEmb^T  (last row only to save memory)
         // Compute for all rows but read back all; caller (generation) uses last row.
         nint logitsBuf = runtime.Allocate(seqLen * vocabSize);
-        SilkLauncher.Gemm(runtime, normed.Handle, tokEmbTransposed, logitsBuf, seqLen, hiddenDim, vocabSize);
+        Gemm(normed.Handle, tokEmbTransposed, logitsBuf, seqLen, hiddenDim, vocabSize);
         // tokEmb is [vocab,hidden]; need transposed [hidden,vocab]. We don't have it precomputed.
         // Fallback: compute via host transpose on demand is expensive; instead store tokEmbT.
         var logits = runtime.Download(logitsBuf, seqLen * vocabSize);
@@ -242,9 +244,9 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            Gemm(normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
             if (qkvBias)
             {
                 SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
@@ -256,17 +258,17 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
-            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            Gemm(context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
-            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            Gemm(mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -274,7 +276,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
         nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        Gemm(lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -306,9 +308,9 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            Gemm(normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
             if (qkvBias)
             {
                 SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
@@ -323,17 +325,17 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
-            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            Gemm(context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
-            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            Gemm(mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -341,7 +343,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
         nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        Gemm(lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -370,7 +372,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         {
             LayerWeights w = layers[li];
 
-            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.InputNormW,
+            RmsNormGemv(x.Handle, w.InputNormW,
                 [
                     new(w.Wq, w.QBias, q.Handle, qDim),
                     new(w.Wk, w.KBias, k.Handle, kvDim),
@@ -386,15 +388,15 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
 
             int kvLen = position + 1;
-            SilkLauncher.DecodeGqaAttentionOproj(runtime, q.Handle, kCache[li], vCache[li], context.Handle,
+            DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
                 w.Wo, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
 
-            SilkLauncher.MlpBlock(runtime, x.Handle, w.PostNormW, w.Wgate, w.Wup, w.Wdown,
+            MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.Wup, w.Wdown,
                 x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormGemv(runtime, x.Handle, finalNormW,
+        RmsNormGemv(x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
@@ -447,9 +449,9 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wq, q.Handle, seqLen, hiddenDim, qDim);
+            Gemm(normed.Handle, w.Wk, k.Handle, seqLen, hiddenDim, kvDim);
+            Gemm(normed.Handle, w.Wv, v.Handle, seqLen, hiddenDim, kvDim);
             if (qkvBias)
             {
                 SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
@@ -465,17 +467,17 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
-            SilkLauncher.Gemm(runtime, context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
+            Gemm(context.Handle, w.Wo, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            SilkLauncher.Gemm(runtime, normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wgate, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            Gemm(normed.Handle, w.Wup, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
-            SilkLauncher.Gemm(runtime, mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            Gemm(mlp.Handle, w.Wdown, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -485,7 +487,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         // last row logits
         nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        Gemm(lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
         var logits = runtime.Download(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -516,7 +518,7 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
         {
             LayerWeights w = layers[li];
 
-            SilkLauncher.RmsNormGemv(runtime, x.Handle, w.InputNormW,
+            RmsNormGemv(x.Handle, w.InputNormW,
                 [
                     new(w.Wq, w.QBias, q.Handle, qDim),
                     new(w.Wk, w.KBias, k.Handle, kvDim),
@@ -534,15 +536,15 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
 
             int kvLen = position + 1;
-            SilkLauncher.DecodeGqaAttentionOproj(runtime, q.Handle, kCache[li], vCache[li], context.Handle,
+            DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
                 w.Wo, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
 
-            SilkLauncher.MlpBlock(runtime, x.Handle, w.PostNormW, w.Wgate, w.Wup, w.Wdown,
+            MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.Wup, w.Wdown,
                 x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormGemv(runtime, x.Handle, finalNormW,
+        RmsNormGemv(x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         var logits = runtime.Download(logitsBuf, vocabSize);
@@ -550,6 +552,37 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
 
         if (position + 1 > cachedLen) cachedLen = position + 1;
         return logits;
+    }
+
+    void Gemm(nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        if (bf16Weights) SilkLauncher.GemmBf16(runtime, a, b, c, aRows, aCols, bCols);
+        else SilkLauncher.Gemm(runtime, a, b, c, aRows, aCols, bCols);
+    }
+
+    void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, bool hasBias, int aRows, int aCols, float eps)
+    {
+        if (bf16Weights) SilkLauncher.RmsNormGemvBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+        else SilkLauncher.RmsNormGemv(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+    }
+
+    void MlpBlock(nint x, nint gamma, nint wg, nint wu, nint wd, nint outBuf, nint residual, int hidden, int inter, float eps2)
+    {
+        if (bf16Weights) SilkLauncher.MlpBlockBf16(runtime, x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
+        else SilkLauncher.MlpBlock(runtime, x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
+    }
+
+    void DecodeOproj(nint q, nint kCache, nint vCache, nint contextScratch, nint wo, nint residual, nint outBuf, int kvLen, int numHeads2, int numKvHeads2, int headDim2, int qDim2, int hiddenDim2, float scale2)
+    {
+        if (bf16Weights)
+        {
+            SilkLauncher.DecodeGqaAttention(runtime, q, kCache, vCache, contextScratch, kvLen, numHeads2, numKvHeads2, headDim2, scale2);
+            SilkLauncher.GemmGemvAddBf16(runtime, contextScratch, wo, outBuf, residual, qDim2, hiddenDim2);
+        }
+        else
+        {
+            SilkLauncher.DecodeGqaAttentionOproj(runtime, q, kCache, vCache, contextScratch, wo, residual, outBuf, kvLen, numHeads2, numKvHeads2, headDim2, qDim2, hiddenDim2, scale2);
+        }
     }
 
     void EnsureWorkspace(int seqLen)
@@ -636,6 +669,48 @@ public sealed class SilkSmolLMGpuRunner : IDisposable
             Wgate = UploadT(owner, tensors, $"{p}.mlp.gate_proj.weight");
             Wup = UploadT(owner, tensors, $"{p}.mlp.up_proj.weight");
             Wdown = UploadT(owner, tensors, $"{p}.mlp.down_proj.weight");
+        }
+
+        public LayerWeights(SilkSmolLMGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, int i)
+        {
+            string p = $"model.layers.{i}";
+            InputNormW = UploadFloat(owner, tensors, $"{p}.input_layernorm.weight");
+            PostNormW = UploadFloat(owner, tensors, $"{p}.post_attention_layernorm.weight");
+            Wq = UploadTBf16(owner, tensors, $"{p}.self_attn.q_proj.weight");
+            Wk = UploadTBf16(owner, tensors, $"{p}.self_attn.k_proj.weight");
+            Wv = UploadTBf16(owner, tensors, $"{p}.self_attn.v_proj.weight");
+            Wo = UploadTBf16(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            if (owner.qkvBias)
+            {
+                QBias = UploadFloat(owner, tensors, $"{p}.self_attn.q_proj.bias");
+                KBias = UploadFloat(owner, tensors, $"{p}.self_attn.k_proj.bias");
+                VBias = UploadFloat(owner, tensors, $"{p}.self_attn.v_proj.bias");
+            }
+            Wgate = UploadTBf16(owner, tensors, $"{p}.mlp.gate_proj.weight");
+            Wup = UploadTBf16(owner, tensors, $"{p}.mlp.up_proj.weight");
+            Wdown = UploadTBf16(owner, tensors, $"{p}.mlp.down_proj.weight");
+        }
+
+        static nint UploadFloat(SilkSmolLMGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key)
+        {
+            var t = WeightLayout.Req(tensors, key, "Silk");
+            var f = new float[t.Data.Length];
+            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(t.Data.AsSpan());
+            for (int i = 0; i < f.Length; i++) f[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+            nint buf = owner.runtime.Allocate(f.Length);
+            owner.runtime.Upload(buf, f);
+            return buf;
+        }
+
+        static nint UploadTBf16(SilkSmolLMGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key)
+        {
+            var data = WeightLayout.Transposed(tensors, key, "Silk");
+            var us = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(data.AsSpan());
+            var arr = new ushort[us.Length];
+            us.CopyTo(arr);
+            nint buf = owner.runtime.Allocate(arr.Length);
+            owner.runtime.Upload(buf, arr.AsSpan());
+            return buf;
         }
 
         static nint Upload(SilkSmolLMGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)

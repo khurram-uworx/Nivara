@@ -8,7 +8,7 @@ namespace Nivara.Silk;
 /// with <c>ModernBertGpuRunner</c>. <paramref name="prefix"/> is <c>"model"</c> for the
 /// stock checkpoint and <c>"encoder"</c> for Laya.
 /// </summary>
-public sealed class SilkModernBertGpuRunner : IDisposable
+public sealed partial class SilkModernBertGpuRunner : IDisposable
 {
     readonly SilkRuntime runtime;
     readonly int hiddenDim;

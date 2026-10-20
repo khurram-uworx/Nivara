@@ -23,7 +23,7 @@ namespace Nivara.Silk;
 /// further sync.
 /// </para>
 /// </summary>
-public sealed class SilkBertEncoderRunner : IBertEncoderRunner
+public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
 {
     /// <summary>Workspace cap, matching the ILGPU runner's (the scenario's actual maxima).</summary>
     const int MaxBatch = 8;

@@ -1,6 +1,6 @@
 namespace Nivara.Silk;
 
-public sealed class SilkMobileNetV2GpuRunner : IDisposable
+public sealed partial class SilkMobileNetV2GpuRunner : IDisposable
 {
     readonly SilkRuntime runtime;
     readonly int numClasses;
