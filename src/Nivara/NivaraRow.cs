@@ -76,7 +76,7 @@ public readonly struct NivaraRow
         // delegate (built once per T) rather than reflection so predicate hot loops stay
         // allocation-free. Reference-type requesters can never satisfy this branch; the mismatch
         // throw below keeps the old contract.
-        if (typeof(T).IsValueType && Nullable.GetUnderlyingType(column.ElementType) == typeof(T))
+        if (NullableColumnReader.IsNullableColumnFor<T>(column))
             return NullableColumnReader.Read<T>(column, rowIndex);
 
         throw new ColumnTypeMismatchException(columnName, typeof(T), column.ElementType);
@@ -106,9 +106,9 @@ public readonly struct NivaraRow
         // Nullable-element columns (NivaraColumn<T?>) implement IColumn<T?>, not IColumn<T>.
         // When the caller requests the underlying value type, treat it as a match and read via
         // the cached typed delegate.
-        if (typeof(T).IsValueType && Nullable.GetUnderlyingType(column!.ElementType) == typeof(T))
+        if (NullableColumnReader.IsNullableColumnFor<T>(column!))
         {
-            value = NullableColumnReader.Read<T>(column, rowIndex);
+            value = NullableColumnReader.Read<T>(column!, rowIndex);
             return true;
         }
 
@@ -165,6 +165,17 @@ public readonly struct NivaraRow
         static readonly MethodInfo readCore = typeof(NullableColumnReader)
             .GetMethod(nameof(ReadCore), BindingFlags.NonPublic | BindingFlags.Static)!;
         static readonly ConcurrentDictionary<Type, Delegate> cache = new();
+        static readonly ConcurrentDictionary<Type, Type> nullableInterfaceCache = new();
+
+        public static bool IsNullableColumnFor<T>(IColumn column)
+        {
+            if (!typeof(T).IsValueType || Nullable.GetUnderlyingType(typeof(T)) != null)
+                return false;
+
+            var nullableInterface = nullableInterfaceCache.GetOrAdd(typeof(T), static t =>
+                typeof(IColumn<>).MakeGenericType(typeof(Nullable<>).MakeGenericType(t)));
+            return nullableInterface.IsInstanceOfType(column);
+        }
 
         public static T Read<T>(IColumn column, int rowIndex)
         {

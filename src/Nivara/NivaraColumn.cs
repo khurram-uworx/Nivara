@@ -231,9 +231,11 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             // For now, the factory returns memory storage, but this will be optimized later
             return ColumnStorageFactory.Create(values);
         }
-        else if (typeof(T).IsClass)
+        else if (typeof(T).IsClass || Nullable.GetUnderlyingType(typeof(T)) != null)
         {
-            // For reference types, always detect nulls using ColumnStorage directly
+            // Reference types and nullable value types keep null positions in a mask rather
+            // than inside the stored values, so a nullable input produces the same
+            // representation as CreateFromNullable.
             return new ColumnStorage<T>(values, detectNulls: true);
         }
         else
@@ -1288,7 +1290,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <inheritdoc />
-    public Type ElementType => typeof(T);
+    public Type ElementType => Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
 
     /// <inheritdoc />
     public object? GetValue(int index)
@@ -1329,11 +1331,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var nullMask = storage.NullMask;
         if (nullMask.Length > 0)
             return nullMask[index];
-
-        // Nullable-element columns (e.g. NivaraColumn<int?>) store nulls inside the values rather
-        // than a separate null mask, so a position is null when its value equals the default (null).
-        if (Nullable.GetUnderlyingType(typeof(T)) != null)
-            return EqualityComparer<T>.Default.Equals(storage[index], default);
 
         return false;
     }

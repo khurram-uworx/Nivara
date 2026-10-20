@@ -2148,6 +2148,47 @@ public class NivaraColumnTests
         Assert.That(halfColumn.IsNull(1), Is.True);
     }
 
+    /// <summary>
+    /// A nullable input through the generic <see cref="NivaraColumn{T}.Create(T[])"/> path must use
+    /// the same mask-based representation as <see cref="NivaraColumnFactory.CreateFromNullable{T}"/>:
+    /// nulls live in the mask, IsNull is authoritative, and the element type is the underlying type.
+    /// </summary>
+    [Test]
+    public void Create_NullableValueType_UsesMaskBasedRepresentation()
+    {
+        int?[] values = [10, null, 30];
+
+        var column = NivaraColumn<int?>.Create(values);
+
+        Assert.That(column.ElementType, Is.EqualTo(typeof(int)));
+        Assert.That(column.HasNulls, Is.True);
+        Assert.That(column.IsNull(0), Is.False);
+        Assert.That(column.IsNull(1), Is.True);
+        Assert.That(column.IsNull(2), Is.False);
+
+        var factoryColumn = NivaraColumnFactory.CreateFromNullable(values);
+        Assert.That(column.NullCount, Is.EqualTo(factoryColumn.NullCount));
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(column.IsNull(i), Is.EqualTo(factoryColumn.IsNull(i)));
+            Assert.That(column.GetValue(i), Is.EqualTo(factoryColumn.GetValue(i)));
+        }
+    }
+
+    /// <summary>
+    /// Nullable input without nulls must not allocate a mask and must report no nulls.
+    /// </summary>
+    [Test]
+    public void Create_NullableValueTypeWithoutNulls_HasNoMask()
+    {
+        var column = NivaraColumn<double?>.Create([1.5, 2.5, 3.5]);
+
+        Assert.That(column.ElementType, Is.EqualTo(typeof(double)));
+        Assert.That(column.HasNulls, Is.False);
+        Assert.That(column.IsNull(0), Is.False);
+        Assert.That(column[0], Is.EqualTo(1.5));
+    }
+
     #endregion
 
     #region Span and Copy Operations (new APIs)

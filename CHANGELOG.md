@@ -12,6 +12,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **Nullable columns are always stored mask-based (#346)** — any `Nullable<T>` input to
+  `NivaraColumn<T>.Create` now extracts a null mask and reports the underlying element type
+  (`ElementType == typeof(T)`), matching `NivaraColumnFactory.CreateFromNullable`. `IsNull` is
+  authoritative from the mask alone; the value-nullable fallback and the `ElementType == typeof(T?)`
+  guards it needed are gone. Callers that compared `ElementType` against a nullable type should
+  compare against the underlying type. Fixes the residual `(IColumn<T>)` casts in row
+  materialization (#344).
+
 - **Silk cached decode fuses its projection norms (#670)** — the single-token decode path ran one
   norm-fused kernel per projection, recomputing `RMSNorm(x)` and re-reading `x` for each. Q/K/V now
   take one `rms_norm_gemv` launch with three output slots instead of three launches, and gate/up one
