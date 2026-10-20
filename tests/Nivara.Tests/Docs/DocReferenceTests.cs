@@ -3,7 +3,7 @@ using NUnit.Framework;
 namespace Nivara.Tests.Docs;
 
 /// <summary>
-/// Checks that every <c>File.cs:NN</c> citation and every <c>docs/.md</c> reference in the product
+/// Checks that every <c>File.cs:NN</c> citation and every <c>docs/…md</c> reference in the product
 /// trees resolves. Motivation is #625: a deleted <c>docs/BERT-GPU.md</c> was still cited from
 /// <c>samples/</c> and <c>tests/</c>, which <see cref="DocCitationTests"/> never reads; and #549, the
 /// same blind spot for a deleted <c>docs/TODO.md</c>. The gate now states its own coverage: the files
