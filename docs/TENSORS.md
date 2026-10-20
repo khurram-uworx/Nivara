@@ -190,10 +190,12 @@ Status verified against `System.Numerics.Tensors` 11.0.0-preview.7 (#136):
   `TensorPrimitives.Dot` and friends, so `TensorsHelper.Transpose` stays as the physical
   materializer. It is also materially faster than the view + `FlattenTo` route: measured in
   Release at 2.2–3.4× across five shapes, winning ~99–100% of interleaved A/B rounds
-  (`dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose`). A parity test plus a
-  median-ratio performance gate in `TensorsHelperTests` signal a re-evaluation if that inverts;
-  the performance gate only runs in an optimized build, because in Debug the handwritten kernel
-  is unoptimized while the BCL tensor code stays ReadyToRun and the two collapse to parity (#482).
+  (`dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose`). A parity test in
+  `TensorsHelperTests` guards byte-for-byte agreement; the median ratio is logged there but is
+  deliberately not gated, because a single-shape wall-clock ordering is environment-sensitive
+  (issue #350). The authoritative timing measurement remains the SimdProbe `transpose` mode.
+  In Debug the handwritten kernel is unoptimized while the BCL tensor code stays ReadyToRun and
+  the two collapse to parity, so timing numbers are only meaningful in an optimized build (#482).
 - **`Tensor.MatrixMultiply<T>` does not exist** yet — open api-suggestion
   [dotnet/runtime#95863](https://github.com/dotnet/runtime/issues/95863) inside the BLAS epic
   [dotnet/runtime#93286](https://github.com/dotnet/runtime/issues/93286). The handwritten matmul
