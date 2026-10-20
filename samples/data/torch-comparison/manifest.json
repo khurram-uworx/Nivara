@@ -1725,6 +1725,40 @@
       16
     ]
   },
+  "llama_causal_lm": {
+    "layer": "LlamaForCausalLM",
+    "input_ids_shape": [
+      5
+    ],
+    "embed_shape": [
+      128,
+      32
+    ],
+    "final_norm_shape": [
+      32
+    ],
+    "logits_shape": [
+      5,
+      128
+    ],
+    "embed_grad_shape": [
+      128,
+      32
+    ],
+    "params": {
+      "vocab_size": 128,
+      "hidden_size": 32,
+      "num_hidden_layers": 2,
+      "num_heads": 4,
+      "num_key_value_heads": 2,
+      "intermediate_size": 64,
+      "max_position_embeddings": 32,
+      "rope_theta": 10000.0,
+      "rms_norm_eps": 1e-05,
+      "qkv_bias": false,
+      "tie_word_embeddings": true
+    }
+  },
   "provenance": {
     "python": "3.12.9",
     "python_full": "3.12.9 (tags/v3.12.9:fdb8142, Feb  4 2025, 15:27:58) [MSC v.1942 64 bit (AMD64)]",
