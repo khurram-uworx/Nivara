@@ -89,7 +89,7 @@ internal static class LayaForwardProbe
             Console.WriteLine("Checkpoint absent. Kernel legs and the layout matrix still run.");
             Console.WriteLine("The forward is SYNTHETIC (Kaiming init) and is not a denominator against the recorded 4.1 s.");
             var synthetic = new ModernBertConfig();
-            var encoder = new ModernBertEncoder<float>(synthetic);
+            var encoder = new ModernBertEncoder<float, float>(synthetic);
             var head = new LayaDecisionHead<float, float>(synthetic.HiddenSize, headLayerCount: 2);
             encoder.Eval();
             head.Eval();
@@ -126,7 +126,7 @@ internal static class LayaForwardProbe
     }
 
     static List<ForwardCell> TimeForwards(
-        ModernBertEncoder<float>? encoder, LayaDecisionHead<float>? head, ModernBertConfig config,
+        ModernBertEncoder<float, float>? encoder, LayaDecisionHead<float, float>? head, ModernBertConfig config,
         string weightSource, ref int voids)
     {
         var cells = new List<ForwardCell>();
@@ -188,7 +188,7 @@ internal static class LayaForwardProbe
     }
 
     static (double Median, double Min, double Max, bool Finite) TimeEncoder(
-        ModernBertEncoder<float> encoder, int[] ids, int valid)
+        ModernBertEncoder<float, float> encoder, int[] ids, int valid)
     {
         for (int i = 0; i < ForwardWarmup; i++)
             encoder.Forward(ids, valid);
@@ -205,7 +205,7 @@ internal static class LayaForwardProbe
     }
 
     static (double Median, double Min, double Max, bool Finite) TimeHead(
-        LayaDecisionHead<float> head, Nivara.AutoDiff.ReverseGradTensor<float> hidden, int valid)
+        LayaDecisionHead<float, float> head, Nivara.AutoDiff.ReverseGradTensor<float> hidden, int valid)
     {
         for (int i = 0; i < ForwardWarmup; i++)
             head.Forward(hidden, LayaQuestionType.Choice, PairMarkers, valid);
@@ -222,7 +222,7 @@ internal static class LayaForwardProbe
     }
 
     static (double Median, double Min, double Max, bool Finite) TimePair(
-        ModernBertEncoder<float> encoder, LayaDecisionHead<float> head, int[] ids, int valid)
+        ModernBertEncoder<float, float> encoder, LayaDecisionHead<float, float> head, int[] ids, int valid)
     {
         for (int i = 0; i < ForwardWarmup; i++)
         {
@@ -492,7 +492,7 @@ internal static class LayaForwardProbe
 
     static string Moved(double ratio) => Math.Abs(ratio - 1.0) <= NoiseBand ? "within noise" : "moved";
 
-    static void TimeDiagnostics(ModernBertEncoder<float> encoder, ModernBertConfig config)
+    static void TimeDiagnostics(ModernBertEncoder<float, float> encoder, ModernBertConfig config)
     {
         Console.WriteLine("--- diagnostics pass (shares of the instrumented total only) ---");
         Console.WriteLine("The tracker takes a lock per op. These durations are not the forward above and are not a denominator.");
