@@ -156,6 +156,7 @@ internal static class SilkKernelsGate
 
                 legs.AddRange(MeasureModernBertPorts(ilgpu, silk, buffers));
                 legs.AddRange(MeasureSmolLMKernels(silk, buffers));
+                MeasureDecodeShapeAb(silk, buffers);
                 return Report(legs);
             }
             finally
@@ -1388,6 +1389,114 @@ internal static class SilkKernelsGate
             IlgpuUs = ilgpuUs,
             SilkUs = silkUs,
         };
+    }
+
+    // ---- same-session A/B: decode-shape kernel geometry (#682) ----
+
+    static void MeasureDecodeShapeAb(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== decode-shape kernel geometry A/B: rms_norm_lm_head (tile, aRows=1) vs rms_norm_gemv (flat, one slot) (#682) ===");
+        Console.WriteLine("  Same session, interleaved rounds, median of per-round ratios. Parity already pinned by");
+        Console.WriteLine("  SilkRmsNormGemvTests.RmsNormGemv_OneBiasFreeSlot_MatchesSingleProjectionKernel.");
+        Console.WriteLine();
+
+        const float eps = 1e-5f;
+        const int warmups = 5;
+        const int rounds = 10;
+
+        (int hidden, int width)[] shapes =
+        [
+            (896, 151936), // Qwen head (hidden 896, vocab 151936)
+            (896, 96),     // small width
+            (896, 24),     // small width
+        ];
+
+        foreach (var (hidden, width) in shapes)
+        {
+            var x = new float[hidden];
+            var gamma = new float[hidden];
+            var w = new float[hidden * width];
+            uint seed = 0x68200001u;
+            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < w.Length; i++) w[i] = GemmBenchmark.NextUniformF(ref seed);
+
+            nint sx = silk.Allocate(hidden); buffers.Add(sx);
+            nint sg = silk.Allocate(hidden); buffers.Add(sg);
+            nint sw = silk.Allocate(w.Length); buffers.Add(sw);
+            nint soutTile = silk.Allocate(width); buffers.Add(soutTile);
+            nint soutFlat = silk.Allocate(width); buffers.Add(soutFlat);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(sw, w);
+
+            Action runTile = () =>
+            {
+                Nivara.Silk.SilkLauncher.RmsNormLmHead(silk, sx, sg, sw, soutTile, 1, hidden, width, eps);
+                silk.Finish();
+            };
+            Action runFlat = () =>
+            {
+                Nivara.Silk.SilkLauncher.RmsNormGemv(
+                    silk, sx, sg,
+                    [new Nivara.Silk.SilkLauncher.GemvSlot(sw, 0, soutFlat, width)],
+                    hasBias: false, aRows: 1, aCols: hidden, eps: eps);
+                silk.Finish();
+            };
+
+            for (int wu = 0; wu < warmups; wu++)
+            {
+                runTile();
+                runFlat();
+            }
+
+            var tileTicks = new double[rounds];
+            var flatTicks = new double[rounds];
+            for (int r = 0; r < rounds; r++)
+            {
+                if (r % 2 == 0)
+                {
+                    tileTicks[r] = Time(() => runTile());
+                    flatTicks[r] = Time(() => runFlat());
+                }
+                else
+                {
+                    flatTicks[r] = Time(() => runFlat());
+                    tileTicks[r] = Time(() => runTile());
+                }
+            }
+
+            var ratios = new List<double>(rounds);
+            for (int r = 0; r < rounds; r++)
+            {
+                if (flatTicks[r] == 0.0) continue;
+                ratios.Add(tileTicks[r] / flatTicks[r]);
+            }
+            double medianRatio = ratios.Count > 0 ? Median(ratios.ToArray()) : double.NaN;
+            double medianTileMs = Median(tileTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            double medianFlatMs = Median(flatTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+            Console.WriteLine($"  hidden={hidden} width={width}: median tile/flat ratio = {medianRatio:F3}  " +
+                              $"(tile {medianTileMs:F3} ms, flat {medianFlatMs:F3} ms)");
+        }
+
+        Console.WriteLine();
+    }
+
+    static long Time(Action action)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        action();
+        return System.Diagnostics.Stopwatch.GetTimestamp() - start;
+    }
+
+    static double Median(double[] values)
+    {
+        double[] sorted = (double[])values.Clone();
+        Array.Sort(sorted);
+        int n = sorted.Length;
+        return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
     }
 
     static int Report(List<Leg> legs)
