@@ -16,11 +16,11 @@ public class TensorsHelperTests
     // margin is structural rather than marginal. The bound is loose on purpose.
     const double MaskPropagationMaxRatio = 0.9;
 
-    // Measured Release median ratio is ~0.38 (2.2-3.4x faster across shapes, 15/15 runs).
-    // 0.9 sits far below that signal while staying clear of run-to-run drift, so this
-    // catches a genuine regression without encoding a sub-1% margin. See the
-    // `transpose` mode in tests/Nivara.SimdProbe.
-    const double TransposeMaxRatio = 0.9;
+    // The authoritative measurement is the `transpose` mode of tests/Nivara.SimdProbe,
+    // which samples five shapes across 30 interleaved rounds. This unit test keeps the
+    // functional parity assertion (below) but only logs the median ratio, because a
+    // single-shape wall-clock ordering is environment-sensitive and cannot be a reliable
+    // gate on its own. See issue #350 (was #482).
 
     [Test]
     public void PropagateNullMask_NoMasks_ClearsResultMask()
@@ -471,16 +471,14 @@ public class TensorsHelperTests
     [Category("Performance")]
     public void Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization()
     {
-        // #136 gate: the BCL Tensor.Transpose<T> net11 API returns a strided view,
-        // so the swap route must pay Tensor construction + FlattenTo materialization
-        // per call to stay comparable with the span-based tiled kernel.
+        // #136: the BCL Tensor.Transpose<T> net11 API returns a strided view, so the
+        // swap route must pay Tensor construction + FlattenTo materialization per call
+        // to stay comparable with the span-based tiled kernel.
         //
-        // #482: this gate was flaky (3/5 failures on a clean tree, once on a 0.2% margin).
-        // It measured each route with a private best-of-5 and compared the two summaries
-        // once, sequentially, tiled first — so load drift always landed on tiled. It also
-        // ran by default in Debug, where this assembly is unoptimized while the BCL
-        // Tensor code stays ReadyToRun, collapsing both routes to parity. It now warms up,
-        // interleaves the routes with alternating order, and asserts on the median ratio.
+        // #482/#350: a single-shape wall-clock ordering is environment-sensitive and
+        // cannot be a reliable gate, so the ratio is now logged only (no assertion).
+        // The functional parity assertion below is the hard gate. The authoritative
+        // timing measurement is the `transpose` mode of tests/Nivara.SimdProbe.
         TimingGuards.RequireOptimizedBuildForTiming();
 
         const int rows = 1024, cols = 1024;
@@ -496,10 +494,12 @@ public class TensorsHelperTests
             $"Transpose {rows}x{cols} ticks: tiled={result.FirstMedian:F0}, " +
             $"bclView+flatten={result.SecondMedian:F0}, median ratio={result.MedianRatio:F3}, " +
             $"tiled wins {result.FirstWins}/{result.Rounds} rounds");
+        // Functional parity gate (hard): the two routes must agree byte-for-byte.
         Assert.That(bcl, Is.EqualTo(tiled));
-        Assert.That(result.MedianRatio, Is.LessThan(TransposeMaxRatio),
-            $"Tiled transpose lost to the BCL view-materialization route " +
-            $"(median ratio {result.MedianRatio:F3}) - re-evaluate the #136 kernel swap.");
+        // Performance is logged only, not gated: a single-shape wall-clock ordering is
+        // machine/load sensitive (issue #350). The authoritative measurement is the
+        // `transpose` mode of tests/Nivara.SimdProbe; investigate there if this ratio
+        // ever inverts above ~1.0.
     }
 
     static T[] TransposeViaBcl<T>(T[] src, int rows, int cols)
