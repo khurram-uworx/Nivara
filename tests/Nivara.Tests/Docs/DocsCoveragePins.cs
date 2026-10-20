@@ -61,7 +61,7 @@ internal static class DocsCoveragePins
     /// <c>src/Nivara/Execution/MemoryBudget.cs</c>, and
     /// <c>tests/Nivara.Tests/Execution/MemoryBudgetTests.cs</c>.
     /// 742 = 741 + <c>tests/Nivara.Tests/AutoDiff/MixedPrecisionMatmulTests.cs</c>, added by #387.
-/// 743 = 742 + <c>tests/Nivara.Tests/AutoDiff/MixedPrecisionTrainingTests.cs</c>, added by #746.
+    /// 743 = 742 + <c>tests/Nivara.Tests/AutoDiff/MixedPrecisionTrainingTests.cs</c>, added by #746.
     /// </summary>
     internal const int ExpectedFileCount = 743;
 
