@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara.Silk;
 
 public sealed class SilkSmolLMSession : IDisposable
@@ -12,7 +14,17 @@ public sealed class SilkSmolLMSession : IDisposable
         catch { runtime.Dispose(); throw; }
     }
 
+    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+    {
+        runtime = new SilkRuntime();
+        try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors); }
+        catch { runtime.Dispose(); throw; }
+    }
+
     public static SilkSmolLMSession Open(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => new SilkSmolLMSession(config, tensors);
+
+    public static SilkSmolLMSession Open(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
         => new SilkSmolLMSession(config, tensors);
 
     public string DeviceName => runtime.DeviceName;
