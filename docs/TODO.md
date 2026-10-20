@@ -6,10 +6,16 @@ Qwen2.5-0.5B ships BF16 on disk (989 MB). Current `qwen` path widens to F32 at l
 
 ## Scope (#387)
 
-In scope: core mixed-precision span kernels (forward + VJP), qwen CPU raw-BF16 inference path (inference-only), opt-in flag, parity tests, README benchmark row, docs.
+In scope: core mixed-precision span kernels (forward + VJP for activations/weights), parity tests (kernel level), docs.
+
+The end-to-end qwen raw-BF16 inference path (keeping BF16 weights in a model, the opt-in
+`--qwen-weights` flag, the ~1 GB measurement and A/B decode timing) requires mixed-precision
+weights inside `Module<T>`/`Parameter<T>`, which is out of scope for this issue and tracked by
+#746. #387 unblocks #746 by providing the kernel family; #746 will add the flag and the
+InferenceCliArgumentTests coverage that a new flag requires.
 
 Out of scope (follow-ups created):
-- #746 Mixed-precision Module/Parameter/StateDict (trainable BF16 weights) + VJP wiring into modules.
+- #746 Mixed-precision Module/Parameter/StateDict (trainable BF16 weights) + VJP wiring into modules + qwen raw path + flag.
 - #747 JVP / forward-mode AD for mixed precision.
 - #748 Silk/GPU device-side BF16 weights.
 - #749 Memory-mapped / paged weights for very large models.
@@ -34,13 +40,11 @@ Out of scope (follow-ups created):
 ## Planned commits
 
 1. docs: plan #387 in TODO.md
-2. feat(primitives): mixed-precision MatMulTransposedB (BF16/Half weights × float) SIMD + scalar
-3. feat(gradkernels): expose mixed-precision matmul + VJP span kernels
+2. feat(primitives): mixed-precision MatMulTransposedB (BF16/Half weights x float) SIMD + scalar
+3. feat(gradkernels): expose mixed-precision matmul span kernels
 4. feat(fused): LlamaFusedKernels mixed-precision MatMulTransposedB
-5. feat(qwen): raw-BF16 CPU inference path + --qwen-weights flag
-6. test: parity + kernel SIMD-vs-scalar
-7. docs: README benchmark row
-8. docs: remove TODO.md
+5. test: mixed-precision matmul parity (SIMD vs scalar, vs float-widened reference)
+6. docs: remove TODO.md
 
 ## GitHub issues log
 
