@@ -44,6 +44,23 @@ static class ColumnStorageFactory
     {
         ArgumentNullException.ThrowIfNull(values);
 
+        // Nullable value types keep null positions in the mask, never in a mask-less array.
+        if (nullMask is null && Nullable.GetUnderlyingType(typeof(T)) != null)
+        {
+            bool[]? detectedMask = null;
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (values[i] == null)
+                {
+                    detectedMask ??= new bool[values.Length];
+                    detectedMask[i] = true;
+                }
+            }
+
+            if (detectedMask is not null)
+                nullMask = new ReadOnlyMemory<bool>(detectedMask);
+        }
+
         return new ColumnStorage<T>(values, nullMask);
     }
 
