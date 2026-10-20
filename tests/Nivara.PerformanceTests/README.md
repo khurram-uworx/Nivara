@@ -175,9 +175,10 @@ K=4096 with N=1024 is a worse aspect ratio for the 16x16 tile than the other hea
 > `SharedMemory.Allocate<float>` form, so re-recording this table today would compare 1D addressing
 > against 2D and book the ~20% form difference as if it were a tile-geometry effect — which is the
 > one thing this table exists to isolate. The table below is therefore left exactly as measured on
-> 2026-09-29 and is kept only as the record of that experiment. Re-measuring the family with all
-> five kernels on one addressing form is outstanding work; until then, treat "no geometry wins" as
-> a statement about the 1D form the family was built in, not about the geometries.
+> 2026-09-29 and is kept only as the record of that experiment. The port to one addressing form is
+> done (#470); re-running --gemm and re-recording the table on this machine is outstanding work.
+> Until that lands, treat "no geometry wins" as a statement about the 1D form the family was built
+> in, not about the geometries.
 
 171 cells, all PASS, plus **byte-identity PASS** against Row4 on all #440 cells. Same machine,
 AC line. The four new geometries are the *plain* kernels only — the fused-epilogue siblings
