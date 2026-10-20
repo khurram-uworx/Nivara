@@ -5,14 +5,26 @@ public sealed class SilkQwenSession : IDisposable
     readonly SilkRuntime runtime;
     readonly SilkQwenGpuRunner runner;
 
-    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         runtime = new SilkRuntime();
         try { runner = new SilkQwenGpuRunner(runtime, config, tensors); }
         catch { runtime.Dispose(); throw; }
     }
 
+
+    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors)
+    {
+        runtime = new SilkRuntime();
+        try { runner = new SilkQwenGpuRunner(runtime, config, tensors); }
+        catch { runtime.Dispose(); throw; }
+    }
+
+
     public static SilkQwenSession Open(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => new SilkQwenSession(config, tensors);
+
+    public static SilkQwenSession Open(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors)
         => new SilkQwenSession(config, tensors);
 
     public string DeviceName => runtime.DeviceName;
