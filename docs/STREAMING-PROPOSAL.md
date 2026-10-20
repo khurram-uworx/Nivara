@@ -1,6 +1,10 @@
 # Streaming memory-budget enforcement — design proposal
 
-> **Status: design proposal — not implemented.** The `BudgetEnforcement` enum, the
+> **Status: Phase 1 implemented (branch khurram/325).** The `BudgetEnforcement` enum and
+> `MemoryBudget` primitive now exist; `NivaraExecutionContext.BudgetEnforcement` defaults to
+> `Advisory`. Phase 2 (spill/external memory) remains unimplemented — see #743.
+>
+> Historical note (pre-implementation): The `BudgetEnforcement` enum, the
 > `MemoryBudget` class (the accounting primitive, distinct from the existing
 > `NivaraExecutionContext.MemoryBudget` byte count), and an `enforced:` parameter on
 > `QueryFrame.AsStream` do not exist anywhere in `src/`. Every code block below is the
