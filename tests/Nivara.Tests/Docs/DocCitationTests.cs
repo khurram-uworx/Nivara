@@ -13,52 +13,12 @@ public class DocCitationTests
 {
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenCitations.md";
 
-    /// <summary>Count of citations found repository-wide. Pinned deliberately: see the coverage test.</summary>
-    const int ExpectedCitationCount = 114;
-
-    /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
-    const int ExpectedCitedDocumentCount = 19;
-
-    /// <summary>
-    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 43 under
-    /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
-    /// <c>docs/TODO.md</c> does <em>not</em> increase this number — excluding it is the point, and it is
-    /// what keeps the count stable across a workflow that commits one. The move of <c>SILK.md</c>
-    /// from <c>tests/Nivara.GpuProbe/</c> into <c>docs/</c> is what took <c>docs/</c> from 39 to 40:
-    /// the gate scans the repository root plus <c>docs/</c>, never <c>tests/</c>, so the probe tree
-    /// was not counted before and the document entered scope on arrival. The acceleration-doc
-    /// restructure took it from 40 to 41 by extracting the ungated streaming design proposal into
-    /// its own <c>docs/STREAMING-PROPOSAL.md</c>. The #492 reconciliation added
-    /// <c>docs/BLAS-MKL.md</c>, taking <c>docs/</c> from 41 to 42. The decision-model work added
-    /// <c>docs/DECISION-MODELS.md</c>, taking <c>docs/</c> from 42 to 43 and this count from 51 to 52.
-    /// </summary>
-    const int ExpectedDocumentCount = 53;
-
     [Test]
     public void EveryCitationInTheDocumentation_Resolves()
     {
         var faults = DocCitationExtractor.AllFaults();
 
         Assert.That(faults, Is.Empty, Environment.NewLine + string.Join(Environment.NewLine, faults.Select(f => f.ToString())));
-    }
-
-    [Test]
-    public void Coverage_IsAccountedForAcrossTheWholeRepository()
-    {
-        Assert.Multiple(() =>
-        {
-            Assert.That(DocCitationExtractor.CitationCount(), Is.EqualTo(ExpectedCitationCount),
-                "the repository-wide citation count moved; update this number deliberately. Unlike the "
-                + "snippet gate there is no opt-out and no ungated list — every citation in every scanned "
-                + "document is checked, so a drop here is reduced coverage, not a neutral event");
-
-            Assert.That(DocSnippetExtractor.MarkdownFiles(), Has.Count.EqualTo(ExpectedDocumentCount),
-                "the document scope moved; update this number deliberately. A shrinking scope means "
-                + "documents stopped being checked, which is reduced coverage, not a neutral event");
-
-            Assert.That(DocCitationExtractor.CitedDocumentCount(), Is.EqualTo(ExpectedCitedDocumentCount),
-                "the number of documents carrying citations moved; update this number deliberately");
-        });
     }
 
     [Test]
@@ -79,7 +39,7 @@ public class DocCitationTests
                 Assert.That(DocSnippetExtractor.MarkdownFiles(), Does.Not.Contain("docs/TODO.md"),
                     "the citation gate reuses the snippet gate's scope, which must leave the plan out");
                 Assert.That(DocSnippetExtractor.MarkdownFiles(), Has.Count.EqualTo(documents),
-                    $"the document scope must stay {ExpectedDocumentCount} while a plan is in the tree");
+                    $"the document scope must stay {DocsCoveragePins.ExpectedDocumentCount} while a plan is in the tree");
                 Assert.That(DocCitationExtractor.CitationCount(), Is.EqualTo(citations),
                     "the plan document cites a source file, so a leak moves the repository-wide count");
                 Assert.That(DocCitationExtractor.CitedDocumentCount(), Is.EqualTo(citedDocuments),

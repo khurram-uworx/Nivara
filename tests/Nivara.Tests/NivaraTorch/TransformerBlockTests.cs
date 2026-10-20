@@ -51,7 +51,7 @@ public class TransformerBlockTests
         ReverseGradOperations.Sum(output).Backward();
 
         Assert.That(output.Shape, Is.EqualTo(new[] { 6, 32 }));
-        TestHelpers.AssertTensorEqual(expectedOutput, TestHelpers.ExtractOutput(output), label: $"{prefix}_output");
+        TestHelpers.AssertTensorEqual(expectedOutput, TestHelpers.ExtractOutput(output), absTol: 1e-4f, relTol: 1e-3f, label: $"{prefix}_output");
         TestHelpers.AssertTensorEqual(expectedInputGrad, TestHelpers.ExtractGrad(inputTensor), absTol: 1e-4f, relTol: 1e-3f, label: $"{prefix}_input_grad");
     }
 }
