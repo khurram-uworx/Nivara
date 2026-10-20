@@ -1791,6 +1791,123 @@ def run():
                         with_grads=False)
 
     # =========================================================================
+    # LlamaForCausalLM full-model parity (tied LM head)
+    # Dedicated generator keeps the shared rng stream bit-stable. Mirrors the
+    # LlamaForCausalLM sample: embedding -> N decoder blocks (pre-norm GQA
+    # attention + gated SiLU FFN, residuals) -> final RMSNorm -> h @ embed.T.
+    # Saves embedding weight, per-layer weights, final-norm gamma, input token
+    # ids, logits, and the embedding-weight gradient (sum-backward).
+    # =========================================================================
+    lm_rng = torch.Generator().manual_seed(1616)
+
+    lm_vocab = 128
+    lm_hidden = 32
+    lm_layers = 2
+    lm_heads = 4
+    lm_kv_heads = 2
+    lm_head_dim = lm_hidden // lm_heads
+    lm_inter = 64
+    lm_seq = 5
+    lm_max_pos = 32
+    lm_eps = 1e-5
+    lm_tokens = [1, 12, 45, 78, 99]
+
+    lm_embed = torch.randn(lm_vocab, lm_hidden, generator=lm_rng)
+
+    lm_layer_weights = []
+    for _ in range(lm_layers):
+        w = {
+            "in_gamma": torch.randn(lm_hidden, generator=lm_rng) * 0.1 + 1.0,
+            "post_gamma": torch.randn(lm_hidden, generator=lm_rng) * 0.1 + 1.0,
+            "qw": torch.randn(lm_heads * lm_head_dim, lm_hidden, generator=lm_rng),
+            "kw": torch.randn(lm_kv_heads * lm_head_dim, lm_hidden, generator=lm_rng),
+            "vw": torch.randn(lm_kv_heads * lm_head_dim, lm_hidden, generator=lm_rng),
+            "ow": torch.randn(lm_hidden, lm_hidden, generator=lm_rng),
+            "gate": torch.randn(lm_inter, lm_hidden, generator=lm_rng),
+            "up": torch.randn(lm_inter, lm_hidden, generator=lm_rng),
+            "down": torch.randn(lm_hidden, lm_inter, generator=lm_rng),
+        }
+        lm_layer_weights.append(w)
+
+    lm_final_gamma = torch.randn(lm_hidden, generator=lm_rng) * 0.1 + 1.0
+
+    # Forward (grad-enabled) to capture logits + embedding gradient.
+    lm_embed_g = lm_embed.detach().clone().requires_grad_(True)
+    lm_x = torch.tensor(lm_tokens, dtype=torch.long)
+    lm_h = lm_embed_g[lm_x]  # [L, hidden]
+    for lw in lm_layer_weights:
+        # pre-norm attention
+        ln = rms_norm_affine(lm_h, lw["in_gamma"], lm_eps)
+        qq = ln @ lw["qw"].t()
+        kk = ln @ lw["kw"].t()
+        vv = ln @ lw["vw"].t()
+        cos, sin = build_rope_cache(lm_head_dim, lm_seq, 10000.0)
+        qq = apply_rope(qq, cos, sin)
+        kk = apply_rope(kk, cos, sin)
+        lm_mask = torch.triu(torch.full((lm_seq, lm_seq), float("-inf")), diagonal=1)
+        attn_h = gqa_mha(qq, kk, vv, lm_heads, lm_kv_heads, lm_mask, 1.0 / math.sqrt(lm_head_dim)) @ lw["ow"].t()
+        lm_h = lm_h + attn_h
+        # pre-norm FFN
+        ffn_in = rms_norm_affine(lm_h, lw["post_gamma"], lm_eps)
+        gate_h = F.silu(ffn_in @ lw["gate"].t())
+        up_h = ffn_in @ lw["up"].t()
+        mlp_h = (gate_h * up_h) @ lw["down"].t()
+        lm_h = lm_h + mlp_h
+
+    # final norm
+    lm_h = rms_norm_affine(lm_h, lm_final_gamma, lm_eps)
+    lm_logits = lm_h @ lm_embed_g.t()  # [L, vocab]
+    lm_logits.sum().backward()
+
+    lm_name = "llama_causal_lm"
+    # input ids (int32)
+    torch.tensor(lm_tokens, dtype=torch.long).numpy().astype(np.int64).tofile(
+        os.path.join(TEST_DIR, f"{lm_name}_input_ids.bin"))
+    lm_embed.detach().numpy().astype(np.float32).tofile(
+        os.path.join(TEST_DIR, f"{lm_name}_embed.bin"))
+    for i, lw in enumerate(lm_layer_weights):
+        lw["in_gamma"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_in_gamma.bin"))
+        lw["post_gamma"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_post_gamma.bin"))
+        lw["qw"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_qw.bin"))
+        lw["kw"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_kw.bin"))
+        lw["vw"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_vw.bin"))
+        lw["ow"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_ow.bin"))
+        lw["gate"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_gatew.bin"))
+        lw["up"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_upw.bin"))
+        lw["down"].detach().numpy().astype(np.float32).tofile(
+            os.path.join(TEST_DIR, f"{lm_name}_layer{i}_downw.bin"))
+    lm_final_gamma.detach().numpy().astype(np.float32).tofile(
+        os.path.join(TEST_DIR, f"{lm_name}_final_norm.bin"))
+    lm_logits.detach().numpy().astype(np.float32).tofile(
+        os.path.join(TEST_DIR, f"{lm_name}_logits.bin"))
+    lm_embed_g.grad.detach().numpy().astype(np.float32).tofile(
+        os.path.join(TEST_DIR, f"{lm_name}_embed_grad.bin"))
+
+    manifest[lm_name] = {
+        "layer": "LlamaForCausalLM",
+        "input_ids_shape": [lm_seq],
+        "embed_shape": list(lm_embed.shape),
+        "final_norm_shape": list(lm_final_gamma.shape),
+        "logits_shape": list(lm_logits.shape),
+        "embed_grad_shape": list(lm_embed_g.grad.shape),
+        "params": {"vocab_size": lm_vocab, "hidden_size": lm_hidden,
+                   "num_hidden_layers": lm_layers, "num_heads": lm_heads,
+                   "num_key_value_heads": lm_kv_heads, "intermediate_size": lm_inter,
+                   "max_position_embeddings": lm_max_pos, "rope_theta": 10000.0,
+                   "rms_norm_eps": lm_eps, "qkv_bias": False,
+                   "tie_word_embeddings": True},
+    }
+    print(f"  {lm_name}: input_ids={lm_tokens} layers={lm_layers} logits={list(lm_logits.shape)}")
+
+    # =========================================================================
     # Write manifest
     # =========================================================================
     case_count = len(manifest)
