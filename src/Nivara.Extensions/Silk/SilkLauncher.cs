@@ -586,4 +586,107 @@ internal static class SilkLauncher
         int total = N * C;
         runtime.Run(SilkKernels.AdaptiveAvgPool2d, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
     }
+
+    public static void GemmBf16(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmBf16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmBf16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmBf16, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmBf16, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmBf16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmBf16, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmBf16, aRows, bCols);
+    }
+
+    public static void GemmGemvAddBf16(
+        SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aCols, int bCols)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        runtime.SetBuffer(SilkKernels.GemmGemvAddBf16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddBf16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddBf16, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddBf16, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddBf16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddBf16, 5, (uint)bCols);
+        int threads = SilkKernels.GemvGlobalCols(bCols);
+        runtime.Run(
+            SilkKernels.GemmGemvAddBf16,
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void MlpBlockBf16(
+        SilkRuntime runtime, nint x, nint gamma, nint Wgate, nint Wup, nint Wdown,
+        nint outBuf, nint residual, int hidden, int intermediate, float eps)
+    {
+        if (hidden <= 0) throw new ArgumentOutOfRangeException(nameof(hidden));
+        if (intermediate <= 0) throw new ArgumentOutOfRangeException(nameof(intermediate));
+        if (intermediate > 5120) throw new ArgumentOutOfRangeException(nameof(intermediate), "exceeds MLP_MAX_INTERMEDIATE");
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 0, x);
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 2, Wgate);
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 3, Wup);
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 4, Wdown);
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 5, outBuf);
+        runtime.SetBuffer(SilkKernels.MlpBlockBf16, 6, residual);
+        runtime.SetUInt32(SilkKernels.MlpBlockBf16, 7, (uint)hidden);
+        runtime.SetUInt32(SilkKernels.MlpBlockBf16, 8, (uint)intermediate);
+        runtime.SetFloat32(SilkKernels.MlpBlockBf16, 9, eps);
+        runtime.Run(
+            SilkKernels.MlpBlockBf16,
+            [(nuint)SilkKernels.LinearGroupSize],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void RmsNormGemvBf16(
+        SilkRuntime runtime,
+        nint x,
+        nint gamma,
+        ReadOnlySpan<GemvSlot> slots,
+        bool hasBias,
+        int aRows,
+        int aCols,
+        float eps)
+    {
+        if (aRows != 1)
+            throw new ArgumentOutOfRangeException(nameof(aRows), aRows, "rms_norm_gemv is the single-row decode shape");
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        GemvSlot s0 = slots[0];
+        GemvSlot s1 = slots.Length > 1 ? slots[1] : default;
+        GemvSlot s2 = slots.Length > 2 ? slots[2] : default;
+        if (s0.Cols <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s1.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s2.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 2, s0.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 3, s0.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 4, s0.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 5, s1.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 6, s1.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 7, s1.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 8, s2.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 9, s2.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvBf16, 10, s2.Output);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvBf16, 11, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvBf16, 12, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvBf16, 13, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvBf16, 14, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvBf16, 15, hasBias ? 1u : 0u);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvBf16, 16, eps);
+
+        int threads =
+            SilkKernels.GemvGlobalCols(s0.Cols)
+            + SilkKernels.GemvGlobalCols(s1.Cols)
+            + SilkKernels.GemvGlobalCols(s2.Cols);
+        runtime.Run(
+            SilkKernels.RmsNormGemvBf16,
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
 }

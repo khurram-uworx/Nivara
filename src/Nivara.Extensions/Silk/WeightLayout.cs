@@ -16,13 +16,14 @@ public static class WeightLayout
     /// <param name="tensors">The checkpoint tensors, keyed by name.</param>
     /// <param name="key">The weight key to transpose.</param>
     /// <param name="backend">Backend label used only in the missing-key error message.</param>
-    public static float[] Transposed(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, string backend)
+    public static T[] Transposed<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors, string key, string backend)
+        where T : struct
     {
         var t = Req(tensors, key, backend);
         int outDim = t.Shape[0];
         int inDim = t.Shape[1];
-        var bt = new float[outDim * inDim];
+        var bt = new T[outDim * inDim];
         for (int r = 0; r < outDim; r++)
             for (int c = 0; c < inDim; c++)
                 bt[c * outDim + r] = t.Data[r * inDim + c];
@@ -71,8 +72,8 @@ public static class WeightLayout
     /// Resolves a checkpoint tensor by key, failing with the backend label so a missing key names
     /// the path that asked for it.
     /// </summary>
-    public static (float[] Data, int[] Shape) Req(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, string backend)
+    public static (T[] Data, int[] Shape) Req<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors, string key, string backend)
         => tensors.TryGetValue(key, out var t)
             ? t
             : throw new InvalidOperationException($"Missing weight key '{key}' for the {backend} forward.");
