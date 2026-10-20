@@ -8,7 +8,8 @@ namespace Nivara.Silk;
 /// for operation. Prefill-only (no KV cache): generation runs the full forward each step, matching
 /// the CPU cache-free path.
 /// </summary>
-public sealed partial class SilkSmolLMGpuRunner : IDisposable{
+public sealed partial class SilkSmolLMGpuRunner : IDisposable
+{
     readonly SilkRuntime runtime;
     readonly SmolLMConfig config;
     readonly int hiddenDim;
