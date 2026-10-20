@@ -56,8 +56,12 @@ internal static class DocsCoveragePins
     /// 738 = 735 + the three files added by #383: <c>samples/Nivara.Samples/NivaraAIFunctions.cs</c>,
     /// <c>tests/Nivara.Tests/Qwen/QwenToolsNivaraLoopTests.cs</c>, and
     /// <c>tests/Nivara.Tests/Samples/NivaraAIFunctionsTests.cs</c>.
+    /// 741 = 738 + the three files added by #325 phase 1:
+    /// <c>src/Nivara/Execution/BudgetEnforcement.cs</c>,
+    /// <c>src/Nivara/Execution/MemoryBudget.cs</c>, and
+    /// <c>tests/Nivara.Tests/Execution/MemoryBudgetTests.cs</c>.
     /// </summary>
-    internal const int ExpectedFileCount = 738;
+    internal const int ExpectedFileCount = 741;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     internal const int ExpectedCodeCitationCount = 127;
