@@ -39,8 +39,10 @@ public class DocReferenceTests
     /// <c>tests/Nivara.Tests/Gpu/SilkGroupedHashReduceTests.cs</c>,
     /// <c>tests/Nivara.Tests/Incident/GpuIncidentTests.cs</c>, and
     /// <c>tests/Nivara.Tests/Incident/GpuProfitabilityTests.cs</c>.
+    /// 735 = 734 + <c>tests/Nivara.Tests/NivaraTorch/LlamaForCausalLMTests.cs</c>, added by the
+    /// LlamaForCausalLM torch parity work on khurram/372 without moving the pin.
     /// </summary>
-    const int ExpectedFileCount = 734;
+    const int ExpectedFileCount = 735;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
     const int ExpectedCodeCitationCount = 127;
