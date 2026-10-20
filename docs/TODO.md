@@ -72,4 +72,4 @@ decision (see D2).
 
 ## GitHub issues log
 
-- None yet. (Create issues for deferred follow-ups at discovery.)
+- #760 — sample CLI wiring + vision-model BF16 conv-kernel follow-up (created while working on 756).
