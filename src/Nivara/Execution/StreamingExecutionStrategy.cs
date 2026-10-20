@@ -353,6 +353,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             return pipelinedResult;
         }
 
+        var enforced = context.BudgetEnforcement == BudgetEnforcement.Enforced;
+        MemoryBudget? memoryBudget = enforced ? new MemoryBudget(context.MemoryBudget) : null;
+
         var channel = CreateBoundChannel(context.MemoryBudget, chunkSize);
         var chunkIndex = 0;
 
@@ -385,9 +388,25 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                         if (chunkScope != null)
                             chunkScope.SetRowCount(chunkFrame.RowCount);
 
-                        inFlight = chunkFrame;
-                        await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
-                        inFlight = null;
+                        long acquiredBytes = 0;
+                        if (memoryBudget != null)
+                        {
+                            acquiredBytes = chunkFrame.estimateFrameMemoryUsage();
+                            await memoryBudget.AcquireAsync(acquiredBytes, context.CancellationToken).ConfigureAwait(false);
+                        }
+
+                        try
+                        {
+                            inFlight = chunkFrame;
+                            await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
+                            inFlight = null;
+                        }
+                        catch
+                        {
+                            if (memoryBudget != null)
+                                memoryBudget.Release(acquiredBytes);
+                            throw;
+                        }
                     }
 
                     chunkIndex++;
@@ -399,8 +418,26 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 {
                     var flushed = windowProcessor.Flush();
                     if (flushed != null)
-                        await channel.Writer.WriteAsync(NivaraFrame.Create(flushed), context.CancellationToken)
-                            .ConfigureAwait(false);
+                    {
+                        var flushedFrame = NivaraFrame.Create(flushed);
+                        long acquiredBytes = 0;
+                        if (memoryBudget != null)
+                        {
+                            acquiredBytes = flushedFrame.estimateFrameMemoryUsage();
+                            await memoryBudget.AcquireAsync(acquiredBytes, context.CancellationToken).ConfigureAwait(false);
+                        }
+                        try
+                        {
+                            await channel.Writer.WriteAsync(flushedFrame, context.CancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            if (memoryBudget != null)
+                                memoryBudget.Release(acquiredBytes);
+                            throw;
+                        }
+                    }
                 }
             }
             finally
@@ -416,13 +453,17 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             await foreach (var chunkFrame in channel.Reader.ReadAllAsync(context.CancellationToken)
                 .ConfigureAwait(false))
             {
+                if (memoryBudget != null)
+                    memoryBudget.Release(chunkFrame.estimateFrameMemoryUsage());
                 budgetTracker.RecordFrame(chunkFrame);
                 chunkFrames.Add(chunkFrame);
             }
             await producer.ConfigureAwait(false);
+            memoryBudget?.Dispose();
         }
         catch
         {
+            memoryBudget?.Dispose();
             foreach (var f in chunkFrames) f.Dispose();
             channel.Writer.TryComplete();
             while (channel.Reader.TryRead(out var buffered))
@@ -506,6 +547,10 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var diag = context.ExecutionDiagnostics;
         using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamChunksAsync") : null;
 
+        var enforced = context.BudgetEnforcement == BudgetEnforcement.Enforced;
+        MemoryBudget? memoryBudget = enforced ? new MemoryBudget(context.MemoryBudget) : null;
+        using var _memoryBudget = memoryBudget;
+
         if (!plan.Source.CanReadInChunks)
         {
             var columns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
@@ -550,7 +595,23 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     diag.RowsReturned += chunkFrame.RowCount;
                     diag.MaterializedColumns = chunkFrame.ColumnCount;
                 }
-                yield return chunkFrame;
+
+                long acquiredBytes = 0;
+                if (memoryBudget != null)
+                {
+                    acquiredBytes = chunkFrame.estimateFrameMemoryUsage();
+                    await memoryBudget.AcquireAsync(acquiredBytes, ct).ConfigureAwait(false);
+                }
+
+                try
+                {
+                    yield return chunkFrame;
+                }
+                finally
+                {
+                    if (memoryBudget != null)
+                        memoryBudget.Release(acquiredBytes);
+                }
             }
             yield break;
         }
