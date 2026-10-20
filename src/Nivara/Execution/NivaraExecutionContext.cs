@@ -43,6 +43,12 @@ public sealed class NivaraExecutionContext
     public long MemoryBudget { get; set; }
 
     /// <summary>
+    /// Gets or sets how <see cref="MemoryBudget"/> is enforced by the streaming
+    /// execution strategy. Defaults to <see cref="BudgetEnforcement.Advisory"/>.
+    /// </summary>
+    public BudgetEnforcement BudgetEnforcement { get; set; }
+
+    /// <summary>
     /// Gets or sets an explicit row target for streaming chunks. When set, the streaming
     /// strategy uses this value directly instead of deriving a chunk size from
     /// <see cref="MemoryBudget"/>. Null means "derive from the memory budget".
@@ -74,6 +80,7 @@ public sealed class NivaraExecutionContext
             Strategy = Strategy,
             MaxDegreeOfParallelism = MaxDegreeOfParallelism,
             MemoryBudget = MemoryBudget,
+            BudgetEnforcement = BudgetEnforcement,
             ChunkSize = ChunkSize,
             CancellationToken = CancellationToken,
             Progress = Progress,
@@ -110,6 +117,17 @@ public sealed class NivaraExecutionContext
             MemoryBudget = memoryBudgetBytes
         };
 
+    /// <summary>
+    /// Creates an execution context with the specified budget enforcement mode.
+    /// </summary>
+    /// <param name="budgetEnforcement">The budget enforcement mode.</param>
+    /// <returns>A new ExecutionContext with the specified budget enforcement.</returns>
+    public static NivaraExecutionContext WithBudgetEnforcement(BudgetEnforcement budgetEnforcement)
+        => new NivaraExecutionContext
+        {
+            BudgetEnforcement = budgetEnforcement
+        };
+
 
     /// <summary>
     /// Creates an execution context with the specified chunk size for streaming
@@ -138,7 +156,7 @@ public sealed class NivaraExecutionContext
     /// </summary>
     /// <returns>A formatted string describing the execution context</returns>
     public override string ToString()
-        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes, ChunkSize: {(ChunkSize.HasValue ? ChunkSize.Value.ToString("N0") : "derived")}, Diagnostics: {(ExecutionDiagnostics != null ? "Set" : "None")} }}";
+        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes, BudgetEnforcement: {BudgetEnforcement}, ChunkSize: {(ChunkSize.HasValue ? ChunkSize.Value.ToString("N0") : "derived")}, Diagnostics: {(ExecutionDiagnostics != null ? "Set" : "None")} }}";
 }
 
 /// <summary>
