@@ -32,7 +32,7 @@ namespace Nivara.AI;
 /// </description></item>
 /// </list>
 /// <para>
-/// Attention is the reused <see cref="BertSelfAttention{T}"/> rather than a second implementation.
+/// Attention is the reused <see cref="BertSelfAttention{TModel}"/> rather than a second implementation.
 /// It already has biased q/k/v, a biased output projection, the dense <c>[L, L]</c> additive
 /// key-padding mask, and the <c>1 / sqrt(embedDim / numHeads)</c> scale that PyTorch's
 /// <c>nn.MultiheadAttention</c> applies. The checkpoint's fused <c>in_proj_weight</c> /
@@ -45,13 +45,13 @@ namespace Nivara.AI;
 /// residual.
 /// </para>
 /// </remarks>
-public sealed class LayaHeadLayer<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class LayaHeadLayer<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly LayerNorm<T> norm1;
-    public readonly BertSelfAttention<T> attn;
-    public readonly LayerNorm<T> norm2;
-    public readonly Linear<T> linear1;
-    public readonly Linear<T> linear2;
+    public readonly LayerNorm<TModel> norm1;
+    public readonly BertSelfAttention<TModel, TWeight> attn;
+    public readonly LayerNorm<TModel> norm2;
+    public readonly Linear<TModel, TWeight> linear1;
+    public readonly Linear<TModel, TWeight> linear2;
 
     public LayaHeadLayer(int hiddenSize, int intermediateSize, int numHeads, float eps)
     {
@@ -66,15 +66,15 @@ public sealed class LayaHeadLayer<T> : Module<T> where T : struct, IFloatingPoin
             throw new ArgumentException(
                 $"hiddenSize {hiddenSize} does not divide into {numHeads} heads");
 
-        norm1 = new LayerNorm<T>(hiddenSize, eps);
-        attn = new BertSelfAttention<T>(hiddenSize, numHeads);
-        norm2 = new LayerNorm<T>(hiddenSize, eps);
-        linear1 = new Linear<T>(hiddenSize, intermediateSize, bias: true);
-        linear2 = new Linear<T>(intermediateSize, hiddenSize, bias: true);
+        norm1 = new LayerNorm<TModel>(hiddenSize, eps);
+        attn = new BertSelfAttention<TModel, TWeight>(hiddenSize, numHeads);
+        norm2 = new LayerNorm<TModel>(hiddenSize, eps);
+        linear1 = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: true);
+        linear2 = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: true);
         RegisterModules(norm1, attn, norm2, linear1, linear2);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input) => Forward(input, null);
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input) => Forward(input, null);
 
     /// <param name="input">Hidden state of shape <c>[seqLen, hiddenSize]</c>.</param>
     /// <param name="paddingMask">
@@ -83,7 +83,7 @@ public sealed class LayaHeadLayer<T> : Module<T> where T : struct, IFloatingPoin
     /// <c>~attention_mask</c> suppressed is the same predicate as a 0 in <c>attention_mask</c>
     /// suppressed, so no inversion is needed at the call site.
     /// </param>
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? paddingMask)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -93,7 +93,7 @@ public sealed class LayaHeadLayer<T> : Module<T> where T : struct, IFloatingPoin
         return ReverseGradOperations.Add(hidden, ffn);
     }
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int validLength)
+    public ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input, int validLength)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -183,7 +183,7 @@ public readonly record struct LayaHeadOutput
 /// <c>clamp(min=2)</c>, which is load-bearing for the one-option question.
 /// </para>
 /// </remarks>
-public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     /// <summary>Question types the type embedding has rows for; matches <see cref="LayaQuestionType"/>.</summary>
     public const int QuestionTypeCount = 3;
@@ -194,26 +194,26 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
     /// <summary>The reference's head width per type: <c>nhead = max(1, d // 64)</c>.</summary>
     public const int HeadDimTarget = 64;
 
-    readonly LayaHeadLayer<T>[] headLayers;
+    readonly LayaHeadLayer<TModel, TWeight>[] headLayers;
 
     /// <summary>
     /// The pre-norm head stack, empty when <c>head_layers</c> is 0. Exposed so a backend that runs
     /// the head itself — the GPU path — can drive the same layers rather than reimplementing them.
     /// </summary>
-    public IReadOnlyList<LayaHeadLayer<T>> HeadLayers => headLayers;
+    public IReadOnlyList<LayaHeadLayer<TModel, TWeight>> HeadLayers => headLayers;
 
     /// <summary>The question-type embedding, added to the hidden state before the head stack.</summary>
-    public readonly Embedding<T> typeEmb;
+    public readonly Embedding<TModel, TWeight> typeEmb;
 
     // The two <c>nn.Sequential</c> blocks, held as parts so the load sites name the checkpoint keys
     // directly. Both default activations are nn.GELU (exact), unlike the head layers' ReLU.
-    public readonly LayerNorm<T> scorerNorm;
-    public readonly Linear<T> scorerHidden;
-    public readonly Linear<T> scorerOut;
-    public readonly Linear<T> actInput;
-    public readonly Linear<T> actOut;
+    public readonly LayerNorm<TModel> scorerNorm;
+    public readonly Linear<TModel, TWeight> scorerHidden;
+    public readonly Linear<TModel, TWeight> scorerOut;
+    public readonly Linear<TModel, TWeight> actInput;
+    public readonly Linear<TModel, TWeight> actOut;
 
-    readonly T[] checkpointTemperature;
+    readonly TModel[] checkpointTemperature;
 
     public int HiddenSize => typeEmb.EmbeddingDim;
     public int HeadLayerCount => headLayers.Length;
@@ -223,7 +223,7 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
     /// The per-type temperatures the checkpoint stores in its <c>temperature</c> buffer. Loaded for
     /// completeness and cross-checking against the agent config; never applied.
     /// </summary>
-    public IReadOnlyList<T> CheckpointTemperature => checkpointTemperature;
+    public IReadOnlyList<TModel> CheckpointTemperature => checkpointTemperature;
 
     public LayaDecisionHead(int hiddenSize, int headLayerCount = 2, int actClassCount = 2, float eps = 1e-5f)
     {
@@ -243,29 +243,29 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
             throw new ArgumentException(
                 $"hiddenSize {hiddenSize} does not divide into {NumHeads} heads at {HeadDimTarget} wide");
 
-        typeEmb = new Embedding<T>(QuestionTypeCount, hiddenSize);
-        scorerNorm = new LayerNorm<T>(hiddenSize, eps);
-        scorerHidden = new Linear<T>(hiddenSize, hiddenSize, bias: true);
-        scorerOut = new Linear<T>(hiddenSize, 1, bias: true);
-        actInput = new Linear<T>(hiddenSize + LayaHeadOutput.FeatureCount, ActHeadHidden, bias: true);
-        actOut = new Linear<T>(ActHeadHidden, actClassCount, bias: true);
+        typeEmb = new Embedding<TModel, TWeight>(QuestionTypeCount, hiddenSize);
+        scorerNorm = new LayerNorm<TModel>(hiddenSize, eps);
+        scorerHidden = new Linear<TModel, TWeight>(hiddenSize, hiddenSize, bias: true);
+        scorerOut = new Linear<TModel, TWeight>(hiddenSize, 1, bias: true);
+        actInput = new Linear<TModel, TWeight>(hiddenSize + LayaHeadOutput.FeatureCount, ActHeadHidden, bias: true);
+        actOut = new Linear<TModel, TWeight>(ActHeadHidden, actClassCount, bias: true);
 
-        headLayers = new LayaHeadLayer<T>[headLayerCount];
+        headLayers = new LayaHeadLayer<TModel, TWeight>[headLayerCount];
         for (int i = 0; i < headLayerCount; i++)
-            headLayers[i] = new LayaHeadLayer<T>(hiddenSize, 4 * hiddenSize, NumHeads, eps);
+            headLayers[i] = new LayaHeadLayer<TModel, TWeight>(hiddenSize, 4 * hiddenSize, NumHeads, eps);
 
         // The reference registers torch.ones(3); a checkpoint overrides it. The value is kept
         // unloaded-as-one rather than left at a silent identity.
-        checkpointTemperature = new T[QuestionTypeCount];
+        checkpointTemperature = new TModel[QuestionTypeCount];
         for (int i = 0; i < QuestionTypeCount; i++)
-            checkpointTemperature[i] = T.One;
+            checkpointTemperature[i] = TModel.One;
 
         RegisterModules(typeEmb, scorerNorm, scorerHidden, scorerOut, actInput, actOut);
         foreach (var layer in headLayers)
             RegisterModules(layer);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
         => throw new NotSupportedException(
             "The decision head needs the question type, the marker positions and the valid length. " +
             "Use Forward(hidden, type, markerPositions, validLength).");
@@ -286,7 +286,7 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
     /// real tokens a prefix of the row, so the padding mask is this and not an arbitrary vector.
     /// </param>
     public LayaHeadOutput Forward(
-        ReverseGradTensor<T> hidden,
+        ReverseGradTensor<TModel> hidden,
         LayaQuestionType type,
         IReadOnlyList<int> markerPositions,
         int validLength)
@@ -344,7 +344,7 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
 
         // pooled = h[:, 0] — the post-head-row 0, i.e. the [CLS] position after the head stack.
         var pooled = ReverseGradOperations.Gather(withType, [0]);
-        var featureRow = ReverseGradTensor<T>.FromMatrix(ToTensor(features), 1, LayaHeadOutput.FeatureCount);
+        var featureRow = ReverseGradTensor<TModel>.FromMatrix(ToTensor(features), 1, LayaHeadOutput.FeatureCount);
         var actInputTensor = ReverseGradOperations.Concat([pooled, featureRow], axis: 1);
 
         // act_head: Sequential(Linear, GELU, Linear)
@@ -366,12 +366,10 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
     /// dictionary to <see cref="ModernBertEncoder{TModel}.LoadWeights{TModel, TWeight}"/> with
     /// prefix <c>"encoder"</c>.
     /// </summary>
-    public static LayaDecisionHead<TModel> LoadWeights<TModel, TWeight>(
+    public static LayaDecisionHead<TModel, TWeight> LoadWeights(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         int headLayerCount = 2,
         int actClassCount = 2)
-        where TModel : struct, IFloatingPointIeee754<TModel>
-        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         ArgumentNullException.ThrowIfNull(tensors);
 
@@ -380,7 +378,7 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
                 "Missing tensor: type_emb.weight. A stock encoder checkpoint is not a Laya decision " +
                 "model; the head is what makes it one.");
 
-        var head = new LayaDecisionHead<TModel>(typeWeight.Shape[1], headLayerCount, actClassCount);
+        var head = new LayaDecisionHead<TModel, TWeight>(typeWeight.Shape[1], headLayerCount, actClassCount);
         int hidden = head.HiddenSize;
 
         StateDictLoader.LoadEmbed(head.typeEmb, tensors, "type_emb.weight");
@@ -428,15 +426,15 @@ public sealed class LayaDecisionHead<T> : Module<T> where T : struct, IFloatingP
         return head;
     }
 
-    static T[] ToTensor(double[] values)
+    static TModel[] ToTensor(double[] values)
     {
-        var converted = new T[values.Length];
+        var converted = new TModel[values.Length];
         for (int i = 0; i < values.Length; i++)
-            converted[i] = T.CreateChecked(values[i]);
+            converted[i] = TModel.CreateChecked(values[i]);
         return converted;
     }
 
-    static float[] ToFloats(ReverseGradTensor<T> tensor)
+    static float[] ToFloats(ReverseGradTensor<TModel> tensor)
     {
         var values = new float[tensor.Data.Length];
         if (tensor.Data.TryGetSpan(out var span))

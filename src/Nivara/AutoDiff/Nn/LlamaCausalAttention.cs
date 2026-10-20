@@ -11,7 +11,7 @@ namespace Nivara.AutoDiff.Nn;
 /// heads are repeated so all heads align on the shared-head attention path. This mirrors
 /// the <c>LlamaAttention</c> structure used by SmolLM and the Llama family.
 /// </summary>
-public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     readonly int hiddenSize;
     readonly int numHeads;
@@ -20,16 +20,16 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     readonly bool qkvBias;
 
     /// <summary>Gets the query projection linear.</summary>
-    public Linear<T> QProj { get; }
+    public Linear<TModel, TWeight> QProj { get; }
     /// <summary>Gets the key projection linear.</summary>
-    public Linear<T> KProj { get; }
+    public Linear<TModel, TWeight> KProj { get; }
     /// <summary>Gets the value projection linear.</summary>
-    public Linear<T> VProj { get; }
+    public Linear<TModel, TWeight> VProj { get; }
     /// <summary>Gets the output projection linear.</summary>
-    public Linear<T> OProj { get; }
-    readonly RotaryEmbedding<T> rotary;
+    public Linear<TModel, TWeight> OProj { get; }
+    readonly RotaryEmbedding<TModel> rotary;
 
-    readonly T attnScale;
+    readonly TModel attnScale;
 
     /// <summary>Gets the hidden size (embedding dimension).</summary>
     public int HiddenSize => hiddenSize;
@@ -43,7 +43,7 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// <summary>Gets whether the query/key/value projections carry a bias vector.</summary>
     public bool QkvBias => qkvBias;
     /// <summary>Gets the rotary position embedding tables (fused-kernel path).</summary>
-    internal RotaryEmbedding<T> Rotary => rotary;
+    internal RotaryEmbedding<TModel> Rotary => rotary;
 
     /// <summary>
     /// Creates a Llama causal self-attention module.
@@ -77,13 +77,13 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         this.numKeyValueHeads = numKeyValueHeads;
         this.qkvBias = qkvBias;
         headDim = hiddenSize / numHeads;
-        attnScale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
+        attnScale = TModel.CreateChecked(1.0 / Math.Sqrt(headDim));
 
-        QProj = new Linear<T>(hiddenSize, numHeads * headDim, bias: qkvBias);
-        KProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
-        VProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
-        OProj = new Linear<T>(hiddenSize, hiddenSize, bias: false);
-        rotary = new RotaryEmbedding<T>(headDim, maxPositionEmbeddings, ropeTheta);
+        QProj = new Linear<TModel, TWeight>(hiddenSize, numHeads * headDim, bias: qkvBias);
+        KProj = new Linear<TModel, TWeight>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
+        VProj = new Linear<TModel, TWeight>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
+        OProj = new Linear<TModel, TWeight>(hiddenSize, hiddenSize, bias: false);
+        rotary = new RotaryEmbedding<TModel>(headDim, maxPositionEmbeddings, ropeTheta);
 
         RegisterModules(QProj, KProj, VProj, OProj, rotary);
     }
@@ -94,7 +94,7 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// </summary>
     /// <param name="input">The input tensor (rank 2)</param>
     /// <returns>The attention output with shape <c>[L, hiddenSize]</c></returns>
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank != 2) throw new ArgumentException($"LlamaCausalAttention expects 2D input [L, D], got {input.Rank}D");
@@ -112,9 +112,9 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// applies RoPE at absolute positions <c>[positionOffset, positionOffset + L)</c>, copies the
     /// RoPE'd pre-repeat K/V (<c>[L, kvWidth]</c>, the cache's row-major per-KV-head layout) into
     /// cache rows <c>[positionOffset, positionOffset + L)</c>, then runs the same GQA repeat,
-    /// causal attention, and output projection as <see cref="Forward(ReverseGradTensor{T})"/>.
+    /// causal attention, and output projection as <see cref="Forward(ReverseGradTensor{TModel})"/>.
     /// One batched pass reads the weights once instead of L per-token walks. Inference and
-    /// grad-enabled paths follow <see cref="Forward(ReverseGradTensor{T})"/> exactly (the capture
+    /// grad-enabled paths follow <see cref="Forward(ReverseGradTensor{TModel})"/> exactly (the capture
     /// is a plain array write; no graph node is built for it).
     /// </summary>
     /// <param name="input">The prompt hidden states <c>[L, hiddenSize]</c></param>
@@ -122,11 +122,11 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// <param name="kCache">Per-layer RoPE'd key cache, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
     /// <param name="vCache">Per-layer value cache, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
     /// <returns>The attention output with shape <c>[L, hiddenSize]</c></returns>
-    public ReverseGradTensor<T> ForwardPrefill(
-        ReverseGradTensor<T> input,
+    public ReverseGradTensor<TModel> ForwardPrefill(
+        ReverseGradTensor<TModel> input,
         int positionOffset,
-        T[] kCache,
-        T[] vCache)
+        TModel[] kCache,
+        TModel[] vCache)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank != 2) throw new ArgumentException($"LlamaCausalAttention expects 2D input [L, D], got {input.Rank}D");
@@ -142,11 +142,11 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         return ForwardCore(input, positionOffset, kCache, vCache);
     }
 
-    ReverseGradTensor<T> ForwardCore(
-        ReverseGradTensor<T> input,
+    ReverseGradTensor<TModel> ForwardCore(
+        ReverseGradTensor<TModel> input,
         int positionOffset,
-        T[]? kCache,
-        T[]? vCache)
+        TModel[]? kCache,
+        TModel[]? vCache)
     {
         int qLen = input.shape[0];
 
@@ -174,14 +174,14 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
 
             if (!GradientUtils.IsGradEnabled)
             {
-                var outData = new T[qLen * numHeads * headDim];
-                AttentionKernels<T>.BatchedAttention(
+                var outData = new TModel[qLen * numHeads * headDim];
+                AttentionKernels<TModel>.BatchedAttention(
                     Q.AsSpan(),
                     kCache.AsSpan(positionOffset * kvWidth, rowBytes),
                     vCache.AsSpan(positionOffset * kvWidth, rowBytes),
                     outData, qLen, numHeads, numKeyValueHeads, headDim, attnScale);
-                return OProj.Forward(new ReverseGradTensor<T>(
-                    NivaraColumn<T>.CreateFromOwnedArray(outData), requiresGrad: false,
+                return OProj.Forward(new ReverseGradTensor<TModel>(
+                    NivaraColumn<TModel>.CreateFromOwnedArray(outData), requiresGrad: false,
                     new[] { qLen, numHeads * headDim }));
             }
         }
@@ -191,7 +191,7 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         K = ReverseGradOperations.GqaRepeatKV(K, numHeads, numKeyValueHeads);
         V = ReverseGradOperations.GqaRepeatKV(V, numHeads, numKeyValueHeads);
 
-        var mask = ModuleHelpers<T>.CreateCausalMask(qLen, qLen);
+        var mask = ModuleHelpers<TModel>.CreateCausalMask(qLen, qLen);
         var attn = ReverseGradOperations.MultiHeadAttention(Q, K, V, numHeads, attnScale, mask);
         return OProj.Forward(attn);
     }
@@ -203,7 +203,7 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// <paramref name="kCache"/>/<paramref name="vCache"/>, and attends the new query against the
     /// full cached prefix. The cache holds all positions seen so far (inclusive of the new token),
     /// with the parent incrementing <paramref name="cacheLen"/> across calls. This mirrors
-    /// <see cref="Forward(ReverseGradTensor{T})"/> numerically but avoids re-running projections
+    /// <see cref="Forward(ReverseGradTensor{TModel})"/> numerically but avoids re-running projections
     /// over the whole prefix. Inference-only (no graph nodes built).
     /// </summary>
     /// <param name="input">The new-token hidden state <c>[1, hiddenSize]</c></param>
@@ -212,11 +212,11 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// <param name="vCache">Buffer of per-KV-head values, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
     /// <param name="cacheLen">Number of tokens already cached before this call</param>
     /// <returns>The attention output <c>[1, hiddenSize]</c> after the output projection</returns>
-    public ReverseGradTensor<T> ForwardCached(
-        ReverseGradTensor<T> input,
+    public ReverseGradTensor<TModel> ForwardCached(
+        ReverseGradTensor<TModel> input,
         int positionOffset,
-        T[] kCache,
-        T[] vCache,
+        TModel[] kCache,
+        TModel[] vCache,
         int cacheLen)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -240,32 +240,32 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         K.AsSpan().CopyTo(kCache.AsSpan(cacheLen * kvWidth, kvWidth));
         V.AsSpan().CopyTo(vCache.AsSpan(cacheLen * kvWidth, kvWidth));
 
-        ReverseGradTensor<T> attn;
+        ReverseGradTensor<TModel> attn;
         if (!GradientUtils.IsGradEnabled)
         {
             // Inference-only fused path: attend the single query row against the cached KV
             // prefix with virtual GQA head mapping — zero-copy cache reads (no BlockCopy), no
             // GqaRepeatKV expansion across the prefix, no head repack, no mask allocation.
-            var outData = new T[numHeads * headDim];
-            AttentionKernels<T>.DecodeAttention(
+            var outData = new TModel[numHeads * headDim];
+            AttentionKernels<TModel>.DecodeAttention(
                 Q.AsSpan(), kCache.AsSpan(0, needed), vCache.AsSpan(0, needed),
                 outData, newLen, numHeads, numKeyValueHeads, headDim, attnScale);
-            attn = new ReverseGradTensor<T>(
-                NivaraColumn<T>.CreateFromOwnedArray(outData), requiresGrad: false, new[] { 1, numHeads * headDim });
+            attn = new ReverseGradTensor<TModel>(
+                NivaraColumn<TModel>.CreateFromOwnedArray(outData), requiresGrad: false, new[] { 1, numHeads * headDim });
         }
         else
         {
             // Grad-enabled fallback: keep the exact multi-step path so backward flows through
             // the same graph nodes as before (the fused path is inference-only).
-            var kData = new T[needed];
-            var vData = new T[needed];
-            Buffer.BlockCopy(kCache, 0, kData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
-            Buffer.BlockCopy(vCache, 0, vData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
+            var kData = new TModel[needed];
+            var vData = new TModel[needed];
+            Buffer.BlockCopy(kCache, 0, kData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<TModel>());
+            Buffer.BlockCopy(vCache, 0, vData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<TModel>());
 
-            var kCol = NivaraColumn<T>.CreateFromOwnedArray(kData);
-            var vCol = NivaraColumn<T>.CreateFromOwnedArray(vData);
-            var kTensor = new ReverseGradTensor<T>(kCol, requiresGrad: false);
-            var vTensor = new ReverseGradTensor<T>(vCol, requiresGrad: false);
+            var kCol = NivaraColumn<TModel>.CreateFromOwnedArray(kData);
+            var vCol = NivaraColumn<TModel>.CreateFromOwnedArray(vData);
+            var kTensor = new ReverseGradTensor<TModel>(kCol, requiresGrad: false);
+            var vTensor = new ReverseGradTensor<TModel>(vCol, requiresGrad: false);
             kTensor.Reshape(newLen, kvWidth);
             vTensor.Reshape(newLen, kvWidth);
 
@@ -274,9 +274,9 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
             var VFull = ReverseGradOperations.GqaRepeatKV(vTensor, numHeads, numKeyValueHeads);
 
             // Fully-open mask: the new token attends to every cached position.
-            var openMaskData = new T[newLen];
-            var maskCol = NivaraColumn<T>.CreateFromOwnedArray(openMaskData);
-            var openMask = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
+            var openMaskData = new TModel[newLen];
+            var maskCol = NivaraColumn<TModel>.CreateFromOwnedArray(openMaskData);
+            var openMask = new ReverseGradTensor<TModel>(maskCol, requiresGrad: false);
             openMask.Reshape(1, newLen);
 
             attn = ReverseGradOperations.MultiHeadAttention(Q, KFull, VFull, numHeads, attnScale, openMask);

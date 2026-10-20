@@ -220,11 +220,11 @@ public static class ModernBertMasks
 {
     /// <summary>
     /// The largest sequence length for which a dense <c>[L, L]</c> mask is built by the reference
-    /// helper <see cref="Build{T}"/>. At the model's full 8192-token context one dense mask is 67M
+    /// helper <see cref="Build{TModel}"/>. At the model's full 8192-token context one dense mask is 67M
     /// elements (268 MB in F32), and a forward builds <em>two</em> of them — a global and a sliding
     /// — so 537 MB for the pair. Longer inputs throw instead of silently allocating.
     ///
-    /// This cap constrains only <see cref="Build{T}"/> (used by tests and reference tooling). The
+    /// This cap constrains only <see cref="Build{TModel}"/> (used by tests and reference tooling). The
     /// CPU attention path no longer builds a dense mask (#476): it carries <c>band</c> and
     /// <c>validLength</c> as metadata bounds, so it is not limited by this value.
     /// </summary>
@@ -236,8 +236,8 @@ public static class ModernBertMasks
     /// <paramref name="validLength"/> is the number of leading positions that are real tokens; the
     /// rest are padding and are suppressed for every query.
     /// </summary>
-    public static ReverseGradTensor<T> Build<T>(int seqLen, int band, int validLength)
-        where T : struct, IFloatingPointIeee754<T>
+    public static ReverseGradTensor<TModel> Build<TModel>(int seqLen, int band, int validLength)
+        where TModel : struct, IFloatingPointIeee754<TModel>
     {
         if (seqLen <= 0)
             throw new ArgumentOutOfRangeException(nameof(seqLen), $"seqLen must be positive, got {seqLen}.");
@@ -250,8 +250,8 @@ public static class ModernBertMasks
         if (validLength <= 0 || validLength > seqLen)
             throw new ArgumentOutOfRangeException(nameof(validLength), $"validLength {validLength} must be within [1, {seqLen}].");
 
-        var data = new T[seqLen * seqLen];
-        var negInf = T.CreateChecked(double.NegativeInfinity);
+        var data = new TModel[seqLen * seqLen];
+        var negInf = TModel.CreateChecked(double.NegativeInfinity);
 
         for (int i = 0; i < seqLen; i++)
         {
@@ -263,7 +263,7 @@ public static class ModernBertMasks
                 data[rowBase + j] = j < firstAllowed || j > lastAllowed ? negInf : default;
         }
 
-        return ReverseGradTensor<T>.FromMatrix(data, seqLen, seqLen, requiresGrad: false);
+        return ReverseGradTensor<TModel>.FromMatrix(data, seqLen, seqLen, requiresGrad: false);
     }
 }
 
@@ -272,19 +272,19 @@ public static class ModernBertMasks
 /// embeddings at the layer type's theta, and bidirectional (non-causal) scaled dot-product
 /// attention under an additive mask.
 /// </summary>
-public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class ModernBertAttention<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly Linear<T> qProj;
-    public readonly Linear<T> kProj;
-    public readonly Linear<T> vProj;
-    public readonly Linear<T> oProj;
+    public readonly Linear<TModel, TWeight> qProj;
+    public readonly Linear<TModel, TWeight> kProj;
+    public readonly Linear<TModel, TWeight> vProj;
+    public readonly Linear<TModel, TWeight> oProj;
 
-    readonly RotaryEmbedding<T> rope;
+    readonly RotaryEmbedding<TModel> rope;
     readonly int numHeads;
-    readonly T scale;
+    readonly TModel scale;
 
     /// <summary>Gets the rotary embedding (carries the per-layer theta).</summary>
-    public RotaryEmbedding<T> Rope => rope;
+    public RotaryEmbedding<TModel> Rope => rope;
 
     /// <summary>Gets the number of attention heads.</summary>
     public int NumHeads => numHeads;
@@ -293,24 +293,24 @@ public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloati
 
     public ModernBertAttention(ModernBertConfig config, float ropeTheta)
     {
-        qProj = new Linear<T>(config.HiddenSize, config.HiddenSize, bias: false);
-        kProj = new Linear<T>(config.HiddenSize, config.HiddenSize, bias: false);
-        vProj = new Linear<T>(config.HiddenSize, config.HiddenSize, bias: false);
-        oProj = new Linear<T>(config.HiddenSize, config.HiddenSize, bias: false);
+        qProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+        kProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+        vProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+        oProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
 
-        rope = new RotaryEmbedding<T>(config.HeadDim, config.MaxPositionEmbeddings, ropeTheta);
+        rope = new RotaryEmbedding<TModel>(config.HeadDim, config.MaxPositionEmbeddings, ropeTheta);
         numHeads = config.NumAttentionHeads;
-        scale = T.CreateChecked(1.0 / Math.Sqrt(config.HeadDim));
+        scale = TModel.CreateChecked(1.0 / Math.Sqrt(config.HeadDim));
         RegisterModules(qProj, kProj, vProj, oProj);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input) => Forward(input, null);
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input) => Forward(input, null);
 
     /// <summary>
     /// Projects, applies rotary embeddings to the queries and keys, then attends under
     /// <paramref name="mask"/> — an additive <c>[seqLen, seqLen]</c> tensor, or null for no mask.
     /// </summary>
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T>? mask)
+    public ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? mask)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -322,7 +322,7 @@ public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloati
         return oProj.Forward(context);
     }
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int band, int validLength)
+    public ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input, int band, int validLength)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -343,21 +343,21 @@ public sealed class ModernBertAttention<T> : Module<T> where T : struct, IFloati
 /// "gate" is rows <c>[intermediate, 2 * intermediate)</c>, which is why the loader hands the
 /// <em>first</em> row block to <see cref="inputProj"/> and the second to <see cref="gateProj"/>.
 /// </summary>
-public sealed class ModernBertMlp<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class ModernBertMlp<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly Linear<T> inputProj;
-    public readonly Linear<T> gateProj;
-    public readonly Linear<T> downProj;
+    public readonly Linear<TModel, TWeight> inputProj;
+    public readonly Linear<TModel, TWeight> gateProj;
+    public readonly Linear<TModel, TWeight> downProj;
 
     public ModernBertMlp(ModernBertConfig config)
     {
-        inputProj = new Linear<T>(config.HiddenSize, config.IntermediateSize, bias: false);
-        gateProj = new Linear<T>(config.HiddenSize, config.IntermediateSize, bias: false);
-        downProj = new Linear<T>(config.IntermediateSize, config.HiddenSize, bias: false);
+        inputProj = new Linear<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, bias: false);
+        gateProj = new Linear<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, bias: false);
+        downProj = new Linear<TModel, TWeight>(config.IntermediateSize, config.HiddenSize, bias: false);
         RegisterModules(inputProj, gateProj, downProj);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -373,14 +373,14 @@ public sealed class ModernBertMlp<T> : Module<T> where T : struct, IFloatingPoin
 /// — so they are constructed with <c>bias: false</c> and register no beta for an optimizer to
 /// drift. The first layer's attention norm is an identity and so has no weights in the checkpoint.
 /// </summary>
-public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class ModernBertLayer<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     readonly int hiddenSize;
 
-    public readonly LayerNorm<T>? attnNorm;
-    public readonly ModernBertAttention<T> attn;
-    public readonly LayerNorm<T> mlpNorm;
-    public readonly ModernBertMlp<T> mlp;
+    public readonly LayerNorm<TModel>? attnNorm;
+    public readonly ModernBertAttention<TModel, TWeight> attn;
+    public readonly LayerNorm<TModel> mlpNorm;
+    public readonly ModernBertMlp<TModel, TWeight> mlp;
 
     /// <summary>Gets the hidden (embedding) dimension.</summary>
     public int HiddenSize => hiddenSize;
@@ -389,19 +389,19 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
     {
         hiddenSize = config.HiddenSize;
         if (layerIndex != 0)
-            attnNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
-        attn = new ModernBertAttention<T>(config, config.RopeTheta(layerIndex));
-        mlpNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
-        mlp = new ModernBertMlp<T>(config);
+            attnNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
+        attn = new ModernBertAttention<TModel, TWeight>(config, config.RopeTheta(layerIndex));
+        mlpNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
+        mlp = new ModernBertMlp<TModel, TWeight>(config);
 
         if (attnNorm != null)
             RegisterModules(attnNorm);
         RegisterModules(attn, mlpNorm, mlp);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input) => Forward(input, null);
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input) => Forward(input, null);
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T>? mask)
+    public ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? mask)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -410,7 +410,7 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
         return ReverseGradOperations.Add(hidden, mlp.Forward(mlpNorm.Forward(hidden)));
     }
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int band, int validLength)
+    public ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input, int band, int validLength)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -420,13 +420,13 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
     }
 
     /// <summary>
-    /// Inference-only fused whole-layer forward. Replicates <see cref="Forward(ReverseGradTensor{T}, int, int)"/>
+    /// Inference-only fused whole-layer forward. Replicates <see cref="Forward(ReverseGradTensor{TModel}, int, int)"/>
     /// using the shared span kernels (LayerNorm, banded attention, RoPE, GeGLU) with zero
     /// steady-state heap allocations. <paramref name="band"/> is -1 for full attention;
     /// <paramref name="validLength"/> is the number of leading real tokens.
     /// Throws inside a <see cref="GradientUtils.Grad()"/> scope.
     /// </summary>
-    public void ForwardFused(ReadOnlySpan<T> input, Span<T> output, int band, int validLength)
+    public void ForwardFused(ReadOnlySpan<TModel> input, Span<TModel> output, int band, int validLength)
     {
         if (input.Length == 0 || input.Length % hiddenSize != 0)
             throw new ArgumentException($"Input length {input.Length} must be a positive multiple of hidden size {hiddenSize}.");
@@ -442,23 +442,23 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
         int headDim = attn.HeadDim;
         int qWidth = numHeads * headDim; // == hiddenSize for MHA
         int intermediateSize = mlp.inputProj.OutFeatures;
-        T scale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
-        T eps = mlpNorm.Eps;
+        TModel scale = TModel.CreateChecked(1.0 / Math.Sqrt(headDim));
+        TModel eps = mlpNorm.Eps;
         bool diag = InferenceDiagnostics.IsEnabled;
 
         // Scratch buffers (rented; returned in finally).
-        var normBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
-        var qBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
-        var kBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
-        var vBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
-        var scores = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * seqLen, 1));
-        var context = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
-        var attnOut = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
-        var residual = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
-        var mlpNormBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
-        var actBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * intermediateSize, 1));
-        var gateBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * intermediateSize, 1));
-        var mlpOut = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var normBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var qBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var kBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var vBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var scores = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * seqLen, 1));
+        var context = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * qWidth, 1));
+        var attnOut = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var residual = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var mlpNormBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
+        var actBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * intermediateSize, 1));
+        var gateBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * intermediateSize, 1));
+        var mlpOut = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * hiddenSize, 1));
         try
         {
             var normSpan = normBuf.AsSpan(0, seqLen * hiddenSize);
@@ -479,15 +479,15 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             if (attnNorm != null)
             {
                 var gamma = WeightSpan(attnNorm.Weight);
-                var beta = attnNorm.Bias != null ? WeightSpan(attnNorm.Bias) : ReadOnlySpan<T>.Empty;
-                var lnOut = LayerNormKernel<T>.ForwardInference(input, seqLen, hiddenSize, gamma, beta, attnNorm.Eps);
+                var beta = attnNorm.Bias != null ? WeightSpan(attnNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+                var lnOut = LayerNormKernel<TModel>.ForwardInference(input, seqLen, hiddenSize, gamma, beta, attnNorm.Eps);
                 lnOut.AsSpan(0, seqLen * hiddenSize).CopyTo(normSpan);
             }
             else
             {
                 input.CopyTo(normSpan);
             }
-            if (diag) mAttnNorm.Record("CPU-Encoder-AttnNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
+            if (diag) mAttnNorm.Record("CPU-Encoder-AttnNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mQkv = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 2. Q/K/V projections.
@@ -497,7 +497,7 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             GradKernels.MatMulTransposedB(normSpan, wQ, qBuf, seqLen, hiddenSize, qWidth);
             GradKernels.MatMulTransposedB(normSpan, wK, kBuf, seqLen, hiddenSize, qWidth);
             GradKernels.MatMulTransposedB(normSpan, wV, vBuf, seqLen, hiddenSize, qWidth);
-            if (diag) mQkv.Record("CPU-Encoder-QKV", global::Nivara.KernelSelector.DetermineKernelType<T>(3 * seqLen * hiddenSize), 3 * seqLen * hiddenSize, typeof(T), false, null);
+            if (diag) mQkv.Record("CPU-Encoder-QKV", global::Nivara.KernelSelector.DetermineKernelType<TModel>(3 * seqLen * hiddenSize), 3 * seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mRope = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 3. RoPE in place.
@@ -515,7 +515,7 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
                         kSpan.Slice(r * qWidth + b * headDim, headDim));
                 }
             }
-            if (diag) mRope.Record("CPU-Encoder-RoPE", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * qWidth), seqLen * qWidth, typeof(T), false, null);
+            if (diag) mRope.Record("CPU-Encoder-RoPE", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * qWidth), seqLen * qWidth, typeof(TModel), false, null);
 
             var mAttention = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 4. Banded attention per head.
@@ -526,15 +526,15 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
                 // by copying into temp head-major buffers.
             }
             // Use packed head-major buffers for the matmul path (matches autodiff kernel).
-            var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
-            var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
-            var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
-            var outHeads = ArrayPool<T>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var qHeads = ArrayPool<TModel>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var kHeads = ArrayPool<TModel>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var vHeads = ArrayPool<TModel>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
+            var outHeads = ArrayPool<TModel>.Shared.Rent(Math.Max(numHeads * seqLen * headDim, 1));
             try
             {
-                AttentionKernels<T>.PackHeads(qSpan, qHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
-                AttentionKernels<T>.PackHeads(kSpan, kHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
-                AttentionKernels<T>.PackHeads(vSpan, vHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
+                AttentionKernels<TModel>.PackHeads(qSpan, qHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
+                AttentionKernels<TModel>.PackHeads(kSpan, kHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
+                AttentionKernels<TModel>.PackHeads(vSpan, vHeads.AsSpan(0, numHeads * seqLen * headDim), seqLen, numHeads, headDim);
 
                 for (int h = 0; h < numHeads; h++)
                 {
@@ -545,9 +545,9 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
 
                     GradKernels.MatMulTransposedB(qh, kh, scores, seqLen, headDim, seqLen);
                     TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
-                    AttentionKernels<T>.ApplyBounds(scoresSpan, Span<bool>.Empty, seqLen, seqLen, band, validLength);
-                    AttentionKernels<T>.SoftmaxRows(scoresSpan, seqLen, seqLen);
-                    var outHeadBuf = ArrayPool<T>.Shared.Rent(Math.Max(seqLen * headDim, 1));
+                    AttentionKernels<TModel>.ApplyBounds(scoresSpan, Span<bool>.Empty, seqLen, seqLen, band, validLength);
+                    AttentionKernels<TModel>.SoftmaxRows(scoresSpan, seqLen, seqLen);
+                    var outHeadBuf = ArrayPool<TModel>.Shared.Rent(Math.Max(seqLen * headDim, 1));
                     try
                     {
                         GradKernels.MatMul(scoresSpan, vh, outHeadBuf, seqLen, seqLen, headDim);
@@ -555,7 +555,7 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
                     }
                     finally
                     {
-                        ArrayPool<T>.Shared.Return(outHeadBuf);
+                        ArrayPool<TModel>.Shared.Return(outHeadBuf);
                     }
                 }
 
@@ -563,17 +563,17 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
                 for (int h = 0; h < numHeads; h++)
                 {
                     var oh = outHeads.AsSpan(h * seqLen * headDim, seqLen * headDim);
-                    AttentionKernels<T>.ScatterHead(oh, contextSpan, seqLen, hiddenSize, h, headDim);
+                    AttentionKernels<TModel>.ScatterHead(oh, contextSpan, seqLen, hiddenSize, h, headDim);
                 }
             }
             finally
             {
-                ArrayPool<T>.Shared.Return(qHeads);
-                ArrayPool<T>.Shared.Return(kHeads);
-                ArrayPool<T>.Shared.Return(vHeads);
-                ArrayPool<T>.Shared.Return(outHeads);
+                ArrayPool<TModel>.Shared.Return(qHeads);
+                ArrayPool<TModel>.Shared.Return(kHeads);
+                ArrayPool<TModel>.Shared.Return(vHeads);
+                ArrayPool<TModel>.Shared.Return(outHeads);
             }
-            if (diag) mAttention.Record("CPU-Encoder-Attention", global::Nivara.KernelSelector.DetermineKernelType<T>(numHeads * seqLen * seqLen), numHeads * seqLen * seqLen, typeof(T), false, null);
+            if (diag) mAttention.Record("CPU-Encoder-Attention", global::Nivara.KernelSelector.DetermineKernelType<TModel>(numHeads * seqLen * seqLen), numHeads * seqLen * seqLen, typeof(TModel), false, null);
 
             var mOProj = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 5. Output projection + residual.
@@ -581,15 +581,15 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             GradKernels.MatMulTransposedB(contextSpan, wO, attnOut, seqLen, hiddenSize, hiddenSize);
             input.CopyTo(residualSpan);
             TensorPrimitives.Add(residualSpan, attnOutSpan, residualSpan);
-            if (diag) mOProj.Record("CPU-Encoder-OProj", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
+            if (diag) mOProj.Record("CPU-Encoder-OProj", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mLpNorm = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 6. MLP norm.
             var mlpGamma = WeightSpan(mlpNorm.Weight);
-            var mlpBeta = mlpNorm.Bias != null ? WeightSpan(mlpNorm.Bias) : ReadOnlySpan<T>.Empty;
-            var lnMlp = LayerNormKernel<T>.ForwardInference(residualSpan, seqLen, hiddenSize, mlpGamma, mlpBeta, mlpNorm.Eps);
+            var mlpBeta = mlpNorm.Bias != null ? WeightSpan(mlpNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+            var lnMlp = LayerNormKernel<TModel>.ForwardInference(residualSpan, seqLen, hiddenSize, mlpGamma, mlpBeta, mlpNorm.Eps);
             lnMlp.AsSpan(0, seqLen * hiddenSize).CopyTo(mlpNormSpan);
-            if (diag) mLpNorm.Record("CPU-Encoder-MlpNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
+            if (diag) mLpNorm.Record("CPU-Encoder-MlpNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mGeGlu = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 7. GeGLU.
@@ -601,36 +601,45 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
             GradKernels.MatMulTransposedB(mlpNormSpan, wGate, gateBuf, seqLen, hiddenSize, intermediateSize);
             TensorPrimitives.Multiply(actSpan, gateSpan, gateSpan);
             GradKernels.MatMulTransposedB(gateSpan, wDown, mlpOut, seqLen, intermediateSize, hiddenSize);
-            if (diag) mGeGlu.Record("CPU-Encoder-GeGLU", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * intermediateSize), seqLen * intermediateSize * 3, typeof(T), false, null);
+            if (diag) mGeGlu.Record("CPU-Encoder-GeGLU", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * intermediateSize), seqLen * intermediateSize * 3, typeof(TModel), false, null);
 
             var mResid = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 8. Residual into output.
             TensorPrimitives.Add(residualSpan, mlpOutSpan, output);
-            if (diag) mResid.Record("CPU-Encoder-Residual", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
+            if (diag) mResid.Record("CPU-Encoder-Residual", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(normBuf);
-            ArrayPool<T>.Shared.Return(qBuf);
-            ArrayPool<T>.Shared.Return(kBuf);
-            ArrayPool<T>.Shared.Return(vBuf);
-            ArrayPool<T>.Shared.Return(scores);
-            ArrayPool<T>.Shared.Return(context);
-            ArrayPool<T>.Shared.Return(attnOut);
-            ArrayPool<T>.Shared.Return(residual);
-            ArrayPool<T>.Shared.Return(mlpNormBuf);
-            ArrayPool<T>.Shared.Return(actBuf);
-            ArrayPool<T>.Shared.Return(gateBuf);
-            ArrayPool<T>.Shared.Return(mlpOut);
+            ArrayPool<TModel>.Shared.Return(normBuf);
+            ArrayPool<TModel>.Shared.Return(qBuf);
+            ArrayPool<TModel>.Shared.Return(kBuf);
+            ArrayPool<TModel>.Shared.Return(vBuf);
+            ArrayPool<TModel>.Shared.Return(scores);
+            ArrayPool<TModel>.Shared.Return(context);
+            ArrayPool<TModel>.Shared.Return(attnOut);
+            ArrayPool<TModel>.Shared.Return(residual);
+            ArrayPool<TModel>.Shared.Return(mlpNormBuf);
+            ArrayPool<TModel>.Shared.Return(actBuf);
+            ArrayPool<TModel>.Shared.Return(gateBuf);
+            ArrayPool<TModel>.Shared.Return(mlpOut);
         }
     }
 
-    static ReadOnlySpan<T> WeightSpan(Parameter<T>? weight)
+    static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
     {
         if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
-        if (!weight.Tensor.Data.TryGetSpan(out var span))
+        if (typeof(TParam) == typeof(TModel))
+        {
+            if (!weight.Tensor.Data.TryGetSpan(out var narrowSpan))
+                throw new InvalidOperationException("Parameter data must be null-free.");
+            return System.Runtime.InteropServices.MemoryMarshal.Cast<TParam, TModel>(narrowSpan);
+        }
+        if (!weight.Tensor.Data.TryGetSpan(out var sourceSpan))
             throw new InvalidOperationException("Parameter data must be null-free.");
-        return span;
+        var widened = new TModel[sourceSpan.Length];
+        for (int i = 0; i < widened.Length; i++)
+            widened[i] = TModel.CreateChecked(sourceSpan[i]);
+        return widened.AsSpan();
     }
 }
 
@@ -639,32 +648,32 @@ public sealed class ModernBertLayer<T> : Module<T> where T : struct, IFloatingPo
 /// pre-norm layer stack, and a final bias-free norm. There are no position or token-type
 /// embeddings — positions come entirely from rotary embeddings.
 /// </summary>
-public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     public readonly ModernBertConfig config;
-    public readonly Embedding<T> tokenEmbedding;
-    public readonly LayerNorm<T> embedNorm;
-    public readonly ModernBertLayer<T>[] layers;
-    public readonly LayerNorm<T> finalNorm;
+    public readonly Embedding<TModel, TWeight> tokenEmbedding;
+    public readonly LayerNorm<TModel> embedNorm;
+    public readonly ModernBertLayer<TModel, TWeight>[] layers;
+    public readonly LayerNorm<TModel> finalNorm;
 
     public ModernBertEncoder(ModernBertConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
 
         this.config = config;
-        tokenEmbedding = new Embedding<T>(config.VocabSize, config.HiddenSize);
-        embedNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
-        layers = new ModernBertLayer<T>[config.NumHiddenLayers];
+        tokenEmbedding = new Embedding<TModel, TWeight>(config.VocabSize, config.HiddenSize);
+        embedNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
+        layers = new ModernBertLayer<TModel, TWeight>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
-            layers[i] = new ModernBertLayer<T>(config, i);
-        finalNorm = new LayerNorm<T>(config.HiddenSize, config.NormEps, bias: false);
+            layers[i] = new ModernBertLayer<TModel, TWeight>(config, i);
+        finalNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
 
         RegisterModules(tokenEmbedding, embedNorm, finalNorm);
         foreach (var layer in layers)
             RegisterModules(layer);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -681,7 +690,7 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
     /// are passed as <see cref="int"/> so narrow-precision dtypes (Half / BFloat16) are never asked
     /// to represent vocabulary indices.
     /// </summary>
-    public ReverseGradTensor<T> Forward(int[] tokenIds, int validLength)
+    public ReverseGradTensor<TModel> Forward(int[] tokenIds, int validLength)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);
 
@@ -706,7 +715,7 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
         var weightData = tokenEmbedding.Weight != null
             ? WeightSpan(tokenEmbedding.Weight)
             : throw new InvalidOperationException("tokenEmbedding has no weight.");
-        var hiddenBuf = new T[seqLen * hiddenSize];
+        var hiddenBuf = new TModel[seqLen * hiddenSize];
         for (int i = 0; i < seqLen; i++)
         {
             int id = tokenIds[i];
@@ -717,13 +726,13 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
 
         var mEmbed = diag ? DiagnosticsTracker.StartMeasurement() : default;
         var embedGamma = WeightSpan(embedNorm.Weight);
-        var embedBeta = embedNorm.Bias != null ? WeightSpan(embedNorm.Bias) : ReadOnlySpan<T>.Empty;
-        var embedOut = LayerNormKernel<T>.ForwardInference(hiddenBuf, seqLen, hiddenSize, embedGamma, embedBeta, embedNorm.Eps);
+        var embedBeta = embedNorm.Bias != null ? WeightSpan(embedNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+        var embedOut = LayerNormKernel<TModel>.ForwardInference(hiddenBuf, seqLen, hiddenSize, embedGamma, embedBeta, embedNorm.Eps);
         embedOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
-        if (diag) mEmbed.Record("CPU-Encoder-EmbedNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
+        if (diag) mEmbed.Record("CPU-Encoder-EmbedNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
         var bufA = hiddenBuf;
-        var bufB = new T[seqLen * hiddenSize];
+        var bufB = new TModel[seqLen * hiddenSize];
         for (int i = 0; i < layers.Length; i++)
         {
             int band = config.IsFullAttention(i) ? -1 : config.SlidingWindow;
@@ -735,13 +744,13 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
 
         var mFinal = diag ? DiagnosticsTracker.StartMeasurement() : default;
         var finalGamma = WeightSpan(finalNorm.Weight);
-        var finalBeta = finalNorm.Bias != null ? WeightSpan(finalNorm.Bias) : ReadOnlySpan<T>.Empty;
-        var finalOut = LayerNormKernel<T>.ForwardInference(hiddenBuf, seqLen, hiddenSize, finalGamma, finalBeta, finalNorm.Eps);
+        var finalBeta = finalNorm.Bias != null ? WeightSpan(finalNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+        var finalOut = LayerNormKernel<TModel>.ForwardInference(hiddenBuf, seqLen, hiddenSize, finalGamma, finalBeta, finalNorm.Eps);
         finalOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
-        if (diag) mFinal.Record("CPU-Encoder-FinalNorm", global::Nivara.KernelSelector.DetermineKernelType<T>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(T), false, null);
+        if (diag) mFinal.Record("CPU-Encoder-FinalNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
-        return new ReverseGradTensor<T>(
-            NivaraColumn<T>.CreateFromOwnedArray(hiddenBuf), false, new[] { seqLen, hiddenSize });
+        return new ReverseGradTensor<TModel>(
+            NivaraColumn<TModel>.CreateFromOwnedArray(hiddenBuf), false, new[] { seqLen, hiddenSize });
     }
 
     /// <summary>
@@ -750,16 +759,14 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
     /// Laya, which nests a copy of the same architecture under that name. Fused QKV and gate/up
     /// weights are split into contiguous row blocks.
     /// </summary>
-    public static ModernBertEncoder<TModel> LoadWeights<TModel, TWeight>(
+    public static ModernBertEncoder<TModel, TWeight> LoadWeights(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         ModernBertConfig config,
         string prefix = "model")
-        where TModel : struct, IFloatingPointIeee754<TModel>
-        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         ArgumentNullException.ThrowIfNull(tensors);
 
-        var encoder = new ModernBertEncoder<TModel>(config);
+        var encoder = new ModernBertEncoder<TModel, TWeight>(config);
 
         StateDictLoader.LoadEmbed(encoder.tokenEmbedding, tensors, $"{prefix}.embeddings.tok_embeddings.weight");
         StateDictLoader.LoadLayerNorm(encoder.embedNorm, tensors, $"{prefix}.embeddings.norm");
@@ -795,13 +802,22 @@ public sealed class ModernBertEncoder<T> : Module<T> where T : struct, IFloating
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         ModernBertConfig config,
         string prefix = "model")
-        => LoadWeights<float, float>(tensors, config, prefix);
+        => LoadWeights(tensors, config, prefix);
 
-    static ReadOnlySpan<T> WeightSpan(Parameter<T>? weight)
+    static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
     {
         if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
-        if (!weight.Tensor.Data.TryGetSpan(out var span))
+        if (typeof(TParam) == typeof(TModel))
+        {
+            if (!weight.Tensor.Data.TryGetSpan(out var narrowSpan))
+                throw new InvalidOperationException("Parameter data must be null-free.");
+            return System.Runtime.InteropServices.MemoryMarshal.Cast<TParam, TModel>(narrowSpan);
+        }
+        if (!weight.Tensor.Data.TryGetSpan(out var sourceSpan))
             throw new InvalidOperationException("Parameter data must be null-free.");
-        return span;
+        var widened = new TModel[sourceSpan.Length];
+        for (int i = 0; i < widened.Length; i++)
+            widened[i] = TModel.CreateChecked(sourceSpan[i]);
+        return widened.AsSpan();
     }
 }

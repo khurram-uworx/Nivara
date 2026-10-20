@@ -94,9 +94,9 @@ public class LayaDecisionHeadTests
         return tensors;
     }
 
-    static LayaDecisionHead<float> NewHead(
+    static LayaDecisionHead<float, float> NewHead(
         int headLayers = 2, int actClasses = 2, int? temperature = null)
-        => LayaDecisionHead<float>.LoadWeights<float, float>(
+        => LayaDecisionHead<float>.LoadWeights(
             SyntheticTensors(headLayers, actClasses, temperature), headLayers, actClasses);
 
     /// <summary>A plausible encoder output: distinct rows, nothing degenerate.</summary>
@@ -172,7 +172,7 @@ public class LayaDecisionHeadTests
         // A stock ModernBERT checkpoint is the likely mistake, and it would otherwise load as a head
         // with all-identity scorer weights and produce confident nonsense.
         var ex = Assert.Throws<KeyNotFoundException>(() =>
-            LayaDecisionHead<float>.LoadWeights<float, float>(
+            LayaDecisionHead<float>.LoadWeights(
                 new Dictionary<string, (float[], int[])>(), headLayerCount: 0));
         Assert.That(ex!.Message, Does.Contain("type_emb"));
     }

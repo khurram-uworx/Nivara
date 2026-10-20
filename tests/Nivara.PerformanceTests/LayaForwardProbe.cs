@@ -82,7 +82,7 @@ internal static class LayaForwardProbe
 
     sealed record LegCell(string Name, bool Measured, double LayerMs, int FullyMaskedRows);
 
-    static (ModernBertEncoder<float>? Encoder, LayaDecisionHead<float>? Head, ModernBertConfig Config, string Source) Load()
+    static (ModernBertEncoder<float, float>? Encoder, LayaDecisionHead<float, float>? Head, ModernBertConfig Config, string Source) Load()
     {
         if (!TryResolveCheckpoint(out string modelPath, out string configPath))
         {
@@ -90,7 +90,7 @@ internal static class LayaForwardProbe
             Console.WriteLine("The forward is SYNTHETIC (Kaiming init) and is not a denominator against the recorded 4.1 s.");
             var synthetic = new ModernBertConfig();
             var encoder = new ModernBertEncoder<float>(synthetic);
-            var head = new LayaDecisionHead<float>(synthetic.HiddenSize, headLayerCount: 2);
+            var head = new LayaDecisionHead<float, float>(synthetic.HiddenSize, headLayerCount: 2);
             encoder.Eval();
             head.Eval();
             return (encoder, head, synthetic, "SYNTHETIC");
@@ -100,8 +100,8 @@ internal static class LayaForwardProbe
         var sw = Stopwatch.StartNew();
         var tensors = SafeTensorsLoader.Read(modelPath);
         var config = ModernBertConfig.FromJson(File.ReadAllText(configPath));
-        var loaded = ModernBertEncoder<float>.LoadWeights(tensors, config, prefix: "encoder");
-        var loadedHead = LayaDecisionHead<float>.LoadWeights<float, float>(tensors, headLayerCount: 2);
+        var loaded = ModernBertEncoder<float, float>.LoadWeights(tensors, config, prefix: "encoder");
+        var loadedHead = LayaDecisionHead<float, float>.LoadWeights(tensors, headLayerCount: 2);
         sw.Stop();
         Console.WriteLine($"Load: {sw.ElapsedMilliseconds} ms (not part of any forward below)");
         return (loaded, loadedHead, config, "REAL");

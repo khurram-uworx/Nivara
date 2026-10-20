@@ -2152,7 +2152,7 @@ class Program
         Console.WriteLine();
 
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
-        var model = MiniLMDistilled<T>.LoadWeights<T, T>(tensors, config);
+        var model = MiniLMDistilled<T>.LoadWeights(tensors, config);
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
         Console.WriteLine($"Parameters: {totalParams:N0}");
@@ -3767,7 +3767,7 @@ class Program
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
 
         var buildSw = Stopwatch.StartNew();
-        var model = MiniLMDistilled<BFloat16>.LoadWeights<BFloat16, BFloat16>(tensors, config);
+        var model = MiniLMDistilled<BFloat16>.LoadWeights(tensors, config);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -3977,7 +3977,7 @@ class Program
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
 
         var buildSw = Stopwatch.StartNew();
-        var model = MiniLMDistilled<Half>.LoadWeights<Half, Half>(tensors, config);
+        var model = MiniLMDistilled<Half>.LoadWeights(tensors, config);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 

@@ -531,7 +531,7 @@ public static class Laya
         return count;
     }
 
-    static (ModernBertEncoder<TModel> Encoder, LayaDecisionHead<TModel> Head, long Milliseconds)
+    static (ModernBertEncoder<TModel, TWeight> Encoder, LayaDecisionHead<TModel, TWeight> Head, long Milliseconds)
         LoadModels<TModel, TWeight>(
             Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
             ModernBertConfig config,
@@ -541,8 +541,8 @@ public static class Laya
     {
         var sw = Stopwatch.StartNew();
         // Laya nests the backbone under "encoder"; the stock checkpoint uses "model".
-        var encoder = ModernBertEncoder<TModel>.LoadWeights<TModel, TWeight>(tensors, config, prefix: "encoder");
-        var head = LayaDecisionHead<TModel>.LoadWeights<TModel, TWeight>(tensors, agent.HeadLayers);
+        var encoder = ModernBertEncoder<TModel, TWeight>.LoadWeights(tensors, config, prefix: "encoder");
+        var head = LayaDecisionHead<TModel, TWeight>.LoadWeights(tensors, agent.HeadLayers);
         sw.Stop();
         return (encoder, head, sw.ElapsedMilliseconds);
     }

@@ -76,10 +76,10 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
         DistilBertLoader.LoadEncoderWeights<T, TWeight>(encoder, tensors, "distilbert");
 
         if (tensors.ContainsKey("pre_classifier.weight") || tensors.ContainsKey("pre_classifier.bias"))
-            StateDictLoader.LoadLinear(preClassifier, tensors, "pre_classifier");
+            StateDictLoader.LoadLinear((Linear<T>)(object)preClassifier, tensors, "pre_classifier");
 
         if (tensors.ContainsKey("classifier.weight") || tensors.ContainsKey("classifier.bias"))
-            StateDictLoader.LoadLinear(classifier, tensors, "classifier");
+            StateDictLoader.LoadLinear((Linear<T>)(object)classifier, tensors, "classifier");
 
         Eval();
     }
@@ -155,21 +155,21 @@ public static class DistilBertLoader
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        StateDictLoader.LoadEmbed(encoder.wordEmbed, tensors, $"{prefix}.embeddings.word_embeddings.weight");
-        StateDictLoader.LoadEmbed(encoder.posEmbed, tensors, $"{prefix}.embeddings.position_embeddings.weight");
+        StateDictLoader.LoadEmbed((Embedding<TModel>)(object)encoder.wordEmbed, tensors, $"{prefix}.embeddings.word_embeddings.weight");
+        StateDictLoader.LoadEmbed((Embedding<TModel>)(object)encoder.posEmbed, tensors, $"{prefix}.embeddings.position_embeddings.weight");
         StateDictLoader.LoadLayerNorm(encoder.embedLn, tensors, $"{prefix}.embeddings.LayerNorm");
 
         for (int i = 0; i < encoder.layers.Length; i++)
         {
             var layer = encoder.layers[i];
             var p = $"{prefix}.transformer.layer.{i}";
-            StateDictLoader.LoadLinear(layer.attn.qProj, tensors, $"{p}.attention.q_lin");
-            StateDictLoader.LoadLinear(layer.attn.kProj, tensors, $"{p}.attention.k_lin");
-            StateDictLoader.LoadLinear(layer.attn.vProj, tensors, $"{p}.attention.v_lin");
-            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"{p}.attention.out_lin");
+            StateDictLoader.LoadLinear((Linear<TModel>)(object)layer.attn.qProj, tensors, $"{p}.attention.q_lin");
+            StateDictLoader.LoadLinear((Linear<TModel>)(object)layer.attn.kProj, tensors, $"{p}.attention.k_lin");
+            StateDictLoader.LoadLinear((Linear<TModel>)(object)layer.attn.vProj, tensors, $"{p}.attention.v_lin");
+            StateDictLoader.LoadLinear((Linear<TModel>)(object)layer.attn.oProj, tensors, $"{p}.attention.out_lin");
             StateDictLoader.LoadLayerNorm(layer.ln1, tensors, $"{p}.sa_layer_norm");
-            StateDictLoader.LoadLinear(layer.fc1, tensors, $"{p}.ffn.lin1");
-            StateDictLoader.LoadLinear(layer.fc2, tensors, $"{p}.ffn.lin2");
+            StateDictLoader.LoadLinear((Linear<TModel>)(object)layer.fc1, tensors, $"{p}.ffn.lin1");
+            StateDictLoader.LoadLinear((Linear<TModel>)(object)layer.fc2, tensors, $"{p}.ffn.lin2");
             StateDictLoader.LoadLayerNorm(layer.ln2, tensors, $"{p}.output_layer_norm");
         }
     }
