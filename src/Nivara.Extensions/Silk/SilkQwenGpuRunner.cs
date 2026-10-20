@@ -584,19 +584,19 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     void Gemm(nint a, nint b, nint c, int aRows, int aCols, int bCols)
     {
         if (bf16Weights) SilkLauncher.GemmBf16(runtime, a, b, c, aRows, aCols, bCols);
-        else Gemm(a, b, c, aRows, aCols, bCols);
+        else SilkLauncher.Gemm(runtime, a, b, c, aRows, aCols, bCols);
     }
 
     void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, bool hasBias, int aRows, int aCols, float eps)
     {
         if (bf16Weights) SilkLauncher.RmsNormGemvBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
-        else RmsNormGemv(x, gamma, slots, hasBias, aRows, aCols, eps);
+        else SilkLauncher.RmsNormGemv(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
     }
 
     void MlpBlock(nint x, nint gamma, nint wg, nint wu, nint wd, nint outBuf, nint residual, int hidden, int inter, float eps2)
     {
         if (bf16Weights) SilkLauncher.MlpBlockBf16(runtime, x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
-        else MlpBlock(x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
+        else SilkLauncher.MlpBlock(runtime, x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
     }
 
     void DecodeOproj(nint q, nint kCache, nint vCache, nint contextScratch, nint wo, nint residual, nint outBuf, int kvLen, int numHeads2, int numKvHeads2, int headDim2, int qDim2, int hiddenDim2, float scale2)
@@ -608,7 +608,8 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         }
         else
         {
-            DecodeOproj(q, kCache, vCache, contextScratch, wo, residual, outBuf, kvLen, numHeads2, numKvHeads2, headDim2, qDim2, hiddenDim2, scale2);
+            SilkLauncher.DecodeGqaAttentionOproj(runtime, q, kCache, vCache, contextScratch, wo, residual, outBuf,
+                kvLen, numHeads2, numKvHeads2, headDim2, qDim2, hiddenDim2, scale2);
         }
     }
 
