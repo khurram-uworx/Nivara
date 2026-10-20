@@ -84,6 +84,7 @@ internal static class SilkKernels
     public const string Rotary = "rotary";
     public const string GeGlu = "geglu";
     public const string Gemm = "gemm_row4";
+    public const string GemmBf16 = "gemm_row4_bf16";
     public const string GemmBias = "gemm_row4_bias";
     public const string GemmRelu = "gemm_row4_relu";
     public const string GemmGelu = "gemm_row4_gelu";
@@ -94,6 +95,7 @@ internal static class SilkKernels
     public const string RmsNorm = "rms_norm";
     public const string RmsNormLmHead = "rms_norm_lm_head";
     public const string RmsNormGemv = "rms_norm_gemv";
+    public const string RmsNormGemvBf16 = "rms_norm_gemv_bf16";
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
     public const string CausalGqaAttention = "causal_gqa_attention";
@@ -104,12 +106,14 @@ internal static class SilkKernels
 
     // Flat single-row GEMV + residual for cached decode O-projection (#672, Stage A1).
     public const string GemmGemvAdd = "gemm_gemv_add";
+    public const string GemmGemvAddBf16 = "gemm_gemv_add_bf16";
 
     // True single-work-group fused decode attention + O-projection (#691). Only usable
     // when the device exposes at least numHeads * AttentionGroupSize work-items per group.
     public const string DecodeGqaAttentionOprojFused = "decode_gqa_attention_oproj_fused";
     // Fused single-token MLP block for cached decode (#672, Stage B): norm + gate/up + SwiGLU + down + residual.
     public const string MlpBlock = "mlp_block";
+    public const string MlpBlockBf16 = "mlp_block_bf16";
 
     // Device-side reduction for causal-LM greedy decode (#663).
     public const string ArgMax = "argmax";
@@ -130,7 +134,7 @@ internal static class SilkKernels
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
         Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock, DecodeGqaAttentionOprojFused,
+        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16, DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
     ];
@@ -174,6 +178,8 @@ internal static class SilkKernels
         #define ATTNGROUP 64
         #define GEMVLANES 32
         #define GEMVCOLS 128
+        #define BF16_TO_F32(x) ((float)(((uint)(x)) << 16))
+        #define BF16_TO_F32(x) ((float)(((uint)(x)) << 16))
 
         inline float gelu_exact(float v)
         {
@@ -406,6 +412,102 @@ internal static class SilkKernels
                     uint outCol = colBase + y * BLOCK + w; \
                     smem[x + (TILE + y * BLOCK + w) * TILE] = \
                         (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0.0f; \
+                } \
+                barrier(CLK_LOCAL_MEM_FENCE); \
+                for (uint k = 0; k < TILE; ++k) { \
+                    float av = smem[x + k * TILE]; \
+                    uint bBase = TILE + y * BLOCK; \
+                    a0 += av * smem[k + (bBase + 0) * TILE]; \
+                    a1 += av * smem[k + (bBase + 1) * TILE]; \
+                    a2 += av * smem[k + (bBase + 2) * TILE]; \
+                    a3 += av * smem[k + (bBase + 3) * TILE]; \
+                } \
+                barrier(CLK_LOCAL_MEM_FENCE); \
+            } \
+            uint c0 = colBase + y * BLOCK + 0; \
+            uint c1 = colBase + y * BLOCK + 1; \
+            uint c2 = colBase + y * BLOCK + 2; \
+            uint c3 = colBase + y * BLOCK + 3;
+
+        #define GEMM_ROW4_ACCUMULATE_BF16 \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                uint aCol = k0 + y; \
+                uint bRow = k0 + x; \
+                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                for (uint w = 0; w < BLOCK; ++w) { \
+                    uint outCol = colBase + y * BLOCK + w; \
+                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                        (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                } \
+                barrier(CLK_LOCAL_MEM_FENCE); \
+                for (uint k = 0; k < TILE; ++k) { \
+                    float av = smem[x + k * TILE]; \
+                    uint bBase = TILE + y * BLOCK; \
+                    a0 += av * smem[k + (bBase + 0) * TILE]; \
+                    a1 += av * smem[k + (bBase + 1) * TILE]; \
+                    a2 += av * smem[k + (bBase + 2) * TILE]; \
+                    a3 += av * smem[k + (bBase + 3) * TILE]; \
+                } \
+                barrier(CLK_LOCAL_MEM_FENCE); \
+            } \
+            uint c0 = colBase + y * BLOCK + 0; \
+            uint c1 = colBase + y * BLOCK + 1; \
+            uint c2 = colBase + y * BLOCK + 2; \
+            uint c3 = colBase + y * BLOCK + 3;
+
+        #define GEMM_ROW4_ACCUMULATE_BF16 \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                uint aCol = k0 + y; \
+                uint bRow = k0 + x; \
+                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                for (uint w = 0; w < BLOCK; ++w) { \
+                    uint outCol = colBase + y * BLOCK + w; \
+                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                        (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                } \
+                barrier(CLK_LOCAL_MEM_FENCE); \
+                for (uint k = 0; k < TILE; ++k) { \
+                    float av = smem[x + k * TILE]; \
+                    uint bBase = TILE + y * BLOCK; \
+                    a0 += av * smem[k + (bBase + 0) * TILE]; \
+                    a1 += av * smem[k + (bBase + 1) * TILE]; \
+                    a2 += av * smem[k + (bBase + 2) * TILE]; \
+                    a3 += av * smem[k + (bBase + 3) * TILE]; \
+                } \
+                barrier(CLK_LOCAL_MEM_FENCE); \
+            } \
+            uint c0 = colBase + y * BLOCK + 0; \
+            uint c1 = colBase + y * BLOCK + 1; \
+            uint c2 = colBase + y * BLOCK + 2; \
+            uint c3 = colBase + y * BLOCK + 3;
+
+        #define GEMM_ROW4_ACCUMULATE_BF16 \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                uint aCol = k0 + y; \
+                uint bRow = k0 + x; \
+                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                for (uint w = 0; w < BLOCK; ++w) { \
+                    uint outCol = colBase + y * BLOCK + w; \
+                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                        (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
                 for (uint k = 0; k < TILE; ++k) { \
@@ -1620,5 +1722,431 @@ internal static class SilkKernels
                 partialSums[baseOffset + g] = localSums[g];
             }
         }
+        __kernel void gemm_row4_bf16(
+                    __global const float* a,
+                    __global const ushort* b,
+                    __global float* c,
+                    const uint aRows,
+                    const uint aCols,
+                    const uint bCols)
+                {
+                    GEMM_ROW4_ACCUMULATE_BF16
+                    if (outRow < aRows)
+                    {
+                        uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                        if (c0 < bCols) c[rowBase + 0] = a0;
+                        if (c1 < bCols) c[rowBase + 1] = a1;
+                        if (c2 < bCols) c[rowBase + 2] = a2;
+                        if (c3 < bCols) c[rowBase + 3] = a3;
+                    }
+                }
+
+
+        __kernel void gemm_gemv_add_bf16(
+                    __global const float* a,
+                    __global const ushort* b,
+                    __global float* c,
+                    __global const float* residual,
+                    const uint aCols,
+                    const uint bCols)
+                {
+                    uint col = get_global_id(0) * BLOCK;
+                    if (col >= bCols) return;
+
+                    uint avail = bCols - col;
+
+                    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = a[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    }
+
+                    c[col] = a0 + residual[col];
+                    if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+                }
+
+                /* Fused single-token MLP block for cached decode (#672, Stage B): RMSNorm(x) feeds
+                   gate/up, SwiGLU, down-projection, plus the residual add, in one launch. Shared memory
+                   holds the intermediate swiglu vector (max 5120 columns). One work-group of 256 lanes. */
+                #define MLP_MAX_INTERMEDIATE 5120
+
+        __kernel void rms_norm_gemv_bf16(
+                    __global const float* x,
+                    __global const float* gamma,
+                    __global const ushort* w0,
+                    __global const float* bias0,
+                    __global float* out0,
+                    __global const ushort* w1,
+                    __global const float* bias1,
+                    __global float* out1,
+                    __global const ushort* w2,
+                    __global const float* bias2,
+                    __global float* out2,
+                    const uint aCols,
+                    const uint cols0,
+                    const uint cols1,
+                    const uint cols2,
+                    const uint hasBias,
+                    const float eps)
+                {
+                    uint g = get_group_id(0);
+                    uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
+                    uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+
+                    __global const float* b;
+                    __global const float* bias;
+                    __global float* c;
+                    uint bCols;
+                    uint colBase;
+                    if (g < groups0)
+                    {
+                        b = w0;
+                        bias = bias0;
+                        c = out0;
+                        bCols = cols0;
+                        colBase = g * GEMVCOLS;
+                    }
+                    else if (g < groups0 + groups1)
+                    {
+                        b = w1;
+                        bias = bias1;
+                        c = out1;
+                        bCols = cols1;
+                        colBase = (g - groups0) * GEMVCOLS;
+                    }
+                    else
+                    {
+                        b = w2;
+                        bias = bias2;
+                        c = out2;
+                        bCols = cols2;
+                        colBase = (g - groups0 - groups1) * GEMVCOLS;
+                    }
+
+                    uint col = colBase + get_local_id(0) * BLOCK;
+                    if (col >= bCols)
+                        return;
+
+                    float ssq = 0.0f;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float v = x[k];
+                        ssq += v * v;
+                    }
+                    float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+                    /* A lane's last columns run past bCols when the width is not a whole number of
+                       BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+                    uint avail = bCols - col;
+
+                    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    }
+
+                    if (hasBias != 0u)
+                    {
+                        c[col] = a0 + bias[col];
+                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                    }
+                    else
+                    {
+                        c[col] = a0;
+                        if (avail > 1u) c[col + 1u] = a1;
+                        if (avail > 2u) c[col + 2u] = a2;
+                        if (avail > 3u) c[col + 3u] = a3;
+                    }
+                }
+
+                /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
+                   a is [aCols], b is [aCols * bCols] row-major (B[k, outCol]), result c[outCol] =
+                   sum_k a[k]*b[k*bCols+outCol] + residual[outCol]. One work item per BLOCK output
+                   columns, single accumulator over k ascending, no shared-memory staging. */
+
+        __kernel void mlp_block_bf16(
+                    __global const float* x,
+                    __global const float* gamma,
+                    __global const ushort* Wgate,
+                    __global const ushort* Wup,
+                    __global const ushort* Wdown,
+                    __global float* out,
+                    __global const float* residual,
+                    const uint hidden,
+                    const uint intermediate,
+                    const float eps)
+                {
+                    uint lid = get_local_id(0);
+                    uint gsize = get_local_size(0);
+
+                    __local float swiglu[MLP_MAX_INTERMEDIATE];
+
+                    // norm scale (each lane computes identically; cheap relative to the GEMVs)
+                    float ssq = 0.0f;
+                    for (uint k = 0; k < hidden; ++k)
+                    {
+                        float v = x[k];
+                        ssq += v * v;
+                    }
+                    float normScale = 1.0f / sqrt(ssq / (float)hidden + eps);
+
+                    // phase 1: gate/up/swiglu into shared memory
+                    for (uint i = lid; i < intermediate; i += gsize)
+                    {
+                        float g = 0.0f, u = 0.0f;
+                        for (uint k = 0; k < hidden; ++k)
+                        {
+                            float nk = x[k] * normScale * gamma[k];
+                            g += nk * BF16_TO_F32(Wgate[k * intermediate + i]);
+                            u += nk * BF16_TO_F32(Wup[k * intermediate + i]);
+                        }
+                        float siluGate = g / (1.0f + exp(-g));
+                        swiglu[i] = siluGate * u;
+                    }
+                    barrier(CLK_LOCAL_MEM_FENCE);
+
+                    // phase 2: down projection + residual
+                    for (uint j = lid; j < hidden; j += gsize)
+                    {
+                        float acc = 0.0f;
+                        for (uint i = 0; i < intermediate; ++i)
+                            acc += swiglu[i] * BF16_TO_F32(Wdown[i * hidden + j]);
+                        out[j] = acc + residual[j];
+                    }
+                }
+                /* Fused single-work-group decode attention + O-projection (#691). One work-group of
+                   numHeads * ATTNGROUP threads computes every head's attention context into the shared
+                   ctx[] array, barriers, then does the O-projection (GEMV + residual) over hiddenDim
+                   output columns. No global context buffer is written. Only usable when the device
+                   exposes at least numHeads * ATTNGROUP work-items per group. */
+                #define FUSED_MAX_HEADS 64
+
+        __kernel void gemm_row4_bf16(
+                    __global const float* a,
+                    __global const ushort* b,
+                    __global float* c,
+                    const uint aRows,
+                    const uint aCols,
+                    const uint bCols)
+                {
+                    GEMM_ROW4_ACCUMULATE_BF16
+                    if (outRow < aRows)
+                    {
+                        uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                        if (c0 < bCols) c[rowBase + 0] = a0;
+                        if (c1 < bCols) c[rowBase + 1] = a1;
+                        if (c2 < bCols) c[rowBase + 2] = a2;
+                        if (c3 < bCols) c[rowBase + 3] = a3;
+                    }
+                }
+
+
+        __kernel void gemm_gemv_add_bf16(
+                    __global const float* a,
+                    __global const ushort* b,
+                    __global float* c,
+                    __global const float* residual,
+                    const uint aCols,
+                    const uint bCols)
+                {
+                    uint col = get_global_id(0) * BLOCK;
+                    if (col >= bCols) return;
+
+                    uint avail = bCols - col;
+
+                    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = a[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    }
+
+                    c[col] = a0 + residual[col];
+                    if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+                }
+
+                /* Fused single-token MLP block for cached decode (#672, Stage B): RMSNorm(x) feeds
+                   gate/up, SwiGLU, down-projection, plus the residual add, in one launch. Shared memory
+                   holds the intermediate swiglu vector (max 5120 columns). One work-group of 256 lanes. */
+                #define MLP_MAX_INTERMEDIATE 5120
+
+        __kernel void rms_norm_gemv_bf16(
+                    __global const float* x,
+                    __global const float* gamma,
+                    __global const ushort* w0,
+                    __global const float* bias0,
+                    __global float* out0,
+                    __global const ushort* w1,
+                    __global const float* bias1,
+                    __global float* out1,
+                    __global const ushort* w2,
+                    __global const float* bias2,
+                    __global float* out2,
+                    const uint aCols,
+                    const uint cols0,
+                    const uint cols1,
+                    const uint cols2,
+                    const uint hasBias,
+                    const float eps)
+                {
+                    uint g = get_group_id(0);
+                    uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
+                    uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+
+                    __global const float* b;
+                    __global const float* bias;
+                    __global float* c;
+                    uint bCols;
+                    uint colBase;
+                    if (g < groups0)
+                    {
+                        b = w0;
+                        bias = bias0;
+                        c = out0;
+                        bCols = cols0;
+                        colBase = g * GEMVCOLS;
+                    }
+                    else if (g < groups0 + groups1)
+                    {
+                        b = w1;
+                        bias = bias1;
+                        c = out1;
+                        bCols = cols1;
+                        colBase = (g - groups0) * GEMVCOLS;
+                    }
+                    else
+                    {
+                        b = w2;
+                        bias = bias2;
+                        c = out2;
+                        bCols = cols2;
+                        colBase = (g - groups0 - groups1) * GEMVCOLS;
+                    }
+
+                    uint col = colBase + get_local_id(0) * BLOCK;
+                    if (col >= bCols)
+                        return;
+
+                    float ssq = 0.0f;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float v = x[k];
+                        ssq += v * v;
+                    }
+                    float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+                    /* A lane's last columns run past bCols when the width is not a whole number of
+                       BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+                    uint avail = bCols - col;
+
+                    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    }
+
+                    if (hasBias != 0u)
+                    {
+                        c[col] = a0 + bias[col];
+                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                    }
+                    else
+                    {
+                        c[col] = a0;
+                        if (avail > 1u) c[col + 1u] = a1;
+                        if (avail > 2u) c[col + 2u] = a2;
+                        if (avail > 3u) c[col + 3u] = a3;
+                    }
+                }
+
+                /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
+                   a is [aCols], b is [aCols * bCols] row-major (B[k, outCol]), result c[outCol] =
+                   sum_k a[k]*b[k*bCols+outCol] + residual[outCol]. One work item per BLOCK output
+                   columns, single accumulator over k ascending, no shared-memory staging. */
+
+        __kernel void mlp_block_bf16(
+                    __global const float* x,
+                    __global const float* gamma,
+                    __global const ushort* Wgate,
+                    __global const ushort* Wup,
+                    __global const ushort* Wdown,
+                    __global float* out,
+                    __global const float* residual,
+                    const uint hidden,
+                    const uint intermediate,
+                    const float eps)
+                {
+                    uint lid = get_local_id(0);
+                    uint gsize = get_local_size(0);
+
+                    __local float swiglu[MLP_MAX_INTERMEDIATE];
+
+                    // norm scale (each lane computes identically; cheap relative to the GEMVs)
+                    float ssq = 0.0f;
+                    for (uint k = 0; k < hidden; ++k)
+                    {
+                        float v = x[k];
+                        ssq += v * v;
+                    }
+                    float normScale = 1.0f / sqrt(ssq / (float)hidden + eps);
+
+                    // phase 1: gate/up/swiglu into shared memory
+                    for (uint i = lid; i < intermediate; i += gsize)
+                    {
+                        float g = 0.0f, u = 0.0f;
+                        for (uint k = 0; k < hidden; ++k)
+                        {
+                            float nk = x[k] * normScale * gamma[k];
+                            g += nk * BF16_TO_F32(Wgate[k * intermediate + i]);
+                            u += nk * BF16_TO_F32(Wup[k * intermediate + i]);
+                        }
+                        float siluGate = g / (1.0f + exp(-g));
+                        swiglu[i] = siluGate * u;
+                    }
+                    barrier(CLK_LOCAL_MEM_FENCE);
+
+                    // phase 2: down projection + residual
+                    for (uint j = lid; j < hidden; j += gsize)
+                    {
+                        float acc = 0.0f;
+                        for (uint i = 0; i < intermediate; ++i)
+                            acc += swiglu[i] * BF16_TO_F32(Wdown[i * hidden + j]);
+                        out[j] = acc + residual[j];
+                    }
+                }
+                /* Fused single-work-group decode attention + O-projection (#691). One work-group of
+                   numHeads * ATTNGROUP threads computes every head's attention context into the shared
+                   ctx[] array, barriers, then does the O-projection (GEMV + residual) over hiddenDim
+                   output columns. No global context buffer is written. Only usable when the device
+                   exposes at least numHeads * ATTNGROUP work-items per group. */
+                #define FUSED_MAX_HEADS 64
+
         """;
 }
