@@ -162,3 +162,43 @@ Runs 5–6 are ~12 minutes of teacher time and are the only long-running steps.
 
 - [ ] #386 — Qwen distillation full cycle: this branch adds the Silk teacher path and its
   measurements; the full cycle itself stays open.
+
+## Results (2026-10-20)
+
+Implementation landed as planned (commits 2–5). Verification:
+
+| Step | Result |
+|---|---|
+| `dotnet build Nivara.slnx -c Release` | clean, 0 warnings |
+| `InferenceCliArgumentTests` + `SilkQwen*` (Release) | 52 passed |
+| `Nivara.Tests.Docs` (Release) | 66 passed |
+| `dotnet format --verify-no-changes` | clean |
+
+Real-checkpoint Silk teacher run (`qwen --silk distill --teacher-examples 12 --force`,
+Iris Xe, 18 classifications):
+
+- Model build 2,677 ms; **18–21 s per sentence**; teacher pass ≈ 5.8 min.
+- Labels: 10 train + 8 eval written to the resumable cache.
+- Old CPU cache held 3 of those train sentences; all 3 came back identical
+  (positive / positive / positive) — the only direct cross-backend label evidence.
+
+**Scope decision (human, 2026-10-20):** the matching CPU `distill --force` run was not
+executed, so:
+
+- real-checkpoint label parity rests on those 3 overlapping sentences plus the synthetic
+  cached-decode parity test, not a full 18-sentence diff. Residual risk: an argmax flip on
+  one of the other 15 is unmeasured.
+- the CPU half of the teacher-pass timing comes from the gate measurements below, not from a
+  distill run.
+
+CPU-vs-GPU gate (same machine, Release, F32, `qwen benchmark` vs `qwen --silk`):
+
+| Surface | Prompt → gen | Total | Amortized |
+|---|---|---:|---:|
+| CPU tools | 206 → 19 | 11,142 ms (median of 3, warmed) | 586 ms/token |
+| Silk tools | 206 → 19 | 11,500 ms (single run) | 604 ms/token |
+| CPU plain | 36 → 7 | 4,452 ms (median of 3, warmed) | 643 ms/token |
+| Silk plain | 36 → 7 | 3,750 ms (median of 3, warmed) | 535 ms/token |
+
+The teacher-shaped call ties (Silk 3% slower), which is consistent with the 18–21 s
+per-sentence Silk figures above. The feature therefore lands for parity, not throughput.
