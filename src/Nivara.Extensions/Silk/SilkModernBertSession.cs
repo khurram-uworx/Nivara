@@ -1,4 +1,5 @@
 using Nivara.AI;
+using System.Numerics;
 
 namespace Nivara.Silk;
 
@@ -8,6 +9,13 @@ public sealed class SilkModernBertSession : IModernBertGpuSession
     readonly SilkModernBertGpuRunner runner;
 
     public SilkModernBertSession(ModernBertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, string prefix = "model")
+    {
+        runtime = new SilkRuntime();
+        try { runner = new SilkModernBertGpuRunner(runtime, config, tensors, prefix); }
+        catch { runtime.Dispose(); throw; }
+    }
+
+    public SilkModernBertSession(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, string prefix = "model")
     {
         runtime = new SilkRuntime();
         try { runner = new SilkModernBertGpuRunner(runtime, config, tensors, prefix); }
