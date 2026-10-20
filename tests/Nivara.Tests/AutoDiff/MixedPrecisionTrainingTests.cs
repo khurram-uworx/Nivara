@@ -43,4 +43,20 @@ public class MixedPrecisionTrainingTests
         Assert.That(losses.All(float.IsFinite), Is.True);
         Assert.That(losses[^1], Is.LessThan(losses[0]));
     }
+
+    [Test]
+    public void LinearMixed_StateDict_RoundTrip_PreservesWeights()
+    {
+        using var model = new Linear<float, BFloat16>(2, 3);
+        var input = ReverseGradTensor<float>.FromMatrix(new[] { 1f, 2f, 3f, 4f }, 2, 2, requiresGrad: false);
+
+        var sd = model.StateDict();
+        Assert.That(sd.ContainsKey("Weight"), Is.True);
+
+        using var copy = new Linear<float, BFloat16>(2, 3);
+        copy.LoadStateDict(sd);
+
+        for (int i = 0; i < model.Weight!.Length; i++)
+            Assert.That(float.CreateChecked(copy.Weight!.Tensor[i]), Is.EqualTo(float.CreateChecked(model.Weight!.Tensor[i])).Within(1e-4f));
+    }
 }
