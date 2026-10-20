@@ -326,18 +326,28 @@ public class InferenceCliArgumentTests
     public void SilkSmolLM_Precision_Rejected() =>
         AssertRejected(Run("smollm", "--silk", "--precision", "bf16"), "--silk is F32-only");
 
+    /// <summary>
+    /// <c>distill</c> is a Silk mode now, so the mode allow-list no longer rejects this
+    /// invocation — which is why the assertion has to name the F32 guard. A rejection that fired on
+    /// the mode list would pass this test without pinning the precision path.
+    /// </summary>
     [Test]
-    public void SilkQwen_DistillMode_Rejected() =>
-        AssertRejected(Run("qwen", "--silk", "distill"),
-            "--silk does not support mode 'distill' for 'qwen'");
+    public void SilkQwen_DistillPrecision_Rejected() =>
+        AssertRejected(Run("qwen", "--silk", "distill", "--precision", "bf16"), "--silk is F32-only");
 
+    /// <summary>
+    /// <c>minilm</c> carries <c>similarity</c> on the CPU path but not on Silk, so the mode guard
+    /// is the only thing between validation and the weight load. <c>qwen --silk distill</c> used to
+    /// be the vehicle here; once distill became a Silk mode, every accepted qwen mode was also a
+    /// Silk mode, which left no qwen invocation for this property to test.
+    /// </summary>
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
     {
-        CliResult result = Run("qwen", "--silk", "distill");
+        CliResult result = Run("minilm", "--silk", "similarity");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
-            "the --silk guard must run before the model-file check; no checkpoint is in reach");
-        AssertRejected(result, "--silk does not support mode 'distill'");
+            "the --silk mode guard must run before the model-file check");
+        AssertRejected(result, "--silk does not support mode 'similarity' for 'minilm'");
     }
 
     [Test]
@@ -570,6 +580,7 @@ public class InferenceCliArgumentTests
         ["qwen", "distill"],
         ["qwen", "benchmark"],
         ["qwen", "--precision", "bf16", "benchmark"],
+        ["qwen", "--silk", "distill"],
     ];
 
     static void AssertRejected(CliResult result, string message)

@@ -269,7 +269,7 @@ A future `--qwen gguf` sub-mode would load the Qwen checkpoint as GGUF through a
 
 ## GPU path
 
-Qwen now has an F32 Silk runner (`--qwen ... --silk`: tools, plain, benchmark). `--ilgpu` is still not supported. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
+Qwen now has an F32 Silk runner (`--qwen ... --silk`: tools, plain, benchmark, distill). `--ilgpu` is still not supported. The teacher pass in `distill` runs on either backend through one shared prompt-and-parse seam, so the two paths can only differ in the generation call. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
 
 ## Benchmark protocol (Qwen)
 

@@ -219,14 +219,23 @@ public static class Qwen
         Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
         where T : struct, IFloatingPointIeee754<T>
     {
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
         var model = LlamaLoader.Load<T, T>(config, tensors);
+        return (model, config, tokenizer);
+    }
+
+    /// <summary>Config + tokenizer without materializing a CPU model. The Silk distill path hands
+    /// the host tensors straight to the device and never builds one, which keeps a second ~1.9 GB
+    /// copy of the weights out of the process.</summary>
+    static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadConfigAndTokenizer(string modelDir)
+    {
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"),
             Path.Combine(modelDir, "merges.txt"),
             unkToken: "<|endoftext|>",
             tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
-        return (model, config, tokenizer);
+        return (config, tokenizer);
     }
 
     /// <summary>Narrows synthetic float weights to compute type <typeparamref name="T"/> so the
@@ -932,11 +941,48 @@ public static class Qwen
         bool force,
         int seed)
     {
-        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Teacher distillation into a tiny sentiment classifier ===");
-        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
+        PrintDistillHeader($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
+        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        return RunDistillCore(config, modelDir, teacherExamples, force, seed,
+            sentence => RunTeacherClassify(model, config, tokenizer, sentence));
+    }
+
+    /// <summary>Silk (OpenCL) teacher path: the same cache, resume, training and eval as
+    /// <see cref="RunDistill"/>, with only the teacher generation swapped. One session serves every
+    /// sentence — <see cref="GenerateSilk"/> resets the KV cache on entry.</summary>
+    public static int RunDistillSilk(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir,
+        int teacherExamples,
+        bool force,
+        int seed)
+    {
+        PrintDistillHeader("Device: GPU (Silk)  Precision: F32 (BF16-upcast)  KV cache: on");
+
+        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
-        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        return RunDistillCore(config, modelDir, teacherExamples, force, seed,
+            sentence => ParseClassification(tokenizer.Decode(
+                GenerateSilk(session, config, BuildClassifyTurnIds(tokenizer, sentence), MaxNewTokens, useKvCache: true))));
+    }
+
+    static void PrintDistillHeader(string deviceLine)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Teacher distillation into a tiny sentiment classifier ===");
+        Console.WriteLine(deviceLine);
+        Console.WriteLine();
+    }
+
+    static int RunDistillCore(
+        LlamaConfig config, string modelDir, int teacherExamples, bool force, int seed,
+        Func<string, string> classifyTeacher)
+    {
         Console.WriteLine($"Teacher: {config.NumHiddenLayers} layers, hidden={config.HiddenSize}, vocab={config.VocabSize}");
         Console.WriteLine($"Student: hashed word+bigram BOW (FNV-1a, {FeatureDim}-d) -> Linear({FeatureDim}\u219264) -> ReLU -> Linear(64\u21922)");
         Console.WriteLine($"Train sentences: {TrainSentences.Length} (teacher-annotated, resumable cache)");
@@ -947,8 +993,7 @@ public static class Qwen
 
         // ---- Teacher pass: classify each train sentence (cached, resumable) ----
         string cachePath = Path.Combine(modelDir, "qwen_distill_labels.json");
-        var trainLabels = LoadOrRunTeacher(model, config, tokenizer, cachePath,
-            TrainSentences, teacherExamples, force);
+        var trainLabels = LoadOrRunTeacher(cachePath, TrainSentences, teacherExamples, force, classifyTeacher);
         PrintTrainLabels(TrainSentences, trainLabels);
 
         // ---- Build student features (hashed BOW) ----
@@ -1017,8 +1062,7 @@ public static class Qwen
         }
 
         var evalSentences = DistilBertSst.CompareSentences;
-        var evalTeacher = LoadOrRunTeacher(model, config, tokenizer, cachePath,
-            evalSentences, evalSentences.Length, force);
+        var evalTeacher = LoadOrRunTeacher(cachePath, evalSentences, evalSentences.Length, force, classifyTeacher);
 
         var studentRight = 0;
         var baselineRight = 0;
@@ -1075,8 +1119,8 @@ public static class Qwen
     /// are cached in a resumable JSON file; <paramref name="limit"/> before a cached full set runs only
     /// the missing prefix (resumable incremental cache).</summary>
     static string[] LoadOrRunTeacher(
-        LlamaForCausalLM<float> model, LlamaConfig config, Gpt2BpeTokenizer tokenizer,
-        string cachePath, IReadOnlyList<string> sentences, int limit, bool force)
+        string cachePath, IReadOnlyList<string> sentences, int limit, bool force,
+        Func<string, string> classifyTeacher)
     {
         var cache = LoadLabelCache(cachePath);
         var labels = new string[sentences.Count];
@@ -1099,7 +1143,7 @@ public static class Qwen
 
             Console.Write($"  [teacher] classifying [{i}] \"{Shorten(sentences[i])}\"... ");
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            string label = RunTeacherClassify(model, config, tokenizer, sentences[i]);
+            string label = classifyTeacher(sentences[i]);
             sw.Stop();
             labels[i] = label;
             cache[sentences[i]] = label;
@@ -1111,18 +1155,20 @@ public static class Qwen
         return labels;
     }
 
-    static string RunTeacherClassify(
-        LlamaForCausalLM<float> model, LlamaConfig config, Gpt2BpeTokenizer tokenizer, string sentence)
+    /// <summary>The classify_sentiment tool turn, encoded. Shared by the CPU and Silk teachers so
+    /// the two paths can only differ in the generation call, never in the prompt.</summary>
+    static int[] BuildClassifyTurnIds(Gpt2BpeTokenizer tokenizer, string sentence)
     {
         string toolJson = QwenChatTemplate.ToolJson(
             ClassifyToolName, ClassifyToolDesc,
             [("text", "string", null, true), ("label", "string", null, true)]);
         string systemMessage = QwenChatTemplate.BuildToolsSystemMessage(toolJson);
         string prompt = QwenChatTemplate.RenderFirstTurn(systemMessage, $"Classify the sentiment of this movie review: \"{sentence}\"");
-        var promptIds = tokenizer.Encode(prompt).ToList();
+        return tokenizer.Encode(prompt).ToArray();
+    }
 
-        var turnIds = Generate(model, config, promptIds, MaxNewTokens, useKvCache: true);
-        string text = tokenizer.Decode(turnIds);
+    static string ParseClassification(string text)
+    {
         var parsed = QwenToolParser.TryParseToolCall(text);
         string? label = QwenToolParser.ArgumentString(parsed, "label");
         if (!string.IsNullOrWhiteSpace(label))
@@ -1134,6 +1180,13 @@ public static class Qwen
         // Fallback: scan the raw generated text for a sentiment word.
         var lower = text.ToLowerInvariant();
         return lower.Contains("positive") ? "positive" : lower.Contains("negative") ? "negative" : "negative";
+    }
+
+    static string RunTeacherClassify(
+        LlamaForCausalLM<float> model, LlamaConfig config, Gpt2BpeTokenizer tokenizer, string sentence)
+    {
+        var turnIds = Generate(model, config, BuildClassifyTurnIds(tokenizer, sentence), MaxNewTokens, useKvCache: true);
+        return ParseClassification(tokenizer.Decode(turnIds));
     }
 
     static string Shorten(string s) => s.Length <= 48 ? s : s[..45] + "...";
