@@ -214,6 +214,13 @@ public sealed unsafe class SilkRuntime : IDisposable
     }
 
     /// <summary>Blocking write of exactly <paramref name="data"/>.Length elements.</summary>
+    public void Upload(nint buffer, ReadOnlySpan<ushort> data)
+    {
+        fixed (ushort* p = data)
+            WriteRaw(buffer, p, (ulong)data.Length * sizeof(ushort));
+    }
+
+    /// <summary>Blocking write of exactly <paramref name="data"/>.Length elements.</summary>
     public void Upload(nint buffer, ReadOnlySpan<int> data)
     {
         fixed (int* p = data)
