@@ -54,10 +54,11 @@ public class SharedMemoryAllocationTests
 
     const string AllocationNamePrefix = "Allocate";
 
-    /// <summary>Floor for the non-vacuity assertion: GemmKernels declares ten
-    /// <c>TiledGemmKernel*</c> methods today. A rename that dropped them below this must fail the
-    /// test loudly rather than leave it scanning nothing and reporting a clean run.</summary>
-    const int MinimumGemmKernels = 10;
+    /// <summary>Floor for the non-vacuity assertion: GemmKernels declares twelve
+    /// <c>TiledGemmKernel*</c> methods today (incl. the #784 2x4/4x4 candidates). A rename that
+    /// dropped them below this must fail the test loudly rather than leave it scanning nothing and
+    /// reporting a clean run.</summary>
+    const int MinimumGemmKernels = 12;
 
     static readonly Dictionary<short, OpCode> s_opCodes = BuildOpCodeTable();
 
