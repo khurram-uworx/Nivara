@@ -1,5 +1,6 @@
 using Nivara.AI;
 using Nivara.AutoDiff.Nn;
+using System.Diagnostics;
 
 namespace Nivara.Silk;
 
@@ -53,6 +54,9 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
     int[]? posIdHost;
     float[]? maskHost;
     int hiddenRows;
+
+    public bool ProfilingEnabled { get; set; }
+    public readonly Dictionary<string, long> LastPhaseMs = new();
 
     public SilkModernBertGpuRunner(
         SilkRuntime runtime,
@@ -135,42 +139,85 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
         runtime.Upload(maskBuf.Handle, maskHost.AsSpan(0, seqLen));
 
+        long _embed = 0, _qkvGemm = 0, _split = 0, _rotary = 0, _attn = 0, _outGemm = 0, _add = 0, _attnNorm = 0, _mlpNorm = 0, _mlpGemm1 = 0, _geglu = 0, _mlpGemm2 = 0, _finalNorm = 0;
+        int _layers = layers.Length;
+
         int rows = seqLen;
-        LaunchGather(tokEmb, idsBuf.Handle, x.Handle, rows * hiddenDim);
-        LaunchLayerNorm(x.Handle, embedNormW, zeroBeta, x.Handle, rows);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGather(tokEmb, idsBuf.Handle, x.Handle, rows * hiddenDim); runtime.Finish(); _embed += s.ElapsedMilliseconds; }
+        else LaunchGather(tokEmb, idsBuf.Handle, x.Handle, rows * hiddenDim);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchLayerNorm(x.Handle, embedNormW, zeroBeta, x.Handle, rows); runtime.Finish(); _embed += s.ElapsedMilliseconds; }
+        else LaunchLayerNorm(x.Handle, embedNormW, zeroBeta, x.Handle, rows);
 
         for (int i = 0; i < layers.Length; i++)
         {
             LayerWeights w = layers[i];
-            nint qkvIn = w.AttnNormW == 0
-                ? x.Handle
-                : LayerNormInto(x.Handle, w.AttnNormW, rows);
+            nint qkvIn;
+            if (w.AttnNormW == 0)
+            {
+                qkvIn = x.Handle;
+            }
+            else
+            {
+                if (ProfilingEnabled) { var s = Stopwatch.StartNew(); qkvIn = LayerNormInto(x.Handle, w.AttnNormW, rows); runtime.Finish(); _attnNorm += s.ElapsedMilliseconds; }
+                else qkvIn = LayerNormInto(x.Handle, w.AttnNormW, rows);
+            }
 
-            LaunchGemm(qkvIn, w.Wqkv, qkv.Handle, rows, hiddenDim, 3 * hiddenDim);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(qkvIn, w.Wqkv, qkv.Handle, rows, hiddenDim, 3 * hiddenDim); runtime.Finish(); _qkvGemm += s.ElapsedMilliseconds; }
+            else LaunchGemm(qkvIn, w.Wqkv, qkv.Handle, rows, hiddenDim, 3 * hiddenDim);
             for (int part = 0; part < 3; part++)
             {
                 nint dst = part switch { 0 => q.Handle, 1 => k.Handle, _ => v.Handle };
-                LaunchSplit(qkv.Handle, dst, rows, part);
+                if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchSplit(qkv.Handle, dst, rows, part); runtime.Finish(); _split += s.ElapsedMilliseconds; }
+                else LaunchSplit(qkv.Handle, dst, rows, part);
             }
 
             nint cos = w.Full ? cosFull.Handle : cosSliding.Handle;
             nint sin = w.Full ? sinFull.Handle : sinSliding.Handle;
-            LaunchRotary(q.Handle, cos, sin, rows);
-            LaunchRotary(k.Handle, cos, sin, rows);
-            LaunchAttention(q.Handle, k.Handle, v.Handle, maskBuf.Handle, context.Handle, rows, w.Band);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchRotary(q.Handle, cos, sin, rows); runtime.Finish(); _rotary += s.ElapsedMilliseconds; }
+            else LaunchRotary(q.Handle, cos, sin, rows);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchRotary(k.Handle, cos, sin, rows); runtime.Finish(); _rotary += s.ElapsedMilliseconds; }
+            else LaunchRotary(k.Handle, cos, sin, rows);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchAttention(q.Handle, k.Handle, v.Handle, maskBuf.Handle, context.Handle, rows, w.Band); runtime.Finish(); _attn += s.ElapsedMilliseconds; }
+            else LaunchAttention(q.Handle, k.Handle, v.Handle, maskBuf.Handle, context.Handle, rows, w.Band);
 
-            LaunchGemm(context.Handle, w.Wo, projected.Handle, rows, hiddenDim, hiddenDim);
-            LaunchAdd(x.Handle, projected.Handle, x.Handle, rows * hiddenDim);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(context.Handle, w.Wo, projected.Handle, rows, hiddenDim, hiddenDim); runtime.Finish(); _outGemm += s.ElapsedMilliseconds; }
+            else LaunchGemm(context.Handle, w.Wo, projected.Handle, rows, hiddenDim, hiddenDim);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchAdd(x.Handle, projected.Handle, x.Handle, rows * hiddenDim); runtime.Finish(); _add += s.ElapsedMilliseconds; }
+            else LaunchAdd(x.Handle, projected.Handle, x.Handle, rows * hiddenDim);
 
-            LayerNormInto(x.Handle, w.MlpNormW, rows);
-            LaunchGemm(normed.Handle, w.Wi, mlpIn.Handle, rows, hiddenDim, 2 * intermediateDim);
-            LaunchGeGlu(mlpIn.Handle, gated.Handle, rows);
-            LaunchGemm(gated.Handle, w.WoMlp, mlpOut.Handle, rows, intermediateDim, hiddenDim);
-            LaunchAdd(x.Handle, mlpOut.Handle, x.Handle, rows * hiddenDim);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LayerNormInto(x.Handle, w.MlpNormW, rows); runtime.Finish(); _mlpNorm += s.ElapsedMilliseconds; }
+            else LayerNormInto(x.Handle, w.MlpNormW, rows);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(normed.Handle, w.Wi, mlpIn.Handle, rows, hiddenDim, 2 * intermediateDim); runtime.Finish(); _mlpGemm1 += s.ElapsedMilliseconds; }
+            else LaunchGemm(normed.Handle, w.Wi, mlpIn.Handle, rows, hiddenDim, 2 * intermediateDim);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGeGlu(mlpIn.Handle, gated.Handle, rows); runtime.Finish(); _geglu += s.ElapsedMilliseconds; }
+            else LaunchGeGlu(mlpIn.Handle, gated.Handle, rows);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(gated.Handle, w.WoMlp, mlpOut.Handle, rows, intermediateDim, hiddenDim); runtime.Finish(); _mlpGemm2 += s.ElapsedMilliseconds; }
+            else LaunchGemm(gated.Handle, w.WoMlp, mlpOut.Handle, rows, intermediateDim, hiddenDim);
+            if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchAdd(x.Handle, mlpOut.Handle, x.Handle, rows * hiddenDim); runtime.Finish(); _add += s.ElapsedMilliseconds; }
+            else LaunchAdd(x.Handle, mlpOut.Handle, x.Handle, rows * hiddenDim);
         }
 
-        LaunchLayerNorm(x.Handle, finalNormW, zeroBeta, projected.Handle, rows);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchLayerNorm(x.Handle, finalNormW, zeroBeta, projected.Handle, rows); runtime.Finish(); _finalNorm += s.ElapsedMilliseconds; }
+        else LaunchLayerNorm(x.Handle, finalNormW, zeroBeta, projected.Handle, rows);
         hiddenRows = rows;
+
+        if (ProfilingEnabled)
+        {
+            LastPhaseMs["AttnNorm"] = _attnNorm;
+            LastPhaseMs["Embed"] = _embed;
+            LastPhaseMs["QkvGemm"] = _qkvGemm;
+            LastPhaseMs["Split"] = _split;
+            LastPhaseMs["Rotary"] = _rotary;
+            LastPhaseMs["Attention"] = _attn;
+            LastPhaseMs["OutGemm"] = _outGemm;
+            LastPhaseMs["Add"] = _add;
+            LastPhaseMs["MlpNorm"] = _mlpNorm;
+            LastPhaseMs["MlpGemm1"] = _mlpGemm1;
+            LastPhaseMs["GeGlu"] = _geglu;
+            LastPhaseMs["MlpGemm2"] = _mlpGemm2;
+            LastPhaseMs["FinalNorm"] = _finalNorm;
+            LastPhaseMs["Layers"] = _layers;
+        }
     }
 
     nint LayerNormInto(nint src, nint gamma, int rows)
