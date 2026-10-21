@@ -136,7 +136,7 @@ public static class ModernBert
         PrintConfig(config);
 
         var buildSw = Stopwatch.StartNew();
-        var encoder = ModernBertEncoder<TModel>.LoadWeights<TModel, TWeight>(tensors, config);
+        var encoder = ModernBertEncoder<TModel, TWeight>.LoadWeights(tensors, config);
         buildSw.Stop();
         Console.WriteLine($"Load weights: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine($"Parameters: {tensors.Values.Sum(t => t.Data.Length):N0} " +
@@ -186,7 +186,7 @@ public static class ModernBert
         PrintConfig(config);
 
         var buildSw = Stopwatch.StartNew();
-        var encoder = ModernBertEncoder<TModel>.LoadWeights<TModel, TWeight>(tensors, config);
+        var encoder = ModernBertEncoder<TModel, TWeight>.LoadWeights(tensors, config);
         buildSw.Stop();
         Console.WriteLine($"Load weights: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();

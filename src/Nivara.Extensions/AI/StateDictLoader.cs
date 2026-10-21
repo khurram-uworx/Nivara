@@ -194,4 +194,147 @@ public static class StateDictLoader
             ReverseGradTensor<TWeight>.FromArray(w.Data));
         rms.LoadStateDict(new Dictionary<string, ReverseGradTensor<TModel>> { ["Weight"] = tensor });
     }
+
+    // --- Mixed-target (storage dtype preserved) overloads ----------------------
+
+    public static void LoadEmbed<TModel, TWeight>(
+        Embedding<TModel, TWeight> embed,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string key)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        if (!tensors.TryGetValue(key, out var t))
+            throw new KeyNotFoundException($"Missing tensor: {key}");
+
+        var requiresGrad = embed.Weight != null && embed.Weight.Tensor.RequiresGrad;
+        embed.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(t.Data, t.Shape[0], t.Shape[1], requiresGrad);
+    }
+
+    public static void LoadLinear<TModel, TWeight>(
+        Linear<TModel, TWeight> linear,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string prefix)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        ArgumentNullException.ThrowIfNull(linear);
+        var state = new Dictionary<string, ReverseGradTensor<TModel>>();
+
+        if (tensors.TryGetValue($"{prefix}.weight", out var w))
+        {
+            var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
+            linear.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1], requiresGrad);
+        }
+
+        if (tensors.TryGetValue($"{prefix}.bias", out var b))
+            state["Bias"] = TypeConverter.Convert<TWeight, TModel>(
+                ReverseGradTensor<TWeight>.FromMatrix(b.Data, 1, b.Shape[0]));
+
+        if (state.Count > 0) linear.LoadStateDict(state);
+    }
+
+    public static void LoadLinearSlice<TModel, TWeight>(
+        Linear<TModel, TWeight> linear,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string prefix,
+        int rowOffset,
+        int rowCount)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        ArgumentNullException.ThrowIfNull(linear);
+        if (rowOffset < 0)
+            throw new ArgumentOutOfRangeException(nameof(rowOffset), rowOffset, "rowOffset must be non-negative.");
+        if (rowCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rowCount), rowCount, "rowCount must be positive.");
+        if (!tensors.TryGetValue($"{prefix}.weight", out var w))
+            throw new KeyNotFoundException($"Missing tensor: {prefix}.weight");
+
+        int inFeatures = w.Shape[1];
+        int fusedRows = w.Shape[0];
+        if (rowOffset + rowCount > fusedRows)
+            throw new InvalidOperationException(
+                $"Row block [{rowOffset}, {rowOffset + rowCount}) exceeds the {fusedRows} rows of {prefix}.weight.");
+        if (inFeatures != linear.InFeatures || rowCount != linear.OutFeatures)
+            throw new InvalidOperationException(
+                $"Row block of {prefix}.weight is [{rowCount}, {inFeatures}] but the target linear is " +
+                $"[{linear.OutFeatures}, {linear.InFeatures}].");
+
+        var slice = new TWeight[rowCount * inFeatures];
+        Array.Copy(w.Data, rowOffset * inFeatures, slice, 0, slice.Length);
+
+        var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
+        linear.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(slice, rowCount, inFeatures, requiresGrad);
+    }
+
+    public static void LoadFusedLinearSlice<TModel, TWeight>(
+        Linear<TModel, TWeight> linear,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string weightKey,
+        string biasKey,
+        int rowOffset,
+        int rowCount)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        ArgumentNullException.ThrowIfNull(linear);
+        if (!tensors.TryGetValue(weightKey, out var w))
+            throw new KeyNotFoundException($"Missing tensor: {weightKey}");
+        if (!tensors.TryGetValue(biasKey, out var b))
+            throw new KeyNotFoundException($"Missing tensor: {biasKey}");
+
+        int inFeatures = w.Shape[1];
+        if (rowOffset + rowCount > w.Shape[0])
+            throw new InvalidOperationException($"Row block [{rowOffset}, {rowOffset + rowCount}) exceeds weight rows.");
+        if (rowOffset + rowCount > b.Shape[0])
+            throw new InvalidOperationException($"Block exceeds bias entries.");
+        if (inFeatures != linear.InFeatures || rowCount != linear.OutFeatures)
+            throw new InvalidOperationException($"Row block shape mismatch.");
+
+        var weightSlice = new TWeight[rowCount * inFeatures];
+        Array.Copy(w.Data, rowOffset * inFeatures, weightSlice, 0, weightSlice.Length);
+        var biasSlice = new TWeight[rowCount];
+        Array.Copy(b.Data, rowOffset, biasSlice, 0, rowCount);
+
+        var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
+        linear.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(weightSlice, rowCount, inFeatures, requiresGrad);
+
+        var state = new Dictionary<string, ReverseGradTensor<TModel>>
+        {
+            ["Bias"] = TypeConverter.Convert<TWeight, TModel>(
+                ReverseGradTensor<TWeight>.FromMatrix(biasSlice, 1, rowCount))
+        };
+        linear.LoadStateDict(state);
+    }
+    public static void LoadEmbedWidened<TModel, TWeight>(
+        Embedding<TModel, TModel> embed,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string key)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        if (!tensors.TryGetValue(key, out var t))
+            throw new KeyNotFoundException($"Missing tensor: {key}");
+        var tensor = TypeConverter.Convert<TWeight, TModel>(
+            ReverseGradTensor<TWeight>.FromMatrix(t.Data, t.Shape[0], t.Shape[1]));
+        embed.LoadStateDict(new Dictionary<string, ReverseGradTensor<TModel>> { ["Weight"] = tensor });
+    }
+
+    public static void LoadLinearWidened<TModel, TWeight>(
+        Linear<TModel, TModel> linear,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string prefix)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        var dict = new Dictionary<string, ReverseGradTensor<TModel>>();
+        if (tensors.TryGetValue($"{prefix}.weight", out var w))
+            dict["Weight"] = TypeConverter.Convert<TWeight, TModel>(
+                ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1]));
+        if (tensors.TryGetValue($"{prefix}.bias", out var b))
+            dict["Bias"] = TypeConverter.Convert<TWeight, TModel>(
+                ReverseGradTensor<TWeight>.FromMatrix(b.Data, 1, b.Shape[0]));
+        if (dict.Count > 0) linear.LoadStateDict(dict);
+    }
 }

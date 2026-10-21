@@ -12,36 +12,36 @@ namespace Nivara.AutoDiff.Nn;
 /// This mirrors the <c>LlamaDecoderLayer</c> used by SmolLM and the Llama family. Output
 /// shape equals the input shape <c>[L, hiddenSize]</c>.
 /// </summary>
-public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     readonly int hiddenSize;
     readonly int intermediateSize;
 
     // Fused-path scratch (inference-only). Plain fields not registered with the module system,
     // so they stay invisible to StateDict/serialization. Lazily sized on first fused use.
-    T[]? norm;
-    T[]? q;
-    T[]? k;
-    T[]? v;
-    T[]? attn;
-    T[]? h;
-    T[]? residual;
-    T[]? gate;
-    T[]? gateOut;
-    T[]? up;
+    TModel[]? norm;
+    TModel[]? q;
+    TModel[]? k;
+    TModel[]? v;
+    TModel[]? attn;
+    TModel[]? h;
+    TModel[]? residual;
+    TModel[]? gate;
+    TModel[]? gateOut;
+    TModel[]? up;
 
     /// <summary>Gets the pre-attention RMS norm.</summary>
-    public RMSNorm<T> InputNorm { get; }
+    public RMSNorm<TModel> InputNorm { get; }
     /// <summary>Gets the attention module.</summary>
-    public LlamaCausalAttention<T> Attention { get; }
+    public LlamaCausalAttention<TModel, TWeight> Attention { get; }
     /// <summary>Gets the post-attention RMS norm.</summary>
-    public RMSNorm<T> PostNorm { get; }
+    public RMSNorm<TModel> PostNorm { get; }
     /// <summary>Gets the SiLU gated-projection linear.</summary>
-    public Linear<T> GateProj { get; }
+    public Linear<TModel, TWeight> GateProj { get; }
     /// <summary>Gets the up-projection linear.</summary>
-    public Linear<T> UpProj { get; }
+    public Linear<TModel, TWeight> UpProj { get; }
     /// <summary>Gets the down-projection linear.</summary>
-    public Linear<T> DownProj { get; }
+    public Linear<TModel, TWeight> DownProj { get; }
 
     /// <summary>Gets the hidden (embedding) dimension.</summary>
     public int HiddenSize => hiddenSize;
@@ -77,12 +77,12 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         this.hiddenSize = hiddenSize;
         this.intermediateSize = intermediateSize;
 
-        InputNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
-        Attention = new LlamaCausalAttention<T>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta, qkvBias);
-        PostNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
-        GateProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
-        UpProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
-        DownProj = new Linear<T>(intermediateSize, hiddenSize, bias: false);
+        InputNorm = new RMSNorm<TModel>(hiddenSize, rmsNormEps);
+        Attention = new LlamaCausalAttention<TModel, TWeight>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta, qkvBias);
+        PostNorm = new RMSNorm<TModel>(hiddenSize, rmsNormEps);
+        GateProj = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: false);
+        UpProj = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: false);
+        DownProj = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: false);
 
         RegisterModules(InputNorm, Attention, PostNorm, GateProj, UpProj, DownProj);
     }
@@ -92,7 +92,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// </summary>
     /// <param name="input">The input tensor (rank 2)</param>
     /// <returns>The block output with shape <c>[L, hiddenSize]</c></returns>
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank != 2) throw new ArgumentException($"LlamaDecoderBlock expects 2D input [L, D], got {input.Rank}D");
@@ -114,8 +114,8 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
 
     /// <summary>
     /// Runs one Llama decoder block over a single new token during cached inference. Mirrors
-    /// <see cref="Forward(ReverseGradTensor{T})"/> (same residual/FFN structure) but routes the
-    /// attention through <see cref="LlamaCausalAttention{T}.ForwardCached"/> so projections are
+    /// <see cref="Forward(ReverseGradTensor{TModel})"/> (same residual/FFN structure) but routes the
+    /// attention through <see cref="LlamaCausalAttention{TModel}.ForwardCached"/> so projections are
     /// only computed for the one position.
     /// </summary>
     /// <param name="input">The new-token hidden state <c>[1, hiddenSize]</c></param>
@@ -124,11 +124,11 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <param name="vCache">Per-layer value cache (row-major per-KV-head)</param>
     /// <param name="cacheLen">Number of tokens already cached before this call</param>
     /// <returns>The block output <c>[1, hiddenSize]</c></returns>
-    public ReverseGradTensor<T> ForwardCached(
-        ReverseGradTensor<T> input,
+    public ReverseGradTensor<TModel> ForwardCached(
+        ReverseGradTensor<TModel> input,
         int positionOffset,
-        T[] kCache,
-        T[] vCache,
+        TModel[] kCache,
+        TModel[] vCache,
         int cacheLen)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -146,20 +146,20 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
 
     /// <summary>
     /// Runs one Llama decoder block over a batched <c>[L, hiddenSize]</c> prompt during cached
-    /// inference, routing attention through <see cref="LlamaCausalAttention{T}.ForwardPrefill"/>
+    /// inference, routing attention through <see cref="LlamaCausalAttention{TModel}.ForwardPrefill"/>
     /// so the per-KV-head key/value rows are captured into the caches in a single pass. Mirrors
-    /// <see cref="Forward(ReverseGradTensor{T})"/> (same residual/FFN structure).
+    /// <see cref="Forward(ReverseGradTensor{TModel})"/> (same residual/FFN structure).
     /// </summary>
     /// <param name="input">The prompt hidden states <c>[L, hiddenSize]</c></param>
     /// <param name="positionOffset">Absolute position of the first prompt row</param>
     /// <param name="kCache">Per-layer RoPE'd key cache (row-major per-KV-head)</param>
     /// <param name="vCache">Per-layer value cache (row-major per-KV-head)</param>
     /// <returns>The block output with shape <c>[L, hiddenSize]</c></returns>
-    public ReverseGradTensor<T> ForwardPrefill(
-        ReverseGradTensor<T> input,
+    public ReverseGradTensor<TModel> ForwardPrefill(
+        ReverseGradTensor<TModel> input,
         int positionOffset,
-        T[] kCache,
-        T[] vCache)
+        TModel[] kCache,
+        TModel[] vCache)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
 
@@ -177,9 +177,9 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <summary>
     /// Runs the fused single-token decoder block for cached inference with zero steady-state
     /// heap allocations (scratch arrays are reused across calls). Replicates
-    /// <see cref="ForwardCached(ReverseGradTensor{T}, int, T[], T[], int)"/> using the shared
-    /// span kernels directly — GEMV fast-path matmuls (<see cref="GradKernels.MatMulTransposedB{T}"/>),
-    /// <see cref="AttentionKernels{T}.DecodeAttention"/>, the per-row RMS kernel, RoPE in place,
+    /// <see cref="ForwardCached(ReverseGradTensor{TModel}, int, TModel[], TModel[], int)"/> using the shared
+    /// span kernels directly — GEMV fast-path matmuls (<see cref="GradKernels.MatMulTransposedB{TModel}"/>),
+    /// <see cref="AttentionKernels{TModel}.DecodeAttention"/>, the per-row RMS kernel, RoPE in place,
     /// and elementwise tensor primitives — so the values match the per-op chain bit-for-bit.
     /// The block output is written to <paramref name="output"/> (length ≥ <c>hiddenSize</c>) and
     /// the new RoPE'd pre-repeat key/value rows are appended to the caches at
@@ -193,11 +193,11 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <param name="vCache">Per-layer value cache (row-major per-KV-head)</param>
     /// <param name="cacheLen">Number of tokens already cached before this call</param>
     public void ForwardCachedFused(
-        ReadOnlySpan<T> input,
-        Span<T> output,
+        ReadOnlySpan<TModel> input,
+        Span<TModel> output,
         int positionOffset,
-        T[] kCache,
-        T[] vCache,
+        TModel[] kCache,
+        TModel[] vCache,
         int cacheLen)
     {
         if (input.Length != hiddenSize)
@@ -218,7 +218,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         int needed = newLen * kvWidth;
         if (kCache.Length < needed || vCache.Length < needed)
             throw new ArgumentException("Cache buffers must have capacity for the new token row.");
-        T scale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
+        TModel scale = TModel.CreateChecked(1.0 / Math.Sqrt(headDim));
 
         if (norm is null) EnsureFusedScratch(qWidth, kvWidth);
         var normBuf = norm!;
@@ -233,11 +233,11 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
 
         // InputNorm (in-place kernel then gamma multiply, same math as RMSNorm.ForwardInference).
         input.CopyTo(normBuf);
-        RMSNormKernel<T>.PerRowRMSNormForwardKernel(normBuf, normBuf, 1, hiddenSize, double.CreateChecked(InputNorm.Eps));
+        RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(normBuf, normBuf, 1, hiddenSize, double.CreateChecked(InputNorm.Eps));
         var iGamma = WeightSpan(InputNorm.Weight);
         TensorPrimitives.Multiply(normBuf.AsSpan(0, hiddenSize), iGamma, normBuf.AsSpan(0, hiddenSize));
 
-        // Q/K/V projections (B = W^T for a 1-row a is the GEMV fast path) plus bias.
+        // Q/K/V projections (B = W^TModel for a 1-row a is the GEMV fast path) plus bias.
         GradKernels.MatMulTransposedB(normBuf.AsSpan(0, hiddenSize), WeightSpan(Attention.QProj.Weight), qBuf, 1, hiddenSize, qWidth);
         GradKernels.MatMulTransposedB(normBuf.AsSpan(0, hiddenSize), WeightSpan(Attention.KProj.Weight), kBuf, 1, hiddenSize, kvWidth);
         GradKernels.MatMulTransposedB(normBuf.AsSpan(0, hiddenSize), WeightSpan(Attention.VProj.Weight), vBuf, 1, hiddenSize, kvWidth);
@@ -263,7 +263,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         vBuf.AsSpan(0, kvWidth).CopyTo(vCache.AsSpan(cacheLen * kvWidth, kvWidth));
 
         // GQA decode attention over the full cached prefix (inclusive of the new row).
-        AttentionKernels<T>.DecodeAttention(
+        AttentionKernels<TModel>.DecodeAttention(
             qBuf.AsSpan(0, qWidth), kCache.AsSpan(0, needed), vCache.AsSpan(0, needed),
             attnBuf.AsSpan(0, qWidth), newLen, numHeads, numKvHeads, headDim, scale);
 
@@ -274,7 +274,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         if (residual is not null) hBuf.AsSpan(0, hiddenSize).CopyTo(residual);
 
         // PostNorm (in place), then the gated SiLU feed-forward.
-        RMSNormKernel<T>.PerRowRMSNormForwardKernel(hBuf, hBuf, 1, hiddenSize, double.CreateChecked(PostNorm.Eps));
+        RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(hBuf, hBuf, 1, hiddenSize, double.CreateChecked(PostNorm.Eps));
         var pGamma = WeightSpan(PostNorm.Weight);
         TensorPrimitives.Multiply(hBuf.AsSpan(0, hiddenSize), pGamma, hBuf.AsSpan(0, hiddenSize));
 
@@ -291,7 +291,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
 
     /// <summary>
     /// Runs the fused batched decoder block for cached-inference prefill, replicating
-    /// <see cref="ForwardPrefill(ReverseGradTensor{T}, int, T[], T[])"/> with the same span
+    /// <see cref="ForwardPrefill(ReverseGradTensor{TModel}, int, TModel[], TModel[])"/> with the same span
     /// kernels as <see cref="ForwardCachedFused"/> over <c>[qLen, hiddenSize]</c> rows. The
     /// per-layer workspace is ArrayPool-rented for the call (zero steady-state allocations past
     /// pool warm-up), so an L-token prefill builds no per-op tensors on the row chain. The
@@ -306,11 +306,11 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <param name="kCache">Per-layer RoPE'd key cache (row-major per-KV-head)</param>
     /// <param name="vCache">Per-layer value cache (row-major per-KV-head)</param>
     public void ForwardPrefillFused(
-        ReadOnlySpan<T> input,
-        Span<T> output,
+        ReadOnlySpan<TModel> input,
+        Span<TModel> output,
         int positionOffset,
-        T[] kCache,
-        T[] vCache)
+        TModel[] kCache,
+        TModel[] vCache)
     {
         if (input.Length == 0 || input.Length % hiddenSize != 0)
             throw new ArgumentException($"Input length {input.Length} must be a positive multiple of the hidden size {hiddenSize}.");
@@ -329,24 +329,24 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         int needed = (positionOffset + qLen) * kvWidth;
         if (kCache.Length < needed || vCache.Length < needed)
             throw new ArgumentException("Cache buffers must have capacity for the prefill rows.");
-        T scale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
+        TModel scale = TModel.CreateChecked(1.0 / Math.Sqrt(headDim));
 
-        var normArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
-        var qArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * qWidth, 1));
-        var kArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * kvWidth, 1));
-        var vArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * kvWidth, 1));
-        var attnArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * qWidth, 1));
-        var hArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
-        var residualArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
-        var gateArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
-        var gateOutArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
-        var upArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
-        var mlpArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
+        var normArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
+        var qArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * qWidth, 1));
+        var kArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * kvWidth, 1));
+        var vArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * kvWidth, 1));
+        var attnArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * qWidth, 1));
+        var hArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
+        var residualArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
+        var gateArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
+        var gateOutArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
+        var upArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
+        var mlpArr = ArrayPool<TModel>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
         try
         {
             // InputNorm over the whole chunk.
             input.CopyTo(normArr);
-            RMSNormKernel<T>.PerRowRMSNormForwardKernel(normArr, normArr, qLen, hiddenSize, double.CreateChecked(InputNorm.Eps));
+            RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(normArr, normArr, qLen, hiddenSize, double.CreateChecked(InputNorm.Eps));
             var iGamma = WeightSpan(InputNorm.Weight);
             for (int r = 0; r < qLen; r++)
                 TensorPrimitives.Multiply(normArr.AsSpan(r * hiddenSize, hiddenSize), iGamma, normArr.AsSpan(r * hiddenSize, hiddenSize));
@@ -386,7 +386,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
             vArr.AsSpan(0, rowBytes).CopyTo(vCache.AsSpan(positionOffset * kvWidth, rowBytes));
 
             // Batched GQA attention over this chunk, then OProj + residual in place.
-            AttentionKernels<T>.BatchedAttention(
+            AttentionKernels<TModel>.BatchedAttention(
                 qArr.AsSpan(0, qLen * qWidth),
                 kCache.AsSpan(positionOffset * kvWidth, rowBytes),
                 vCache.AsSpan(positionOffset * kvWidth, rowBytes),
@@ -397,7 +397,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
             hArr.AsSpan(0, qLen * hiddenSize).CopyTo(residualArr);
 
             // PostNorm, then the gated SiLU feed-forward.
-            RMSNormKernel<T>.PerRowRMSNormForwardKernel(hArr, hArr, qLen, hiddenSize, double.CreateChecked(PostNorm.Eps));
+            RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(hArr, hArr, qLen, hiddenSize, double.CreateChecked(PostNorm.Eps));
             var pGamma = WeightSpan(PostNorm.Weight);
             for (int r = 0; r < qLen; r++)
                 TensorPrimitives.Multiply(hArr.AsSpan(r * hiddenSize, hiddenSize), pGamma, hArr.AsSpan(r * hiddenSize, hiddenSize));
@@ -415,39 +415,48 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(normArr);
-            ArrayPool<T>.Shared.Return(qArr);
-            ArrayPool<T>.Shared.Return(kArr);
-            ArrayPool<T>.Shared.Return(vArr);
-            ArrayPool<T>.Shared.Return(attnArr);
-            ArrayPool<T>.Shared.Return(hArr);
-            ArrayPool<T>.Shared.Return(residualArr);
-            ArrayPool<T>.Shared.Return(gateArr);
-            ArrayPool<T>.Shared.Return(gateOutArr);
-            ArrayPool<T>.Shared.Return(upArr);
-            ArrayPool<T>.Shared.Return(mlpArr);
+            ArrayPool<TModel>.Shared.Return(normArr);
+            ArrayPool<TModel>.Shared.Return(qArr);
+            ArrayPool<TModel>.Shared.Return(kArr);
+            ArrayPool<TModel>.Shared.Return(vArr);
+            ArrayPool<TModel>.Shared.Return(attnArr);
+            ArrayPool<TModel>.Shared.Return(hArr);
+            ArrayPool<TModel>.Shared.Return(residualArr);
+            ArrayPool<TModel>.Shared.Return(gateArr);
+            ArrayPool<TModel>.Shared.Return(gateOutArr);
+            ArrayPool<TModel>.Shared.Return(upArr);
+            ArrayPool<TModel>.Shared.Return(mlpArr);
         }
     }
 
     void EnsureFusedScratch(int qWidth, int kvWidth)
     {
-        norm = new T[hiddenSize];
-        q = new T[qWidth];
-        k = new T[kvWidth];
-        v = new T[kvWidth];
-        attn = new T[qWidth];
-        h = new T[hiddenSize];
-        residual = new T[hiddenSize];
-        gate = new T[intermediateSize];
-        gateOut = new T[intermediateSize];
-        up = new T[intermediateSize];
+        norm = new TModel[hiddenSize];
+        q = new TModel[qWidth];
+        k = new TModel[kvWidth];
+        v = new TModel[kvWidth];
+        attn = new TModel[qWidth];
+        h = new TModel[hiddenSize];
+        residual = new TModel[hiddenSize];
+        gate = new TModel[intermediateSize];
+        gateOut = new TModel[intermediateSize];
+        up = new TModel[intermediateSize];
     }
 
-    static ReadOnlySpan<T> WeightSpan(Parameter<T>? weight)
+    static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
     {
         if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
-        if (!weight.Tensor.Data.TryGetSpan(out var span))
+        if (typeof(TParam) == typeof(TModel))
+        {
+            if (!weight.Tensor.Data.TryGetSpan(out var narrowSpan))
+                throw new InvalidOperationException("Parameter data must be null-free.");
+            return System.Runtime.InteropServices.MemoryMarshal.Cast<TParam, TModel>(narrowSpan);
+        }
+        if (!weight.Tensor.Data.TryGetSpan(out var sourceSpan))
             throw new InvalidOperationException("Parameter data must be null-free.");
-        return span;
+        var widened = new TModel[sourceSpan.Length];
+        for (int i = 0; i < widened.Length; i++)
+            widened[i] = TModel.CreateChecked(sourceSpan[i]);
+        return widened.AsSpan();
     }
 }

@@ -32,7 +32,7 @@ static class DistilBertSst
     {
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
         var model = new DistilBertForSequenceClassification<T>(config.ToBertConfig(), numClasses: 2);
-        model.LoadWeights<T>(tensors);
+        model.LoadWeights(tensors);
         return model;
     }
 

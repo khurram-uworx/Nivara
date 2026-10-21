@@ -72,18 +72,20 @@ public class ModernBertWeightLoadingTests
         return tensors.ToDictionary(kv => kv.Key, kv => (kv.Value.Item1, kv.Value.Item2));
     }
 
-    static float[] LinearWeight(Linear<float> linear)
+    static float[] LinearWeight(Linear<float, float> linear)
     {
         var tensor = linear.Weight!.Tensor;
-        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
-        return span.ToArray();
+        var data = new float[tensor.Length];
+        tensor.Data.CopyTo(data, 0f);
+        return data;
     }
 
-    static float[] EmbeddingWeight(Embedding<float> embedding)
+    static float[] EmbeddingWeight(Embedding<float, float> embedding)
     {
         var tensor = embedding.Weight!.Tensor;
-        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
-        return span.ToArray();
+        var data = new float[tensor.Length];
+        tensor.Data.CopyTo(data, 0f);
+        return data;
     }
 
     static float[] NormWeight(LayerNorm<float> norm)
@@ -105,8 +107,8 @@ public class ModernBertWeightLoadingTests
             ["W.weight"] = (fused, [rows, cols]),
         };
 
-        var linear = new Linear<float>(cols, 3);
-        StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 3, 3);
+        var linear = new Linear<float, float>(cols, 3);
+        StateDictLoader.LoadLinearSlice(linear, tensors, "W", 3, 3);
 
         var expected = fused.Skip(9).Take(9).ToArray();
         Assert.That(LinearWeight(linear), Is.EqualTo(expected));
@@ -122,8 +124,8 @@ public class ModernBertWeightLoadingTests
             ["W.weight"] = (fused, [rows, cols]),
         };
 
-        var linear = new Linear<float>(cols, 2);
-        StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 0, 2);
+        var linear = new Linear<float, float>(cols, 2);
+        StateDictLoader.LoadLinearSlice(linear, tensors, "W", 0, 2);
 
         Assert.That(LinearWeight(linear), Is.EqualTo(new[] { 100f, 101f, 102f, 103f, 104f, 105f }));
     }
@@ -132,10 +134,10 @@ public class ModernBertWeightLoadingTests
     public void LoadLinearSlice_MissingTensor_ThrowsWithTheKeyName()
     {
         var tensors = new Dictionary<string, (float[] Data, int[] Shape)>();
-        var linear = new Linear<float>(4, 2);
+        var linear = new Linear<float, float>(4, 2);
 
         var ex = Assert.Throws<KeyNotFoundException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "attn.Wqkv", 0, 2));
+            () => StateDictLoader.LoadLinearSlice(linear, tensors, "attn.Wqkv", 0, 2));
         Assert.That(ex!.Message, Does.Contain("attn.Wqkv.weight"));
     }
 
@@ -146,10 +148,10 @@ public class ModernBertWeightLoadingTests
         {
             ["W.weight"] = (Filled(6, 3, 0f), [6, 3]),
         };
-        var linear = new Linear<float>(3, 3);
+        var linear = new Linear<float, float>(3, 3);
 
         var ex = Assert.Throws<InvalidOperationException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 4, 3));
+            () => StateDictLoader.LoadLinearSlice(linear, tensors, "W", 4, 3));
         Assert.That(ex!.Message, Does.Contain("exceeds"));
     }
 
@@ -160,10 +162,10 @@ public class ModernBertWeightLoadingTests
         {
             ["W.weight"] = (Filled(6, 3, 0f), [6, 3]),
         };
-        var linear = new Linear<float>(5, 3);
+        var linear = new Linear<float, float>(5, 3);
 
         Assert.Throws<InvalidOperationException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 0, 3));
+            () => StateDictLoader.LoadLinearSlice(linear, tensors, "W", 0, 3));
     }
 
     [Test]
@@ -173,14 +175,14 @@ public class ModernBertWeightLoadingTests
         {
             ["W.weight"] = (Filled(6, 3, 0f), [6, 3]),
         };
-        var linear = new Linear<float>(3, 3);
+        var linear = new Linear<float, float>(3, 3);
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", -1, 3));
+            () => StateDictLoader.LoadLinearSlice(linear, tensors, "W", -1, 3));
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 0, 0));
+            () => StateDictLoader.LoadLinearSlice(linear, tensors, "W", 0, 0));
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(linear, tensors, "W", 0, -3));
+            () => StateDictLoader.LoadLinearSlice(linear, tensors, "W", 0, -3));
     }
 
     [Test]
@@ -192,7 +194,7 @@ public class ModernBertWeightLoadingTests
         };
 
         Assert.Throws<ArgumentNullException>(
-            () => StateDictLoader.LoadLinearSlice<float, float>(null!, tensors, "W", 0, 3));
+            () => StateDictLoader.LoadLinearSlice((Linear<float, float>)null!, tensors, "W", 0, 3));
     }
 
     //  ── fused QKV / gate-up binding ───────────────────────────────────────────

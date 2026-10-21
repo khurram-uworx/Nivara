@@ -42,29 +42,29 @@ public sealed record BertConfig
     }
 }
 
-public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class BertSelfAttention<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly Linear<T> qProj;
-    public readonly Linear<T> kProj;
-    public readonly Linear<T> vProj;
-    public readonly Linear<T> oProj;
+    public readonly Linear<TModel, TWeight> qProj;
+    public readonly Linear<TModel, TWeight> kProj;
+    public readonly Linear<TModel, TWeight> vProj;
+    public readonly Linear<TModel, TWeight> oProj;
     readonly int embedDim;
     readonly int _numHeads;
-    readonly T _scale;
+    readonly TModel _scale;
 
     public BertSelfAttention(int embedDim, int numHeads)
     {
-        qProj = new Linear<T>(embedDim, embedDim);
-        kProj = new Linear<T>(embedDim, embedDim);
-        vProj = new Linear<T>(embedDim, embedDim);
-        oProj = new Linear<T>(embedDim, embedDim);
+        qProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+        kProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+        vProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+        oProj = new Linear<TModel, TWeight>(embedDim, embedDim);
         this.embedDim = embedDim;
         _numHeads = numHeads;
-        _scale = T.CreateChecked(1.0 / Math.Sqrt(embedDim / numHeads));
+        _scale = TModel.CreateChecked(1.0 / Math.Sqrt(embedDim / numHeads));
         RegisterModules(qProj, kProj, vProj, oProj);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         var Q = qProj.Forward(input);
         var K = kProj.Forward(input);
@@ -72,7 +72,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         return oProj.Forward(MultiHeadAttention(Q, K, V, null));
     }
 
-    public ReverseGradTensor<T> ForwardWithValidLength(ReverseGradTensor<T> input, int validLength)
+    public ReverseGradTensor<TModel> ForwardWithValidLength(ReverseGradTensor<TModel> input, int validLength)
     {
         var Q = qProj.Forward(input);
         var K = kProj.Forward(input);
@@ -81,29 +81,29 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         return oProj.Forward(ReverseGradOperations.MultiHeadAttention(Q, K, V, _numHeads, _scale, null, -1, validLength));
     }
 
-    public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> ForwardWithMask(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? paddingMask)
     {
         var Q = qProj.Forward(input);
         var K = kProj.Forward(input);
         var V = vProj.Forward(input);
 
-        ReverseGradTensor<T>? mask = null;
+        ReverseGradTensor<TModel>? mask = null;
         if (paddingMask != null)
         {
             int L = Q.Shape[0];
-            var maskData = new T[L * L];
+            var maskData = new TModel[L * L];
             for (int j = 0; j < paddingMask.Length && j < L; j++)
-                if (paddingMask.Data[j] is T pv && float.CreateChecked(pv) < 0.5f)
+                if (paddingMask.Data[j] is TModel pv && float.CreateChecked(pv) < 0.5f)
                     for (int i = 0; i < L; i++)
-                        maskData[i * L + j] = T.CreateChecked(float.NegativeInfinity);
-            mask = ReverseGradTensor<T>.FromMatrix(maskData, L, L, requiresGrad: false);
+                        maskData[i * L + j] = TModel.CreateChecked(float.NegativeInfinity);
+            mask = ReverseGradTensor<TModel>.FromMatrix(maskData, L, L, requiresGrad: false);
         }
 
         return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
     }
 
-    public ReverseGradTensor<T> ForwardBatched(
-        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    public ReverseGradTensor<TModel> ForwardBatched(
+        ReverseGradTensor<TModel> input, ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
         var Q = qProj.Forward(input);
         var K = kProj.Forward(input);
@@ -120,11 +120,11 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         return oProj.Forward(attn);
     }
 
-    static ReverseGradTensor<T> BuildBatchedPaddingMask(
-        ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    static ReverseGradTensor<TModel> BuildBatchedPaddingMask(
+        ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
-        var maskData = new T[batchSize * seqLen * seqLen];
-        var negInf = T.CreateChecked(double.NegativeInfinity);
+        var maskData = new TModel[batchSize * seqLen * seqLen];
+        var negInf = TModel.CreateChecked(double.NegativeInfinity);
 
         for (int b = 0; b < batchSize; b++)
         {
@@ -132,7 +132,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
             int maskBase = b * seqLen;
             for (int j = 0; j < seqLen; j++)
             {
-                if (attentionMask.Data[maskBase + j] == T.Zero)
+                if (attentionMask.Data[maskBase + j] == TModel.Zero)
                 {
                     for (int i = 0; i < seqLen; i++)
                         maskData[rowBase + i * seqLen + j] = negInf;
@@ -140,38 +140,38 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
             }
         }
 
-        var tensor = ReverseGradTensor<T>.FromArray(maskData, requiresGrad: false);
+        var tensor = ReverseGradTensor<TModel>.FromArray(maskData, requiresGrad: false);
         tensor.Reshape(batchSize, seqLen, seqLen);
         return tensor;
     }
 
-    ReverseGradTensor<T> MultiHeadAttention(
-        ReverseGradTensor<T> Q, ReverseGradTensor<T> K, ReverseGradTensor<T> V,
-        ReverseGradTensor<T>? mask)
+    ReverseGradTensor<TModel> MultiHeadAttention(
+        ReverseGradTensor<TModel> Q, ReverseGradTensor<TModel> K, ReverseGradTensor<TModel> V,
+        ReverseGradTensor<TModel>? mask)
     {
         return ReverseGradOperations.MultiHeadAttention(Q, K, V, _numHeads, _scale, mask);
     }
 }
 
-public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class BertLayer<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly LayerNorm<T> ln1;
-    public readonly BertSelfAttention<T> attn;
-    public readonly LayerNorm<T> ln2;
-    public readonly Linear<T> fc1;
-    public readonly Linear<T> fc2;
+    public readonly LayerNorm<TModel> ln1;
+    public readonly BertSelfAttention<TModel, TWeight> attn;
+    public readonly LayerNorm<TModel> ln2;
+    public readonly Linear<TModel, TWeight> fc1;
+    public readonly Linear<TModel, TWeight> fc2;
 
     public BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps)
     {
-        ln1 = new LayerNorm<T>(hiddenSize, eps);
-        attn = new BertSelfAttention<T>(hiddenSize, numHeads);
-        ln2 = new LayerNorm<T>(hiddenSize, eps);
-        fc1 = new Linear<T>(hiddenSize, intermediateSize, bias: true);
-        fc2 = new Linear<T>(intermediateSize, hiddenSize, bias: true);
+        ln1 = new LayerNorm<TModel>(hiddenSize, eps);
+        attn = new BertSelfAttention<TModel, TWeight>(hiddenSize, numHeads);
+        ln2 = new LayerNorm<TModel>(hiddenSize, eps);
+        fc1 = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: true);
+        fc2 = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: true);
         RegisterModules(ln1, attn, ln2, fc1, fc2);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         var h = attn.Forward(input);
         h = ReverseGradOperations.Add(h, input);
@@ -185,7 +185,7 @@ public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIee
         return h2;
     }
 
-    public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> ForwardWithMask(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? paddingMask)
     {
         var h = attn.ForwardWithMask(input, paddingMask);
         h = ReverseGradOperations.Add(h, input);
@@ -199,8 +199,8 @@ public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIee
         return h2;
     }
 
-    public ReverseGradTensor<T> ForwardBatched(
-        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    public ReverseGradTensor<TModel> ForwardBatched(
+        ReverseGradTensor<TModel> input, ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
         var h = attn.ForwardBatched(input, attentionMask, batchSize, seqLen);
         h = ReverseGradOperations.Add(h, input);
@@ -215,26 +215,26 @@ public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIee
     }
 }
 
-public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class BertEncoder<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly Embedding<T> wordEmbed;
-    public readonly Embedding<T> posEmbed;
-    public readonly Embedding<T>? tokenTypeEmbed;
-    public readonly LayerNorm<T> embedLn;
-    public readonly BertLayer<T>[] layers;
+    public readonly Embedding<TModel, TWeight> wordEmbed;
+    public readonly Embedding<TModel, TWeight> posEmbed;
+    public readonly Embedding<TModel, TWeight>? tokenTypeEmbed;
+    public readonly LayerNorm<TModel> embedLn;
+    public readonly BertLayer<TModel, TWeight>[] layers;
     readonly bool _includeTokenTypeEmbedding;
 
     public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding = true)
     {
         _includeTokenTypeEmbedding = includeTokenTypeEmbedding;
-        wordEmbed = new Embedding<T>(config.VocabSize, config.HiddenSize);
-        posEmbed = new Embedding<T>(config.MaxPositionEmbeddings, config.HiddenSize);
+        wordEmbed = new Embedding<TModel, TWeight>(config.VocabSize, config.HiddenSize);
+        posEmbed = new Embedding<TModel, TWeight>(config.MaxPositionEmbeddings, config.HiddenSize);
         if (includeTokenTypeEmbedding)
-            tokenTypeEmbed = new Embedding<T>(2, config.HiddenSize);
-        embedLn = new LayerNorm<T>(config.HiddenSize, config.LayerNormEps);
-        layers = new BertLayer<T>[config.NumHiddenLayers];
+            tokenTypeEmbed = new Embedding<TModel, TWeight>(2, config.HiddenSize);
+        embedLn = new LayerNorm<TModel>(config.HiddenSize, config.LayerNormEps);
+        layers = new BertLayer<TModel, TWeight>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
-            layers[i] = new BertLayer<T>(config.HiddenSize, config.IntermediateSize, config.NumAttentionHeads, config.LayerNormEps);
+            layers[i] = new BertLayer<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, config.NumAttentionHeads, config.LayerNormEps);
 
         RegisterModules(wordEmbed, posEmbed, embedLn);
         if (includeTokenTypeEmbedding)
@@ -243,22 +243,22 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
             RegisterModules(layer);
     }
 
-    ReverseGradTensor<T> TokenTypeEmb(int len)
+    ReverseGradTensor<TModel> TokenTypeEmb(int len)
     {
-        var ttIds = new T[len];
-        Array.Fill(ttIds, T.Zero);
-        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
+        var ttIds = new TModel[len];
+        Array.Fill(ttIds, TModel.Zero);
+        var ttInput = ReverseGradTensor<TModel>.FromArray(ttIds, requiresGrad: false);
         ttInput.Reshape(len);
         return tokenTypeEmbed!.Forward(ttInput);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         int seqLen = input.Shape[0];
 
-        var posIds = new T[seqLen];
-        for (int i = 0; i < seqLen; i++) posIds[i] = T.CreateChecked(i);
-        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        var posIds = new TModel[seqLen];
+        for (int i = 0; i < seqLen; i++) posIds[i] = TModel.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<TModel>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
         var wordEmb = wordEmbed.Forward(input);
@@ -274,13 +274,13 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
         return hidden;
     }
 
-    public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> ForwardWithMask(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? paddingMask)
     {
         int seqLen = input.Shape[0];
 
-        var posIds = new T[seqLen];
-        for (int i = 0; i < seqLen; i++) posIds[i] = T.CreateChecked(i);
-        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        var posIds = new TModel[seqLen];
+        for (int i = 0; i < seqLen; i++) posIds[i] = TModel.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<TModel>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
         var wordEmb = wordEmbed.Forward(input);
@@ -296,14 +296,14 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
         return hidden;
     }
 
-    public ReverseGradTensor<T> ForwardBatched(
-        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    public ReverseGradTensor<TModel> ForwardBatched(
+        ReverseGradTensor<TModel> input, ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
-        var posIds = new T[batchSize * seqLen];
+        var posIds = new TModel[batchSize * seqLen];
         for (int b = 0; b < batchSize; b++)
             for (int i = 0; i < seqLen; i++)
-                posIds[b * seqLen + i] = T.CreateChecked(i);
-        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+                posIds[b * seqLen + i] = TModel.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<TModel>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(batchSize * seqLen);
 
         var wordEmb = wordEmbed.Forward(input);
@@ -320,18 +320,18 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
     }
 
     /// <summary>
-    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{T})"/>. Token IDs
+    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{TModel})"/>. Token IDs
     /// are supplied as <see cref="int"/> and never round-tripped through the compute dtype
-    /// <typeparamref name="T"/>, so this is the correct overload for narrow-precision dtypes
+    /// <typeparamref name="TModel"/>, so this is the correct overload for narrow-precision dtypes
     /// (BFloat16 / Half) whose integer range cannot represent typical vocabularies.
     /// </summary>
-    public ReverseGradTensor<T> Forward(int[] inputIds)
+    public ReverseGradTensor<TModel> Forward(int[] inputIds)
     {
         int seqLen = inputIds.Length;
 
-        var posIds = new T[seqLen];
-        for (int i = 0; i < seqLen; i++) posIds[i] = T.CreateChecked(i);
-        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        var posIds = new TModel[seqLen];
+        for (int i = 0; i < seqLen; i++) posIds[i] = TModel.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<TModel>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
         var wordEmb = wordEmbed.Forward(inputIds);
@@ -348,16 +348,16 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
     }
 
     /// <summary>
-    /// Exact-integer-index variant of <see cref="ForwardWithMask(ReverseGradTensor{T}, ReverseGradTensor{T}?)"/>.
+    /// Exact-integer-index variant of <see cref="ForwardWithMask(ReverseGradTensor{TModel}, ReverseGradTensor{TModel}?)"/>.
     /// See <see cref="Forward(int[])"/> for why token IDs are passed as <see cref="int"/>.
     /// </summary>
-    public ReverseGradTensor<T> ForwardWithMask(int[] inputIds, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> ForwardWithMask(int[] inputIds, ReverseGradTensor<TModel>? paddingMask)
     {
         int seqLen = inputIds.Length;
 
-        var posIds = new T[seqLen];
-        for (int i = 0; i < seqLen; i++) posIds[i] = T.CreateChecked(i);
-        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        var posIds = new TModel[seqLen];
+        for (int i = 0; i < seqLen; i++) posIds[i] = TModel.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<TModel>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
         var wordEmb = wordEmbed.Forward(inputIds);
@@ -375,16 +375,16 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
 
     /// <summary>
     /// Exact-integer-index variant of
-    /// <see cref="ForwardBatched(ReverseGradTensor{T}, ReverseGradTensor{T}, int, int)"/>.
+    /// <see cref="ForwardBatched(ReverseGradTensor{TModel}, ReverseGradTensor{TModel}, int, int)"/>.
     /// See <see cref="Forward(int[])"/> for why token IDs are passed as <see cref="int"/>.
     /// </summary>
-    public ReverseGradTensor<T> ForwardBatched(int[] inputIds, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    public ReverseGradTensor<TModel> ForwardBatched(int[] inputIds, ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
-        var posIds = new T[batchSize * seqLen];
+        var posIds = new TModel[batchSize * seqLen];
         for (int b = 0; b < batchSize; b++)
             for (int i = 0; i < seqLen; i++)
-                posIds[b * seqLen + i] = T.CreateChecked(i);
-        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+                posIds[b * seqLen + i] = TModel.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<TModel>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(batchSize * seqLen);
 
         var wordEmb = wordEmbed.Forward(inputIds);
@@ -401,43 +401,43 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
     }
 }
 
-public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public class MiniLMDistilled<TModel, TWeight> : Module<TModel> where TModel : struct, IFloatingPointIeee754<TModel> where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    public readonly BertEncoder<T> encoder;
+    public readonly BertEncoder<TModel, TWeight> encoder;
     public readonly BertConfig config;
 
     public MiniLMDistilled(BertConfig config)
     {
         this.config = config;
-        encoder = new BertEncoder<T>(config);
+        encoder = new BertEncoder<TModel, TWeight>(config);
         RegisterModules(encoder);
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         var hidden = encoder.Forward(input);
         var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
         return L2Normalize(clsToken, config.HiddenSize);
     }
 
-    public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> ForwardWithMask(ReverseGradTensor<TModel> input, ReverseGradTensor<TModel>? paddingMask)
     {
         var hidden = encoder.ForwardWithMask(input, paddingMask);
         var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
         return L2Normalize(clsToken, config.HiddenSize);
     }
 
-    public ReverseGradTensor<T> ForwardBatched(
-        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    public ReverseGradTensor<TModel> ForwardBatched(
+        ReverseGradTensor<TModel> input, ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
         return encoder.ForwardBatched(input, attentionMask, batchSize, seqLen);
     }
 
     /// <summary>
-    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{T})"/>. Token IDs
-    /// are passed as <see cref="int"/> (see <see cref="BertEncoder{T}.Forward(int[])"/>).
+    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{TModel})"/>. Token IDs
+    /// are passed as <see cref="int"/> (see <see cref="BertEncoder{TModel}.Forward(int[])"/>).
     /// </summary>
-    public ReverseGradTensor<T> Forward(int[] inputIds)
+    public ReverseGradTensor<TModel> Forward(int[] inputIds)
     {
         var hidden = encoder.Forward(inputIds);
         var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
@@ -445,9 +445,9 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPo
     }
 
     /// <summary>
-    /// Exact-integer-index variant of <see cref="ForwardWithMask(ReverseGradTensor{T}, ReverseGradTensor{T}?)"/>.
+    /// Exact-integer-index variant of <see cref="ForwardWithMask(ReverseGradTensor{TModel}, ReverseGradTensor{TModel}?)"/>.
     /// </summary>
-    public ReverseGradTensor<T> ForwardWithMask(int[] inputIds, ReverseGradTensor<T>? paddingMask)
+    public ReverseGradTensor<TModel> ForwardWithMask(int[] inputIds, ReverseGradTensor<TModel>? paddingMask)
     {
         var hidden = encoder.ForwardWithMask(inputIds, paddingMask);
         var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
@@ -456,36 +456,36 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPo
 
     /// <summary>
     /// Exact-integer-index variant of
-    /// <see cref="ForwardBatched(ReverseGradTensor{T}, ReverseGradTensor{T}, int, int)"/>.
+    /// <see cref="ForwardBatched(ReverseGradTensor{TModel}, ReverseGradTensor{TModel}, int, int)"/>.
     /// </summary>
-    public ReverseGradTensor<T> ForwardBatched(int[] inputIds, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    public ReverseGradTensor<TModel> ForwardBatched(int[] inputIds, ReverseGradTensor<TModel> attentionMask, int batchSize, int seqLen)
     {
         return encoder.ForwardBatched(inputIds, attentionMask, batchSize, seqLen);
     }
 
-    static ReverseGradTensor<T> ExtractRow(ReverseGradTensor<T> matrix, int row, int cols)
+    static ReverseGradTensor<TModel> ExtractRow(ReverseGradTensor<TModel> matrix, int row, int cols)
     {
         int offset = row * cols;
-        var data = new T[cols];
+        var data = new TModel[cols];
         matrix.Data.TryGetSpan(out var span);
         if (!span.IsEmpty)
             span.Slice(offset, cols).CopyTo(data);
         else
         {
-            var full = new T[matrix.Length];
-            matrix.Data.CopyTo(full, default(T)!);
+            var full = new TModel[matrix.Length];
+            matrix.Data.CopyTo(full, default(TModel)!);
             Array.Copy(full, offset, data, 0, cols);
         }
-        var result = ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
+        var result = ReverseGradTensor<TModel>.FromArray(data, requiresGrad: false);
         result.Reshape(cols);
         return result;
     }
 
-    static ReverseGradTensor<T> L2Normalize(ReverseGradTensor<T> vec, int hiddenSize)
+    static ReverseGradTensor<TModel> L2Normalize(ReverseGradTensor<TModel> vec, int hiddenSize)
     {
         int n = vec.Length;
-        var data = new T[n];
-        vec.Data.CopyTo(data.AsSpan(), default(T)!);
+        var data = new TModel[n];
+        vec.Data.CopyTo(data.AsSpan(), default(TModel)!);
         float norm = 0f;
         for (int i = 0; i < n; i++)
         {
@@ -497,20 +497,18 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPo
         {
             float invNorm = 1f / norm;
             for (int i = 0; i < n; i++)
-                data[i] = T.CreateChecked(float.CreateChecked(data[i]) * invNorm);
+                data[i] = TModel.CreateChecked(float.CreateChecked(data[i]) * invNorm);
         }
-        var result = ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
+        var result = ReverseGradTensor<TModel>.FromArray(data, requiresGrad: false);
         result.Reshape(hiddenSize);
         return result;
     }
 
-    public static MiniLMDistilled<TModel> LoadWeights<TModel, TWeight>(
+    public static MiniLMDistilled<TModel, TWeight> LoadWeights(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         BertConfig config)
-        where TModel : struct, IFloatingPointIeee754<TModel>
-        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        var model = new MiniLMDistilled<TModel>(config);
+        var model = new MiniLMDistilled<TModel, TWeight>(config);
         var enc = model.encoder;
 
         StateDictLoader.LoadEmbed(enc.wordEmbed, tensors, "embeddings.word_embeddings.weight");
@@ -536,10 +534,6 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPo
         return model;
     }
 
-    public static MiniLMDistilled<float> LoadWeights(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
-        BertConfig config)
-        => LoadWeights<float, float>(tensors, config);
 }
 
 public static class MiniLMTokenizer
@@ -633,4 +627,24 @@ public static class MiniLMEmbeddingGenerator
             providerName,
             defaultModelId: "all-minilm-l6-v2");
     }
+}
+
+public sealed class BertSelfAttention<T> : BertSelfAttention<T, T> where T : struct, IFloatingPointIeee754<T>
+{
+    public BertSelfAttention(int embedDim, int numHeads) : base(embedDim, numHeads) { }
+}
+
+public sealed class BertLayer<T> : BertLayer<T, T> where T : struct, IFloatingPointIeee754<T>
+{
+    public BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps) : base(hiddenSize, intermediateSize, numHeads, eps) { }
+}
+
+public sealed class BertEncoder<T> : BertEncoder<T, T> where T : struct, IFloatingPointIeee754<T>
+{
+    public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding = true) : base(config, includeTokenTypeEmbedding) { }
+}
+
+public sealed class MiniLMDistilled<T> : MiniLMDistilled<T, T> where T : struct, IFloatingPointIeee754<T>
+{
+    public MiniLMDistilled(BertConfig config) : base(config) { }
 }

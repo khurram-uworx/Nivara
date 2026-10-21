@@ -89,7 +89,7 @@ public sealed class ModernBertGpuRunner : IDisposable
     /// <summary>
     /// Uploads a ModernBERT encoder and its kernels to <paramref name="runtime"/>.
     /// <paramref name="prefix"/> selects the checkpoint layout, matching
-    /// <c>ModernBertEncoder&lt;T&gt;.LoadWeights</c>: <c>"model"</c> for the stock HuggingFace
+    /// <c>ModernBertEncoder&lt;T&gt;.LoadWeights: <c>"model"</c> for the stock HuggingFace
     /// backbone, <c>"encoder"</c> for Laya, which nests the same architecture under that name.
     /// </summary>
     public ModernBertGpuRunner(
