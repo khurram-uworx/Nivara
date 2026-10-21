@@ -124,6 +124,15 @@ internal interface IColumnStorage<T> : IDisposable
     ReadOnlyMemory<T> Data { get; }
 
     /// <summary>
+    /// For string columns, returns a cached span of per-element hash codes (0 for null positions).
+    /// Returns false for non-string element types. The cache is lazily populated and lives with
+    /// the storage instance.
+    /// </summary>
+    /// <param name="hashes">When this method returns true, contains the cached hash codes.</param>
+    /// <returns>true when the element type is string and hashes are available; otherwise false.</returns>
+    internal bool TryGetHashCodes(out ReadOnlySpan<int> hashes);
+
+    /// <summary>
     /// Gets a read-only span over the underlying data.
     /// </summary>
     /// <remarks>
