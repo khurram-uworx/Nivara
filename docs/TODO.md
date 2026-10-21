@@ -23,11 +23,12 @@ assessment. Root cause likely in the shared head attention/GEMM kernels at seqLe
 - LayerNorm verified correct on a non-trivial input (mean=2.5, var=1.25).
 - GELU verified correct (A&S polynomial matches).
 - Upload/Readback verified correct.
-- All individual operators match, but the end-to-end head still differs by 0.00018 (identity
-  LayerNorm) or 0.088 (original weights).
-- The issue must be in how the operators are composed or in a subtle difference in the
-  attention/validLength handling.
-- Next: check if the issue is in the attention kernel by testing with multiple tokens.
+- All individual operators (LayerNorm, GELU, GEMM, gather, CreateSubview, Upload/Readback)
+  verified correct on controlled inputs. Both CPU and GPU agree to ~1e-6.
+- Yet the end-to-end head still differs: CPU -0.084776, ILGPU -0.041759 (seqLen=1, 0 layers).
+- The issue must be in how the operators are composed or in a subtle interaction.
+- CreateSubview verified correct (type embedding sub-view works).
+- Next: check if the issue is in the marker gather stride or the type add.
 
 ## Verification
 - `laya --silk compare` PASS
