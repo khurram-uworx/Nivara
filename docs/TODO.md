@@ -18,14 +18,16 @@ assessment. Root cause likely in the shared head attention/GEMM kernels at seqLe
   loading (scorerHidden GELU + scorerOut GEMM).
 - Conclusion: the GPU GEMM kernel or weight loading differs from CPU. The LayerNorm was a
   red herring (it amplified a small GEMM difference through the weight matrix).
-- GEMM kernel verified correct on a known input (2x3 @ 3x2). CPU and GPU agree exactly.
-- With identity LayerNorm, the remaining 0.00018 diff is in the GELU or bias loading.
-- The GPU GELU uses the A&S erf polynomial (same as Silk). The CPU uses Math.Erf (exact).
-  The difference between exact erf and A&S is ~1e-7, not 0.00018.
-- The bias loading: GPU uses UploadPlain (direct copy). CPU uses StateDictLoader.LoadLinear.
-  Both read from the same tensors dictionary. Should be identical.
-- Next: check if the issue is in how the bias is applied (GEMM epilogue) or in the
-  type embedding loading.
+- GEMM kernel verified correct on synthetic (2x3 @ 3x2) and real (scorer.1.weight, 1x1024 @ 1024x1024)
+  inputs. CPU and GPU agree to ~1e-6.
+- LayerNorm verified correct on a non-trivial input (mean=2.5, var=1.25).
+- GELU verified correct (A&S polynomial matches).
+- Upload/Readback verified correct.
+- All individual operators match, but the end-to-end head still differs by 0.00018 (identity
+  LayerNorm) or 0.088 (original weights).
+- The issue must be in how the operators are composed or in a subtle difference in the
+  attention/validLength handling.
+- Next: check if the issue is in the attention kernel by testing with multiple tokens.
 
 ## Verification
 - `laya --silk compare` PASS
