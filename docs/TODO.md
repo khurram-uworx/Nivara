@@ -10,11 +10,13 @@ assessment. Root cause likely in the shared head attention/GEMM kernels at seqLe
 - Forced the attention kernel's recompute path (disable scoreCache): still FAIL.
 - Reduced seqLen to 128 and 32: still FAIL.
 - Reduced head layer count to 0 (type add + scorer only): still FAIL.
-- Conclusion: failure is not seqLen- or layer-dependent; it is in the type-add/scorer path
-  or a fundamental operator mismatch (GEMM/attention) common to both backends. The CPU head
-  matches the Python wheel, so the GPU head implementation is the culprit.
-- Next: isolate by running the GPU head on a controlled input (e.g. zeros) vs CPU, and
-  compare intermediate activations (type-add output, scorer logits).
+- Ran GPU head on a trivial all-ones input (seqLen=4, 0 layers): CPU logits -0.084776 (identical
+  for both markers); Silk -0.237384/-0.237392; ILGPU -0.136088 (identical). Both backends
+  produce symmetric results but differ from CPU and from each other.
+- Conclusion: failure is not seqLen- or layer-dependent; it is a fundamental operator or weight-
+  loading difference in the GPU head (type-add or scorer), common to both backends. The CPU head
+  matches the Python wheel.
+- Next: isolate each operator (type-add, LayerNorm, GEMM, GELU) on a controlled input.
 
 ## Verification
 - `laya --silk compare` PASS
