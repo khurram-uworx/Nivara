@@ -361,6 +361,17 @@ bit-identical to Row4 — and the `--gemm` gate asserts that byte-identity along
 double-precision truth check, which is what caught #468: an ILGPU OpenCL lowering bug that returns
 plausible wrong values and **cannot be seen in review**.
 
+### #784 candidates (2×4 / 4×4 @ K16)
+
+Issue #784 asks to revisit row blocking with **2×4** and **4×4** geometries (keeping 4 output
+columns per thread but 2 or 4 rows). Implemented as `TiledGemmKernelReg2x4K16` and
+`TiledGemmKernelReg4x4K16` (`GemmKernels.cs`) and registered in `GpuBuffers.GemmGeometries`
+indices 4/5, following the same row-striping + single-allocation pattern as the #440 family.
+Both are plain (no fused epilogue) so the byte-identity claim reduces to the accumulation;
+epilogues are ported only for the winner. Shared footprint: 2×4 ≈ 5 KB, 4×4 ≈ 5 KB (KT-wide
+A strip), both under the 64 KB device limit. Measurement pending — do not route a runner at
+either until the `--gemm` gate shows a win.
+
 ### 10.2 Lesson #468: at most one shared allocation per kernel body
 
 Every #440 kernel that staged a KT-wide A tile against a TileCols-wide B tile returned *plausible*
