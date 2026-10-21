@@ -16,6 +16,7 @@ public class DocReferenceTests
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenReferences.md";
 
     [Test]
+    [Category("ReleaseReadiness")]
     public void EveryReferenceInTheProductTrees_Resolves()
     {
         var faults = DocReferenceExtractor.AllFaults();
