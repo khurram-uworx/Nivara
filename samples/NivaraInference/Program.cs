@@ -624,7 +624,7 @@ class Program
             return 1;
         }
 
-        if (useSilk && (bf16 || fp16))
+        if (useSilk && fp16)
         {
             Console.Error.WriteLine("--silk is F32-only: the hand-authored Silk kernel stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
             return 1;
@@ -633,7 +633,7 @@ class Program
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
-        if ((bf16 || fp16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
+        if ((bf16 || fp16) && !(useSilk && bf16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
         {
             Console.Error.WriteLine(isQwen
                 ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32."
