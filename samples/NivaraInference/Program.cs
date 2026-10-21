@@ -800,8 +800,8 @@ class Program
                     Nivara.AI.OpenLayaSession open = useSilk ? Nivara.Silk.SilkLayaSession.Open : Nivara.Samples.Gpu.IlgpuLayaSession.Open;
                     if (benchmark) return Laya.RunBenchmarkGpu(layaSilkTensors, modelDir, open);
                     if (compare) return Laya.CompareGpu(layaSilkTensors, modelDir, open);
-                    if (mode == "diag") { Nivara.Samples.Gpu.OpDiagnostic.Run(); return 0; }
                     return Laya.RunGpu(layaSilkTensors, modelDir, open);
+
                 }
                 if (compare) return Laya.Compare(tensors, modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
