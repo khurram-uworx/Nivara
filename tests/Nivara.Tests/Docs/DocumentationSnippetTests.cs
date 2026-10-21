@@ -141,6 +141,7 @@ public class DocumentationSnippetTests
     }
 
     [Test]
+    [Category("ReleaseReadiness")]
     public void EveryGatedBlock_CompilesWithoutErrors()
     {
         var failures = new List<string>();
