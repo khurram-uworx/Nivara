@@ -25,6 +25,9 @@ public sealed class SilkModernBertSession : IModernBertGpuSession
     public static SilkModernBertSession Open(ModernBertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => new SilkModernBertSession(config, tensors);
 
+    public static SilkModernBertSession Open(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => new SilkModernBertSession(config, tensors);
+
     public string DeviceName => runtime.DeviceName;
     public float[] Forward(int[] tokenIds, int validLength) => runner.Forward(tokenIds, validLength);
     public void Dispose() { runner.Dispose(); runtime.Dispose(); }
