@@ -443,15 +443,29 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     {
         var hashMap = new Dictionary<CompositeKey, List<int>>();
 
+        var readers = keyColumns.Select(c => GroupKeyReaderFactory.Create(columns[c])).ToArray();
+
         for (int i = 0; i < rowCount; i++)
         {
+            // Null keys never match in a join; skip them to keep hash buckets clean.
+            bool hasNull = false;
+            for (int j = 0; j < readers.Length; j++)
+            {
+                if (columns[keyColumns[j]].IsNull(i))
+                {
+                    hasNull = true;
+                    break;
+                }
+            }
+            if (hasNull)
+                continue;
+
             var keyValues = new object?[keyColumns.Length];
             for (int j = 0; j < keyColumns.Length; j++)
-            {
                 keyValues[j] = columns[keyColumns[j]].GetValue(i);
-            }
 
-            var compositeKey = new CompositeKey(keyValues);
+            int hash = TypedGroupHash.ComputeRowHash(readers, i);
+            var compositeKey = new CompositeKey(keyValues, hash);
 
             if (!hashMap.TryGetValue(compositeKey, out var indices))
             {
@@ -474,6 +488,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         var rightIndices = new List<int>();
 
         var leftKeyColumns = joinKeys.Select(jk => jk.LeftColumn).ToArray();
+        var leftReaders = joinKeys.Select(jk => GroupKeyReaderFactory.Create(leftColumns[jk.LeftColumn])).ToArray();
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
@@ -483,7 +498,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 leftKeyValues[j] = leftColumns[leftKeyColumns[j]].GetValue(leftIndex);
             }
 
-            var leftKey = new CompositeKey(leftKeyValues);
+            var leftKey = new CompositeKey(leftKeyValues, TypedGroupHash.ComputeRowHash(leftReaders, leftIndex));
 
             if (rightHashMap.TryGetValue(leftKey, out var matchingRightIndices))
             {
@@ -507,6 +522,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         var rightIndices = new List<int>();
 
         var leftKeyColumns = joinKeys.Select(jk => jk.LeftColumn).ToArray();
+        var leftReaders = joinKeys.Select(jk => GroupKeyReaderFactory.Create(leftColumns[jk.LeftColumn])).ToArray();
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
@@ -516,7 +532,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 leftKeyValues[j] = leftColumns[leftKeyColumns[j]].GetValue(leftIndex);
             }
 
-            var leftKey = new CompositeKey(leftKeyValues);
+            var leftKey = new CompositeKey(leftKeyValues, TypedGroupHash.ComputeRowHash(leftReaders, leftIndex));
 
             if (rightHashMap.TryGetValue(leftKey, out var matchingRightIndices))
             {
@@ -548,6 +564,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         // First, find all matches (same as inner join)
         var matchedRightIndices = new HashSet<int>();
         var leftKeyColumns = joinKeys.Select(jk => jk.LeftColumn).ToArray();
+        var leftReaders = joinKeys.Select(jk => GroupKeyReaderFactory.Create(leftColumns[jk.LeftColumn])).ToArray();
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
@@ -557,7 +574,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 leftKeyValues[j] = leftColumns[leftKeyColumns[j]].GetValue(leftIndex);
             }
 
-            var leftKey = new CompositeKey(leftKeyValues);
+            var leftKey = new CompositeKey(leftKeyValues, TypedGroupHash.ComputeRowHash(leftReaders, leftIndex));
 
             if (rightHashMap.TryGetValue(leftKey, out var matchingRightIndices))
             {
@@ -594,6 +611,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         // First, find all matches and track matched right indices
         var matchedRightIndices = new HashSet<int>();
         var leftKeyColumns = joinKeys.Select(jk => jk.LeftColumn).ToArray();
+        var leftReaders = joinKeys.Select(jk => GroupKeyReaderFactory.Create(leftColumns[jk.LeftColumn])).ToArray();
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
@@ -603,7 +621,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 leftKeyValues[j] = leftColumns[leftKeyColumns[j]].GetValue(leftIndex);
             }
 
-            var leftKey = new CompositeKey(leftKeyValues);
+            var leftKey = new CompositeKey(leftKeyValues, TypedGroupHash.ComputeRowHash(leftReaders, leftIndex));
 
             if (rightHashMap.TryGetValue(leftKey, out var matchingRightIndices))
             {
@@ -889,16 +907,22 @@ internal sealed class CompositeKey : IEquatable<CompositeKey>
     /// </summary>
     /// <param name="values">The key values</param>
     public CompositeKey(object?[] values)
+        : this(values, ComputeHashCode(values))
+    {
+    }
+
+    public CompositeKey(object?[] values, int hashCode)
     {
         this.values = values ?? throw new ArgumentNullException(nameof(values));
+        this.hashCode = hashCode;
+    }
 
-        // Pre-compute hash code for performance
+    static int ComputeHashCode(object?[] values)
+    {
         var hash = new HashCode();
         foreach (var value in values)
-        {
             hash.Add(value);
-        }
-        hashCode = hash.ToHashCode();
+        return hash.ToHashCode();
     }
 
     /// <summary>
