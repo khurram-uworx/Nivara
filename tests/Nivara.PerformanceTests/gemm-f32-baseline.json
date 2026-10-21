@@ -685,6 +685,190 @@
     "Row4|minilm qkv/o": {
       "count": 49152,
       "hash": "0xdb7b819b41cb12fd"
+    },
+    "Reg2x4K16|distilbert fc1": {
+      "count": 393216,
+      "hash": "0x6ffe8ac6e43ffb1e"
+    },
+    "Reg2x4K16|distilbert fc2": {
+      "count": 98304,
+      "hash": "0x4a05a8fb55a2b005"
+    },
+    "Reg2x4K16|distilbert head": {
+      "count": 256,
+      "hash": "0xe4a835f8f579f97d"
+    },
+    "Reg2x4K16|distilbert qkv/o": {
+      "count": 98304,
+      "hash": "0x63a72ad3117e76ba"
+    },
+    "Reg2x4K16|edge 1x8 N=100": {
+      "count": 10000,
+      "hash": "0x0eee20df89fdc38b"
+    },
+    "Reg2x4K16|edge 2x2 K=17": {
+      "count": 4096,
+      "hash": "0x4aff8166a97662a1"
+    },
+    "Reg2x4K16|edge 4x2 M=20 N=40": {
+      "count": 800,
+      "hash": "0x06745c5a69c48eaa"
+    },
+    "Reg2x4K16|edge padded K": {
+      "count": 8320,
+      "hash": "0xeda976e821ea4196"
+    },
+    "Reg2x4K16|edge padded rows": {
+      "count": 7000,
+      "hash": "0x667b9db2b327728b"
+    },
+    "Reg2x4K16|laya act 1": {
+      "count": 131072,
+      "hash": "0x10992fdc85e9c0d3"
+    },
+    "Reg2x4K16|laya attn out": {
+      "count": 524288,
+      "hash": "0xa8031a4a5a5a64a2"
+    },
+    "Reg2x4K16|laya fc1 (Wi)": {
+      "count": 2686976,
+      "hash": "0x1460aa0590639a66"
+    },
+    "Reg2x4K16|laya fc2 (Wo)": {
+      "count": 524288,
+      "hash": "0xad7a7d5924860658"
+    },
+    "Reg2x4K16|laya head ff1": {
+      "count": 2097152,
+      "hash": "0xd2b12837ce7603c0"
+    },
+    "Reg2x4K16|laya head ff2": {
+      "count": 524288,
+      "hash": "0x67a481cb5ea9373d"
+    },
+    "Reg2x4K16|laya qkv": {
+      "count": 1572864,
+      "hash": "0x5938558e190e5ee0"
+    },
+    "Reg2x4K16|laya qkv@128": {
+      "count": 393216,
+      "hash": "0xd022a657fb2280b2"
+    },
+    "Reg2x4K16|laya scorer 1": {
+      "count": 8192,
+      "hash": "0x13c4884016f46ce6"
+    },
+    "Reg2x4K16|laya scorer 2": {
+      "count": 8,
+      "hash": "0x57713823b91c35f8"
+    },
+    "Reg2x4K16|minilm fc1": {
+      "count": 196608,
+      "hash": "0xe17b5f5872223d01"
+    },
+    "Reg2x4K16|minilm fc2": {
+      "count": 49152,
+      "hash": "0x418bf2edf53d34d5"
+    },
+    "Reg2x4K16|minilm head": {
+      "count": 256,
+      "hash": "0x3611fa7688add9d2"
+    },
+    "Reg2x4K16|minilm qkv/o": {
+      "count": 49152,
+      "hash": "0xdb7b819b41cb12fd"
+    },
+    "Reg4x4K16|distilbert fc1": {
+      "count": 393216,
+      "hash": "0x6ffe8ac6e43ffb1e"
+    },
+    "Reg4x4K16|distilbert fc2": {
+      "count": 98304,
+      "hash": "0x4a05a8fb55a2b005"
+    },
+    "Reg4x4K16|distilbert head": {
+      "count": 256,
+      "hash": "0xe4a835f8f579f97d"
+    },
+    "Reg4x4K16|distilbert qkv/o": {
+      "count": 98304,
+      "hash": "0x63a72ad3117e76ba"
+    },
+    "Reg4x4K16|edge 1x8 N=100": {
+      "count": 10000,
+      "hash": "0x0eee20df89fdc38b"
+    },
+    "Reg4x4K16|edge 2x2 K=17": {
+      "count": 4096,
+      "hash": "0x4aff8166a97662a1"
+    },
+    "Reg4x4K16|edge 4x2 M=20 N=40": {
+      "count": 800,
+      "hash": "0x06745c5a69c48eaa"
+    },
+    "Reg4x4K16|edge padded K": {
+      "count": 8320,
+      "hash": "0xeda976e821ea4196"
+    },
+    "Reg4x4K16|edge padded rows": {
+      "count": 7000,
+      "hash": "0x667b9db2b327728b"
+    },
+    "Reg4x4K16|laya act 1": {
+      "count": 131072,
+      "hash": "0x10992fdc85e9c0d3"
+    },
+    "Reg4x4K16|laya attn out": {
+      "count": 524288,
+      "hash": "0xa8031a4a5a5a64a2"
+    },
+    "Reg4x4K16|laya fc1 (Wi)": {
+      "count": 2686976,
+      "hash": "0x1460aa0590639a66"
+    },
+    "Reg4x4K16|laya fc2 (Wo)": {
+      "count": 524288,
+      "hash": "0xad7a7d5924860658"
+    },
+    "Reg4x4K16|laya head ff1": {
+      "count": 2097152,
+      "hash": "0xd2b12837ce7603c0"
+    },
+    "Reg4x4K16|laya head ff2": {
+      "count": 524288,
+      "hash": "0x67a481cb5ea9373d"
+    },
+    "Reg4x4K16|laya qkv": {
+      "count": 1572864,
+      "hash": "0x5938558e190e5ee0"
+    },
+    "Reg4x4K16|laya qkv@128": {
+      "count": 393216,
+      "hash": "0xd022a657fb2280b2"
+    },
+    "Reg4x4K16|laya scorer 1": {
+      "count": 8192,
+      "hash": "0x13c4884016f46ce6"
+    },
+    "Reg4x4K16|laya scorer 2": {
+      "count": 8,
+      "hash": "0x57713823b91c35f8"
+    },
+    "Reg4x4K16|minilm fc1": {
+      "count": 196608,
+      "hash": "0xe17b5f5872223d01"
+    },
+    "Reg4x4K16|minilm fc2": {
+      "count": 49152,
+      "hash": "0x418bf2edf53d34d5"
+    },
+    "Reg4x4K16|minilm head": {
+      "count": 256,
+      "hash": "0x3611fa7688add9d2"
+    },
+    "Reg4x4K16|minilm qkv/o": {
+      "count": 49152,
+      "hash": "0xdb7b819b41cb12fd"
     }
   }
 }
