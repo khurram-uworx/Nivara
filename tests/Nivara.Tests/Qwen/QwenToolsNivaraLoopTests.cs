@@ -1,8 +1,8 @@
 using Microsoft.Extensions.AI;
+using Nivara.AI;
 using Nivara.AutoDiff.Nn;
 using Nivara.Samples;
 using NivaraChat.Modes;
-using Nivara.AI;
 using NivaraChat.Qwen;
 using NUnit.Framework;
 

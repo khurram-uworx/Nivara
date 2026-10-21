@@ -1,6 +1,5 @@
 using NivaraChat.Shared;
 using NUnit.Framework;
-using System;
 
 namespace Nivara.Tests.Qwen;
 

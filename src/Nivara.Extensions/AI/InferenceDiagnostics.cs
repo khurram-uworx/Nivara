@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.Diagnostics;
 using System.Numerics;
 

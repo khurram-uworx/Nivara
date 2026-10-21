@@ -1,5 +1,4 @@
 using Nivara.AutoDiff.Nn;
-using System.Numerics;
 
 namespace Nivara.Silk;
 

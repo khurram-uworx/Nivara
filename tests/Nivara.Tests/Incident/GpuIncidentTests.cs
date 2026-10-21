@@ -1,5 +1,5 @@
-using Nivara.Silk;
 using Nivara.Samples.Incident;
+using Nivara.Silk;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Incident;
