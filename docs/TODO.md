@@ -44,5 +44,10 @@ tokenization.
 - `samples/NivaraInference/NivaraTypeSafeClient.cs` — phase timings + hoisting.
 - `samples/NivaraInference/TypeSafe.cs` — benchmark phase breakdown.
 
+## Status
+- Commit 1+2 (phase timing + sharing) implemented and targeted tests pass (60/60).
+- Phase 3 (attention experiments) remains pending and is human-run (no laya model on this machine).
+- `DocsCoveragePins` unchanged: no docs/citations added.
+
 ## GitHub issues log
 - (none yet; deferred work captured during execution)
