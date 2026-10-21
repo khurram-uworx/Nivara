@@ -27,52 +27,12 @@ internal static class DocsCoveragePins
     /// </summary>
     internal const int ExpectedDocumentCount = 53;
 
-    /// <summary>
-    /// Files read by the widened scan. Pinned deliberately: a drop is reduced coverage.
-    /// 696 = 691 + the six new Silk/model files (<c>WeightLayout</c>, <c>BertEncoderGpuTypes</c>,
-    /// <c>GpuSeam</c>, <c>SilkLauncher</c>, <c>SilkModernBertSession</c>, <c>SilkLayaSession</c>)
-    /// minus the deleted samples <c>IBertEncoderRunner.cs</c>. 698 = 696 +
-    /// <c>docs/BLAS-MKL.md</c> and <c>tests/Nivara.PerformanceTests/LayaForwardProbe.cs</c>
-    /// added by the #492 reconciliation. 700 = 698 + the two SmolLM Silk files
-    /// (<c>SilkSmolLMGpuRunner.cs</c>, <c>SilkSmolLMSession.cs</c>) added by #628. 710 = 709 +
-    /// <c>docs/DECISION-MODELS.md</c>, the decision-model ecosystem doc split out of the
-    /// inference sample's README and <c>docs/LAYA.md</c>. 711 = 710 + the #670 fused-decode
-    /// fixture, <c>tests/Nivara.Tests/Gpu/SilkRmsNormGemvTests.cs</c>. 712 = 711 + the #670
-    /// device-free geometry fixture, <c>tests/Nivara.Tests/Gpu/SilkGemvGeometryTests.cs</c>, which
-    /// was split out of that one so the bit-identity fixture stays byte-identical while the
-    /// geometry it relies on is reshaped. 715 = 714 + the #681 bit-identity fixture,
-    /// <c>tests/Nivara.Tests/Gpu/SilkGemmGemvAddTests.cs</c>. 722 = 721 + <c>docs/443-PLAN.md</c>.
-    /// The merge of PR #726 added three counted files without moving the pin -
-    /// <c>samples/Nivara.Samples/Incident/GpuOffload.cs</c>,
-    /// <c>src/Nivara.Extensions/Silk/SilkAnalytics.cs</c>, and
-    /// <c>tests/Nivara.Tests/Qwen/SynthesizeTensorsBiasGatingTests.cs</c> - so the merged tree was
-    /// actually 725 and this gate was red on <c>main</c>. 729 = 725 + the four files the #443
-    /// Phase 2/3 work adds: <c>samples/Nivara.Samples/Incident/GpuProfitability.cs</c>,
-    /// <c>tests/Nivara.Tests/Gpu/SilkGroupedHashReduceTests.cs</c>,
-    /// <c>tests/Nivara.Tests/Incident/GpuIncidentTests.cs</c>, and
-    /// <c>tests/Nivara.Tests/Incident/GpuProfitabilityTests.cs</c>.
-    /// 735 = 734 + <c>tests/Nivara.Tests/NivaraTorch/LlamaForCausalLMTests.cs</c>, added by the
-    /// LlamaForCausalLM torch parity work on khurram/372 without moving the pin.
-    /// 738 = 735 + the three files added by #383: <c>samples/Nivara.Samples/NivaraAIFunctions.cs</c>,
-    /// <c>tests/Nivara.Tests/Qwen/QwenToolsNivaraLoopTests.cs</c>, and
-    /// <c>tests/Nivara.Tests/Samples/NivaraAIFunctionsTests.cs</c>.
-    /// 741 = 738 + the three files added by #325 phase 1:
-    /// <c>src/Nivara/Execution/BudgetEnforcement.cs</c>,
-    /// <c>src/Nivara/Execution/MemoryBudget.cs</c>, and
-    /// <c>tests/Nivara.Tests/Execution/MemoryBudgetTests.cs</c>.
-    /// 742 = 741 + <c>tests/Nivara.Tests/AutoDiff/MixedPrecisionMatmulTests.cs</c>, added by #387.
-    /// 743 = 742 + <c>tests/Nivara.Tests/AutoDiff/MixedPrecisionTrainingTests.cs</c>, added by #746.
-    /// 744 = 743 + <c>tests/Nivara.Tests/AutoDiff/MixedPrecisionJvpTests.cs</c>, added by #747.
-    /// 746 = 744 + <c>tests/Nivara.Tests/Qwen/SilkQwenBf16ParityTests.cs</c> and
-    /// <c>src/Nivara.Extensions/Silk/SilkQwenGpuRunner.Bf16.cs</c>, added by #748.
-    /// </summary>
-    internal const int ExpectedFileCount = 755;
-    /// <summary><c>File.cs:NN</c> citations discovered across the widened scope. Pinned deliberately.</summary>
-    internal const int ExpectedCodeCitationCount = 127;
+    /// <summary><c>File.cs:NN</c> citations discovered across the narrowed markdown scope. Pinned deliberately.</summary>
+    internal const int ExpectedCodeCitationCount = 31;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 362;
+    internal const int ExpectedDocumentReferenceCount = 242;
 }
