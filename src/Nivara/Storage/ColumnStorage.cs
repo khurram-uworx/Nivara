@@ -36,6 +36,8 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     readonly int maskStart;
     bool disposed;
     Tensor<T>? tensorView;
+    int[]? hashCodes;
+    readonly object hashLock = new();
 
     /// <summary>
     /// Initializes a new instance of ColumnStorage with the specified values
@@ -251,6 +253,48 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     }
 
     /// <inheritdoc />
+    /// <inheritdoc />
+    internal bool TryGetHashCodes(out ReadOnlySpan<int> hashes)
+    {
+        if (typeof(T) != typeof(string))
+        {
+            hashes = default;
+            return false;
+        }
+
+        if (hashCodes is null)
+        {
+            lock (hashLock)
+            {
+                if (hashCodes is null)
+                {
+                    var computed = new int[dataLength];
+                    var mask = NullMask; // ReadOnlySpan<bool>, length dataLength or empty
+                    var stringData = (string[])(object)data;
+                    for (int i = 0; i < dataLength; i++)
+                    {
+                        bool isNull = mask.Length > 0 && i < mask.Length && mask[i];
+                        if (isNull)
+                        {
+                            computed[i] = 0;
+                        }
+                        else
+                        {
+                            computed[i] = stringData[dataStart + i]?.GetHashCode() ?? 0;
+                        }
+                    }
+                    hashCodes = computed;
+                }
+            }
+        }
+
+        hashes = hashCodes.AsSpan();
+        return true;
+    }
+
+    bool IColumnStorage<T>.TryGetHashCodes(out ReadOnlySpan<int> hashes)
+        => TryGetHashCodes(out hashes);
+
     ReadOnlySpan<T> IColumnStorage<T>.AsSpan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);

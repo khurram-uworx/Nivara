@@ -1279,6 +1279,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
     }
 
+    /// <summary>
+    /// Returns cached per-element hash codes when the column contains strings.
+    /// </summary>
+    internal bool TryGetStringHashCodes(out ReadOnlySpan<int> hashes)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return storage.TryGetHashCodes(out hashes);
+    }
+
     /// <inheritdoc />
     public bool HasNulls
     {

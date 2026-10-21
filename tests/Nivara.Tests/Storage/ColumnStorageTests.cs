@@ -534,4 +534,48 @@ public class ColumnStorageTests
     }
 
     #endregion
+
+    #region String Hash Cache Tests
+
+    [Test]
+    public void ColumnStorage_StringHashCache_ReturnsCachedHashes()
+    {
+        var values = new string[] { "hello", null!, "world", "" };
+        var storage = new ColumnStorage<string>(values, detectNulls: true);
+
+        Assert.That(storage.TryGetHashCodes(out var hashes), Is.True);
+        Assert.That(hashes.Length, Is.EqualTo(values.Length));
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            int expected = values[i] is null ? 0 : values[i].GetHashCode();
+            Assert.That(hashes[i], Is.EqualTo(expected), $"Hash at {i}");
+        }
+
+        // Repeated call returns identical values (cached).
+        Assert.That(storage.TryGetHashCodes(out var hashes2), Is.True);
+        Assert.That(hashes2.ToArray(), Is.EqualTo(hashes.ToArray()));
+    }
+
+    [Test]
+    public void ColumnStorage_StringHashCache_NonStringReturnsFalse()
+    {
+        var storage = new ColumnStorage<int>(new[] { 1, 2, 3 });
+        Assert.That(storage.TryGetHashCodes(out _), Is.False);
+    }
+
+    [Test]
+    public void ColumnStorage_StringHashCache_SliceAligned()
+    {
+        var values = new string[] { "a", "b", "c", "d", "e" };
+        var storage = new ColumnStorage<string>(values, detectNulls: true);
+        var slice = (ColumnStorage<string>)storage.Slice(1, 3);
+
+        Assert.That(slice.TryGetHashCodes(out var hashes), Is.True);
+        Assert.That(hashes.Length, Is.EqualTo(3));
+        for (int i = 0; i < 3; i++)
+            Assert.That(hashes[i], Is.EqualTo(values[1 + i].GetHashCode()));
+    }
+
+    #endregion
 }
