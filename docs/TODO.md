@@ -10,13 +10,12 @@ assessment. Root cause likely in the shared head attention/GEMM kernels at seqLe
 - Forced the attention kernel's recompute path (disable scoreCache): still FAIL.
 - Reduced seqLen to 128 and 32: still FAIL.
 - Reduced head layer count to 0 (type add + scorer only): still FAIL.
-- Ran GPU head on a trivial all-ones input (seqLen=4, 0 layers): CPU logits -0.084776 (identical
-  for both markers); Silk -0.237384/-0.237392; ILGPU -0.136088 (identical). Both backends
-  produce symmetric results but differ from CPU and from each other.
-- Conclusion: failure is not seqLen- or layer-dependent; it is a fundamental operator or weight-
-  loading difference in the GPU head (type-add or scorer), common to both backends. The CPU head
-  matches the Python wheel.
-- Next: isolate each operator (type-add, LayerNorm, GEMM, GELU) on a controlled input.
+- Ran GPU head on a trivial all-ones input (seqLen=1, 0 layers): CPU -0.084776, ILGPU -0.041759.
+- Zeroed type_emb + set scorer LayerNorm to identity (weight=1, bias=0): diff dropped from
+  0.088 to 0.00018. This isolates the LayerNorm as the primary culprit.
+- Conclusion: the GPU LayerNorm kernel produces different output than CPU LayerNorm. The remaining
+  0.00018 is GELU approximation error (GPU uses A&S erf polynomial, CPU uses Math.Erf).
+- Next: fix the GPU LayerNorm to match CPU (accumulation order or numerical formula).
 
 ## Verification
 - `laya --silk compare` PASS
