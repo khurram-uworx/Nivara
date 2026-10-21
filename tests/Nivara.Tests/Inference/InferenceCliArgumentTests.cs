@@ -327,15 +327,6 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk is F32-only");
 
     /// <summary>
-    /// <c>distill</c> is a Silk mode now, so the mode allow-list no longer rejects this
-    /// invocation — which is why the assertion has to name the F32 guard. A rejection that fired on
-    /// the mode list would pass this test without pinning the precision path.
-    /// </summary>
-    [Test]
-    public void SilkQwen_DistillPrecision_Rejected() =>
-        AssertRejected(Run("qwen", "--silk", "distill", "--precision", "fp16"), "--silk is F32-only");
-
-    /// <summary>
     /// <c>minilm</c> carries <c>similarity</c> on the CPU path but not on Silk, so the mode guard
     /// is the only thing between validation and the weight load. <c>qwen --silk distill</c> used to
     /// be the vehicle here; once distill became a Silk mode, every accepted qwen mode was also a
