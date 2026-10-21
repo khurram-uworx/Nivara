@@ -35,7 +35,19 @@ internal sealed class GroupKeyReader<T> : IGroupKeyReader
 
     public Type ElementType => typeof(T);
 
-    public int GetHashCode(int row) => column.IsNull(row) ? 0 : EqualityComparer<T>.Default.GetHashCode(column[row]!);
+    public int GetHashCode(int row)
+    {
+        if (column.IsNull(row))
+            return 0;
+
+        if (typeof(T) == typeof(string) && column is NivaraColumn<string> stringColumn &&
+            stringColumn.TryGetStringHashCodes(out var hashes))
+        {
+            return hashes[row];
+        }
+
+        return EqualityComparer<T>.Default.GetHashCode(column[row]!);
+    }
 
     public bool ValuesEqual(int rowA, IGroupKeyReader other, int rowB)
     {
