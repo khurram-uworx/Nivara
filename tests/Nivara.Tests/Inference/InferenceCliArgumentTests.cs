@@ -324,16 +324,7 @@ public class InferenceCliArgumentTests
     /// </summary>
     [Test]
     public void SilkSmolLM_Precision_Rejected() =>
-        AssertRejected(Run("smollm", "--silk", "--precision", "bf16"), "--silk is F32-only");
-
-    /// <summary>
-    /// <c>distill</c> is a Silk mode now, so the mode allow-list no longer rejects this
-    /// invocation — which is why the assertion has to name the F32 guard. A rejection that fired on
-    /// the mode list would pass this test without pinning the precision path.
-    /// </summary>
-    [Test]
-    public void SilkQwen_DistillPrecision_Rejected() =>
-        AssertRejected(Run("qwen", "--silk", "distill", "--precision", "bf16"), "--silk is F32-only");
+        AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk is F32-only");
 
     /// <summary>
     /// <c>minilm</c> carries <c>similarity</c> on the CPU path but not on Silk, so the mode guard
@@ -357,7 +348,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SilkPrecisionCombination_Rejected() =>
-        AssertRejected(Run("minilm", "--silk", "--precision", "bf16"), "--silk is F32-only");
+        AssertRejected(Run("minilm", "--silk", "--precision", "fp16"), "--silk is F32-only");
 
     [Test]
     public void SilkUnsupportedMode_Rejected() =>
@@ -376,7 +367,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SilkLaya_Precision_Rejected() =>
-        AssertRejected(Run("laya", "--silk", "--precision", "bf16"), "--silk is F32-only");
+        AssertRejected(Run("laya", "--silk", "--precision", "fp16"), "--silk is F32-only");
 
     [Test]
     public void SilkModernBert_CompareDiag_Rejected() =>
@@ -390,7 +381,7 @@ public class InferenceCliArgumentTests
     /// </summary>
     [Test]
     public void SilkModernBert_Precision_Rejected() =>
-        AssertRejected(Run("modernbert", "--silk", "--precision", "bf16"), "--silk is F32-only");
+        AssertRejected(Run("modernbert", "--silk", "--precision", "fp16"), "--silk is F32-only");
 
     /// <summary>
     /// 4096 is past the CPU dense-mask cap. The precision reject runs after <c>--seq</c> is parsed
@@ -399,7 +390,7 @@ public class InferenceCliArgumentTests
     [Test]
     public void SilkModernBert_Seq4096_IsNotTheCpuCap()
     {
-        CliResult result = Run("modernbert", "--silk", "benchmark", "--seq", "4096", "--precision", "bf16");
+        CliResult result = Run("modernbert", "--silk", "benchmark", "--seq", "4096", "--precision", "fp16");
         AssertRejected(result, "--silk is F32-only");
         Assert.That(result.StdErr, Does.Not.Contain("dense-mask"));
     }
@@ -581,6 +572,7 @@ public class InferenceCliArgumentTests
         ["qwen", "benchmark"],
         ["qwen", "--precision", "bf16", "benchmark"],
         ["qwen", "--silk", "distill"],
+        ["qwen", "--silk", "benchmark", "--precision", "bf16"],
     ];
 
     static void AssertRejected(CliResult result, string message)

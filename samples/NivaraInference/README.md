@@ -65,7 +65,8 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu co
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
 
 # BERT-family encoders on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
-# (MiniLM / DistilBERT / DistilBERT SST-2, F32-only, mutually exclusive with --ilgpu;
+# (MiniLM / DistilBERT / DistilBERT SST-2; --silk now accepts --precision bf16 (widened to F32 on device
+#  for the encoder; SmolLM/Qwen use true BF16 kernels). fp16 is still rejected. Mutually exclusive with --ilgpu;
 #  see docs/SILK.md Part 2 for the backend and docs/ACCELERATION.md §1 for the cross-backend view)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 dotnet run --project samples/NivaraInference -c Release -- distilbert --silk

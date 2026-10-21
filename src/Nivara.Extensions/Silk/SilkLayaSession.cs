@@ -36,6 +36,9 @@ public sealed class SilkLayaSession : ILayaGpuSession
     public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int headLayerCount)
         => new SilkLayaSession(config, tensors, headLayerCount);
 
+    public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, int headLayerCount)
+        => new SilkLayaSession(config, tensors, headLayerCount);
+
     public string DeviceName => runtime.DeviceName;
     public LayaHeadOutput Forward(int[] ids, int validLength, LayaQuestionType type, IReadOnlyList<int> markers)
     {

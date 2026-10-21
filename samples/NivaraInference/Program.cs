@@ -624,7 +624,7 @@ class Program
             return 1;
         }
 
-        if (useSilk && (bf16 || fp16))
+        if (useSilk && fp16)
         {
             Console.Error.WriteLine("--silk is F32-only: the hand-authored Silk kernel stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
             return 1;
@@ -633,7 +633,7 @@ class Program
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
-        if ((bf16 || fp16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
+        if ((bf16 || fp16) && !(useSilk && bf16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
         {
             Console.Error.WriteLine(isQwen
                 ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32."
@@ -721,9 +721,10 @@ class Program
             case "mobilenet_v2":
                 if (useSilk)
                 {
-                    if (benchmark) return RunMobileNetV2SilkBenchmark(tensors);
-                    if (compare) return RunMobileNetV2SilkCompare(tensors);
-                    return RunMobileNetV2SilkInference(tensors, mode);
+                    var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (benchmark) return RunMobileNetV2SilkBenchmark(mobSilkTensors);
+                    if (compare) return RunMobileNetV2SilkCompare(mobSilkTensors);
+                    return RunMobileNetV2SilkInference(mobSilkTensors, mode);
                 }
                 if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
                 if (compare) return RunCompare(tensors, "mobilenet_v2");
@@ -731,9 +732,10 @@ class Program
             case "resnet18":
                 if (useSilk)
                 {
-                    if (benchmark) return RunResNet18SilkBenchmark(tensors);
-                    if (compare) return RunResNet18SilkCompare(tensors);
-                    return RunResNet18SilkInference(tensors, mode);
+                    var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (benchmark) return RunResNet18SilkBenchmark(resSilkTensors);
+                    if (compare) return RunResNet18SilkCompare(resSilkTensors);
+                    return RunResNet18SilkInference(resSilkTensors, mode);
                 }
                 if (compareDiag) return RunCompareDiag(tensors, "resnet18");
                 if (compare) return RunCompare(tensors, "resnet18");
@@ -741,9 +743,10 @@ class Program
             case "minilm":
                 if (useSilk)
                 {
-                    if (benchmark) return BenchmarkMiniLmSilk(tensors);
-                    if (compare) return RunMiniLmSilkCompare(tensors);
-                    return RunMiniLmSilkInference(tensors);
+                    var miniSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (benchmark) return BenchmarkMiniLmSilk(miniSilkTensors);
+                    if (compare) return RunMiniLmSilkCompare(miniSilkTensors);
+                    return RunMiniLmSilkInference(miniSilkTensors);
                 }
                 if (useGpu)
                 {
@@ -758,8 +761,9 @@ class Program
             case "distilbert":
                 if (useSilk)
                 {
-                    if (compare) return RunDistilBertSilkCompare(tensors);
-                    return benchmark ? BenchmarkDistilBertSilk(tensors) : RunDistilBertSilkInference(tensors);
+                    var distSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (compare) return RunDistilBertSilkCompare(distSilkTensors);
+                    return benchmark ? BenchmarkDistilBertSilk(distSilkTensors) : RunDistilBertSilkInference(distSilkTensors);
                 }
                 if (useGpu)
                 {
@@ -773,9 +777,10 @@ class Program
             case "distilbert_sst":
                 if (useSilk)
                 {
-                    if (benchmark) return BenchmarkDistilBertSstSilk(tensors);
-                    if (compare) return RunDistilBertSstSilkCompare(tensors);
-                    return RunDistilBertSstSilkInference(tensors);
+                    var sstSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (benchmark) return BenchmarkDistilBertSstSilk(sstSilkTensors);
+                    if (compare) return RunDistilBertSstSilkCompare(sstSilkTensors);
+                    return RunDistilBertSstSilkInference(sstSilkTensors);
                 }
                 if (useGpu)
                 {
@@ -791,10 +796,11 @@ class Program
             case "laya":
                 if (useSilk || useGpu)
                 {
+                    var layaSilkTensors = (useSilk && bf16) ? WidenBFloat16Tensors(tensorsBf16) : tensors;
                     Nivara.AI.OpenLayaSession open = useSilk ? Nivara.Silk.SilkLayaSession.Open : Nivara.Samples.Gpu.IlgpuLayaSession.Open;
-                    if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
-                    if (compare) return Laya.CompareGpu(tensors, modelDir, open);
-                    return Laya.RunGpu(tensors, modelDir, open);
+                    if (benchmark) return Laya.RunBenchmarkGpu(layaSilkTensors, modelDir, open);
+                    if (compare) return Laya.CompareGpu(layaSilkTensors, modelDir, open);
+                    return Laya.RunGpu(layaSilkTensors, modelDir, open);
                 }
                 if (compare) return Laya.Compare(tensors, modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
@@ -803,10 +809,11 @@ class Program
             case "modernbert":
                 if (useSilk || useGpu)
                 {
+                    var mbSilkTensors = (useSilk && bf16) ? WidenBFloat16Tensors(tensorsBf16) : tensors;
                     OpenModernBertSession open = useSilk ? SilkModernBertSession.Open : IlgpuModernBertSession.Open;
-                    if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations, open);
-                    if (compare) return ModernBert.CompareGpu(tensors, modelDir, open);
-                    return ModernBert.RunGpu(tensors, modelDir, open);
+                    if (benchmark) return ModernBert.BenchmarkGpu(mbSilkTensors, modelDir, seqLengths, warmup, iterations, open);
+                    if (compare) return ModernBert.CompareGpu(mbSilkTensors, modelDir, open);
+                    return ModernBert.RunGpu(mbSilkTensors, modelDir, open);
                 }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                 if (compare) return ModernBert.Compare(tensors, modelDir);
@@ -817,6 +824,11 @@ class Program
                 if (useSilk)
                 {
                     if (syntheticWeights) return RunSmolLMSyntheticBenchmarkSilk();
+                    if (bf16)
+                    {
+                        if (benchmark) return BenchmarkSmolLMSilk(tensorsBf16);
+                        return RunSmolLMSilk(tensorsBf16);
+                    }
                     if (benchmark) return BenchmarkSmolLMSilk(tensors);
                     return RunSmolLMSilk(tensors);
                 }
@@ -839,6 +851,13 @@ class Program
                 if (useSilk)
                 {
                     if (syntheticWeights) return Qwen.RunSyntheticBenchmarkSilk(plain);
+                    if (bf16)
+                    {
+                        if (mode == "distill") return Qwen.RunDistillSilk(tensorsBf16, modelDir, teacherExamples, force, seed);
+                        if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensorsBf16, modelDir);
+                        if (plain) return Qwen.RunPlainSilk(tensorsBf16, modelDir, text);
+                        return Qwen.RunToolsSilk(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
+                    }
                     if (mode == "distill") return Qwen.RunDistillSilk(tensors, modelDir, teacherExamples, force, seed);
                     if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensors, modelDir);
                     if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
@@ -1880,6 +1899,22 @@ class Program
             runtime.Dispose();
             throw;
         }
+    }
+
+    static Dictionary<string, (float[] Data, int[] Shape)> WidenBFloat16Tensors(
+        Dictionary<string, (BFloat16[] Data, int[] Shape)> src)
+    {
+        var result = new Dictionary<string, (float[] Data, int[] Shape)>(src.Count);
+        foreach (var kv in src)
+        {
+            var data = kv.Value.Data;
+            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<BFloat16, ushort>(data.AsSpan());
+            var dst = new float[data.Length];
+            for (int i = 0; i < data.Length; i++)
+                dst[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+            result[kv.Key] = (dst, kv.Value.Shape);
+        }
+        return result;
     }
 
     // MiniLM's three entry points are backend-agnostic: the "GPU" label is the incumbent ILGPU path
@@ -3035,7 +3070,28 @@ class Program
 
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
-        ConsumeGeneratedSilk(session, modelDir, tokenizer, config);
+        ConsumeGeneratedSilk(session, modelDir, tokenizer, config, "F32");
+        return 0;
+    }
+
+    static int RunSmolLMSilk(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== SmolLM-135M Causal LM (BFloat16, Silk) ===");
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}  Precision: BFloat16");
+        Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
+                          $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +
+                          $"intermediate={config.IntermediateSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        ConsumeGeneratedSilk(session, modelDir, tokenizer, config, "BFloat16");
         return 0;
     }
 
@@ -3072,7 +3128,8 @@ class Program
         Nivara.Silk.SilkSmolLMSession session,
         string modelDir,
         Gpt2BpeTokenizer tokenizer,
-        LlamaConfig config)
+        LlamaConfig config,
+        string precisionName = "F32")
     {
         const string Prompt = "The capital of France is";
         const int MaxNewTokens = 32;
@@ -3091,18 +3148,57 @@ class Program
         Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
         Console.WriteLine();
 
-        var refIds = TryLoadSmolLMReferenceTokenStream(modelDir, "F32");
+        var refIds = TryLoadSmolLMReferenceTokenStream(modelDir, precisionName);
         var logitsSequence = (IReadOnlyList<int>)(refIds ?? sequence.ToArray());
         var prefix = new int[logitsSequence.Count - 1];
         for (int i = 0; i < prefix.Length; i++) prefix[i] = logitsSequence[i];
         var lastLogits = session.ForwardLastLogits(prefix);
 
-        CompareSmolLmFixtures(modelDir, promptIds.Count, sequence, lastLogits, "F32");
+        CompareSmolLmFixtures(modelDir, promptIds.Count, sequence, lastLogits, precisionName);
     }
 
     static int BenchmarkSmolLMSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         Console.WriteLine("=== SmolLM-135M Benchmark (F32, Silk) ===");
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Device: {session.DeviceName}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        const string Prompt = "The capital of France is";
+        var promptIds = tokenizer.Encode(Prompt);
+        const int MaxNewTokens = 32;
+
+        var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+
+        var runs = new (long Ms, int Generated)[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+            runs[i] = (timing.Milliseconds, timing.Generated);
+            Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
+        }
+        Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+        long medianMs = runs[1].Ms;
+        int medianTokens = runs[1].Generated;
+        Console.WriteLine();
+        Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
+                          $"{medianTokens * 1000.0 / Math.Max(1, medianMs):F2} tok/s)");
+        return 0;
+    }
+
+    static int BenchmarkSmolLMSilk(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== SmolLM-135M Benchmark (BFloat16, Silk) ===");
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
 

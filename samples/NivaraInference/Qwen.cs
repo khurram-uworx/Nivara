@@ -424,14 +424,16 @@ public static class Qwen
     // Silk entry points
     // ----------------------------------------------------------------------------------
 
-    public static int RunToolsSilk(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+    public static int RunToolsSilk<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors,
         string modelDir,
         bool useKvCache,
         string text)
+        where T : struct, IFloatingPointIeee754<T>
     {
+        string prec = typeof(T) == typeof(BFloat16) ? "BFloat16" : "F32";
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Native Function Calling (getWeather) -- Silk ===");
-        Console.WriteLine($"Device: GPU (Silk)  Precision: F32 (BF16-upcast)  KV cache: {(useKvCache ? "on" : "off")}");
+        Console.WriteLine($"Device: GPU (Silk)  Precision: {prec}  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
 
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
@@ -442,7 +444,7 @@ public static class Qwen
             tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
 
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
-        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), (dynamic)tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
@@ -499,8 +501,9 @@ public static class Qwen
         return ok ? 0 : 2;
     }
 
-    public static int RunPlainSilk(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir, string? userText)
+    public static int RunPlainSilk<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir, string? userText)
+        where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) -- Silk ===");
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
@@ -515,7 +518,7 @@ public static class Qwen
         Console.WriteLine($"Prompt ({promptIds.Count} tokens): {prompt.Replace("\\n", "\\\\n")}");
 
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
-        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), (dynamic)tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}  Model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -528,8 +531,9 @@ public static class Qwen
         return 0;
     }
 
-    public static int RunBenchmarkSilk(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
+    public static int RunBenchmarkSilk<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
+        where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
         var (_, config, tokenizer) = Qwen.LoadModel(tensors, modelDir);
@@ -537,7 +541,7 @@ public static class Qwen
         var promptIds = tokenizer.Encode(prompt).ToList();
 
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
-        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), (dynamic)tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
@@ -950,18 +954,20 @@ public static class Qwen
     /// <summary>Silk (OpenCL) teacher path: the same cache, resume, training and eval as
     /// <see cref="RunDistill"/>, with only the teacher generation swapped. One session serves every
     /// sentence — <see cref="GenerateSilk"/> resets the KV cache on entry.</summary>
-    public static int RunDistillSilk(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+    public static int RunDistillSilk<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors,
         string modelDir,
         int teacherExamples,
         bool force,
         int seed)
+        where T : struct, IFloatingPointIeee754<T>
     {
-        PrintDistillHeader("Device: GPU (Silk)  Precision: F32 (BF16-upcast)  KV cache: on");
+        string prec = typeof(T) == typeof(BFloat16) ? "BFloat16" : "F32";
+        PrintDistillHeader($"Device: GPU (Silk)  Precision: {prec} (BF16-upcast)  KV cache: on");
 
         var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
-        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        using var session = SilkQwenSession.Open(ToSilkConfig(config), (dynamic)tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
