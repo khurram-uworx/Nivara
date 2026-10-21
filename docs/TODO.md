@@ -50,4 +50,4 @@ tokenization.
 - `DocsCoveragePins` unchanged: no docs/citations added.
 
 ## GitHub issues log
-- (none yet; deferred work captured during execution)
+- [x] #771 — Phase 3: Silk Laya head parity/performance experiments (#708 follow-up) (created during gate run)
