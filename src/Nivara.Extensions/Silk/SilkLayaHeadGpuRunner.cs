@@ -1,4 +1,5 @@
 using Nivara.AI;
+using System.Diagnostics;
 
 namespace Nivara.Silk;
 
@@ -50,6 +51,9 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
     SilkRuntime.SilkBuffer markerIds;
 
     int[] markerIdHost = [];
+
+    public bool ProfilingEnabled { get; set; }
+    public readonly Dictionary<string, long> LastPhaseMs = new();
 
     public SilkLayaHeadGpuRunner(
         SilkRuntime runtime,
@@ -140,12 +144,15 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 
         int k = markerPositions.Count;
         EnsureWorkspace(rows, k);
+        if (ProfilingEnabled) { var _es = Stopwatch.StartNew(); runtime.Finish(); LastPhaseMs["EncodeDrain"] = _es.ElapsedMilliseconds; }
 
         int typeOffset = (int)type * hiddenDim;
         nint typeRow = runtime.CreateSubview(typeEmb, typeOffset, hiddenDim);
         try
         {
+            var _sw = ProfilingEnabled ? Stopwatch.StartNew() : null;
             LaunchAddBias(hidden, typeRow, hidden, rows, hiddenDim);
+            if (ProfilingEnabled) { runtime.Finish(); LastPhaseMs["AddBias"] = _sw!.ElapsedMilliseconds; }
         }
         finally
         {
@@ -160,18 +167,37 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
             nint v = runtime.CreateSubview(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
             try
             {
+                long _norm = 0, _gemm = 0, _attn = 0, _add = 0;
+                var _layerSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
                 for (int i = 0; i < layers.Length; i++)
                 {
                     LayerWeights w = layers[i];
-                    LaunchLayerNorm(hidden, w.Norm1W, w.Norm1B, normed.Handle, rows);
-                    LaunchGemm(SilkKernels.GemmQkv, normed.Handle, w.Wqkv, qkv.Handle, w.Bqkv, rows, hiddenDim, 3 * hiddenDim, hiddenDim);
-                    LaunchAttention(q, kv, v, maskBuf.Handle, context.Handle, rows);
-                    LaunchGemm(SilkKernels.GemmBias, context.Handle, w.Wo, projected.Handle, w.Bo, rows, hiddenDim, hiddenDim);
-                    LaunchAdd(hidden, projected.Handle, hidden, rows * hiddenDim);
-                    LaunchLayerNorm(hidden, w.Norm2W, w.Norm2B, normed.Handle, rows);
-                    LaunchGemm(SilkKernels.GemmRelu, normed.Handle, w.W1, ffnIn.Handle, w.B1, rows, hiddenDim, intermediateDim);
-                    LaunchGemm(SilkKernels.GemmBias, ffnIn.Handle, w.W2, ffnOut.Handle, w.B2, rows, intermediateDim, hiddenDim);
-                    LaunchAdd(hidden, ffnOut.Handle, hidden, rows * hiddenDim);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchLayerNorm(hidden, w.Norm1W, w.Norm1B, normed.Handle, rows); runtime.Finish(); _norm += s.ElapsedMilliseconds; }
+                    else LaunchLayerNorm(hidden, w.Norm1W, w.Norm1B, normed.Handle, rows);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmQkv, normed.Handle, w.Wqkv, qkv.Handle, w.Bqkv, rows, hiddenDim, 3 * hiddenDim, hiddenDim); runtime.Finish(); _gemm += s.ElapsedMilliseconds; }
+                    else LaunchGemm(SilkKernels.GemmQkv, normed.Handle, w.Wqkv, qkv.Handle, w.Bqkv, rows, hiddenDim, 3 * hiddenDim, hiddenDim);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchAttention(q, kv, v, maskBuf.Handle, context.Handle, rows); runtime.Finish(); _attn += s.ElapsedMilliseconds; }
+                    else LaunchAttention(q, kv, v, maskBuf.Handle, context.Handle, rows);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmBias, context.Handle, w.Wo, projected.Handle, w.Bo, rows, hiddenDim, hiddenDim); runtime.Finish(); _gemm += s.ElapsedMilliseconds; }
+                    else LaunchGemm(SilkKernels.GemmBias, context.Handle, w.Wo, projected.Handle, w.Bo, rows, hiddenDim, hiddenDim);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchAdd(hidden, projected.Handle, hidden, rows * hiddenDim); runtime.Finish(); _add += s.ElapsedMilliseconds; }
+                    else LaunchAdd(hidden, projected.Handle, hidden, rows * hiddenDim);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchLayerNorm(hidden, w.Norm2W, w.Norm2B, normed.Handle, rows); runtime.Finish(); _norm += s.ElapsedMilliseconds; }
+                    else LaunchLayerNorm(hidden, w.Norm2W, w.Norm2B, normed.Handle, rows);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmRelu, normed.Handle, w.W1, ffnIn.Handle, w.B1, rows, hiddenDim, intermediateDim); runtime.Finish(); _gemm += s.ElapsedMilliseconds; }
+                    else LaunchGemm(SilkKernels.GemmRelu, normed.Handle, w.W1, ffnIn.Handle, w.B1, rows, hiddenDim, intermediateDim);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmBias, ffnIn.Handle, w.W2, ffnOut.Handle, w.B2, rows, intermediateDim, hiddenDim); runtime.Finish(); _gemm += s.ElapsedMilliseconds; }
+                    else LaunchGemm(SilkKernels.GemmBias, ffnIn.Handle, w.W2, ffnOut.Handle, w.B2, rows, intermediateDim, hiddenDim);
+                    if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchAdd(hidden, ffnOut.Handle, hidden, rows * hiddenDim); runtime.Finish(); _add += s.ElapsedMilliseconds; }
+                    else LaunchAdd(hidden, ffnOut.Handle, hidden, rows * hiddenDim);
+                }
+                if (ProfilingEnabled)
+                {
+                    LastPhaseMs["Norm"] = _norm;
+                    LastPhaseMs["Gemm"] = _gemm;
+                    LastPhaseMs["Attention"] = _attn;
+                    LastPhaseMs["Add"] = _add;
+                    LastPhaseMs["LayerLoop"] = _layerSw!.ElapsedMilliseconds;
                 }
             }
             finally
@@ -187,24 +213,36 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         for (int i = 0; i < k; i++)
             markerIdHost[i] = markerPositions[i];
         runtime.Upload(markerIds.Handle, markerIdHost.AsSpan(0, k));
-        LaunchGather(hidden, markerIds.Handle, markerRows.Handle, k * hiddenDim);
-        LaunchLayerNorm(markerRows.Handle, scorerNormW, scorerNormB, markerScored.Handle, k);
-        LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScoredOut.Handle, scorerHiddenB, k, hiddenDim, hiddenDim);
-        LaunchGemm(SilkKernels.GemmBias, markerScoredOut.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1);
+        long _markerMs = 0;
+        var _mSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGather(hidden, markerIds.Handle, markerRows.Handle, k * hiddenDim); runtime.Finish(); _markerMs += s.ElapsedMilliseconds; }
+        else LaunchGather(hidden, markerIds.Handle, markerRows.Handle, k * hiddenDim);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchLayerNorm(markerRows.Handle, scorerNormW, scorerNormB, markerScored.Handle, k); runtime.Finish(); _markerMs += s.ElapsedMilliseconds; }
+        else LaunchLayerNorm(markerRows.Handle, scorerNormW, scorerNormB, markerScored.Handle, k);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScoredOut.Handle, scorerHiddenB, k, hiddenDim, hiddenDim); runtime.Finish(); _markerMs += s.ElapsedMilliseconds; }
+        else LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScoredOut.Handle, scorerHiddenB, k, hiddenDim, hiddenDim);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmBias, markerScoredOut.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1); runtime.Finish(); _markerMs += s.ElapsedMilliseconds; }
+        else LaunchGemm(SilkKernels.GemmBias, markerScoredOut.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1);
         float[] logitsHost = runtime.Download(logits.Handle, k);
+        if (ProfilingEnabled) LastPhaseMs["MarkerHead"] = _markerMs;
 
         double[] probabilities = LayaHeadScoring.Softmax(logitsHost);
         double[] features = LayaHeadScoring.BuildFeatures(probabilities);
 
-        LaunchGather(hidden, pooledIds, actRow.Handle, hiddenDim);
+        long _actMs = 0;
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGather(hidden, pooledIds, actRow.Handle, hiddenDim); runtime.Finish(); _actMs += s.ElapsedMilliseconds; }
+        else LaunchGather(hidden, pooledIds, actRow.Handle, hiddenDim);
         float[] actRowHost = runtime.Download(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
         for (int i = 0; i < features.Length; i++)
             actRowHost[hiddenDim + i] = (float)features[i];
         runtime.Upload(actRow.Handle, actRowHost);
 
-        LaunchGemm(SilkKernels.GemmGelu, actRow.Handle, actInW, actHiddenBuf.Handle, actInB, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden);
-        LaunchGemm(SilkKernels.GemmBias, actHiddenBuf.Handle, actOutW, actLogits.Handle, actOutB, 1, actHidden, actClassCount);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmGelu, actRow.Handle, actInW, actHiddenBuf.Handle, actInB, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden); runtime.Finish(); _actMs += s.ElapsedMilliseconds; }
+        else LaunchGemm(SilkKernels.GemmGelu, actRow.Handle, actInW, actHiddenBuf.Handle, actInB, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden);
+        if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmBias, actHiddenBuf.Handle, actOutW, actLogits.Handle, actOutB, 1, actHidden, actClassCount); runtime.Finish(); _actMs += s.ElapsedMilliseconds; }
+        else LaunchGemm(SilkKernels.GemmBias, actHiddenBuf.Handle, actOutW, actLogits.Handle, actOutB, 1, actHidden, actClassCount);
         float[] actHost = runtime.Download(actLogits.Handle, actClassCount);
+        if (ProfilingEnabled) LastPhaseMs["ActHead"] = _actMs;
 
         return new LayaHeadOutput
         {

@@ -42,12 +42,14 @@ public sealed class SilkLayaSession : ILayaGpuSession
 
     public long LastEncodeMilliseconds { get; private set; }
     public long LastHeadMilliseconds { get; private set; }
+    public SilkLayaHeadGpuRunner Head => head;
 
     public string DeviceName => runtime.DeviceName;
     public LayaHeadOutput Forward(int[] ids, int validLength, LayaQuestionType type, IReadOnlyList<int> markers)
     {
         var sw = Stopwatch.StartNew();
         encoder.ForwardOnDevice(ids, validLength);
+        runtime.Finish();
         LastEncodeMilliseconds = sw.ElapsedMilliseconds;
         sw.Restart();
         var result = head.Forward(encoder.HiddenOnDevice, encoder.HiddenRows, type, markers, validLength);
