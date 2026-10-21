@@ -85,7 +85,8 @@ No docs pins affected (no docs files changed, no fixtures added/removed).
 
 ## GitHub issues log
 
-- (none yet — add entries here if deferred work is found during execution)
+- [ ] #774 — Silk Torch parity: Phase B elementary/activation/norm kernels (created while working on Phase A)
+- [ ] #775 — Silk Torch parity: Phase C attention kernels (created while working on Phase A)
 
 ## Decisions for the human (Gate G1)
 
