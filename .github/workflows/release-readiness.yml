@@ -1,0 +1,37 @@
+name: Release Readiness
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  release-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '11.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Verify formatting
+        run: dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test (ReleaseReadiness)
+        run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category=ReleaseReadiness" --logger "trx;LogFileName=release-readiness.trx" --results-directory TestResults
+
+      - name: Upload test durations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-readiness-durations
+          path: TestResults/**/*.trx
+          if-no-files-found: warn
