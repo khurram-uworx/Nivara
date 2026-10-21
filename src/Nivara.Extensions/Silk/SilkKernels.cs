@@ -418,10 +418,22 @@ internal static class SilkKernels
                 uint aCol = k0 + y; \
                 uint bRow = k0 + x; \
                 smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
-                for (uint w = 0; w < BLOCK; ++w) { \
-                    uint outCol = colBase + y * BLOCK + w; \
-                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
-                        (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0.0f; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols && (bBase % 4u) == 0u) { \
+                        float4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = bv.s0; \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = bv.s1; \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = bv.s2; \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = bv.s3; \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0.0f; \
+                        } \
+                    } \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
                 for (uint k = 0; k < TILE; ++k) { \
@@ -1940,6 +1952,7 @@ internal static class SilkKernels
                 }
 
         /* Measured candidate geometry: 2x4 @ K16 (issue #784). Plain GEMM, ascending K. */
+        #undef TILE
         __kernel void gemm_reg2x4(
             __global const float* a,
             __global const float* b,
