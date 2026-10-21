@@ -18,6 +18,8 @@ assessment. Root cause likely in the shared head attention/GEMM kernels at seqLe
   loading (scorerHidden GELU + scorerOut GEMM).
 - Conclusion: the GPU GEMM kernel or weight loading differs from CPU. The LayerNorm was a
   red herring (it amplified a small GEMM difference through the weight matrix).
+- The GEMM kernel (TiledGemmKernelRow4Bias) appears correct on inspection. The issue may be
+  in the F16->F32 conversion or in how the bias is indexed when bCols=1.
 - Next: compare GEMM output on a known input between CPU and GPU.
 
 ## Verification
