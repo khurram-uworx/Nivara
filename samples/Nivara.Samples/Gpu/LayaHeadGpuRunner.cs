@@ -89,6 +89,7 @@ public sealed class LayaHeadGpuRunner : IDisposable
     MemoryBuffer1D<float, Stride1D.Dense> ffnOut = null!;
     MemoryBuffer1D<float, Stride1D.Dense> markerRows = null!;
     MemoryBuffer1D<float, Stride1D.Dense> markerScored = null!;
+    MemoryBuffer1D<float, Stride1D.Dense> markerScoredOut = null!;
     MemoryBuffer1D<float, Stride1D.Dense> logits = null!;
     MemoryBuffer1D<float, Stride1D.Dense> actRow = null!;
     MemoryBuffer1D<float, Stride1D.Dense> actHiddenBuf = null!;
@@ -292,9 +293,9 @@ public sealed class LayaHeadGpuRunner : IDisposable
         gather(runtime.Stream, GpuBuffers.Cfg1D(k * hiddenDim), xView, markerIds.View, markerRows.View, hiddenDim);
         layerNorm(runtime.Stream, GpuBuffers.Cfg1D(k), markerRows.View, scorerNormW.View, scorerNormB.View, markerScored.View, k, hiddenDim, eps);
         gemmGelu(runtime.Stream, GpuBuffers.GemmCfg(k, hiddenDim),
-            markerScored.View, scorerHiddenW.View, markerScored.View, scorerHiddenB.View, k, hiddenDim, hiddenDim);
+            markerScored.View, scorerHiddenW.View, markerScoredOut.View, scorerHiddenB.View, k, hiddenDim, hiddenDim);
         gemmBias(runtime.Stream, GpuBuffers.GemmCfg(k, 1),
-            markerScored.View, scorerOutW.View, logits.View, scorerOutB.View, k, hiddenDim, 1);
+            markerScoredOut.View, scorerOutW.View, logits.View, scorerOutB.View, k, hiddenDim, 1);
 
         runtime.Synchronize();
         var logitsHost = GpuBuffers.Readback(logits, k);
@@ -343,6 +344,7 @@ public sealed class LayaHeadGpuRunner : IDisposable
         GpuBuffers.Ensure(ref ffnOut, rows * hiddenDim, acc);
         GpuBuffers.Ensure(ref markerRows, markers * hiddenDim, acc);
         GpuBuffers.Ensure(ref markerScored, markers * hiddenDim, acc);
+        GpuBuffers.Ensure(ref markerScoredOut, markers * hiddenDim, acc);
         GpuBuffers.Ensure(ref logits, markers, acc);
         GpuBuffers.Ensure(ref actRow, hiddenDim + LayaHeadOutput.FeatureCount, acc);
         GpuBuffers.Ensure(ref actHiddenBuf, actHidden, acc);
@@ -375,6 +377,7 @@ public sealed class LayaHeadGpuRunner : IDisposable
         ffnOut?.Dispose();
         markerRows?.Dispose();
         markerScored?.Dispose();
+        markerScoredOut?.Dispose();
         logits?.Dispose();
         actRow?.Dispose();
         actHiddenBuf?.Dispose();
