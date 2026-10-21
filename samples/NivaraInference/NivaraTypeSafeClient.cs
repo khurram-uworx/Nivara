@@ -236,6 +236,19 @@ public static class NivaraTypeSafeLayaMapping
     }
 }
 
+public sealed record SystemOnePhaseTimings(
+    long StateTextMs,
+    long StateTokenizeMs,
+    long QuestionMappingMs,
+    long PromptBuildMs,
+    long ForwardMs,
+    long EncodeMs,
+    long HeadMs,
+    long DecodeMs,
+    long AnswerMappingMs,
+    long AllocationsMs,
+    long TotalMs);
+
 public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
 {
     readonly string modelDir;
@@ -247,6 +260,8 @@ public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
     readonly ILayaGpuSession session;
     readonly Stopwatch loadSw = Stopwatch.StartNew();
     bool disposed;
+
+    public SystemOnePhaseTimings? LastPhaseTimings { get; private set; }
 
     public NivaraTypeSafeClient(string modelDir)
     {
@@ -274,27 +289,63 @@ public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
         SystemOneRequest request, RequestOptions? options = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var stateText = NivaraTypeSafeLayaMapping.ContentToText(request.State);
-        var stateIds = tokenizer.Encode(stateText.Replace("[MASK]", " ", StringComparison.Ordinal));
+        var totalSw = Stopwatch.StartNew();
 
-        var answers = new Dictionary<string, Answer>(StringComparer.Ordinal);
+        var sw = Stopwatch.StartNew();
+        var stateText = NivaraTypeSafeLayaMapping.ContentToText(request.State);
+        var stateTextMs = sw.ElapsedMilliseconds;
+        sw.Restart();
+        var stateIds = tokenizer.Encode(stateText.Replace("[MASK]", " ", StringComparison.Ordinal));
+        var stateTokenizeMs = sw.ElapsedMilliseconds;
+
+        sw.Restart();
+        var layaQuestions = new Dictionary<string, LayaQuestion>(request.Questions.Count, StringComparer.Ordinal);
+        foreach (var (id, question) in request.Questions)
+            layaQuestions[id] = NivaraTypeSafeLayaMapping.ToLayaQuestion(id, question!);
+        var questionMappingMs = sw.ElapsedMilliseconds;
+
+        sw.Restart();
+        var sequences = new Dictionary<string, LayaSequence>(request.Questions.Count, StringComparer.Ordinal);
+        foreach (var (id, _) in request.Questions)
+            sequences[id] = LayaPromptBuilder.BuildSequence(
+                tokenizer, stateText, layaQuestions[id], agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
+        var promptBuildMs = sw.ElapsedMilliseconds;
+
+        var answers = new Dictionary<string, Answer>(request.Questions.Count, StringComparer.Ordinal);
         int inputTokens = 0;
+        long forwardMs = 0;
+        long encodeMs = 0;
+        long headMs = 0;
+        long decodeMs = 0;
+        long answerMappingMs = 0;
 
         lock (gate)
         {
             foreach (var (id, question) in request.Questions)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var layaQuestion = NivaraTypeSafeLayaMapping.ToLayaQuestion(id, question!);
-                var sequence = LayaPromptBuilder.BuildSequence(
-                    tokenizer, stateText, layaQuestion, agent.MaxLen, agent.HeadMaxLen, stateIds: stateIds);
+                var layaQuestion = layaQuestions[id];
+                var sequence = sequences[id];
+
+                var fwdSw = Stopwatch.StartNew();
                 var output = session.Forward(sequence.Ids, sequence.Length, layaQuestion.Type, sequence.Markers);
+                forwardMs += fwdSw.ElapsedMilliseconds;
+                encodeMs += session.LastEncodeMilliseconds;
+                headMs += session.LastHeadMilliseconds;
+
+                var decSw = Stopwatch.StartNew();
                 var decision = calibration.Decode(layaQuestion, output.Logits, output.ActionProbability);
+                decodeMs += decSw.ElapsedMilliseconds;
+
+                var mapSw = Stopwatch.StartNew();
                 answers[id] = NivaraTypeSafeLayaMapping.ToAnswer(question!, decision);
+                answerMappingMs += mapSw.ElapsedMilliseconds;
+
                 inputTokens += sequence.Length;
             }
         }
 
+        var allocSw = Stopwatch.StartNew();
         var nouls = answers.Where(kv => kv.Value is NoulAnswer)
             .ToDictionary(kv => kv.Key, kv => (NoulAnswer)kv.Value);
         var choices = answers.Where(kv => kv.Value is ChoiceAnswer)
@@ -308,6 +359,22 @@ public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
             Answers = answers,
             Usage = new Usage { InputTokens = inputTokens, OutputTokens = 0 },
         };
+        var allocationsMs = allocSw.ElapsedMilliseconds;
+        totalSw.Stop();
+
+        LastPhaseTimings = new SystemOnePhaseTimings(
+            stateTextMs,
+            stateTokenizeMs,
+            questionMappingMs,
+            promptBuildMs,
+            forwardMs,
+            encodeMs,
+            headMs,
+            decodeMs,
+            answerMappingMs,
+            allocationsMs,
+            totalSw.ElapsedMilliseconds);
+
         return Task.FromResult(response);
     }
 

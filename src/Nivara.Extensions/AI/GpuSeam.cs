@@ -38,6 +38,12 @@ public interface ILayaGpuSession : IDisposable
 {
     string DeviceName { get; }
 
+    /// <summary>Encode (ModernBERT) time of the most recent <see cref="Forward"/> call, in milliseconds.</summary>
+    long LastEncodeMilliseconds { get; }
+
+    /// <summary>Decision-head time of the most recent <see cref="Forward"/> call, in milliseconds.</summary>
+    long LastHeadMilliseconds { get; }
+
     LayaHeadOutput Forward(int[] ids, int validLength, LayaQuestionType type, IReadOnlyList<int> markers);
 }
 
