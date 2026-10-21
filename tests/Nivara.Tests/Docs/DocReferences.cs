@@ -81,12 +81,29 @@ static partial class DocReferenceExtractor
         var root = DocSnippetExtractor.RepoRoot;
         var files = new List<string>();
 
-        Collect(root, recursive: false, files);
+        // C# files: read everywhere so File.cs:NN citations resolve (unchanged scope).
+        Collect(root, recursive: false, files, static relative => Path.GetExtension(relative) == ".cs");
         foreach (var subtree in new[] { "docs", "src", "samples", "tests" })
         {
             var directory = Path.Combine(root, subtree);
-            if (Directory.Exists(directory)) Collect(directory, recursive: true, files);
+            if (Directory.Exists(directory))
+                Collect(directory, recursive: true, files, static relative => Path.GetExtension(relative) == ".cs");
         }
+
+        // Markdown reference discovery (issue #704): only top-level docs/*.md plus docs/adr/,
+        // repo-root *.md, and README.md/AGENTS.md anywhere. Subfolders of docs/ other than
+        // adr/ (blog/, research/, plan/, ...) are out of scope for the pin.
+        Collect(root, recursive: false, files, static relative => Path.GetExtension(relative) == ".md");
+        var docsDir = Path.Combine(root, "docs");
+        if (Directory.Exists(docsDir))
+        {
+            Collect(docsDir, recursive: false, files, static relative => Path.GetExtension(relative) == ".md");
+            var adrDir = Path.Combine(docsDir, "adr");
+            if (Directory.Exists(adrDir))
+                Collect(adrDir, recursive: true, files, static relative => Path.GetExtension(relative) == ".md");
+        }
+        Collect(root, recursive: true, files, static relative =>
+            Path.GetFileName(relative) is "README.md" or "AGENTS.md");
 
         return files
             .Distinct(StringComparer.Ordinal)
@@ -135,19 +152,19 @@ static partial class DocReferenceExtractor
         return faults;
     }
 
-    static void Collect(string directory, bool recursive, List<string> files)
+    static void Collect(string directory, bool recursive, List<string> files, Func<string, bool> includeFile)
     {
         foreach (var file in Directory.EnumerateFiles(directory, "*.*", SearchOption.TopDirectoryOnly))
         {
-            if (Path.GetExtension(file) is not (".md" or ".cs"))
-                continue;
-
             var relative = Path.GetRelativePath(DocSnippetExtractor.RepoRoot, file).Replace('\\', '/');
 
             if (ExcludedDocuments.Contains(relative, StringComparer.Ordinal))
                 continue;
 
             if (ExcludedPathPrefixes.Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal)))
+                continue;
+
+            if (!includeFile(relative))
                 continue;
 
             files.Add(relative);
@@ -159,7 +176,7 @@ static partial class DocReferenceExtractor
         foreach (var child in Directory.EnumerateDirectories(directory))
         {
             if (!ExcludedSegments.Contains(Path.GetFileName(child), StringComparer.Ordinal))
-                Collect(child, recursive: true, files);
+                Collect(child, recursive: true, files, includeFile);
         }
     }
 
