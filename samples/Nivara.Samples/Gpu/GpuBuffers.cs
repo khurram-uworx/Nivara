@@ -138,6 +138,8 @@ internal static class GpuBuffers
         new("2x2@KT32", 2, 2, 32),
         new("4x2@KT32", 4, 2, 32),
         new("1x8@KT16", 1, 8, 16),
+        new("2x4@KT16", 2, 4, 16),
+        new("4x4@KT16", 4, 4, 16),
     ];
 
     /// <summary>
