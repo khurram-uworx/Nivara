@@ -50,7 +50,7 @@ class Program
         ["minilm"] = ["", "benchmark", "compare", "similarity"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
-        ["laya"] = ["", "benchmark", "compare"],
+        ["laya"] = ["", "benchmark", "compare", "diag"],
         ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
@@ -64,7 +64,7 @@ class Program
         ["minilm"] = ["", "benchmark", "compare"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
-        ["laya"] = ["", "benchmark", "compare"],
+        ["laya"] = ["", "benchmark", "compare", "diag"],
         ["modernbert"] = ["", "benchmark", "compare"],
     };
 
@@ -77,7 +77,7 @@ class Program
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare"],
-        ["laya"] = ["", "benchmark", "compare"],
+        ["laya"] = ["", "benchmark", "compare", "diag"],
         ["smollm"] = ["", "benchmark", "generate"],
         ["qwen"] = ["", "benchmark", "tools", "distill"],
         ["mobilenet_v2"] = ["", "benchmark", "compare"],
@@ -801,6 +801,7 @@ class Program
                     if (benchmark) return Laya.RunBenchmarkGpu(layaSilkTensors, modelDir, open);
                     if (compare) return Laya.CompareGpu(layaSilkTensors, modelDir, open);
                     return Laya.RunGpu(layaSilkTensors, modelDir, open);
+
                 }
                 if (compare) return Laya.Compare(tensors, modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
