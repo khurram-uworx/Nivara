@@ -18,12 +18,14 @@ assessment. Root cause likely in the shared head attention/GEMM kernels at seqLe
   loading (scorerHidden GELU + scorerOut GEMM).
 - Conclusion: the GPU GEMM kernel or weight loading differs from CPU. The LayerNorm was a
   red herring (it amplified a small GEMM difference through the weight matrix).
-- The GEMM kernel (TiledGemmKernelRow4Bias) appears correct on inspection. The issue may be
-  in the F16->F32 conversion or in how the bias is indexed when bCols=1.
-- Diagnostic attempts to isolate GEMM are blocked by internal access modifiers (GemmKernels,
-  SilkLauncher are internal). Need to either make them public or add diagnostic methods to
-  the sample project.
-- Next: add diagnostic methods to Nivara.Samples.Gpu or make kernels public for testing.
+- GEMM kernel verified correct on a known input (2x3 @ 3x2). CPU and GPU agree exactly.
+- With identity LayerNorm, the remaining 0.00018 diff is in the GELU or bias loading.
+- The GPU GELU uses the A&S erf polynomial (same as Silk). The CPU uses Math.Erf (exact).
+  The difference between exact erf and A&S is ~1e-7, not 0.00018.
+- The bias loading: GPU uses UploadPlain (direct copy). CPU uses StateDictLoader.LoadLinear.
+  Both read from the same tensors dictionary. Should be identical.
+- Next: check if the issue is in how the bias is applied (GEMM epilogue) or in the
+  type embedding loading.
 
 ## Verification
 - `laya --silk compare` PASS
