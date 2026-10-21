@@ -89,6 +89,10 @@ internal static class SilkKernels
     public const string GemmRelu = "gemm_row4_relu";
     public const string GemmGelu = "gemm_row4_gelu";
     public const string GemmQkv = "gemm_row4_qkv";
+
+    // Measured candidate geometries (issue #784) — not routed by any runner yet.
+    public const string GemmReg2x4 = "gemm_reg2x4";
+    public const string GemmReg4x4 = "gemm_reg4x4";
     public const string Attention = "batched_attention";
 
     // SmolLM (Llama-family causal LM) kernels.
@@ -133,7 +137,7 @@ internal static class SilkKernels
     public static readonly string[] KernelNames =
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
-        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
+        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention,
         RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16, DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
@@ -141,6 +145,12 @@ internal static class SilkKernels
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
     public static int GemmGlobalRows(int aRows) => RoundUp(aRows, GemmTileSize);
+
+    /// <summary>Global work size (dim 0) for the measured 2×4 geometry (32-row tile, 16 threads).</summary>
+    public static int GemmGlobalRowsReg2x4(int aRows) => RoundUp(aRows, GemmTileSize * 2) / 2;
+
+    /// <summary>Global work size (dim 0) for the measured 4×4 geometry (64-row tile, 16 threads).</summary>
+    public static int GemmGlobalRowsReg4x4(int aRows) => RoundUp(aRows, GemmTileSize * 4) / 4;
 
     /// <summary>Global work size (dim 1) for a GEMM producing <paramref name="bCols"/> columns.
     /// A work-group is 16 threads wide here but covers <see cref="GemmTileCols"/> output columns
@@ -1928,6 +1938,180 @@ internal static class SilkKernels
                         out[j] = acc + residual[j];
                     }
                 }
+
+        /* Measured candidate geometry: 2x4 @ K16 (issue #784). Plain GEMM, ascending K. */
+        __kernel void gemm_reg2x4(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            const uint BR = 2, BC = 4, KT = 16, TILE = 16;
+            const uint TileRows = TILE * BR, TileCols = TILE * BC;
+            uint x = get_local_id(0);
+            uint y = get_local_id(1);
+            uint outRowBase = get_group_id(0) * TileRows;
+            uint colBase = get_group_id(1) * TileCols;
+            __local float smem[TILE * (KT + TileCols)];
+            float acc00 = 0.0f, acc01 = 0.0f, acc02 = 0.0f, acc03 = 0.0f;
+            float acc10 = 0.0f, acc11 = 0.0f, acc12 = 0.0f, acc13 = 0.0f;
+
+            for (uint k0 = 0; k0 < aCols; k0 += KT)
+            {
+                uint stripOfThread = (x * BR) / KT;
+                for (uint s = 0; s < (TileRows / KT); ++s)
+                {
+                    if (s == stripOfThread)
+                    {
+                        for (uint r = 0; r < BR; ++r)
+                        {
+                            uint srcRow = outRowBase + x * BR + r;
+                            uint slot = x * BR + r - s * KT;
+                            for (uint kk = 0; kk < KT; kk += TILE)
+                            {
+                                uint srcCol = k0 + kk + y;
+                                smem[slot + (kk + y) * (KT + TileCols)] = (srcRow < aRows && srcCol < aCols) ? a[srcRow * aCols + srcCol] : 0.0f;
+                            }
+                        }
+                    }
+                    for (uint kk = 0; kk < KT; kk += TILE)
+                        for (uint cc = 0; cc < TileCols; cc += TILE)
+                        {
+                            uint srcRow = k0 + kk + x;
+                            uint srcCol = colBase + cc + y;
+                            smem[(kk + x) + (KT + cc + y) * (KT + TileCols)] = (srcRow < aCols && srcCol < bCols) ? b[srcRow * bCols + srcCol] : 0.0f;
+                        }
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                    if (s == stripOfThread)
+                    {
+                        for (uint k = 0; k < KT; ++k)
+                        {
+                            float a0 = smem[(x * BR + 0 - s * KT) + k * (KT + TileCols)];
+                            float a1 = smem[(x * BR + 1 - s * KT) + k * (KT + TileCols)];
+                            uint cb = y * BC;
+                            acc00 += a0 * smem[k + (KT + cb + 0) * (KT + TileCols)];
+                            acc01 += a0 * smem[k + (KT + cb + 1) * (KT + TileCols)];
+                            acc02 += a0 * smem[k + (KT + cb + 2) * (KT + TileCols)];
+                            acc03 += a0 * smem[k + (KT + cb + 3) * (KT + TileCols)];
+                            acc10 += a1 * smem[k + (KT + cb + 0) * (KT + TileCols)];
+                            acc11 += a1 * smem[k + (KT + cb + 1) * (KT + TileCols)];
+                            acc12 += a1 * smem[k + (KT + cb + 2) * (KT + TileCols)];
+                            acc13 += a1 * smem[k + (KT + cb + 3) * (KT + TileCols)];
+                        }
+                    }
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                }
+            }
+
+            uint d = colBase + y * BC;
+            {
+                uint outRow = outRowBase + x * BR + 0;
+                if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc00; if (d + 1 < bCols) c[dst + 1] = acc01; if (d + 2 < bCols) c[dst + 2] = acc02; if (d + 3 < bCols) c[dst + 3] = acc03; }
+            }
+            {
+                uint outRow = outRowBase + x * BR + 1;
+                if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc10; if (d + 1 < bCols) c[dst + 1] = acc11; if (d + 2 < bCols) c[dst + 2] = acc12; if (d + 3 < bCols) c[dst + 3] = acc13; }
+            }
+        }
+
+        /* Measured candidate geometry: 4x4 @ K16 (issue #784). Plain GEMM, ascending K. */
+        __kernel void gemm_reg4x4(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            const uint BR = 4, BC = 4, KT = 16, TILE = 16;
+            const uint TileRows = TILE * BR, TileCols = TILE * BC;
+            uint x = get_local_id(0);
+            uint y = get_local_id(1);
+            uint outRowBase = get_group_id(0) * TileRows;
+            uint colBase = get_group_id(1) * TileCols;
+            __local float smem[TILE * (KT + TileCols)];
+            float acc00 = 0.0f, acc01 = 0.0f, acc02 = 0.0f, acc03 = 0.0f;
+            float acc10 = 0.0f, acc11 = 0.0f, acc12 = 0.0f, acc13 = 0.0f;
+            float acc20 = 0.0f, acc21 = 0.0f, acc22 = 0.0f, acc23 = 0.0f;
+            float acc30 = 0.0f, acc31 = 0.0f, acc32 = 0.0f, acc33 = 0.0f;
+
+            for (uint k0 = 0; k0 < aCols; k0 += KT)
+            {
+                uint stripOfThread = (x * BR) / KT;
+                for (uint s = 0; s < (TileRows / KT); ++s)
+                {
+                    if (s == stripOfThread)
+                    {
+                        for (uint r = 0; r < BR; ++r)
+                        {
+                            uint srcRow = outRowBase + x * BR + r;
+                            uint slot = x * BR + r - s * KT;
+                            for (uint kk = 0; kk < KT; kk += TILE)
+                            {
+                                uint srcCol = k0 + kk + y;
+                                smem[slot + (kk + y) * (KT + TileCols)] = (srcRow < aRows && srcCol < aCols) ? a[srcRow * aCols + srcCol] : 0.0f;
+                            }
+                        }
+                    }
+                    for (uint kk = 0; kk < KT; kk += TILE)
+                        for (uint cc = 0; cc < TileCols; cc += TILE)
+                        {
+                            uint srcRow = k0 + kk + x;
+                            uint srcCol = colBase + cc + y;
+                            smem[(kk + x) + (KT + cc + y) * (KT + TileCols)] = (srcRow < aCols && srcCol < bCols) ? b[srcRow * bCols + srcCol] : 0.0f;
+                        }
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                    if (s == stripOfThread)
+                    {
+                        for (uint k = 0; k < KT; ++k)
+                        {
+                            float a0 = smem[(x * BR + 0 - s * KT) + k * (KT + TileCols)];
+                            float a1 = smem[(x * BR + 1 - s * KT) + k * (KT + TileCols)];
+                            float a2 = smem[(x * BR + 2 - s * KT) + k * (KT + TileCols)];
+                            float a3 = smem[(x * BR + 3 - s * KT) + k * (KT + TileCols)];
+                            uint cb = y * BC;
+                            acc00 += a0 * smem[k + (KT + cb + 0) * (KT + TileCols)];
+                            acc01 += a0 * smem[k + (KT + cb + 1) * (KT + TileCols)];
+                            acc02 += a0 * smem[k + (KT + cb + 2) * (KT + TileCols)];
+                            acc03 += a0 * smem[k + (KT + cb + 3) * (KT + TileCols)];
+                            acc10 += a1 * smem[k + (KT + cb + 0) * (KT + TileCols)];
+                            acc11 += a1 * smem[k + (KT + cb + 1) * (KT + TileCols)];
+                            acc12 += a1 * smem[k + (KT + cb + 2) * (KT + TileCols)];
+                            acc13 += a1 * smem[k + (KT + cb + 3) * (KT + TileCols)];
+                            acc20 += a2 * smem[k + (KT + cb + 0) * (KT + TileCols)];
+                            acc21 += a2 * smem[k + (KT + cb + 1) * (KT + TileCols)];
+                            acc22 += a2 * smem[k + (KT + cb + 2) * (KT + TileCols)];
+                            acc23 += a2 * smem[k + (KT + cb + 3) * (KT + TileCols)];
+                            acc30 += a3 * smem[k + (KT + cb + 0) * (KT + TileCols)];
+                            acc31 += a3 * smem[k + (KT + cb + 1) * (KT + TileCols)];
+                            acc32 += a3 * smem[k + (KT + cb + 2) * (KT + TileCols)];
+                            acc33 += a3 * smem[k + (KT + cb + 3) * (KT + TileCols)];
+                        }
+                    }
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                }
+            }
+
+            uint d = colBase + y * BC;
+            {
+                uint outRow = outRowBase + x * BR + 0;
+                if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc00; if (d + 1 < bCols) c[dst + 1] = acc01; if (d + 2 < bCols) c[dst + 2] = acc02; if (d + 3 < bCols) c[dst + 3] = acc03; }
+            }
+            {
+                uint outRow = outRowBase + x * BR + 1;
+                if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc10; if (d + 1 < bCols) c[dst + 1] = acc11; if (d + 2 < bCols) c[dst + 2] = acc12; if (d + 3 < bCols) c[dst + 3] = acc13; }
+            }
+            {
+                uint outRow = outRowBase + x * BR + 2;
+                if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc20; if (d + 1 < bCols) c[dst + 1] = acc21; if (d + 2 < bCols) c[dst + 2] = acc22; if (d + 3 < bCols) c[dst + 3] = acc23; }
+            }
+            {
+                uint outRow = outRowBase + x * BR + 3;
+                if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc30; if (d + 1 < bCols) c[dst + 1] = acc31; if (d + 2 < bCols) c[dst + 2] = acc32; if (d + 3 < bCols) c[dst + 3] = acc33; }
+            }
+        }
 
         """;
 }

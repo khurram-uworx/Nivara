@@ -123,6 +123,249 @@ internal static class GemmKernels
         }
     }
 
+    // ── #784 register-blocked geometries (2×4 / 4×4 @ K16) — MEASURED, NOT ADOPTED ──
+    //
+    // Candidate wider row-blocking geometries (issue #784) following the #440 row-striping
+    // pattern but keeping 4 output columns per thread. Plain (no fused epilogue) so the
+    // byte-identity claim reduces to the accumulation. Promoted to a production kernel only
+    // if the --gemm gate measures a win; see docs/ILGPU.md §10.1.
+
+    /// <summary>2x4 @ K16: 32x64 output tile, 16x16 group. 8 accumulators. Measured candidate for #784.</summary>
+    internal static void TiledGemmKernelReg2x4K16(
+        ArrayView<float> a,
+        ArrayView<float> b,
+        ArrayView<float> c,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        const int BR = 2, BC = 4, KT = 16;
+        const int TileRows = TileSize * BR, TileCols = TileSize * BC;
+        int x = Group.IdxX;
+        int y = Group.IdxY;
+
+        const int RowStride = KT + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, RowStride), new Stride2D.DenseX(RowStride));
+
+        int rowBase = Grid.IdxX * TileRows;
+        int colBase = Grid.IdxY * TileCols;
+        float acc00 = 0f, acc01 = 0f, acc02 = 0f, acc03 = 0f;
+        float acc10 = 0f, acc11 = 0f, acc12 = 0f, acc13 = 0f;
+
+        const int NumStrips = TileRows / KT;
+        for (int k0 = 0; k0 < aCols; k0 += KT)
+        {
+            int stripOfThread = (x * BR) / KT;
+            for (int s = 0; s < NumStrips; s++)
+            {
+                if (s == stripOfThread)
+                {
+                    for (int r = 0; r < BR; r++)
+                    {
+                        int srcRow = rowBase + x * BR + r;
+                        int slot = x * BR + r - s * KT;
+                        for (int kk = 0; kk < KT; kk += TileSize)
+                        {
+                            int srcCol = k0 + kk + y;
+                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
+                                ? a[srcRow * aCols + srcCol] : 0f;
+                        }
+                    }
+                }
+                for (int kk = 0; kk < KT; kk += TileSize)
+                    for (int cc = 0; cc < TileCols; cc += TileSize)
+                    {
+                        int srcRow = k0 + kk + x;
+                        int srcCol = colBase + cc + y;
+                        smem[kk + x, KT + cc + y] = (srcRow < aCols && srcCol < bCols)
+                            ? b[srcRow * bCols + srcCol] : 0f;
+                    }
+                Group.Barrier();
+
+                if (s == stripOfThread)
+                {
+                    for (int k = 0; k < KT; k++)
+                    {
+                        float a0 = smem[x * BR + 0 - s * KT, k];
+                        float a1 = smem[x * BR + 1 - s * KT, k];
+                        int cb = y * BC;
+                        acc00 += a0 * smem[k, KT + cb + 0];
+                        acc01 += a0 * smem[k, KT + cb + 1];
+                        acc02 += a0 * smem[k, KT + cb + 2];
+                        acc03 += a0 * smem[k, KT + cb + 3];
+                        acc10 += a1 * smem[k, KT + cb + 0];
+                        acc11 += a1 * smem[k, KT + cb + 1];
+                        acc12 += a1 * smem[k, KT + cb + 2];
+                        acc13 += a1 * smem[k, KT + cb + 3];
+                    }
+                }
+                Group.Barrier();
+            }
+        }
+
+        int d = colBase + y * BC;
+        {
+            int outRow = rowBase + x * BR + 0;
+            if (outRow < aRows)
+            {
+                int dst = outRow * bCols + d;
+                if (d + 0 < bCols) c[dst + 0] = acc00;
+                if (d + 1 < bCols) c[dst + 1] = acc01;
+                if (d + 2 < bCols) c[dst + 2] = acc02;
+                if (d + 3 < bCols) c[dst + 3] = acc03;
+            }
+        }
+        {
+            int outRow = rowBase + x * BR + 1;
+            if (outRow < aRows)
+            {
+                int dst = outRow * bCols + d;
+                if (d + 0 < bCols) c[dst + 0] = acc10;
+                if (d + 1 < bCols) c[dst + 1] = acc11;
+                if (d + 2 < bCols) c[dst + 2] = acc12;
+                if (d + 3 < bCols) c[dst + 3] = acc13;
+            }
+        }
+    }
+
+    /// <summary>4x4 @ K16: 64x64 output tile, 16x16 group. 16 accumulators. Measured candidate for #784.</summary>
+    internal static void TiledGemmKernelReg4x4K16(
+        ArrayView<float> a,
+        ArrayView<float> b,
+        ArrayView<float> c,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        const int BR = 4, BC = 4, KT = 16;
+        const int TileRows = TileSize * BR, TileCols = TileSize * BC;
+        int x = Group.IdxX;
+        int y = Group.IdxY;
+
+        const int RowStride = KT + TileCols;
+        var smem = SharedMemory.Allocate2D<float, Stride2D.DenseX>(
+            new Index2D(KT, RowStride), new Stride2D.DenseX(RowStride));
+
+        int rowBase = Grid.IdxX * TileRows;
+        int colBase = Grid.IdxY * TileCols;
+        float acc00 = 0f, acc01 = 0f, acc02 = 0f, acc03 = 0f;
+        float acc10 = 0f, acc11 = 0f, acc12 = 0f, acc13 = 0f;
+        float acc20 = 0f, acc21 = 0f, acc22 = 0f, acc23 = 0f;
+        float acc30 = 0f, acc31 = 0f, acc32 = 0f, acc33 = 0f;
+
+        const int NumStrips = TileRows / KT;
+        for (int k0 = 0; k0 < aCols; k0 += KT)
+        {
+            int stripOfThread = (x * BR) / KT;
+            for (int s = 0; s < NumStrips; s++)
+            {
+                if (s == stripOfThread)
+                {
+                    for (int r = 0; r < BR; r++)
+                    {
+                        int srcRow = rowBase + x * BR + r;
+                        int slot = x * BR + r - s * KT;
+                        for (int kk = 0; kk < KT; kk += TileSize)
+                        {
+                            int srcCol = k0 + kk + y;
+                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
+                                ? a[srcRow * aCols + srcCol] : 0f;
+                        }
+                    }
+                }
+                for (int kk = 0; kk < KT; kk += TileSize)
+                    for (int cc = 0; cc < TileCols; cc += TileSize)
+                    {
+                        int srcRow = k0 + kk + x;
+                        int srcCol = colBase + cc + y;
+                        smem[kk + x, KT + cc + y] = (srcRow < aCols && srcCol < bCols)
+                            ? b[srcRow * bCols + srcCol] : 0f;
+                    }
+                Group.Barrier();
+
+                if (s == stripOfThread)
+                {
+                    for (int k = 0; k < KT; k++)
+                    {
+                        float a0 = smem[x * BR + 0 - s * KT, k];
+                        float a1 = smem[x * BR + 1 - s * KT, k];
+                        float a2 = smem[x * BR + 2 - s * KT, k];
+                        float a3 = smem[x * BR + 3 - s * KT, k];
+                        int cb = y * BC;
+                        acc00 += a0 * smem[k, KT + cb + 0];
+                        acc01 += a0 * smem[k, KT + cb + 1];
+                        acc02 += a0 * smem[k, KT + cb + 2];
+                        acc03 += a0 * smem[k, KT + cb + 3];
+                        acc10 += a1 * smem[k, KT + cb + 0];
+                        acc11 += a1 * smem[k, KT + cb + 1];
+                        acc12 += a1 * smem[k, KT + cb + 2];
+                        acc13 += a1 * smem[k, KT + cb + 3];
+                        acc20 += a2 * smem[k, KT + cb + 0];
+                        acc21 += a2 * smem[k, KT + cb + 1];
+                        acc22 += a2 * smem[k, KT + cb + 2];
+                        acc23 += a2 * smem[k, KT + cb + 3];
+                        acc30 += a3 * smem[k, KT + cb + 0];
+                        acc31 += a3 * smem[k, KT + cb + 1];
+                        acc32 += a3 * smem[k, KT + cb + 2];
+                        acc33 += a3 * smem[k, KT + cb + 3];
+                    }
+                }
+                Group.Barrier();
+            }
+        }
+
+        int d = colBase + y * BC;
+        // row 0
+        {
+            int outRow = rowBase + x * BR + 0;
+            if (outRow < aRows)
+            {
+                int dst = outRow * bCols + d;
+                if (d + 0 < bCols) c[dst + 0] = acc00;
+                if (d + 1 < bCols) c[dst + 1] = acc01;
+                if (d + 2 < bCols) c[dst + 2] = acc02;
+                if (d + 3 < bCols) c[dst + 3] = acc03;
+            }
+        }
+        // row 1
+        {
+            int outRow = rowBase + x * BR + 1;
+            if (outRow < aRows)
+            {
+                int dst = outRow * bCols + d;
+                if (d + 0 < bCols) c[dst + 0] = acc10;
+                if (d + 1 < bCols) c[dst + 1] = acc11;
+                if (d + 2 < bCols) c[dst + 2] = acc12;
+                if (d + 3 < bCols) c[dst + 3] = acc13;
+            }
+        }
+        // row 2
+        {
+            int outRow = rowBase + x * BR + 2;
+            if (outRow < aRows)
+            {
+                int dst = outRow * bCols + d;
+                if (d + 0 < bCols) c[dst + 0] = acc20;
+                if (d + 1 < bCols) c[dst + 1] = acc21;
+                if (d + 2 < bCols) c[dst + 2] = acc22;
+                if (d + 3 < bCols) c[dst + 3] = acc23;
+            }
+        }
+        // row 3
+        {
+            int outRow = rowBase + x * BR + 3;
+            if (outRow < aRows)
+            {
+                int dst = outRow * bCols + d;
+                if (d + 0 < bCols) c[dst + 0] = acc30;
+                if (d + 1 < bCols) c[dst + 1] = acc31;
+                if (d + 2 < bCols) c[dst + 2] = acc32;
+                if (d + 3 < bCols) c[dst + 3] = acc33;
+            }
+        }
+    }
+
     // ── #440 register-blocked geometries — MEASURED, NOT ADOPTED ───────────────
     //
     // Do not route a runner at anything in this section. All four were gated and measured on

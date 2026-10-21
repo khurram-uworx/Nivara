@@ -25,7 +25,7 @@ internal static class GemmBenchmark
     const double GateMaxAbs = 1e-3;
     const int ExitUnbuilt = 10;
 
-    enum GemmVariant { OneToOne, Row4, Row4Bias, Row4Gelu, Row4Relu, Row4Qkv, Reg2x2K16, Reg2x2K32, Reg4x2K32, Reg1x8K16 }
+    enum GemmVariant { OneToOne, Row4, Row4Bias, Row4Gelu, Row4Relu, Row4Qkv, Reg2x2K16, Reg2x2K32, Reg4x2K32, Reg1x8K16, Reg2x4K16, Reg4x4K16 }
 
     /// <summary>
     /// The #440 register-blocked geometries under test, in attribution order. The 2x2 factor
@@ -35,6 +35,7 @@ internal static class GemmBenchmark
     static readonly GemmVariant[] s_regVariants =
     [
         GemmVariant.Reg2x2K16, GemmVariant.Reg2x2K32, GemmVariant.Reg4x2K32, GemmVariant.Reg1x8K16,
+        GemmVariant.Reg2x4K16, GemmVariant.Reg4x4K16,
     ];
 
     /// <summary>The tile geometry a #440 variant implements (GpuBuffers is the single authority).</summary>
@@ -45,6 +46,8 @@ internal static class GemmBenchmark
         GemmVariant.Reg2x2K32 => GpuBuffers.GemmGeometries[1],
         GemmVariant.Reg4x2K32 => GpuBuffers.GemmGeometries[2],
         GemmVariant.Reg1x8K16 => GpuBuffers.GemmGeometries[3],
+        GemmVariant.Reg2x4K16 => GpuBuffers.GemmGeometries[4],
+        GemmVariant.Reg4x4K16 => GpuBuffers.GemmGeometries[5],
         _ => GpuBuffers.Row4Geometry,
     };
 
@@ -197,6 +200,12 @@ internal static class GemmBenchmark
                     GemmVariant.Reg4x2K32 => runtime.Accelerator.LoadKernel<
                         ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
                         GemmKernels.TiledGemmKernelReg4x2K32),
+                    GemmVariant.Reg2x4K16 => runtime.Accelerator.LoadKernel<
+                        ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+                        GemmKernels.TiledGemmKernelReg2x4K16),
+                    GemmVariant.Reg4x4K16 => runtime.Accelerator.LoadKernel<
+                        ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+                        GemmKernels.TiledGemmKernelReg4x4K16),
                     _ => runtime.Accelerator.LoadKernel<
                         ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
                         GemmKernels.TiledGemmKernelReg1x8K16),
@@ -603,7 +612,8 @@ internal static class GemmBenchmark
                 {
                     GemmVariant.OneToOne or GemmVariant.Row4
                         or GemmVariant.Reg2x2K16 or GemmVariant.Reg2x2K32
-                        or GemmVariant.Reg4x2K32 or GemmVariant.Reg1x8K16 => core[i * bCols + j],
+                        or GemmVariant.Reg4x2K32 or GemmVariant.Reg1x8K16
+                        or GemmVariant.Reg2x4K16 or GemmVariant.Reg4x4K16 => core[i * bCols + j],
                     GemmVariant.Row4Gelu => GeluD(raw),
                     GemmVariant.Row4Relu => Math.Max(0.0, raw),
                     _ => raw,
