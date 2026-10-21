@@ -41,6 +41,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
     SilkRuntime.SilkBuffer ffnOut;
     SilkRuntime.SilkBuffer markerRows;
     SilkRuntime.SilkBuffer markerScored;
+    SilkRuntime.SilkBuffer markerScoredOut;
     SilkRuntime.SilkBuffer logits;
     SilkRuntime.SilkBuffer actRow;
     SilkRuntime.SilkBuffer actHiddenBuf;
@@ -188,8 +189,8 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         runtime.Upload(markerIds.Handle, markerIdHost.AsSpan(0, k));
         LaunchGather(hidden, markerIds.Handle, markerRows.Handle, k * hiddenDim);
         LaunchLayerNorm(markerRows.Handle, scorerNormW, scorerNormB, markerScored.Handle, k);
-        LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScored.Handle, scorerHiddenB, k, hiddenDim, hiddenDim);
-        LaunchGemm(SilkKernels.GemmBias, markerScored.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1);
+        LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScoredOut.Handle, scorerHiddenB, k, hiddenDim, hiddenDim);
+        LaunchGemm(SilkKernels.GemmBias, markerScoredOut.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1);
         float[] logitsHost = runtime.Download(logits.Handle, k);
 
         double[] probabilities = LayaHeadScoring.Softmax(logitsHost);
@@ -225,6 +226,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         ffnOut = runtime.Ensure(ffnOut, rows * hiddenDim);
         markerRows = runtime.Ensure(markerRows, markers * hiddenDim);
         markerScored = runtime.Ensure(markerScored, markers * hiddenDim);
+        markerScoredOut = runtime.Ensure(markerScoredOut, markers * hiddenDim);
         logits = runtime.Ensure(logits, markers);
         actRow = runtime.Ensure(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
         actHiddenBuf = runtime.Ensure(actHiddenBuf, actHidden);
@@ -288,6 +290,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         Release(ffnOut);
         Release(markerRows);
         Release(markerScored);
+        Release(markerScoredOut);
         Release(logits);
         Release(actRow);
         Release(actHiddenBuf);
