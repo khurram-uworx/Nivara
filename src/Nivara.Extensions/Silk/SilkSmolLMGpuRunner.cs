@@ -195,7 +195,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         // tied LM head: logits = normed @ tokEmb^T  (last row only to save memory)
         // Compute for all rows but read back all; caller (generation) uses last row.
         nint logitsBuf = runtime.Allocate(seqLen * vocabSize);
-        Gemm(normed.Handle, tokEmbTransposed, logitsBuf, seqLen, hiddenDim, vocabSize);
+        SilkLauncher.Gemm(runtime, normed.Handle, tokEmbTransposed, logitsBuf, seqLen, hiddenDim, vocabSize);
         // tokEmb is [vocab,hidden]; need transposed [hidden,vocab]. We don't have it precomputed.
         // Fallback: compute via host transpose on demand is expensive; instead store tokEmbT.
         var logits = runtime.Download(logitsBuf, seqLen * vocabSize);
@@ -276,7 +276,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
 
         nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        Gemm(lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -343,7 +343,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
 
         nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        Gemm(lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -396,7 +396,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        RmsNormGemv(x.Handle, finalNormW,
+        SilkLauncher.RmsNormGemv(runtime, x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
@@ -487,7 +487,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         // last row logits
         nint lastRowView = runtime.CreateSubview(normed.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        Gemm(lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
+        SilkLauncher.Gemm(runtime, lastRowView, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize);
         var logits = runtime.Download(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -544,7 +544,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        RmsNormGemv(x.Handle, finalNormW,
+        SilkLauncher.RmsNormGemv(runtime, x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         var logits = runtime.Download(logitsBuf, vocabSize);
