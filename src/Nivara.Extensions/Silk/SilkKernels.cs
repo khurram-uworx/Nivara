@@ -178,8 +178,8 @@ internal static class SilkKernels
         #define ATTNGROUP 64
         #define GEMVLANES 32
         #define GEMVCOLS 128
-        #define BF16_TO_F32(x) ((float)(((uint)(x)) << 16))
-        #define BF16_TO_F32(x) ((float)(((uint)(x)) << 16))
+        #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
+        #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
 
         inline float gelu_exact(float v)
         {
