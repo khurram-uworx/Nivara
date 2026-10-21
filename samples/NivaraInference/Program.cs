@@ -50,7 +50,7 @@ class Program
         ["minilm"] = ["", "benchmark", "compare", "similarity"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
-        ["laya"] = ["", "benchmark", "compare", "diag"],
+        ["laya"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
@@ -64,7 +64,7 @@ class Program
         ["minilm"] = ["", "benchmark", "compare"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
-        ["laya"] = ["", "benchmark", "compare", "diag"],
+        ["laya"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare"],
     };
 
@@ -77,7 +77,7 @@ class Program
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare"],
-        ["laya"] = ["", "benchmark", "compare", "diag"],
+        ["laya"] = ["", "benchmark", "compare"],
         ["smollm"] = ["", "benchmark", "generate"],
         ["qwen"] = ["", "benchmark", "tools", "distill"],
         ["mobilenet_v2"] = ["", "benchmark", "compare"],
