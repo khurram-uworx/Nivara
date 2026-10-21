@@ -164,6 +164,11 @@ public static class TypeSafe
         int failedItems = 0;
         int partialItems = 0;
 
+        long phaseStateText = 0, phaseStateTokenize = 0, phaseQuestionMapping = 0, phasePromptBuild = 0;
+        long phaseForward = 0, phaseEncode = 0, phaseHead = 0, phaseDecode = 0;
+        long phaseAnswerMapping = 0, phaseAllocations = 0, phaseTotal = 0;
+        int phaseCount = 0;
+
         for (int i = 0; i < NewsItems.Length; i++)
         {
             var item = NewsItems[i];
@@ -195,6 +200,22 @@ public static class TypeSafe
                 }
                 sw.Stop();
                 samples[recorded++] = sw.ElapsedMilliseconds;
+
+                if (client is NivaraTypeSafeClient tsClient && tsClient.LastPhaseTimings is { } pt)
+                {
+                    phaseStateText += pt.StateTextMs;
+                    phaseStateTokenize += pt.StateTokenizeMs;
+                    phaseQuestionMapping += pt.QuestionMappingMs;
+                    phasePromptBuild += pt.PromptBuildMs;
+                    phaseForward += pt.ForwardMs;
+                    phaseEncode += pt.EncodeMs;
+                    phaseHead += pt.HeadMs;
+                    phaseDecode += pt.DecodeMs;
+                    phaseAnswerMapping += pt.AnswerMappingMs;
+                    phaseAllocations += pt.AllocationsMs;
+                    phaseTotal += pt.TotalMs;
+                    phaseCount++;
+                }
             }
 
             if (recorded == 0)
@@ -241,6 +262,24 @@ public static class TypeSafe
         Console.WriteLine();
         Console.WriteLine($"Overall: median {overall:0.#} ms per assessment across {medians.Count} items" +
             $"{(notes.Count > 0 ? $" ({string.Join(", ", notes)})" : "")}, {throughput}.");
+
+        if (phaseCount > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Phase breakdown (avg ms per assessment):");
+            Console.WriteLine($"  state text:        {phaseStateText / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  state tokenize:    {phaseStateTokenize / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  question mapping:  {phaseQuestionMapping / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  prompt build:      {phasePromptBuild / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  forward (total):   {phaseForward / (double)phaseCount,7:F1}");
+            Console.WriteLine($"    encode:          {phaseEncode / (double)phaseCount,7:F1}");
+            Console.WriteLine($"    head:            {phaseHead / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  decode:            {phaseDecode / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  answer mapping:    {phaseAnswerMapping / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  allocations:       {phaseAllocations / (double)phaseCount,7:F1}");
+            Console.WriteLine($"  total:             {phaseTotal / (double)phaseCount,7:F1}");
+        }
+
         Console.WriteLine(notes.Count == 0
             ? "\nDone."
             : $"\n{failedItems} of {NewsItems.Length} items failed, {partialItems} partial; see the rows above.");
