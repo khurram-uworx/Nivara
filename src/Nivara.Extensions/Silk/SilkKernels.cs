@@ -676,7 +676,7 @@ internal static class SilkKernels
             uint c2 = colBase + y * BLOCK + 2; \
             uint c3 = colBase + y * BLOCK + 3;
 
-                inline uint qkv_dest(uint j, uint outRow, uint aRows, uint blockWidth)
+        inline uint qkv_dest(uint j, uint outRow, uint aRows, uint blockWidth)
         {
             uint block = j / blockWidth;
             uint colInBlock = j - block * blockWidth;
