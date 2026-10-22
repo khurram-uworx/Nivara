@@ -633,12 +633,13 @@ As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
    Laya did. Do not fold those into the BERT runner.
 2. Add a kernel only if the operation is not already in `KernelNames`; reuse
    `GEMM_ROW4_ACCUMULATE` for any new GEMM so the byte-identity claim keeps holding.
-3. Keep the accumulation order identical to the ILGPU kernel of the same shape — the gate compares
+3. Keep the accumulation order identical to the CPU reference of the same shape — the gate compares
    them directly.
 4. Keep `KernelNames` in sync with the translation unit (add the name constant).
 5. Take `Transposed`, `QkvPacked` and `Req` from `WeightLayout`, and dispatch from `SilkLauncher`.
-   The ILGPU side reaches the same host math through `GpuBuffers`, which delegates. Do not re-derive
-   it per backend: the drift would be a silently wrong attention rather than a crash.
+   The CPU reference assumed by the gate consumes the same host layout, so these come from
+   `WeightLayout` rather than a per-backend re-derivation: the drift would be a silently wrong
+   attention rather than a crash.
 6. Register every buffer so `Dispose` is unconditional; release sub-buffers in a `finally`.
 7. Add the model to `SilkModes` and the CLI dispatch, and extend `InferenceCliArgumentTests` for each
    new rejection.
