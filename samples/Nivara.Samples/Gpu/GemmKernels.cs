@@ -45,9 +45,28 @@ internal static class GemmKernels
 
         for (int k0 = 0; k0 < aCols; k0 += TileSize)
         {
-            int aCol = k0 + y;
+            if (y < 4)
+            {
+                int aColBase = k0 + y * 4;
+                int aBase = outRow * aCols + aColBase;
+                if (outRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                {
+                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                    smem[x, y * 4 + 0] = av.X;
+                    smem[x, y * 4 + 1] = av.Y;
+                    smem[x, y * 4 + 2] = av.Z;
+                    smem[x, y * 4 + 3] = av.W;
+                }
+                else
+                {
+                    for (int aw = 0; aw < 4; aw++)
+                    {
+                        int aCol2 = aColBase + aw;
+                        smem[x, y * 4 + aw] = (outRow < aRows && aCol2 < aCols) ? a[outRow * aCols + aCol2] : 0f;
+                    }
+                }
+            }
             int bRow = k0 + x;
-            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             smem[x, TileSize + y] = (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0f;
             Group.Barrier();
 
@@ -92,9 +111,28 @@ internal static class GemmKernels
 
         for (int k0 = 0; k0 < aCols; k0 += TileSize)
         {
-            int aCol = k0 + y;
+            if (y < 4)
+            {
+                int aColBase = k0 + y * 4;
+                int aBase = outRow * aCols + aColBase;
+                if (outRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                {
+                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                    smem[x, y * 4 + 0] = av.X;
+                    smem[x, y * 4 + 1] = av.Y;
+                    smem[x, y * 4 + 2] = av.Z;
+                    smem[x, y * 4 + 3] = av.W;
+                }
+                else
+                {
+                    for (int aw = 0; aw < 4; aw++)
+                    {
+                        int aCol2 = aColBase + aw;
+                        smem[x, y * 4 + aw] = (outRow < aRows && aCol2 < aCols) ? a[outRow * aCols + aCol2] : 0f;
+                    }
+                }
+            }
             int bRow = k0 + x;
-            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             {
                 int outCol0 = colBase + y * BlockCols;
                 int bBase = bRow * bCols + outCol0;
@@ -854,9 +892,28 @@ internal static class GemmKernels
 
         for (int k0 = 0; k0 < aCols; k0 += TileSize)
         {
-            int aCol = k0 + y;
+            if (y < 4)
+            {
+                int aColBase = k0 + y * 4;
+                int aBase = outRow * aCols + aColBase;
+                if (outRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                {
+                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                    smem[x, y * 4 + 0] = av.X;
+                    smem[x, y * 4 + 1] = av.Y;
+                    smem[x, y * 4 + 2] = av.Z;
+                    smem[x, y * 4 + 3] = av.W;
+                }
+                else
+                {
+                    for (int aw = 0; aw < 4; aw++)
+                    {
+                        int aCol2 = aColBase + aw;
+                        smem[x, y * 4 + aw] = (outRow < aRows && aCol2 < aCols) ? a[outRow * aCols + aCol2] : 0f;
+                    }
+                }
+            }
             int bRow = k0 + x;
-            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             {
                 int outCol0 = colBase + y * BlockCols;
                 int bBase = bRow * bCols + outCol0;
@@ -939,9 +996,28 @@ internal static class GemmKernels
 
         for (int k0 = 0; k0 < aCols; k0 += TileSize)
         {
-            int aCol = k0 + y;
+            if (y < 4)
+            {
+                int aColBase = k0 + y * 4;
+                int aBase = outRow * aCols + aColBase;
+                if (outRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                {
+                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                    smem[x, y * 4 + 0] = av.X;
+                    smem[x, y * 4 + 1] = av.Y;
+                    smem[x, y * 4 + 2] = av.Z;
+                    smem[x, y * 4 + 3] = av.W;
+                }
+                else
+                {
+                    for (int aw = 0; aw < 4; aw++)
+                    {
+                        int aCol2 = aColBase + aw;
+                        smem[x, y * 4 + aw] = (outRow < aRows && aCol2 < aCols) ? a[outRow * aCols + aCol2] : 0f;
+                    }
+                }
+            }
             int bRow = k0 + x;
-            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             {
                 int outCol0 = colBase + y * BlockCols;
                 int bBase = bRow * bCols + outCol0;
@@ -1024,9 +1100,28 @@ internal static class GemmKernels
 
         for (int k0 = 0; k0 < aCols; k0 += TileSize)
         {
-            int aCol = k0 + y;
+            if (y < 4)
+            {
+                int aColBase = k0 + y * 4;
+                int aBase = outRow * aCols + aColBase;
+                if (outRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                {
+                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                    smem[x, y * 4 + 0] = av.X;
+                    smem[x, y * 4 + 1] = av.Y;
+                    smem[x, y * 4 + 2] = av.Z;
+                    smem[x, y * 4 + 3] = av.W;
+                }
+                else
+                {
+                    for (int aw = 0; aw < 4; aw++)
+                    {
+                        int aCol2 = aColBase + aw;
+                        smem[x, y * 4 + aw] = (outRow < aRows && aCol2 < aCols) ? a[outRow * aCols + aCol2] : 0f;
+                    }
+                }
+            }
             int bRow = k0 + x;
-            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             {
                 int outCol0 = colBase + y * BlockCols;
                 int bBase = bRow * bCols + outCol0;
@@ -1123,9 +1218,28 @@ internal static class GemmKernels
 
         for (int k0 = 0; k0 < aCols; k0 += TileSize)
         {
-            int aCol = k0 + y;
+            if (y < 4)
+            {
+                int aColBase = k0 + y * 4;
+                int aBase = outRow * aCols + aColBase;
+                if (outRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                {
+                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                    smem[x, y * 4 + 0] = av.X;
+                    smem[x, y * 4 + 1] = av.Y;
+                    smem[x, y * 4 + 2] = av.Z;
+                    smem[x, y * 4 + 3] = av.W;
+                }
+                else
+                {
+                    for (int aw = 0; aw < 4; aw++)
+                    {
+                        int aCol2 = aColBase + aw;
+                        smem[x, y * 4 + aw] = (outRow < aRows && aCol2 < aCols) ? a[outRow * aCols + aCol2] : 0f;
+                    }
+                }
+            }
             int bRow = k0 + x;
-            smem[x, y] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0f;
             {
                 int outCol0 = colBase + y * BlockCols;
                 int bBase = bRow * bCols + outCol0;
