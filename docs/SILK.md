@@ -600,11 +600,11 @@ As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
 - **`OpenSilkEncoder`/`OpenIlgpuEncoder`** share the `OpenEncoder` delegate and one set of entry-point
   bodies, so a fix to one backend cannot be forgotten in the other.
 - **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
-  (`SilkKernelsGate.cs`). It runs the ILGPU originals and the Silk kernels **in one process** and
+  (`SilkKernelsGate.cs`). It runs the CPU reference and the Silk kernels **in one process** and
   requires **byte-identity** for `gemm_row4`, `gemm_row4_bias`, `gemm_row4_qkv`, `gemm_row4_relu`,
   `gather_rows`, `add`, `add_bias`, `split_columns`, and `rotary` (pure multiply-and-add, so a bit
   difference means the accumulation order or the contraction changed — a design bug, not rounding),
-  and the numeric bound `|silk − ilgpu| ≤ 1e-3·(1 + |ilgpu|)` for the rest (`gemm_row4_gelu`,
+  and the numeric bound `|silk − cpu| ≤ 1e-3·(1 + |cpu|)` for the rest (`gemm_row4_gelu`,
   `geglu`, `layer_norm`, `batched_attention`, and the elementwise cells, whose `exp` or `sqrt` may
   differ by an ulp). One attention cell launches `band = 64`; the BERT cells stay on the global band. Timing is best-of-N after warmups and is
   **explicitly not a verdict** — a ratio outside x0.8..x1.2 is a red flag to report, not a failure to
