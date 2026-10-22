@@ -15,8 +15,9 @@ order unchanged. Adopt only if a before/after measurement shows a gain.
     (8-byte aligned, since `b` is `ushort*`).
   - widen each of `bv.s0..s3` with the existing `BF16_TO_F32` bitcast.
 - No ILGPU side: `samples/Nivara.Samples/Gpu/GemmKernels.cs` has no BF16 GEMM kernel.
-- Add a temporary `--bf16-gemm` probe to `tests/Nivara.PerformanceTests` to take before/after
-  measurements on MiniLM/DistilBERT-shaped GEMMs.
+- Measurement taken with a temporary standalone probe (not committed) on DistilBERT shape
+  (128x768x2304): median 1.291 ms (before) -> 1.091 ms (after), ~15.5% faster. MiniLM
+  shape also measured after (0.333 ms). Gain confirmed; change adopted.
 
 ## Verification
 - `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`.
@@ -27,8 +28,7 @@ order unchanged. Adopt only if a before/after measurement shows a gain.
 ## Planned commits
 1. docs: plan #790 in TODO.md
 2. perf(silk): vectorized ushort4 B-tile load in BF16 GEMM macro
-3. test(perf): add --bf16-gemm probe for before/after measurement (if retained)
-4. docs: remove TODO.md — plan executed
+3. docs: remove TODO.md — plan executed
 
 ## Blast radius
 - `src/Nivara.Extensions/Silk/SilkKernels.cs` (macro used by `gemm_row4_bf16` kernel string).
