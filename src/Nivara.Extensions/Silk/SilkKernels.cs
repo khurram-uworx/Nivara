@@ -87,7 +87,7 @@ internal static class SilkKernels
     public const string SplitColumns = "split_columns";
     public const string Rotary = "rotary";
     public const string GeGlu = "geglu";
-    public const string Gemm = "gemm_row4";    public const string GemmBf16 = "gemm_row4_bf16";
+    public const string Gemm = "gemm_row4"; public const string GemmBf16 = "gemm_row4_bf16";
     public const string GemmBias = "gemm_row4_bias";
     public const string GemmRelu = "gemm_row4_relu";
     public const string GemmGelu = "gemm_row4_gelu";
