@@ -52,6 +52,15 @@ Remove `using ILGPU`, `using ILGPU.Runtime`, `using Nivara.Samples.Gpu`, and all
 - `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels` (human-run)
 - `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`
 
+## Handover notes
+
+- Build: `dotnet build tests/Nivara.PerformanceTests/Nivara.PerformanceTests.csproj -c Release` PASSED (0 warnings, 0 errors).
+- Gate run `--silk-kernels` started on this machine but is very slow / timed out; complete it on the other machine.
+  Command: `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
+  Expected: all cells PASS (byte-identity where required, otherwise within 1e-3 bound); UNBUILT only if Silk/OpenCL unavailable.
+- Whitespace check still to run: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`.
+- Docs wording updates (ACCELERATION.md §6, SILK.md gate section, PerformanceTests README) still pending.
+
 ## GitHub issues log
 
 - (none yet)
