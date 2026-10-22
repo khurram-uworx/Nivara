@@ -50,8 +50,11 @@ internal static class SilkGemmProbe
                 for (int i = 0; i < a.Length; i++) a[i] = GemmBenchmark.NextUniformF(ref seed);
                 for (int i = 0; i < w.Length; i++) w[i] = GemmBenchmark.NextUniformF(ref seed);
 
-                // w is already [N x K] row-major, so Bt == w.
-                var bt = w;
+                // bt is [K x N] row-major: bt[k*n + j] = w[j*k + k], matching the gate's convention.
+                var bt = new float[k * n];
+                for (int j = 0; j < n; j++)
+                    for (int kk = 0; kk < k; kk++)
+                        bt[kk * n + j] = w[j * k + kk];
 
                 var cpuOut = new float[m * n];
                 Action runCpu = () =>
@@ -63,9 +66,8 @@ internal static class SilkGemmProbe
                         for (int j = 0; j < n; j++)
                         {
                             float acc = 0.0f;
-                            int bBase = j * k;
                             for (int kk = 0; kk < k; kk++)
-                                acc += a[aBase + kk] * bt[bBase + kk];
+                                acc += a[aBase + kk] * bt[kk * n + j];
                             cpuOut[outBase + j] = acc;
                         }
                     }
