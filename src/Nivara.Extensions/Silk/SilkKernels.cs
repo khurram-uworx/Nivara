@@ -436,14 +436,22 @@ internal static class SilkKernels
                     } \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
-                for (uint k = 0; k < TILE; ++k) { \
-                    float av = smem[x + k * TILE]; \
-                    uint bBase = TILE + y * BLOCK; \
-                    a0 += av * smem[k + (bBase + 0) * TILE]; \
-                    a1 += av * smem[k + (bBase + 1) * TILE]; \
-                    a2 += av * smem[k + (bBase + 2) * TILE]; \
-                    a3 += av * smem[k + (bBase + 3) * TILE]; \
-                } \
+                { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 1 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[1 + (bBase + 0) * TILE]; a1 += av * smem[1 + (bBase + 1) * TILE]; a2 += av * smem[1 + (bBase + 2) * TILE]; a3 += av * smem[1 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 2 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[2 + (bBase + 0) * TILE]; a1 += av * smem[2 + (bBase + 1) * TILE]; a2 += av * smem[2 + (bBase + 2) * TILE]; a3 += av * smem[2 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 3 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[3 + (bBase + 0) * TILE]; a1 += av * smem[3 + (bBase + 1) * TILE]; a2 += av * smem[3 + (bBase + 2) * TILE]; a3 += av * smem[3 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 4 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[4 + (bBase + 0) * TILE]; a1 += av * smem[4 + (bBase + 1) * TILE]; a2 += av * smem[4 + (bBase + 2) * TILE]; a3 += av * smem[4 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 5 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[5 + (bBase + 0) * TILE]; a1 += av * smem[5 + (bBase + 1) * TILE]; a2 += av * smem[5 + (bBase + 2) * TILE]; a3 += av * smem[5 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 6 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[6 + (bBase + 0) * TILE]; a1 += av * smem[6 + (bBase + 1) * TILE]; a2 += av * smem[6 + (bBase + 2) * TILE]; a3 += av * smem[6 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 7 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[7 + (bBase + 0) * TILE]; a1 += av * smem[7 + (bBase + 1) * TILE]; a2 += av * smem[7 + (bBase + 2) * TILE]; a3 += av * smem[7 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 8 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[8 + (bBase + 0) * TILE]; a1 += av * smem[8 + (bBase + 1) * TILE]; a2 += av * smem[8 + (bBase + 2) * TILE]; a3 += av * smem[8 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 9 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[9 + (bBase + 0) * TILE]; a1 += av * smem[9 + (bBase + 1) * TILE]; a2 += av * smem[9 + (bBase + 2) * TILE]; a3 += av * smem[9 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 10 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[10 + (bBase + 0) * TILE]; a1 += av * smem[10 + (bBase + 1) * TILE]; a2 += av * smem[10 + (bBase + 2) * TILE]; a3 += av * smem[10 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 11 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[11 + (bBase + 0) * TILE]; a1 += av * smem[11 + (bBase + 1) * TILE]; a2 += av * smem[11 + (bBase + 2) * TILE]; a3 += av * smem[11 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 12 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[12 + (bBase + 0) * TILE]; a1 += av * smem[12 + (bBase + 1) * TILE]; a2 += av * smem[12 + (bBase + 2) * TILE]; a3 += av * smem[12 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 13 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[13 + (bBase + 0) * TILE]; a1 += av * smem[13 + (bBase + 1) * TILE]; a2 += av * smem[13 + (bBase + 2) * TILE]; a3 += av * smem[13 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 14 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[14 + (bBase + 0) * TILE]; a1 += av * smem[14 + (bBase + 1) * TILE]; a2 += av * smem[14 + (bBase + 2) * TILE]; a3 += av * smem[14 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 15 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[15 + (bBase + 0) * TILE]; a1 += av * smem[15 + (bBase + 1) * TILE]; a2 += av * smem[15 + (bBase + 2) * TILE]; a3 += av * smem[15 + (bBase + 3) * TILE]; } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
             } \
             uint c0 = colBase + y * BLOCK + 0; \
@@ -468,14 +476,22 @@ internal static class SilkKernels
                         (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
-                for (uint k = 0; k < TILE; ++k) { \
-                    float av = smem[x + k * TILE]; \
-                    uint bBase = TILE + y * BLOCK; \
-                    a0 += av * smem[k + (bBase + 0) * TILE]; \
-                    a1 += av * smem[k + (bBase + 1) * TILE]; \
-                    a2 += av * smem[k + (bBase + 2) * TILE]; \
-                    a3 += av * smem[k + (bBase + 3) * TILE]; \
-                } \
+                { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 1 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[1 + (bBase + 0) * TILE]; a1 += av * smem[1 + (bBase + 1) * TILE]; a2 += av * smem[1 + (bBase + 2) * TILE]; a3 += av * smem[1 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 2 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[2 + (bBase + 0) * TILE]; a1 += av * smem[2 + (bBase + 1) * TILE]; a2 += av * smem[2 + (bBase + 2) * TILE]; a3 += av * smem[2 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 3 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[3 + (bBase + 0) * TILE]; a1 += av * smem[3 + (bBase + 1) * TILE]; a2 += av * smem[3 + (bBase + 2) * TILE]; a3 += av * smem[3 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 4 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[4 + (bBase + 0) * TILE]; a1 += av * smem[4 + (bBase + 1) * TILE]; a2 += av * smem[4 + (bBase + 2) * TILE]; a3 += av * smem[4 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 5 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[5 + (bBase + 0) * TILE]; a1 += av * smem[5 + (bBase + 1) * TILE]; a2 += av * smem[5 + (bBase + 2) * TILE]; a3 += av * smem[5 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 6 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[6 + (bBase + 0) * TILE]; a1 += av * smem[6 + (bBase + 1) * TILE]; a2 += av * smem[6 + (bBase + 2) * TILE]; a3 += av * smem[6 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 7 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[7 + (bBase + 0) * TILE]; a1 += av * smem[7 + (bBase + 1) * TILE]; a2 += av * smem[7 + (bBase + 2) * TILE]; a3 += av * smem[7 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 8 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[8 + (bBase + 0) * TILE]; a1 += av * smem[8 + (bBase + 1) * TILE]; a2 += av * smem[8 + (bBase + 2) * TILE]; a3 += av * smem[8 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 9 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[9 + (bBase + 0) * TILE]; a1 += av * smem[9 + (bBase + 1) * TILE]; a2 += av * smem[9 + (bBase + 2) * TILE]; a3 += av * smem[9 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 10 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[10 + (bBase + 0) * TILE]; a1 += av * smem[10 + (bBase + 1) * TILE]; a2 += av * smem[10 + (bBase + 2) * TILE]; a3 += av * smem[10 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 11 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[11 + (bBase + 0) * TILE]; a1 += av * smem[11 + (bBase + 1) * TILE]; a2 += av * smem[11 + (bBase + 2) * TILE]; a3 += av * smem[11 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 12 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[12 + (bBase + 0) * TILE]; a1 += av * smem[12 + (bBase + 1) * TILE]; a2 += av * smem[12 + (bBase + 2) * TILE]; a3 += av * smem[12 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 13 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[13 + (bBase + 0) * TILE]; a1 += av * smem[13 + (bBase + 1) * TILE]; a2 += av * smem[13 + (bBase + 2) * TILE]; a3 += av * smem[13 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 14 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[14 + (bBase + 0) * TILE]; a1 += av * smem[14 + (bBase + 1) * TILE]; a2 += av * smem[14 + (bBase + 2) * TILE]; a3 += av * smem[14 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 15 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[15 + (bBase + 0) * TILE]; a1 += av * smem[15 + (bBase + 1) * TILE]; a2 += av * smem[15 + (bBase + 2) * TILE]; a3 += av * smem[15 + (bBase + 3) * TILE]; } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
             } \
             uint c0 = colBase + y * BLOCK + 0; \
@@ -500,14 +516,22 @@ internal static class SilkKernels
                         (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
-                for (uint k = 0; k < TILE; ++k) { \
-                    float av = smem[x + k * TILE]; \
-                    uint bBase = TILE + y * BLOCK; \
-                    a0 += av * smem[k + (bBase + 0) * TILE]; \
-                    a1 += av * smem[k + (bBase + 1) * TILE]; \
-                    a2 += av * smem[k + (bBase + 2) * TILE]; \
-                    a3 += av * smem[k + (bBase + 3) * TILE]; \
-                } \
+                { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 1 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[1 + (bBase + 0) * TILE]; a1 += av * smem[1 + (bBase + 1) * TILE]; a2 += av * smem[1 + (bBase + 2) * TILE]; a3 += av * smem[1 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 2 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[2 + (bBase + 0) * TILE]; a1 += av * smem[2 + (bBase + 1) * TILE]; a2 += av * smem[2 + (bBase + 2) * TILE]; a3 += av * smem[2 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 3 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[3 + (bBase + 0) * TILE]; a1 += av * smem[3 + (bBase + 1) * TILE]; a2 += av * smem[3 + (bBase + 2) * TILE]; a3 += av * smem[3 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 4 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[4 + (bBase + 0) * TILE]; a1 += av * smem[4 + (bBase + 1) * TILE]; a2 += av * smem[4 + (bBase + 2) * TILE]; a3 += av * smem[4 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 5 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[5 + (bBase + 0) * TILE]; a1 += av * smem[5 + (bBase + 1) * TILE]; a2 += av * smem[5 + (bBase + 2) * TILE]; a3 += av * smem[5 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 6 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[6 + (bBase + 0) * TILE]; a1 += av * smem[6 + (bBase + 1) * TILE]; a2 += av * smem[6 + (bBase + 2) * TILE]; a3 += av * smem[6 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 7 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[7 + (bBase + 0) * TILE]; a1 += av * smem[7 + (bBase + 1) * TILE]; a2 += av * smem[7 + (bBase + 2) * TILE]; a3 += av * smem[7 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 8 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[8 + (bBase + 0) * TILE]; a1 += av * smem[8 + (bBase + 1) * TILE]; a2 += av * smem[8 + (bBase + 2) * TILE]; a3 += av * smem[8 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 9 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[9 + (bBase + 0) * TILE]; a1 += av * smem[9 + (bBase + 1) * TILE]; a2 += av * smem[9 + (bBase + 2) * TILE]; a3 += av * smem[9 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 10 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[10 + (bBase + 0) * TILE]; a1 += av * smem[10 + (bBase + 1) * TILE]; a2 += av * smem[10 + (bBase + 2) * TILE]; a3 += av * smem[10 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 11 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[11 + (bBase + 0) * TILE]; a1 += av * smem[11 + (bBase + 1) * TILE]; a2 += av * smem[11 + (bBase + 2) * TILE]; a3 += av * smem[11 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 12 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[12 + (bBase + 0) * TILE]; a1 += av * smem[12 + (bBase + 1) * TILE]; a2 += av * smem[12 + (bBase + 2) * TILE]; a3 += av * smem[12 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 13 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[13 + (bBase + 0) * TILE]; a1 += av * smem[13 + (bBase + 1) * TILE]; a2 += av * smem[13 + (bBase + 2) * TILE]; a3 += av * smem[13 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 14 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[14 + (bBase + 0) * TILE]; a1 += av * smem[14 + (bBase + 1) * TILE]; a2 += av * smem[14 + (bBase + 2) * TILE]; a3 += av * smem[14 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 15 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[15 + (bBase + 0) * TILE]; a1 += av * smem[15 + (bBase + 1) * TILE]; a2 += av * smem[15 + (bBase + 2) * TILE]; a3 += av * smem[15 + (bBase + 3) * TILE]; } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
             } \
             uint c0 = colBase + y * BLOCK + 0; \
@@ -532,14 +556,22 @@ internal static class SilkKernels
                         (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
-                for (uint k = 0; k < TILE; ++k) { \
-                    float av = smem[x + k * TILE]; \
-                    uint bBase = TILE + y * BLOCK; \
-                    a0 += av * smem[k + (bBase + 0) * TILE]; \
-                    a1 += av * smem[k + (bBase + 1) * TILE]; \
-                    a2 += av * smem[k + (bBase + 2) * TILE]; \
-                    a3 += av * smem[k + (bBase + 3) * TILE]; \
-                } \
+                { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 1 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[1 + (bBase + 0) * TILE]; a1 += av * smem[1 + (bBase + 1) * TILE]; a2 += av * smem[1 + (bBase + 2) * TILE]; a3 += av * smem[1 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 2 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[2 + (bBase + 0) * TILE]; a1 += av * smem[2 + (bBase + 1) * TILE]; a2 += av * smem[2 + (bBase + 2) * TILE]; a3 += av * smem[2 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 3 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[3 + (bBase + 0) * TILE]; a1 += av * smem[3 + (bBase + 1) * TILE]; a2 += av * smem[3 + (bBase + 2) * TILE]; a3 += av * smem[3 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 4 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[4 + (bBase + 0) * TILE]; a1 += av * smem[4 + (bBase + 1) * TILE]; a2 += av * smem[4 + (bBase + 2) * TILE]; a3 += av * smem[4 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 5 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[5 + (bBase + 0) * TILE]; a1 += av * smem[5 + (bBase + 1) * TILE]; a2 += av * smem[5 + (bBase + 2) * TILE]; a3 += av * smem[5 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 6 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[6 + (bBase + 0) * TILE]; a1 += av * smem[6 + (bBase + 1) * TILE]; a2 += av * smem[6 + (bBase + 2) * TILE]; a3 += av * smem[6 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 7 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[7 + (bBase + 0) * TILE]; a1 += av * smem[7 + (bBase + 1) * TILE]; a2 += av * smem[7 + (bBase + 2) * TILE]; a3 += av * smem[7 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 8 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[8 + (bBase + 0) * TILE]; a1 += av * smem[8 + (bBase + 1) * TILE]; a2 += av * smem[8 + (bBase + 2) * TILE]; a3 += av * smem[8 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 9 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[9 + (bBase + 0) * TILE]; a1 += av * smem[9 + (bBase + 1) * TILE]; a2 += av * smem[9 + (bBase + 2) * TILE]; a3 += av * smem[9 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 10 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[10 + (bBase + 0) * TILE]; a1 += av * smem[10 + (bBase + 1) * TILE]; a2 += av * smem[10 + (bBase + 2) * TILE]; a3 += av * smem[10 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 11 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[11 + (bBase + 0) * TILE]; a1 += av * smem[11 + (bBase + 1) * TILE]; a2 += av * smem[11 + (bBase + 2) * TILE]; a3 += av * smem[11 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 12 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[12 + (bBase + 0) * TILE]; a1 += av * smem[12 + (bBase + 1) * TILE]; a2 += av * smem[12 + (bBase + 2) * TILE]; a3 += av * smem[12 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 13 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[13 + (bBase + 0) * TILE]; a1 += av * smem[13 + (bBase + 1) * TILE]; a2 += av * smem[13 + (bBase + 2) * TILE]; a3 += av * smem[13 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 14 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[14 + (bBase + 0) * TILE]; a1 += av * smem[14 + (bBase + 1) * TILE]; a2 += av * smem[14 + (bBase + 2) * TILE]; a3 += av * smem[14 + (bBase + 3) * TILE]; } \
+                { float av = smem[x + 15 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[15 + (bBase + 0) * TILE]; a1 += av * smem[15 + (bBase + 1) * TILE]; a2 += av * smem[15 + (bBase + 2) * TILE]; a3 += av * smem[15 + (bBase + 3) * TILE]; } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
             } \
             uint c0 = colBase + y * BLOCK + 0; \
