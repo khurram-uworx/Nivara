@@ -475,6 +475,14 @@ the same ascending-K order and reports the hit counts: ILGPU matches `mul+add` o
 and `fma` on ~19%. An explicit `fma()` here would defeat the pragma and diverge from ILGPU on ~81% of
 outputs at rounding scale, systematically wrong and invisible to any tolerance.
 
+**Unroll form (issue #796).** The inner 16-iteration accumulation is now expressed as a single
+`_Pragma("unroll 16") for (uint k = 0; k < TILE; ++k)` loop rather than 16 hand-written blocks.
+An A/B on the target GPU compiled the pragma form successfully, produced bit-identical output to the
+manual form on 100% of elements, and measured ~3.5% faster (manual 128.70 us, pragma 124.15 us,
+128x128x128 tile, Release, 2026-10-22). Manual unrolling is therefore not canonical: the pragma
+form is shorter, less error-prone to edit, and slightly faster, while preserving the ascending-K
+`mul+add` operation order and the `#pragma OPENCL FP_CONTRACT OFF` invariant the parity gate depends on.
+
 Transcendentals (`exp` in the softmax and the GELU erf) are **not** assumed identical to ILGPU's
 `XMath.Exp`; those cells gate on the model's numeric bound instead (§14).
 
