@@ -184,7 +184,8 @@ internal static class SilkKernelsGate
             GemmKernels.TiledGemmKernelRow4Gelu);
         var qkvKernel = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
             GemmKernels.TiledGemmKernelRow4Qkv);
-
+        var row4Kernel = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
+            GemmKernels.TiledGemmKernelRow4);
         foreach (var (name, aRows, aCols, bCols) in shape.Gemms)
         {
             string cell = $"{shape.Name} {name}";
@@ -255,6 +256,23 @@ internal static class SilkKernelsGate
                 () => cBuf.AsContiguous().GetAsArray(),
                 () => { SetGemmArgs(silk, Nivara.Silk.SilkKernels.GemmQkv, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: true); RunGemm(silk, Nivara.Silk.SilkKernels.GemmQkv, aRows, bCols); },
                 () => silk.Download(sc, elements)));
+
+            // Production Row4 (scalar A staging) baseline for the #791 A/B.
+            legs.Add(Measure(
+                Nivara.Silk.SilkKernels.Gemm, cell, requireBytes: true,
+                () => { row4Kernel(stream, cfg, aView, bView, cView, aRows, aCols, bCols); ilgpu.Synchronize(); },
+                () => cBuf.AsContiguous().GetAsArray(),
+                () => { SetGemmArgsNoBias(silk, Nivara.Silk.SilkKernels.Gemm, sa, sb, sc, aRows, aCols, bCols); RunGemm(silk, Nivara.Silk.SilkKernels.Gemm, aRows, bCols); },
+                () => silk.Download(sc, elements)));
+
+            // Candidate: vectorized A-tile staging (issue #791). Compared against the scalar-A
+            // ILGPU Row4 to validate that the changed staging keeps byte-identity.
+            legs.Add(Measure(
+                Nivara.Silk.SilkKernels.GemmAtileVec, cell, requireBytes: true,
+                () => { row4Kernel(stream, cfg, aView, bView, cView, aRows, aCols, bCols); ilgpu.Synchronize(); },
+                () => cBuf.AsContiguous().GetAsArray(),
+                () => { SetGemmArgsNoBias(silk, Nivara.Silk.SilkKernels.GemmAtileVec, sa, sb, sc, aRows, aCols, bCols); RunGemm(silk, Nivara.Silk.SilkKernels.GemmAtileVec, aRows, bCols); },
+                () => silk.Download(sc, elements)));
         }
 
         return legs;
@@ -315,6 +333,16 @@ internal static class SilkKernelsGate
         silk.SetUInt32(kernel, 5, (uint)aCols);
         silk.SetUInt32(kernel, 6, (uint)bCols);
         if (qkv) silk.SetUInt32(kernel, 7, (uint)(bCols / 3));
+    }
+
+    static void SetGemmArgsNoBias(Nivara.Silk.SilkRuntime silk, string kernel, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        silk.SetBuffer(kernel, 0, a);
+        silk.SetBuffer(kernel, 1, b);
+        silk.SetBuffer(kernel, 2, c);
+        silk.SetUInt32(kernel, 3, (uint)aRows);
+        silk.SetUInt32(kernel, 4, (uint)aCols);
+        silk.SetUInt32(kernel, 5, (uint)bCols);
     }
 
     static void RunGemm(Nivara.Silk.SilkRuntime silk, string kernel, int aRows, int bCols)
