@@ -372,6 +372,38 @@ epilogues are ported only for the winner. Shared footprint: 2×4 ≈ 5 KB, 4×4 
 A strip), both under the 64 KB device limit. Measurement pending — do not route a runner at
 either until the `--gemm` gate shows a win.
 
+### A-tile vectorization (#791) — promoted
+
+Issue #791 asked whether the **A** tile in the Row4 GEMM family could also be staged with
+vectorized loads; the B tile had already been vectorized in #785/#789. A was left scalar
+because each thread owns exactly one A element (`a[outRow * aCols + (k0 + y)]`), so
+vectorizing it requires changing the thread work distribution. The constraint was that any
+such change must keep the shared-memory layout and the ascending-K accumulation order
+identical, or the byte-identity claim breaks.
+
+**Outcome: promoted.** A distribution exists that satisfies the constraint: threads with
+`y < 4` each load four consecutive K values of their row (`aColBase = k0 + y*4`) with a
+`float4`/`vload4` when the row, the four columns and the base index are all in range and
+4-aligned, and fall back to the scalar loop for unaligned or partial tiles. Only the load
+granularity changes — the shared-memory slot written (`smem[x, y*4 + 0..3]`), the K order
+and `FP_CONTRACT OFF` are unchanged.
+
+- **ILGPU** (`GemmKernels.cs`): `TiledGemmKernelRow4` and all fused-epilogue siblings
+  (`Row4Bias`, `Row4Gelu`, `Row4Relu`, `Row4Qkv`) plus the 1×1 baseline use
+  `a.Cast<ILGPU.Util.Float4>()` with the scalar fallback. The #440 geometries keep their
+  existing staging.
+- **Silk** (`SilkKernels.cs`): `GEMM_ROW4_ACCUMULATE` and every BF16 variant use `vload4`
+  with the same guard and fallback.
+- **Speedup:** prototype A staging measured ~8–10% faster than scalar on MiniLM/DistilBERT
+  shapes before promotion; the production macro now uses vectorized A staging.
+- **Byte-identity:** retained — the `--gemm` gate's double-precision truth check and
+  byte-identity assertion still pass, and the `--silk-kernels` gate reported Gate PASS
+  (all 50 cells met the criterion, byte-identity where required).
+- **Do not re-run this experiment:** the distribution and its guards are settled. A future
+  change that alters the thread-to-slot mapping or the accumulation order would break
+  byte-identity and must be re-gated, but re-measuring the already-promoted form is not
+  expected to change the answer.
+
 ### 10.2 Lesson #468: at most one shared allocation per kernel body
 
 Every #440 kernel that staged a KT-wide A tile against a TileCols-wide B tile returned *plausible*
