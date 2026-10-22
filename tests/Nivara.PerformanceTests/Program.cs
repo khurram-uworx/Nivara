@@ -1056,7 +1056,7 @@ static class Program
         bool silkLayaForward = false;
         bool silkLayaHeadProfile = false;
         bool silkEncoderProfile = false;
-bool silkGemm = false;
+        bool silkGemm = false;
 
         for (int i = 0; i < args.Length; i++)
         {
