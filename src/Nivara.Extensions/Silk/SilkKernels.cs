@@ -420,7 +420,7 @@ internal static class SilkKernels
                 if (y < 4u) { \
                     uint aColBase = k0 + y * 4u; \
                     uint aBase = outRow * aCols + aColBase; \
-                    if (outRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u) { \
+                    if (outRow < aRows && (aColBase + 3u) < aCols) { \
                         float4 av = vload4(0, a + aBase); \
                         smem[x + (y * 4u + 0u) * TILE] = av.s0; \
                         smem[x + (y * 4u + 1u) * TILE] = av.s1; \
@@ -480,7 +480,7 @@ internal static class SilkKernels
                 if (y < 4u) { \
                     uint aColBase = k0 + y * 4u; \
                     uint aBase = outRow * aCols + aColBase; \
-                    if (outRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u) { \
+                    if (outRow < aRows && (aColBase + 3u) < aCols) { \
                         float4 av = vload4(0, a + aBase); \
                         smem[x + (y * 4u + 0u) * TILE] = av.s0; \
                         smem[x + (y * 4u + 1u) * TILE] = av.s1; \
@@ -2091,7 +2091,7 @@ internal static class SilkKernels
                                 {
                                     uint aColBase = k0 + kk + y * 4u;
                                     uint aBase = srcRow * aCols + aColBase;
-                                    if (srcRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u)
+                                    if (srcRow < aRows && (aColBase + 3u) < aCols)
                                     {
                                         float4 av = vload4(0, a + aBase);
                                         smem[slot + (kk + y * 4u + 0u) * (KT + TileCols)] = av.s0;
@@ -2189,7 +2189,7 @@ internal static class SilkKernels
                                 {
                                     uint aColBase = k0 + kk + y * 4u;
                                     uint aBase = srcRow * aCols + aColBase;
-                                    if (srcRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u)
+                                    if (srcRow < aRows && (aColBase + 3u) < aCols)
                                     {
                                         float4 av = vload4(0, a + aBase);
                                         smem[slot + (kk + y * 4u + 0u) * (KT + TileCols)] = av.s0;
