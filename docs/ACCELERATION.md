@@ -174,8 +174,7 @@ Run the kernels gate:
 dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels
 ```
 
-The reference implementation's kernels and the Nivara GPU kernels run in one process. Byte-identical is required for:
-
+The CPU reference and the Nivara GPU (Silk) kernels run in one process. Byte-identical is required for:
 ```
 gemm_row4, gemm_row4_bias, gemm_row4_qkv, gemm_row4_relu, gather_rows, add, add_bias, split_columns, rotary
 ```
