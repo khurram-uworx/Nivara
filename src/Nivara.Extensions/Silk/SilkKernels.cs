@@ -94,8 +94,6 @@ internal static class SilkKernels
     public const string GemmGelu = "gemm_row4_gelu";
     public const string GemmQkv = "gemm_row4_qkv";
 
-    // Measured candidate: vectorized A-tile staging (issue #791) — not routed by any runner yet.
-    public const string GemmAtileVec = "gemm_row4_atile_vec";
     // Measured candidate geometries (issue #784) — not routed by any runner yet.
     public const string GemmReg2x4 = "gemm_reg2x4";
     public const string GemmReg4x4 = "gemm_reg4x4";

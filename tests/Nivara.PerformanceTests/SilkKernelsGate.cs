@@ -8,7 +8,7 @@ namespace Nivara.PerformanceTests;
 /// The <c>--silk-kernels</c> gate: runs the OpenCL C BERT-family kernels
 /// (src/Nivara.Extensions/Silk/SilkKernels.cs) that the <c>--silk</c> sample path uses against the
 /// incumbent ILGPU kernels of the same shape, on the same inputs, at each model's real dimensions
-/// (MiniLM and DistilBERT) — and answers the one question that decides whether the Silk path is
+/// (MiniLM and DistilBERT) ΓÇö and answers the one question that decides whether the Silk path is
 /// worth building out: do the two backends compute the same numbers?
 ///
 /// <para>
@@ -17,11 +17,11 @@ namespace Nivara.PerformanceTests;
 /// <c>rotary</c>) gate on
 /// <b>byte-identity</b>: they add the same f32 values to the same accumulators in the same
 /// ascending-K order as the ILGPU Row4 family, so a bit difference means the accumulation order
-/// or the contraction changed — a design bug, not rounding (docs/ILGPU.md §10.2,
+/// or the contraction changed ΓÇö a design bug, not rounding (docs/ILGPU.md ┬º10.2,
 /// GUIDELINES.md "Assert Exactness When Exactness Is Available"). That is not a theoretical
 /// hazard: the first version of these kernels was fused (the OpenCL driver contracts
 /// <c>a*b+c</c> by default; ILGPU does not) and diverged from ILGPU on ~81% of outputs at
-/// rounding scale — invisible to every tolerance, fatal to a bit-for-bit claim.
+/// rounding scale ΓÇö invisible to every tolerance, fatal to a bit-for-bit claim.
 /// </para>
 ///
 /// <para>
@@ -30,14 +30,14 @@ namespace Nivara.PerformanceTests;
 /// own sake: <c>gemm_row4_gelu</c>, <c>geglu</c> and <c>batched_attention</c> call <c>exp</c>,
 /// <c>layer_norm</c> calls <c>sqrt</c>, and ILGPU's
 /// <c>XMath.Exp</c> and OpenCL's <c>exp</c> are independent implementations of the same function
-/// that may differ by an ulp — a difference no exactness check could tell apart from a real bug.
+/// that may differ by an ulp ΓÇö a difference no exactness check could tell apart from a real bug.
 /// Every cell currently comes out bit-identical, GELU and softmax included; the bound is what
 /// stops a legitimate future ulp from being reported as a design defect.
 /// </para>
 ///
 /// <para>
-/// Each GEMM shape also gets a host replay of its dot product — <c>mul+add</c>, <c>fma</c> and
-/// <c>f64</c> in the same ascending-K order — with the byte-match counts against both backends
+/// Each GEMM shape also gets a host replay of its dot product ΓÇö <c>mul+add</c>, <c>fma</c> and
+/// <c>f64</c> in the same ascending-K order ΓÇö with the byte-match counts against both backends
 /// printed above the table. It is the difference between "the byte gate disagrees" and "the byte
 /// gate disagrees <i>because</i> the driver fused": it is how the contraction above was pinned
 /// down, and it is the standing evidence for the accumulation claim in <see cref="Nivara.Silk.SilkKernels"/>.
@@ -46,7 +46,7 @@ namespace Nivara.PerformanceTests;
 /// <para>
 /// Per-kernel timing is printed for the informal A/B the plan asks for and is deliberately
 /// <em>not</em> a verdict: this gate's exit code counts correctness failures only, and a ratio
-/// outside the ±10–20% band is a red flag to report to the human, not a failure to encode. The
+/// outside the ┬▒10ΓÇô20% band is a red flag to report to the human, not a failure to encode. The
 /// figures are not committed to any doc.
 /// </para>
 /// </summary>
@@ -167,7 +167,7 @@ internal static class SilkKernelsGate
         }
     }
 
-    // ── GEMM: byte-identity on the fused epilogues ────────────────
+    // ΓöÇΓöÇ GEMM: byte-identity on the fused epilogues ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static List<Leg> MeasureGemms(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
@@ -184,8 +184,7 @@ internal static class SilkKernelsGate
             GemmKernels.TiledGemmKernelRow4Gelu);
         var qkvKernel = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
             GemmKernels.TiledGemmKernelRow4Qkv);
-        var row4Kernel = acc.LoadKernel<ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
-            GemmKernels.TiledGemmKernelRow4);
+
         foreach (var (name, aRows, aCols, bCols) in shape.Gemms)
         {
             string cell = $"{shape.Name} {name}";
@@ -256,30 +255,13 @@ internal static class SilkKernelsGate
                 () => cBuf.AsContiguous().GetAsArray(),
                 () => { SetGemmArgs(silk, Nivara.Silk.SilkKernels.GemmQkv, sa, sb, sc, sbias, aRows, aCols, bCols, qkv: true); RunGemm(silk, Nivara.Silk.SilkKernels.GemmQkv, aRows, bCols); },
                 () => silk.Download(sc, elements)));
-
-            // Production Row4 (scalar A staging) baseline for the #791 A/B.
-            legs.Add(Measure(
-                Nivara.Silk.SilkKernels.Gemm, cell, requireBytes: true,
-                () => { row4Kernel(stream, cfg, aView, bView, cView, aRows, aCols, bCols); ilgpu.Synchronize(); },
-                () => cBuf.AsContiguous().GetAsArray(),
-                () => { SetGemmArgsNoBias(silk, Nivara.Silk.SilkKernels.Gemm, sa, sb, sc, aRows, aCols, bCols); RunGemm(silk, Nivara.Silk.SilkKernels.Gemm, aRows, bCols); },
-                () => silk.Download(sc, elements)));
-
-            // Candidate: vectorized A-tile staging (issue #791). Compared against the scalar-A
-            // ILGPU Row4 to validate that the changed staging keeps byte-identity.
-            legs.Add(Measure(
-                Nivara.Silk.SilkKernels.GemmAtileVec, cell, requireBytes: true,
-                () => { row4Kernel(stream, cfg, aView, bView, cView, aRows, aCols, bCols); ilgpu.Synchronize(); },
-                () => cBuf.AsContiguous().GetAsArray(),
-                () => { SetGemmArgsNoBias(silk, Nivara.Silk.SilkKernels.GemmAtileVec, sa, sb, sc, aRows, aCols, bCols); RunGemm(silk, Nivara.Silk.SilkKernels.GemmAtileVec, aRows, bCols); },
-                () => silk.Download(sc, elements)));
         }
 
         return legs;
     }
 
     /// <summary>Classifies each backend's GEMM accumulation by replaying the same dot product on
-    /// the host three ways — f32 multiply-then-add, f32 fused-multiply-add, and f64 accumulate —
+    /// the host three ways ΓÇö f32 multiply-then-add, f32 fused-multiply-add, and f64 accumulate ΓÇö
     /// in exactly the ascending-K order the kernels use, and counting byte-for-byte matches. This
     /// is what turns "the byte gate disagrees" into "the byte gate disagrees because <i>this</i>",
     /// and it is the evidence behind (or against) the bit-identity claim in
@@ -335,16 +317,6 @@ internal static class SilkKernelsGate
         if (qkv) silk.SetUInt32(kernel, 7, (uint)(bCols / 3));
     }
 
-    static void SetGemmArgsNoBias(Nivara.Silk.SilkRuntime silk, string kernel, nint a, nint b, nint c, int aRows, int aCols, int bCols)
-    {
-        silk.SetBuffer(kernel, 0, a);
-        silk.SetBuffer(kernel, 1, b);
-        silk.SetBuffer(kernel, 2, c);
-        silk.SetUInt32(kernel, 3, (uint)aRows);
-        silk.SetUInt32(kernel, 4, (uint)aCols);
-        silk.SetUInt32(kernel, 5, (uint)bCols);
-    }
-
     static void RunGemm(Nivara.Silk.SilkRuntime silk, string kernel, int aRows, int bCols)
     {
         silk.Run(
@@ -354,7 +326,7 @@ internal static class SilkKernelsGate
         silk.Finish();
     }
 
-    // ── attention ─────────────────────────────────────────────────
+    // ΓöÇΓöÇ attention ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static Leg MeasureAttention(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers, int band = GpuBuffers.GlobalAttentionBand)
     {
@@ -452,7 +424,7 @@ internal static class SilkKernelsGate
             () => silk.Download(sout, q.Length));
     }
 
-    // ── layer norm + residual ─────────────────────────────────────
+    // ΓöÇΓöÇ layer norm + residual ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static Leg MeasureLayerNormResidual(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
@@ -526,7 +498,7 @@ internal static class SilkKernelsGate
             () => silk.Download(sy, elements));
     }
 
-    // ── embedding gather/sum ──────────────────────────────────────
+    // ΓöÇΓöÇ embedding gather/sum ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static Leg MeasureEmbedSum(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
@@ -611,7 +583,7 @@ internal static class SilkKernelsGate
             () => silk.Download(sy, elements));
     }
 
-    // ── classifier-head row gather ────────────────────────────────
+    // ΓöÇΓöÇ classifier-head row gather ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static Leg MeasureGather(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, ModelShape shape, List<nint> buffers)
     {
@@ -672,7 +644,7 @@ internal static class SilkKernelsGate
             () => silk.Download(sout, elements));
     }
 
-    // ── ModernBERT / Laya ports ───────────────────────────────────
+    // ΓöÇΓöÇ ModernBERT / Laya ports ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static List<Leg> MeasureModernBertPorts(IlgpuRuntime ilgpu, Nivara.Silk.SilkRuntime silk, List<nint> buffers)
     {
@@ -1329,8 +1301,8 @@ internal static class SilkKernelsGate
         return values;
     }
 
-    /// <summary>Host replay of one <c>rms_norm_gemv</c> slot. <c>rms_norm_gemv</c> is Silk-only — no
-    /// ILGPU kernel reproduces it — so this replay is its reference, the way the other SmolLM-family
+    /// <summary>Host replay of one <c>rms_norm_gemv</c> slot. <c>rms_norm_gemv</c> is Silk-only ΓÇö no
+    /// ILGPU kernel reproduces it ΓÇö so this replay is its reference, the way the other SmolLM-family
     /// kernels are measured here. The reduction is the kernel's: one accumulator over ascending K,
     /// <c>1 / sqrt(ssq / cols + eps)</c>, then the same ascending-K
     /// <c>acc += (x[k] * scale * gamma[k]) * w[k, j]</c>, and the bias in the store.</summary>
@@ -1390,7 +1362,7 @@ internal static class SilkKernelsGate
         silk.Finish();
     }
 
-    // ── measurement + verdict ─────────────────────────────────────
+    // ΓöÇΓöÇ measurement + verdict ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
     static Leg Measure(
         string kernel,
@@ -1561,21 +1533,21 @@ internal static class SilkKernelsGate
         Console.WriteLine(new string('-', 102));
         Console.WriteLine($"  {byteIdentical} of {legs.Count} kernel outputs are bit-identical to ILGPU; {outOfBand} of {legs.Count} outside the x{BandLow:F1}..x{BandHigh:F1} timing band.");
         Console.WriteLine(outOfBand > 0
-            ? "  A timing ratio outside the band is a red flag to report, not a failure — this gate's exit code is correctness only."
+            ? "  A timing ratio outside the band is a red flag to report, not a failure ΓÇö this gate's exit code is correctness only."
             : "  Every kernel is inside the informal timing band.");
 
         if (failures == 0)
         {
-            Console.WriteLine($"Gate PASS — all {legs.Count} cells met their criterion (byte-identity where required, otherwise {Bound:E0} * (1 + |ilgpu|)).");
+            Console.WriteLine($"Gate PASS ΓÇö all {legs.Count} cells met their criterion (byte-identity where required, otherwise {Bound:E0} * (1 + |ilgpu|)).");
             return 0;
         }
 
         int requiredByte = legs.Count(l => l.RequireBytes && ByteDiffs(l.Actual, l.Reference) != 0);
         int numeric = legs.Count(l => !l.RequireBytes && WorstRatio(l.Actual, l.Reference) > 1.0);
         if (requiredByte > 0)
-            Console.WriteLine($"Byte-identity FAIL — {requiredByte} of the {legs.Count(l => l.RequireBytes)} required cells differ from ILGPU; the accumulation order or the contraction changed (a design bug, not rounding).");
+            Console.WriteLine($"Byte-identity FAIL ΓÇö {requiredByte} of the {legs.Count(l => l.RequireBytes)} required cells differ from ILGPU; the accumulation order or the contraction changed (a design bug, not rounding).");
         if (numeric > 0)
-            Console.WriteLine($"Numeric FAIL — {numeric} cells exceed {Bound:E0} * (1 + |ilgpu|).");
+            Console.WriteLine($"Numeric FAIL ΓÇö {numeric} cells exceed {Bound:E0} * (1 + |ilgpu|).");
         return failures;
     }
 
