@@ -59,7 +59,7 @@ internal static class SilkGemmProbe
                 var cpuOut = new float[m * n];
                 Action runCpu = () =>
                 {
-                    for (int i = 0; i < m; i++)
+                    System.Threading.Tasks.Parallel.For(0, m, i =>
                     {
                         int aBase = i * k;
                         int outBase = i * n;
@@ -70,7 +70,7 @@ internal static class SilkGemmProbe
                                 acc += a[aBase + kk] * bt[kk * n + j];
                             cpuOut[outBase + j] = acc;
                         }
-                    }
+                    });
                 };
 
                 int elements = m * n;
