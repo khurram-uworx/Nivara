@@ -420,9 +420,23 @@ internal static class SilkKernels
             uint colBase = get_group_id(1) * TILECOLS; \
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
             for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
-                uint aCol = k0 + y; \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
+                } \
                 uint bRow = k0 + x; \
-                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
                 { \
                     uint outCol0 = colBase + y * BLOCK; \
                     uint bBase = bRow * bCols + outCol0; \
@@ -472,9 +486,23 @@ internal static class SilkKernels
             uint colBase = get_group_id(1) * TILECOLS; \
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
             for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
-                uint aCol = k0 + y; \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
+                } \
                 uint bRow = k0 + x; \
-                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
                 { \
                     uint outCol0 = colBase + y * BLOCK; \
                     uint bBase = bRow * bCols + outCol0; \
@@ -524,9 +552,23 @@ internal static class SilkKernels
             uint colBase = get_group_id(1) * TILECOLS; \
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
             for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
-                uint aCol = k0 + y; \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
+                } \
                 uint bRow = k0 + x; \
-                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
                 { \
                     uint outCol0 = colBase + y * BLOCK; \
                     uint bBase = bRow * bCols + outCol0; \
@@ -576,9 +618,23 @@ internal static class SilkKernels
             uint colBase = get_group_id(1) * TILECOLS; \
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
             for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
-                uint aCol = k0 + y; \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
+                } \
                 uint bRow = k0 + x; \
-                smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
                 { \
                     uint outCol0 = colBase + y * BLOCK; \
                     uint bBase = bRow * bCols + outCol0; \
