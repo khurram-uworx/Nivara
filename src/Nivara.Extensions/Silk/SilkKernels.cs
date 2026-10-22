@@ -475,10 +475,22 @@ internal static class SilkKernels
                 uint aCol = k0 + y; \
                 uint bRow = k0 + x; \
                 smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
-                for (uint w = 0; w < BLOCK; ++w) { \
-                    uint outCol = colBase + y * BLOCK + w; \
-                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
-                        (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols && (bBase % 4u) == 0u) { \
+                        ushort4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = BF16_TO_F32(bv.s0); \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = BF16_TO_F32(bv.s1); \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = BF16_TO_F32(bv.s2); \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = BF16_TO_F32(bv.s3); \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                        } \
+                    } \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
                 { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
@@ -515,10 +527,22 @@ internal static class SilkKernels
                 uint aCol = k0 + y; \
                 uint bRow = k0 + x; \
                 smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
-                for (uint w = 0; w < BLOCK; ++w) { \
-                    uint outCol = colBase + y * BLOCK + w; \
-                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
-                        (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols && (bBase % 4u) == 0u) { \
+                        ushort4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = BF16_TO_F32(bv.s0); \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = BF16_TO_F32(bv.s1); \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = BF16_TO_F32(bv.s2); \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = BF16_TO_F32(bv.s3); \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                        } \
+                    } \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
                 { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
@@ -555,10 +579,22 @@ internal static class SilkKernels
                 uint aCol = k0 + y; \
                 uint bRow = k0 + x; \
                 smem[x + y * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
-                for (uint w = 0; w < BLOCK; ++w) { \
-                    uint outCol = colBase + y * BLOCK + w; \
-                    smem[x + (TILE + y * BLOCK + w) * TILE] = \
-                        (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols && (bBase % 4u) == 0u) { \
+                        ushort4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = BF16_TO_F32(bv.s0); \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = BF16_TO_F32(bv.s1); \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = BF16_TO_F32(bv.s2); \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = BF16_TO_F32(bv.s3); \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                        } \
+                    } \
                 } \
                 barrier(CLK_LOCAL_MEM_FENCE); \
                 { float av = smem[x + 0 * TILE]; uint bBase = TILE + y * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; } \
