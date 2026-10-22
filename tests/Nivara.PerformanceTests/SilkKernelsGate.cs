@@ -231,6 +231,7 @@ internal static class SilkKernelsGate
             // qkv
             {
                 var reference = new float[elements];
+                int blockWidth = bCols / 3;
                 Action runCpu = () =>
                 {
                     for (int i = 0; i < aRows; i++)
@@ -239,7 +240,8 @@ internal static class SilkKernelsGate
                             float acc = 0f;
                             for (int k = 0; k < aCols; k++)
                                 acc += a[i * aCols + k] * bt[k * bCols + j];
-                            reference[i * bCols + j] = acc + bias[j];
+                            int dest = QkvDest(j, i, aRows, blockWidth);
+                            reference[dest] = acc + bias[j];
                         }
                 };
                 Func<float[]> readCpu = () => reference;
@@ -404,6 +406,13 @@ internal static class SilkKernelsGate
         return MeasureCpuReference(Nivara.Silk.SilkKernels.Attention, label, false, runCpu, readCpu, runSilk, readSilk);
     }
 
+    static int QkvDest(int j, int outRow, int aRows, int blockWidth)
+    {
+        int block = j / blockWidth;
+        int colInBlock = j - block * blockWidth;
+        return block * aRows * blockWidth + outRow * blockWidth + colInBlock;
+    }
+
     static float CpuRowScore(float[] q, float[] k, int qRow, int jRow, int dOffset, int D, int headDim, float scale)
     {
         int qBase = qRow * D + dOffset;
@@ -525,7 +534,6 @@ internal static class SilkKernelsGate
                 int row = idx / hidden;
                 int col = idx - row * hidden;
                 float v = wordEmb[ids[row] * hidden + col] + posEmb[posIds[row] * hidden + col];
-                v += tokenType[col];
                 cpuOut[idx] = v;
             }
         };
