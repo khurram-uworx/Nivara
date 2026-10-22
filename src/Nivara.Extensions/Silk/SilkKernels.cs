@@ -890,8 +890,8 @@ internal static class SilkKernels
             int jFirst = band < 0 ? 0 : max(0, qp - band);
             int jLast = band < 0 ? sl - 1 : min(sl - 1, qp + band);
 
-            // seqLen <= 512 covers the attention shapes this backend is benchmarked on; higher values keep
-            // the original recompute path to avoid fixed-size local bounds.
+            // Sliding-window path: the attended span is at most 2*band+1 (<=257), so cache only that.
+            // Out-of-range bands fall back to the global kernel, which recomputes above 512 keys.
             float scoreCache[257];
             int range = jLast - jFirst + 1;
             int cacheReady = range <= 257 ? 1 : 0;
