@@ -475,6 +475,19 @@ the same ascending-K order and reports the hit counts: ILGPU matches `mul+add` o
 and `fma` on ~19%. An explicit `fma()` here would defeat the pragma and diverge from ILGPU on ~81% of
 outputs at rounding scale, systematically wrong and invisible to any tolerance.
 
+**A-tile vector loads and alignment (#807).** The A-staging loops load four consecutive f32 values with
+load4(0, a + aBase). OpenCL load/store are the designated unaligned access primitives: load4
+requires alignment to the *element* type (loat — four bytes), not to loat4. Since  is a
+__global const float*,  + aBase is always 4-byte aligned by construction (float index into a float
+array), so the base is never misaligned at load time — even when Cols or the row stride is not a
+multiple of four. The old (aBase % 4u) == 0u guard was therefore over-conservative (it demanded
+16-byte alignment) and denied vectorization on non-multiple-of-four K or hidden dimensions.
+It has been dropped; the in-range guards (srcRow < aRows, ColBase + 3 < aCols) and the scalar
+tail remain. Partial tiles at the K or batch edge still use the scalar loop, so correctness (including
+byte-identity under #pragma OPENCL FP_CONTRACT OFF) is unchanged, and the same treatment is
+*not* applied to the ILGPU side: there ArrayView<float>.Cast<Float4>() is an unchecked
+alignment assertion with no safe unaligned counterpart.
+
 **Unroll form (issue #796).** The inner 16-iteration accumulation is now expressed as a single
 `_Pragma("unroll 16") for (uint k = 0; k < TILE; ++k)` loop rather than 16 hand-written blocks.
 An A/B on the target GPU compiled the pragma form successfully, produced bit-identical output to the
