@@ -192,7 +192,6 @@ internal static class SilkKernels
         #define GEMVLANES 32
         #define GEMVCOLS 128
         #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
-        #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
 
         inline float gelu_exact(float v)
         {
@@ -1903,7 +1902,6 @@ internal static class SilkKernels
                 /* Fused single-token MLP block for cached decode (#672, Stage B): RMSNorm(x) feeds
                    gate/up, SwiGLU, down-projection, plus the residual add, in one launch. Shared memory
                    holds the intermediate swiglu vector (max 5120 columns). One work-group of 256 lanes. */
-                #define MLP_MAX_INTERMEDIATE 5120
 
         __kernel void rms_norm_gemv_bf16(
                     __global const float* x,
