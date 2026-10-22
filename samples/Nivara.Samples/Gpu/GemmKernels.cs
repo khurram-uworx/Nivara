@@ -215,15 +215,34 @@ internal static class GemmKernels
             {
                 if (s == stripOfThread)
                 {
-                    for (int r = 0; r < BR; r++)
+                    if (y < 4)
                     {
-                        int srcRow = rowBase + x * BR + r;
-                        int slot = x * BR + r - s * KT;
-                        for (int kk = 0; kk < KT; kk += TileSize)
+                        for (int r = 0; r < BR; r++)
                         {
-                            int srcCol = k0 + kk + y;
-                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
-                                ? a[srcRow * aCols + srcCol] : 0f;
+                            int srcRow = rowBase + x * BR + r;
+                            int slot = x * BR + r - s * KT;
+                            for (int kk = 0; kk < KT; kk += TileSize)
+                            {
+                                int aColBase = k0 + kk + y * 4;
+                                int aBase = srcRow * aCols + aColBase;
+                                if (srcRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                                {
+                                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                                    smem[slot, kk + y * 4 + 0] = av.X;
+                                    smem[slot, kk + y * 4 + 1] = av.Y;
+                                    smem[slot, kk + y * 4 + 2] = av.Z;
+                                    smem[slot, kk + y * 4 + 3] = av.W;
+                                }
+                                else
+                                {
+                                    for (int aw = 0; aw < 4; aw++)
+                                    {
+                                        int aCol2 = aColBase + aw;
+                                        smem[slot, kk + y * 4 + aw] = (srcRow < aRows && aCol2 < aCols)
+                                            ? a[srcRow * aCols + aCol2] : 0f;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -316,15 +335,34 @@ internal static class GemmKernels
             {
                 if (s == stripOfThread)
                 {
-                    for (int r = 0; r < BR; r++)
+                    if (y < 4)
                     {
-                        int srcRow = rowBase + x * BR + r;
-                        int slot = x * BR + r - s * KT;
-                        for (int kk = 0; kk < KT; kk += TileSize)
+                        for (int r = 0; r < BR; r++)
                         {
-                            int srcCol = k0 + kk + y;
-                            smem[slot, kk + y] = (srcRow < aRows && srcCol < aCols)
-                                ? a[srcRow * aCols + srcCol] : 0f;
+                            int srcRow = rowBase + x * BR + r;
+                            int slot = x * BR + r - s * KT;
+                            for (int kk = 0; kk < KT; kk += TileSize)
+                            {
+                                int aColBase = k0 + kk + y * 4;
+                                int aBase = srcRow * aCols + aColBase;
+                                if (srcRow < aRows && aColBase + 3 < aCols && aBase % 4 == 0)
+                                {
+                                    var av = a.Cast<ILGPU.Util.Float4>()[aBase / 4];
+                                    smem[slot, kk + y * 4 + 0] = av.X;
+                                    smem[slot, kk + y * 4 + 1] = av.Y;
+                                    smem[slot, kk + y * 4 + 2] = av.Z;
+                                    smem[slot, kk + y * 4 + 3] = av.W;
+                                }
+                                else
+                                {
+                                    for (int aw = 0; aw < 4; aw++)
+                                    {
+                                        int aCol2 = aColBase + aw;
+                                        smem[slot, kk + y * 4 + aw] = (srcRow < aRows && aCol2 < aCols)
+                                            ? a[srcRow * aCols + aCol2] : 0f;
+                                    }
+                                }
+                            }
                         }
                     }
                 }

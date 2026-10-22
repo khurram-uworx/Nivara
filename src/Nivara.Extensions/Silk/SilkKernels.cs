@@ -2083,14 +2083,33 @@ internal static class SilkKernels
                 {
                     if (s == stripOfThread)
                     {
-                        for (uint r = 0; r < BR; ++r)
+                        if (y < 4u)
                         {
-                            uint srcRow = outRowBase + x * BR + r;
-                            uint slot = x * BR + r - s * KT;
-                            for (uint kk = 0; kk < KT; kk += TILE_K)
+                            for (uint r = 0; r < BR; ++r)
                             {
-                                uint srcCol = k0 + kk + y;
-                                smem[slot + (kk + y) * (KT + TileCols)] = (srcRow < aRows && srcCol < aCols) ? a[srcRow * aCols + srcCol] : 0.0f;
+                                uint srcRow = outRowBase + x * BR + r;
+                                uint slot = x * BR + r - s * KT;
+                                for (uint kk = 0; kk < KT; kk += TILE_K)
+                                {
+                                    uint aColBase = k0 + kk + y * 4u;
+                                    uint aBase = srcRow * aCols + aColBase;
+                                    if (srcRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u)
+                                    {
+                                        float4 av = vload4(0, a + aBase);
+                                        smem[slot + (kk + y * 4u + 0u) * (KT + TileCols)] = av.s0;
+                                        smem[slot + (kk + y * 4u + 1u) * (KT + TileCols)] = av.s1;
+                                        smem[slot + (kk + y * 4u + 2u) * (KT + TileCols)] = av.s2;
+                                        smem[slot + (kk + y * 4u + 3u) * (KT + TileCols)] = av.s3;
+                                    }
+                                    else
+                                    {
+                                        for (uint aw = 0u; aw < 4u; ++aw)
+                                        {
+                                            uint aCol = aColBase + aw;
+                                            smem[slot + (kk + y * 4u + aw) * (KT + TileCols)] = (srcRow < aRows && aCol < aCols) ? a[srcRow * aCols + aCol] : 0.0f;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2162,14 +2181,33 @@ internal static class SilkKernels
                 {
                     if (s == stripOfThread)
                     {
-                        for (uint r = 0; r < BR; ++r)
+                        if (y < 4u)
                         {
-                            uint srcRow = outRowBase + x * BR + r;
-                            uint slot = x * BR + r - s * KT;
-                            for (uint kk = 0; kk < KT; kk += TILE_K)
+                            for (uint r = 0; r < BR; ++r)
                             {
-                                uint srcCol = k0 + kk + y;
-                                smem[slot + (kk + y) * (KT + TileCols)] = (srcRow < aRows && srcCol < aCols) ? a[srcRow * aCols + srcCol] : 0.0f;
+                                uint srcRow = outRowBase + x * BR + r;
+                                uint slot = x * BR + r - s * KT;
+                                for (uint kk = 0; kk < KT; kk += TILE_K)
+                                {
+                                    uint aColBase = k0 + kk + y * 4u;
+                                    uint aBase = srcRow * aCols + aColBase;
+                                    if (srcRow < aRows && (aColBase + 3u) < aCols && (aBase % 4u) == 0u)
+                                    {
+                                        float4 av = vload4(0, a + aBase);
+                                        smem[slot + (kk + y * 4u + 0u) * (KT + TileCols)] = av.s0;
+                                        smem[slot + (kk + y * 4u + 1u) * (KT + TileCols)] = av.s1;
+                                        smem[slot + (kk + y * 4u + 2u) * (KT + TileCols)] = av.s2;
+                                        smem[slot + (kk + y * 4u + 3u) * (KT + TileCols)] = av.s3;
+                                    }
+                                    else
+                                    {
+                                        for (uint aw = 0u; aw < 4u; ++aw)
+                                        {
+                                            uint aCol = aColBase + aw;
+                                            smem[slot + (kk + y * 4u + aw) * (KT + TileCols)] = (srcRow < aRows && aCol < aCols) ? a[srcRow * aCols + aCol] : 0.0f;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
