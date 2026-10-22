@@ -64,6 +64,7 @@ internal static class SilkLauncher
         GemmGrid(runtime, SilkKernels.Gemm, aRows, bCols);
     }
 
+
     /// <summary>
     /// A Row4 epilogue GEMM (<c>gemm_row4_bias</c>, <c>gemm_row4_gelu</c>, <c>gemm_row4_relu</c>,
     /// <c>gemm_row4_qkv</c>): the six shared arguments plus, when <paramref name="blockWidth"/> is
