@@ -74,6 +74,10 @@ internal static class SilkKernels
     /// <summary>Band sentinel meaning "attend to every non-suppressed key" (global attention).</summary>
     public const int GlobalAttentionBand = -1;
 
+    public const int SlidingAttentionBandMax = 128;
+
+    public const int SlidingAttentionCacheSize = 2 * SlidingAttentionBandMax + 1;
+
     public const string EmbedSum = "embed_sum";
     public const string GatherRows = "gather_rows";
     public const string LayerNormResidual = "layer_norm_residual";
@@ -94,6 +98,7 @@ internal static class SilkKernels
     public const string GemmReg2x4 = "gemm_reg2x4";
     public const string GemmReg4x4 = "gemm_reg4x4";
     public const string Attention = "batched_attention";
+    public const string AttentionSliding = "batched_attention_sliding";
 
     // SmolLM (Llama-family causal LM) kernels.
     public const string RmsNorm = "rms_norm";
@@ -137,7 +142,7 @@ internal static class SilkKernels
     public static readonly string[] KernelNames =
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
-        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention,
+        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
         RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16, DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
@@ -850,6 +855,124 @@ internal static class SilkKernels
             for (uint d = 0; d < headDim; ++d)
                 attnOut[outBase + dOffset + d] = acc[d * MAXHEADDIM + lane];
         }
+
+        __kernel void batched_attention_sliding(
+            __global const float* q,
+            __global const float* k,
+            __global const float* v,
+            __global const float* mask,
+            __global float* attnOut,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const int band,
+            const float scale)
+        {
+            __local float acc[MAXHEADDIM * ATTNGROUP];
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint qPos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint dOffset = h * headDim;
+            uint qRow = b * seqLen + qPos;
+            uint maskBase = b * seqLen;
+            uint outBase = qRow * D;
+
+            int qp = (int)qPos;
+            int sl = (int)seqLen;
+            int jFirst = band < 0 ? 0 : max(0, qp - band);
+            int jLast = band < 0 ? sl - 1 : min(sl - 1, qp + band);
+
+            // Sliding-window path: the attended span is at most 2*band+1 (<=257), so cache only that.
+            // Out-of-range bands fall back to the global kernel, which recomputes above 512 keys.
+            float scoreCache[257];
+            int range = jLast - jFirst + 1;
+            int cacheReady = range <= 257 ? 1 : 0;
+
+            float mx = -INFINITY;
+            if (cacheReady)
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    scoreCache[j - jFirst] = s;
+                    if (s > mx) mx = s;
+                }
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    if (s > mx) mx = s;
+                }
+            }
+
+            if (mx == -INFINITY)
+            {
+                for (uint d = 0; d < headDim; ++d)
+                    attnOut[outBase + dOffset + d] = 0.0f;
+                return;
+            }
+
+            float sum = 0.0f;
+            if (cacheReady)
+            {
+                for (int j = 0; j < range; ++j)
+                    sum += exp(scoreCache[j] - mx);
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    sum += exp(s - mx);
+                }
+            }
+
+            uint lane = get_local_id(0);
+            for (uint d = 0; d < headDim; ++d)
+                acc[d * MAXHEADDIM + lane] = 0.0f;
+
+            if (cacheReady)
+            {
+                for (int j = 0; j < range; ++j)
+                {
+                    float s = scoreCache[j];
+                    float p = exp(s - mx) / sum;
+                    int jGlobal = jFirst + j;
+                    uint vBase = (b * seqLen + (uint)jGlobal) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        acc[d * MAXHEADDIM + lane] += p * v[vBase + d];
+                }
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    float p = exp(s - mx) / sum;
+                    uint vBase = (b * seqLen + (uint)j) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        acc[d * MAXHEADDIM + lane] += p * v[vBase + d];
+                }
+            }
+
+            for (uint d = 0; d < headDim; ++d)
+                attnOut[outBase + dOffset + d] = acc[d * MAXHEADDIM + lane];
+        }
+
 
         /* RMSNorm: no mean subtraction, affine gamma only. One work item per row. y may alias x. */
         __kernel void rms_norm(

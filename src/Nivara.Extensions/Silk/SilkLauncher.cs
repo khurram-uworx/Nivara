@@ -89,19 +89,24 @@ internal static class SilkLauncher
         SilkRuntime runtime, nint q, nint k, nint v, nint mask, nint output,
         int batch, int seqLen, int numHeads, int headDim, int band, float scale)
     {
-        runtime.SetBuffer(SilkKernels.Attention, 0, q);
-        runtime.SetBuffer(SilkKernels.Attention, 1, k);
-        runtime.SetBuffer(SilkKernels.Attention, 2, v);
-        runtime.SetBuffer(SilkKernels.Attention, 3, mask);
-        runtime.SetBuffer(SilkKernels.Attention, 4, output);
-        runtime.SetUInt32(SilkKernels.Attention, 5, (uint)batch);
-        runtime.SetUInt32(SilkKernels.Attention, 6, (uint)seqLen);
-        runtime.SetUInt32(SilkKernels.Attention, 7, (uint)numHeads);
-        runtime.SetUInt32(SilkKernels.Attention, 8, (uint)headDim);
-        runtime.SetInt32(SilkKernels.Attention, 9, band);
-        runtime.SetFloat32(SilkKernels.Attention, 10, scale);
+        string kernelName = band >= 0
+            && 2 * band + 1 <= SilkKernels.SlidingAttentionCacheSize
+            ? SilkKernels.AttentionSliding
+            : SilkKernels.Attention;
+
+        runtime.SetBuffer(kernelName, 0, q);
+        runtime.SetBuffer(kernelName, 1, k);
+        runtime.SetBuffer(kernelName, 2, v);
+        runtime.SetBuffer(kernelName, 3, mask);
+        runtime.SetBuffer(kernelName, 4, output);
+        runtime.SetUInt32(kernelName, 5, (uint)batch);
+        runtime.SetUInt32(kernelName, 6, (uint)seqLen);
+        runtime.SetUInt32(kernelName, 7, (uint)numHeads);
+        runtime.SetUInt32(kernelName, 8, (uint)headDim);
+        runtime.SetInt32(kernelName, 9, band);
+        runtime.SetFloat32(kernelName, 10, scale);
         runtime.Run(
-            SilkKernels.Attention,
+            kernelName,
             [(nuint)SilkKernels.AttentionGlobal(batch * numHeads * seqLen)],
             [(nuint)SilkKernels.AttentionGroupSize]);
     }
