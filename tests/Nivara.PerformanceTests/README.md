@@ -326,6 +326,15 @@ Read this mode as a binary gate plus a rough fill-rate estimate; do not threshol
 milliseconds. (Same class of instability as the single-row variance noted under
 `--cpu-gemm`.)
 
+#### `--silk-gemm` - Silk-only GEMM baseline
+
+`dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-gemm`
+
+Native Silk-only GEMM baseline/comparison harness (no ILGPU leg): runs the Silk `gemm`
+kernel over the standard GEMM shapes and compares output + timing against an ascending-K
+CPU reference (mul+add). Exits 0 on full parity, 10 when the Silk runtime is unavailable.
+Usable on Silk-only machines where `--silk-kernels` cannot run.
+
 #### `--cpu-gemm` - CPU GEMM ceiling
 
 `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm`
