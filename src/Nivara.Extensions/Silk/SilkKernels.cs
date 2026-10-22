@@ -2143,7 +2143,6 @@ internal static class SilkKernels
                 }
 
         /* Measured candidate geometry: 2x4 @ K16 (issue #784). Plain GEMM, ascending K. */
-        #undef TILE
         __kernel void gemm_reg2x4(
             __global const float* a,
             __global const float* b,
@@ -2152,13 +2151,13 @@ internal static class SilkKernels
             const uint aCols,
             const uint bCols)
         {
-            const uint BR = 2, BC = 4, KT = 16, TILE = 16;
-            const uint TileRows = TILE * BR, TileCols = TILE * BC;
+            const uint BR = 2, BC = 4, KT = 16, TILE_K = 16;
+            const uint TileRows = TILE_K * BR, TileCols = TILE_K * BC;
             uint x = get_local_id(0);
             uint y = get_local_id(1);
             uint outRowBase = get_group_id(0) * TileRows;
             uint colBase = get_group_id(1) * TileCols;
-            __local float smem[TILE * (KT + TileCols)];
+            __local float smem[TILE_K * (KT + TileCols)];
             float acc00 = 0.0f, acc01 = 0.0f, acc02 = 0.0f, acc03 = 0.0f;
             float acc10 = 0.0f, acc11 = 0.0f, acc12 = 0.0f, acc13 = 0.0f;
 
@@ -2173,15 +2172,15 @@ internal static class SilkKernels
                         {
                             uint srcRow = outRowBase + x * BR + r;
                             uint slot = x * BR + r - s * KT;
-                            for (uint kk = 0; kk < KT; kk += TILE)
+                            for (uint kk = 0; kk < KT; kk += TILE_K)
                             {
                                 uint srcCol = k0 + kk + y;
                                 smem[slot + (kk + y) * (KT + TileCols)] = (srcRow < aRows && srcCol < aCols) ? a[srcRow * aCols + srcCol] : 0.0f;
                             }
                         }
                     }
-                    for (uint kk = 0; kk < KT; kk += TILE)
-                        for (uint cc = 0; cc < TileCols; cc += TILE)
+                    for (uint kk = 0; kk < KT; kk += TILE_K)
+                        for (uint cc = 0; cc < TileCols; cc += TILE_K)
                         {
                             uint srcRow = k0 + kk + x;
                             uint srcCol = colBase + cc + y;
@@ -2229,13 +2228,13 @@ internal static class SilkKernels
             const uint aCols,
             const uint bCols)
         {
-            const uint BR = 4, BC = 4, KT = 16, TILE = 16;
-            const uint TileRows = TILE * BR, TileCols = TILE * BC;
+            const uint BR = 4, BC = 4, KT = 16, TILE_K = 16;
+            const uint TileRows = TILE_K * BR, TileCols = TILE_K * BC;
             uint x = get_local_id(0);
             uint y = get_local_id(1);
             uint outRowBase = get_group_id(0) * TileRows;
             uint colBase = get_group_id(1) * TileCols;
-            __local float smem[TILE * (KT + TileCols)];
+            __local float smem[TILE_K * (KT + TileCols)];
             float acc00 = 0.0f, acc01 = 0.0f, acc02 = 0.0f, acc03 = 0.0f;
             float acc10 = 0.0f, acc11 = 0.0f, acc12 = 0.0f, acc13 = 0.0f;
             float acc20 = 0.0f, acc21 = 0.0f, acc22 = 0.0f, acc23 = 0.0f;
@@ -2252,15 +2251,15 @@ internal static class SilkKernels
                         {
                             uint srcRow = outRowBase + x * BR + r;
                             uint slot = x * BR + r - s * KT;
-                            for (uint kk = 0; kk < KT; kk += TILE)
+                            for (uint kk = 0; kk < KT; kk += TILE_K)
                             {
                                 uint srcCol = k0 + kk + y;
                                 smem[slot + (kk + y) * (KT + TileCols)] = (srcRow < aRows && srcCol < aCols) ? a[srcRow * aCols + srcCol] : 0.0f;
                             }
                         }
                     }
-                    for (uint kk = 0; kk < KT; kk += TILE)
-                        for (uint cc = 0; cc < TileCols; cc += TILE)
+                    for (uint kk = 0; kk < KT; kk += TILE_K)
+                        for (uint cc = 0; cc < TileCols; cc += TILE_K)
                         {
                             uint srcRow = k0 + kk + x;
                             uint srcCol = colBase + cc + y;
