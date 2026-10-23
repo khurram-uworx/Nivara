@@ -2,6 +2,8 @@
 
 **Status:** planning reference · **Scope:** the columnar engine (`src/Nivara`) · **Lens:** `docs/plan/POLARS-REVIEW.md`
 
+**Reassessed 2026-10-23:** Phases 1–4 are delivered and verified on `main` (solution builds clean, 0 warnings/errors); only Phase 5 (source generators) and the post-roadmap items remain open. See `docs/plan/POLARS-REVIEW.md` §7.
+
 This is the travel plan for turning Nivara into what a columnar engine *would* be if Polars had been conceived in .NET — not a port, a native design.
 
 ---
@@ -76,7 +78,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 - **Generic-math collapse:** replace the explicit `float`/`double` branches in `NivaraColumn<T>` arithmetic (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`, and operator overloads) with `INumber<T>` generic paths, keeping `TensorPrimitives` on the vectorizable fast path.
 
 **Scope (remaining):**
-- **BFloat16 in the column/query-expression path — ✅ Delivered (branch `khurram/bfloat16`).** Issue #137 admitted `BFloat16` to the **AutoDiff** domain only; the columnar layer now wires it through (mirroring `Half`): `NumericKernelDispatcher.arithmeticDomain`, `NumericPromoter`, `TypeCompatibilityValidator.GetNumericTypes`, `TypeExtensions.IsNumericType`, window functions, sort/comparers, aggregation (Sum→`double`), quantile, the fused evaluator (`FusedKernel.CoerceLiteral`), and `NivaraSeries`. Step-0 probe confirmed the active net11 BCL `TensorPrimitives` exposes `BFloat16` arithmetic overloads, so the generic SIMD path applies with no scalar fallback.
+- **BFloat16 in the column/query-expression path — ✅ Delivered (on `main`).** Issue #137 admitted `BFloat16` to the **AutoDiff** domain only; the columnar layer now wires it through (mirroring `Half`): `NumericKernelDispatcher.arithmeticDomain`, `NumericPromoter`, `TypeCompatibilityValidator.GetNumericTypes`, `TypeExtensions.IsNumericType`, window functions, sort/comparers, aggregation (Sum→`double`), quantile, the fused evaluator (`FusedKernel.CoerceLiteral`), and `NivaraSeries`. Step-0 probe confirmed the active net11 BCL `TensorPrimitives` exposes `BFloat16` arithmetic overloads, so the generic SIMD path applies with no scalar fallback.
 - **#155 — span-native compiled target — ✅ Resolved.** A literally `Span<T>`-parameterized compiled delegate is impossible under `System.Linq.Expressions` (ref-struct ban), so the compiled path is now **span-equivalent** instead: leaf arrays are the columns' underlying backing arrays (zero-copy, including sliced columns) read at `baseOffset[col] + start + i`, and the per-call dispatch wrapper is rented from `ArrayPool<object>` (no whole-column snapshot copy, no hot-path allocation). The span-capable, memory-budgeted IR path already ships via `FusedKernel` + `EvaluateChunked` (#167).
 
 **Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/Expressions/KernelIR.cs`, `src/Nivara/Expressions/KernelLowerer.cs`, `src/Nivara/Expressions/FusedKernel.cs`, `src/Nivara/Expressions/TensorPrimitivesKernel.cs`, `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraQuery.cs`, `src/Nivara/KernelSelector.cs`.
@@ -141,6 +143,8 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 ---
 
 ### Phase 5 — Source generators *(the uniquely-.NET differentiator)*
+
+**Status:** not started — no `Nivara.Generators` project or Roslyn analyzer reference exists in the solution yet (verified 2026-10-23). This is the only roadmap phase with no code.
 
 **Motivation:** Roslyn can emit typed schema accessors and specialized query builders at build time — structurally impossible for a Rust engine fronted by Python (Pillar 8). This is Nivara's native trump card, and it is currently untouched.
 

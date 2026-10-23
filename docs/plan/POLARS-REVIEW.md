@@ -2,6 +2,8 @@
 
 **Status:** architecture reference · **Scope:** the columnar engine (`src/Nivara`) · **Companion:** `docs/plan/POLARS-ROADMAP.md`
 
+**Reassessed 2026-10-23:** Phases 1–4 delivered on `main`; only Phase 5 (source generators) and post-roadmap items remain. Operator-level fusion (§5.1) is still an open scope decision.
+
 This document records a specific lens for evaluating Nivara's columnar engine: **"What if Polars had been conceived in .NET instead of Rust?"** It is deliberately *not* "how close are we to a Polars port." A port copies a foreign architecture. A lens derives a native one.
 
 The short version is: Nivara is already closer to the native-.NET design than to a Polars clone, and the highest-leverage gaps are concentrated in one place — the query *expression* path.
@@ -162,10 +164,10 @@ highest-leverage change in the project. That judgement was right.
 
 ## 5. Secondary gaps
 
-1. **No operator-level fusion rule.** The inert `OperationFusionRule` was removed; the optimizer currently focuses on pushdown and column elimination. Kernel-level expression fusion is provided by `FusedExpressionEvaluator`, but chained plan operators still materialize intermediate columns.
+1. **No operator-level fusion rule (still open).** The inert `OperationFusionRule` was removed; the optimizer currently focuses on pushdown and column elimination. Kernel-level expression fusion is provided by `FusedExpressionEvaluator`, but chained plan operators still materialize intermediate columns. **Scope decision pending** — add a fusion rule or drop from the Polars lens.
 2. **Window functions — built since this review.** `WindowSpec` (`src/Nivara/Operations/WindowSpec.cs:15`) plus `WindowOperations` and `WindowFrameExtensions` provide `Over()`, rolling, cumulative, shift/lead/lag, row number and rank, including over computed window sources. This was the largest *analytical feature* gap versus Polars that the review identified, and it is now closed.
 3. **Generic-math collapse partly done.** `NivaraColumn<T>` arithmetic no longer branches on `float`/`double` explicitly: it routes through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs:72-73`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs:41-42`). What remains is that the column *surface* still exposes per-type methods rather than generic-math ones.
-4. **Async not first-class in streaming.** The seams exist; the streaming strategy is still a synchronous chunk puller with async wrappers.
+4. **Async streaming delivered (v1.4.0 + #331).** `CollectAsync`/`AsStream`/`AsStream(context)` are genuine async end to end. The remaining sync-primary shape of `IQuerySource` is intentional; the `khurram/async` async-first refactor branch is abandoned/stale and should be deleted.
 5. **No source generators.** The uniquely-.NET differentiator is untouched (see Pillar 8, Phase 5).
 
 ---
@@ -181,7 +183,7 @@ highest-leverage change in the project. That judgement was right.
 
 ## 7. Summary
 
-Nivara is ~75% a "Polars for .NET" and ~80% a "columnar + Arrow-inspired + AI infrastructure in .NET style," but those numbers are not the point. The lens says something sharper:
+Nivara is ~90% a "Polars for .NET" on `main` (Phases 1-4 delivered; only source generators remain), but those numbers are not the point. The lens says something sharper:
 
 > Nivara already makes the right native-.NET choices on **memory**, **tensor substrate**, **Arrow positioning**, **optimization**, and **observability**. At the time of this review it violated the native model in exactly one architectural place — the expression engine boxed instead of compiling — and it was missing the native-only differentiators (source generators) and the analytical breadth (window functions). The expression engine and the window functions have since been built (§4, §5.2), so the remaining native-only gap is source generators; what is still open is the secondary list in §5.
 
