@@ -396,7 +396,7 @@ public class InferenceCliArgumentTests
         Assert.Multiple(() =>
         {
             AssertRejected(Run("typesafe", "predict"), "Unsupported mode 'predict' for 'typesafe'");
-            AssertRejected(Run("typesafe", "--silk"), "--silk is not supported for 'typesafe'");            AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
+            AssertRejected(Run("typesafe", "--silk"), "--silk is not supported for 'typesafe'"); AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
         });
     }
 
