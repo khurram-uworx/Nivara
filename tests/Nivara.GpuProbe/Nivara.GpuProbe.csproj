@@ -14,7 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Numerics.Tensors" Version="11.0.0-rc.1.26425.128" />
+    <PackageReference Include="System.Numerics.Tensors" Version="11.0.0-rc.2.26504.105" />
   </ItemGroup>
 
   <!-- Phase 4a (issue #431): first GPU-backend package in the probe. ILGPU is a pure-C#
@@ -51,7 +51,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.1.26425.128" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.2.26504.105" />
   </ItemGroup>
 
 </Project>

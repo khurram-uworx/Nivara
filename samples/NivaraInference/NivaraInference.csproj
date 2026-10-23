@@ -11,12 +11,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
     <ProjectReference Include="..\Nivara.Samples\Nivara.Samples.csproj" />
-    <PackageReference Include="System.Drawing.Common" Version="11.0.0-rc.1.26425.128" />
-    <PackageReference Include="TypeSafeAI" Version="0.2.0" />
+    <PackageReference Include="System.Drawing.Common" Version="11.0.0-rc.2.26504.105" />
+    <PackageReference Include="TypeSafeAI" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.1.26425.128" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.2.26504.105" />
   </ItemGroup>
 
 </Project>

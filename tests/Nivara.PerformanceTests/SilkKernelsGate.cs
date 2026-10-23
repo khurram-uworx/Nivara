@@ -1,5 +1,3 @@
-using System;
-
 namespace Nivara.PerformanceTests;
 
 /// <summary>
