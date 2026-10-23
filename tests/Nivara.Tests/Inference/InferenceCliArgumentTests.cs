@@ -154,8 +154,12 @@ public class InferenceCliArgumentTests
     }
 
     [Test]
-    public void Gpu_OnModelWithoutGpuPath_Rejected() =>
+    public void Gpu_OnModelWithoutGpuPath_Rejected()
+    {
         AssertRejected(Run("smollm", "--ilgpu"), "--ilgpu is not supported for 'smollm'");
+        AssertRejected(Run("distilbert", "--ilgpu"), "--ilgpu is not supported for 'distilbert'");
+        AssertRejected(Run("distilbert_sst", "--ilgpu"), "--ilgpu is not supported for 'distilbert_sst'");
+    }
 
     [Test]
     public void Gpu_RejectedBeforeModelFileLookup()
@@ -295,7 +299,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void GpuPrecisionCombination_Rejected() =>
-        AssertRejected(Run("distilbert", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
+        AssertRejected(Run("modernbert", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
 
     [Test]
     public void GpuUnsupportedMode_Rejected()
@@ -559,7 +563,6 @@ public class InferenceCliArgumentTests
 
     static readonly (string[] Args, string Expected)[] GpuModeCases =
     [
-        (["distilbert_sst", "--ilgpu", "predict"], "--ilgpu does not support mode 'predict' for 'distilbert_sst'"),
         (["modernbert", "--ilgpu", "compare_diag"], "--ilgpu does not support mode 'compare_diag' for 'modernbert'"),
     ];
 
