@@ -5,7 +5,6 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
 using Nivara.Samples;
-using Nivara.Samples.Gpu;
 using Nivara.Silk;
 using System.Diagnostics;
 using System.Drawing;
@@ -57,12 +56,6 @@ class Program
         // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
         // checkpoint, and it dispatches before the model-file lookup below.
         ["typesafe"] = ["", "benchmark", "verify"],
-    };
-
-    static readonly Dictionary<string, string[]> GpuModes = new()
-    {
-        ["laya"] = ["", "benchmark", "compare"],
-        ["modernbert"] = ["", "benchmark", "compare"],
     };
 
     // The Silk.NET OpenCL path is kernels-first. The hand-authored kernels cover the BERT-family
@@ -135,7 +128,6 @@ class Program
         bool force = false;
         bool syntheticWeights = false;
         bool plain = false;
-        bool useGpu = false;
         bool useSilk = false;
         string engine = TypeSafe.DefaultEngine;
         bool engineSet = false;
@@ -221,8 +213,6 @@ class Program
                 syntheticWeights = true;
             else if (args[i] == "--plain")
                 plain = true;
-            else if (args[i] == "--ilgpu")
-                useGpu = true;
             else if (args[i] == "--silk")
                 useSilk = true;
             else if (args[i] == "--url")
@@ -266,13 +256,6 @@ class Program
                 }
                 modelSet = true;
                 i++;
-            }
-            else if (args[i] == "--gpu")
-            {
-                // The flag was renamed when the Silk path arrived. Rejected rather than aliased
-                // so an old invocation fails loudly instead of silently running the ILGPU path.
-                Console.Error.WriteLine("--gpu was renamed --ilgpu; rerun with --ilgpu.");
-                return 1;
             }
             else if (args[i] is "--seq" or "--warmup" or "--iters")
             {
@@ -353,9 +336,6 @@ class Program
             Console.WriteLine("                    Not every model an engine holds is a decision model; the engine rejects the others.");
             Console.WriteLine();
             Console.WriteLine("GPU (modernbert / laya):");
-            Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
-            Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
-            Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
             Console.WriteLine("  --silk             Run on the OpenCL GPU through the hand-authored Silk.NET kernel");
             Console.WriteLine("                     stack (src/Nivara.Extensions/Silk/SilkKernels.cs). 'minilm' /");
             Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
@@ -415,15 +395,6 @@ class Program
             return 1;
         }
 
-        // A conflict between the two backend flags does not depend on the model, so it is checked
-        // before the model-scoped guards: 'minilm --ilgpu --silk' must name the conflict, not one
-        // flag's model scope.
-        if (useGpu && useSilk)
-        {
-            Console.Error.WriteLine("--ilgpu and --silk select competing GPU backends; pick one (each invocation runs one backend).");
-            return 1;
-        }
-
         if (seqArg is not null || warmupArg is not null || itersArg is not null)
         {
             // Model scope: --seq is a shape parameter and stays modernbert-only; --warmup/--iters
@@ -467,12 +438,6 @@ class Program
                 Console.Error.WriteLine($"--iters expects a positive integer; got '{itersArg}'.");
                 return 1;
             }
-        }
-
-        if (useGpu && !GpuModes.ContainsKey(modelType))
-        {
-            Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: modernbert, laya).");
-            return 1;
         }
 
         if (useSilk && !SilkModes.ContainsKey(modelType))
@@ -573,12 +538,6 @@ class Program
             return 1;
         }
 
-        if (useGpu && !GpuModes[modelType].Contains(mode))
-        {
-            Console.Error.WriteLine($"--ilgpu does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (GPU modes: default, benchmark, compare).");
-            return 1;
-        }
-
         if (useSilk && !SilkModes[modelType].Contains(mode))
         {
             Console.Error.WriteLine($"--silk does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (Silk modes: default, benchmark, compare).");
@@ -612,12 +571,6 @@ class Program
         if (isQwen && fp16)
         {
             Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode. Use --precision f32 (BF16-on-disk, widened to F32 at load) or --precision bf16 (native BFloat16).");
-            return 1;
-        }
-
-        if (useGpu && (bf16 || fp16))
-        {
-            Console.Error.WriteLine("--ilgpu is F32-only in this phase: the ILGPU path has no bf16/fp16 kernels yet. Drop --precision bf16|fp16 (or --ilgpu) and rerun.");
             return 1;
         }
 
@@ -774,10 +727,10 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "laya":
-                if (useSilk || useGpu)
+                if (useSilk)
                 {
-                    var layaSilkTensors = (useSilk && bf16) ? WidenBFloat16Tensors(tensorsBf16) : tensors;
-                    Nivara.AI.OpenLayaSession open = useSilk ? Nivara.Silk.SilkLayaSession.Open : Nivara.Samples.Gpu.IlgpuLayaSession.Open;
+                    var layaSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    Nivara.AI.OpenLayaSession open = Nivara.Silk.SilkLayaSession.Open;
                     if (benchmark) return Laya.RunBenchmarkGpu(layaSilkTensors, modelDir, open);
                     if (compare) return Laya.CompareGpu(layaSilkTensors, modelDir, open);
                     return Laya.RunGpu(layaSilkTensors, modelDir, open);
@@ -788,10 +741,10 @@ class Program
                 if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
                 return Laya.Run<float, float>(tensors, modelDir, mode, "F32");
             case "modernbert":
-                if (useSilk || useGpu)
+                if (useSilk)
                 {
-                    var mbSilkTensors = (useSilk && bf16) ? WidenBFloat16Tensors(tensorsBf16) : tensors;
-                    OpenModernBertSession open = useSilk ? SilkModernBertSession.Open : IlgpuModernBertSession.Open;
+                    var mbSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    OpenModernBertSession open = SilkModernBertSession.Open;
                     if (benchmark) return ModernBert.BenchmarkGpu(mbSilkTensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(mbSilkTensors, modelDir, open);
                     return ModernBert.RunGpu(mbSilkTensors, modelDir, open);
