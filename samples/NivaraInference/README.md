@@ -57,8 +57,6 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu be
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 
 # BERT-family encoders on the OpenCL iGPU (ILGPU 1.5.3; --ilgpu is F32-only in this phase)
-dotnet run --project samples/NivaraInference -c Release -- distilbert --ilgpu
-dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu            # encoder + decision head
 

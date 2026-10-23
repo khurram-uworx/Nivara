@@ -61,8 +61,6 @@ class Program
 
     static readonly Dictionary<string, string[]> GpuModes = new()
     {
-        ["distilbert"] = ["", "benchmark", "compare"],
-        ["distilbert_sst"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
         ["modernbert"] = ["", "benchmark", "compare"],
     };
@@ -473,7 +471,7 @@ class Program
 
         if (useGpu && !GpuModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: distilbert, distilbert_sst, modernbert, laya).");
+            Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: modernbert, laya).");
             return 1;
         }
 
@@ -758,11 +756,6 @@ class Program
                     if (compare) return RunDistilBertSilkCompare(distSilkTensors);
                     return benchmark ? BenchmarkDistilBertSilk(distSilkTensors) : RunDistilBertSilkInference(distSilkTensors);
                 }
-                if (useGpu)
-                {
-                    if (compare) return RunDistilBertGpuCompare(tensors);
-                    return benchmark ? BenchmarkDistilBertGpu(tensors) : RunDistilBertGpuInference(tensors);
-                }
                 if (bf16) return benchmark ? BenchmarkDistilBert(tensorsBf16, "BFloat16") : RunDistilBertBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBert(tensorsHalf, "Half") : RunDistilBertHalf(tensorsHalf);
                 if (compare) return RunDistilBertCompare(tensors);
@@ -774,12 +767,6 @@ class Program
                     if (benchmark) return BenchmarkDistilBertSstSilk(sstSilkTensors);
                     if (compare) return RunDistilBertSstSilkCompare(sstSilkTensors);
                     return RunDistilBertSstSilkInference(sstSilkTensors);
-                }
-                if (useGpu)
-                {
-                    if (benchmark) return BenchmarkDistilBertSstGpu(tensors);
-                    if (compare) return RunDistilBertSstGpuCompare(tensors);
-                    return RunDistilBertSstGpuInference(tensors);
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBertSst(tensorsBf16, "BFloat16") : RunDistilBertSstBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBertSst(tensorsHalf, "Half") : RunDistilBertSstHalf(tensorsHalf);
@@ -2364,8 +2351,6 @@ class Program
     // the incumbent ILGPU path and "Silk" is the hand-authored OpenCL stack. Both go through the same
     // body with DistilBert naming, so a fix to one cannot be forgotten in the other.
 
-    static int RunDistilBertGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunDistilBertBackendInference("GPU", OpenIlgpuEncoder, tensors);
 
     static int RunDistilBertSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertBackendInference("Silk", OpenSilkEncoder, tensors);
@@ -2416,8 +2401,6 @@ class Program
         return 0;
     }
 
-    static int BenchmarkDistilBertGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => BenchmarkDistilBertBackend("GPU", OpenIlgpuEncoder, tensors);
 
     static int BenchmarkDistilBertSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => BenchmarkDistilBertBackend("Silk", OpenSilkEncoder, tensors);
@@ -2452,8 +2435,6 @@ class Program
         return 0;
     }
 
-    static int RunDistilBertSstGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunDistilBertSstBackendInference("GPU", OpenIlgpuEncoder, tensors);
 
     static int RunDistilBertSstSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertSstBackendInference("Silk", OpenSilkEncoder, tensors);
@@ -2500,8 +2481,6 @@ class Program
         return 0;
     }
 
-    static int BenchmarkDistilBertSstGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => BenchmarkDistilBertSstBackend("GPU", OpenIlgpuEncoder, tensors);
 
     static int BenchmarkDistilBertSstSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => BenchmarkDistilBertSstBackend("Silk", OpenSilkEncoder, tensors);
@@ -2589,8 +2568,6 @@ class Program
         Console.WriteLine($"  {what}: maxAbs={stats.MaxAbs:E3}  maxRel={stats.MaxRel:E3}  violations={stats.Violations}/{stats.Total}  (tol: |g−r| ≤ {GateRelTol}·(1+|r|))");
     }
 
-    static int RunDistilBertGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunDistilBertBackendCompare("GPU", OpenIlgpuEncoder, tensors);
 
     static int RunDistilBertSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertBackendCompare("Silk", OpenSilkEncoder, tensors);
@@ -2649,8 +2626,6 @@ class Program
         return 0;
     }
 
-    static int RunDistilBertSstGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunDistilBertSstBackendCompare("GPU", OpenIlgpuEncoder, tensors);
 
     static int RunDistilBertSstSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertSstBackendCompare("Silk", OpenSilkEncoder, tensors);
