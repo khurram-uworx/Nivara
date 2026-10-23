@@ -301,7 +301,7 @@ Read this part as the map for adding a model to the ILGPU path.
 ## 9. Runtime and the no-CPU-fallback contract
 
 `IlgpuRuntime` builds the context OpenCL-only (`builder.OpenCL().Optimize(OptimizationLevel.O2)`,
-`IlgpuRuntime.cs:36`). `SelectGpu` (`:57–69`) returns the first device that is `CL_DEVICE_TYPE_GPU`
+`IlgpuRuntime.cs (deleted in #814)). `SelectGpu` (`:57–69`) returns the first device that is `CL_DEVICE_TYPE_GPU`
 **and** whose name contains "Intel"; if none, construction throws ("--ilgpu requires an OpenCL GPU
 device…"). It then asserts the *accelerator's* device type too (`:47–51`) — a driver that answers the
 enumeration with something else must fail loudly rather than become a CPU measurement. `XMath` from
@@ -313,7 +313,7 @@ enumeration with something else must fail loudly rather than become a CPU measur
 ## 10. The GEMM family
 
 `TileSize = 16` and groups are 16×16 everywhere. The keystone is **`TiledGemmKernelRow4`**
-(`GemmKernels.cs:68`): each thread owns a **1×4** register block — 4 adjacent output columns of one
+(`GemmKernels.cs (deleted in #814)): each thread owns a **1×4** register block — 4 adjacent output columns of one
 row — so a 16×16 group covers a 16-row × 64-col tile and each K step reads `BlockRows + BlockCols =
 5` shared floats for 4 MACs, against the 1×1 baseline's 2 reads per 1 MAC. It was measured at
 303–379 GMAC/s on all DistilBERT shapes against the naive gemv's 6.6 GMAC/s, and its ascending-K
@@ -339,8 +339,8 @@ would inline all three paths and bloat registers on the hot lean launches.
 
 ### 10.1 Labelled negative: the #440 register-blocked geometries
 
-`GemmGeometries` (`GpuBuffers.cs:134`) holds four wider-block geometries (`2x2@KT16`, `2x2@KT32`,
-`4x2@KT32`, `1x8@KT16`) whose kernels live in `GemmKernels.cs:197–501`, each flagged **"Measured
+`GemmGeometries` (`GpuBuffers.cs (deleted in #814)) holds four wider-block geometries (`2x2@KT16`, `2x2@KT32`,
+`4x2@KT32`, `1x8@KT16`) whose kernels live in `GemmKernels.cs (deleted in #814) each flagged **"Measured
 slower than Row4 — not adopted."** All four were gated and measured on 2026-09-29 and every one lost
 on every shape: best cell 1.01× (a wash inside run-to-run noise), typical 0.6–0.85×, and the
 launch-bound narrow shapes worst at 0.25–0.42×. The full ratio table is in
@@ -423,7 +423,7 @@ is being changed for a measured reason.
 
 ## 11. Attention
 
-`BatchedAttention` (`samples/Nivara.Samples/Gpu/AttentionKernels.cs:36`) runs one work item per `(b, h, q)` and computes the
+`BatchedAttention` (`samples/Nivara.Samples/Gpu/AttentionKernels.cs (deleted in #814)) runs one work item per `(b, h, q)` and computes the
 softmax row in **three passes, each recomputing the score** — max, exp-sum, then the
 probability-weighted V accumulation into a shared-memory tile. It never spills the row: `[B, H, S, S]`
 would be 268 MB at S=2048 and 4.3 GB at S=8192. The accumulator tile is `[MaxHeadDim ×
@@ -458,7 +458,7 @@ communication); `GeGlu` (activates the *first* half of the fused `Wi` projection
 `gelu(Wi[0:I]) * Wi[I:2I]`).
 
 The exact-GELU polynomial has **one definition** on the GPU path: `internal static float
-GeluExact(float v)` (`ElementwiseKernels.cs:171`), a direct A–S 7.1.26 erf port with `XMath.Exp`
+GeluExact(float v)` (`ElementwiseKernels.cs (deleted in #814)), a direct A–S 7.1.26 erf port with `XMath.Exp`
 (ILGPU has no `erf`). Both `Gelu` and the GELU GEMM epilogues call it, so the polynomial cannot
 drift.
 
@@ -467,7 +467,7 @@ drift.
 `BertEncoderGpuRunner` uploads the loader's weight key set once (GEMM weights transposed
 `[out,in] → Bt[in,out]` so `C = A·Bt` is plain row-major and global reads coalesce along K), then runs
 the whole forward with every intermediate resident on device and only the final hidden / logits read
-back (`BertEncoderGpuRunner.cs:76`). It is config-driven from `BertConfig` and naming-driven via
+back (`BertEncoderGpuRunner.cs (deleted in #814)). It is config-driven from `BertConfig` and naming-driven via
 `BertGpuNaming { DistilBert, Bert }` + `BertGpuKeys`, so MiniLM and DistilBERT share it:
 `embeddings`/`encoder.layer.N.*` for Bert against `distilbert.embeddings`/`distilbert.transformer.layer.N.*`
 for DistilBert (Bert keys are pre-stripped of the `bert.` prefix during provisioning).

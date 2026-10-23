@@ -12,7 +12,7 @@ namespace Nivara.Tests.Inference;
 /// <para>
 /// <b>Coverage.</b> Every reject the CLI owns is asserted here: the <c>--seq</c>/<c>--warmup</c>/
 /// <c>--iters</c> scope (#474), the <c>--precision</c>/<c>--seed</c>/<c>--teacher-examples</c> values
-/// (#479), the <c>--ilgpu</c> model scope (#568), the <c>--teacher-examples</c>/<c>--seed</c>/
+/// (#479), the <c>--teacher-examples</c>/<c>--seed</c>/
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
@@ -154,23 +154,6 @@ public class InferenceCliArgumentTests
     }
 
     [Test]
-    public void Gpu_OnModelWithoutGpuPath_Rejected()
-    {
-        AssertRejected(Run("smollm", "--ilgpu"), "--ilgpu is not supported for 'smollm'");
-        AssertRejected(Run("distilbert", "--ilgpu"), "--ilgpu is not supported for 'distilbert'");
-        AssertRejected(Run("distilbert_sst", "--ilgpu"), "--ilgpu is not supported for 'distilbert_sst'");
-    }
-
-    [Test]
-    public void Gpu_RejectedBeforeModelFileLookup()
-    {
-        CliResult result = Run("qwen", "--ilgpu");
-        Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
-            "the --ilgpu guard must run before the model-file check; no checkpoint is in reach");
-        AssertRejected(result, "--ilgpu is not supported for 'qwen'");
-    }
-
-    [Test]
     public void Precision_UnparseableValue_Rejected() =>
         AssertRejected(Run("minilm", "--precision", "foo"),
             "--precision expects f32, bf16 or fp16; got 'foo'.");
@@ -297,28 +280,6 @@ public class InferenceCliArgumentTests
             "fp16 is not supported for the qwen mode");
     }
 
-    [Test]
-    public void GpuPrecisionCombination_Rejected() =>
-        AssertRejected(Run("modernbert", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
-
-    [Test]
-    public void GpuUnsupportedMode_Rejected()
-    {
-        Assert.Multiple(() =>
-        {
-            foreach ((string[] args, string expected) in GpuModeCases)
-                AssertRejected(Run(args), expected);
-        });
-    }
-
-    /// <summary>
-    /// The flag's migration contract: the pre-Silk name is rejected with the new name named,
-    /// not silently aliased, so an old invocation cannot quietly keep running the ILGPU path.
-    /// </summary>
-    [Test]
-    public void GpuRenamedFlag_RejectedWithNewName() =>
-        AssertRejected(Run("minilm", "--gpu"), "--gpu was renamed --ilgpu");
-
     /// <summary>
     /// The Silk phase: <c>--silk</c> is a second GPU backend whose model scope (the hand-authored
     /// kernels cover the BERT-family encoders, MiniLM and DistilBERT, and DistilBERT's classifier
@@ -344,11 +305,6 @@ public class InferenceCliArgumentTests
             "the --silk mode guard must run before the model-file check");
         AssertRejected(result, "--silk does not support mode 'similarity' for 'minilm'");
     }
-
-    [Test]
-    public void SilkAndIlgpu_CompetingBackends_Rejected() =>
-        AssertRejected(Run("minilm", "--ilgpu", "--silk"),
-            "--ilgpu and --silk select competing GPU backends");
 
     [Test]
     public void SilkPrecisionCombination_Rejected() =>
@@ -440,8 +396,7 @@ public class InferenceCliArgumentTests
         Assert.Multiple(() =>
         {
             AssertRejected(Run("typesafe", "predict"), "Unsupported mode 'predict' for 'typesafe'");
-            AssertRejected(Run("typesafe", "--ilgpu"), "--ilgpu is not supported for 'typesafe'");
-            AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
+            AssertRejected(Run("typesafe", "--silk"), "--silk is not supported for 'typesafe'"); AssertRejected(Run("typesafe", "--precision", "bf16"), "--precision bf16 is not supported for 'typesafe'");
         });
     }
 
@@ -559,11 +514,6 @@ public class InferenceCliArgumentTests
         (["resnet18", "--precision", "bf16", "compare"], "--precision bf16 is not supported for 'resnet18 compare'"),
         (["laya", "compare", "--precision", "bf16"], "--precision bf16 is not supported for 'laya compare'"),
         (["modernbert", "compare", "--precision", "fp16"], "--precision fp16 is not supported for 'modernbert compare'"),
-    ];
-
-    static readonly (string[] Args, string Expected)[] GpuModeCases =
-    [
-        (["modernbert", "--ilgpu", "compare_diag"], "--ilgpu does not support mode 'compare_diag' for 'modernbert'"),
     ];
 
     static readonly string[][] AcceptedQwenCases =
