@@ -1854,19 +1854,6 @@ class Program
         }
     }
 
-    static BertEncoderBackend OpenIlgpuEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming)
-    {
-        var runtime = new IlgpuRuntime();
-        try
-        {
-            return new BertEncoderBackend(runtime, new Nivara.Samples.Gpu.BertEncoderGpuRunner(runtime, config, tensors, naming));
-        }
-        catch
-        {
-            runtime.Dispose();
-            throw;
-        }
-    }
 
     static BertEncoderBackend OpenSilkEncoder(BertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, BertGpuNaming naming)
     {
