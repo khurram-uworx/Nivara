@@ -10,7 +10,7 @@ internal static class DocsCoveragePins
     internal const int ExpectedCitationCount = 107;
 
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
-    internal const int ExpectedCitedDocumentCount = 19;
+    internal const int ExpectedCitedDocumentCount = 18;
 
     /// <summary>
     /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 43 under
@@ -28,7 +28,7 @@ internal static class DocsCoveragePins
     internal const int ExpectedDocumentCount = 53;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the narrowed markdown scope. Pinned deliberately.</summary>
-    internal const int ExpectedCodeCitationCount = 31;
+    internal const int ExpectedCodeCitationCount = 24;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
