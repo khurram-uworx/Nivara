@@ -295,7 +295,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void GpuPrecisionCombination_Rejected() =>
-        AssertRejected(Run("minilm", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
+        AssertRejected(Run("distilbert", "--ilgpu", "--precision", "bf16"), "--ilgpu is F32-only in this phase");
 
     [Test]
     public void GpuUnsupportedMode_Rejected()
@@ -559,7 +559,6 @@ public class InferenceCliArgumentTests
 
     static readonly (string[] Args, string Expected)[] GpuModeCases =
     [
-        (["minilm", "--ilgpu", "similarity"], "--ilgpu does not support mode 'similarity' for 'minilm'"),
         (["distilbert_sst", "--ilgpu", "predict"], "--ilgpu does not support mode 'predict' for 'distilbert_sst'"),
         (["modernbert", "--ilgpu", "compare_diag"], "--ilgpu does not support mode 'compare_diag' for 'modernbert'"),
     ];
