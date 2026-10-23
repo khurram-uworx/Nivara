@@ -53,8 +53,10 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchm
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark  # seq 128 + 256; 1 warmup + 3 timed; --seq 256 times one length
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu benchmark  # seq 128 + 512 + 2048 + 4096
 
+# MiniLM on the OpenCL iGPU (Silk only -- hand-authored OpenCL kernels; F32-only)
+dotnet run --project samples/NivaraInference -c Release -- minilm --silk
+
 # BERT-family encoders on the OpenCL iGPU (ILGPU 1.5.3; --ilgpu is F32-only in this phase)
-dotnet run --project samples/NivaraInference -c Release -- minilm --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- distilbert --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu
