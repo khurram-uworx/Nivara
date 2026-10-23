@@ -352,7 +352,7 @@ class Program
             Console.WriteLine("  --model <name>    Decision model to load on that engine; e.g. 'typesafe ollama --model tev1:0.8b'.");
             Console.WriteLine("                    Not every model an engine holds is a decision model; the engine rejects the others.");
             Console.WriteLine();
-            Console.WriteLine("GPU (distilbert / distilbert_sst / modernbert / laya):");
+            Console.WriteLine("GPU (modernbert / laya):");
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
