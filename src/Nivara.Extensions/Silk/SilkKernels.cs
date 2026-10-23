@@ -437,7 +437,7 @@ internal static class SilkKernels
                 { \
                     uint outCol0 = colBase + y * BLOCK; \
                     uint bBase = bRow * bCols + outCol0; \
-                    if (bRow < aCols && (outCol0 + 3u) < bCols && (bBase % 4u) == 0u) { \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols) { \
                         float4 bv = vload4(0, b + bBase); \
                         smem[x + (TILE + y * BLOCK + 0) * TILE] = bv.s0; \
                         smem[x + (TILE + y * BLOCK + 1) * TILE] = bv.s1; \
@@ -497,7 +497,7 @@ internal static class SilkKernels
                 { \
                     uint outCol0 = colBase + y * BLOCK; \
                     uint bBase = bRow * bCols + outCol0; \
-                    if (bRow < aCols && (outCol0 + 3u) < bCols && (bBase % 4u) == 0u) { \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols) { \
                         ushort4 bv = vload4(0, b + bBase); \
                         smem[x + (TILE + y * BLOCK + 0) * TILE] = BF16_TO_F32(bv.s0); \
                         smem[x + (TILE + y * BLOCK + 1) * TILE] = BF16_TO_F32(bv.s1); \
