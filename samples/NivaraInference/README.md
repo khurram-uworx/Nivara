@@ -54,7 +54,7 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark 
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu benchmark  # seq 128 + 512 + 2048 + 4096
 
 # BERT-family encoders on the OpenCL iGPU (ILGPU 1.5.3; --ilgpu is F32-only in this phase)
-dotnet run --project samples/NivaraInference -c Release -- minilm --ilgpu
+dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 dotnet run --project samples/NivaraInference -c Release -- distilbert --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu
