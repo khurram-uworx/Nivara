@@ -488,6 +488,17 @@ byte-identity under #pragma OPENCL FP_CONTRACT OFF) is unchanged, and the same t
 *not* applied to the ILGPU side: there ArrayView<float>.Cast<Float4>() is an unchecked
 alignment assertion with no safe unaligned counterpart.
 
+**B-tile vector loads and alignment (#822).** The B-staging loops load four consecutive values with
+vload4(0, b + bBase). The base  is a __global const float* for the gemm_row4* kernels and
+a __global const ushort* for gemm_row4_bf16, so  + bBase is always aligned to the element
+type by construction (4 bytes and 2 bytes respectively) - even when Cols or the row stride is not
+a multiple of four. The old (bBase % 4u) == 0u guard was over-conservative and has been dropped;
+the in-range guard Row < aCols && (outCol0 + 3u) < bCols and the scalar tail remain. Partial
+tiles at the edge still use the scalar loop, so correctness, accumulation order and byte-identity
+(including #pragma OPENCL FP_CONTRACT OFF) are unchanged. The same treatment is *not* applied to
+the ILGPU side, as with the A-tile (#807).
+
+
 **Unroll form (issue #796).** The inner 16-iteration accumulation is now expressed as a single
 `_Pragma("unroll 16") for (uint k = 0; k < TILE; ++k)` loop rather than 16 hand-written blocks.
 An A/B on the target GPU compiled the pragma form successfully, produced bit-identical output to the
