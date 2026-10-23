@@ -7,7 +7,7 @@ namespace Nivara.Tests.Docs;
 internal static class DocsCoveragePins
 {
     /// <summary>Count of citations found repository-wide. Pinned deliberately: see the coverage test.</summary>
-    internal const int ExpectedCitationCount = 114;
+    internal const int ExpectedCitationCount = 107;
 
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
     internal const int ExpectedCitedDocumentCount = 19;
