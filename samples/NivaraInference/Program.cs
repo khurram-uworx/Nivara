@@ -61,7 +61,6 @@ class Program
 
     static readonly Dictionary<string, string[]> GpuModes = new()
     {
-        ["minilm"] = ["", "benchmark", "compare"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
@@ -355,7 +354,7 @@ class Program
             Console.WriteLine("  --model <name>    Decision model to load on that engine; e.g. 'typesafe ollama --model tev1:0.8b'.");
             Console.WriteLine("                    Not every model an engine holds is a decision model; the engine rejects the others.");
             Console.WriteLine();
-            Console.WriteLine("GPU (minilm / distilbert / distilbert_sst / modernbert / laya):");
+            Console.WriteLine("GPU (distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  --ilgpu            Run on the OpenCL GPU (ILGPU; F32-only — combine");
             Console.WriteLine("                     --ilgpu with --precision bf16|fp16 to trigger the reject path)");
             Console.WriteLine("                     Any other model rejects --ilgpu (no GPU path).");
@@ -474,7 +473,7 @@ class Program
 
         if (useGpu && !GpuModes.ContainsKey(modelType))
         {
-            Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: minilm, distilbert, distilbert_sst, modernbert, laya).");
+            Console.Error.WriteLine($"--ilgpu is not supported for '{modelType}' (GPU models: distilbert, distilbert_sst, modernbert, laya).");
             return 1;
         }
 
@@ -747,12 +746,6 @@ class Program
                     if (benchmark) return BenchmarkMiniLmSilk(miniSilkTensors);
                     if (compare) return RunMiniLmSilkCompare(miniSilkTensors);
                     return RunMiniLmSilkInference(miniSilkTensors);
-                }
-                if (useGpu)
-                {
-                    if (benchmark) return BenchmarkMiniLmGpu(tensors);
-                    if (compare) return RunMiniLmGpuCompare(tensors);
-                    return RunMiniLmGpuInference(tensors);
                 }
                 if (bf16) return benchmark ? BenchmarkMiniLM(tensorsBf16, "BFloat16") : RunMiniLMBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkMiniLM(tensorsHalf, "Half") : RunMiniLMHalf(tensorsHalf);
@@ -1918,12 +1911,7 @@ class Program
         return result;
     }
 
-    // MiniLM's three entry points are backend-agnostic: the "GPU" label is the incumbent ILGPU path
-    // (whose output is unchanged) and "Silk" is the hand-authored OpenCL stack. Both go through the
-    // same body, so a fix to one cannot be forgotten in the other.
-
-    static int RunMiniLmGpuInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunMiniLmInference("GPU", OpenIlgpuEncoder, tensors);
+    // MiniLM's GPU entry points go through Silk only (hand-authored OpenCL stack).
 
     static int RunMiniLmSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunMiniLmInference("Silk", OpenSilkEncoder, tensors);
@@ -1979,9 +1967,6 @@ class Program
         return 0;
     }
 
-    static int BenchmarkMiniLmGpu(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => BenchmarkMiniLm("GPU", OpenIlgpuEncoder, tensors);
-
     static int BenchmarkMiniLmSilk(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => BenchmarkMiniLm("Silk", OpenSilkEncoder, tensors);
 
@@ -2023,9 +2008,6 @@ class Program
 
         return 0;
     }
-
-    static int RunMiniLmGpuCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunMiniLmCompare("GPU", OpenIlgpuEncoder, tensors);
 
     static int RunMiniLmSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunMiniLmCompare("Silk", OpenSilkEncoder, tensors);
