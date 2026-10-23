@@ -1,51 +1,43 @@
-# Plan: drop ILGPU DistilBERT-SST GPU path; keep Silk (#825)
+# Plan: tidy ILGPU user-facing surface after #824 (#825)
 
 Base: `khurram/824` (`72d688d0`)
 Branch: `khurram/825`
 
 ## Problem
 
-`distilbert_sst` still reaches a GPU path through the ILGPU-backed `OpenIlgpuEncoder` /
-`BertEncoderGpuRunner` (`RunDistilBertSstGpuInference`, `BenchmarkDistilBertSstGpu`,
-`RunDistilBertSstGpuCompare`), plus its dispatch arm and `GpuModes` entry. Silk
-(`OpenSilkEncoder` / `SilkBertEncoderRunner`) is already wired behind `--silk`, so the ILGPU
-remnants are dead weight ahead of #814 (remove ILGPU entirely).
+`khurram/824` already removed the ILGPU backends for minilm / distilbert / distilbert_sst and
+dropped `OpenIlgpuEncoder`, plus its test changes. What remains untidy is the user-facing
+help text and a consistency pass:
+
+- `samples/NivaraInference/Program.cs` still advertises
+  `GPU (distilbert / distilbert_sst / modernbert / laya):` for `--ilgpu`, but only
+  `modernbert` and `laya` are ILGPU-capable now.
+- Only `modernbert` is in `GpuModeCases` (correct), and `Gpu_OnModelWithoutGpuPath_Rejected` pins
+  minilm/distilbert/distilbert_sst. Verify this test coverage still matches the surface.
 
 ## Proposed changes
 
-`samples/NivaraInference/Program.cs`:
-- Remove `["distilbert_sst"]` from `GpuModes`; update the guard message's model list.
-- Delete the `if (useGpu)` block in `case "distilbert_sst"`.
-- Delete helpers `RunDistilBertSstGpuInference`, `BenchmarkDistilBertSstGpu`,
-  `RunDistilBertSstGpuCompare`.
-- Leave `OpenIlgpuEncoder` and other models untouched (scope is #814's job).
-- Leave narrow-precision constants (`ConsumesNarrow`, `ConsumesWiden`, `NarrowFloatModels`)
-  unchanged — they cover CPU/Silk paths.
-
-`tests/Nivara.Tests/Inference/InferenceCliArgumentTests.cs`:
-- Replace the `distilbert_sst --ilgpu predict` entry with a model-scope rejection:
-  `(["distilbert_sst", "--ilgpu"], "--ilgpu is not supported for 'distilbert_sst'")`.
+- Update the `--help` header to `GPU (modernbert / laya):`.
+- No source/dispatch change needed (already done in #824).
+- Keep docs/help consistent with `GpuModes` = { modernbert, laya }.
 
 ## Blast radius
 
-- Dispatch only: `distilbert_sst --ilgpu` now exits 1 via the generic model-scope guard.
-- CPU and `--silk` paths (default/benchmark/compare/predict) unchanged.
-- No source changes under `src/`; only sample + test.
+- Strings only in CLI help. No execution path changes.
 
 ## Verification
 
-1. `dotnet build` samples/NivaraInference.
-2. Targeted `InferenceCliArgumentTests`.
-3. Smoke `distilbert_sst --silk` default/benchmark/compare/predict where weights exist.
+1. `dotnet build samples/NivaraInference`.
+2. Targeted `InferenceCliArgumentTests` (must stay green: 47 tests).
+3. Manual `--help` output check.
 
 ## Planned commits
 
-1. `docs: plan #825 in TODO.md`
-2. `refactor(inference): drop ILGPU distilbert_sst entry points`
-3. `test(inference): pin distilbert_sst ilgpu rejection`
-4. `docs: remove TODO.md — plan executed`
+1. `docs: plan #825 in TODO.md` (already committed)
+2. `docs(inference): correct --ilgpu model list in help text`
+3. `docs: remove TODO.md — plan executed`
 
 ## GitHub issues log
 
 - #825 — this issue.
-- #814 — broader ILGPU removal (still open; not in scope here).
+- #824 — predecessor (minilm + DistilBERT GPU drops), already landed.
