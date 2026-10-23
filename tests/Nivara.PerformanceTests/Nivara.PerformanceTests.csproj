@@ -15,13 +15,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- GEMM gate mode (#435): loads the committed ILGPU GEMM kernels and launches them
-         through the public Nivara.Samples.Gpu surface. Same 1.5.3 snapshot pin as samples
-         and tests/Nivara.GpuProbe (docs/ILGPU.md). -->
-    <PackageReference Include="ILGPU" Version="1.5.3" />
-    <PackageReference Include="ILGPU.Algorithms" Version="1.5.3" />
-    <!-- Silk leg of the silk-kernels gate. Re-pinned here as well as in samples (the same
-         way ILGPU is), so the gate's own reference is explicit rather than accidental-transitive. -->
+    <!-- Silk/OpenCL leg of the silk-kernels gate. Explicitly pinned here (rather than
+         accidental-transitive) so the gate's own reference is unambiguous. -->
     <PackageReference Include="Silk.NET.OpenCL" Version="2.23.0" />
   </ItemGroup>
 

@@ -33,15 +33,7 @@ static class Program
         if (args.Any(a => a.Equals("--qwen-decode-attn", StringComparison.OrdinalIgnoreCase)))
             return QwenDecodeAttentionProbe.Run();
 
-        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkGemm) = ParseArgs(args);
-
-        // Re-recording a fingerprint baseline silently does nothing without --gemm, which is the
-        // worst shape for this flag: the run looks successful and the reference is unchanged.
-        if (writeGemmBaseline && !gemm)
-        {
-            Console.Error.WriteLine("--write-gemm-baseline only applies to --gemm; re-run with both flags.");
-            return 2;
-        }
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkGemm) = ParseArgs(args);
 
         if (datasetTest)
         {
@@ -55,20 +47,11 @@ static class Program
             return 0;
         }
 
-        if (gpuAlloc)
-            return GpuAllocProbe.Run(args);
-
         if (cpuGemm)
             return CpuGemmProbe.Run(args);
 
         if (silkGemm)
             return SilkGemmProbe.Run(args);
-
-        if (gemm)
-            return GemmBenchmark.Run(args, writeGemmBaseline);
-
-        if (gemmLegs)
-            return GemmLegBenchmark.Run(args);
 
         if (silkKernels)
             return SilkKernelsGate.Run(args);
@@ -1038,18 +1021,14 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool Gemm, bool GpuAlloc, bool CpuGemm, bool GemmLegs, bool WriteGemmBaseline, bool Mask, bool SilkKernels, bool LayaForward, bool SilkLayaForward, bool SilkLayaHeadProfile, bool SilkEncoderProfile, bool SilkGemm) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool CpuGemm, bool Mask, bool SilkKernels, bool LayaForward, bool SilkLayaForward, bool SilkLayaHeadProfile, bool SilkEncoderProfile, bool SilkGemm) ParseArgs(string[] args)
     {
         string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
         double minOpsFraction = GateEvaluator.DefaultMinOpsFraction;
         bool datasetTest = false;
         bool safetensorsMmap = false;
-        bool gemm = false;
-        bool gpuAlloc = false;
         bool cpuGemm = false;
-        bool gemmLegs = false;
-        bool writeGemmBaseline = false;
         bool mask = false;
         bool silkKernels = false;
         bool layaForward = false;
@@ -1068,23 +1047,11 @@ static class Program
                 case "--safetensors-mmap":
                     safetensorsMmap = true;
                     break;
-                case "--gemm":
-                    gemm = true;
-                    break;
-                case "--gpu-alloc":
-                    gpuAlloc = true;
-                    break;
                 case "--cpu-gemm":
                     cpuGemm = true;
                     break;
-                case "--gemm-legs":
-                    gemmLegs = true;
-                    break;
                 case "--silk-kernels":
                     silkKernels = true;
-                    break;
-                case "--write-gemm-baseline":
-                    writeGemmBaseline = true;
                     break;
                 case "--mask":
                     mask = true;
@@ -1123,13 +1090,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--gemm [--write-gemm-baseline]] [--gemm-legs] [--silk-kernels] [--silk-gemm] [--mask] [--laya-forward] [--gpu-alloc] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--silk-kernels] [--silk-gemm] [--mask] [--laya-forward] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, gemm, gpuAlloc, cpuGemm, gemmLegs, writeGemmBaseline, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkGemm);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkGemm);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)
