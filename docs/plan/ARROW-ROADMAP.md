@@ -100,14 +100,17 @@ polarity**, and it belongs solely to interop. Both sides also allow an elided va
 there are no nulls; the boundary reconciles the two conventions.
 
 **Scope (remaining):**
-- Provide cheap `bool[]`↔bitmap conversions used at the Arrow boundary (no element boxing), replacing
-  today's element-wise path through the Apache.Arrow builders and per-slot `IsNull` reads.
+- Provide cheap `bool[]`↔bitmap conversions used at the Arrow boundary (no element boxing). *Landed
+  (issue #833):* the span-first `ArrowValidityMask` helper packs and unpacks over spans, inverts
+  polarity, zeroes padding bits, and handles the absent-mask cases. *Remaining:* wire it in,
+  replacing today's element-wise path through the Apache.Arrow builders and per-slot `IsNull` reads.
 - Preserve mask-OR semantics exactly; add property tests proving behavior parity across both
   representations.
 - Keep core storage byte-wise — this phase does not move a bitmap into `ColumnStorage<T>`.
 
-**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs` (the boundary), plus validity helpers under
-`src/Nivara/Storage/` if the conversion is shared.
+**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs` (the boundary) and
+`src/Nivara.Extensions/IO/ArrowValidityMask.cs` (the landed helper); core storage gains nothing, because
+the conversion is not shared.
 
 **Dependencies:** Phase A (validity chunked with data) for the chunk-level form of the conversion.
 
@@ -116,12 +119,15 @@ there are no nulls; the boundary reconciles the two conventions.
   the only place packing happens — landed as ADR-007 and in `ARCHITECTURE.md`.
 - Null-mask property tests (existing patterns in `tests/Nivara.Tests/`) pass unchanged; the
   representation did not change, so this is a no-op guard rather than new work.
-- *Open:* Arrow validity bitmap import/export is buffer-based, not per-element.
+- *Landed (issue #833):* a span-first bitmap↔mask helper exists, round-trips exactly, and covers the
+  absent-mask cases; it is internal and not yet called by the interop layer.
+- *Open:* Arrow validity bitmap import/export is buffer-based, not per-element — that needs the
+  helper wired into `ArrowInterop` in both directions.
 - No NaN/sentinel semantics introduced (ADR-001 intact).
 
 **Risks:** the remaining work touches the interop hot path in both directions; mitigation: land the
-conversion behind the existing seam, keep the element-wise path until the buffer-level one is proven,
-and never regress null-correctness.
+conversion behind the existing seam, keep the element-wise path until the buffer-level one is proven
+by round-trip parity in the interop layer, and never regress null-correctness.
 
 ---
 

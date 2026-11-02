@@ -46,7 +46,8 @@ in core. Bit-packed validity exists only at the Arrow boundary.**
 6. **The boundary conversion is element-wise today.** Export walks each value through the
    Apache.Arrow builders, except the fixed-size-binary (Guid) path, which writes the bitmap
    directly; import reads each slot and materialises boxed values. A buffer-level mask-to-bitmap
-   helper is *not* implemented — it remains open Phase C work.
+   helper now exists and is unit-tested (`ArrowValidityMask`, internal to the interop assembly),
+   but `ArrowInterop` does not call it yet, so the conversion it performs is still element-wise.
 
 ## Consequences
 
@@ -67,7 +68,7 @@ in core. Bit-packed validity exists only at the Arrow boundary.**
   additive to the data payload, which for typical element widths is the larger term, but it is real
   and is not "slight".
 - The Arrow boundary converts per element today, so interop pays both a packing cost and a boxing
-  cost until the buffer-level helper lands.
+  cost until the buffer-level helper is wired into the boundary.
 
 **Revisit when:**
 
