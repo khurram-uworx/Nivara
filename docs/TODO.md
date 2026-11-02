@@ -152,5 +152,5 @@ Docs namespace is ~66 tests / ~25 s. Expected after the branch: all pins at thei
 
 ## GitHub issues log
 
-- [ ] filed during execution — buffer-level validity bitmap conversion for the Arrow boundary
-- [ ] filed during execution — sweep stale source citations across the remaining plan docs
+- [ ] #840 — Arrow boundary: buffer-level `bool[]` → bit-packed validity conversion (created while working on #832; the still-open Phase C item)
+- [ ] #841 — Docs: sweep stale `File.cs:NN` citations across the remaining plan documents (created while working on #832)
