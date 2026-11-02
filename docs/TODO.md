@@ -96,6 +96,28 @@ Wording that must survive: the *boundary* is still element-wise, because integra
 scope. The honest statement is "the buffer-level helper exists and is unit-tested; `ArrowInterop`
 does not call it yet."
 
+## G1 grounding (microsoft-learn + code-memory)
+
+- **Rejected alternative — `System.Collections.BitArray`.** .NET 11 added span constructors
+  (`ReadOnlySpan<bool>`, `ReadOnlySpan<byte>`, `ReadOnlySpan<int>`) precisely to avoid an
+  intermediate array. It is still wrong for this boundary: constructing one allocates a `BitArray`
+  plus its internal `int[]` copy, and there is no `CopyTo(Span<byte>)` span export, so the pack
+  direction would have to go through `Array` anyway. It also does not invert polarity. The helper
+  keeps its own span loops.
+- **Bit order corroborated.** The same documentation example shows `bits[0]` reading the
+  least-significant bit of the first byte (`0b_0000_0011` → indices 0 and 1 true), which is the
+  LSB-first numbering Arrow mandates and the helper implements. This is documented behaviour, not
+  an assumption.
+- **Span guidance.** The performance guidance frames `Span<T>` and `ref` safety as the
+  allocation-reducing currency of hot paths, which is why the helper takes and returns spans and
+  offers only the two allocation conveniences the issue asks for.
+- **Blast radius re-confirmed.** code-memory records no symbol named `ArrowValidityMask`,
+  `ToValidityBitmap` or `GetBitmapLength`, and no product code calls the new type by construction.
+  The change adds nodes without adding edges: nothing in `src/` changes behaviour. The only
+  consumers are the new tests.
+
+No decision or red flag surfaced that the human has not already resolved.
+
 ## Verification
 
 ```
