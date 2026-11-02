@@ -10,8 +10,7 @@ storage consolidation left one sole-owner `ColumnStorage<T>` for every element t
 `T[]` data buffer plus an optional `bool[]` null mask. Two properties of that mask are load-bearing
 and were never written down as a decision:
 
-- The mask is **byte-wise** — one `bool` per slot, 4 bytes or 1 byte depending on how the runtime
-  lays out `bool[]` — not bit-packed.
+- The mask is **byte-wise** — one `bool` (one byte) per slot, not bit-packed.
 - The mask is **absent** when a column has no nulls. `HasNulls` is `nullMask is not null`, an
   explicit empty mask is normalised to absent, and there is no all-false mask.
 

@@ -109,22 +109,69 @@ Span-access semantics are uniform across all types because there is a single sto
 
 ### Null Representation Decision
 
-**Decision**: Use **explicit validity masks** to represent nulls instead of sentinel values.
+**Decision**: Use **explicit validity masks** to represent nulls instead of sentinel values, and
+represent that mask as a **byte-wise `ReadOnlySpan<bool>`** — one byte per element — rather than as
+a bit-packed bitmap. This is a deliberate design decision (ADR-007), not an accident of
+implementation.
 
-**Context**: The system operates on strongly typed, columnar data and must support both numeric and non-numeric types consistently.
+**Context**: The system operates on strongly typed, columnar data and must support both numeric and
+non-numeric types consistently.
 
 **Alternatives Considered**:
 - Sentinel values (e.g. `NaN`)
 - Type-specific nullable encodings
+- A bit-packed validity bitmap (1 bit per element, the Apache Arrow representation) as the primary
+  in-core form
 
 **Why This Was Chosen**:
 - Sentinel values do not generalize beyond floating-point types
 - They leak into user-visible results and complicate semantics
 - A separate validity mask keeps data and nullness orthogonal
+- Byte-wise keeps the mask in the shape every null-aware kernel already consumes. `nullMask` is
+  exposed as `ReadOnlySpan<bool>` through `IColumnStorage<T>` and `ColumnStorage<T>`, and the fused
+  expression engine ORs an output mask from leaf masks in the same pass it computes values. A
+  bit-packed primary form would charge unpack-on-entry and pack-on-exit to **every** kernel in order
+  to save mask memory that is small relative to the payload it annotates
+
+**Canonical representation**:
+
+- Storage holds a sole-owner `bool[]` null mask alongside the data buffer, sliced together with it so
+  the mask stays aligned one-to-one with the values in every view.
+- **`true` means null.** The polarity is part of the contract and is never inverted inside the engine.
+- **An absent mask means no nulls.** `HasNulls` is true only when a mask exists; an all-false mask is
+  never materialised, and an explicit empty mask is normalised to absent. A column with no nulls
+  therefore pays nothing for validity.
+
+**Arrow boundary**:
+
+Apache Arrow requires a **bit-packed** validity buffer — 1 bit per element, least-significant-bit
+numbering, with a set bit meaning *valid* and a zero bit meaning *null* — so the representation must
+change at the interop boundary. That is a boundary concern, never a storage concern, and it does two
+things rather than one:
+
+- **Packing and unpacking**, because Arrow is bit-dense and Nivara is byte-wise.
+- **Polarity inversion**, because Nivara's mask is true-at-null while Arrow's bit is true-at-valid.
+
+Both sides also have an "absent" convention, with the same meaning but different mechanics: Nivara
+omits the mask entirely, and Arrow permits eliding the validity buffer when the null count is zero.
+The conversion belongs solely to the Arrow interop layer.
+
+**How that conversion works today — and its limit.** It is element-wise in both directions: export
+walks each value through the Apache.Arrow builders (which maintain the bitmap internally), apart from
+the fixed-size-binary path, which writes the bitmap directly; import reads each slot and materialises
+boxed values. A buffer-level mask-to-bitmap conversion — the one that would make the boundary cheap
+and non-allocating — is **not implemented**; it is open work on the Arrow roadmap.
 
 **Consequences**:
-- Slight memory overhead
+- 1 byte per element against Arrow's 1 bit: **8× the validity memory, only when nulls are present**,
+  additive to the data payload. This is the deliberate cost of the fast path, not an oversight
 - Much clearer and more predictable null propagation
+- No pack/unpack cost at any kernel boundary, including the fused single-pass mask OR
+- Interop pays an element-wise packing cost today; the buffer-level helper is still open work
+
+**Revisit when**: validity becomes a dominant memory consumer (very wide, densely-null, narrow-element
+frames), or when the Arrow roadmap needs a buffer-level validity handoff for real zero-copy. At that
+point the packing cost is paid once at the boundary, which is the trade this decision already assumes.
 
 Nulls are **not** encoded using sentinel values such as `NaN`. Null handling is explicit and first-class:
 
@@ -605,36 +652,8 @@ Many design choices exist solely to surface errors as early as possible.
 - Optional null mask for explicit null tracking
 
 Each column owns:
-- A data buffer (`T[]`, `Memory<T>`, or tensor-backed storage)
-- A validity bitmap (when nulls are present)
-
-### Memory vs Tensor Storage Strategy
-
-Nivara distinguishes between two storage strategies based on data type characteristics:
-
-#### Memory Storage
-Used when:
-- `T` is not vectorizable (strings, objects, complex types)
-- Operations cannot be safely SIMD-accelerated
-
-Characteristics:
-- Simple memory layout using `Memory<T>`
-- Scalar execution paths
-- Predictable semantics
-- Lower memory overhead
-
-#### Tensor Storage
-Used when:
-- `T` supports SIMD operations (`int`, `float`, `double`, `bool`)
-- Operations are safe to vectorize
-
-Characteristics:
-- Uses `System.Numerics.Tensors` for storage
-- Automatic SIMD acceleration via `TensorPrimitives`
-- Falls back to scalar paths when required
-- Higher performance for simple numeric column operations
-
-This distinction is **internal** and transparent to users. The system automatically selects the optimal storage backend based on type analysis. Public tensor APIs are limited to conversion and ingestion so platform libraries remain responsible for tensor math.
+- A data buffer (a sole-owner `T[]`)
+- A null mask (only when nulls are present — byte-wise, see [Null Representation Decision](#null-representation-decision))
 
 ### Vectorization Strategy
 
