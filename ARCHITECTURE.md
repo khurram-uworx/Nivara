@@ -160,14 +160,15 @@ The conversion belongs solely to the Arrow interop layer.
 walks each value through the Apache.Arrow builders (which maintain the bitmap internally), apart from
 the fixed-size-binary path, which writes the bitmap directly; import reads each slot and materialises
 boxed values. A buffer-level mask-to-bitmap conversion — the one that would make the boundary cheap
-and non-allocating — is **not implemented**; it is open work on the Arrow roadmap.
+and non-allocating — **exists as an internal, unit-tested helper** (`Nivara.IO.ArrowValidityMask`),
+but it is not wired into the interop path, so the conversion described above is still element-wise.
 
 **Consequences**:
 - 1 byte per element against Arrow's 1 bit: **8× the validity memory, only when nulls are present**,
   additive to the data payload. This is the deliberate cost of the fast path, not an oversight
 - Much clearer and more predictable null propagation
 - No pack/unpack cost at any kernel boundary, including the fused single-pass mask OR
-- Interop pays an element-wise packing cost today; the buffer-level helper is still open work
+- Interop pays an element-wise packing cost today, because the buffer-level helper is not wired in yet
 
 **Revisit when**: validity becomes a dominant memory consumer (very wide, densely-null, narrow-element
 frames), or when the Arrow roadmap needs a buffer-level validity handoff for real zero-copy. At that
