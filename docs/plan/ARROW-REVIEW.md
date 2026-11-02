@@ -39,7 +39,7 @@ A .NET-native implementation of these ideas does not import Arrow's C++ memory m
 
 - **Principle:** nulls are a separate buffer, **bit-packed** (1 bit per element), decoupled from the data buffer. Null propagation in kernels is a bitmap AND/OR.
 - **.NET substrate:** `Memory<byte>` validity bitmap with SIMD-friendly mask helpers — or a *deliberate, documented* byte-wise `Span<bool>` fast path — plus a cheap bool↔bitmap conversion at the interchange boundary.
-- **Divergence to flag:** `bool[]`/`Tensor<bool>` (1 byte per element) is 8× denser in Arrow terms and is *not* a layout decision Nivara has made — it is an inheritance.
+- **Ratified (2026-11-02, issue #832):** Nivara keeps the `bool[]`/`Tensor<bool>` mask — 1 byte per element, **8× the memory** of Arrow's bitmap — as a *deliberate, documented* fast path, because every null-aware kernel consumes `ReadOnlySpan<bool>` and a bit-packed primary form would charge pack/unpack to all of them. Recorded as `docs/adr/007-byte-wise-null-mask-fast-path.md`. Bit-packing is a boundary conversion; it is element-wise today, and a buffer-level helper is still open Phase C work.
 
 ### Pillar 3 — Buffers, views, and true zero-copy
 
@@ -77,11 +77,11 @@ A .NET-native implementation of these ideas does not import Arrow's C++ memory m
 
 | Pillar | Status | Evidence |
 | --- | --- | --- |
-| 1 · Logical/physical separation | 🟡 Partial | Storage is consolidated into one sole-owner `ColumnStorage<T>` — the pre-consolidation `TensorStorage`/`MemoryStorage` split no longer exists — but there is still no *layout* abstraction, and strings are `T[]` reference arrays (`src/Nivara/Storage/ColumnStorage.cs:18`), not variable-binary: an analytic gap for sort/hash/groupby on strings |
-| 2 · Validity bitmap | 🟡 Divergent | Nulls are a `bool[]` mask — **1 byte per element**, not bit-packed (`src/Nivara/Storage/ColumnStorage.cs:21`); no documented layout decision, no bool↔bitmap path. Consolidation did not change this, as the banner says |
-| 3 · Buffers + zero-copy | ❌ **Copy at the boundary** | *Internally* access is now a genuine zero-copy view — `AsSpan()` returns a slice of the owned array (`src/Nivara/Storage/ColumnStorage.cs:238-242`) and `Slice` shares the same backing array (`:167-182`), so the pre-consolidation `GetFlattenedSpan()` copy is gone. The **interop** boundary still has no zero-copy path — the placeholder `TryCreateZeroCopy*Array` methods were removed (issue #94), so all conversion copies element-by-element (`ArrowInterop.cs:677-710`, `731-806`, `824-849`) |
-| 4 · Chunked columns / RecordBatch | ❌ Absent | No chunked column in core; Arrow `ChunkedArray` is *flattened* on import into single arrays (`ArrowInterop.cs:688-710`), losing chunk structure |
-| 5 · Schema artifact | ✅ Strong | Immutable `Schema` with metadata + compatibility checks (`src/Nivara/Schema.cs:9-300`); source-generated typed accessors missing |
+| 1 · Logical/physical separation | 🟡 Partial | Storage is consolidated into one sole-owner `ColumnStorage<T>` — the pre-consolidation `TensorStorage`/`MemoryStorage` split no longer exists — but there is still no *layout* abstraction, and strings are `T[]` reference arrays (`src/Nivara/Storage/ColumnStorage.cs:32`), not variable-binary: an analytic gap for sort/hash/groupby on strings |
+| 2 · Validity bitmap | 🟡 Divergent, and now decided | Nulls are a `bool[]` mask — **1 byte per element**, not bit-packed (`src/Nivara/Storage/ColumnStorage.cs:35`); byte-wise is ratified as the deliberate fast path (ADR-007), but **no buffer-level bool↔bitmap conversion exists**: packing happens element-wise inside interop and the bulk helper is unbuilt |
+| 3 · Buffers + zero-copy | ❌ **Copy at the boundary** | *Internally* access is now a genuine zero-copy view — `AsSpan()` returns a slice of the owned array (`src/Nivara/Storage/ColumnStorage.cs:298-302`) and `Slice` shares the same backing array (`:183-198`), so the pre-consolidation `GetFlattenedSpan()` copy is gone. The **interop** boundary still has no zero-copy path — the placeholder `TryCreateZeroCopy*Array` methods were removed (issue #94), so all conversion copies element-by-element (`ArrowInterop.cs:973-1057`, and the per-type export helpers around `409-870`) |
+| 4 · Chunked columns / RecordBatch | ❌ Absent | No chunked column in core; Arrow `ChunkedArray` is *flattened* on import into single arrays (`ArrowInterop.cs:999-1015`), losing chunk structure |
+| 5 · Schema artifact | ✅ Strong | Immutable `Schema` with metadata + compatibility checks (`src/Nivara/Schema.cs:10-309`); source-generated typed accessors missing |
 | 6 · Null-propagating kernels | ✅ Strong | Column kernels are null-aware, mask-OR, vectorized (`TensorPrimitives` in `src/Nivara/NivaraColumn.cs`) — *except* the boxed query expression path (see `docs/plan/POLARS-REVIEW.md` §4) |
 | 7 · Dictionary encoding | ❌ Absent | Listed only as "future" in `docs/IDEA.md` (retired); tracked as [issue #132](https://github.com/khurram-uworx/Nivara/issues/132) |
 | 8 · Interchange-native scanning | 🟡 Partial | Lazy sources + streaming strategies exist (`StreamingExecutionStrategy`); pull-based, not async-first (see `docs/plan/POLARS-ROADMAP.md` Phase 4) |
@@ -96,9 +96,9 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
 The design promised Arrow-style zero-copy sharing, but the code only had scaffolding. **Resolution (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94):** the `ArrowConversionOptions.UseZeroCopy` option and the `TryCreateZeroCopy*Array` placeholders were **removed** as a breaking change rather than left lying. No public API or README advertises zero-copy today; the real implementation is `docs/plan/ARROW-ROADMAP.md` Phase D, which will re-introduce the APIs.
 
-- Interop is entirely element-by-element copying through `List<object?>` and `GetValue` boxing (`ArrowInterop.cs:677-710`, `731-806`, `824-849`). The option that used to claim otherwise is gone.
-- Historically even *internal* span access copied: `TensorStorage.GetFlattenedSpan()` flattened into a freshly allocated `T[]`, and `TensorStorage.Slice` copied. Both members are gone. Today `AsSpan()` hands back a slice of the owned array (`src/Nivara/Storage/ColumnStorage.cs:238-242`) and `Slice` re-uses that same array with an offset (`:167-182`) — so this half of the old finding is **resolved**, and only the interop boundary above is still open.
-- The plumbing is no longer half-present. Zero-copy used to work only on the memory-storage path, with the tensor path — supposedly the fast path — copying; today there is a single path and it shares (`src/Nivara/Storage/ColumnStorage.cs:167-182`). That is precisely why §4.1's *conclusion* survives while its storage-side evidence does not: the capability still missing is zero-copy across the Arrow/Parquet **boundary**, and no amount of internal sharing substitutes for that.
+- Interop is element-by-element in both directions. Export walks each value through an Apache.Arrow builder, and import materialises a `List<object?>` of boxed values (`ArrowInterop.cs:973-1057`). The option that used to claim otherwise is gone.
+- Historically even *internal* span access copied: `TensorStorage.GetFlattenedSpan()` flattened into a freshly allocated `T[]`, and `TensorStorage.Slice` copied. Both members are gone. Today `AsSpan()` hands back a slice of the owned array (`src/Nivara/Storage/ColumnStorage.cs:298-302`) and `Slice` re-uses that same array with an offset (`:183-198`) — so this half of the old finding is **resolved**, and only the interop boundary above is still open.
+- The plumbing is no longer half-present. Zero-copy used to work only on the memory-storage path, with the tensor path — supposedly the fast path — copying; today there is a single path and it shares (`src/Nivara/Storage/ColumnStorage.cs:183-198`). That is precisely why §4.1's *conclusion* survives while its storage-side evidence does not: the capability still missing is zero-copy across the Arrow/Parquet **boundary**, and no amount of internal sharing substitutes for that.
 
 **Consequence:** the core Arrow promise — share buffers, don't copy — is the single capability the project currently cannot deliver. It is no longer advertised; `docs/plan/ARROW-ROADMAP.md` Phase D adds it with real APIs and real advertising.
 
@@ -106,7 +106,7 @@ The design promised Arrow-style zero-copy sharing, but the code only had scaffol
 
 Apache Arrow `Table` is a set of chunk-aligned columns; NivaraFrame is a set of single contiguous arrays. As a result:
 
-- Every Arrow `ChunkedArray` is flattened on import into one Nivara column (`ArrowInterop.cs:688-710`, `731-806`), discarding chunk structure.
+- Every Arrow `ChunkedArray` is flattened on import into one Nivara column (`ArrowInterop.cs:999-1015`), discarding chunk structure.
 - Every `Concat`/`Append` is a full materialization; there is no zero-copy horizontal or vertical sharing.
 - Streaming materializes whole columns per operation rather than pipeline-shaped chunks.
 
@@ -117,10 +117,10 @@ The chunked-column abstraction is the single structural piece that would make Ar
 ## 5. What is already right (and should not be changed)
 
 - **The semantics are Arrow-faithful.** Explicit null masks, no NaN-based nulls, mask-OR propagation, comparisons false-at-null, SQL-like semantics — all match Arrow's compute-kernel model and ADR-001's explicit-null boundary (`docs/adr/001-autodiff-nonnullable-domain.md`).
-- **Schema is genuinely Arrow-inspired and native.** Immutable, metadata-carrying, compatibility-checked (`src/Nivara/Schema.cs:9-300`).
+- **Schema is genuinely Arrow-inspired and native.** Immutable, metadata-carrying, compatibility-checked (`src/Nivara/Schema.cs:10-309`).
 - **Column kernels are null-aware and vectorized.** `TensorPrimitives` on spans, `KernelSelector` heuristics — the compute layer is in the right shape.
 - **Arrow and Parquet are correctly positioned as interchange** in `Nivara.Extensions`, not core — the native-.NET boundary decision from POLARS-REVIEW Pillar 7 holds.
-- **The storage split (`Tensor`/`Memory`) is the right skeleton** — it is the beginning of a layout model (Pillar 1), it just needs the layout concept made explicit.
+- **The single storage class is the right skeleton** — one sole-owner `ColumnStorage<T>` for every element type is the beginning of a layout model (Pillar 1); what it needs is the layout concept made explicit, not a second storage implementation.
 
 ---
 

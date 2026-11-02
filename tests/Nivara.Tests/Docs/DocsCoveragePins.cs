@@ -24,8 +24,11 @@ internal static class DocsCoveragePins
     /// its own <c>docs/STREAMING-PROPOSAL.md</c>. The #492 reconciliation added
     /// <c>docs/BLAS-MKL.md</c>, taking <c>docs/</c> from 41 to 42. The decision-model work added
     /// <c>docs/DECISION-MODELS.md</c>, taking <c>docs/</c> from 42 to 43 and this count from 51 to 52.
+    /// The validity-mask ratification added <c>docs/adr/007-byte-wise-null-mask-fast-path.md</c>,
+    /// taking this count from 53 to 54: <c>docs/adr/</c> is scanned recursively, so a new ADR file
+    /// enters scope on arrival even though it changes no code.
     /// </summary>
-    internal const int ExpectedDocumentCount = 53;
+    internal const int ExpectedDocumentCount = 54;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the narrowed markdown scope. Pinned deliberately.</summary>
     internal const int ExpectedCodeCitationCount = 24;
@@ -33,6 +36,10 @@ internal static class DocsCoveragePins
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
+    /// The validity-mask ratification took this from 226 to 229, in three parts: one for the ADR-007
+    /// line in the <c>AGENTS.md</c> index (<c>AGENTS.md</c> is in the widened scope), and two for the
+    /// plan documents the new ADR names — the roadmap phase it ratifies and the review whose
+    /// scorecard it corrects. 226 + 1 + 2 = 229.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 226;
+    internal const int ExpectedDocumentReferenceCount = 229;
 }

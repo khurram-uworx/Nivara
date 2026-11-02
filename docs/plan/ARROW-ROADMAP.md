@@ -20,7 +20,7 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`), Arrow/Parquet interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, recorded in `CHANGELOG.md`, so all interchange conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`), Arrow/Parquet interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, recorded in `CHANGELOG.md`, so all interchange conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:999-1015`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
 
 ### Non-goals (explicit)
 
@@ -78,25 +78,50 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ---
 
-### Phase C — Validity as an explicit bitmap
+### Phase C — Validity representation decided; boundary conversion remains
 
-**Motivation:** Byte-wise `bool` masks are 8× denser than Arrow's bit-packed validity and were never a documented design decision. Make the representation explicit and boundary-friendly.
+**Motivation:** Byte-wise `bool` masks cost **8× the memory** of Arrow's bit-packed validity (1 byte
+per element against 1 bit), and that cost was never a written decision — so the representation read as
+accidental. Phase C exists to make it explicit and boundary-friendly. The first half of that is now
+done: the representation is ratified, and what remains is the conversion.
 
-**Scope:**
-- Define the canonical validity representation: **bit-packed `Memory<byte>`** (Arrow-compatible) with SIMD-usable mask helpers, **or** a documented byte-wise `Span<bool>` fast path — pick one primary, keep the other as an explicit interop conversion.
-- Provide cheap `bool[]`↔bitmap conversions used at the Arrow boundary (no element boxing).
-- Preserve mask-OR semantics exactly; add property tests proving behavior parity across both representations.
+**Decision (2026-11-02, issue #832) — Option A:** byte-wise `ReadOnlySpan<bool>` is the canonical
+validity representation in core; bit-packed `Memory<byte>` exists **only** at the Arrow boundary.
+Core storage does not change. The rationale is that every null-aware kernel already consumes
+`ReadOnlySpan<bool>` — including the fused pass that ORs leaf masks into an output mask — so a
+bit-packed primary form would charge unpack-on-entry and pack-on-exit to every kernel in order to
+save mask memory that is small beside the payload. The cost (8× on the mask, and only when nulls
+exist) is accepted deliberately, with a stated revisit trigger: validity becoming a dominant memory
+consumer, or a buffer-level handoff being needed by Phase D.
 
-**Key files:** `src/Nivara/Storage/` validity types + helpers, `src/Nivara/NivaraColumn.cs` null ops, `src/Nivara.Extensions/IO/ArrowInterop.cs`.
+**What that means for the boundary:** Arrow's buffer is bit-packed, LSB-first, with a set bit meaning
+*valid*, while Nivara's mask is byte-wise and true-at-null. Conversion therefore **packs and inverts
+polarity**, and it belongs solely to interop. Both sides also allow an elided validity buffer when
+there are no nulls; the boundary reconciles the two conventions.
 
-**Dependencies:** Phase A (validity chunked with data).
+**Scope (remaining):**
+- Provide cheap `bool[]`↔bitmap conversions used at the Arrow boundary (no element boxing), replacing
+  today's element-wise path through the Apache.Arrow builders and per-slot `IsNull` reads.
+- Preserve mask-OR semantics exactly; add property tests proving behavior parity across both
+  representations.
+- Keep core storage byte-wise — this phase does not move a bitmap into `ColumnStorage<T>`.
+
+**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs` (the boundary), plus validity helpers under
+`src/Nivara/Storage/` if the conversion is shared.
+
+**Dependencies:** Phase A (validity chunked with data) for the chunk-level form of the conversion.
 
 **Acceptance criteria:**
-- Null-mask property tests (existing patterns in `tests/Nivara.Tests/`) pass unchanged under the new representation.
-- Arrow validity bitmap import/export is buffer-based, not per-element.
+- *Decided:* the byte-wise mask is documented as deliberate and the Arrow boundary is identified as
+  the only place packing happens — landed as ADR-007 and in `ARCHITECTURE.md`.
+- Null-mask property tests (existing patterns in `tests/Nivara.Tests/`) pass unchanged; the
+  representation did not change, so this is a no-op guard rather than new work.
+- *Open:* Arrow validity bitmap import/export is buffer-based, not per-element.
 - No NaN/sentinel semantics introduced (ADR-001 intact).
 
-**Risks:** bitwise mask access is slower than `Span<bool>` for scalar paths; mitigation: SIMD helpers + the documented byte-wise fast path; never regress null-correctness.
+**Risks:** the remaining work touches the interop hot path in both directions; mitigation: land the
+conversion behind the existing seam, keep the element-wise path until the buffer-level one is proven,
+and never regress null-correctness.
 
 ---
 
