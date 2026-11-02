@@ -35,11 +35,25 @@ internal static class ArrowValidityMask
     /// <remarks>
     /// An empty mask has no slot count to derive, so it packs to an empty bitmap. Callers exporting a
     /// column with no nulls should either omit the buffer (Arrow permits that when the null count is
-    /// zero) or use the length-taking overload to materialise an all-valid bitmap.
+    /// zero) or use the length-taking overload to materialise an all-valid bitmap. Passing an empty
+    /// mask with a non-empty destination is rejected rather than left unwritten, because a zero-filled
+    /// bitmap reads as all-null.
     /// </remarks>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="destination"/> is too small.</exception>
-    internal static void ToValidityBitmap(ReadOnlySpan<bool> nullMask, Span<byte> destination) =>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="nullMask"/> is empty and <paramref name="destination"/> is not, or
+    /// when <paramref name="destination"/> is too small.
+    /// </exception>
+    internal static void ToValidityBitmap(ReadOnlySpan<bool> nullMask, Span<byte> destination)
+    {
+        if (nullMask.IsEmpty && !destination.IsEmpty)
+        {
+            throw new ArgumentException(
+                "An empty null mask carries no slot count, so it cannot pack into a non-empty destination. Pass the slot count with the length-taking overload, or omit the validity buffer.",
+                nameof(nullMask));
+        }
+
         ToValidityBitmap(nullMask, nullMask.Length, destination);
+    }
 
     /// <summary>
     /// Packs a null mask into an Arrow validity bitmap for an explicit slot count, inverting polarity.

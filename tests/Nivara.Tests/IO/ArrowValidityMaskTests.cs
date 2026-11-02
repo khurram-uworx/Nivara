@@ -90,6 +90,18 @@ public class ArrowValidityMaskTests
     }
 
     [Test]
+    public void ToValidityBitmap_EmptyMaskWithNonEmptyDestination_ThrowsArgumentException()
+    {
+        var destination = new byte[2];
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => ArrowValidityMask.ToValidityBitmap(ReadOnlySpan<bool>.Empty, destination));
+
+        Assert.That(ex!.Message, Does.Contain("slot count"));
+        Assert.That(destination, Is.EqualTo(new byte[2]), "a rejected call must not write");
+    }
+
+    [Test]
     public void ToValidityBitmap_DestinationTooSmall_ThrowsArgumentException()
     {
         bool[] mask = [false, false, false, false, false, false, false, false, false];
