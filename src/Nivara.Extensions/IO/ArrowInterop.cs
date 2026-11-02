@@ -210,14 +210,9 @@ public static class ArrowInterop
                 return CreateEmptyArrowArray<T>();
             }
 
-            // Convert series to array and create a temporary column
-            var data = new T[series.Length];
-            for (int i = 0; i < series.Length; i++)
-            {
-                data[i] = series[i];
-            }
-
-            var column = NivaraColumn<T>.Create(data);
+            // Use the series' underlying column directly so its null mask is preserved
+            // (the previous rebuild dropped nulls and produced an all-valid Arrow array).
+            var column = series.Values;
             return ConvertColumnToArrowArray(column, options);
         }
         catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException)
@@ -259,23 +254,28 @@ public static class ArrowInterop
                 return NivaraSeries<T>.Create(System.Array.Empty<T>());
             }
 
-            // Extract data directly from the Arrow array
+            // Extract data directly from the Arrow array, preserving null positions via a mask
+            // (the previous path dropped nulls and produced an all-valid Nivara series).
             var data = new List<T>();
+            var nullMask = new List<bool>();
 
             for (int i = 0; i < arrowArray.Length; i++)
             {
                 if (arrowArray.IsNull(i))
                 {
                     data.Add(default(T)!);
+                    nullMask.Add(true);
                 }
                 else
                 {
                     var value = ExtractValueFromArrowArray<T>(arrowArray, i, options);
                     data.Add(value);
+                    nullMask.Add(false);
                 }
             }
 
-            return NivaraSeries<T>.Create(data.ToArray());
+            var column = NivaraColumn<T>.CreateFromSpans(data.ToArray().AsSpan(), nullMask.ToArray().AsSpan());
+            return new NivaraSeries<T>(column);
         }
         catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException)
         {

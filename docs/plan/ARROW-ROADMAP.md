@@ -123,6 +123,9 @@ the conversion is not shared.
   absent-mask cases; it is internal and not yet called by the interop layer.
 - *Landed (issue #843):* Arrow validity bitmap import/export is buffer-based, not per-element, for
   the flat primitive types — `ArrowValidityMask` is wired into `ArrowInterop` in both directions.
+- *Landed (issue #834):* round-trip validity tests at the interop boundary (empty / all-null /
+  all-valid / mixed) for value, reference and bool columns, plus a hand-built dirty-padding-bits
+  case; proves the helper's encoding matches the buffers Arrow produces and consumes.
 - No NaN/sentinel semantics introduced (ADR-001 intact).
 
 **Risks:** the remaining work touches the interop hot path in both directions; mitigation: land the
