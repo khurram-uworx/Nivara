@@ -98,7 +98,8 @@ The human asked for the adjacent defects to be fixed in this change too:
   statement (polarity inversion + packing; element-wise today; buffer-level helper still open).
 - `AGENTS.md`: one-line index entry under "Architectural Decisions (ADRs)".
 - `DocsCoveragePins`: `ExpectedDocumentCount` 53 → 54 and `ExpectedDocumentReferenceCount`
-  226 → 227, extending each doc comment's arithmetic rather than only bumping the number.
+  226 → 229 (one for the AGENTS.md index line, two for the plan documents ADR-007 names),
+  extending each doc comment's arithmetic rather than only bumping the number.
 
 ### Commit 2 — `docs(architecture): ratify the byte-wise Span<bool> null mask`
 
@@ -134,7 +135,7 @@ dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore
 ```
 
 Docs namespace is ~66 tests / ~25 s. Expected after the branch: all pins at their new values
-(107 / 18 / 54 / 24 / 227), every citation resolves, `AdrIndexTests` green in both directions.
+(107 / 18 / 54 / 24 / 229), every citation resolves, `AdrIndexTests` green in both directions.
 
 ## Planned commits
 
