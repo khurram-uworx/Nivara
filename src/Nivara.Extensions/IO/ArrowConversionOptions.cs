@@ -8,6 +8,18 @@ namespace Nivara.IO;
 public class ArrowConversionOptions
 {
     /// <summary>
+    /// Gets or sets whether to use zero-copy operations when possible
+    /// </summary>
+    /// <remarks>
+    /// When enabled, the converter shares the column's existing data buffer with the
+    /// resulting Apache.Arrow array instead of copying. Only flat, null-free columns
+    /// of supported unmanaged element types are eligible; requesting zero-copy for a
+    /// null-bearing, unsupported, or incompatible column throws rather than silently
+    /// falling back to copying. Default is false.
+    /// </remarks>
+    public bool UseZeroCopy { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets the timezone for timestamp conversions
     /// </summary>
     /// <remarks>
