@@ -121,8 +121,8 @@ the conversion is not shared.
   representation did not change, so this is a no-op guard rather than new work.
 - *Landed (issue #833):* a span-first bitmap↔mask helper exists, round-trips exactly, and covers the
   absent-mask cases; it is internal and not yet called by the interop layer.
-- *Open:* Arrow validity bitmap import/export is buffer-based, not per-element — that needs the
-  helper wired into `ArrowInterop` in both directions.
+- *Landed (issue #843):* Arrow validity bitmap import/export is buffer-based, not per-element, for
+  the flat primitive types — `ArrowValidityMask` is wired into `ArrowInterop` in both directions.
 - No NaN/sentinel semantics introduced (ADR-001 intact).
 
 **Risks:** the remaining work touches the interop hot path in both directions; mitigation: land the
