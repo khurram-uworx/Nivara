@@ -146,5 +146,21 @@ The full suite is not run without asking first.
 
 ## GitHub issues log
 
-- [ ] Follow-up to #833 — wire `ArrowValidityMask` into `ArrowInterop` export/import and retire the
-      per-element builder and `List<object?>` boxing paths (file at implementation time).
+- [x] #843 — wire `ArrowValidityMask` into `ArrowInterop` and retire the per-element validity
+      paths (created while working on #833; still open).
+
+## G2 review outcome (before deletion)
+
+**Review (a) — branch work as a whole vs issue #833.** All acceptance criteria met literally:
+round-trips exact (mixed, 1–16, 1–1000 seeded), empty/all-null/all-valid covered, destination
+length validated (too small, too short, mismatch, negative), no core or public API change
+(new type is `internal`), `ArrowInterop` untouched, LSB-first order corroborated by the
+Apache.Arrow builder cross-check. One finding: the two-argument pack overload silently wrote
+nothing for an empty mask into a pre-sized buffer, which reads as all-null — fixed as commit
+`cf39277c` with a regression test. No other gap.
+
+**Review (b) — branch work vs this plan.** Every planned change landed: `GetBitmapLength`,
+six pack/unpack methods, 30 tests, the five docs claim sites, and the follow-up issue. Blast
+radius matches: one internal class, one test file, prose-only docs. Pins unchanged (107 / 18 /
+54 / 24 / 229); the Docs namespace (66 tests) passes. Both reviews clear, so `docs/TODO.md`
+is removed next.
