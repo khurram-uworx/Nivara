@@ -982,8 +982,6 @@ public static class ArrowInterop
     /// </summary>
     private static IColumn ConvertArrowColumnToNivaraColumnInt(Column arrowColumn, ArrowConversionOptions options)
     {
-        var chunkedArray = arrowColumn.Data;
-        int chunkCount = chunkedArray.ArrayCount;
         int totalLength = (int)arrowColumn.Length;
 
         if (totalLength == 0)
@@ -991,29 +989,55 @@ public static class ArrowInterop
             return NivaraColumn<int>.Create(System.Array.Empty<int>());
         }
 
-        var values = new List<int?>();
+        var chunkedArray = arrowColumn.Data;
+        int chunkCount = chunkedArray.ArrayCount;
 
-        // Process each chunk in the column
+        var values = new int[totalLength];
+        var nullMask = new bool[totalLength];
+
+        int offset = 0;
         for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
         {
             var chunk = chunkedArray.Array(chunkIndex);
+            int chunkLength = (int)chunk.Length;
 
-            for (int i = 0; i < chunk.Length; i++)
+            if (chunk.Offset != 0)
             {
-                if (chunk.IsNull(i))
+                for (int i = 0; i < chunkLength; i++)
                 {
-                    values.Add(null);
-                }
-                else
-                {
-                    var intArray = (Int32Array)chunk;
-                    var value = intArray.GetValue(i)!.Value;
-                    values.Add(value);
+                    bool isNull = chunk.IsNull(i);
+                    nullMask[offset + i] = isNull;
+                    if (!isNull)
+                    {
+                        var intArray = (Int32Array)chunk;
+                        values[offset + i] = intArray.GetValue(i)!.Value;
+                    }
                 }
             }
+            else
+            {
+                var validityBytes = (chunk.Data.Buffers.Length > 0)
+                    ? chunk.Data.Buffers[0].Span
+                    : ReadOnlySpan<byte>.Empty;
+                ArrowValidityMask.ToNullMask(validityBytes, nullMask.AsSpan(offset, chunkLength));
+
+                var intArray = (Int32Array)chunk;
+                for (int i = 0; i < chunkLength; i++)
+                {
+                    if (!nullMask[offset + i])
+                        values[offset + i] = intArray.GetValue(i)!.Value;
+                }
+            }
+
+            offset += chunkLength;
         }
 
-        return NivaraColumnFactory.CreateFromNullable(values.ToArray());
+        var nullable = new int?[totalLength];
+        for (int i = 0; i < totalLength; i++)
+            if (!nullMask[i])
+                nullable[i] = values[i];
+
+        return NivaraColumnFactory.CreateFromNullable(nullable);
     }
 
     /// <summary>
@@ -1036,7 +1060,6 @@ public static class ArrowInterop
     /// </summary>
     private static IColumn ConvertArrowColumnToNivaraColumnTyped<T>(Column arrowColumn, ArrowConversionOptions options)
     {
-        // Calculate total length across all chunks
         int totalLength = (int)arrowColumn.Length;
 
         if (totalLength == 0)
@@ -1044,77 +1067,84 @@ public static class ArrowInterop
             return NivaraColumn<T>.Create(System.Array.Empty<T>());
         }
 
-        // Use object list to avoid generic nullable type issues with T?
-        var values = new List<object?>();
-
-        // Get the ChunkedArray
         var chunkedArray = arrowColumn.Data;
-
-        // Try to get the number of chunks using ArrayCount property
         int chunkCount = chunkedArray.ArrayCount;
 
         if (chunkCount == 0)
         {
-            // No chunks, return empty column
             return NivaraColumn<T>.Create(System.Array.Empty<T>());
         }
 
-        // Process each chunk in the column
+        var nullMask = new bool[totalLength];
+        var values = new T[totalLength];
+
+        int offset = 0;
         for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
         {
             var chunk = chunkedArray.Array(chunkIndex);
+            int chunkLength = (int)chunk.Length;
 
-            for (int i = 0; i < chunk.Length; i++)
+            if (chunk.Offset != 0)
             {
-                if (chunk.IsNull(i))
+                for (int i = 0; i < chunkLength; i++)
                 {
-                    values.Add(null);
-                }
-                else
-                {
-                    var extractedValue = ExtractValueFromArrowArray<T>(chunk, i, options);
-                    values.Add(extractedValue);
+                    bool isNull = chunk.IsNull(i);
+                    nullMask[offset + i] = isNull;
+                    if (!isNull)
+                        values[offset + i] = ExtractValueFromArrowArray<T>(chunk, i, options);
                 }
             }
+            else
+            {
+                var validityBytes = (chunk.Data.Buffers.Length > 0)
+                    ? chunk.Data.Buffers[0].Span
+                    : ReadOnlySpan<byte>.Empty;
+                ArrowValidityMask.ToNullMask(validityBytes, nullMask.AsSpan(offset, chunkLength));
+
+                for (int i = 0; i < chunkLength; i++)
+                {
+                    if (!nullMask[offset + i])
+                        values[offset + i] = ExtractValueFromArrowArray<T>(chunk, i, options);
+                }
+            }
+
+            offset += chunkLength;
         }
 
-        // Create appropriate Nivara column
         if (typeof(T).IsValueType)
         {
-            // For value types, create nullable array and use CreateFromNullable
             return typeof(T) switch
             {
                 Type t when t == typeof(int) => ConvertArrowColumnToNivaraColumnInt(arrowColumn, options),
-                Type t when t == typeof(long) => CreateNullableColumn<long>(values),
-                Type t when t == typeof(float) => CreateNullableColumn<float>(values),
-                Type t when t == typeof(double) => CreateNullableColumn<double>(values),
-                Type t when t == typeof(bool) => CreateNullableColumn<bool>(values),
-                Type t when t == typeof(DateTime) => CreateNullableColumn<DateTime>(values),
-                Type t when t == typeof(byte) => CreateNullableColumn<byte>(values),
-                Type t when t == typeof(short) => CreateNullableColumn<short>(values),
-                Type t when t == typeof(uint) => CreateNullableColumn<uint>(values),
-                Type t when t == typeof(ulong) => CreateNullableColumn<ulong>(values),
-                Type t when t == typeof(ushort) => CreateNullableColumn<ushort>(values),
-                Type t when t == typeof(sbyte) => CreateNullableColumn<sbyte>(values),
-                Type t when t == typeof(Half) => CreateNullableColumn<Half>(values),
-                Type t when t == typeof(nint) => CreateNullableColumn<nint>(values),
-                Type t when t == typeof(nuint) => CreateNullableColumn<nuint>(values),
-                Type t when t == typeof(char) => CreateNullableColumn<char>(values),
-                Type t when t == typeof(DateOnly) => CreateNullableColumn<DateOnly>(values),
-                Type t when t == typeof(TimeOnly) => CreateNullableColumn<TimeOnly>(values),
-                Type t when t == typeof(Guid) => CreateNullableColumn<Guid>(values),
-                Type t when t == typeof(DateTimeOffset) => CreateNullableColumn<DateTimeOffset>(values),
-                Type t when t == typeof(TimeSpan) => CreateNullableColumn<TimeSpan>(values),
+                Type t when t == typeof(long) => CreateNullableColumn<long>((long[])(object)values, nullMask),
+                Type t when t == typeof(float) => CreateNullableColumn<float>((float[])(object)values, nullMask),
+                Type t when t == typeof(double) => CreateNullableColumn<double>((double[])(object)values, nullMask),
+                Type t when t == typeof(bool) => CreateNullableColumn<bool>((bool[])(object)values, nullMask),
+                Type t when t == typeof(DateTime) => CreateNullableColumn<DateTime>((DateTime[])(object)values, nullMask),
+                Type t when t == typeof(byte) => CreateNullableColumn<byte>((byte[])(object)values, nullMask),
+                Type t when t == typeof(short) => CreateNullableColumn<short>((short[])(object)values, nullMask),
+                Type t when t == typeof(uint) => CreateNullableColumn<uint>((uint[])(object)values, nullMask),
+                Type t when t == typeof(ulong) => CreateNullableColumn<ulong>((ulong[])(object)values, nullMask),
+                Type t when t == typeof(ushort) => CreateNullableColumn<ushort>((ushort[])(object)values, nullMask),
+                Type t when t == typeof(sbyte) => CreateNullableColumn<sbyte>((sbyte[])(object)values, nullMask),
+                Type t when t == typeof(Half) => CreateNullableColumn<Half>((Half[])(object)values, nullMask),
+                Type t when t == typeof(nint) => CreateNullableColumn<nint>((nint[])(object)values, nullMask),
+                Type t when t == typeof(nuint) => CreateNullableColumn<nuint>((nuint[])(object)values, nullMask),
+                Type t when t == typeof(char) => CreateNullableColumn<char>((char[])(object)values, nullMask),
+                Type t when t == typeof(DateOnly) => CreateNullableColumn<DateOnly>((DateOnly[])(object)values, nullMask),
+                Type t when t == typeof(TimeOnly) => CreateNullableColumn<TimeOnly>((TimeOnly[])(object)values, nullMask),
+                Type t when t == typeof(Guid) => CreateNullableColumn<Guid>((Guid[])(object)values, nullMask),
+                Type t when t == typeof(DateTimeOffset) => CreateNullableColumn<DateTimeOffset>((DateTimeOffset[])(object)values, nullMask),
+                Type t when t == typeof(TimeSpan) => CreateNullableColumn<TimeSpan>((TimeSpan[])(object)values, nullMask),
                 _ => throw new UnsupportedTypeException(typeof(T))
             };
         }
         else
         {
-            // For reference types, convert to typed array
             var referenceValues = new T[totalLength];
             for (int i = 0; i < totalLength; i++)
             {
-                referenceValues[i] = values[i] == null ? default(T)! : (T)values[i]!;
+                referenceValues[i] = nullMask[i] ? default(T)! : values[i];
             }
             return NivaraColumn<T>.CreateForReferenceType(referenceValues);
         }
@@ -1123,12 +1153,12 @@ public static class ArrowInterop
     /// <summary>
     /// Creates a nullable column from a list of object values
     /// </summary>
-    private static IColumn CreateNullableColumn<T>(List<object?> values) where T : struct
+    private static IColumn CreateNullableColumn<T>(T[] values, bool[] nullMask) where T : struct
     {
-        var nullableArray = new T?[values.Count];
-        for (int i = 0; i < values.Count; i++)
+        var nullableArray = new T?[values.Length];
+        for (int i = 0; i < values.Length; i++)
         {
-            nullableArray[i] = values[i] == null ? null : (T)values[i]!;
+            nullableArray[i] = nullMask[i] ? null : values[i];
         }
         return NivaraColumnFactory.CreateFromNullable(nullableArray);
     }
