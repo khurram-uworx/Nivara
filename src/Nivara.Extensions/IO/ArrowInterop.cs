@@ -1,6 +1,8 @@
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Nivara.IO;
 
@@ -408,17 +410,26 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateBooleanArray(NivaraColumn<bool> column, ArrowConversionOptions options)
     {
-        var builder = new BooleanArray.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        // Arrow stores boolean data bit-packed, one bit per slot (LSB first).
+        var dataBytes = new byte[(length + 7) / 8];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
+                continue;
+            if (column[i])
+                dataBytes[i >> 3] |= (byte)(1 << (i & 7));
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(dataBytes));
+        var arrayData = new ArrayData(BooleanType.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -426,17 +437,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt32Array(NivaraColumn<int> column, ArrowConversionOptions options)
     {
-        var builder = new Int32Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new int[length];
+        column.CopyTo(data.AsSpan(), 0);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(Int32Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -444,17 +457,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt64Array(NivaraColumn<long> column, ArrowConversionOptions options)
     {
-        var builder = new Int64Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new long[length];
+        column.CopyTo(data.AsSpan(), 0L);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(Int64Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -462,17 +477,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateFloatArray(NivaraColumn<float> column, ArrowConversionOptions options)
     {
-        var builder = new FloatArray.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new float[length];
+        column.CopyTo(data.AsSpan(), 0f);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(FloatType.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -480,17 +497,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateDoubleArray(NivaraColumn<double> column, ArrowConversionOptions options)
     {
-        var builder = new DoubleArray.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new double[length];
+        column.CopyTo(data.AsSpan(), 0d);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(DoubleType.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -517,50 +536,41 @@ public static class ArrowInterop
     private static IArrowArray CreateTimestampArray(NivaraColumn<DateTime> column, ArrowConversionOptions options)
     {
         var timestampType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
-        var builder = new TimestampArray.Builder(timestampType);
 
-        // Define safe DateTime range for Arrow conversion
-        // Arrow supports timestamps from 1677-09-21 to 2262-04-11 (approximately)
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
+
         var minSafeDateTime = new DateTime(1677, 9, 21, 0, 0, 0, DateTimeKind.Utc);
         var maxSafeDateTime = new DateTime(2262, 4, 11, 23, 47, 16, DateTimeKind.Utc);
+        var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new long[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-            {
-                builder.AppendNull();
-            }
-            else
-            {
-                var dateTime = column[i];
-                // Convert DateTime to UTC
-                if (dateTime.Kind == DateTimeKind.Unspecified)
-                {
-                    dateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Utc);
-                }
-                else if (dateTime.Kind == DateTimeKind.Local)
-                {
-                    dateTime = dateTime.ToUniversalTime();
-                }
+                continue;
 
-                // Clamp DateTime to safe range before conversion
-                if (dateTime < minSafeDateTime)
-                {
-                    dateTime = minSafeDateTime;
-                }
-                else if (dateTime > maxSafeDateTime)
-                {
-                    dateTime = maxSafeDateTime;
-                }
+            var dateTime = column[i];
+            if (dateTime.Kind == DateTimeKind.Unspecified)
+                dateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Utc);
+            else if (dateTime.Kind == DateTimeKind.Local)
+                dateTime = dateTime.ToUniversalTime();
 
-                // Convert to DateTimeOffset for the builder
-                var dateTimeOffset = new DateTimeOffset(dateTime, TimeSpan.Zero);
+            if (dateTime < minSafeDateTime)
+                dateTime = minSafeDateTime;
+            else if (dateTime > maxSafeDateTime)
+                dateTime = maxSafeDateTime;
 
-                builder.Append(dateTimeOffset);
-            }
+            data[i] = (dateTime - unixEpoch).Ticks / 10;
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(timestampType, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -568,17 +578,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateUInt8Array(NivaraColumn<byte> column, ArrowConversionOptions options)
     {
-        var builder = new UInt8Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new byte[length];
+        column.CopyTo(data.AsSpan(), (byte)0);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(data));
+        var arrayData = new ArrayData(UInt8Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -586,17 +598,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt16Array(NivaraColumn<short> column, ArrowConversionOptions options)
     {
-        var builder = new Int16Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new short[length];
+        column.CopyTo(data.AsSpan(), (short)0);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(Int16Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -604,17 +618,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateUInt32Array(NivaraColumn<uint> column, ArrowConversionOptions options)
     {
-        var builder = new UInt32Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new uint[length];
+        column.CopyTo(data.AsSpan(), 0u);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(UInt32Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -622,17 +638,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateUInt64Array(NivaraColumn<ulong> column, ArrowConversionOptions options)
     {
-        var builder = new UInt64Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new ulong[length];
+        column.CopyTo(data.AsSpan(), 0ul);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(UInt64Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -640,17 +658,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateUInt16Array(NivaraColumn<ushort> column, ArrowConversionOptions options)
     {
-        var builder = new UInt16Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new ushort[length];
+        column.CopyTo(data.AsSpan(), (ushort)0);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(UInt16Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -658,17 +678,19 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt8Array(NivaraColumn<sbyte> column, ArrowConversionOptions options)
     {
-        var builder = new Int8Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
-        {
-            if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
-        }
+        var data = new sbyte[length];
+        column.CopyTo(data.AsSpan(), (sbyte)0);
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(Int8Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -676,17 +698,25 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateHalfFloatArray(NivaraColumn<Half> column, ArrowConversionOptions options)
     {
-        var builder = new HalfFloatArray.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new ushort[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
+                continue;
+            var h = column[i];
+            data[i] = Unsafe.As<Half, ushort>(ref h);
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(new HalfFloatType(), length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -694,17 +724,24 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt64Array(NivaraColumn<nint> column, ArrowConversionOptions options)
     {
-        var builder = new Int64Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new long[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append((long)column[i]);
+                continue;
+            data[i] = (long)column[i];
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(Int64Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -712,17 +749,24 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateUInt64Array(NivaraColumn<nuint> column, ArrowConversionOptions options)
     {
-        var builder = new UInt64Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new ulong[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append((ulong)column[i]);
+                continue;
+            data[i] = (ulong)column[i];
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(UInt64Type.Default, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -748,17 +792,25 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateDate32Array(NivaraColumn<DateOnly> column, ArrowConversionOptions options)
     {
-        var builder = new Date32Array.Builder();
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        var epoch = new DateOnly(1970, 1, 1);
+        var data = new int[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
+                continue;
+            data[i] = column[i].DayNumber - epoch.DayNumber;
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(new Date32Type(), length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -766,17 +818,24 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateTime64Array(NivaraColumn<TimeOnly> column, ArrowConversionOptions options)
     {
-        var builder = new Time64Array.Builder(new Time64Type(TimeUnit.Nanosecond));
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new long[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
+                continue;
+            data[i] = column[i].ToTimeSpan().Ticks * 100L;
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(new Time64Type(TimeUnit.Nanosecond), length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -786,20 +845,18 @@ public static class ArrowInterop
     {
         const int byteLength = 16;
         var values = new byte[column.Length * byteLength];
-        var validity = new byte[(column.Length + 7) / 8];
-        int nullCount = 0;
+        int nullCount = column.NullCount;
 
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
-            {
-                nullCount++;
                 continue;
-            }
 
             column[i].ToByteArray().CopyTo(values, i * byteLength);
-            validity[i / 8] |= (byte)(1 << (i % 8));
         }
+
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validity = ArrowValidityMask.ToValidityBitmap(nullMask);
 
         var arrayData = new ArrayData(
             new FixedSizeBinaryType(byteLength),
@@ -819,36 +876,36 @@ public static class ArrowInterop
     private static IArrowArray CreateTimestampArray(NivaraColumn<DateTimeOffset> column, ArrowConversionOptions options)
     {
         var timestampType = new TimestampType(TimeUnit.Microsecond, TimeZoneInfo.Utc);
-        var builder = new TimestampArray.Builder(timestampType);
 
-        // Define safe DateTime range for Arrow conversion
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
+
         var minSafeDateTime = new DateTime(1677, 9, 21, 0, 0, 0, DateTimeKind.Utc);
         var maxSafeDateTime = new DateTime(2262, 4, 11, 23, 47, 16, DateTimeKind.Utc);
+        var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new long[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-            {
-                builder.AppendNull();
-            }
-            else
-            {
-                var utcDateTime = column[i].ToUniversalTime().UtcDateTime;
+                continue;
 
-                if (utcDateTime < minSafeDateTime)
-                {
-                    utcDateTime = minSafeDateTime;
-                }
-                else if (utcDateTime > maxSafeDateTime)
-                {
-                    utcDateTime = maxSafeDateTime;
-                }
+            var utcDateTime = column[i].ToUniversalTime().UtcDateTime;
+            if (utcDateTime < minSafeDateTime)
+                utcDateTime = minSafeDateTime;
+            else if (utcDateTime > maxSafeDateTime)
+                utcDateTime = maxSafeDateTime;
 
-                builder.Append(new DateTimeOffset(utcDateTime, TimeSpan.Zero));
-            }
+            data[i] = (utcDateTime - unixEpoch).Ticks / 10;
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(timestampType, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -856,17 +913,24 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateDurationArray(NivaraColumn<TimeSpan> column, ArrowConversionOptions options)
     {
-        var builder = new DurationArray.Builder(DurationType.Nanosecond);
+        int length = column.Length;
+        var nullMask = column.TryGetNullMask(out var nm) ? nm : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0 ? ArrowBuffer.Empty : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
 
-        for (int i = 0; i < column.Length; i++)
+        var data = new long[length];
+        for (int i = 0; i < length; i++)
         {
             if (column.IsNull(i))
-                builder.AppendNull();
-            else
-                builder.Append(column[i]);
+                continue;
+            data[i] = column[i].Ticks * 100L;
         }
 
-        return builder.Build();
+        var dataBuffer = new ArrowBuffer(new ReadOnlyMemory<byte>(MemoryMarshal.AsBytes(data.AsSpan()).ToArray()));
+        var arrayData = new ArrayData(DurationType.Nanosecond, length, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
