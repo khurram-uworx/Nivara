@@ -8,4 +8,4 @@ A missing nested document: see `docs/gone/AlsoMissing.md` §2.
 
 A missing relative document: `../../docs/also/Gone.md`.
 
-A missing code citation: `NoSuchFileAnywhere.cs:3`.
+A missing code citation: `NoSuchFileAnywhere.cs::Foo`.

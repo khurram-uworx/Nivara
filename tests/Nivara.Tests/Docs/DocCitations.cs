@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -55,10 +54,9 @@ sealed record ScannedCitation(
     int EndLine);
 
 /// <summary>
-/// Extracts citations from markdown and checks that each resolves. Two forms are
-/// accepted during migration:
+/// Extracts citations from markdown and checks that each resolves. Citations anchor
+/// to a source symbol:
 /// <list type="bullet">
-/// <item><c>File.cs:NN</c> (legacy line-number form) — resolves file + line range.</item>
 /// <item><c>File.cs::MemberName</c>, optionally <c>File.cs::MemberName(sig)</c> — resolves
 /// a source symbol via Roslyn.</item>
 /// </list>
@@ -230,26 +228,13 @@ static partial class DocCitationExtractor
             foreach (Match match in CitationPattern().Matches(lines[i]))
             {
                 var qualifier = match.Groups["qualifier"].Value;
-
-                if (match.Groups["symbol"].Success)
-                {
-                    var file = match.Groups["nsFile"].Value;
-                    var symbol = match.Groups["symbol"].Value.Replace(" ", string.Empty);
-                    var sig = match.Groups["sig"].Success ? match.Groups["sig"].Value : string.Empty;
-                    var hasParens = match.Groups["sig"].Success;
-                    // HasParens is true if the citation included parentheses, even when sig is empty.
-                    // The sig group alone captures this; but a citation like Foo (no parens) has sig.Success false.
-                    found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, true, symbol, sig, hasParens, 0, 0));
-                }
-                else
-                {
-                    var file = match.Groups["oldFile"].Value;
-                    var start = int.Parse(match.Groups["start"].Value, CultureInfo.InvariantCulture);
-                    var last = match.Groups["end"] is { Success: true } end
-                        ? int.Parse(end.Value, CultureInfo.InvariantCulture)
-                        : start;
-                    found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, false, string.Empty, string.Empty, false, start, last));
-                }
+                var file = match.Groups["nsFile"].Value;
+                var symbol = match.Groups["symbol"].Value.Replace(" ", string.Empty);
+                var sig = match.Groups["sig"].Success ? match.Groups["sig"].Value : string.Empty;
+                var hasParens = match.Groups["sig"].Success;
+                // HasParens is true if the citation included parentheses, even when sig is empty.
+                // The sig group alone captures this; but a citation like Foo (no parens) has sig.Success false.
+                found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, true, symbol, sig, hasParens, 0, 0));
             }
         }
 
@@ -307,10 +292,9 @@ static partial class DocCitationExtractor
     }
 
     /// <summary>
-    /// A citation with an optional directory qualifier and either a symbol form
-    /// (<c>File.cs::Member</c>) or a legacy line form (<c>File.cs:NN</c>).
+    /// A citation with an optional directory qualifier and a symbol form (<c>File.cs::Member</c>).
     /// </summary>
-    [GeneratedRegex(@"(?<qualifier>(?:[A-Za-z0-9_.-]+/)+)?(?:(?<nsFile>[A-Za-z0-9_]+\.cs)::(?<symbol>[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?)(?:\((?<sig>[^)]*)\))?|(?<oldFile>[A-Za-z0-9_]+\.cs):(?<start>\d+)(?:-(?<end>\d+))?)")]
+    [GeneratedRegex(@"(?<qualifier>(?:[A-Za-z0-9_.-]+/)+)?(?<nsFile>[A-Za-z0-9_]+\.cs)::(?<symbol>[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?)(?:\((?<sig>[^)]*)\))?")]
     private static partial Regex CitationPattern();
 }
 

@@ -49,23 +49,10 @@ public class DocCitationTests
     }
 
     [Test]
-    public void RangeCitations_AreJudgedByTheirLastLine()
-    {
-        // The negative control carries 1-100000: the first line is real, the last is not. A gate that
-        // only checked the start would pass it, which is exactly how a 1366-1388 range survived in a
-        // file that is now 187 lines.
-        var faults = DocCitationExtractor.Faults(NegativeControl);
-        var range = faults.Single(f => f.Reference.EndsWith("NivaraExecutionContext.cs:1-100000", StringComparison.Ordinal));
-
-        Assert.That(range.Kind, Is.EqualTo(DocCitationFaultKind.PastEndOfFile));
-        Assert.That(range.Detail, Does.Contain("NivaraExecutionContext.cs"));
-    }
-
-    [Test]
     public void AmbiguousBasenames_AreRejectedRatherThanGuessed()
     {
         var faults = DocCitationExtractor.Faults(NegativeControl);
-        var ambiguous = faults.Single(f => f.Reference == "Program.cs:1");
+        var ambiguous = faults.Single(f => f.Reference == "Program.cs::Foo");
 
         Assert.That(ambiguous.Kind, Is.EqualTo(DocCitationFaultKind.AmbiguousFile));
         Assert.That(ambiguous.Detail, Does.Contain("qualify the path"));
@@ -81,8 +68,8 @@ public class DocCitationTests
             Assert.That(faults.Where(f => f.Kind == DocCitationFaultKind.MissingFile).Select(f => f.Reference),
                 Is.EquivalentTo(new[]
                 {
-                    "src/Nivara/Storage/NoSuchFileDoesNotExist.cs:12",
-                    "NoSuchFileAnywhere.cs:3",
+                    "src/Nivara/Storage/NoSuchFileDoesNotExist.cs::Foo",
+                    "NoSuchFileAnywhere.cs::Foo",
                 }));
         });
     }
@@ -106,7 +93,7 @@ public class DocCitationTests
     {
         var faults = DocCitationExtractor.Faults(NegativeControl);
 
-        Assert.That(faults, Has.Count.EqualTo(7),
+        Assert.That(faults, Has.Count.EqualTo(5),
             "the gate stopped rejecting its negative control, so a green run no longer means anything. "
             + Environment.NewLine + string.Join(Environment.NewLine, faults.Select(f => f.ToString())));
     }
@@ -116,10 +103,6 @@ public class DocCitationTests
     {
         var faults = DocCitationExtractor.Faults(NegativeControl);
 
-        Assert.That(faults.Select(f => f.Reference),
-            Does.Not.Contain("src/Nivara/Execution/NivaraExecutionContext.cs:1"),
-            "the negative control rejects everything, including a citation that is correct; that would "
-            + "prove nothing about discriminating real faults from valid references");
         Assert.That(faults.Select(f => f.Reference),
             Does.Not.Contain("src/Nivara/Execution/NivaraExecutionContext.cs::MemoryBudget"),
             "the negative control rejects the resolvable symbol citation too");

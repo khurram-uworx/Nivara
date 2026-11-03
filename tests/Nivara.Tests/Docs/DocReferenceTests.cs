@@ -50,7 +50,7 @@ public class DocReferenceTests
         var faults = DocReferenceExtractor.Faults(NegativeControl);
 
         Assert.That(faults.Where(f => f.Kind == DocCitationFaultKind.MissingFile).Select(f => f.Reference),
-            Does.Contain("NoSuchFileAnywhere.cs:3"),
+            Does.Contain("NoSuchFileAnywhere.cs::Foo"),
             "the widened scan must still check File.cs:NN, not only document references");
     }
 

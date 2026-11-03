@@ -8,20 +8,13 @@ means nothing.
 
 ## Files that do not exist
 
-A qualified path to nowhere: `src/Nivara/Storage/NoSuchFileDoesNotExist.cs:12`
+A qualified path to nowhere: `src/Nivara/Storage/NoSuchFileDoesNotExist.cs::Foo`
 
-A bare basename matching nothing in the repository: `NoSuchFileAnywhere.cs:3`
-
-## Lines past the end of the file
-
-`src/Nivara/Execution/NivaraExecutionContext.cs:100000`
-
-A range whose *first* line exists but whose *last* line does not — a start-only check would
-wave this through: `src/Nivara/Execution/NivaraExecutionContext.cs:1-100000`
+A bare basename matching nothing in the repository: `NoSuchFileAnywhere.cs::Foo`
 
 ## A basename that exists in more than one file
 
-`Program.cs:1`
+`Program.cs::Foo`
 
 ## Symbols that do not exist
 
@@ -32,7 +25,5 @@ wave this through: `src/Nivara/Execution/NivaraExecutionContext.cs:1-100000`
 `src/Nivara/Schema.cs::GetHashCode`
 
 ## Citations that must still pass, so the fixture proves it is not simply rejecting everything
-
-`src/Nivara/Execution/NivaraExecutionContext.cs:1`
 
 `src/Nivara/Execution/NivaraExecutionContext.cs::MemoryBudget`
