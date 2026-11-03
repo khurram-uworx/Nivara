@@ -3,9 +3,10 @@ using System.Numerics.Tensors;
 namespace Nivara.Silk;
 
 /// <summary>
-/// Linear text classifier forward (embedding -> mean pool -> FC1 -> ReLU -> FC2) on Silk/OpenCL.
-/// Phase 0 foundation: embedding gather and mean pool are retained on the host; the linear
-/// projections execute on the device. Training backward kernels remain tracked by #886.
+/// Linear text classifier forward and (host-gradient scaffold) training on Silk/OpenCL.
+/// Embeddings and mean pool are retained on the host; FC1/FC2 execute on the device.
+/// Host-side backward and SGD updates provide a complete, testable training loop while
+/// device-side backward kernels remain tracked by #886.
 /// </summary>
 public sealed class GpuTextLinearClassifier : IDisposable
 {
@@ -13,6 +14,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
     readonly int vocabSize;
     readonly int embeddingDim;
     readonly int hiddenDim;
+    readonly Random rng;
 
     readonly float[] embedding;
     readonly float[] fc1Weight;
@@ -30,11 +32,12 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
     public string DeviceName => runtime.DeviceName;
 
-    public GpuTextLinearClassifier(int vocabSize, int embeddingDim, int hiddenDim)
+    public GpuTextLinearClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seed = 42)
     {
         this.vocabSize = vocabSize;
         this.embeddingDim = embeddingDim;
         this.hiddenDim = hiddenDim;
+        rng = new Random(seed);
 
         runtime = new SilkRuntime();
         embedding = new float[vocabSize * embeddingDim];
@@ -43,6 +46,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
         fc2Weight = new float[hiddenDim * 2];
         fc2Bias = new float[2];
 
+        InitWeights();
         embBuf = runtime.Allocate(embedding.Length);
         fc1Buf = runtime.Allocate(fc1Weight.Length);
         fc1BiasBuf = runtime.Allocate(fc1Bias.Length);
@@ -51,6 +55,15 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
         UploadAll();
     }
+
+    void InitWeights()
+    {
+        for (int i = 0; i < embedding.Length; i++) embedding[i] = NextFloat(-0.05f, 0.05f);
+        for (int i = 0; i < fc1Weight.Length; i++) fc1Weight[i] = NextFloat(-0.05f, 0.05f);
+        for (int i = 0; i < fc2Weight.Length; i++) fc2Weight[i] = NextFloat(-0.05f, 0.05f);
+    }
+
+    float NextFloat(float min, float max) => min + (float)rng.NextDouble() * (max - min);
 
     public void SetWeights(float[] embeddingWeights, float[] fc1Weights, float[] fc1Biases,
         float[] fc2Weights, float[] fc2Biases)
@@ -73,6 +86,12 @@ public sealed class GpuTextLinearClassifier : IDisposable
         Array.Copy(fc2Biases, fc2Bias, fc2Bias.Length);
         UploadAll();
     }
+
+    public float[] ExportEmbedding() { var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
+    public float[] ExportFc1Weight() { var a = new float[fc1Weight.Length]; Array.Copy(fc1Weight, a, a.Length); return a; }
+    public float[] ExportFc1Bias() { var a = new float[fc1Bias.Length]; Array.Copy(fc1Bias, a, a.Length); return a; }
+    public float[] ExportFc2Weight() { var a = new float[fc2Weight.Length]; Array.Copy(fc2Weight, a, a.Length); return a; }
+    public float[] ExportFc2Bias() { var a = new float[fc2Bias.Length]; Array.Copy(fc2Bias, a, a.Length); return a; }
 
     public float[] Forward(int[] tokenIds, int batchSize, int seqLen,
         out float[] pooledOut, out float[] hiddenOut)
@@ -139,6 +158,135 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
     public float[] Forward(int[] tokenIds, int batchSize, int seqLen)
         => Forward(tokenIds, batchSize, seqLen, out _, out _);
+
+    public void Train(int[] tokens, int[] labels, int batchSize, int seqLen, int epochs, float learningRate)
+    {
+        if (tokens is null || labels is null) throw new ArgumentNullException();
+        if (tokens.Length % seqLen != 0) throw new ArgumentException("Token shape mismatch.");
+        int sampleCount = tokens.Length / seqLen;
+        if (labels.Length != sampleCount) throw new ArgumentException("Label count mismatch.");
+
+        int batchesPerEpoch = (sampleCount + batchSize - 1) / batchSize;
+        var rng = new Random(12345);
+
+        for (int epoch = 0; epoch < epochs; epoch++)
+        {
+            int[] indices = Enumerable.Range(0, sampleCount).ToArray();
+            for (int i = indices.Length - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (indices[i], indices[j]) = (indices[j], indices[i]);
+            }
+
+            for (int b = 0; b < batchesPerEpoch; b++)
+            {
+                int start = b * batchSize;
+                int end = Math.Min(start + batchSize, sampleCount);
+                int n = end - start;
+                if (n <= 0) continue;
+
+                int[] batchTokens = new int[n * seqLen];
+                int[] batchLabels = new int[n];
+                for (int i = 0; i < n; i++)
+                {
+                    int src = indices[start + i];
+                    Array.Copy(tokens, src * seqLen, batchTokens, i * seqLen, seqLen);
+                    batchLabels[i] = labels[src];
+                }
+
+                var logits = Forward(batchTokens, n, seqLen, out var pooled, out var hidden);
+
+                // Compute softmax probs and dZ.
+                var gradZ = new float[n * 2];
+                for (int i = 0; i < n; i++)
+                {
+                    float e0 = MathF.Exp(logits[i * 2]);
+                    float e1 = MathF.Exp(logits[i * 2 + 1]);
+                    float z = e0 + e1;
+                    float p0 = e0 / z;
+                    float p1 = e1 / z;
+                    gradZ[i * 2 + 0] = p0 - (batchLabels[i] == 0 ? 1f : 0f);
+                    gradZ[i * 2 + 1] = p1 - (batchLabels[i] == 1 ? 1f : 0f);
+                }
+
+                // FC2 gradients
+                var gradW2 = new float[hiddenDim * 2];
+                var gradB2 = new float[2];
+                for (int i = 0; i < n; i++)
+                {
+                    gradB2[0] += gradZ[i * 2 + 0];
+                    gradB2[1] += gradZ[i * 2 + 1];
+                    for (int h = 0; h < hiddenDim; h++)
+                    {
+                        gradW2[h * 2 + 0] += hidden[i * hiddenDim + h] * gradZ[i * 2 + 0];
+                        gradW2[h * 2 + 1] += hidden[i * hiddenDim + h] * gradZ[i * 2 + 1];
+                    }
+                }
+
+                // dHidden
+                var dH = new float[n * hiddenDim];
+                for (int i = 0; i < n; i++)
+                    for (int h = 0; h < hiddenDim; h++)
+                        dH[i * hiddenDim + h] =
+                            fc2Weight[h * 2 + 0] * gradZ[i * 2 + 0] +
+                            fc2Weight[h * 2 + 1] * gradZ[i * 2 + 1];
+
+                // ReLU backward
+                for (int i = 0; i < n; i++)
+                    for (int h = 0; h < hiddenDim; h++)
+                        if (hidden[i * hiddenDim + h] <= 0f)
+                            dH[i * hiddenDim + h] = 0f;
+
+                // FC1 gradients
+                var gradW1 = new float[embeddingDim * hiddenDim];
+                var gradB1 = new float[hiddenDim];
+                for (int i = 0; i < n; i++)
+                {
+                    for (int h = 0; h < hiddenDim; h++)
+                        gradB1[h] += dH[i * hiddenDim + h];
+                    for (int e = 0; e < embeddingDim; e++)
+                        for (int h = 0; h < hiddenDim; h++)
+                            gradW1[e * hiddenDim + h] += pooled[i * embeddingDim + e] * dH[i * hiddenDim + h];
+                }
+
+                // Pooled gradient
+                var dPooled = new float[n * embeddingDim];
+                for (int i = 0; i < n; i++)
+                    for (int e = 0; e < embeddingDim; e++)
+                        for (int h = 0; h < hiddenDim; h++)
+                            dPooled[i * embeddingDim + e] += dH[i * hiddenDim + h] * fc1Weight[e * hiddenDim + h];
+
+                // Embedding gradient (scatter)
+                var gradEmb = new float[vocabSize * embeddingDim];
+                for (int i = 0; i < n; i++)
+                {
+                    for (int s = 0; s < seqLen; s++)
+                    {
+                        int tid = batchTokens[i * seqLen + s];
+                        float scale = 1f / Math.Max(1, seqLen);
+                        for (int e = 0; e < embeddingDim; e++)
+                            gradEmb[tid * embeddingDim + e] += scale * dPooled[i * embeddingDim + e];
+                    }
+                }
+
+                // Average
+                for (int i = 0; i < gradW2.Length; i++) gradW2[i] /= n;
+                for (int i = 0; i < gradB2.Length; i++) gradB2[i] /= n;
+                for (int i = 0; i < gradW1.Length; i++) gradW1[i] /= n;
+                for (int i = 0; i < gradB1.Length; i++) gradB1[i] /= n;
+                for (int i = 0; i < gradEmb.Length; i++) gradEmb[i] /= n;
+
+                // SGD update
+                for (int i = 0; i < fc2Weight.Length; i++) fc2Weight[i] -= learningRate * gradW2[i];
+                for (int i = 0; i < fc2Bias.Length; i++) fc2Bias[i] -= learningRate * gradB2[i];
+                for (int i = 0; i < fc1Weight.Length; i++) fc1Weight[i] -= learningRate * gradW1[i];
+                for (int i = 0; i < fc1Bias.Length; i++) fc1Bias[i] -= learningRate * gradB1[i];
+                for (int i = 0; i < embedding.Length; i++) embedding[i] -= learningRate * gradEmb[i];
+
+                UploadAll();
+            }
+        }
+    }
 
     void UploadAll()
     {
