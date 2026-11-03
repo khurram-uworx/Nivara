@@ -159,6 +159,24 @@ public sealed class GpuTextLinearClassifier : IDisposable
     public float[] Forward(int[] tokenIds, int batchSize, int seqLen)
         => Forward(tokenIds, batchSize, seqLen, out _, out _);
 
+    public int[] Predict(int[] tokenIds, int seqLen)
+    {
+        if (tokenIds is null || tokenIds.Length % seqLen != 0)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokenIds));
+        int batch = tokenIds.Length / seqLen;
+        var logits = Forward(tokenIds, batch, seqLen);
+        int numClasses = logits.Length / batch;
+        var result = new int[batch];
+        for (int b = 0; b < batch; b++)
+        {
+            int best = 0; float bestVal = logits[b * numClasses];
+            for (int c = 1; c < numClasses; c++)
+                if (logits[b * numClasses + c] > bestVal) { bestVal = logits[b * numClasses + c]; best = c; }
+            result[b] = best;
+        }
+        return result;
+    }
+
     public void Train(int[] tokens, int[] labels, int batchSize, int seqLen, int epochs, float learningRate)
     {
         if (tokens is null || labels is null) throw new ArgumentNullException();
