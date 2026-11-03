@@ -100,11 +100,11 @@ public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, IFl
 
         int embed = embeddingDim;
         ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv1Weights, 64, embed * 3, false);
-        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv1Biases, 1, 64, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromArray(conv1Biases, false);
         ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv2Weights, 64, embed * 5, false);
-        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv2Biases, 1, 64, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromArray(conv2Biases, false);
         ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv3Weights, 64, embed * 7, false);
-        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv3Biases, 1, 64, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromArray(conv3Biases, false);
 
         int convHidden = 64 * 3 * maxSeqLen;
         ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(fc1WeightsCpuLayout, fc1WeightsCpuLayout.Length / convHidden, convHidden, false);
