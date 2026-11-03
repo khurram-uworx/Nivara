@@ -137,7 +137,7 @@ internal static class ArrowValidityMask
     internal static byte[] ToValidityBitmap(ReadOnlySpan<bool> nullMask)
     {
         if (nullMask.IsEmpty)
-            return [];
+            return Array.Empty<byte>();
 
         var destination = new byte[GetBitmapLength(nullMask.Length)];
         ToValidityBitmap(nullMask, destination);
@@ -178,6 +178,77 @@ internal static class ArrowValidityMask
 
         for (int i = 0; i < destination.Length; i++)
             destination[i] = (validityBitmap[i >> 3] & (1 << (i & 7))) == 0;
+    }
+
+    /// <summary>
+    /// Unpacks an Arrow validity bitmap into a null mask starting at <paramref name="offset"/>,
+    /// inverting polarity as it goes. Used for sliced Arrow arrays whose validity buffer is indexed
+    /// by the array's offset rather than zero.
+    /// </summary>
+    /// <param name="validityBitmap">
+    /// The bitmap to unpack. An empty bitmap means Arrow elided the buffer, which means every slot is
+    /// valid.
+    /// </param>
+    /// <param name="offset">The bit offset within <paramref name="validityBitmap"/> where the slice begins.</param>
+    /// <param name="destination">
+    /// The mask to fill; its length is the slot count. Every element is written, where
+    /// <see langword="true"/> means null.
+    /// </param>
+    /// <remarks>
+    /// When <paramref name="validityBitmap"/> is empty (elided by Arrow) every slot is treated as
+    /// valid regardless of <paramref name="offset"/>. When the buffer is present but trimmed to the
+    /// slice (i.e. its length only covers <paramref name="destination"/>), <paramref name="offset"/>
+    /// is ignored and unpacking starts at bit zero.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="validityBitmap"/> is non-empty but too short for the requested
+    /// slice.
+    /// </exception>
+    internal static void ToNullMask(ReadOnlySpan<byte> validityBitmap, int offset, Span<bool> destination)
+    {
+        if (validityBitmap.IsEmpty)
+        {
+            destination.Clear();
+            return;
+        }
+
+        if (offset < 0)
+            throw new ArgumentOutOfRangeException(nameof(offset));
+
+        int length = destination.Length;
+        int requiredWithOffset = GetBitmapLength(offset + length);
+        int requiredZeroBased = GetBitmapLength(length);
+
+        int baseOffset;
+        if (validityBitmap.Length >= requiredWithOffset)
+            baseOffset = offset;
+        else if (validityBitmap.Length >= requiredZeroBased)
+            baseOffset = 0;
+        else
+        {
+            throw new ArgumentException(
+                $"Validity bitmap must hold at least {requiredZeroBased} bytes for {length} slots, but was {validityBitmap.Length}.",
+                nameof(validityBitmap));
+        }
+
+        for (int i = 0; i < length; i++)
+        {
+            int bit = baseOffset + i;
+            destination[i] = (validityBitmap[bit >> 3] & (1 << (bit & 7))) == 0;
+        }
+    }
+
+    /// <summary>
+    /// Unpacks an Arrow validity bitmap into a new null mask starting at <paramref name="offset"/>.
+    /// </summary>
+    internal static bool[] ToNullMask(ReadOnlySpan<byte> validityBitmap, int offset, int length)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+
+        var mask = new bool[length];
+        ToNullMask(validityBitmap, offset, mask);
+        return mask;
     }
 
     /// <summary>
