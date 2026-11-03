@@ -65,8 +65,10 @@ Each issue includes motivation, scope, key files, dependencies, acceptance crite
 6. (optional) `docs: remove TODO.md — plan executed` (only after G2 review clears)
 
 ## GitHub issues log (created during execution)
-- (to fill)
-
+- [x] #866 — Phase 1 re-scoped: ONNX export only (train→deploy) (2026-11-03, this branch)
+- [x] #867 — Phase 2 re-scoped: embeddings as flat [rows, dim] frame convention (2026-11-03, this branch)
+- [x] #868 — Phase 4 re-scoped: minimal frame-scoped metrics module (2026-11-03, this branch)
+- [~] #864 — AISTACK reassessment Steps 1-2 (docs-only; partially subsumed by this branch's reassessment work; left open for tracking)
 ## Blast radius
 - Docs only + 3 new GitHub issues. No source, tests, or public APIs touched. DocsCoveragePins should be unaffected if no new citations are added; will verify at G2.
 - Risk: stale phrasing elsewhere (e.g., other docs referencing "ONNX export/import"). Mitigation: grep audit in verification.
