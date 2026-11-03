@@ -9,6 +9,7 @@ using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
 using Nivara.Onnx;
 using Nivara.Samples;
+using Nivara.Silk;
 using NivaraClassifier;
 using System.Globalization;
 
@@ -22,9 +23,9 @@ if (options.Help)
     return;
 }
 
-if (options.Silk)
+if (options.Silk && options.Command == "predict" && !string.IsNullOrWhiteSpace(options.LoadOnnxPath))
 {
-    Console.Error.WriteLine("--silk is not yet implemented for NivaraClassifier (tracked by #883).");
+    Console.Error.WriteLine("--silk cannot be used with --load-onnx (ONNX Runtime has its own providers).");
     Environment.ExitCode = 2;
     return;
 }
@@ -88,6 +89,63 @@ void RunTraining(Options opt)
     {
         var encoded = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
         Array.Copy(encoded, 0, testTokens, i * opt.MaxSeqLen, opt.MaxSeqLen);
+    }
+
+    if (opt.Silk)
+    {
+        if (opt.Mode != "linear")
+        {
+            Console.Error.WriteLine("Conv training on Silk is not yet implemented (see #893).");
+            return;
+        }
+
+        Console.WriteLine("Training on Silk (host-gradient scaffold)...");
+        var silkModel = new GpuTextLinearClassifier(tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, opt.Seed);
+        silkModel.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate);
+
+        float[] emb = silkModel.ExportEmbedding();
+        float[] gpuFc1 = silkModel.ExportFc1Weight();
+        float[] gpuFc1Bias = silkModel.ExportFc1Bias();
+        float[] gpuFc2 = silkModel.ExportFc2Weight();
+        float[] gpuFc2Bias = silkModel.ExportFc2Bias();
+
+        int embed = opt.EmbeddingDim;
+        int hidden = opt.HiddenDim;
+        var cpuFc1 = new float[hidden * embed];
+        for (int e = 0; e < embed; e++)
+            for (int h = 0; h < hidden; h++)
+                cpuFc1[h * embed + e] = gpuFc1[e * hidden + h];
+        var cpuFc2 = new float[2 * hidden];
+        for (int h = 0; h < hidden; h++)
+            for (int c = 0; c < 2; c++)
+                cpuFc2[c * hidden + h] = gpuFc2[h * 2 + c];
+
+        var cpuModel = new TextClassifierModel<float>(tokenizer.VocabSize, embed, hidden, 2, opt.MaxSeqLen);
+        cpuModel.SetWeights(emb, cpuFc1, gpuFc1Bias, cpuFc2, gpuFc2Bias);
+
+        int gpuCorrect = 0;
+        for (int i = 0; i < testLabels.Length; i++)
+        {
+            var encoded = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
+            var preds = cpuModel.Predict(encoded);
+            if (preds[0] == testLabels[i]) gpuCorrect++;
+        }
+        double gpuAccuracyValue = (double)gpuCorrect / testLabels.Length;
+        Console.WriteLine($"Silk-trained test accuracy: {gpuAccuracyValue:P1} ({gpuCorrect}/{testLabels.Length})");
+
+        if (!string.IsNullOrWhiteSpace(opt.SavePath))
+        {
+            ModelSerializer.Save(cpuModel, opt.SavePath);
+            Console.WriteLine($"Saved model: {opt.SavePath}");
+        }
+        string gpuVocabPath = Path.Combine("samples", "data", "classifier.vocab.json");
+        if (!string.IsNullOrWhiteSpace(opt.SavePath))
+            gpuVocabPath = Path.ChangeExtension(opt.SavePath, ".vocab.json");
+        tokenizer.Save(gpuVocabPath);
+        Console.WriteLine($"Saved vocabulary: {gpuVocabPath}");
+        silkModel.Dispose();
+        Console.WriteLine("Done.");
+        return;
     }
 
     Module<float> model;
@@ -199,7 +257,73 @@ void RunPrediction(Options opt)
 
     var tokenizer = TextTokenizer.Load(vocabPath);
     Func<int[], int[]> predict;
-    if (opt.Mode == "conv")
+    if (opt.Silk && opt.Mode == "conv")
+    {
+        var conv = new ConvTextClassifierModel<float>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        ModelSerializer.Load(conv, modelPath);
+        conv.Eval();
+
+        var ps = conv.GetParameters().Values.ToArray();
+        // Module_0 embedding, Module_1/2/3 conv, Module_4 fc1, Module_5 fc2
+        var emb = ps[0].Tensor.Data.ToArray();
+        var c1w = ps[1].Tensor.Data.ToArray();
+        var c1b = ps[2].Tensor.Data.ToArray();
+        var c2w = ps[3].Tensor.Data.ToArray();
+        var c2b = ps[4].Tensor.Data.ToArray();
+        var c3w = ps[5].Tensor.Data.ToArray();
+        var c3b = ps[6].Tensor.Data.ToArray();
+        var fc1wCpu = ps[7].Tensor.Data.ToArray();
+        var fc1b = ps[8].Tensor.Data.ToArray();
+        var fc2wCpu = ps[9].Tensor.Data.ToArray();
+        var fc2b = ps[10].Tensor.Data.ToArray();
+
+        int embed = opt.EmbeddingDim;
+        int hidden = opt.HiddenDim;
+        int fcIn = 64 * 3 * opt.MaxSeqLen;
+        var gpuFc1 = new float[fcIn * hidden];
+        for (int i = 0; i < hidden; i++)
+            for (int j = 0; j < fcIn; j++)
+                gpuFc1[j * hidden + i] = fc1wCpu[i * fcIn + j];
+        var gpuFc2 = new float[hidden * 2];
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < hidden; j++)
+                gpuFc2[j * 2 + i] = fc2wCpu[i * hidden + j];
+
+        var gpu = new GpuTextConvClassifier(tokenizer.VocabSize, embed, hidden, opt.MaxSeqLen, opt.Seed);
+        gpu.SetWeights(emb, c1w, c1b, c2w, c2b, c3w, c3b, gpuFc1, fc1b, gpuFc2, fc2b);
+        predict = encoded => gpu.Predict(encoded, opt.MaxSeqLen);
+    }
+    else if (opt.Silk && opt.Mode != "conv")
+    {
+        var linear = new TextClassifierModel<float>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        ModelSerializer.Load(linear, modelPath);
+        linear.Eval();
+
+        var ps = linear.GetParameters().Values.ToArray();
+        var emb = ps[0].Tensor.Data.ToArray();
+        var fc1wCpu = ps[1].Tensor.Data.ToArray();
+        var fc1b = ps[2].Tensor.Data.ToArray();
+        var fc2wCpu = ps[3].Tensor.Data.ToArray();
+        var fc2b = ps[4].Tensor.Data.ToArray();
+
+        int embed = opt.EmbeddingDim;
+        int hidden = opt.HiddenDim;
+        var gpuFc1 = new float[embed * hidden];
+        for (int e = 0; e < embed; e++)
+            for (int h = 0; h < hidden; h++)
+                gpuFc1[e * hidden + h] = fc1wCpu[h * embed + e];
+        var gpuFc2 = new float[hidden * 2];
+        for (int h = 0; h < hidden; h++)
+            for (int c = 0; c < 2; c++)
+                gpuFc2[h * 2 + c] = fc2wCpu[c * hidden + h];
+
+        var gpu = new GpuTextLinearClassifier(tokenizer.VocabSize, embed, hidden, opt.Seed);
+        gpu.SetWeights(emb, gpuFc1, fc1b, gpuFc2, fc2b);
+        predict = encoded => gpu.Predict(encoded, opt.MaxSeqLen);
+    }
+    else if (opt.Mode == "conv")
     {
         var conv = new ConvTextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);

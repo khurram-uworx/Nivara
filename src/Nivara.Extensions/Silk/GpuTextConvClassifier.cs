@@ -176,6 +176,24 @@ public sealed class GpuTextConvClassifier : IDisposable
         }
     }
 
+    public int[] Predict(int[] tokenIds, int seqLen)
+    {
+        if (tokenIds is null || tokenIds.Length % seqLen != 0)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokenIds));
+        int batch = tokenIds.Length / seqLen;
+        var logits = Forward(tokenIds, batch);
+        int numClasses = logits.Length / batch;
+        var result = new int[batch];
+        for (int b = 0; b < batch; b++)
+        {
+            int best = 0; float bestVal = logits[b * numClasses];
+            for (int c = 1; c < numClasses; c++)
+                if (logits[b * numClasses + c] > bestVal) { bestVal = logits[b * numClasses + c]; best = c; }
+            result[b] = best;
+        }
+        return result;
+    }
+
     float[] ConvBranch(float[] inputChannels, float[] weight, float[] bias, int k)
     {
         // input: [E,S], output [64,S] with zero padding (k-1)/2

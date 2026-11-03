@@ -50,6 +50,16 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, IFloati
                     fc1)),
             fc2);
 
+    public void SetWeights(T[] embeddingWeights, T[] fc1WeightsCpuLayout, T[] fc1Biases, T[] fc2WeightsCpuLayout, T[] fc2Biases)
+    {
+        var ps = GetParameters().Values.ToArray();
+        ps[0].Tensor = ReverseGradTensor<T>.FromMatrix(embeddingWeights, VocabSize, EmbeddingDim, requiresGrad: false);
+        ps[1].Tensor = ReverseGradTensor<T>.FromMatrix(fc1WeightsCpuLayout, fc1WeightsCpuLayout.Length / EmbeddingDim, EmbeddingDim, requiresGrad: false);
+        ps[2].Tensor = ReverseGradTensor<T>.FromArray(fc1Biases, requiresGrad: false);
+        ps[3].Tensor = ReverseGradTensor<T>.FromMatrix(fc2WeightsCpuLayout, 2, fc2WeightsCpuLayout.Length / 2, requiresGrad: false);
+        ps[4].Tensor = ReverseGradTensor<T>.FromArray(fc2Biases, requiresGrad: false);
+    }
+
     public int[] Predict(int[] tokenIds)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);
