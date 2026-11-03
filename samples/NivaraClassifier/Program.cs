@@ -83,38 +83,38 @@ void RunTraining(Options opt)
         Array.Copy(encoded, 0, testTokens, i * opt.MaxSeqLen, opt.MaxSeqLen);
     }
 
-    Module<double> model;
+    Module<float> model;
     Func<int[], int[]> predict;
     if (opt.Mode == "conv")
     {
-        var conv = new ConvTextClassifierModel<double>(
+        var conv = new ConvTextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         model = conv;
         predict = conv.Predict;
     }
     else
     {
-        var linear = new TextClassifierModel<double>(
+        var linear = new TextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         model = linear;
         predict = linear.Predict;
     }
 
-    using var optimizer = new Adam<double>(learningRate: 0.001);
+    using var optimizer = new Adam<float>(learningRate: 0.001f);
     var allParams = model.GetParameters().Values;
     optimizer.AddParameterGroup(allParams);
 
-    var lossFn = new CrossEntropyLoss<double>();
+    var lossFn = new CrossEntropyLoss<float>();
 
-    var trainFrame = FrameBuilder.BuildDocumentClassificationFrameDouble(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
+    var trainFrame = FrameBuilder.BuildDocumentClassificationFrame(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
     var featureColumns = Enumerable.Range(0, opt.MaxSeqLen).Select(d => $"tok_{d}").ToArray();
-    var trainDataset = new TensorDataset<double>(trainFrame, featureColumns, ["label"]);
-    var trainLoader = new DataLoader<double>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
+    var trainDataset = new TensorDataset<float>(trainFrame, featureColumns, ["label"]);
+    var trainLoader = new DataLoader<float>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
 
     Console.WriteLine($"\nTraining: {trainCount} samples, {testLabels.Length} test");
     Console.WriteLine($"Model: {tokenizer.VocabSize} vocab → {opt.EmbeddingDim} embed → {opt.HiddenDim} hidden → 2 classes ({opt.Mode})\n");
 
-    var trainLoop = new TrainingLoop<double>(
+    var trainLoop = new TrainingLoop<float>(
         model, trainLoader,
         (logits, labels) =>
         {
@@ -194,7 +194,7 @@ void RunPrediction(Options opt)
     Func<int[], int[]> predict;
     if (opt.Mode == "conv")
     {
-        var conv = new ConvTextClassifierModel<double>(
+        var conv = new ConvTextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         ModelSerializer.Load(conv, modelPath);
         conv.Eval();
@@ -202,7 +202,7 @@ void RunPrediction(Options opt)
     }
     else
     {
-        var linear = new TextClassifierModel<double>(
+        var linear = new TextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         ModelSerializer.Load(linear, modelPath);
         linear.Eval();
@@ -242,11 +242,11 @@ void RunOnnxCompare(Options opt)
 
     var tokenizer = TextTokenizer.Load(vocabPath);
 
-    Module<double> model;
+    Module<float> model;
     Func<int[], int[]> nivaraPredict;
     if (opt.Mode == "conv")
     {
-        var conv = new ConvTextClassifierModel<double>(
+        var conv = new ConvTextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         ModelSerializer.Load(conv, modelPath);
         conv.Eval();
@@ -255,7 +255,7 @@ void RunOnnxCompare(Options opt)
     }
     else
     {
-        var linear = new TextClassifierModel<double>(
+        var linear = new TextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         ModelSerializer.Load(linear, modelPath);
         linear.Eval();
@@ -273,17 +273,17 @@ void RunOnnxCompare(Options opt)
         "I hate this product"
     };
 
-    var nivaraLogitsList = new List<double[]>();
+    var nivaraLogitsList = new List<float[]>();
     var nivaraLabels = new List<int>();
     foreach (var s in sentences)
     {
         var encoded = tokenizer.Encode(s, fixedLength: opt.MaxSeqLen);
-        var data = new double[encoded.Length];
+        var data = new float[encoded.Length];
         for (int i = 0; i < encoded.Length; i++) data[i] = encoded[i];
-        var input = ReverseGradTensor<double>.FromMatrix(data, 1, opt.MaxSeqLen, requiresGrad: false);
+        var input = ReverseGradTensor<float>.FromMatrix(data, 1, opt.MaxSeqLen, requiresGrad: false);
         var logits = model.Forward(input);
-        var arr = new double[logits.Length];
-        logits.Data.CopyTo(arr, 0.0);
+        var arr = new float[logits.Length];
+        logits.Data.CopyTo(arr, 0.0f);
         nivaraLogitsList.Add(arr);
         nivaraLabels.Add(nivaraPredict(encoded)[0]);
     }
@@ -311,12 +311,12 @@ void RunOnnxCompare(Options opt)
     for (int i = 0; i < sentences.Length; i++)
     {
         var encoded = tokenizer.Encode(sentences[i], fixedLength: opt.MaxSeqLen);
-        var tensor = new DenseTensor<double>(encoded.Select(t => (double)t).ToArray(), new[] { 1, opt.MaxSeqLen });
+        var tensor = new DenseTensor<float>(encoded.Select(t => (float)t).ToArray(), new[] { 1, opt.MaxSeqLen });
         using var results = session.Run(new[]
         {
             NamedOnnxValue.CreateFromTensor(inputName, tensor)
         });
-        var ortLogits = results.First(v => v.Name == outputName).AsTensor<double>().ToArray();
+        var ortLogits = results.First(v => v.Name == outputName).AsTensor<float>().ToArray();
         double maxAbs = 0.0;
         for (int j = 0; j < nivaraLogitsList[i].Length; j++)
             maxAbs = Math.Max(maxAbs, Math.Abs(ortLogits[j] - nivaraLogitsList[i][j]));
@@ -374,12 +374,12 @@ void RunPredictionOnnx(Options opt)
         if (string.IsNullOrWhiteSpace(line)) break;
 
         var encoded = tokenizer.Encode(line, fixedLength: opt.MaxSeqLen);
-        var tensor = new DenseTensor<double>(encoded.Select(t => (double)t).ToArray(), new[] { 1, opt.MaxSeqLen });
+        var tensor = new DenseTensor<float>(encoded.Select(t => (float)t).ToArray(), new[] { 1, opt.MaxSeqLen });
         using var results = session.Run(new[]
         {
             NamedOnnxValue.CreateFromTensor(inputName, tensor)
         });
-        var output = results.First(v => v.Name == outputName).AsTensor<double>().ToArray();
+        var output = results.First(v => v.Name == outputName).AsTensor<float>().ToArray();
         int labelIdx = output[0] > output[1] ? 0 : 1;
         string label = labelIdx == 1 ? "POSITIVE" : "NEGATIVE";
         Console.WriteLine($"  → {label}\\n");

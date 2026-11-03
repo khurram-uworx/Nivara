@@ -46,7 +46,7 @@ Export decisions and unsupported operations are recorded through `OperationDiagn
 
 ```bash
 dotnet build Nivara.slnx
-dotnet run --project samples/NivaraOnnxExport -c Release
+dotnet run --project samples/NivaraClassifier -c Release -- --command onnx-compare
 ```
 
 The sample exports a tiny MLP and asserts ONNX Runtime output matches Nivara within 1e-4.

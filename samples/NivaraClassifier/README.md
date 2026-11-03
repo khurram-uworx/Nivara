@@ -27,10 +27,16 @@ dotnet run --project samples/NivaraClassifier
 dotnet run --project samples/NivaraClassifier -- --command generate --num-samples 1000
 
 # Train on generated data (default path: samples/data/sentiment_data.csv)
-dotnet run --project samples/NivaraClassifier -- --command train --epochs 20 --save samples/data/classifier.model.json
+dotnet run --project samples/NivaraClassifier -- --command train --epochs 20 --save samples/data/classifier.model.json --export-onnx samples/data/classifier.model.onnx
 
-# Interactive prediction with saved model
+# Interactive prediction with saved model (Nivara)
 dotnet run --project samples/NivaraClassifier -- --command predict --load samples/data/classifier.model.json
+
+# Interactive prediction with exported ONNX model (ONNX Runtime)
+dotnet run --project samples/NivaraClassifier -- --command predict --load-onnx samples/data/classifier.model.onnx
+
+# Compare Nivara vs ONNX Runtime on a few samples
+dotnet run --project samples/NivaraClassifier -- --command onnx-compare --load samples/data/classifier.model.json
 ```
 
 ## CLI options
@@ -39,8 +45,10 @@ dotnet run --project samples/NivaraClassifier -- --command predict --load sample
 |--------|---------|-------------|
 | `--command`, `-c <cmd>` | `train` | Command: `train`, `predict`, `generate` |
 | `--data-path <path>` | `samples/data/sentiment_data.csv` | CSV data file (columns: text, label) |
-| `--save <path>` | — | Save trained model + tokenizer |
-| `--load <path>` | — | Load trained model + tokenizer |
+| `--save <path>` | - | Save trained model + tokenizer |
+| `--load <path>` | - | Load trained model + tokenizer |
+| `--export-onnx <path>` | - | Export trained model to ONNX |
+| `--load-onnx <path>` | - | Load an exported ONNX model for prediction via ONNX Runtime |
 | `--embedding-dim <int>` | 32 | Embedding dimension |
 | `--hidden-dim <int>` | 64 | Hidden layer dimension |
 | `--max-seq-len <int>` | 20 | Fixed sequence length (pad/truncate) |
@@ -161,13 +169,15 @@ Templates with positive/negative patterns, fill nouns and activities from pools,
 | `DataLoader<T>` | `Program.cs` | Batched data loading |
 | `TensorDataset<T>` | `Program.cs` | Frame-backed dataset |
 | `ModelSerializer.Save/Load` | `Program.cs` | JSON model persistence |
+| `OnnxExporter.Export<T>` | `Program.cs` (`train`, `onnx-compare`) | Export Nivara modules to `.onnx` |
 | `NivaraColumn<T>.Create` | `Program.cs` (`BuildFrame`) | Null-free tensor creation at AutoDiff boundary |
 
 ## Requirements
 
-- .NET 10.0 SDK
+- .NET 11 SDK
 - Nivara core library (`src/Nivara/Nivara.csproj`)
-- No external dependencies
+- Nivara.Extensions (`src/Nivara.Extensions/Nivara.Extensions.csproj`, for ONNX export)
+- `Microsoft.ML.OnnxRuntime` 1.31.0 (for `--load-onnx` / `onnx-compare`)
 
 ## Library gaps this example exposed and resolved
 
@@ -181,13 +191,16 @@ NivaraClassifier drove several core library additions and fixes. The original sp
 | **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` added to `Nivara.Samples`. |
 | **No document classifier module** | Simplest classifier requires composing Embedding → MeanPool → Linear manually. | `TextClassifierModel<T>` added to `Nivara.Samples`. Reusable for any document classification task. |
 | **No MeanPool operation** | No built-in mean-over-dimension reduction for `[B, L, D]` → `[B, D]`. | `ReverseGradOperations.MeanPool<T>` added to core with full autograd backward support. |
+| **ONNX export missing graph ops** | `IOnnxExportContext<T>` had no emitters for sequence reductions or reshaping, so the classifier could not be exported. | Added `TransposeAxes`, `Reshape`, `Concat`, and `ReduceMean` emitters to `src/Nivara.Extensions/Onnx/OnnxExporter.cs`. |
+| **ORT lacks double Conv on CPU** | `Conv` nodes exported as `double` failed to load in ONNX Runtime on CPU (`Conv(11)` not implemented). | Classifier sample switched its model/compute dtype to `float`, where ORT Conv is supported; export parity stays within 1e-4. |
 
 ### Library additions from this example
 
 | New API | Location | Purpose |
 |---------|----------|---------|
 | `ReverseGradOperations.MeanPool<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Core autograd mean-pooling with backward gradient distribution |
-| `TextClassifierModel<T>` | `samples/Nivara.Samples/TextClassifierModel.cs` | Embedding → MeanPool → MLP document classifier. Shared with NivaraChat. |
+| `TextClassifierModel<T>.ExportToOnnx` | `samples/Nivara.Samples/TextClassifierModel.cs` | Exports linear classifier through ONNX `Gather/ReduceMean/Gemm` |
+| `ConvTextClassifierModel<T>.ExportToOnnx` | `samples/NivaraClassifier/ConvTextClassifierModel.cs` | Exports conv TextCNN through ONNX `Gather/Transpose/Conv/Reshape/Concat/Gemm` |
 | `TextTokenizer` | `samples/Nivara.Samples/TextTokenizer.cs` | Word-level tokenizer with vocab, encode/decode, special tokens. Shared with NivaraChat. |
 
 ### Core library performance considerations
