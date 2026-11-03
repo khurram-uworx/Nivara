@@ -14,32 +14,50 @@ This is the travel plan for closing the last mile between Nivara and the **local
 
 Concretely, when this roadmap is done:
 
-- AutoDiff modules **export to ONNX** and run anywhere ONNX Runtime runs; ONNX models **import** and infer over Nivara frames.
-- **Embedding columns** are a first-class column kind — vector-valued, similarity/top-k — wired natively to `Microsoft.Extensions.AI.Embedding<T>`.
-- **Dataset operations** (split / shuffle / batch) are frame operations that feed `TrainingLoop`; **metrics** (accuracy, F1, loss curves, confusion) are computed on frames.
-- Data↔tensor conversion is zero-boxing and read-only-safe: no writable span ever exposed over immutable columns.
+- AutoDiff modules **export to ONNX** (train in Nivara, deploy/run anywhere ONNX Runtime or ML.NET runs); ONNX import/inference inside Nivara is a non-goal (first-party ML.NET/ONNX Runtime).- **Embeddings** work as a flat `[rows, dim]` frame convention (column of `float[]`) — similarity/top-k via existing kernels — wired to `Microsoft.Extensions.AI.Embedding<T>` (no new column kind).- **Dataset operations** (split / shuffle / batch) are frame operations that feed `TrainingLoop`; **frame-scoped metric ops** (confusion matrix, per-class/regression summary frames) compute on frames (pipeline-level evaluation stays in ML.NET).- Data↔tensor conversion is zero-boxing and read-only-safe: no writable span ever exposed over immutable columns.
+
+### Revised scope (2026-11-03, governing the phases below)
+
+- **Phase 1 (ONNX):** **export only** — train in Nivara, deploy via ML.NET/ONNX Runtime. ONNX import/inference is a **non-goal** (ML.NET's `Microsoft.ML.OnnxTransformer`/ONNX Runtime already own it, first-party); Nivara competes on the data layer, not the runtime (see `docs/TENSORS.md`).
+- **Phase 2 (embeddings):** **flat `[rows, dim]` frame convention**, not a new column kind — a column of `float[]` plus existing `RowCosineSimilarity`/`TopKDescending` kernels and MEAI `IEmbeddingGenerator` glue (`NivaraEmbeddingGenerator`). A new embedding column type is a non-goal; ARROW Phase B dependency removed.
+- **Phase 3 (dataset):** unchanged in intent; `TensorDataset`/`DataLoader` already landed at the training-API level, frame-level split/shuffle/batch still pending.
+- **Phase 4 (metrics):** **minimal frame-scoped module only** — frame-producing metric operations (confusion-matrix frame, per-class accuracy frame, regression summary frame). Pipeline-level evaluation (ML.NET metrics) is a non-goal, deferred to ML.NET's first-party surface.
+- **Phase 5:** already delivered via `AsTensorView()` (#107); unchanged.
+
+> Each revised phase below states the revised plan first, followed by the **original plan retained for archeology** (labelled "Original plan").
 
 ### Where we are today
 
-The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Nivara/AutoDiff/`); ML.NET interop is first-class (`src/Nivara.Extensions/MLNet/`); MEAI embedding integration is proven in samples (`samples/NivaraChess/ChessEmbeddingGenerator.cs`, `samples/NivaraChat/` uses MEAI + Agents + OllamaSharp); PyTorch-validated kernels bridge the weight ecosystem (the grown NivaraTorch suite: Llama decoder blocks, banded/batched attention, RMSNorm, rotary embeddings, …, in `tests/Nivara.Tests/NivaraTorch/`). Several pieces now landed beyond the original assumptions: dtype-aware SafeTensors import + model layer, MEAI `NivaraEmbeddingGenerator`, `RowCosineSimilarity`/`TopKDescending`, and `TensorDataset<T>` + `DataLoader`, plus a lazy zero-copy view via `AsTensorView()`. The gaps are the last mile: no ONNX export/import, no embedding-column type, no frame-level split/shuffle/batch ops or metrics module, and other tensor conversions remain element-copy (deliberately, for immutability — `src/Nivara/Tensors/TensorInteropExtensions.cs::ToTensorSpan`).
-
+The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Nivara/AutoDiff/`); ML.NET interop is first-class (`src/Nivara.Extensions/MLNet/`); MEAI embedding integration is proven in samples (`samples/NivaraChess/ChessEmbeddingGenerator.cs`, `samples/NivaraChat/` uses MEAI + Agents + OllamaSharp); PyTorch-validated kernels bridge the weight ecosystem (the grown NivaraTorch suite: Llama decoder blocks, banded/batched attention, RMSNorm, rotary embeddings, …, in `tests/Nivara.Tests/NivaraTorch/`). Several pieces now landed beyond the original assumptions: dtype-aware SafeTensors import + model layer, MEAI `NivaraEmbeddingGenerator`, `RowCosineSimilarity`/`TopKDescending`, and `TensorDataset<T>` + `DataLoader`, plus a lazy zero-copy view via `AsTensorView()`. The gaps are the last mile (re-scoped 2026-11-03): no **ONNX export** (import/inference deferred to ML.NET/ONNX Runtime, first-party), no **flat embedding convention/AI glue** (embeddings stay raw `float[]` columns), no **frame-level split/shuffle/batch ops or frame-scoped metrics module** (`TensorDataset`/`DataLoader` landed at training-API level only), and other tensor conversions remain element-copy (deliberately, for immutability — `src/Nivara/Tensors/TensorInteropExtensions.cs::ToTensorSpan`; zero-copy reads available via `AsTensorView()`).
 ### Non-goals (explicit)
 
 - **No Azure/cloud.** No Azure OpenAI, Azure ML, AI Foundry, or cloud vector stores — this roadmap stays fully local.
 - **No reimplementation of ONNX Runtime or ML.NET.** They are *interchange targets*, not competitors. This roadmap bridges to them.
 - **No runtime ONNX dependency in core.** ONNX interop belongs in `Nivara.Extensions` (same boundary rule as Arrow/Parquet); core keeps `System.Numerics.Tensors` only.
 - **No mutable tensor exposure over immutable columns.** Read-only views or copies only — immutability is non-negotiable.
-
+- **No ONNX import/inference in Nivara** (re-scoped 2026-11-03). Importing/running ONNX models is a first-party concern of ML.NET (`Microsoft.ML.OnnxTransformer`) and ONNX Runtime; Nivara does not reimplement them (see `docs/TENSORS.md`). Only **export** of Nivara-trained modules to `.onnx` is in scope.
+- **No new "embedding column" kind.** Embeddings are a flat `[rows, dim]` frame convention (column of `float[]` + existing kernels + MEAI glue). No ARROW variable-binary layout, no column-type addition.
+- **No pipeline-level evaluation/metrics.** Nivara ships only frame-scoped, frame-producing metric ops; pipeline/feature-level evaluation is ML.NET's first-party surface.
 ---
 
 ## 1. The roadmap
 
-### Phase 1 — ONNX export/import *(the highest-value bridge)*
+### Phase 1 — ONNX export *(revised)* / originally export+import
 
+> **Revised plan (2026-11-03).** **Export only.** Train in Nivara, export the trained module to `.onnx`, and run inference elsewhere via ML.NET/ONNX Runtime. Provenance: user positioning steer (consistent with `docs/TENSORS.md` — Nivara owns the data layer, the platform owns the runtime); ONNX import/inference is a first-party ML.NET concern (`Microsoft.ML.OnnxTransformer`), so competing with it is out of scope. Smaller than the original, and honest about where Nivara ends.
+>
+> Scope (revised): traverse the module graph (`Module<T>`, `StateDict()`) and emit a minimal ONNX graph for the common module set — `Linear`, `Embedding`, `Conv1d`/`Conv2d`, `BatchNorm`, `LayerNorm`/`RMSNorm`, `TransformerBlock`/`MultiheadAttention`, activations, `Sequential` — including weights and inference-mode ops. Export lives in `Nivara.Extensions` (`Nivara.Onnx` namespace); **no ONNX import/inference**, **no runtime ONNX dependency in core**.
+>
+> Non-goal (explicit): importing/running ONNX models inside Nivara — use ML.NET/ONNX Runtime directly on the exported model or over frame data.
+>
+> Acceptance (revised): a trained `Linear`→`ReLU`→`Linear` (and a `TransformerBlock`) export to `.onnx`; the file loads in ONNX Runtime/ML.NET and reproduces inference output within float tolerance; round-trip tests vs. the same module run through Nivara directly.
+>
+> **Original plan retained for archeology** (below):
+>
+> ### Phase 1 (original) — ONNX export/import *(the highest-value bridge)*
 **Motivation:** Nivara-trained modules currently speak only their own JSON state dicts and SafeTensors. ONNX is the universal local model format; export/import is what turns Nivara from a self-contained training stack into the data layer of the local .NET AI ecosystem.
 
-**Status note (reassessed 2026-10-23):** SafeTensors import side delivered (dtype-aware loader + model layer + `StateDictLoader`); ONNX export/import remains open.
-
+**Status note (reassessed 2026-10-23 / re-scoped 2026-11-03):** SafeTensors import side delivered (dtype-aware loader + model layer + `StateDictLoader`); **ONNX export** remains open (import/inference deferred to ML.NET/ONNX Runtime, first-party). See follow-up issue #866.
 **Scope:**
 - **Export:** traverse the module graph (`Module<T>`, `StateDict()`) and emit a minimal ONNX graph for the common module set — `Linear`, `Embedding`, `Conv1d`/`Conv2d`, `BatchNorm`, `LayerNorm`/`RMSNorm`, `TransformerBlock`/`MultiheadAttention`, activations, `Sequential` — including weights and inference-mode ops.
 - **Import:** parse ONNX protobuf and materialize inference into Nivara (via a span-based ONNX reader or `Microsoft.ML.OnnxRuntime` in `Nivara.Extensions`), landing output tensors into frames.
@@ -58,8 +76,18 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 ---
 
-### Phase 2 — Embedding columns as a data type
+### Phase 2 — Embeddings as a flat `[rows, dim]` frame convention *(revised)* / originally "embedding columns as a data type"
 
+> **Revised plan (2026-11-03).** **No new column kind.** Embeddings are a flat `[rows, dim]` frame convention — a column of `float[]` (or a frame of embedding columns) scored with the existing `RowCosineSimilarity`/`TopKDescending` kernels and MEAI `IEmbeddingGenerator` glue. Provenance: user positioning steer (consistent with `docs/TENSORS.md` — Nivara owns the table, the BCL owns the math); a new embedding column type is a non-goal; the ARROW Phase B (variable-binary layout) dependency is removed.
+>
+> Scope (revised):
+> - Documented interop pattern: build a frame from `GeneratedEmbeddings<T>` and score rows via `NivaraFrame.RowCosineSimilarity`/`RowDot` (existing).
+> - MEAI glue: promote `NivaraEmbeddingGenerator` (already in `src/Nivara.Extensions/AI/`) to the data-layer helper, with `NivaraFrame` ↔ `GeneratedEmbeddings<T>` conversion (already partially present).
+> - Null semantics preserved (null embedding = null element, no NaN sentinel), per ADR-001.
+>
+> **Original plan retained for archeology** (below, the original called for a new embedding column kind):
+>
+> ### Phase 2 (original) — Embedding columns as a data type
 **Motivation:** The MEAI integration pattern exists at the app layer (`ChessEmbeddingGenerator`), but the data layer has only scalar columns — embeddings land as raw floats, losing the "column of vectors" shape. A native complementer makes embeddings a *type*, not a projection.
 
 **Status note (reassessed 2026-10-23):** `NivaraEmbeddingGenerator` and `RowCosineSimilarity`/`TopKDescending` kernels now exist; the embedding *column type* is still missing.
@@ -106,8 +134,15 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 ---
 
-### Phase 4 — Evaluation & metrics module
+### Phase 4 — Frame-scoped metrics module *(revised)* / originally "Evaluation & metrics module"
 
+> **Revised plan (2026-11-03).** **Frame-scoped only.** A minimal module of frame-*producing* metric operations (a confusion-matrix frame, a per-class accuracy frame, a regression summary frame), null-excluding per ADR-001, vectorized on existing `TensorPrimitives` kernels. Provenance: user positioning steer; pipeline/feature-level evaluation is ML.NET's first-party surface (see `Microsoft.ML` evaluation) and is a non-goal for Nivara. The original broader module (accuracy/F1/loss curves/confusion as a single native surface) is out of scope; `TrainingLoop` loss-curve telemetry stays lightweight in-place rather than a metrics subsystem.
+>
+> Acceptance (revised): confusion-matrix frame and per-class/regression summary frames match hand-computed references on known fixtures (including null rows); vectorized for large frames (per `OperationDiagnostics`).
+>
+> **Original plan retained for archeology** (below):
+>
+> ### Phase 4 (original) — Evaluation & metrics module
 **Motivation:** Evaluation is currently diagnostics + manual metrics in samples. The dataframe is the natural surface for metrics — vectorized and null-aware.
 
 **Status note (reassessed 2026-10-23):** still open; ML.NET permutation importance is the closest existing surface.
@@ -179,8 +214,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 ## 3. Cross-cutting conventions (every phase)
 
-- **Diagnostics:** record ONNX export/import, layout, and metric-kernel decisions via `OperationDiagnostics` / `ExecutionEngine.LastDiagnostics`.
-- **Testing:** NUnit 4.x, `Method_Scenario_ExpectedBehavior`, parity fixtures against PyTorch references (extend the NivaraTorch pattern), round-trip tests (train→export→ONNX Runtime→compare), null-semantics property tests.
+- **Diagnostics:** record ONNX export (and layout/metric-kernel) decisions via `OperationDiagnostics` / `ExecutionEngine.LastDiagnostics`.- **Testing:** NUnit 4.x, `Method_Scenario_ExpectedBehavior`, parity fixtures against PyTorch references (extend the NivaraTorch pattern), round-trip tests (train→export→ONNX Runtime→compare), null-semantics property tests.
 - **Null semantics:** ADR-001 holds; predicted/target nulls excluded from metrics; no NaN sentinels anywhere.
 - **No runtime cloud dependency:** any `Microsoft.Extensions.AI`-typed interop stays in `Nivara.Extensions`/samples, never core.
 - **No comments in code** beyond non-obvious decisions; `.editorconfig` is authoritative.
@@ -191,10 +225,9 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 The vision at §0 holds, verified by:
 
-- A Nivara-trained transformer exports to ONNX and runs in ONNX Runtime with parity; ONNX models import and infer over frames. (ONNX export/import remains open; SafeTensors import side is already delivered.)
-- Embedding columns are a first-class type with MEAI `Embedding<T>` interop and working similarity/top-k. (Kernels + `NivaraEmbeddingGenerator` are delivered; the embedding *column type* remains open.)
-- Split/shuffle/batch are frame operations consumed by `TrainingLoop`; metrics (accuracy/F1/confusion, regression, loss curves) compute on frames. (`TensorDataset<T>`/`DataLoader` are delivered at the training-API level; frame-level split/shuffle/batch + metrics remain open.)
-- Read-only tensor views eliminate copies for safe layouts without exposing writable spans. (`AsTensorView()` delivered as a lazy view; `ReadOnlyTensorSpan` TryGet path remains open.)
+- A Nivara-trained module exports to `.onnx` and runs in ONNX Runtime/ML.NET with parity (re-scoped 2026-11-03: **export only**; import/inference is a first-party ML.NET/ONNX Runtime concern and a non-goal for Nivara; SafeTensors import side is already delivered).
+- Embeddings work as a flat `[rows, dim]` frame convention with MEAI `Embedding<T>` interop and working similarity/top-k (re-scoped 2026-11-03: **no new column kind**; a new embedding column type is a non-goal; kernels + `NivaraEmbeddingGenerator` delivered).
+- Split/shuffle/batch are frame operations consumed by `TrainingLoop`; frame-scoped metric ops (confusion matrix, per-class/regression summary frames) compute on frames (re-scoped 2026-11-03: **frame-scoped only**; pipeline-level evaluation stays in ML.NET; `TensorDataset<T>`/`DataLoader` delivered at the training-API level; frame-level split/shuffle/batch still open).- Read-only tensor views eliminate copies for safe layouts without exposing writable spans. (`AsTensorView()` delivered as a lazy view; `ReadOnlyTensorSpan` TryGet path remains open.)
 - Full `dotnet build Nivara.slnx` + `dotnet test` green; zero cloud dependencies in core.
 
 ---

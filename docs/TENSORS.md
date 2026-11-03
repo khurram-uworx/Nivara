@@ -264,8 +264,7 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 
 ### Local .NET AI stack (`docs/plan/AISTACK-ROADMAP.md`)
 
-- ONNX export/import (train in Nivara, exchange with the ecosystem)
-- Embedding columns as a first-class data type
+- ONNX export (train in Nivara, deploy via ML.NET/ONNX Runtime) — import/inference is first-party (ML.NET); see `docs/plan/AISTACK-ROADMAP.md` Phase 1- Embedding columns as a first-class data type
 - Dataset & data-loader layer
 - Evaluation & metrics module
 - Safe read-only tensor views — **already delivered** via public `AsTensorView()` (#107)
