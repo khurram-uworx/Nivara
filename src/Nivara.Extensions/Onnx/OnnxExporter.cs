@@ -4,6 +4,7 @@ using Onnx;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using Nivara.Diagnostics;
 
 namespace Nivara.Onnx;
 
@@ -67,16 +68,34 @@ public static class OnnxExporter
         var ctx = new Context<T>(graph, inputShape);
         ctx.SetShape(inputName, inputShape.ToArray());
 
-        var outputName = module.ExportToOnnx(ctx, inputName);
-        var outputShape = ctx.GetShape(outputName);
-        var outputInfo = new ValueInfoProto { Name = outputName };
-        outputInfo.Type = new TypeProto
+        var exportEnabled = DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled;
+        var measurement = exportEnabled ? DiagnosticsTracker.StartMeasurement() : default;
+        Exception? exportFailure = null;
+        try
         {
-            TensorType = new TypeProto.Types.Tensor { ElemType = (int)ToOnnxDataType<T>(), Shape = MakeShape(outputShape) }
-        };
-        graph.Output.Add(outputInfo);
+            var outputName = module.ExportToOnnx(ctx, inputName);
+            var outputShape = ctx.GetShape(outputName);
+            var outputInfo = new ValueInfoProto { Name = outputName };
+            outputInfo.Type = new TypeProto
+            {
+                TensorType = new TypeProto.Types.Tensor { ElemType = (int)ToOnnxDataType<T>(), Shape = MakeShape(outputShape) }
+            };
+            graph.Output.Add(outputInfo);
 
-        stream.Write(model.ToByteArray());
+            stream.Write(model.ToByteArray());
+        }
+        catch (Exception ex)
+        {
+            exportFailure = ex;
+            throw;
+        }
+        finally
+        {
+            var notes = exportFailure is null
+                ? "OnnxExport=Module;Emitters=recorded"
+                : $"OnnxExport=Failed;Emitter=Unsupported;Reason={exportFailure.Message}";
+            measurement.Record("OnnxExport", KernelType.Scalar, 0, typeof(T), false, notes);
+        }
     }
 
     static TensorProto.Types.DataType ToOnnxDataType<T>() where T : struct, IFloatingPointIeee754<T> =>
@@ -142,6 +161,7 @@ public static class OnnxExporter
 
         public string Linear(string inputName, Linear<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var wName = New("weight");
             var wShape = module.Weight?.Tensor.Shape ?? new[] { module.OutFeatures, module.InFeatures };
             var wData = new T[module.Weight!.Tensor.Length];
@@ -175,12 +195,14 @@ public static class OnnxExporter
                 ? new[] { inShape[0], module.OutFeatures }
                 : new[] { module.OutFeatures };
             SetShape(outName, outShape);
+            RecordOnnxExportDiagnostic(__m, "Linear", "Gemm", 0);
             return outName;
         }
 
         public string Linear<TWeight>(string inputName, Linear<T, TWeight> module)
             where TWeight : struct, IFloatingPointIeee754<TWeight>
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var wName = New("weight");
             var wShape = module.Weight?.Tensor.Shape ?? new[] { module.OutFeatures, module.InFeatures };
             var wStorage = new TWeight[module.Weight!.Tensor.Length];
@@ -217,11 +239,13 @@ public static class OnnxExporter
                 ? new[] { inShape[0], module.OutFeatures }
                 : new[] { module.OutFeatures };
             SetShape(outName, outShape);
+            RecordOnnxExportDiagnostic(__m, "Linear", "Gemm", 0);
             return outName;
         }
 
         public string Conv1d(string inputName, Conv1d<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var wName = New("conv1d_weight");
             var wShape = new[] { module.OutChannels, module.InChannels, module.KernelSize };
             var wData = new T[module.Weight!.Tensor.Length];
@@ -255,21 +279,32 @@ public static class OnnxExporter
                 if (oL <= 0) oL = l;
                 SetShape(outName, new[] { n, module.OutChannels, oL });
             }
+            RecordOnnxExportDiagnostic(__m, "Conv1d", "Conv", 0);
             return outName;
         }
 
         public string Conv2d(string inputName, Conv2d<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             ArgumentNullException.ThrowIfNull(module);
             if (module.Groups <= 0
                 || module.InChannels % module.Groups != 0
                 || module.OutChannels % module.Groups != 0)
+            {
+                RecordOnnxExportDiagnostic(__m, "Conv2d", "Unsupported", 0, true, "Conv2d export requires groups > 0 with channels divisible by groups.");
                 throw new NotSupportedException("Conv2d export requires groups > 0 with channels divisible by groups.");
+            }
             if (module.KernelSize <= 0 || module.Stride <= 0)
+            {
+                RecordOnnxExportDiagnostic(__m, "Conv2d", "Unsupported", 0, true, "Conv2d export requires positive kernel size and stride.");
                 throw new NotSupportedException("Conv2d export requires positive kernel size and stride.");
+            }
             if (module.PaddingTop < 0 || module.PaddingBottom < 0
                 || module.PaddingLeft < 0 || module.PaddingRight < 0)
+            {
+                RecordOnnxExportDiagnostic(__m, "Conv2d", "Unsupported", 0, true, "Conv2d export requires non-negative padding.");
                 throw new NotSupportedException("Conv2d export requires non-negative padding.");
+            }
             var wName = New("conv2d_weight");
             var wShape = new[] { module.OutChannels, module.InChannels / module.Groups, module.KernelSize, module.KernelSize };
             var wData = new T[module.Weight!.Tensor.Length];
@@ -304,14 +339,19 @@ public static class OnnxExporter
                 int oH = (h + module.PaddingTop + module.PaddingBottom - module.KernelSize) / module.Stride + 1;
                 int oW = (w + module.PaddingLeft + module.PaddingRight - module.KernelSize) / module.Stride + 1;
                 if (oH <= 0 || oW <= 0)
+                {
+                    RecordOnnxExportDiagnostic(__m, "Conv2d", "Unsupported", 0, true, "Conv2d export produced non-positive output dimensions ({oH}x{oW}).");
                     throw new NotSupportedException($"Conv2d export produced non-positive output dimensions ({oH}x{oW}).");
+                }
                 SetShape(outName, new[] { n, module.OutChannels, oH, oW });
             }
+            RecordOnnxExportDiagnostic(__m, "Conv2d", "Conv", 0);
             return outName;
         }
 
         public string Embedding(string inputName, Embedding<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             // Cast indices to int64 when needed
             var castName = inputName;
             if (typeof(T) != typeof(long) && typeof(T) != typeof(int))
@@ -338,12 +378,14 @@ public static class OnnxExporter
                 outShapeEmb[inShapeEmb.Length] = module.EmbeddingDim;
             }
             SetShape(outName, outShapeEmb);
+            RecordOnnxExportDiagnostic(__m, "Embedding", "Gather", 0);
             return outName;
         }
 
         public string Embedding<TWeight>(string inputName, Embedding<T, TWeight> module)
             where TWeight : struct, IFloatingPointIeee754<TWeight>
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var castName = inputName;
             if (typeof(T) != typeof(long) && typeof(T) != typeof(int))
             {
@@ -372,13 +414,18 @@ public static class OnnxExporter
                 outShapeEmb[inShapeEmb.Length] = module.EmbeddingDim;
             }
             SetShape(outName, outShapeEmb);
+            RecordOnnxExportDiagnostic(__m, "Embedding", "Gather", 0);
             return outName;
         }
 
         public string BatchNorm1d(string inputName, BatchNorm1d<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             if (!module.TrackRunningStats)
+            {
+                RecordOnnxExportDiagnostic(__m, "BatchNorm1d", "Unsupported", 0, true, "BatchNorm1d export requires trackRunningStats.");
                 throw new NotSupportedException("BatchNorm1d export requires trackRunningStats.");
+            }
             var scaleName = New("bn_scale");
             var biasName = New("bn_bias");
             var meanName = New("bn_mean");
@@ -416,13 +463,18 @@ public static class OnnxExporter
             AddNode("BatchNormalization", new[] { inputName, scaleName, biasName, meanName, varName }, new[] { outName },
                 new[] { new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = float.CreateChecked(module.Eps) } });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "BatchNorm1d", "BatchNormalization", 0);
             return outName;
         }
 
         public string BatchNorm2d(string inputName, BatchNorm2d<T> module, int? n = null, int? h = null, int? w = null)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             if (!module.TrackRunningStats)
+            {
+                RecordOnnxExportDiagnostic(__m, "BatchNorm2d", "Unsupported", 0, true, "BatchNorm2d export requires trackRunningStats.");
                 throw new NotSupportedException("BatchNorm2d export requires trackRunningStats.");
+            }
             string scaleName = New("bn_scale");
             string biasName = New("bn_bias");
             string meanName = New("bn_mean");
@@ -461,11 +513,13 @@ public static class OnnxExporter
             AddNode("BatchNormalization", new[] { inputName, scaleName, biasName, meanName, varName }, new[] { outName },
                 new[] { new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = float.CreateChecked(module.Eps) } });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "BatchNorm2d", "BatchNormalization", 0);
             return outName;
         }
 
         public string LayerNorm(string inputName, LayerNorm<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             string scaleName;
             string biasName;
             if (module.Affine)
@@ -503,11 +557,13 @@ public static class OnnxExporter
                     new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = float.CreateChecked(module.Eps) }
                 });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "LayerNorm", "LayerNormalization", 0);
             return outName;
         }
 
         public string RMSNorm(string inputName, RMSNorm<T> module)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             // sq
             var sq = New("rms_sq");
             AddNode("Mul", new[] { inputName, inputName }, new[] { sq });
@@ -538,11 +594,13 @@ public static class OnnxExporter
             var outName = New("rms_out");
             AddNode("Mul", new[] { div, scaleName }, new[] { outName });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "RMSNorm", "RmsNormPattern", 0);
             return outName;
         }
 
         public string TransformerBlock(string inputName, TransformerBlock<T> module, int sequenceLength)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var xResidual = inputName;
             var inShape = GetShape(inputName);
             int L = inShape.Length > 0 && inShape[0] > 0 ? inShape[0] : sequenceLength;
@@ -573,6 +631,7 @@ public static class OnnxExporter
                     var meanEps = New("rms_mean_eps"); AddNode("Add", new[] { mean, epsName }, new[] { meanEps }); SetShape(meanEps, GetShape(mean));
                     var rms = New("rms_sqrt"); AddNode("Sqrt", new[] { meanEps }, new[] { rms }); SetShape(rms, GetShape(mean));
                     var div = New("rms_div"); AddNode("Div", new[] { x, rms }, new[] { div }); SetShape(div, GetShape(x));
+                    RecordOnnxExportDiagnostic(__m, "TransformerBlock", "TransformerBlock", 0);
                     return div;
                 }
                 else
@@ -588,6 +647,7 @@ public static class OnnxExporter
                         new[] { new AttributeProto { Name = "axis", Type = AttributeProto.Types.AttributeType.Int, I = -1 },
                                 new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = 1e-5f } });
                     SetShape(outName, GetShape(x));
+                    RecordOnnxExportDiagnostic(__m, "TransformerBlock", "TransformerBlock", 0);
                     return outName;
                 }
             }
@@ -606,6 +666,7 @@ public static class OnnxExporter
                 tp.RawData = ByteString.CopyFrom(bytes);
                 graph.Initializer.Add(tp);
                 SetShape(name, new[] { Llen, Llen });
+                RecordOnnxExportDiagnostic(__m, "TransformerBlock", "TransformerBlock", 0);
                 return name;
             }
 
@@ -623,6 +684,7 @@ public static class OnnxExporter
                 var outName = New("reshape");
                 AddNode("Reshape", new[] { x, initName }, new[] { outName });
                 SetShape(outName, newShape);
+                RecordOnnxExportDiagnostic(__m, "TransformerBlock", "TransformerBlock", 0);
                 return outName;
             }
 
@@ -632,6 +694,7 @@ public static class OnnxExporter
                 attr.Ints.AddRange(perm.Select(v => (long)v));
                 var outName = New("transpose");
                 AddNode("Transpose", new[] { x }, new[] { outName }, new[] { attr });
+                RecordOnnxExportDiagnostic(__m, "TransformerBlock", "TransformerBlock", 0);
                 return outName;
             }
 
@@ -683,53 +746,74 @@ public static class OnnxExporter
             var mlp2 = Linear(geluOut, module.MlpFc2);
             var resid2 = Add(mlp2, resid1);
 
+            RecordOnnxExportDiagnostic(__m, "TransformerBlock", "TransformerBlock", 0);
             return resid2;
         }
 
         public string MultiheadAttention(string inputName, MultiheadAttention<T> module)
         {
-            throw new NotSupportedException("MultiheadAttention export not yet enabled");
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
+            {
+                RecordOnnxExportDiagnostic(__m, "MultiheadAttention", "Unsupported", 0, true, "MultiheadAttention export not yet enabled");
+                throw new NotSupportedException("MultiheadAttention export not yet enabled");
+            }
         }
 
-        public string Sequential(string inputName, Sequential<T> module) => ((IOnnxExportContext<T>)this).Sequential(inputName, module);
+        public string Sequential(string inputName, Sequential<T> module)
+        {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
+            var outputName = ((IOnnxExportContext<T>)this).Sequential(inputName, module);
+            RecordOnnxExportDiagnostic(__m, "Sequential", "Sequential", 0);
+            return outputName;
+        }
 
         public string Relu(string inputName)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var outName = New("relu_out");
             AddNode("Relu", new[] { inputName }, new[] { outName });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "Relu", "Relu", 0);
             return outName;
         }
 
         public string Gelu(string inputName)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var outName = New("gelu_out");
             AddNode("Gelu", new[] { inputName }, new[] { outName });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "Gelu", "Gelu", 0);
             return outName;
         }
 
         public string Sigmoid(string inputName)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var outName = New("sigmoid_out");
             AddNode("Sigmoid", new[] { inputName }, new[] { outName });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "Sigmoid", "Sigmoid", 0);
             return outName;
         }
 
         public string Tanh(string inputName)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var outName = New("tanh_out");
             AddNode("Tanh", new[] { inputName }, new[] { outName });
             SetShape(outName, GetShape(inputName));
+            RecordOnnxExportDiagnostic(__m, "Tanh", "Tanh", 0);
             return outName;
         }
 
         public string Add(string left, string right)
         {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             var outName = New("add_out");
             AddNode("Add", new[] { left, right }, new[] { outName });
             SetShape(outName, GetShape(left));
+            RecordOnnxExportDiagnostic(__m, "Add", "Add", 0);
             return outName;
         }
 
@@ -767,6 +851,31 @@ public static class OnnxExporter
             tensor.Data.CopyTo(data, T.Zero);
             return data;
         }
+        void RecordOnnxExportDiagnostic(OperationMeasurement measurement, string methodName, string emitter, int inputLength, bool unsupported = false, string? reason = null)
+        {
+            var notes = unsupported
+                ? $"OnnxExport={methodName};Emitter=Unsupported;Reason={reason}"
+                : $"OnnxExport={methodName};Emitter={emitter}";
+            var aliases = new[]
+            {
+                "OnnxExport" + methodName,
+                "Onnx" + methodName,
+            };
+            if (unsupported)
+            {
+                aliases = new[]
+                {
+                    "OnnxExport" + methodName,
+                    "Onnx" + methodName,
+                    "OnnxExportUnsupported",
+                    "OnnxUnsupported",
+                };
+            }
+            foreach (var opType in aliases)
+                measurement.Record(opType, KernelType.Scalar, inputLength, typeof(T), false, notes);
+        }
+
+
     }
 
 }
