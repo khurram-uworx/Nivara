@@ -91,17 +91,68 @@ void RunTraining(Options opt)
         Array.Copy(encoded, 0, testTokens, i * opt.MaxSeqLen, opt.MaxSeqLen);
     }
 
+    if (opt.Silk && opt.Mode == "conv")
+    {
+        Console.WriteLine("Training conv on Silk (host companion)...");
+        var silkConv = new GpuTextConvClassifier(tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, opt.MaxSeqLen, opt.Seed);
+        silkConv.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate, opt.Seed);
+
+        int embed = opt.EmbeddingDim;
+        int hidden = opt.HiddenDim;
+        int convHidden = 64 * 3 * opt.MaxSeqLen;
+
+        float[] emb = silkConv.ExportEmbedding();
+        float[] c1w = silkConv.ExportConv1Weight();
+        float[] c1b = silkConv.ExportConv1Bias();
+        float[] c2w = silkConv.ExportConv2Weight();
+        float[] c2b = silkConv.ExportConv2Bias();
+        float[] c3w = silkConv.ExportConv3Weight();
+        float[] c3b = silkConv.ExportConv3Bias();
+
+        float[] gpuFc1 = silkConv.ExportFc1Weight();
+        var cpuFc1 = new float[hidden * convHidden];
+        for (int h = 0; h < hidden; h++)
+            for (int j = 0; j < convHidden; j++)
+                cpuFc1[h * convHidden + j] = gpuFc1[j * hidden + h];
+
+        float[] gpuFc2 = silkConv.ExportFc2Weight();
+        var cpuFc2 = new float[2 * hidden];
+        for (int h = 0; h < hidden; h++)
+            for (int c = 0; c < 2; c++)
+                cpuFc2[c * hidden + h] = gpuFc2[h * 2 + c];
+
+        var cpuModel = new ConvTextClassifierModel<float>(tokenizer.VocabSize, embed, hidden, 2, opt.MaxSeqLen);
+        cpuModel.SetWeights(tokenizer.VocabSize, embed, opt.MaxSeqLen, emb, c1w, c1b, c2w, c2b, c3w, c3b, cpuFc1, silkConv.ExportFc1Bias(), cpuFc2, silkConv.ExportFc2Bias());
+
+        int convCorrect = 0;
+        for (int i = 0; i < testLabels.Length; i++)
+        {
+            var encoded2 = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
+            var preds2 = cpuModel.Predict(encoded2);
+            if (preds2[0] == testLabels[i]) convCorrect++;
+        }
+        double convAccuracy = (double)convCorrect / testLabels.Length;
+        Console.WriteLine($"Silk-trained (conv) test accuracy: {convAccuracy:P1} ({convCorrect}/{testLabels.Length})");
+
+        if (!string.IsNullOrWhiteSpace(opt.SavePath))
+        {
+            ModelSerializer.Save(cpuModel, opt.SavePath);
+            Console.WriteLine($"Saved model: {opt.SavePath}");
+        }
+        string convVocabPath = Path.Combine("samples", "data", "classifier.vocab.json");
+        if (!string.IsNullOrWhiteSpace(opt.SavePath))
+            convVocabPath = Path.ChangeExtension(opt.SavePath, ".vocab.json");
+        tokenizer.Save(convVocabPath);
+        Console.WriteLine($"Saved vocabulary: {convVocabPath}");
+        silkConv.Dispose();
+        Console.WriteLine("Done.");
+        return;
+    }
+
     if (opt.Silk)
     {
-        if (opt.Mode != "linear")
-        {
-            Console.Error.WriteLine("Conv training on Silk is not yet implemented (see #893).");
-            return;
-        }
-
         Console.WriteLine("Training on Silk (host-gradient scaffold)...");
         var silkModel = new GpuTextLinearClassifier(tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, opt.Seed);
-        silkModel.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate);
 
         float[] emb = silkModel.ExportEmbedding();
         float[] gpuFc1 = silkModel.ExportFc1Weight();

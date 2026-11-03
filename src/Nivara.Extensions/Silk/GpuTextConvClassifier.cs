@@ -1,3 +1,10 @@
+using Nivara;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Optimizer;
+using Nivara.AutoDiff.Training;
 using System.Numerics.Tensors;
 
 namespace Nivara.Silk;
@@ -220,6 +227,134 @@ public sealed class GpuTextConvClassifier : IDisposable
         }
         return output;
     }
+
+    public void Train(int[] tokens, int[] labels, int batchSize, int seqLen, int epochs, float learningRate, int seed)
+    {
+        if (tokens is null || labels is null) throw new ArgumentNullException();
+        if (tokens.Length % seqLen != 0) throw new ArgumentException("Token shape mismatch.");
+        int sampleCount = tokens.Length / seqLen;
+        if (labels.Length != sampleCount) throw new ArgumentException("Label count mismatch.");
+
+        var cpuModel = new HostConvModel(vocabSize, embeddingDim, hiddenDim, seqLen);
+        var optimizer = new Adam<float>(learningRate);
+        optimizer.AddParameterGroup(cpuModel.GetParameters().Values);
+        var lossFn = new CrossEntropyLoss<float>();
+
+        var cols = new List<(string Name, IColumn Column)>();
+        for (int d = 0; d < seqLen; d++)
+        {
+            var values = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++) values[i] = tokens[i * seqLen + d];
+            cols.Add(($"tok_{d}", NivaraColumn<float>.Create(values)));
+        }
+        var labelValues = new float[sampleCount];
+        for (int i = 0; i < sampleCount; i++) labelValues[i] = labels[i];
+        cols.Add(("label", NivaraColumn<float>.Create(labelValues)));
+        var frame = NivaraFrame.Create(cols.ToArray());
+        var featureColumns = Enumerable.Range(0, seqLen).Select(d => $"tok_{d}").ToArray();
+        var dataset = new TensorDataset<float>(frame, featureColumns, ["label"]);
+        var loader = new DataLoader<float>(dataset, batchSize, shuffle: true, seed: seed);
+
+        var trainLoop = new TrainingLoop<float>(
+            cpuModel,
+            loader,
+            (logits, labs) =>
+            {
+                int n = logits.Length / 2;
+                var targets = new int[n];
+                for (int i = 0; i < n; i++) targets[i] = int.CreateChecked(labs.Data[i]);
+                return lossFn.Forward(logits, targets);
+            },
+            optimizer, epochs);
+        trainLoop.Run();
+
+        var ps = cpuModel.GetParameters().Values.ToArray();
+        var emb = ps[0].Tensor.Data.ToArray();
+        var c1w = ps[1].Tensor.Data.ToArray();
+        var c1b = ps[2].Tensor.Data.ToArray();
+        var c2w = ps[3].Tensor.Data.ToArray();
+        var c2b = ps[4].Tensor.Data.ToArray();
+        var c3w = ps[5].Tensor.Data.ToArray();
+        var c3b = ps[6].Tensor.Data.ToArray();
+        var fc1wCpu = ps[7].Tensor.Data.ToArray();
+        var fc1b = ps[8].Tensor.Data.ToArray();
+        var fc2wCpu = ps[9].Tensor.Data.ToArray();
+        var fc2b = ps[10].Tensor.Data.ToArray();
+
+        int convHidden = BranchChannels * seqLen * BranchCount;
+        var gpuFc1 = new float[convHidden * hiddenDim];
+        for (int i = 0; i < hiddenDim; i++)
+            for (int j = 0; j < convHidden; j++)
+                gpuFc1[j * hiddenDim + i] = fc1wCpu[i * convHidden + j];
+        var gpuFc2 = new float[hiddenDim * 2];
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < hiddenDim; j++)
+                gpuFc2[j * 2 + i] = fc2wCpu[i * hiddenDim + j];
+
+        SetWeights(emb, c1w, c1b, c2w, c2b, c3w, c3b, gpuFc1, fc1b, gpuFc2, fc2b);
+
+        cpuModel.Dispose();
+        optimizer.Dispose();
+    }
+
+    // Local autograd reference model mirroring ConvTextClassifierModel.
+    sealed class HostConvModel : Module<float>
+    {
+        readonly Embedding<float> embedding;
+        readonly Conv1d<float> conv1;
+        readonly Conv1d<float> conv2;
+        readonly Conv1d<float> conv3;
+        readonly Linear<float> fc1;
+        readonly Linear<float> fc2;
+        readonly int maxSeqLen;
+
+        public HostConvModel(int vocabSize, int embeddingDim, int hiddenDim, int seqLen)
+        {
+            maxSeqLen = seqLen;
+            embedding = new Embedding<float>(vocabSize, embeddingDim);
+            conv1 = new Conv1d<float>(embeddingDim, 64, 3, padding: 1);
+            conv2 = new Conv1d<float>(embeddingDim, 64, 5, padding: 2);
+            conv3 = new Conv1d<float>(embeddingDim, 64, 7, padding: 3);
+            int convOutputSize = 64 * 3 * seqLen;
+            fc1 = new Linear<float>(convOutputSize, hiddenDim, bias: true);
+            fc2 = new Linear<float>(hiddenDim, 2, bias: true);
+            RegisterModules(embedding, conv1, conv2, conv3, fc1, fc2);
+        }
+
+        public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> input)
+        {
+            var emb = embedding.Forward(input);
+            var ncl = ReverseGradOperations.TransposeAxes(emb, 1, 2);
+            var c1 = ReverseGradOperations.Relu(conv1.Forward(ncl));
+            var c2 = ReverseGradOperations.Relu(conv2.Forward(ncl));
+            var c3 = ReverseGradOperations.Relu(conv3.Forward(ncl));
+
+            int B = c1.Shape[0];
+            int c1Flat = c1.Shape[1] * c1.Shape[2];
+            int c2Flat = c2.Shape[1] * c2.Shape[2];
+            int c3Flat = c3.Shape[1] * c3.Shape[2];
+            c1.Reshape(B, c1Flat);
+            c2.Reshape(B, c2Flat);
+            c3.Reshape(B, c3Flat);
+            var cat = ReverseGradOperations.Concat([c1, c2, c3], axis: 1);
+            var h = ReverseGradOperations.Relu(fc1.Forward(cat));
+            return fc2.Forward(h);
+        }
+
+        public override string ExportToOnnx(IOnnxExportContext<float> context, string inputName) => inputName;
+    }
+
+    public float[] ExportEmbedding() { var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
+    public float[] ExportConv1Weight() { var a = new float[conv1W.Length]; Array.Copy(conv1W, a, a.Length); return a; }
+    public float[] ExportConv1Bias() { var a = new float[conv1B.Length]; Array.Copy(conv1B, a, a.Length); return a; }
+    public float[] ExportConv2Weight() { var a = new float[conv2W.Length]; Array.Copy(conv2W, a, a.Length); return a; }
+    public float[] ExportConv2Bias() { var a = new float[conv2B.Length]; Array.Copy(conv2B, a, a.Length); return a; }
+    public float[] ExportConv3Weight() { var a = new float[conv3W.Length]; Array.Copy(conv3W, a, a.Length); return a; }
+    public float[] ExportConv3Bias() { var a = new float[conv3B.Length]; Array.Copy(conv3B, a, a.Length); return a; }
+    public float[] ExportFc1Weight() { var a = new float[fc1W.Length]; Array.Copy(fc1W, a, a.Length); return a; }
+    public float[] ExportFc1Bias() { var a = new float[fc1B.Length]; Array.Copy(fc1B, a, a.Length); return a; }
+    public float[] ExportFc2Weight() { var a = new float[fc2W.Length]; Array.Copy(fc2W, a, a.Length); return a; }
+    public float[] ExportFc2Bias() { var a = new float[fc2B.Length]; Array.Copy(fc2B, a, a.Length); return a; }
 
     public void Dispose()
     {
