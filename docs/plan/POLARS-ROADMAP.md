@@ -75,7 +75,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
   - Generic `INumber<T>` / `IFloatingPointIeee754<T>` static kernels via SAIS (the native monomorphization).
   - `Expression.Compile` to a span-consuming delegate as the fallback for non-generic-math types.
 - **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraQuery.OrderBy`/`SortByExpressionOperation`), routing complex expressions through the fused evaluator.
-- **Generic-math collapse:** replace the explicit `float`/`double` branches in `NivaraColumn<T>` arithmetic (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`, and operator overloads) with `INumber<T>` generic paths, keeping `TensorPrimitives` on the vectorizable fast path.
+- **Generic-math collapse:** expose generic-math methods on the `NivaraColumn<T>` surface (arithmetic already routes through `NumericKernelDispatcher`; operator overloads at `src/Nivara/NivaraColumn.cs:1837-1909`) instead of per-type methods, keeping `TensorPrimitives` on the vectorizable fast path.
 
 **Scope (remaining):**
 - **BFloat16 in the column/query-expression path — ✅ Delivered (on `main`).** Issue #137 admitted `BFloat16` to the **AutoDiff** domain only; the columnar layer now wires it through (mirroring `Half`): `NumericKernelDispatcher.arithmeticDomain`, `NumericPromoter`, `TypeCompatibilityValidator.GetNumericTypes`, `TypeExtensions.IsNumericType`, window functions, sort/comparers, aggregation (Sum→`double`), quantile, the fused evaluator (`FusedKernel.CoerceLiteral`), and `NivaraSeries`. Step-0 probe confirmed the active net11 BCL `TensorPrimitives` exposes `BFloat16` arithmetic overloads, so the generic SIMD path applies with no scalar fallback.
