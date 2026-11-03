@@ -72,6 +72,18 @@ public sealed class UnsupportedTypeException : NivaraIOException
     }
 
     /// <summary>
+    /// Initializes a new instance of UnsupportedTypeException for a supported type used in an
+    /// unsupported way, carrying the reason
+    /// </summary>
+    /// <param name="unsupportedType">The type involved in the unsupported operation</param>
+    /// <param name="reason">Why this operation cannot accept the type</param>
+    public UnsupportedTypeException(Type unsupportedType, string reason)
+        : base($"Type '{unsupportedType.Name}' is not supported for I/O operations: {reason}")
+    {
+        UnsupportedType = unsupportedType;
+    }
+
+    /// <summary>
     /// Initializes a new instance of UnsupportedTypeException with suggested alternatives
     /// </summary>
     /// <param name="unsupportedType">The unsupported type</param>

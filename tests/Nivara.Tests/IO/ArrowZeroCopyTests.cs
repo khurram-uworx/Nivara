@@ -124,4 +124,51 @@ public class ArrowZeroCopyTests
             Assert.That(array.Values.Slice(0, 3).ToArray(), Is.EqualTo(new[] { 11, 12, 13 }));
         });
     }
+
+    [Test]
+    public void ToArrowTable_ZeroCopyNullBearingColumn_ThrowsUnsupportedTypeNamingColumn()
+    {
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
+        var frame = NivaraFrame.Create("values", column);
+
+        var exception = Assert.Throws<UnsupportedTypeException>(
+            () => ArrowInterop.ToArrowTable(frame, ZeroCopy));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.UnsupportedType, Is.EqualTo(typeof(int)));
+            Assert.That(exception.Message, Does.Contain("values"));
+            Assert.That(exception.Message, Does.Contain("null"));
+            Assert.That(exception.Message, Does.Contain("UseZeroCopy"));
+        });
+    }
+
+    [Test]
+    public void ToArrowTable_ZeroCopyStringColumn_ThrowsUnsupportedTypeNamingColumn()
+    {
+        var column = NivaraColumn<string>.Create(new[] { "alpha", "beta" });
+        var frame = NivaraFrame.Create("labels", column);
+
+        var exception = Assert.Throws<UnsupportedTypeException>(
+            () => ArrowInterop.ToArrowTable(frame, ZeroCopy));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.UnsupportedType, Is.EqualTo(typeof(string)));
+            Assert.That(exception.Message, Does.Contain("labels"));
+            Assert.That(exception.Message, Does.Contain("copying path"));
+        });
+    }
+
+    [Test]
+    public void ToArrowArray_ZeroCopyNullBearingSeries_ThrowsUnsupportedType()
+    {
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null });
+        using var series = new NivaraSeries<int>(column);
+
+        var exception = Assert.Throws<UnsupportedTypeException>(
+            () => ArrowInterop.ToArrowArray(series, ZeroCopy));
+
+        Assert.That(exception!.Message, Does.Contain("null"));
+    }
 }
