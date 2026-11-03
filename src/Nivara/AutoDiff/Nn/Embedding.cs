@@ -189,6 +189,9 @@ public class Embedding<TModel, TWeight> : Module<TModel>
 
     bool ShouldTrack() => GradientUtils.IsGradEnabled && weight.Tensor.RequiresGrad;
 
+    public override string ExportToOnnx(IOnnxExportContext<TModel> context, string inputName)
+        => context.Embedding<TWeight>(inputName, this);
+
     public override Dictionary<string, ReverseGradTensor<TModel>> StateDict()
     {
         var state = base.StateDict();

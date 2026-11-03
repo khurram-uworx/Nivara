@@ -9,9 +9,13 @@ namespace Nivara.AutoDiff.Nn;
 public interface IOnnxExportContext<T> where T : struct, IFloatingPointIeee754<T>
 {
     string Linear(string inputName, Linear<T> module);
+    string Linear<TWeight>(string inputName, Linear<T, TWeight> module)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>;
     string Conv1d(string inputName, Conv1d<T> module);
     string Conv2d(string inputName, Conv2d<T> module);
     string Embedding(string inputName, Embedding<T> module);
+    string Embedding<TWeight>(string inputName, Embedding<T, TWeight> module)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>;
     string BatchNorm1d(string inputName, BatchNorm1d<T> module);
     string BatchNorm2d(string inputName, BatchNorm2d<T> module, int? n = null, int? h = null, int? w = null);
     string LayerNorm(string inputName, LayerNorm<T> module);

@@ -125,6 +125,9 @@ public class Linear<TModel, TWeight> : Module<TModel>
         return resultTensor;
     }
 
+    public override string ExportToOnnx(IOnnxExportContext<TModel> context, string inputName)
+        => context.Linear<TWeight>(inputName, this);
+
     public override Dictionary<string, ReverseGradTensor<TModel>> StateDict()
     {
         var state = base.StateDict();

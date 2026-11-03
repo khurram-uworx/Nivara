@@ -14,6 +14,18 @@ public sealed class OnnxExportOptions
     public string ProducerName { get; set; } = "Nivara";
     public string ProducerVersion { get; set; } = "2.0.0";
     public string GraphName { get; set; } = "main_graph";
+    /// <summary>
+    /// When true, attempt to preserve the module's native element type in the exported
+    /// graph instead of the F32 default. Default false (F32-friendly widening).
+    /// </summary>
+    public bool NativeDtype
+    {
+        get => nativeDtype;
+        set => nativeDtype = value;
+    }
+    public bool UseNativeDtype { get => nativeDtype; set => nativeDtype = value; }
+    public bool ExportNativeDtype { get => nativeDtype; set => nativeDtype = value; }
+    bool nativeDtype;
 }
 
 public static class OnnxExporter
@@ -166,6 +178,48 @@ public static class OnnxExporter
             return outName;
         }
 
+        public string Linear<TWeight>(string inputName, Linear<T, TWeight> module)
+            where TWeight : struct, IFloatingPointIeee754<TWeight>
+        {
+            var wName = New("weight");
+            var wShape = module.Weight?.Tensor.Shape ?? new[] { module.OutFeatures, module.InFeatures };
+            var wStorage = new TWeight[module.Weight!.Tensor.Length];
+            module.Weight!.Tensor.Data.CopyTo(wStorage, TWeight.Zero);
+            var wData = new T[wStorage.Length];
+            for (int i = 0; i < wData.Length; i++)
+                wData[i] = T.CreateChecked(wStorage[i]);
+            AddInitializer(wName, wData, wShape);
+
+            var inputs = new List<string> { inputName, wName };
+            string? bName = null;
+            if (module.Bias != null)
+            {
+                bName = New("bias");
+                var bShape = module.Bias!.Tensor.Shape;
+                var bData = new T[module.Bias!.Tensor.Length];
+                module.Bias!.Tensor.Data.CopyTo(bData, T.Zero);
+                AddInitializer(bName, bData, bShape);
+                inputs.Add(bName);
+            }
+
+            var outName = New("linear_out");
+            var attrs = new List<AttributeProto>
+            {
+                new AttributeProto { Name = "alpha", Type = AttributeProto.Types.AttributeType.Float, F = 1f },
+                new AttributeProto { Name = "beta", Type = AttributeProto.Types.AttributeType.Float, F = 1f },
+                new AttributeProto { Name = "transA", Type = AttributeProto.Types.AttributeType.Int, I = 0 },
+                new AttributeProto { Name = "transB", Type = AttributeProto.Types.AttributeType.Int, I = 1 },
+            };
+            AddNode("Gemm", inputs.ToArray(), new[] { outName }, attrs);
+
+            var inShape = GetShape(inputName);
+            var outShape = inShape.Length >= 2
+                ? new[] { inShape[0], module.OutFeatures }
+                : new[] { module.OutFeatures };
+            SetShape(outName, outShape);
+            return outName;
+        }
+
         public string Conv1d(string inputName, Conv1d<T> module)
         {
             var wName = New("conv1d_weight");
@@ -269,6 +323,40 @@ public static class OnnxExporter
             var wName = New("embedding_weight");
             var wData = new T[module.Weight!.Tensor.Length];
             module.Weight!.Tensor.Data.CopyTo(wData, T.Zero);
+            AddInitializer(wName, wData, module.Weight!.Tensor.Shape);
+            var outName = New("embedding_out");
+            AddNode("Gather", new[] { wName, castName }, new[] { outName },
+                new[] { new AttributeProto { Name = "axis", Type = AttributeProto.Types.AttributeType.Int, I = 0 } });
+            var inShapeEmb = GetShape(inputName);
+            int[] outShapeEmb;
+            if (inShapeEmb.Length == 0)
+                outShapeEmb = new[] { module.EmbeddingDim };
+            else
+            {
+                outShapeEmb = new int[inShapeEmb.Length + 1];
+                Array.Copy(inShapeEmb, outShapeEmb, inShapeEmb.Length);
+                outShapeEmb[inShapeEmb.Length] = module.EmbeddingDim;
+            }
+            SetShape(outName, outShapeEmb);
+            return outName;
+        }
+
+        public string Embedding<TWeight>(string inputName, Embedding<T, TWeight> module)
+            where TWeight : struct, IFloatingPointIeee754<TWeight>
+        {
+            var castName = inputName;
+            if (typeof(T) != typeof(long) && typeof(T) != typeof(int))
+            {
+                castName = New("indices_int64");
+                AddNode("Cast", new[] { inputName }, new[] { castName },
+                    new[] { new AttributeProto { Name = "to", Type = AttributeProto.Types.AttributeType.Int, I = (int)TensorProto.Types.DataType.Int64 } });
+            }
+            var wName = New("embedding_weight");
+            var wStorage = new TWeight[module.Weight!.Tensor.Length];
+            module.Weight!.Tensor.Data.CopyTo(wStorage, TWeight.Zero);
+            var wData = new T[wStorage.Length];
+            for (int i = 0; i < wData.Length; i++)
+                wData[i] = T.CreateChecked(wStorage[i]);
             AddInitializer(wName, wData, module.Weight!.Tensor.Shape);
             var outName = New("embedding_out");
             AddNode("Gather", new[] { wName, castName }, new[] { outName },
@@ -657,6 +745,7 @@ public static class OnnxExporter
         string IOnnxExportContext<T>.Conv1d(string inputName, Conv1d<T> module) => Conv1d(inputName, module);
         string IOnnxExportContext<T>.Conv2d(string inputName, Conv2d<T> module) => Conv2d(inputName, module);
         string IOnnxExportContext<T>.Embedding(string inputName, Embedding<T> module) => Embedding(inputName, module);
+        string IOnnxExportContext<T>.Embedding<TWeight>(string inputName, Embedding<T, TWeight> module) => Embedding(inputName, module);
         string IOnnxExportContext<T>.BatchNorm1d(string inputName, BatchNorm1d<T> module) => BatchNorm1d(inputName, module);
         string IOnnxExportContext<T>.BatchNorm2d(string inputName, BatchNorm2d<T> module, int? n, int? h, int? w) => BatchNorm2d(inputName, module, n, h, w);
         string IOnnxExportContext<T>.LayerNorm(string inputName, LayerNorm<T> module) => LayerNorm(inputName, module);
@@ -664,6 +753,7 @@ public static class OnnxExporter
         string IOnnxExportContext<T>.TransformerBlock(string inputName, TransformerBlock<T> module, int sequenceLength) => TransformerBlock(inputName, module, sequenceLength);
         string IOnnxExportContext<T>.MultiheadAttention(string inputName, MultiheadAttention<T> module) => MultiheadAttention(inputName, module);
         string IOnnxExportContext<T>.Linear(string inputName, Linear<T> module) => Linear(inputName, module);
+        string IOnnxExportContext<T>.Linear<TWeight>(string inputName, Linear<T, TWeight> module) => Linear(inputName, module);
         string IOnnxExportContext<T>.Relu(string inputName) => Relu(inputName);
         string IOnnxExportContext<T>.Gelu(string inputName) => Gelu(inputName);
         string IOnnxExportContext<T>.Sigmoid(string inputName) => Sigmoid(inputName);
