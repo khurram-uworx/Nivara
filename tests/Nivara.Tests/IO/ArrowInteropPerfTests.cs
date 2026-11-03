@@ -56,6 +56,46 @@ public class ArrowInteropPerfTests
         RunDirectionalBenchmark<double>("FromArrowTable", 1_000_000);
     }
 
+    [Test]
+    public void ToArrowTable_ZeroCopy_IntColumn_Throughput()
+    {
+        RunZeroCopyBenchmark<int>(100_000);
+    }
+
+    [Test]
+    public void ToArrowTable_ZeroCopy_IntColumn_Throughput_1M()
+    {
+        RunZeroCopyBenchmark<int>(1_000_000);
+    }
+
+    [Test]
+    public void ToArrowTable_ZeroCopy_DoubleColumn_Throughput()
+    {
+        RunZeroCopyBenchmark<double>(100_000);
+    }
+
+    static void RunZeroCopyBenchmark<T>(int size)
+    {
+        var rng = new Random(42);
+        var data = new T[size];
+        for (int i = 0; i < size; i++)
+            data[i] = typeof(T) == typeof(int) ? (T)(object)(i % 100_000) : (T)(object)(rng.NextDouble());
+
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<T>.Create(data)));
+        var options = new ArrowConversionOptions { UseZeroCopy = true };
+
+        Action action = () => ArrowInterop.ToArrowTable(frame, options);
+
+        // warmup
+        action();
+
+        var time = MeasureBestOfFiveMs(action);
+
+        double perSec = size / (time / 1000.0);
+        TestContext.Out.WriteLine(
+            $"ToArrowTable ZERO-COPY <{typeof(T).Name}> ({size} elements): {time:F2}ms ({perSec:F0} el/s)");
+    }
+
     static void RunDirectionalBenchmark<T>(string direction, int size)
     {
         var rng = new Random(42);
