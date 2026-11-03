@@ -33,4 +33,4 @@ NivaraClassifier trains small text classifiers with reverse-mode autograd on CPU
 - docs: update README/SILK
 
 ## GitHub issues log
-- (none yet)
+- [ ] #883 — implement --silk GPU training/predict foundations (created while scoping)
