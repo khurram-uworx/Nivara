@@ -26,6 +26,10 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
     /// <summary>Gets the learnable gamma parameter (shape <c>[normalizedShape]</c>).</summary>
     public Parameter<T>? Weight => weight;
 
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.RMSNorm(inputName, this);
+
     /// <summary>
     /// Creates an RMS normalization layer. Gamma is initialized to one.
     /// </summary>

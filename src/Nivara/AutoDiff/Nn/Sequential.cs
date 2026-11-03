@@ -41,6 +41,15 @@ public sealed class Sequential<T> : Module<T> where T : struct, IFloatingPointIe
         return current;
     }
 
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+    {
+        var current = inputName;
+        foreach (var module in modules)
+            current = module.ExportToOnnx(context, current);
+        return current;
+    }
+
     /// <summary>
     /// Adds a module to the end of the sequence.
     /// </summary>

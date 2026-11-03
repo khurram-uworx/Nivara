@@ -93,6 +93,14 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
     /// <summary>Gets the learnable beta parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName) =>
+        context.BatchNorm1d(inputName, this);
+    /// <summary>Gets the number of features normalized.</summary>
+    public int NumFeatures => numFeatures;
+    /// <summary>Gets the epsilon used for numerical stability.</summary>
+    public T Eps => eps;
+
     /// <summary>
     /// Normalizes a 2D <c>[N, C]</c> or 3D <c>[B, C, L]</c> input, using batch statistics while
     /// training and running statistics while in evaluation mode.
@@ -363,6 +371,14 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
     public Parameter<T>? Weight => weight;
     /// <summary>Gets the learnable beta parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Bias => bias;
+
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName) =>
+        context.BatchNorm2d(inputName, this);
+    /// <summary>Gets the number of features normalized.</summary>
+    public int NumFeatures => numFeatures;
+    /// <summary>Gets the epsilon used for numerical stability.</summary>
+    public T Eps => eps;
 
     /// <summary>
     /// Normalizes a 4D input <c>[N, C, H, W]</c>, using batch statistics while training and

@@ -49,6 +49,10 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     public int PaddingRight => paddingRight;
     /// <summary>Gets the number of channel groups.</summary>
     public int Groups => groups;
+
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.Conv2d(inputName, this);
     /// <summary>Gets the weight parameter (shape <c>[outChannels, inChannels/groups, kernelSize, kernelSize]</c>).</summary>
     public Parameter<T>? Weight => weight;
     /// <summary>Gets the bias parameter, or null when bias is disabled.</summary>

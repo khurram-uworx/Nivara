@@ -29,6 +29,14 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     /// <returns>The output tensor</returns>
     public abstract ReverseGradTensor<T> Forward(ReverseGradTensor<T> input);
 
+    /// <summary>
+    /// Exports this module into an ONNX graph via <paramref name="context"/>. Defaults
+    /// to unsupported so unsupported modules fail loudly rather than silently.
+    /// </summary>
+    public virtual string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => throw new NotSupportedException(
+            $"Module type '{GetType().FullName}' does not support ONNX export.");
+
     /// <summary>Puts this module and all registered child modules into training mode.</summary>
     public void Train()
     {
