@@ -57,43 +57,95 @@ public class ArrowInteropPerfTests
     }
 
     [Test]
-    public void ToArrowTable_ZeroCopy_IntColumn_Throughput()
+    public void ToArrowTable_ZeroCopyVsCopy_IntColumn_100K()
     {
-        RunZeroCopyBenchmark<int>(100_000);
+        RunInterleavedExportComparison<int>(100_000);
     }
 
     [Test]
-    public void ToArrowTable_ZeroCopy_IntColumn_Throughput_1M()
+    public void ToArrowTable_ZeroCopyVsCopy_IntColumn_1M()
     {
-        RunZeroCopyBenchmark<int>(1_000_000);
+        RunInterleavedExportComparison<int>(1_000_000);
     }
 
     [Test]
-    public void ToArrowTable_ZeroCopy_DoubleColumn_Throughput()
+    public void ToArrowTable_ZeroCopyVsCopy_DoubleColumn_100K()
     {
-        RunZeroCopyBenchmark<double>(100_000);
+        RunInterleavedExportComparison<double>(100_000);
     }
 
-    static void RunZeroCopyBenchmark<T>(int size)
+    [Test]
+    public void ToArrowTable_ZeroCopyVsCopy_DoubleColumn_1M()
     {
+        RunInterleavedExportComparison<double>(1_000_000);
+    }
+
+    static void RunInterleavedExportComparison<T>(int size)
+    {
+        TimingGuards.RequireOptimizedBuildForTiming();
+
         var rng = new Random(42);
         var data = new T[size];
         for (int i = 0; i < size; i++)
             data[i] = typeof(T) == typeof(int) ? (T)(object)(i % 100_000) : (T)(object)(rng.NextDouble());
 
         var frame = NivaraFrame.Create(("Values", NivaraColumn<T>.Create(data)));
-        var options = new ArrowConversionOptions { UseZeroCopy = true };
+        var copyOptions = new ArrowConversionOptions();
+        var zeroCopyOptions = new ArrowConversionOptions { UseZeroCopy = true };
 
-        Action action = () => ArrowInterop.ToArrowTable(frame, options);
+        Action copy = () => ArrowInterop.ToArrowTable(frame, copyOptions);
+        Action zeroCopy = () => ArrowInterop.ToArrowTable(frame, zeroCopyOptions);
 
-        // warmup
-        action();
+        copy();
+        zeroCopy();
 
-        var time = MeasureBestOfFiveMs(action);
+        const int rounds = 11;
+        var copyMs = new double[rounds];
+        var zeroCopyMs = new double[rounds];
+        var stopwatch = new Stopwatch();
 
-        double perSec = size / (time / 1000.0);
+        for (int round = 0; round < rounds; round++)
+        {
+            // Alternate the order so load drift cannot systematically favour one route.
+            if ((round & 1) == 0)
+            {
+                copyMs[round] = Time(copy);
+                zeroCopyMs[round] = Time(zeroCopy);
+            }
+            else
+            {
+                zeroCopyMs[round] = Time(zeroCopy);
+                copyMs[round] = Time(copy);
+            }
+        }
+
+        var medianCopy = Median(copyMs);
+        var medianZeroCopy = Median(zeroCopyMs);
+
+        // No timing assertion. The payoff claim is structural - the zero-copy route has no
+        // element loop - and this probe only corroborates it for a human running Release.
         TestContext.Out.WriteLine(
-            $"ToArrowTable ZERO-COPY <{typeof(T).Name}> ({size} elements): {time:F2}ms ({perSec:F0} el/s)");
+            $"ToArrowTable <{typeof(T).Name}> ({size} elements): copy {medianCopy:F3}ms, " +
+            $"zero-copy {medianZeroCopy:F3}ms, ratio {medianZeroCopy / medianCopy:F4} " +
+            $"({rounds} interleaved rounds, median of each route)");
+
+        double Time(Action action)
+        {
+            stopwatch.Restart();
+            action();
+            stopwatch.Stop();
+            return stopwatch.Elapsed.TotalMilliseconds;
+        }
+    }
+
+    static double Median(double[] values)
+    {
+        var sorted = (double[])values.Clone();
+        System.Array.Sort(sorted);
+        int middle = sorted.Length / 2;
+        return (sorted.Length & 1) == 1
+            ? sorted[middle]
+            : (sorted[middle - 1] + sorted[middle]) / 2.0;
     }
 
     static void RunDirectionalBenchmark<T>(string direction, int size)
