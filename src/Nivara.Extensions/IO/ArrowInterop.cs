@@ -79,7 +79,7 @@ public static class ArrowInterop
                     fields.Add(field);
 
                     // Convert column to Arrow array
-                    var arrowArray = ConvertColumnToArrowArray(column, options);
+                    var arrowArray = ConvertColumnToArrowArray(column, options, columnName);
                     arrowArrays.Add(arrowArray);
                 }
                 catch (Exception ex) when (ex is not UnsupportedTypeException)
@@ -334,34 +334,34 @@ public static class ArrowInterop
     /// <summary>
     /// Converts a column to an Arrow array using dynamic dispatch
     /// </summary>
-    private static IArrowArray ConvertColumnToArrowArray(IColumn column, ArrowConversionOptions options)
+    private static IArrowArray ConvertColumnToArrowArray(IColumn column, ArrowConversionOptions options, string? columnName = null)
     {
         var elementType = column.ElementType;
 
         return elementType switch
         {
-            Type t when t == typeof(bool) => ConvertColumnToArrowArrayTyped<bool>(column, options),
-            Type t when t == typeof(int) => ConvertColumnToArrowArrayTyped<int>(column, options),
-            Type t when t == typeof(long) => ConvertColumnToArrowArrayTyped<long>(column, options),
-            Type t when t == typeof(float) => ConvertColumnToArrowArrayTyped<float>(column, options),
-            Type t when t == typeof(double) => ConvertColumnToArrowArrayTyped<double>(column, options),
-            Type t when t == typeof(string) => ConvertColumnToArrowArrayTyped<string>(column, options),
-            Type t when t == typeof(DateTime) => ConvertColumnToArrowArrayTyped<DateTime>(column, options),
-            Type t when t == typeof(byte) => ConvertColumnToArrowArrayTyped<byte>(column, options),
-            Type t when t == typeof(short) => ConvertColumnToArrowArrayTyped<short>(column, options),
-            Type t when t == typeof(uint) => ConvertColumnToArrowArrayTyped<uint>(column, options),
-            Type t when t == typeof(ulong) => ConvertColumnToArrowArrayTyped<ulong>(column, options),
-            Type t when t == typeof(ushort) => ConvertColumnToArrowArrayTyped<ushort>(column, options),
-            Type t when t == typeof(sbyte) => ConvertColumnToArrowArrayTyped<sbyte>(column, options),
-            Type t when t == typeof(Half) => ConvertColumnToArrowArrayTyped<Half>(column, options),
-            Type t when t == typeof(nint) => ConvertColumnToArrowArrayTyped<nint>(column, options),
-            Type t when t == typeof(nuint) => ConvertColumnToArrowArrayTyped<nuint>(column, options),
-            Type t when t == typeof(char) => ConvertColumnToArrowArrayTyped<char>(column, options),
-            Type t when t == typeof(DateOnly) => ConvertColumnToArrowArrayTyped<DateOnly>(column, options),
-            Type t when t == typeof(TimeOnly) => ConvertColumnToArrowArrayTyped<TimeOnly>(column, options),
-            Type t when t == typeof(Guid) => ConvertColumnToArrowArrayTyped<Guid>(column, options),
-            Type t when t == typeof(DateTimeOffset) => ConvertColumnToArrowArrayTyped<DateTimeOffset>(column, options),
-            Type t when t == typeof(TimeSpan) => ConvertColumnToArrowArrayTyped<TimeSpan>(column, options),
+            Type t when t == typeof(bool) => ConvertColumnToArrowArrayTyped<bool>(column, options, columnName),
+            Type t when t == typeof(int) => ConvertColumnToArrowArrayTyped<int>(column, options, columnName),
+            Type t when t == typeof(long) => ConvertColumnToArrowArrayTyped<long>(column, options, columnName),
+            Type t when t == typeof(float) => ConvertColumnToArrowArrayTyped<float>(column, options, columnName),
+            Type t when t == typeof(double) => ConvertColumnToArrowArrayTyped<double>(column, options, columnName),
+            Type t when t == typeof(string) => ConvertColumnToArrowArrayTyped<string>(column, options, columnName),
+            Type t when t == typeof(DateTime) => ConvertColumnToArrowArrayTyped<DateTime>(column, options, columnName),
+            Type t when t == typeof(byte) => ConvertColumnToArrowArrayTyped<byte>(column, options, columnName),
+            Type t when t == typeof(short) => ConvertColumnToArrowArrayTyped<short>(column, options, columnName),
+            Type t when t == typeof(uint) => ConvertColumnToArrowArrayTyped<uint>(column, options, columnName),
+            Type t when t == typeof(ulong) => ConvertColumnToArrowArrayTyped<ulong>(column, options, columnName),
+            Type t when t == typeof(ushort) => ConvertColumnToArrowArrayTyped<ushort>(column, options, columnName),
+            Type t when t == typeof(sbyte) => ConvertColumnToArrowArrayTyped<sbyte>(column, options, columnName),
+            Type t when t == typeof(Half) => ConvertColumnToArrowArrayTyped<Half>(column, options, columnName),
+            Type t when t == typeof(nint) => ConvertColumnToArrowArrayTyped<nint>(column, options, columnName),
+            Type t when t == typeof(nuint) => ConvertColumnToArrowArrayTyped<nuint>(column, options, columnName),
+            Type t when t == typeof(char) => ConvertColumnToArrowArrayTyped<char>(column, options, columnName),
+            Type t when t == typeof(DateOnly) => ConvertColumnToArrowArrayTyped<DateOnly>(column, options, columnName),
+            Type t when t == typeof(TimeOnly) => ConvertColumnToArrowArrayTyped<TimeOnly>(column, options, columnName),
+            Type t when t == typeof(Guid) => ConvertColumnToArrowArrayTyped<Guid>(column, options, columnName),
+            Type t when t == typeof(DateTimeOffset) => ConvertColumnToArrowArrayTyped<DateTimeOffset>(column, options, columnName),
+            Type t when t == typeof(TimeSpan) => ConvertColumnToArrowArrayTyped<TimeSpan>(column, options, columnName),
             _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
     }
@@ -369,12 +369,12 @@ public static class ArrowInterop
     /// <summary>
     /// Converts a typed column to an Arrow array
     /// </summary>
-    private static IArrowArray ConvertColumnToArrowArrayTyped<T>(IColumn column, ArrowConversionOptions options)
+    private static IArrowArray ConvertColumnToArrowArrayTyped<T>(IColumn column, ArrowConversionOptions options, string? columnName = null)
     {
         var typedColumn = (NivaraColumn<T>)column;
 
         if (options.UseZeroCopy)
-            return CreateZeroCopyArrowArray(typedColumn);
+            return CreateZeroCopyArrowArray(typedColumn, columnName);
 
         return typeof(T) switch
         {
@@ -945,33 +945,33 @@ public static class ArrowInterop
 
     /// <summary>
     /// Creates a zero-copy Arrow array sharing the column's backing data buffer.
-    /// Only flat, null-free columns of supported unmanaged primitive types are eligible.
+    /// Only flat columns of supported unmanaged primitive types are eligible; the values buffer
+    /// is shared, the validity buffer is always rebuilt.
     /// </summary>
-    private static IArrowArray CreateZeroCopyArrowArray<T>(NivaraColumn<T> column)
+    private static IArrowArray CreateZeroCopyArrowArray<T>(NivaraColumn<T> column, string? columnName)
     {
-        if (column.HasNulls)
-            throw new InvalidOperationException(
-                "Zero-copy Arrow conversion requires a null-free column; " +
-                "null-bearing columns must use the copying path.");
+        var label = columnName is null ? "the source column" : $"column '{columnName}'";
 
         return typeof(T) switch
         {
-            Type t when t == typeof(byte) => CreateZeroCopyPrimitive((NivaraColumn<byte>)(object)column, UInt8Type.Default, sizeof(byte)),
-            Type t when t == typeof(sbyte) => CreateZeroCopyPrimitive((NivaraColumn<sbyte>)(object)column, Int8Type.Default, sizeof(sbyte)),
-            Type t when t == typeof(short) => CreateZeroCopyPrimitive((NivaraColumn<short>)(object)column, Int16Type.Default, sizeof(short)),
-            Type t when t == typeof(ushort) => CreateZeroCopyPrimitive((NivaraColumn<ushort>)(object)column, UInt16Type.Default, sizeof(ushort)),
-            Type t when t == typeof(int) => CreateZeroCopyPrimitive((NivaraColumn<int>)(object)column, Int32Type.Default, sizeof(int)),
-            Type t when t == typeof(uint) => CreateZeroCopyPrimitive((NivaraColumn<uint>)(object)column, UInt32Type.Default, sizeof(uint)),
-            Type t when t == typeof(long) => CreateZeroCopyPrimitive((NivaraColumn<long>)(object)column, Int64Type.Default, sizeof(long)),
-            Type t when t == typeof(ulong) => CreateZeroCopyPrimitive((NivaraColumn<ulong>)(object)column, UInt64Type.Default, sizeof(ulong)),
-            Type t when t == typeof(float) => CreateZeroCopyPrimitive((NivaraColumn<float>)(object)column, FloatType.Default, sizeof(float)),
-            Type t when t == typeof(double) => CreateZeroCopyPrimitive((NivaraColumn<double>)(object)column, DoubleType.Default, sizeof(double)),
-            Type t when t == typeof(Half) => CreateZeroCopyHalf((NivaraColumn<Half>)(object)column),
-            _ => throw new UnsupportedTypeException(typeof(T), TypeMapper.GetTypeSuggestions(typeof(T)))
+            Type t when t == typeof(byte) => CreateZeroCopyPrimitive((NivaraColumn<byte>)(object)column, UInt8Type.Default),
+            Type t when t == typeof(sbyte) => CreateZeroCopyPrimitive((NivaraColumn<sbyte>)(object)column, Int8Type.Default),
+            Type t when t == typeof(short) => CreateZeroCopyPrimitive((NivaraColumn<short>)(object)column, Int16Type.Default),
+            Type t when t == typeof(ushort) => CreateZeroCopyPrimitive((NivaraColumn<ushort>)(object)column, UInt16Type.Default),
+            Type t when t == typeof(int) => CreateZeroCopyPrimitive((NivaraColumn<int>)(object)column, Int32Type.Default),
+            Type t when t == typeof(uint) => CreateZeroCopyPrimitive((NivaraColumn<uint>)(object)column, UInt32Type.Default),
+            Type t when t == typeof(long) => CreateZeroCopyPrimitive((NivaraColumn<long>)(object)column, Int64Type.Default),
+            Type t when t == typeof(ulong) => CreateZeroCopyPrimitive((NivaraColumn<ulong>)(object)column, UInt64Type.Default),
+            Type t when t == typeof(float) => CreateZeroCopyPrimitive((NivaraColumn<float>)(object)column, FloatType.Default),
+            Type t when t == typeof(double) => CreateZeroCopyPrimitive((NivaraColumn<double>)(object)column, DoubleType.Default),
+            Type t when t == typeof(Half) => CreateZeroCopyPrimitive((NivaraColumn<Half>)(object)column, new HalfFloatType()),
+            _ => throw new UnsupportedTypeException(typeof(T),
+                $"{label} has element type '{typeof(T).Name}', which has no zero-copy export layout. " +
+                $"The type is supported by the copying path; set {nameof(ArrowConversionOptions.UseZeroCopy)} = false to use it.")
         };
     }
 
-    private static IArrowArray CreateZeroCopyPrimitive<T>(NivaraColumn<T> column, IArrowType arrowType, int elementSize) where T : unmanaged
+    private static IArrowArray CreateZeroCopyPrimitive<T>(NivaraColumn<T> column, IArrowType arrowType) where T : unmanaged
     {
         if (column.Storage is not ColumnStorage<T> storage)
             throw new InvalidOperationException("Zero-copy Arrow conversion requires array-backed column storage.");
@@ -981,34 +981,29 @@ public static class ArrowInterop
 
         int count = column.Length;
         var manager = new UnmanagedMemoryManager<T>(segment.Array, segment.Offset, count);
-        var byteMemory = manager.Memory.Slice(0, count * elementSize);
+        var byteMemory = manager.Memory.Slice(0, count * Unsafe.SizeOf<T>());
         var dataBuffer = new ArrowBuffer(byteMemory);
 
-        var arrayData = new ArrayData(arrowType, count, 0, 0,
-            new[] { ArrowBuffer.Empty, dataBuffer }, System.Array.Empty<ArrayData>());
+        var nullMask = column.TryGetNullMask(out var mask) ? mask : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0
+            ? ArrowBuffer.Empty
+            : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
+
+        var arrayData = new ArrayData(arrowType, count, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
 
         return ArrowArrayFactory.BuildArray(arrayData);
     }
 
-    private static IArrowArray CreateZeroCopyHalf(NivaraColumn<Half> column)
-    {
-        if (column.Storage is not ColumnStorage<Half> storage)
-            throw new InvalidOperationException("Zero-copy Arrow conversion requires array-backed column storage.");
-
-        if (!MemoryMarshal.TryGetArray(storage.Data, out var segment) || segment.Array is null)
-            throw new InvalidOperationException("Zero-copy Arrow conversion requires contiguous array-backed storage.");
-
-        int count = column.Length;
-        var manager = new UnmanagedMemoryManager<Half>(segment.Array, segment.Offset, count);
-        var byteMemory = manager.Memory.Slice(0, count * 2);
-        var dataBuffer = new ArrowBuffer(byteMemory);
-
-        var arrayData = new ArrayData(new HalfFloatType(), count, 0, 0,
-            new[] { ArrowBuffer.Empty, dataBuffer }, System.Array.Empty<ArrayData>());
-
-        return ArrowArrayFactory.BuildArray(arrayData);
-    }
-
+    /// <summary>
+    /// Exposes a <typeparamref name="T"/>[] as a <see cref="MemoryManager{T}"/> of bytes so an
+    /// Arrow buffer can share it without copying.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="MemoryManager{T}.Pin"/> takes an index in the manager's element unit, which here
+    /// is <see cref="byte"/> — not in <typeparamref name="T"/> elements.
+    /// </remarks>
     private sealed class UnmanagedMemoryManager<T> : MemoryManager<byte> where T : unmanaged
     {
         private readonly T[] _array;
@@ -1030,8 +1025,9 @@ public static class ArrowInterop
             var handle = GCHandle.Alloc(_array, GCHandleType.Pinned);
             unsafe
             {
-                void* ptr = Unsafe.AsPointer(ref MemoryMarshal.GetArrayDataReference(_array));
-                ptr = (byte*)ptr + (_start + elementIndex) * Unsafe.SizeOf<T>();
+                byte* ptr = (byte*)handle.AddrOfPinnedObject()
+                    + (_start * Unsafe.SizeOf<T>())
+                    + elementIndex;
                 return new MemoryHandle(ptr, handle, this);
             }
         }

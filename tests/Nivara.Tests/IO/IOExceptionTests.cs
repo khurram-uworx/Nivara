@@ -91,6 +91,19 @@ public class IOExceptionTests
     }
 
     [Test]
+    public void UnsupportedTypeException_WithReason_InitializesCorrectly()
+    {
+        var unsupportedType = typeof(string);
+        const string reason = "column 'labels' has no zero-copy layout";
+        var exception = new UnsupportedTypeException(unsupportedType, reason);
+
+        Assert.That(exception.UnsupportedType, Is.EqualTo(unsupportedType));
+        Assert.That(exception.Message, Does.Contain("String"));
+        Assert.That(exception.Message, Does.Contain(reason));
+        Assert.That(exception.SuggestedAlternatives, Is.Empty);
+    }
+
+    [Test]
     public void UnsupportedTypeException_WithSuggestions_InitializesCorrectly()
     {
         var unsupportedType = typeof(TimeSpan);

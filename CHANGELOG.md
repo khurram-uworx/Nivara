@@ -13,6 +13,16 @@ All notable changes to Nivara are documented here. Released versions are publish
   the weights out of the process.
 - Silk Qwen parity coverage for #660: synthetic Silk vs CPU argmax/logit smoke, KV-cache (useKvCache on/off) equivalence, model-gated Paris weather tool loop, and --qwen-decode-attn large-kvLen DecodeAttention benchmark.
 - Fixed corrupted zero-width character in two Qwen Silk tokenizer unkToken literals, which broke --silk tools / --silk plain.
+- **Arrow zero-copy export is real, opt-in, and tested (#835, #836)** —
+  `ArrowConversionOptions.UseZeroCopy` is back with a genuine buffer handoff: for flat
+  `byte`/`sbyte`/`short`/`ushort`/`int`/`uint`/`long`/`ulong`/`float`/`double`/`Half` columns the
+  Arrow data buffer aliases the column's backing array instead of copying it. Null-bearing columns
+  share the values buffer and rebuild the bit-packed validity bitmap from the byte-wise null mask,
+  so a null-bearing 1M-row `int` export allocates the bitmap instead of two full copies. Every other
+  layout, including `bool` and `string`, throws `UnsupportedTypeException` naming the column rather
+  than silently copying, and the option is export-only (`FromArrowTable` ignores it). Evidence:
+  buffer aliasing, slice offsets, post-disposal lifetime and a 12-byte IPC round trip are pinned by
+  tests, and an interleaved A/B probe replaces the previous one-sided best-of-five measurement.
 
 
 ### Changed
@@ -256,6 +266,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **Zero-copy Arrow export reported ineligible columns as data corruption, and pinned at the wrong
+  byte offset (#836)** — a null-bearing, `string`, `bool` or other unsupported column under
+  `UseZeroCopy` threw `InvalidOperationException`, which `ToArrowTable`'s per-column catch rewrapped
+  as `DataCorruptionException` even though nothing was corrupt. It now throws
+  `UnsupportedTypeException` carrying the column name, via a new `Type` + reason overload. The
+  internal `MemoryManager<byte>` also multiplied its pin index by `sizeof(T)` although the index is
+  bytes, so a pin at any non-zero offset pointed past the buffer; it now uses
+  `GCHandle.AddrOfPinnedObject` and scales only the array start.
 - **`NivaraInference` rejects inert and unrecognised options before the first disk touch
   (#586 #587 #591)** — the guards had drifted from the dispatch switch, so each closed hole opened
   the next. The vision models accepted `--precision bf16|fp16`, loaded the BF16/Half weights, and

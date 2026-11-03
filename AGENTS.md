@@ -151,7 +151,7 @@ See [GUIDELINES.md](GUIDELINES.md) for transferable engineering principles (null
 ## Known Issues & Follow-ups
 
 - **Parquet round-trip**: nullable value type null preservation may degrade — investigate (high priority).
-- **Zero-copy Arrow arrays**: removed from the public API (claims-integrity triage, see CHANGELOG); real zero-copy returns with `ARROW-ROADMAP` Phase D (issue #94).
+- **Zero-copy Arrow arrays**: export-only, through `ArrowConversionOptions.UseZeroCopy` — flat primitive columns (including null-bearing ones, whose validity bitmap is rebuilt) share their data buffer; import and Parquet still copy. See `ARROW-ROADMAP` Phase D.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets (element-wise `Series`/`Frame` ↔ `Tensor<T>` interop still copies); `AsTensorView()` covers the flat, null-free column case.
 - **NivaraSeries TopKDescending**: added in Phase 3 on `NivaraSeries<T>` (not `NivaraFrame`), returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
 - **ConvTranspose2d**: no grouped convolution support; grouped transpose would require new kernel paths.

@@ -11,11 +11,22 @@ public class ArrowConversionOptions
     /// Gets or sets whether to use zero-copy operations when possible
     /// </summary>
     /// <remarks>
-    /// When enabled, the converter shares the column's existing data buffer with the
-    /// resulting Apache.Arrow array instead of copying. Only flat, null-free columns
-    /// of supported unmanaged element types are eligible; requesting zero-copy for a
-    /// null-bearing, unsupported, or incompatible column throws rather than silently
-    /// falling back to copying. Default is false.
+    /// <para>
+    /// When enabled, the converter shares the column's existing data buffer with the resulting
+    /// Apache.Arrow array instead of copying it. The validity bitmap is always rebuilt from the
+    /// column's null mask, because a byte-wise, true-at-null mask cannot be shared with Arrow's
+    /// bit-packed, true-at-valid bitmap.
+    /// </para>
+    /// <para>
+    /// Eligible columns are flat columns of <c>byte</c>, <c>sbyte</c>, <c>short</c>,
+    /// <c>ushort</c>, <c>int</c>, <c>uint</c>, <c>long</c>, <c>ulong</c>, <c>float</c>,
+    /// <c>double</c> and <c>Half</c>, with or without nulls. Every other column - including
+    /// <c>bool</c>, whose values Arrow packs as bits, and <c>string</c> - throws
+    /// <see cref="UnsupportedTypeException"/> naming the column rather than silently copying.
+    /// </para>
+    /// <para>
+    /// Export only: <c>ArrowInterop.FromArrowTable</c> ignores this option. Default is false.
+    /// </para>
     /// </remarks>
     public bool UseZeroCopy { get; set; } = false;
 
