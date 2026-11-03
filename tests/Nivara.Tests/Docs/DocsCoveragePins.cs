@@ -28,6 +28,9 @@ internal static class DocsCoveragePins
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
+    /// Re-scoped 2026-11-03 (branch khurram/ai): TENSORS.md's "ONNX export" AI-stack bullet now
+    /// points at `docs/plan/AISTACK-ROADMAP.md` (Phase 1 re-scope to export-only) — one new
+    /// document-reference occurrence (TENSORS.md did not previously reference that path),
+    /// so 230 -> 231. Deliberate addition; not a drop.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 230;
-}
+    internal const int ExpectedDocumentReferenceCount = 231;}
