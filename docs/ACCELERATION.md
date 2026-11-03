@@ -143,7 +143,7 @@ Kernel-level checks and CLI rejects are covered in §§5–6.
 
 ## 5. Kernels, geometry, and contract
 
-`KernelNames` (`SilkKernels.cs:126`) is defined in build/creation order:
+`KernelNames` (`SilkKernels.cs::SilkKernels`) is defined in build/creation order:
 
 ```
 EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,

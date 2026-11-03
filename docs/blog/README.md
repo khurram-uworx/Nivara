@@ -85,7 +85,7 @@ cosine(A, B) should be high, cosine(A, C) low, cosine(C, E) high.
 ```
 
 Live demo: `dotnet run --project samples/NivaraInference -c Release -- minilm similarity`
-(the exact sentence list lives in `samples/NivaraInference/Program.cs:1201-1208`).
+(the exact sentence list lives in `samples/NivaraInference/Program.cs::RunResNet18SilkCompare`).
 
 ## The signal chain (the map everything hangs off)
 
@@ -123,7 +123,7 @@ Live demo: `dotnet run --project samples/NivaraInference -c Release -- minilm si
 | `vocab_size` | 30522 | token lookup table row count |
 | `layer_norm_eps` | 1e-12 | **not** the PyTorch default 1e-5 |
 
-Defaults mirror `BertConfig` (`src/Nivara.Extensions/AI/BertModel.cs:8-16`).
+Defaults mirror `BertConfig` (`src/Nivara.Extensions/AI/BertModel.cs::BertConfig`).
 
 **Parameter budget (~22.6M, computed from config):**
 

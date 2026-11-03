@@ -32,7 +32,7 @@
 
 From each token's embedding row, three **Linear** projections are computed (post 1's
 threshold-logic vote, applied three times). Source: `BertSelfAttention.Forward`,
-`src/Nivara.Extensions/AI/BertModel.cs:65-71`:
+`src/Nivara.Extensions/AI/BertModel.cs::BertSelfAttention(int,int)`:
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -127,9 +127,9 @@ O = P · V
 ```
 
 - In the code, the scale is a constant baked into the module at construction:
-  `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs:40` —
+  `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs::MultiheadAttention` —
   `_attnScale = T.CreateChecked(1.0 / Math.Sqrt(_headDim));`
-  and again in `BertSelfAttention` (`BertModel.cs:61`) for BERT-family models.
+  and again in `BertSelfAttention` (`BertModel.cs::BertSelfAttention(int,int)`) for BERT-family models.
   **Lesson: the scale is part of the model's spec, not a free parameter.**
 
 ## 7. Multi-head: 12 parallel signal paths
@@ -202,10 +202,10 @@ text ──→ ●tokenizer ──→ token ids [128]
 
 ## Facts & numbers to reuse (checklist)
 
-- Q, K, V = three Linear projections of the same `[128,384]` input (`BertModel.cs:65-71`).
+- Q, K, V = three Linear projections of the same `[128,384]` input (`BertModel.cs::BertSelfAttention(int,int)`).
 - `S = Q·Kᵀ / √d`, `P = softmax(S)` per row, `O = P·V`; shapes `[128,384]×[128,384]ᵀ→[128,128]→[128,384]`.
-- head_dim = 384/12 = 32; scale `1/√32` baked into the module (`MultiheadAttention.cs:40`).
-- Multi-head = 12 parallel paths + concat + `oProj` mixing (`BertModel.cs:45-71`).
+- head_dim = 384/12 = 32; scale `1/√32` baked into the module (`MultiheadAttention.cs::MultiheadAttention`).
+- Multi-head = 12 parallel paths + concat + `oProj` mixing (`BertModel.cs::BertSelfAttention<TModel, TWeight>`).
 - The -∞/exp(-∞)=0 fact is the seed of the padding mask (Post 3).
 - 16,384 relevance scores per layer per forward (128×128).
 

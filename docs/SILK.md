@@ -392,7 +392,7 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 
 ### 11.1 The kernel set
 
-`KernelNames` (`SilkKernels.cs:126`) is the build/creation order:
+`KernelNames` (`SilkKernels.cs::SilkKernels`) is the build/creation order:
 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
@@ -465,7 +465,7 @@ returns zero â€” which is how a trailing output slot is omitted rather than laun
 
 ### 11.3 Bit-identity: the macro and the pragma
 
-The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs:390`)
+The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs::Source`)
 deliberately: the byte-identity claim rests on every variant adding the same f32
 values to the same accumulators in the same order, so the text must not be able to drift between
 them. The store after the macro is the only difference. The inner product is a plain `acc += a * b` â€” **not** `fma()` â€” and `#pragma OPENCL FP_CONTRACT
@@ -477,9 +477,9 @@ outputs at rounding scale, systematically wrong and invisible to any tolerance.
 
 **A-tile vector loads and alignment (#807).** The A-staging loops load four consecutive f32 values with
 load4(0, a + aBase). OpenCL load/store are the designated unaligned access primitives: load4
-requires alignment to the *element* type (loat — four bytes), not to loat4. Since  is a
+requires alignment to the *element* type (loat ï¿½ four bytes), not to loat4. Since  is a
 __global const float*,  + aBase is always 4-byte aligned by construction (float index into a float
-array), so the base is never misaligned at load time — even when Cols or the row stride is not a
+array), so the base is never misaligned at load time ï¿½ even when Cols or the row stride is not a
 multiple of four. The old (aBase % 4u) == 0u guard was therefore over-conservative (it demanded
 16-byte alignment) and denied vectorization on non-multiple-of-four K or hidden dimensions.
 It has been dropped; the in-range guards (srcRow < aRows, ColBase + 3 < aCols) and the scalar

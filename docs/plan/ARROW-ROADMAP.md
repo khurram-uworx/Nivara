@@ -20,7 +20,7 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs:951`), while **import** and Parquet conversion still copy; and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:1096-1121`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs::CreateZeroCopyArrowArray`), while **import** and Parquet conversion still copy; and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs::ConvertArrowColumnToNivaraColumnInt`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
 
 ### Non-goals (explicit)
 
@@ -231,7 +231,7 @@ by round-trip parity in the interop layer, and never regress null-correctness.
 
 Both roadmaps sit on the same foundation (typed, null-aware, span-first columns). Phase A here should be sequenced against POLARS-ROADMAP Phase 1 (typed expression engine): they are independent — expression typing does not need chunks, and chunks do not need expression typing — but both must land before Phase D/F merge points.
 
-**What we leverage, not reinvent:** the existing storage seam (`IColumnStorage<T>`, sole-owner `ColumnStorage<T>`), the async members already on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs:34-52`), `ColumnStorage<T>.Slice` (already a true `ReadOnlyMemory` view — proof the pattern works), `KernelSelector`, and the Arrow/Parquet interop test suite in `tests/Nivara.Tests/IO/`.
+**What we leverage, not reinvent:** the existing storage seam (`IColumnStorage<T>`, sole-owner `ColumnStorage<T>`), the async members already on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs::IQuerySource`), `ColumnStorage<T>.Slice` (already a true `ReadOnlyMemory` view — proof the pattern works), `KernelSelector`, and the Arrow/Parquet interop test suite in `tests/Nivara.Tests/IO/`.
 
 ---
 

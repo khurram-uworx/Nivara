@@ -75,7 +75,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
   - Generic `INumber<T>` / `IFloatingPointIeee754<T>` static kernels via SAIS (the native monomorphization).
   - `Expression.Compile` to a span-consuming delegate as the fallback for non-generic-math types.
 - **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraQuery.OrderBy`/`SortByExpressionOperation`), routing complex expressions through the fused evaluator.
-- **Generic-math collapse:** expose generic-math methods on the `NivaraColumn<T>` surface (arithmetic already routes through `NumericKernelDispatcher`; operator overloads at `src/Nivara/NivaraColumn.cs:1837-1909`) instead of per-type methods, keeping `TensorPrimitives` on the vectorizable fast path.
+- **Generic-math collapse:** expose generic-math methods on the `NivaraColumn<T>` surface (arithmetic already routes through `NumericKernelDispatcher`; operator overloads at `src/Nivara/NivaraColumn.cs::NivaraColumn`) instead of per-type methods, keeping `TensorPrimitives` on the vectorizable fast path.
 
 **Scope (remaining):**
 - **BFloat16 in the column/query-expression path — ✅ Delivered (on `main`).** Issue #137 admitted `BFloat16` to the **AutoDiff** domain only; the columnar layer now wires it through (mirroring `Half`): `NumericKernelDispatcher.arithmeticDomain`, `NumericPromoter`, `TypeCompatibilityValidator.GetNumericTypes`, `TypeExtensions.IsNumericType`, window functions, sort/comparers, aggregation (Sum→`double`), quantile, the fused evaluator (`FusedKernel.CoerceLiteral`), and `NivaraSeries`. Step-0 probe confirmed the active net11 BCL `TensorPrimitives` exposes `BFloat16` arithmetic overloads, so the generic SIMD path applies with no scalar fallback.
@@ -120,7 +120,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 ### Phase 4 — Async-first streaming
 
-**Motivation:** The async seams already exist on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs:34-52`), and strategies are implemented — but the pipeline is a synchronous chunk puller with async wrappers. Native design is async-native, with cancellation and bounded memory as first-class properties.
+**Motivation:** The async seams already exist on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs::IQuerySource`), and strategies are implemented — but the pipeline is a synchronous chunk puller with async wrappers. Native design is async-native, with cancellation and bounded memory as first-class properties.
 
 **Status (delivered, v1.4.0 + #331):** The streaming path is genuinely `IAsyncEnumerable`-driven end to end. `QueryFrame.CollectAsync`/`AsStream` are real async (no `Task.Run` hop); every operator exposes `ExecuteAsync` (`IQueryOperation.ExecuteAsync`, `IQuerySource.ExecuteAsync`) and the strategies route through them (`LazyExecutionStrategy`, `StreamingExecutionStrategy`, `ParallelExecutionStrategy`). Channel-style buffering and bounded memory use `StreamingBudgetTracker` + `StreamingWindowProcessor`; lookahead windows (`Lead`/negative `Shift`) stream via delayed emission (#331). `Collect()` remains a thin blocking wrapper over `CollectAsync`. The three acceptance criteria are met and covered by the streaming/property test suites.
 

@@ -19,7 +19,7 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Nivara/AutoDiff/`); ML.NET interop is first-class (`src/Nivara.Extensions/MLNet/`); MEAI embedding integration is proven in samples (`samples/NivaraChess/ChessEmbeddingGenerator.cs`, `samples/NivaraChat/` uses MEAI + Agents + OllamaSharp); PyTorch-validated kernels bridge the weight ecosystem (55 tests, `tests/Nivara.Tests/NivaraTorch/`). The gaps are the last mile: no ONNX export/import, no embedding-column type, no dataset/eval layer, and tensor conversion is element-copy (deliberately, for immutability — `src/Nivara/Tensors/TensorInteropExtensions.cs:84-88`).
+The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Nivara/AutoDiff/`); ML.NET interop is first-class (`src/Nivara.Extensions/MLNet/`); MEAI embedding integration is proven in samples (`samples/NivaraChess/ChessEmbeddingGenerator.cs`, `samples/NivaraChat/` uses MEAI + Agents + OllamaSharp); PyTorch-validated kernels bridge the weight ecosystem (55 tests, `tests/Nivara.Tests/NivaraTorch/`). The gaps are the last mile: no ONNX export/import, no embedding-column type, no dataset/eval layer, and tensor conversion is element-copy (deliberately, for immutability — `src/Nivara/Tensors/TensorInteropExtensions.cs::ToTensorSpan`).
 
 ### Non-goals (explicit)
 
@@ -124,7 +124,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 **Status note:** delivered as the public zero-copy `NivaraColumn<T>.AsTensorView()` / `NivaraSeries<T>.AsTensorView()` surface (issue #107) — a lazy `Tensor<T>` view over the sole-owner backing array, guarded (nulls/reference types throw) rather than a `TryGet` contract. Callers treat the view as read-only; immutability is convention, not a `ReadOnlyTensorSpan<T>` type. `ToTensorSpan` still copies to protect immutability.
 
-**Motivation:** `ToTensorSpan` copies to protect immutability (`TensorInteropExtensions.cs:84-88`) — the *right* principle, but a safe read-only view eliminates the copy for flat, null-free columns without ever exposing a writable span.
+**Motivation:** `ToTensorSpan` copies to protect immutability (`TensorInteropExtensions.cs::ToTensorSpan`) — the *right* principle, but a safe read-only view eliminates the copy for flat, null-free columns without ever exposing a writable span.
 
 **Scope:**
 - Add `TryGetReadOnlyTensorSpan<T>()` on `NivaraColumn<T>`/`NivaraSeries<T>` that returns a `ReadOnlyTensorSpan<T>` **view** over storage when the column is null-free and layout-compatible (flat), else `false` (caller falls back to the copy path).

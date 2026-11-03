@@ -354,7 +354,7 @@ round); the printed `best ms` column is the median of those 20 rounds, not best-
 
 `Blocked` exists because there is no BCL matrix multiply to compare against
 (`TensorPrimitives.Dot` is the *vector* dot product; `Tensor.MatrixMultiply` has not
-shipped, dotnet/runtime#95863, noted at `TensorsHelper.cs:30-36`). It is the shape a
+shipped, dotnet/runtime#95863, noted at `TensorsHelper.cs::TensorsHelper`). It is the shape a
 register-blocked CPU GEMM would take, written in the harness so it measures a number
 instead of proposing a change to `src/Nivara`.
 

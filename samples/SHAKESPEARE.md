@@ -50,7 +50,7 @@ already expressible.**
   does exactly this flatten (`AutoDiff/Nn/Embedding.cs`), and `Linear<T>` covers
   the rank-2 multiply. No new capability.
 - Attention scores (the only true batched-B case) are already handled by the
-  fused `ReverseGradOperations.MultiHeadAttention` (`ReverseGradOperations.cs:362`),
+  fused `ReverseGradOperations.MultiHeadAttention` (`ReverseGradOperations.cs::MatMul`),
   which loops heads internally over rank-2
   `TensorsHelper.MultiplyCore(..., bTransposed: true)`. No FLOPs are wasted in
   the current design.
@@ -91,7 +91,7 @@ SHAKESPEARE.md Task 3 (pool the transient transpose arrays in rank-2 MatMul) is
 partially already done: the `TensorsHelper.MultiplyCore*` kernels already rent
 their `aCopy`/`bT` buffers from `ArrayPool` (lines 167–168, 196–197, 225–226).
 What remains is the op-level backward closure, which allocates `bTArr` and
-`aTArr` as `new T[]` (`ReverseGradOperations.cs:277, 287`) — ~2 arrays per
+`aTArr` as `new T[]` (`ReverseGradOperations.cs::DivideScalar, 287`) — ~2 arrays per
 backward, rentable in a `finally`. That is a real, sample-independent, low-risk
 improvement, but smaller than the original plan advertised.
 
@@ -138,7 +138,7 @@ is the library-level justification for this route.
 ### Decision
 
 - New public op **`ReverseGradOperations.BatchedMultiHeadAttention<T>(query, key, value, nHead, attnScale, mask?)`**
-  (ReverseGradOperations.cs:569) accepting rank-3 `[B, L, D]` Q/K/V and an optional
+  (ReverseGradOperations.cs::MultiHeadAttention(ReverseGradTensor<T>,ReverseGradTensor<T>,ReverseGradTensor<T>,int,T,ReverseGradTensor<T>?,int,int)) accepting rank-3 `[B, L, D]` Q/K/V and an optional
   additive `[B, qLen, kvLen]` mask. A separate op (not an overload) keeps the
   single-sequence `MultiHeadAttention` op untouched and bit-identical — the
   regression surface is zero.
@@ -217,7 +217,7 @@ defaults (`B=16, L=128, D=64, H=4`), causal mask, Release, 16 cores, medians of
 ### Follow-ups
 
 - **#119** (filed 2026-08-05): pool the rank-2 `MatMul` backward transients
-  (`bTArr`/`aTArr`, ReverseGradOperations.cs:277/287) — the batched op pools its
+  (`bTArr`/`aTArr`, ReverseGradOperations.cs::DivideScalar/287) — the batched op pools its
   buffers but the plain MatMul backward closure still `new T[]`s them every
   backward; shows up on the sample's tied-LM-head hot path.
 
@@ -359,7 +359,7 @@ None.
 ### Context
 
 NEXT.md Gap 6 claimed core `Softmax` ignores `dim`. In fact core
-`Softmax<T>(a)` softmaxes over `shape[1]` for rank ≥ 2 (ReverseGradOperations.cs:1836)
+`Softmax<T>(a)` softmaxes over `shape[1]` for rank ≥ 2 (ReverseGradOperations.cs::Slice)
 — not a generic `dim` parameter. An early README draft overclaimed that
 `Softmax(dim)` was "already fixed in core."
 
