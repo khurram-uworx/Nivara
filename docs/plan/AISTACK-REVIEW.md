@@ -2,6 +2,8 @@
 
 **Status:** architecture reference · **Scope:** the AI/data plane — AutoDiff (`src/Nivara/AutoDiff/`), tensor interop (`src/Nivara/Tensors/`), ML.NET interop (`src/Nivara.Extensions/MLNet/`), AI samples · **Companion:** `docs/plan/AISTACK-ROADMAP.md`, `docs/plan/POLARS-REVIEW.md`, `docs/plan/ARROW-REVIEW.md`
 
+**Reassessed 2026-10-23:** Phase 5 (read-only views) delivered; Phases 1–4 open. SafeTensors import + model layer + TensorDataset/DataLoader + NivaraEmbeddingGenerator grew substantially beyond the original scope, but the three headline gaps (ONNX, embedding-column type, metrics module) remain open.
+
 This document evaluates Nivara through a third lens: **"What would AI data infrastructure look like if it were born in .NET to complement the .NET AI stack — with Azure and cloud explicitly off the table?"**
 
 The first two lenses asked whether Nivara behaves like a query engine born in .NET (`docs/plan/POLARS-REVIEW.md`) and like a columnar memory system born in .NET (`docs/plan/ARROW-REVIEW.md`). This lens asks whether Nivara is the *data layer* the local .NET AI ecosystem is missing.
@@ -77,12 +79,12 @@ A data layer born to complement *this* stack makes the boundary between "structu
 
 | Pillar | Status | Evidence |
 | --- | --- | --- |
-| 1 · Tensor-first data plane | 🟡 Partial | `TensorInteropExtensions` (`src/Nivara/Tensors/TensorInteropExtensions.cs`): frame↔`Tensor<T>`, 1D `FromTensor`, `FlattenFromTensor`; `ToTensorSpan` is **deliberately copy-based to preserve immutability** (`:84-88`) — a principled native call — but conversions are element-copies; no safe read-only view path for flat null-free columns |
+| 1 · Tensor-first data plane | 🟡 Partial | `TensorInteropExtensions` (`src/Nivara/Tensors/TensorInteropExtensions.cs`): frame↔`Tensor<T>`, 1D `FromTensor`, `FlattenFromTensor`; `ToTensorSpan` is **deliberately copy-based to preserve immutability** (`:84-88`) — a principled native call — but conversions are element-copies; landed zero-copy lazy view via `AsTensorView()` for flat, null-free columns (nulls/reference types throw); conversions still element-copy; no `ReadOnlyTensorSpan` TryGet path yet |
 | 2 · Feature engineering → ML.NET | ✅ Strong | `MLNetInterop`/`MLNetExtensions` (`src/Nivara.Extensions/MLNet/`): `LoadFromNivaraFrame`/`ToNivaraFrame`, `Fit`, `Predict`, `Transform`, `VBuffer` batch tensors; covered by `tests/Nivara.Tests/MLNet/MLNetIntegrationTests.cs` |
-| 3 · Model interchange | 🟡 Partial | Own `ModelSerializer` (JSON state dicts, `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`), `SafeTensorsLoader` (`src/Nivara.Extensions/AI/SafeTensorsLoader.cs`), 55 PyTorch-validated functional tests (fixtures in `tests/Nivara.Tests/NivaraTorch/`). **No ONNX export/import — the missing bridge to ONNX Runtime** |
+| 3 · Model interchange | 🟡 Partial | Own `ModelSerializer` (JSON state dicts, `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`), SafeTensors import is now dtype-aware with the model layer (Bert/ModernBert/Laya/Llama/Qwen/SmolLM) and `StateDictLoader` (`src/Nivara.Extensions/AI/SafeTensorsLoader.cs`); the PyTorch-validated functional suite has grown well beyond the original 55 (NivaraTorch now covers Llama decoder blocks, banded/batched attention, RMSNorm, rotary embeddings, …). **No ONNX export/import — the missing bridge to ONNX Runtime** |
 | 4 · On-device training/inference | ✅ Very strong | Full AutoDiff subsystem: modules (`Linear`, `Conv*`, `BatchNorm`, `TransformerBlock`, `MultiheadAttention`, `VAE`…), optimizers (`SGD`/`Adam`/`AdamW`), `TrainingLoop`, `DataParallelTrainer`, inference-default `GradientUtils.Grad()` |
-| 5 · Embeddings as data type | 🟡 Partial | `ChessEmbeddingGenerator : IEmbeddingGenerator<ChessBoard, Embedding<float>>` implements MEAI's abstraction (`samples/NivaraChess/ChessEmbeddingGenerator.cs`); `Dot`/`CosineSimilarity`/`TopKDescending` kernels exist. **No embedding column type in the data layer** |
-| 6 · Dataset/data-loader layer | 🟡 Partial | `TrainingLoop`/`DataParallelTrainer` manage batches (`src/Nivara/AutoDiff/Training/`); no frame-level split/shuffle/dataset type |
+| 5 · Embeddings as data type | 🟡 Partial | `ChessEmbeddingGenerator : IEmbeddingGenerator<ChessBoard, Embedding<float>>` implements MEAI's abstraction (`samples/NivaraChess/ChessEmbeddingGenerator.cs`); plus `NivaraEmbeddingGenerator` (MEAI) in `src/Nivara.Extensions/AI/`; `Dot`/`CosineSimilarity`/`TopKDescending` and `RowCosineSimilarity` kernels exist. **No embedding column type in the data layer** |
+| 6 · Dataset/data-loader layer | 🟡 Partial | `TrainingLoop`/`DataParallelTrainer` manage batches (`src/Nivara/AutoDiff/Training/`); `TensorDataset<T>` + `DataLoader` deliver the training-API level. No frame-level split/shuffle/batch ops yet |
 | 7 · Evaluation & metrics | ❌ Gap | Diagnostics + parity fixtures only; no accuracy/F1/loss-curve/confusion module |
 | 8 · Allocation discipline | ✅ Strong | `ArrayPool`/`BufferPool`/spans throughout AutoDiff (`AccumulateGradient`, `Adam`/`AdamW` state, fused kernels) |
 
@@ -95,7 +97,7 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 ## 4. What is already right
 
 - **The app layer already is the complement.** `samples/NivaraChat/` uses `Microsoft.Extensions.AI` + `Microsoft.Agents.AI` + **OllamaSharp** (local LLM via Ollama — no cloud) + `Microsoft.ML.Tokenizers`; `samples/NivaraChess/` implements the MEAI embedding abstraction. The integration pattern is proven end to end.
-- **PyTorch-validated kernels are the ecosystem bridge.** <0.04% loss-curve divergence across 55 functional tests means Nivara-trained weights exchange cleanly with the PyTorch ecosystem (TorchSharp's neighbor). "Train in Nivara, exchange weights with the world."
+- **PyTorch-validated kernels are the ecosystem bridge.** <0.04% loss-curve divergence across the grown NivaraTorch suite (Llama decoder blocks, banded/batched attention, RMSNorm, rotary embeddings, …) means Nivara-trained weights exchange cleanly with the PyTorch ecosystem (TorchSharp's neighbor). "Train in Nivara, exchange weights with the world."
 - **ML.NET interop is first-class**, not an afterthought.
 - **Inference-default is the right native model.** `GradientUtils.Grad()`-gated graph construction matches how a local complementer should behave — predict by default, train explicitly.
 - **`docs/TENSORS.md` already named the right categories** for the AI direction — structured AI datasets, embedding columns, vector search, RAG data preparation, feature engineering, evaluation datasets. This review makes that direction concrete against the local stack.
@@ -106,7 +108,7 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
 All three are additive; nothing architectural needs tearing down.
 
-1. **ONNX export/import (highest value).** Nivara-trained AutoDiff modules export to `.onnx` → run anywhere ONNX Runtime runs; ONNX models import → inference over Nivara frames. This is what turns Nivara from a self-contained training stack into the *data layer of the local .NET AI ecosystem*.
+1. **ONNX export/import (highest value).** Nivara-trained AutoDiff modules export to `.onnx` → run anywhere ONNX Runtime runs; ONNX models import → inference over Nivara frames. This is what turns Nivara from a self-contained training stack into the *data layer of the local .NET AI ecosystem*. (SafeTensors import is already the delivered half of "interchange" — dtype-aware loader + model layer + `StateDictLoader`; ONNX is the remaining half.)
 2. **Embedding column as a first-class column kind.** A column whose elements are vectors, with similarity/top-k, and native `Microsoft.Extensions.AI.Embedding<T>` interop — so generated embeddings land in frames as data (the MEAI `IEmbeddingGenerator` pattern in samples becomes a data-layer feature, not an app-layer one).
 3. **Dataset + evaluation layer.** Split/shuffle/batch as frame operations feeding `TrainingLoop`, plus metrics (accuracy, F1, loss curves, confusion matrices) computed on frames.
 
