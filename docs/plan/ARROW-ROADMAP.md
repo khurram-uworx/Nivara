@@ -20,7 +20,7 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs::CreateZeroCopyArrowArray`), while **import** and Parquet conversion still copy; and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs::ConvertArrowColumnToNivaraColumnInt`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs::CreateZeroCopyArrowArray`), while **import** and Parquet conversion still copy; and there is no chunked-column model in core (Phase A not started; Arrow chunked arrays are flattened on import, `ArrowInterop.cs::ConvertArrowColumnToNivaraColumnInt`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
 
 ### Non-goals (explicit)
 
@@ -33,7 +33,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ## 1. The roadmap
 
-### Phase A — Chunked column model in core *(structural foundation)*
+### Phase A — Chunked column model in core *(structural foundation; Phase A not started)*
 
 **Motivation:** Every Arrow shape collapses at the boundary today because the frame model is single-contiguous-array. Chunked columns are the one structural change everything else hangs off: append/concat, streaming, record-batch boundaries, and zero-copy interop all become natural.
 
@@ -47,7 +47,10 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 **Dependencies:** none (foundation for B–F).
 
+**Status:** Phase A not started — no `Chunk`/`ChunkedColumn` types exist in core yet; Arrow chunked arrays are still flattened on import (verified 2026-11-03).
+
 **Acceptance criteria:**
+- Phase A not started today — until it lands, D-import, Phase F, and chunk-aware handling stay blocked.
 - Arrow `Table` round-trips with chunk structure preserved (chunk counts match; no forced flatten).
 - `Concat` of aligned-chunk inputs does not copy the shared chunks.
 - Existing frame/column behavior unchanged at the API level; `dotnet test` green.
@@ -218,7 +221,7 @@ by round-trip parity in the interop layer, and never regress null-correctness.
 
 ## 2. Sequencing rationale
 
-**Why chunks first:** Phase A remains the structural keystone, but the reality check is now honest: Phase C (validity wiring, #833/#840/#843) and the export half of Phase D (#835/#836) both landed *without* it, because sharing a flat values buffer and packing a validity bitmap do not need a chunked model. What still genuinely needs A is the import half of D (Arrow/Parquet buffers outliving their reader; a validity/ownership rule across chunks), Phase F (record-batch-shaped scanning), and any chunk-aware operator work. B (layout/variable-binary strings) and E (dictionary encoding) are not on the import path and can be tackled for their own analytic reasons; A makes them cleaner, not possible. Without chunks, every chunk-aware phase is bolted onto a single-contiguous-array shape.
+**Why chunks first:** Phase A remains the structural keystone, but the reality check is now honest: Phase C (validity wiring, #833/#840/#843) and the export half of Phase D (#835/#836) **landed independently of Phase A**, because sharing a flat values buffer and packing a validity bitmap do not need a chunked model. What **remains blocked on Phase A** is the import half of D (Arrow/Parquet buffers outliving their reader; a validity/ownership rule across chunks), Phase F (record-batch-shaped scanning), and any chunk-aware handling/operator work. B (layout/variable-binary strings) and E (dictionary encoding) are not on the import path and can be tackled for their own analytic reasons; A makes them cleaner, not possible. Without chunks, every chunk-aware phase is bolted onto a single-contiguous-array shape.
 
 **Credibility vs. polish:** The export half of Phase D is the landed credibility win — it re-introduces the zero-copy API the claims-integrity triage removed (issue #94) and is covered by aliasing, slice, lifetime, IPC and null-parity tests. Phases B and C (the latter delivered) are the physics that make the import half cheap and correct. Phase E is the analytical payoff; F is the streaming payoff.
 
