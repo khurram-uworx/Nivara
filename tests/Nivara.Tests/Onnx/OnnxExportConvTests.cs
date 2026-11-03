@@ -28,10 +28,18 @@ public sealed class Conv2dExportModel : Module<float>
 {
     readonly Conv2d<float> conv;
 
-    public Conv2dExportModel(int inChannels, int outChannels, int kernelSize, int stride = 1, int padding = 0, bool bias = true)
+    public Conv2dExportModel(int inChannels, int outChannels, int kernelSize, int stride = 1, int padding = 0, int groups = 1, bool bias = true)
+        : this(inChannels, outChannels, kernelSize, stride, padding, padding, padding, padding, groups, bias)
+    {
+    }
+
+    public Conv2dExportModel(int inChannels, int outChannels, int kernelSize, int stride,
+        int paddingTop, int paddingBottom, int paddingLeft, int paddingRight,
+        int groups = 1, bool bias = true)
         : base()
     {
-        conv = new Conv2d<float>(inChannels, outChannels, kernelSize, stride, padding, bias: bias);
+        conv = new Conv2d<float>(inChannels, outChannels, kernelSize, stride,
+            paddingTop, paddingBottom, paddingLeft, paddingRight, bias, groups);
         RegisterModules(conv);
     }
 
@@ -155,6 +163,72 @@ public class OnnxExportConvTests
         OnnxExporter.Export(model, ms, new OnnxExportOptions { InputShape = new[] { B, C, H, W } });
         var bytes = ms.ToArray();
         var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "nivara-conv2d-stride.onnx");
+        System.IO.File.WriteAllBytes(path, bytes);
+
+        using var session = new InferenceSession(path);
+        var ortInput = new DenseTensor<float>(input, new[] { B, C, H, W });
+        using var results = session.Run(new[] { NamedOnnxValue.CreateFromTensor("input", ortInput) });
+        var ortOutput = results.First().AsTensor<float>().ToArray();
+
+        Assert.That(ortOutput.Length, Is.EqualTo(expected.Length));
+        for (int i = 0; i < expected.Length; i++)
+            Assert.That(ortOutput[i], Is.EqualTo(expected[i]).Within(1e-4f));
+    }
+
+    [Test]
+    public void Conv2dExport_Grouped_RoundTrip_MatchesNivara()
+    {
+        const int B = 2, C = 4, H = 5, W = 5;
+        var input = new float[B * C * H * W];
+        for (int i = 0; i < input.Length; i++) input[i] = (i + 1) * 0.05f - 0.1f;
+
+        var model = new Conv2dExportModel(C, C, 3, stride: 2, padding: 1, groups: 2, bias: true);
+        model.Eval();
+
+        var inTensor = new ReverseGradTensor<float>(NivaraColumn<float>.Create(input), false);
+        inTensor.Reshape(B, C, H, W);
+        var expectedTensor = model.Forward(inTensor);
+        var expected = new float[expectedTensor.Length];
+        expectedTensor.Data.CopyTo(expected, 0f);
+
+        var ms = new System.IO.MemoryStream();
+        OnnxExporter.Export(model, ms, new OnnxExportOptions { InputShape = new[] { B, C, H, W } });
+        var bytes = ms.ToArray();
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "nivara-conv2d-grouped.onnx");
+        System.IO.File.WriteAllBytes(path, bytes);
+
+        using var session = new InferenceSession(path);
+        var ortInput = new DenseTensor<float>(input, new[] { B, C, H, W });
+        using var results = session.Run(new[] { NamedOnnxValue.CreateFromTensor("input", ortInput) });
+        var ortOutput = results.First().AsTensor<float>().ToArray();
+
+        Assert.That(ortOutput.Length, Is.EqualTo(expected.Length));
+        for (int i = 0; i < expected.Length; i++)
+            Assert.That(ortOutput[i], Is.EqualTo(expected[i]).Within(1e-4f));
+    }
+
+    [Test]
+    public void Conv2dExport_AsymmetricPadding_RoundTrip_MatchesNivara()
+    {
+        const int B = 2, C = 2, H = 5, W = 5;
+        var input = new float[B * C * H * W];
+        for (int i = 0; i < input.Length; i++) input[i] = (i + 1) * 0.05f - 0.2f;
+
+        var model = new Conv2dExportModel(C, 3, 3, stride: 2,
+            paddingTop: 2, paddingBottom: 0, paddingLeft: 1, paddingRight: 3,
+            groups: 1, bias: false);
+        model.Eval();
+
+        var inTensor = new ReverseGradTensor<float>(NivaraColumn<float>.Create(input), false);
+        inTensor.Reshape(B, C, H, W);
+        var expectedTensor = model.Forward(inTensor);
+        var expected = new float[expectedTensor.Length];
+        expectedTensor.Data.CopyTo(expected, 0f);
+
+        var ms = new System.IO.MemoryStream();
+        OnnxExporter.Export(model, ms, new OnnxExportOptions { InputShape = new[] { B, C, H, W } });
+        var bytes = ms.ToArray();
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "nivara-conv2d-asym.onnx");
         System.IO.File.WriteAllBytes(path, bytes);
 
         using var session = new InferenceSession(path);
