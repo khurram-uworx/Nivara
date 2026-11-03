@@ -78,12 +78,14 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ---
 
-### Phase C — Validity representation decided; boundary conversion remains
+### Phase C — Validity representation decided; boundary conversion landed (issues #833, #840, #843)
 
 **Motivation:** Byte-wise `bool` masks cost **8× the memory** of Arrow's bit-packed validity (1 byte
 per element against 1 bit), and that cost was never a written decision — so the representation read as
-accidental. Phase C exists to make it explicit and boundary-friendly. The first half of that is now
-done: the representation is ratified, and what remains is the conversion.
+accidental. Phase C exists to make it explicit and boundary-friendly. The byte-wise mask is
+ratified (ADR-007) and the buffer-level Arrow validity conversion is wired into `ArrowInterop` for
+flat primitive layouts (issues #833, #840, #843); only variable-binary (`string`/`char`) layouts still
+convert element-wise by documented limitation.
 
 **Decision (2026-11-02, issue #832) — Option A:** byte-wise `ReadOnlySpan<bool>` is the canonical
 validity representation in core; bit-packed `Memory<byte>` exists **only** at the Arrow boundary.
