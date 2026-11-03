@@ -945,16 +945,12 @@ public static class ArrowInterop
 
     /// <summary>
     /// Creates a zero-copy Arrow array sharing the column's backing data buffer.
-    /// Only flat, null-free columns of supported unmanaged primitive types are eligible.
+    /// Only flat columns of supported unmanaged primitive types are eligible; the values buffer
+    /// is shared, the validity buffer is always rebuilt.
     /// </summary>
     private static IArrowArray CreateZeroCopyArrowArray<T>(NivaraColumn<T> column, string? columnName)
     {
         var label = columnName is null ? "the source column" : $"column '{columnName}'";
-
-        if (column.HasNulls)
-            throw new UnsupportedTypeException(typeof(T),
-                $"{label} contains null values; zero-copy export requires a null-free column. " +
-                $"Set {nameof(ArrowConversionOptions.UseZeroCopy)} = false to use the copying path.");
 
         return typeof(T) switch
         {
@@ -988,8 +984,14 @@ public static class ArrowInterop
         var byteMemory = manager.Memory.Slice(0, count * Unsafe.SizeOf<T>());
         var dataBuffer = new ArrowBuffer(byteMemory);
 
-        var arrayData = new ArrayData(arrowType, count, 0, 0,
-            new[] { ArrowBuffer.Empty, dataBuffer }, System.Array.Empty<ArrayData>());
+        var nullMask = column.TryGetNullMask(out var mask) ? mask : ReadOnlySpan<bool>.Empty;
+        var validityBytes = ArrowValidityMask.ToValidityBitmap(nullMask);
+        var validityBuffer = validityBytes.Length == 0
+            ? ArrowBuffer.Empty
+            : new ArrowBuffer(new ReadOnlyMemory<byte>(validityBytes));
+
+        var arrayData = new ArrayData(arrowType, count, column.NullCount, 0,
+            new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
 
         return ArrowArrayFactory.BuildArray(arrayData);
     }

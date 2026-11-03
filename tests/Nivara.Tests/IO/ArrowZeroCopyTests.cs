@@ -6,11 +6,11 @@ using NUnit.Framework;
 namespace Nivara.Tests.IO;
 
 /// <summary>
-/// Evidence for the zero-copy export path added by #835. Every test here pins a claim the
-/// landing commit made without a test: that the Arrow data buffer aliases the column's
-/// backing array, that a slice offset is preserved, that the arrow array outlives the column,
-/// and that an aliased buffer survives IPC serialization when its length is not an 8-byte
-/// multiple.
+/// Evidence for the zero-copy export path added by #835 and extended by #836. Every test here
+/// pins a claim about that path: the Arrow data buffer aliases the column's backing array, a
+/// slice offset is preserved, the Arrow array outlives the column, an aliased buffer survives
+/// IPC serialization when its length is not an 8-byte multiple, and a null-bearing column
+/// shares its values buffer while its validity bitmap is rebuilt from the null mask.
 /// </summary>
 [TestFixture]
 public class ArrowZeroCopyTests
@@ -153,20 +153,73 @@ public class ArrowZeroCopyTests
     }
 
     [Test]
-    public void ToArrowTable_ZeroCopyNullBearingColumn_ThrowsUnsupportedTypeNamingColumn()
+    public void ToArrowTable_ZeroCopyNullBearingColumn_BuildsValidityAndSharesValues()
     {
-        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null });
         var frame = NivaraFrame.Create("values", column);
 
-        var exception = Assert.Throws<UnsupportedTypeException>(
-            () => ArrowInterop.ToArrowTable(frame, ZeroCopy));
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+        var copyPathTable = ArrowInterop.ToArrowTable(frame);
+
+        var array = Int32ArrayOf(table);
+        var copyPathArray = (Int32Array)copyPathTable.Column(0).Data.Array(0);
 
         Assert.Multiple(() =>
         {
-            Assert.That(exception!.UnsupportedType, Is.EqualTo(typeof(int)));
-            Assert.That(exception.Message, Does.Contain("values"));
-            Assert.That(exception.Message, Does.Contain("null"));
-            Assert.That(exception.Message, Does.Contain("UseZeroCopy"));
+            Assert.That(array.NullCount, Is.EqualTo(2));
+            Assert.That(array.IsNull(1), Is.True);
+            Assert.That(array.IsNull(3), Is.True);
+            Assert.That(array.IsNull(0), Is.False);
+            Assert.That(array.IsNull(2), Is.False);
+            Assert.That(
+                array.Data.Buffers[0].Span.ToArray(),
+                Is.EqualTo(copyPathArray.Data.Buffers[0].Span.ToArray()),
+                "the rebuilt validity bitmap must match the copying path bit for bit");
+        });
+
+        column.AsWritableSpan()[2] = 99;
+        Assert.That(Int32ArrayOf(table).Values[2], Is.EqualTo(99));
+    }
+
+    [Test]
+    public void ToArrowTable_ZeroCopyNullBearingColumn_RoundTripsNulls()
+    {
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null });
+        var frame = NivaraFrame.Create("values", column);
+
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+        var roundTrip = ArrowInterop.FromArrowTable(table);
+        var roundTripColumn = roundTrip.GetColumn<int>("values");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(roundTripColumn.Length, Is.EqualTo(4));
+            Assert.That(roundTripColumn.IsNull(1), Is.True);
+            Assert.That(roundTripColumn.IsNull(3), Is.True);
+            Assert.That(roundTripColumn[0], Is.EqualTo(1));
+            Assert.That(roundTripColumn[2], Is.EqualTo(3));
+        });
+    }
+
+    [Test]
+    public void ToArrowTable_ZeroCopySlicedNullBearingColumn_PreservesMaskOffset()
+    {
+        var source = NivaraColumnFactory.CreateFromNullable(new int?[] { null, 2, null, 4, 5 });
+        var slice = source.Slice(1, 3);
+        var frame = NivaraFrame.Create("values", slice);
+
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+        var array = Int32ArrayOf(table);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(array.Length, Is.EqualTo(3));
+            Assert.That(array.NullCount, Is.EqualTo(1));
+            Assert.That(array.IsNull(1), Is.True);
+            Assert.That(array.IsNull(0), Is.False);
+            Assert.That(array.IsNull(2), Is.False);
+            Assert.That(array.Values[0], Is.EqualTo(2));
+            Assert.That(array.Values[2], Is.EqualTo(4));
         });
     }
 
@@ -188,14 +241,19 @@ public class ArrowZeroCopyTests
     }
 
     [Test]
-    public void ToArrowArray_ZeroCopyNullBearingSeries_ThrowsUnsupportedType()
+    public void ToArrowArray_ZeroCopyNullBearingSeries_PreservesNulls()
     {
         var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null });
         using var series = new NivaraSeries<int>(column);
 
-        var exception = Assert.Throws<UnsupportedTypeException>(
-            () => ArrowInterop.ToArrowArray(series, ZeroCopy));
+        var array = (Int32Array)ArrowInterop.ToArrowArray(series, ZeroCopy);
 
-        Assert.That(exception!.Message, Does.Contain("null"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(array.Length, Is.EqualTo(2));
+            Assert.That(array.NullCount, Is.EqualTo(1));
+            Assert.That(array.IsNull(1), Is.True);
+            Assert.That(array.Values[0], Is.EqualTo(1));
+        });
     }
 }
