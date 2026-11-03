@@ -43,11 +43,14 @@ in core. Bit-packed validity exists only at the Arrow boundary.**
    buffer is bit-packed, LSB-first, with `1` meaning *valid*; converting Nivara's mask therefore
    inverts polarity as well as packing. That conversion belongs to the interop layer and never
    leaks into storage or kernels.
-6. **The boundary conversion is element-wise today.** Export walks each value through the
-   Apache.Arrow builders, except the fixed-size-binary (Guid) path, which writes the bitmap
-   directly; import reads each slot and materialises boxed values. A buffer-level mask-to-bitmap
-   helper now exists and is unit-tested (`ArrowValidityMask`, internal to the interop assembly),
-   but `ArrowInterop` does not call it yet, so the conversion it performs is still element-wise.
+6. **The boundary conversion is buffer-level for flat primitives.** Apache Arrow's validity
+   buffer is bit-packed, LSB-first, with `1` meaning *valid*; converting Nivara's mask therefore
+   inverts polarity as well as packing. That conversion belongs to the interop layer and never
+   leaks into storage or kernels. `ArrowValidityMask` (internal to the interop assembly) packs and
+   unpacks over spans in one pass, and `ArrowInterop` calls it for every flat primitive layout in
+   both directions, including sliced arrays via an offset-aware overload. The element-wise path
+   remains only for variable-binary (`string`/`char`) layouts, where a per-value pass is required
+   to build the offset and data buffers anyway.
 
 ## Consequences
 

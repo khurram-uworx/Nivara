@@ -102,8 +102,9 @@ there are no nulls; the boundary reconciles the two conventions.
 **Scope (remaining):**
 - Provide cheap `bool[]`↔bitmap conversions used at the Arrow boundary (no element boxing). *Landed
   (issue #833):* the span-first `ArrowValidityMask` helper packs and unpacks over spans, inverts
-  polarity, zeroes padding bits, and handles the absent-mask cases. *Remaining:* wire it in,
-  replacing today's element-wise path through the Apache.Arrow builders and per-slot `IsNull` reads.
+  polarity, zeroes padding bits, and handles the absent-mask cases. *Landed (issue #840):* wired into
+  `ArrowInterop` for flat primitive layouts, sliced arrays (offset-aware), and series import; the
+  element-wise path remains only for variable-binary (`string`/`char`) layouts, documented in code.
 - Preserve mask-OR semantics exactly; add property tests proving behavior parity across both
   representations.
 - Keep core storage byte-wise — this phase does not move a bitmap into `ColumnStorage<T>`.
@@ -120,9 +121,12 @@ the conversion is not shared.
 - Null-mask property tests (existing patterns in `tests/Nivara.Tests/`) pass unchanged; the
   representation did not change, so this is a no-op guard rather than new work.
 - *Landed (issue #833):* a span-first bitmap↔mask helper exists, round-trips exactly, and covers the
-  absent-mask cases; it is internal and not yet called by the interop layer.
+  absent-mask cases; it is internal and wired into `ArrowInterop` for flat primitives (issue #840).
 - *Landed (issue #843):* Arrow validity bitmap import/export is buffer-based, not per-element, for
   the flat primitive types — `ArrowValidityMask` is wired into `ArrowInterop` in both directions.
+- *Landed (issue #840):* buffer-level conversion covers sliced arrays (offset-aware) and the
+  `FromArrowArray` series path; no-null columns export with `ArrowBuffer.Empty`; variable-binary
+  layouts remain element-wise by documented limitation.
 - *Landed (issue #834):* round-trip validity tests at the interop boundary (empty / all-null /
   all-valid / mixed) for value, reference and bool columns, plus a hand-built dirty-padding-bits
   case; proves the helper's encoding matches the buffers Arrow produces and consumes.
