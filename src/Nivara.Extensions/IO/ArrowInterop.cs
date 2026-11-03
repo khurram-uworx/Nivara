@@ -1,6 +1,8 @@
 using Apache.Arrow;
 using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
+using Nivara.Storage;
+using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -376,6 +378,9 @@ public static class ArrowInterop
     private static IArrowArray ConvertColumnToArrowArrayTyped<T>(IColumn column, ArrowConversionOptions options)
     {
         var typedColumn = (NivaraColumn<T>)column;
+
+        if (options.UseZeroCopy)
+            return CreateZeroCopyArrowArray(typedColumn);
 
         return typeof(T) switch
         {
@@ -931,6 +936,104 @@ public static class ArrowInterop
             new[] { validityBuffer, dataBuffer }, System.Array.Empty<ArrayData>());
 
         return ArrowArrayFactory.BuildArray(arrayData);
+    }
+
+    /// <summary>
+    /// Creates a zero-copy Arrow array sharing the column's backing data buffer.
+    /// Only flat, null-free columns of supported unmanaged primitive types are eligible.
+    /// </summary>
+    private static IArrowArray CreateZeroCopyArrowArray<T>(NivaraColumn<T> column)
+    {
+        if (column.HasNulls)
+            throw new InvalidOperationException(
+                "Zero-copy Arrow conversion requires a null-free column; " +
+                "null-bearing columns must use the copying path.");
+
+        return typeof(T) switch
+        {
+            Type t when t == typeof(byte) => CreateZeroCopyPrimitive((NivaraColumn<byte>)(object)column, UInt8Type.Default, sizeof(byte)),
+            Type t when t == typeof(sbyte) => CreateZeroCopyPrimitive((NivaraColumn<sbyte>)(object)column, Int8Type.Default, sizeof(sbyte)),
+            Type t when t == typeof(short) => CreateZeroCopyPrimitive((NivaraColumn<short>)(object)column, Int16Type.Default, sizeof(short)),
+            Type t when t == typeof(ushort) => CreateZeroCopyPrimitive((NivaraColumn<ushort>)(object)column, UInt16Type.Default, sizeof(ushort)),
+            Type t when t == typeof(int) => CreateZeroCopyPrimitive((NivaraColumn<int>)(object)column, Int32Type.Default, sizeof(int)),
+            Type t when t == typeof(uint) => CreateZeroCopyPrimitive((NivaraColumn<uint>)(object)column, UInt32Type.Default, sizeof(uint)),
+            Type t when t == typeof(long) => CreateZeroCopyPrimitive((NivaraColumn<long>)(object)column, Int64Type.Default, sizeof(long)),
+            Type t when t == typeof(ulong) => CreateZeroCopyPrimitive((NivaraColumn<ulong>)(object)column, UInt64Type.Default, sizeof(ulong)),
+            Type t when t == typeof(float) => CreateZeroCopyPrimitive((NivaraColumn<float>)(object)column, FloatType.Default, sizeof(float)),
+            Type t when t == typeof(double) => CreateZeroCopyPrimitive((NivaraColumn<double>)(object)column, DoubleType.Default, sizeof(double)),
+            Type t when t == typeof(Half) => CreateZeroCopyHalf((NivaraColumn<Half>)(object)column),
+            _ => throw new UnsupportedTypeException(typeof(T), TypeMapper.GetTypeSuggestions(typeof(T)))
+        };
+    }
+
+    private static IArrowArray CreateZeroCopyPrimitive<T>(NivaraColumn<T> column, IArrowType arrowType, int elementSize) where T : unmanaged
+    {
+        if (column.Storage is not ColumnStorage<T> storage)
+            throw new InvalidOperationException("Zero-copy Arrow conversion requires array-backed column storage.");
+
+        if (!MemoryMarshal.TryGetArray(storage.Data, out var segment) || segment.Array is null)
+            throw new InvalidOperationException("Zero-copy Arrow conversion requires contiguous array-backed storage.");
+
+        int count = column.Length;
+        var manager = new UnmanagedMemoryManager<T>(segment.Array, segment.Offset, count);
+        var byteMemory = manager.Memory.Slice(0, count * elementSize);
+        var dataBuffer = new ArrowBuffer(byteMemory);
+
+        var arrayData = new ArrayData(arrowType, count, 0, 0,
+            new[] { ArrowBuffer.Empty, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
+    }
+
+    private static IArrowArray CreateZeroCopyHalf(NivaraColumn<Half> column)
+    {
+        if (column.Storage is not ColumnStorage<Half> storage)
+            throw new InvalidOperationException("Zero-copy Arrow conversion requires array-backed column storage.");
+
+        if (!MemoryMarshal.TryGetArray(storage.Data, out var segment) || segment.Array is null)
+            throw new InvalidOperationException("Zero-copy Arrow conversion requires contiguous array-backed storage.");
+
+        int count = column.Length;
+        var manager = new UnmanagedMemoryManager<Half>(segment.Array, segment.Offset, count);
+        var byteMemory = manager.Memory.Slice(0, count * 2);
+        var dataBuffer = new ArrowBuffer(byteMemory);
+
+        var arrayData = new ArrayData(new HalfFloatType(), count, 0, 0,
+            new[] { ArrowBuffer.Empty, dataBuffer }, System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
+    }
+
+    private sealed class UnmanagedMemoryManager<T> : MemoryManager<byte> where T : unmanaged
+    {
+        private readonly T[] _array;
+        private readonly int _start;
+        private readonly int _count;
+
+        public UnmanagedMemoryManager(T[] array, int start, int count)
+        {
+            _array = array;
+            _start = start;
+            _count = count;
+        }
+
+        public override Span<byte> GetSpan() =>
+            MemoryMarshal.AsBytes(_array.AsSpan(_start, _count));
+
+        public override MemoryHandle Pin(int elementIndex = 0)
+        {
+            var handle = GCHandle.Alloc(_array, GCHandleType.Pinned);
+            unsafe
+            {
+                void* ptr = Unsafe.AsPointer(ref MemoryMarshal.GetArrayDataReference(_array));
+                ptr = (byte*)ptr + (_start + elementIndex) * Unsafe.SizeOf<T>();
+                return new MemoryHandle(ptr, handle, this);
+            }
+        }
+
+        public override void Unpin() { }
+
+        protected override void Dispose(bool disposing) { }
     }
 
     /// <summary>
