@@ -35,7 +35,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Onnx\onnx.proto" GrpcServices="None" OutputDir="Onnx\Generated" />
+    <Protobuf Include="Onnx\onnx.proto" GrpcServices="None" OutputDir="$(IntermediateOutputPath)" />
   </ItemGroup>
 
   <ItemGroup>
