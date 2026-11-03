@@ -169,7 +169,7 @@ public static class OnnxExporter
         public string Conv1d(string inputName, Conv1d<T> module)
         {
             var wName = New("conv1d_weight");
-            var wShape = module.Weight!.Tensor.Shape;
+            var wShape = new[] { module.OutChannels, module.InChannels, module.KernelSize };
             var wData = new T[module.Weight!.Tensor.Length];
             module.Weight!.Tensor.Data.CopyTo(wData, T.Zero);
             AddInitializer(wName, wData, wShape);
@@ -192,13 +192,22 @@ public static class OnnxExporter
                 new AttributeProto { Name="group", Type=AttributeProto.Types.AttributeType.Int, I = 1 },
             };
             AddNode("Conv", inputs.ToArray(), new[] { outName }, attrs);
+            var inShape1d = GetShape(inputName);
+            if (inShape1d.Length >= 3 && inShape1d[0] > 0 && inShape1d[2] > 0)
+            {
+                int n = inShape1d[0];
+                int l = inShape1d[2];
+                int oL = (l + 2 * module.Padding - module.KernelSize) / module.Stride + 1;
+                if (oL <= 0) oL = l;
+                SetShape(outName, new[] { n, module.OutChannels, oL });
+            }
             return outName;
         }
 
         public string Conv2d(string inputName, Conv2d<T> module)
         {
             var wName = New("conv2d_weight");
-            var wShape = module.Weight!.Tensor.Shape;
+            var wShape = new[] { module.OutChannels, module.InChannels / module.Groups, module.KernelSize, module.KernelSize };
             var wData = new T[module.Weight!.Tensor.Length];
             module.Weight!.Tensor.Data.CopyTo(wData, T.Zero);
             AddInitializer(wName, wData, wShape);
@@ -222,6 +231,18 @@ public static class OnnxExporter
                 new AttributeProto { Name="group", Type=AttributeProto.Types.AttributeType.Int, I = module.Groups },
             };
             AddNode("Conv", inputs.ToArray(), new[] { outName }, attrs);
+            var inShape2d = GetShape(inputName);
+            if (inShape2d.Length >= 4 && inShape2d[0] > 0 && inShape2d[2] > 0 && inShape2d[3] > 0)
+            {
+                int n = inShape2d[0];
+                int h = inShape2d[2];
+                int w = inShape2d[3];
+                int oH = (h + module.PaddingTop + module.PaddingBottom - module.KernelSize) / module.Stride + 1;
+                int oW = (w + module.PaddingLeft + module.PaddingRight - module.KernelSize) / module.Stride + 1;
+                if (oH <= 0) oH = h;
+                if (oW <= 0) oW = w;
+                SetShape(outName, new[] { n, module.OutChannels, oH, oW });
+            }
             return outName;
         }
 
@@ -242,11 +263,24 @@ public static class OnnxExporter
             var outName = New("embedding_out");
             AddNode("Gather", new[] { wName, castName }, new[] { outName },
                 new[] { new AttributeProto { Name = "axis", Type = AttributeProto.Types.AttributeType.Int, I = 0 } });
+            var inShapeEmb = GetShape(inputName);
+            int[] outShapeEmb;
+            if (inShapeEmb.Length == 0)
+                outShapeEmb = new[] { module.EmbeddingDim };
+            else
+            {
+                outShapeEmb = new int[inShapeEmb.Length + 1];
+                Array.Copy(inShapeEmb, outShapeEmb, inShapeEmb.Length);
+                outShapeEmb[inShapeEmb.Length] = module.EmbeddingDim;
+            }
+            SetShape(outName, outShapeEmb);
             return outName;
         }
 
         public string BatchNorm1d(string inputName, BatchNorm1d<T> module)
         {
+            if (!module.TrackRunningStats)
+                throw new NotSupportedException("BatchNorm1d export requires trackRunningStats.");
             var scaleName = New("bn_scale");
             var biasName = New("bn_bias");
             var meanName = New("bn_mean");
@@ -283,11 +317,14 @@ public static class OnnxExporter
             var outName = New("bn_out");
             AddNode("BatchNormalization", new[] { inputName, scaleName, biasName, meanName, varName }, new[] { outName },
                 new[] { new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = float.CreateChecked(module.Eps) } });
+            SetShape(outName, GetShape(inputName));
             return outName;
         }
 
         public string BatchNorm2d(string inputName, BatchNorm2d<T> module, int? n = null, int? h = null, int? w = null)
         {
+            if (!module.TrackRunningStats)
+                throw new NotSupportedException("BatchNorm2d export requires trackRunningStats.");
             string scaleName = New("bn_scale");
             string biasName = New("bn_bias");
             string meanName = New("bn_mean");
@@ -325,6 +362,7 @@ public static class OnnxExporter
             var outName = New("bn_out");
             AddNode("BatchNormalization", new[] { inputName, scaleName, biasName, meanName, varName }, new[] { outName },
                 new[] { new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = float.CreateChecked(module.Eps) } });
+            SetShape(outName, GetShape(inputName));
             return outName;
         }
 
@@ -337,9 +375,17 @@ public static class OnnxExporter
                 scaleName = New("ln_scale");
                 biasName = New("ln_bias");
                 var scaleData = new T[module.Weight!.Tensor.Length]; module.Weight!.Tensor.Data.CopyTo(scaleData, T.Zero);
-                var biasData = new T[module.Bias!.Tensor.Length]; module.Bias!.Tensor.Data.CopyTo(biasData, T.Zero);
                 AddInitializer(scaleName, scaleData, module.Weight!.Tensor.Shape);
-                AddInitializer(biasName, biasData, module.Bias!.Tensor.Shape);
+                if (module.Bias != null)
+                {
+                    var biasData = new T[module.Bias!.Tensor.Length]; module.Bias!.Tensor.Data.CopyTo(biasData, T.Zero);
+                    AddInitializer(biasName, biasData, module.Bias!.Tensor.Shape);
+                }
+                else
+                {
+                    var biasData = new T[module.NormalizedShape];
+                    AddInitializer(biasName, biasData, new[] { module.NormalizedShape });
+                }
             }
             else
             {
@@ -358,6 +404,7 @@ public static class OnnxExporter
                     new AttributeProto { Name = "axis", Type = AttributeProto.Types.AttributeType.Int, I = -1 },
                     new AttributeProto { Name = "epsilon", Type = AttributeProto.Types.AttributeType.Float, F = float.CreateChecked(module.Eps) }
                 });
+            SetShape(outName, GetShape(inputName));
             return outName;
         }
 
@@ -392,6 +439,7 @@ public static class OnnxExporter
             AddInitializer(scaleName, scaleData, module.Weight!.Tensor.Shape);
             var outName = New("rms_out");
             AddNode("Mul", new[] { div, scaleName }, new[] { outName });
+            SetShape(outName, GetShape(inputName));
             return outName;
         }
 
