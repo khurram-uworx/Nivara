@@ -28,4 +28,8 @@ public interface IOnnxExportContext<T> where T : struct, IFloatingPointIeee754<T
     string Sigmoid(string inputName);
     string Tanh(string inputName);
     string Add(string left, string right);
+    string TransposeAxes(string inputName, int[] perm);
+    string Reshape(string inputName, int[] newShape);
+    string Concat(string[] inputNames, int axis);
+    string ReduceMean(string inputName, int[] axes, bool keepDims = false);
 }

@@ -39,6 +39,17 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, IFloati
         return logits;
     }
 
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName) =>
+        context.Linear(
+            context.Relu(
+                context.Linear(
+                    context.ReduceMean(
+                        context.Embedding(inputName, embedding),
+                        new[] { 1 },
+                        keepDims: false),
+                    fc1)),
+            fc2);
+
     public int[] Predict(int[] tokenIds)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);

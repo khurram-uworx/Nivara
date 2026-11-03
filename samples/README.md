@@ -46,6 +46,6 @@ Loads pre-trained HuggingFace models and runs forward inference entirely within 
 
 Trains a VAE to learn latent representations of synthetic 2D patterns. Supports both MLP and convolutional (`Conv2d`/`ConvTranspose2d`) architectures. Demonstrates encoder–decoder design, reparameterization trick, and latent space exploration (generation, interpolation, per-dimension walks).
 
-## [NivaraOnnxExport/README.md](NivaraOnnxExport/README.md) - Train in Nivara, Deploy via ONNX Runtime
+## [NivaraClassifier/README.md](NivaraClassifier/README.md) - ONNX export/deploy (via NivaraClassifier)
 
-Trains a tiny MLP, exports it to `.onnx` with `OnnxExporter`, then verifies parity against ONNX Runtime inference (within 1e-4).
+NivaraClassifier now folds the former `NivaraOnnxExport` workflow: train, `--save`, `--export-onnx`, and `--command onnx-compare` validates Nivara vs ONNX Runtime parity (within 1e-4); `--load-onnx` runs prediction through ONNX Runtime.

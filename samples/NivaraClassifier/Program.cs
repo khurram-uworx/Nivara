@@ -1,9 +1,13 @@
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using Nivara;
+using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using Nivara.Onnx;
 using Nivara.Samples;
 using NivaraClassifier;
 using System.Globalization;
@@ -24,6 +28,8 @@ else if (options.Command == "predict")
     RunPrediction(options);
 else if (options.Command == "generate")
     RunGenerate(options);
+else if (options.Command == "onnx-compare")
+    RunOnnxCompare(options);
 else
     Options.PrintHelp();
 
@@ -77,38 +83,38 @@ void RunTraining(Options opt)
         Array.Copy(encoded, 0, testTokens, i * opt.MaxSeqLen, opt.MaxSeqLen);
     }
 
-    Module<double> model;
+    Module<float> model;
     Func<int[], int[]> predict;
     if (opt.Mode == "conv")
     {
-        var conv = new ConvTextClassifierModel<double>(
+        var conv = new ConvTextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         model = conv;
         predict = conv.Predict;
     }
     else
     {
-        var linear = new TextClassifierModel<double>(
+        var linear = new TextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         model = linear;
         predict = linear.Predict;
     }
 
-    using var optimizer = new Adam<double>(learningRate: 0.001);
+    using var optimizer = new Adam<float>(learningRate: 0.001f);
     var allParams = model.GetParameters().Values;
     optimizer.AddParameterGroup(allParams);
 
-    var lossFn = new CrossEntropyLoss<double>();
+    var lossFn = new CrossEntropyLoss<float>();
 
-    var trainFrame = FrameBuilder.BuildDocumentClassificationFrameDouble(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
+    var trainFrame = FrameBuilder.BuildDocumentClassificationFrame(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
     var featureColumns = Enumerable.Range(0, opt.MaxSeqLen).Select(d => $"tok_{d}").ToArray();
-    var trainDataset = new TensorDataset<double>(trainFrame, featureColumns, ["label"]);
-    var trainLoader = new DataLoader<double>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
+    var trainDataset = new TensorDataset<float>(trainFrame, featureColumns, ["label"]);
+    var trainLoader = new DataLoader<float>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
 
     Console.WriteLine($"\nTraining: {trainCount} samples, {testLabels.Length} test");
     Console.WriteLine($"Model: {tokenizer.VocabSize} vocab → {opt.EmbeddingDim} embed → {opt.HiddenDim} hidden → 2 classes ({opt.Mode})\n");
 
-    var trainLoop = new TrainingLoop<double>(
+    var trainLoop = new TrainingLoop<float>(
         model, trainLoader,
         (logits, labels) =>
         {
@@ -145,11 +151,31 @@ void RunTraining(Options opt)
         vocabPath = Path.ChangeExtension(opt.SavePath, ".vocab.json");
     tokenizer.Save(vocabPath);
     Console.WriteLine($"Saved vocabulary: {vocabPath}");
+
+    if (!string.IsNullOrWhiteSpace(opt.ExportOnnxPath))
+    {
+        model.Eval();
+        using var ms = new MemoryStream();
+        OnnxExporter.Export(model, ms, new OnnxExportOptions
+        {
+            InputShape = new[] { 1, opt.MaxSeqLen },
+        });
+        var onnxBytes = ms.ToArray();
+        File.WriteAllBytes(opt.ExportOnnxPath, onnxBytes);
+        Console.WriteLine($"Exported ONNX: {opt.ExportOnnxPath} ({onnxBytes.Length} bytes)");
+    }
+
     Console.WriteLine("Done.");
 }
 
 void RunPrediction(Options opt)
 {
+    if (!string.IsNullOrWhiteSpace(opt.LoadOnnxPath))
+    {
+        RunPredictionOnnx(opt);
+        return;
+    }
+
     string modelPath = opt.LoadPath ?? "classifier.model.json";
     string vocabPath = Path.ChangeExtension(modelPath, ".vocab.json");
 
@@ -168,16 +194,18 @@ void RunPrediction(Options opt)
     Func<int[], int[]> predict;
     if (opt.Mode == "conv")
     {
-        var conv = new ConvTextClassifierModel<double>(
+        var conv = new ConvTextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         ModelSerializer.Load(conv, modelPath);
+        conv.Eval();
         predict = conv.Predict;
     }
     else
     {
-        var linear = new TextClassifierModel<double>(
+        var linear = new TextClassifierModel<float>(
             tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
         ModelSerializer.Load(linear, modelPath);
+        linear.Eval();
         predict = linear.Predict;
     }
 
@@ -197,6 +225,167 @@ void RunPrediction(Options opt)
     }
 }
 
+void RunOnnxCompare(Options opt)
+{
+    string modelPath = opt.LoadPath ?? "classifier.model.json";
+    string vocabPath = Path.ChangeExtension(modelPath, ".vocab.json");
+    if (!File.Exists(modelPath))
+    {
+        Console.WriteLine($"Model not found: {modelPath}. Train first with --command train.");
+        return;
+    }
+    if (!File.Exists(vocabPath))
+    {
+        Console.WriteLine($"Vocabulary not found: {vocabPath}.");
+        return;
+    }
+
+    var tokenizer = TextTokenizer.Load(vocabPath);
+
+    Module<float> model;
+    Func<int[], int[]> nivaraPredict;
+    if (opt.Mode == "conv")
+    {
+        var conv = new ConvTextClassifierModel<float>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        ModelSerializer.Load(conv, modelPath);
+        conv.Eval();
+        model = conv;
+        nivaraPredict = conv.Predict;
+    }
+    else
+    {
+        var linear = new TextClassifierModel<float>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        ModelSerializer.Load(linear, modelPath);
+        linear.Eval();
+        model = linear;
+        nivaraPredict = linear.Predict;
+    }
+
+    var sentences = new[]
+    {
+        "this movie is great and I loved it",
+        "terrible waste of time and money",
+        "pretty good overall",
+        "awful plot and bad acting",
+        "not bad at all",
+        "I hate this product"
+    };
+
+    var nivaraLogitsList = new List<float[]>();
+    var nivaraLabels = new List<int>();
+    foreach (var s in sentences)
+    {
+        var encoded = tokenizer.Encode(s, fixedLength: opt.MaxSeqLen);
+        var data = new float[encoded.Length];
+        for (int i = 0; i < encoded.Length; i++) data[i] = encoded[i];
+        var input = ReverseGradTensor<float>.FromMatrix(data, 1, opt.MaxSeqLen, requiresGrad: false);
+        var logits = model.Forward(input);
+        var arr = new float[logits.Length];
+        logits.Data.CopyTo(arr, 0.0f);
+        nivaraLogitsList.Add(arr);
+        nivaraLabels.Add(nivaraPredict(encoded)[0]);
+    }
+
+    string onnxPath = !string.IsNullOrWhiteSpace(opt.ExportOnnxPath)
+        ? opt.ExportOnnxPath!
+        : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(modelPath)) ?? ".", "classifier.compare.onnx");
+    model.Eval();
+    using (var ms = new MemoryStream())
+    {
+        OnnxExporter.Export(model, ms, new OnnxExportOptions
+        {
+            InputShape = new[] { 1, opt.MaxSeqLen },
+        });
+        File.WriteAllBytes(onnxPath, ms.ToArray());
+    }
+    Console.WriteLine($"Exported ONNX: {onnxPath}");
+
+    using var session = new InferenceSession(onnxPath);
+    string inputName = session.InputMetadata.Keys.First();
+    string outputName = session.OutputMetadata.Keys.First();
+
+    double globalMaxAbs = 0.0;
+    int mismatches = 0;
+    for (int i = 0; i < sentences.Length; i++)
+    {
+        var encoded = tokenizer.Encode(sentences[i], fixedLength: opt.MaxSeqLen);
+        var tensor = new DenseTensor<float>(encoded.Select(t => (float)t).ToArray(), new[] { 1, opt.MaxSeqLen });
+        using var results = session.Run(new[]
+        {
+            NamedOnnxValue.CreateFromTensor(inputName, tensor)
+        });
+        var ortLogits = results.First(v => v.Name == outputName).AsTensor<float>().ToArray();
+        double maxAbs = 0.0;
+        for (int j = 0; j < nivaraLogitsList[i].Length; j++)
+            maxAbs = Math.Max(maxAbs, Math.Abs(ortLogits[j] - nivaraLogitsList[i][j]));
+        globalMaxAbs = Math.Max(globalMaxAbs, maxAbs);
+        int ortLabel = ortLogits[0] > ortLogits[1] ? 0 : 1;
+        if (ortLabel != nivaraLabels[i]) mismatches++;
+        Console.WriteLine($"  \"{sentences[i]}\"  nivara={LabelName(nivaraLabels[i])}  onnx={LabelName(ortLabel)}  maxAbs={maxAbs:E3}");
+    }
+
+    Console.WriteLine($"Global max abs diff: {globalMaxAbs:E3}");
+    if (mismatches > 0 || globalMaxAbs > 1e-4)
+    {
+        Console.WriteLine($"FAIL: {mismatches} label mismatch(es), tolerance 1e-4");
+        Environment.ExitCode = 1;
+    }
+    else
+    {
+        Console.WriteLine("OK: Nivara / ONNX Runtime parity within 1e-4");
+    }
+}
+
+static string LabelName(int label) => label == 1 ? "POSITIVE" : "NEGATIVE";
+
+void RunPredictionOnnx(Options opt)
+{
+    string onnxPath = opt.LoadOnnxPath!;
+    string vocabPath = !string.IsNullOrWhiteSpace(opt.LoadPath)
+        ? Path.ChangeExtension(opt.LoadPath, ".vocab.json")
+        : Path.ChangeExtension(onnxPath, ".vocab.json");
+
+    if (!File.Exists(onnxPath))
+    {
+        Console.WriteLine($"ONNX model not found: {onnxPath}.");
+        return;
+    }
+    if (!File.Exists(vocabPath))
+    {
+        Console.WriteLine($"Vocabulary not found: {vocabPath}.");
+        return;
+    }
+
+    var tokenizer = TextTokenizer.Load(vocabPath);
+
+    using var session = new InferenceSession(onnxPath);
+    string inputName = session.InputMetadata.Keys.First();
+    string outputName = session.OutputMetadata.Keys.First();
+
+    Console.WriteLine("Nivara Text Classifier (ONNX Runtime) — Interactive Prediction");
+    Console.WriteLine("Type a sentence (empty line to quit):\\n");
+
+    while (true)
+    {
+        Console.Write("> ");
+        string? line = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(line)) break;
+
+        var encoded = tokenizer.Encode(line, fixedLength: opt.MaxSeqLen);
+        var tensor = new DenseTensor<float>(encoded.Select(t => (float)t).ToArray(), new[] { 1, opt.MaxSeqLen });
+        using var results = session.Run(new[]
+        {
+            NamedOnnxValue.CreateFromTensor(inputName, tensor)
+        });
+        var output = results.First(v => v.Name == outputName).AsTensor<float>().ToArray();
+        int labelIdx = output[0] > output[1] ? 0 : 1;
+        string label = labelIdx == 1 ? "POSITIVE" : "NEGATIVE";
+        Console.WriteLine($"  → {label}\\n");
+    }
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 sealed class Options
@@ -205,6 +394,8 @@ sealed class Options
     public string? DataPath { get; set; }
     public string? SavePath { get; set; }
     public string? LoadPath { get; set; }
+    public string? ExportOnnxPath { get; set; }
+    public string? LoadOnnxPath { get; set; }
     public int Epochs { get; set; } = 10;
     public int BatchSize { get; set; } = 32;
     public int EmbeddingDim { get; set; } = 32;
@@ -236,6 +427,12 @@ sealed class Options
                     break;
                 case "--load":
                     o.LoadPath = ReadString(args, ref i, args[i]);
+                    break;
+                case "--export-onnx":
+                    o.ExportOnnxPath = ReadString(args, ref i, args[i]);
+                    break;
+                case "--load-onnx":
+                    o.LoadOnnxPath = ReadString(args, ref i, args[i]);
                     break;
                 case "--epochs":
                     o.Epochs = ReadInt(args, ref i, args[i]);
@@ -289,15 +486,18 @@ sealed class Options
               NivaraClassifier [options]
 
             Commands (via --command):
-              train      Train model on generated/loaded data (default)
-              predict    Interactive prediction with saved model
-              generate   Generate synthetic training CSV
+              train         Train model on generated/loaded data (default)
+              predict       Interactive prediction with saved model
+              generate      Generate synthetic training CSV
+              onnx-compare  Compare Nivara vs ONNX Runtime on a few samples
 
             Options:
               --command, -c <cmd>     Command: train, predict, generate
               --data-path <path>      CSV data file (default: samples/data/sentiment_data.csv)
               --save <path>           Save trained model
               --load <path>           Load model for prediction
+              --export-onnx <path>    Export trained model to ONNX
+              --load-onnx <path>      Load ONNX model for prediction (uses ORT)
               --epochs <n>            Training epochs (default: 10)
               --batch-size <n>        Batch size (default: 32)
               --embedding-dim <n>     Embedding dimension (default: 32)

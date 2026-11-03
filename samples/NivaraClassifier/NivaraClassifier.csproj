@@ -9,7 +9,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
+    <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
     <ProjectReference Include="..\Nivara.Samples\Nivara.Samples.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
   </ItemGroup>
 
   <ItemGroup>
