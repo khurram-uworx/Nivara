@@ -88,11 +88,25 @@ public class DocCitationTests
     }
 
     [Test]
+    public void SymbolCitations_MissingAndAmbiguousSymbols_AreReported()
+    {
+        var faults = DocCitationExtractor.Faults(NegativeControl);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(faults.Any(f => f.Reference.EndsWith("::DefinitelyNotAMember", StringComparison.Ordinal)
+                && f.Kind == DocCitationFaultKind.MissingSymbol), Is.True);
+            Assert.That(faults.Any(f => f.Reference.EndsWith("::GetHashCode", StringComparison.Ordinal)
+                && f.Kind == DocCitationFaultKind.AmbiguousSymbol), Is.True);
+        });
+    }
+
+    [Test]
     public void NegativeControl_TheGateStillRejectsBrokenCitations()
     {
         var faults = DocCitationExtractor.Faults(NegativeControl);
 
-        Assert.That(faults, Has.Count.EqualTo(5),
+        Assert.That(faults, Has.Count.EqualTo(7),
             "the gate stopped rejecting its negative control, so a green run no longer means anything. "
             + Environment.NewLine + string.Join(Environment.NewLine, faults.Select(f => f.ToString())));
     }
@@ -106,5 +120,8 @@ public class DocCitationTests
             Does.Not.Contain("src/Nivara/Execution/NivaraExecutionContext.cs:1"),
             "the negative control rejects everything, including a citation that is correct; that would "
             + "prove nothing about discriminating real faults from valid references");
+        Assert.That(faults.Select(f => f.Reference),
+            Does.Not.Contain("src/Nivara/Execution/NivaraExecutionContext.cs::MemoryBudget"),
+            "the negative control rejects the resolvable symbol citation too");
     }
 }
