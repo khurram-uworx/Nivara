@@ -23,13 +23,18 @@ if (options.Help)
     return;
 }
 
+if (options.Silk && options.Command is not ("train" or "predict"))
+{
+    Console.Error.WriteLine("--silk is supported only with --command train or --command predict.");
+    Environment.ExitCode = 2;
+    return;
+}
 if (options.Silk && options.Command == "predict" && !string.IsNullOrWhiteSpace(options.LoadOnnxPath))
 {
     Console.Error.WriteLine("--silk cannot be used with --load-onnx (ONNX Runtime has its own providers).");
     Environment.ExitCode = 2;
     return;
 }
-
 if (options.Command == "train")
     RunTraining(options);
 else if (options.Command == "predict")
@@ -694,7 +699,7 @@ sealed class Options
               --lr <rate>             Learning rate (default: 0.001)
               --seed <n>              Random seed (default: 42)
               --mode <mode>           Model mode: linear or conv (default: linear)
-               --silk                  Silk/OpenCL GPU path (plumbing only until #883)
+               --silk                  Silk/OpenCL path (linear training; conv training is host-companion)
               --help, -h              Show this help
             """);
     }

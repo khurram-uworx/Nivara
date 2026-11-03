@@ -32,6 +32,12 @@ dotnet run --project samples/NivaraClassifier -- --command train --epochs 20 --s
 # Interactive prediction with saved model (Nivara)
 dotnet run --project samples/NivaraClassifier -- --command predict --load samples/data/classifier.model.json
 
+# Train on Silk (linear mode)
+dotnet run --project samples/NivaraClassifier -- --command train --silk --epochs 20 --save samples/data/classifier.model.json
+
+# Interactive prediction with saved model on Silk (linear/conv; load Nivara model, not ONNX)
+dotnet run --project samples/NivaraClassifier -- --command predict --silk --load samples/data/classifier.model.json --mode linear
+
 # Interactive prediction with exported ONNX model (ONNX Runtime)
 dotnet run --project samples/NivaraClassifier -- --command predict --load-onnx samples/data/classifier.model.onnx
 
@@ -59,6 +65,7 @@ dotnet run --project samples/NivaraClassifier -- --command onnx-compare --load s
 | `--lr <float>` | 0.001 | Learning rate |
 | `--seed <int>` | 42 | RNG seed |
 | `--mode <linear\|conv>` | `linear` | Model: `linear` = Embedding → MeanPool → MLP, `conv` = Embedding → Conv1d (kernels 3,5,7) → Concat → MLP |
+| `--silk` | - | Silk/OpenCL path: linear training + prediction; conv prediction (conv training uses a host companion) |
 | `--help`, `-h` | — | Show CLI help |
 
 ## Modes of use
@@ -176,6 +183,7 @@ Templates with positive/negative patterns, fill nouns and activities from pools,
 
 - .NET 11 SDK
 - Nivara core library (`src/Nivara/Nivara.csproj`)
+- For `--silk`: an OpenCL-capable GPU (Intel/AMD iGPU preferred) with an in-box OpenCL driver (see `docs/SILK.md`)
 - Nivara.Extensions (`src/Nivara.Extensions/Nivara.Extensions.csproj`, for ONNX export)
 - `Microsoft.ML.OnnxRuntime` 1.31.0 (for `--load-onnx` / `onnx-compare`)
 
