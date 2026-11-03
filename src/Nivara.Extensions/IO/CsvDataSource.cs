@@ -1,5 +1,4 @@
 using CsvHelper;
-using CsvHelper.Configuration;
 using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
@@ -108,23 +107,26 @@ public sealed class CsvOptions
     }
 
     /// <summary>
-    /// Creates a CsvHelper configuration from these options
+    /// Creates CsvHelper reader options from these options
     /// </summary>
-    /// <returns>A CsvHelper configuration</returns>
-    internal CsvConfiguration ToCsvConfiguration()
+    /// <returns>CsvHelper reader options</returns>
+    internal CsvReaderOptions ToCsvReaderOptions()
     {
-        return new CsvConfiguration(Culture)
+        return new CsvReaderOptions
         {
-            HasHeaderRecord = HasHeaderRecord,
-            Delimiter = Delimiter,
-            IgnoreBlankLines = IgnoreBlankLines,
-            TrimOptions = TrimOptions == CsvTrimOptions.Trim
-                ? CsvHelper.Configuration.TrimOptions.Trim
-                : CsvHelper.Configuration.TrimOptions.None,
-            MissingFieldFound = null, // Don't throw on missing fields
-            HeaderValidated = null   // Don't validate headers
+            HasHeader = HasHeaderRecord,
+            Separator = Delimiter.Length > 0 ? Delimiter[0] : (char?)null,
+            FormatProvider = Culture,
+            SkipEmptyLines = IgnoreBlankLines,
+            TrimWhitespace = TrimOptions == CsvTrimOptions.Trim,
+            MissingField = CsvMissingFieldHandling.ReturnEmpty
         };
     }
+
+    /// <summary>
+    /// Backwards-compatible alias for <see cref="ToCsvReaderOptions"/>.
+    /// </summary>
+    internal CsvReaderOptions ToCsvConfiguration() => ToCsvReaderOptions();
 }
 
 /// <summary>
@@ -407,13 +409,14 @@ sealed class CsvLazySource : IQuerySource
                 }
 
                 var recordDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < csv.HeaderRecord?.Length; i++)
+                var recordHeaders = csv.Headers;
+                for (int i = 0; i < recordHeaders.Count; i++)
                 {
-                    var header = csv.HeaderRecord?[i];
-                    if (header != null)
+                    var header = recordHeaders[i];
+                    if (!string.IsNullOrWhiteSpace(header))
                     {
-                        var fieldValue = csv.GetField(i);
-                        recordDict[header] = fieldValue ?? string.Empty;
+                        var fieldValue = csv.GetString(i);
+                        recordDict[header] = fieldValue;
                     }
                 }
                 records.Add(recordDict);
@@ -504,13 +507,14 @@ sealed class CsvLazySource : IQuerySource
                 }
 
                 var recordDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < csv.HeaderRecord?.Length; i++)
+                var recordHeaders = csv.Headers;
+                for (int i = 0; i < recordHeaders.Count; i++)
                 {
-                    var header = csv.HeaderRecord?[i];
-                    if (header != null)
+                    var header = recordHeaders[i];
+                    if (!string.IsNullOrWhiteSpace(header))
                     {
-                        var fieldValue = csv.GetField(i);
-                        recordDict[header] = fieldValue ?? string.Empty;
+                        var fieldValue = csv.GetString(i);
+                        recordDict[header] = fieldValue;
                     }
                 }
                 records.Add(recordDict);
@@ -582,17 +586,11 @@ sealed class CsvLazySource : IQuerySource
             eofReached = false;
             var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync);
             var streamReader = new StreamReader(stream);
-            var csv = new CsvReader(streamReader, options.ToCsvConfiguration());
-            if (options.HasHeaderRecord && !csv.Read())
-            {
-                chunkStreamReader = streamReader;
-                chunkCsvReader = csv;
-                rowsConsumed = 0;
-                eofReached = true;
-                return false;
-            }
+            var csv = CsvReader.Create(streamReader, options.ToCsvReaderOptions(), false);
             if (options.HasHeaderRecord)
+            {
                 csv.ReadHeader();
+            }
             chunkStreamReader = streamReader;
             chunkCsvReader = csv;
             rowsConsumed = 0;
@@ -680,19 +678,11 @@ sealed class CsvLazySource : IQuerySource
                 throw new DataSourceException($"CSV file is empty or contains only whitespace: '{filePath}'");
             }
 
-            using var reader = new StringReader(fileContent);
-            using var csv = new CsvReader(reader, options.ToCsvConfiguration());
+            using var csv = CsvReader.FromText(fileContent, options.ToCsvReaderOptions());
 
             // Read header to get column names
-            bool headerRead;
             try
             {
-                headerRead = csv.Read();
-                if (!headerRead)
-                {
-                    throw new DataSourceException($"CSV file contains no data: '{filePath}'");
-                }
-
                 csv.ReadHeader();
             }
             catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
@@ -700,14 +690,14 @@ sealed class CsvLazySource : IQuerySource
                 throw new DataSourceException($"CSV header parsing error in file '{filePath}': {ex.Message}", ex);
             }
 
-            var headers = csv.HeaderRecord;
-            if (headers == null || headers.Length == 0)
+            var headers = csv.Headers;
+            if (headers == null || headers.Count == 0)
             {
                 throw new DataSourceException($"No headers found in CSV file: '{filePath}'");
             }
 
             // Validate headers
-            for (int i = 0; i < headers.Length; i++)
+            for (int i = 0; i < headers.Count; i++)
             {
                 if (string.IsNullOrWhiteSpace(headers[i]))
                 {
@@ -727,14 +717,14 @@ sealed class CsvLazySource : IQuerySource
             }
 
             // Read sample rows for type inference
-            var sampleRecords = new List<dynamic>();
+            var sampleRecords = new List<CsvDynamicRecord>();
             int rowsRead = 0;
 
             try
             {
                 while (csv.Read() && rowsRead < options.SchemaInferenceRecords)
                 {
-                    sampleRecords.Add(csv.GetRecord<dynamic>());
+                    sampleRecords.Add(csv.GetRecord<CsvDynamicRecord>());
                     rowsRead++;
                 }
             }
@@ -778,16 +768,15 @@ sealed class CsvLazySource : IQuerySource
     /// <param name="sampleRecords">Sample records to analyze</param>
     /// <param name="columnName">The name of the column</param>
     /// <returns>The inferred type</returns>
-    private static Type InferColumnType(List<dynamic> sampleRecords, string columnName)
+    private static Type InferColumnType(List<CsvDynamicRecord> sampleRecords, string columnName)
     {
         var values = new List<string>();
 
         foreach (var record in sampleRecords)
         {
-            var dict = (IDictionary<string, object>)record;
-            if (dict.TryGetValue(columnName, out var value) && value != null)
+            if (record.TryGetValue(columnName, out var value) && value != null)
             {
-                values.Add(value.ToString() ?? string.Empty);
+                values.Add(value);
             }
         }
 

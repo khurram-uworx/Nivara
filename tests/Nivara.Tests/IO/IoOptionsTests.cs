@@ -74,10 +74,10 @@ public class IoOptionsTests
     public void CsvOptions_ToCsvConfiguration_MapsTrimOptions()
     {
         var trimmed = CsvOptions.Default.With(trimOptions: CsvTrimOptions.Trim).ToCsvConfiguration();
-        Assert.That(trimmed.TrimOptions, Is.EqualTo(CsvHelper.Configuration.TrimOptions.Trim));
+        Assert.That(trimmed.TrimWhitespace, Is.True);
 
         var verbatim = CsvOptions.Default.With(trimOptions: CsvTrimOptions.None).ToCsvConfiguration();
-        Assert.That(verbatim.TrimOptions, Is.EqualTo(CsvHelper.Configuration.TrimOptions.None));
+        Assert.That(verbatim.TrimWhitespace, Is.False);
     }
 
     [Test]
