@@ -258,25 +258,19 @@ public static class ArrowInterop
 
             // Extract data directly from the Arrow array, preserving null positions via a mask
             // (the previous path dropped nulls and produced an all-valid Nivara series).
-            var data = new List<T>();
-            var nullMask = new List<bool>();
+            var validityBytes = (arrowArray.Data.Buffers.Length > 0)
+                ? arrowArray.Data.Buffers[0].Span
+                : ReadOnlySpan<byte>.Empty;
+            var nullMask = ArrowValidityMask.ToNullMask(validityBytes, (int)arrowArray.Data.Offset, (int)arrowArray.Length);
 
+            var data = new T[arrowArray.Length];
             for (int i = 0; i < arrowArray.Length; i++)
             {
-                if (arrowArray.IsNull(i))
-                {
-                    data.Add(default(T)!);
-                    nullMask.Add(true);
-                }
-                else
-                {
-                    var value = ExtractValueFromArrowArray<T>(arrowArray, i, options);
-                    data.Add(value);
-                    nullMask.Add(false);
-                }
+                if (!nullMask[i])
+                    data[i] = ExtractValueFromArrowArray<T>(arrowArray, i, options);
             }
 
-            var column = NivaraColumn<T>.CreateFromSpans(data.ToArray().AsSpan(), nullMask.ToArray().AsSpan());
+            var column = NivaraColumn<T>.CreateFromSpans(data.AsSpan(), nullMask.AsSpan());
             return new NivaraSeries<T>(column);
         }
         catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException)
@@ -520,6 +514,13 @@ public static class ArrowInterop
     /// <summary>
     /// Creates a String Arrow array from a NivaraColumn
     /// </summary>
+    /// <remarks>
+    /// Variable-binary (offsets + byte data) layout requires a per-value pass to encode each
+    /// string's bytes and advance the offset buffer, so this path uses the Apache.Arrow builder
+    /// (element-wise) and is the only remaining element-wise export path. Validity is produced
+    /// by the builder itself; the bulk <see cref="ArrowValidityMask"/> helper cannot avoid the
+    /// per-value offset pass for this layout.
+    /// </remarks>
     private static IArrowArray CreateStringArray(NivaraColumn<string> column, ArrowConversionOptions options)
     {
         var builder = new StringArray.Builder();
@@ -777,6 +778,10 @@ public static class ArrowInterop
     /// <summary>
     /// Creates a String Arrow array from a NivaraColumn of <see cref="char"/> (widened representation)
     /// </summary>
+    /// <remarks>
+    /// See <see cref="CreateStringArray(NivaraColumn{string}, ArrowConversionOptions)"/>: the
+    /// variable-binary layout needs a per-value pass, so this path stays element-wise.
+    /// </remarks>
     private static IArrowArray CreateStringArray(NivaraColumn<char> column, ArrowConversionOptions options)
     {
         var builder = new StringArray.Builder();
@@ -1104,32 +1109,16 @@ public static class ArrowInterop
             var chunk = chunkedArray.Array(chunkIndex);
             int chunkLength = (int)chunk.Length;
 
-            if (chunk.Offset != 0)
-            {
-                for (int i = 0; i < chunkLength; i++)
-                {
-                    bool isNull = chunk.IsNull(i);
-                    nullMask[offset + i] = isNull;
-                    if (!isNull)
-                    {
-                        var intArray = (Int32Array)chunk;
-                        values[offset + i] = intArray.GetValue(i)!.Value;
-                    }
-                }
-            }
-            else
-            {
-                var validityBytes = (chunk.Data.Buffers.Length > 0)
-                    ? chunk.Data.Buffers[0].Span
-                    : ReadOnlySpan<byte>.Empty;
-                ArrowValidityMask.ToNullMask(validityBytes, nullMask.AsSpan(offset, chunkLength));
+            var validityBytes = (chunk.Data.Buffers.Length > 0)
+                ? chunk.Data.Buffers[0].Span
+                : ReadOnlySpan<byte>.Empty;
+            ArrowValidityMask.ToNullMask(validityBytes, (int)chunk.Offset, nullMask.AsSpan(offset, chunkLength));
 
-                var intArray = (Int32Array)chunk;
-                for (int i = 0; i < chunkLength; i++)
-                {
-                    if (!nullMask[offset + i])
-                        values[offset + i] = intArray.GetValue(i)!.Value;
-                }
+            var intArray = (Int32Array)chunk;
+            for (int i = 0; i < chunkLength; i++)
+            {
+                if (!nullMask[offset + i])
+                    values[offset + i] = intArray.GetValue(i)!.Value;
             }
 
             offset += chunkLength;
@@ -1187,28 +1176,15 @@ public static class ArrowInterop
             var chunk = chunkedArray.Array(chunkIndex);
             int chunkLength = (int)chunk.Length;
 
-            if (chunk.Offset != 0)
-            {
-                for (int i = 0; i < chunkLength; i++)
-                {
-                    bool isNull = chunk.IsNull(i);
-                    nullMask[offset + i] = isNull;
-                    if (!isNull)
-                        values[offset + i] = ExtractValueFromArrowArray<T>(chunk, i, options);
-                }
-            }
-            else
-            {
-                var validityBytes = (chunk.Data.Buffers.Length > 0)
-                    ? chunk.Data.Buffers[0].Span
-                    : ReadOnlySpan<byte>.Empty;
-                ArrowValidityMask.ToNullMask(validityBytes, nullMask.AsSpan(offset, chunkLength));
+            var validityBytes = (chunk.Data.Buffers.Length > 0)
+                ? chunk.Data.Buffers[0].Span
+                : ReadOnlySpan<byte>.Empty;
+            ArrowValidityMask.ToNullMask(validityBytes, (int)chunk.Offset, nullMask.AsSpan(offset, chunkLength));
 
-                for (int i = 0; i < chunkLength; i++)
-                {
-                    if (!nullMask[offset + i])
-                        values[offset + i] = ExtractValueFromArrowArray<T>(chunk, i, options);
-                }
+            for (int i = 0; i < chunkLength; i++)
+            {
+                if (!nullMask[offset + i])
+                    values[offset + i] = ExtractValueFromArrowArray<T>(chunk, i, options);
             }
 
             offset += chunkLength;
