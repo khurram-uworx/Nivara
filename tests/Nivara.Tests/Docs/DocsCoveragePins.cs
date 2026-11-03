@@ -20,7 +20,7 @@ internal static class DocsCoveragePins
     /// <c>docs/TODO.md</c> does <em>not</em> increase this number - excluding it is the point, and it is
     /// what keeps the count stable across a workflow that commits one.
     /// </summary>
-    internal const int ExpectedDocumentCount = 55;
+    internal const int ExpectedDocumentCount = 56;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the narrowed markdown scope. Pinned deliberately.</summary>
     internal const int ExpectedCodeCitationCount = 27;
@@ -33,5 +33,5 @@ internal static class DocsCoveragePins
     /// document-reference occurrence (TENSORS.md did not previously reference that path),
     /// so 230 -> 231. Deliberate addition; not a drop.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 231;
+    internal const int ExpectedDocumentReferenceCount = 232;
 }

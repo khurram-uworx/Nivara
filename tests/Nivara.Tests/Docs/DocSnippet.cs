@@ -70,6 +70,7 @@ static partial class DocSnippetExtractor
         "docs/ILGPU.md",
         "docs/INTEGERS.md",
         "docs/LINQ.md",
+        "docs/ONNX.md",
         "docs/QWEN.md",
         "docs/RETRAINING.md",
         "docs/SAFETENSORS.md",

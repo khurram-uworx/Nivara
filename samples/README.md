@@ -45,3 +45,7 @@ Loads pre-trained HuggingFace models and runs forward inference entirely within 
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
 Trains a VAE to learn latent representations of synthetic 2D patterns. Supports both MLP and convolutional (`Conv2d`/`ConvTranspose2d`) architectures. Demonstrates encoder–decoder design, reparameterization trick, and latent space exploration (generation, interpolation, per-dimension walks).
+
+## [NivaraOnnxExport/README.md](NivaraOnnxExport/README.md) - Train in Nivara, Deploy via ONNX Runtime
+
+Trains a tiny MLP, exports it to `.onnx` with `OnnxExporter`, then verifies parity against ONNX Runtime inference (within 1e-4).
