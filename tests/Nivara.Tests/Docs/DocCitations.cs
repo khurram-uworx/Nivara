@@ -50,6 +50,7 @@ sealed record ScannedCitation(
     bool IsSymbol,
     string Symbol,
     string Signature,
+    bool HasParens,
     int StartLine,
     int EndLine);
 
@@ -121,7 +122,17 @@ static partial class DocCitationExtractor
             if (citation.IsSymbol)
             {
                 var entries = DocCitationSymbolIndex.Get(resolved);
-                var matches = entries.Where(e => e.Name == citation.Symbol).ToArray();
+                var allMatches = entries.Where(e => e.Name == citation.Symbol).ToArray();
+                var typeMatches = allMatches.Where(e => e.IsType).ToArray();
+                var nonTypeMatches = allMatches.Where(e => !e.IsType).ToArray();
+                // Disambiguate types vs. constructors/methods by citation syntax: a trailing
+                // "()" indicates a constructor/method (non-type), its absence indicates a type.
+                // Only apply when both kinds exist for the same name; otherwise keep all matches.
+                var matches = (citation.HasParens && typeMatches.Length > 0 && nonTypeMatches.Length > 0)
+                    ? nonTypeMatches
+                    : (!citation.HasParens && typeMatches.Length > 0 && nonTypeMatches.Length > 0)
+                        ? typeMatches
+                        : allMatches;
 
                 if (matches.Length == 0)
                 {
@@ -223,9 +234,12 @@ static partial class DocCitationExtractor
                 if (match.Groups["symbol"].Success)
                 {
                     var file = match.Groups["nsFile"].Value;
-                    var symbol = match.Groups["symbol"].Value;
+                    var symbol = match.Groups["symbol"].Value.Replace(" ", string.Empty);
                     var sig = match.Groups["sig"].Success ? match.Groups["sig"].Value : string.Empty;
-                    found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, true, symbol, sig, 0, 0));
+                    var hasParens = match.Groups["sig"].Success;
+                    // HasParens is true if the citation included parentheses, even when sig is empty.
+                    // The sig group alone captures this; but a citation like Foo (no parens) has sig.Success false.
+                    found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, true, symbol, sig, hasParens, 0, 0));
                 }
                 else
                 {
@@ -234,7 +248,7 @@ static partial class DocCitationExtractor
                     var last = match.Groups["end"] is { Success: true } end
                         ? int.Parse(end.Value, CultureInfo.InvariantCulture)
                         : start;
-                    found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, false, string.Empty, string.Empty, start, last));
+                    found.Add(new ScannedCitation(i + 1, match.Value, qualifier, file, false, string.Empty, string.Empty, false, start, last));
                 }
             }
         }
@@ -306,7 +320,7 @@ static partial class DocCitationExtractor
 /// </summary>
 static class DocCitationSymbolIndex
 {
-    internal sealed record SymbolEntry(string Name, string Signature, int StartLine, int EndLine);
+    internal sealed record SymbolEntry(string Name, string Signature, int StartLine, int EndLine, bool IsType = false);
 
     static readonly Dictionary<string, SymbolEntry[]> Cache = new(StringComparer.Ordinal);
     static readonly object Gate = new();
@@ -353,7 +367,7 @@ static class DocCitationSymbolIndex
                 break;
 
             case EnumDeclarationSyntax enumDecl:
-                Add(enumDecl.Identifier.Text, string.Empty, enumDecl, list);
+                Add(enumDecl.Identifier.Text, string.Empty, enumDecl, list, isType: true);
                 break;
 
             case TypeDeclarationSyntax typeDecl:
@@ -363,10 +377,10 @@ static class DocCitationSymbolIndex
                     var tps = string.Join(",", typeDecl.TypeParameterList.Parameters.Select(p => p.Identifier.Text));
                     typeName = $"{typeName}<{tps}>";
                 }
-                var typeFull = parentFullName is null ? typeName : parentFullName + "." + typeName;
-                Add(typeDecl.Identifier.Text, string.Empty, typeDecl, list);
+                var typeFull2 = parentFullName is null ? typeName : parentFullName + "." + typeName;
+                Add(typeName, string.Empty, typeDecl, list, isType: true);
                 foreach (var child in typeDecl.Members)
-                    Collect(child, typeFull, list);
+                    Collect(child, typeFull2, list);
                 break;
 
             case MethodDeclarationSyntax methodDecl:
@@ -397,10 +411,10 @@ static class DocCitationSymbolIndex
         }
     }
 
-    static void Add(string name, string signature, SyntaxNode node, List<SymbolEntry> list)
+    static void Add(string name, string signature, SyntaxNode node, List<SymbolEntry> list, bool isType = false)
     {
         var span = node.GetLocation().GetLineSpan();
-        list.Add(new SymbolEntry(name, signature, span.StartLinePosition.Line + 1, span.EndLinePosition.Line + 1));
+        list.Add(new SymbolEntry(name, signature, span.StartLinePosition.Line + 1, span.EndLinePosition.Line + 1, isType));
     }
 
     static string BuildMethodSignature(MethodDeclarationSyntax method) =>
