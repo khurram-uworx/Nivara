@@ -85,6 +85,34 @@ public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, IFl
         return context.Linear(h, fc2);
     }
 
+    public void SetWeights(
+        int vocabSize, int embeddingDim, int maxSeqLen,
+        T[] embeddingWeights,
+        T[] conv1Weights, T[] conv1Biases,
+        T[] conv2Weights, T[] conv2Biases,
+        T[] conv3Weights, T[] conv3Biases,
+        T[] fc1WeightsCpuLayout, T[] fc1Biases,
+        T[] fc2WeightsCpuLayout, T[] fc2Biases)
+    {
+        var ps = GetParameters().Values.ToArray();
+        int idx = 0;
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(embeddingWeights.Cast<T>().ToArray(), vocabSize, embeddingDim, false);
+
+        int embed = embeddingDim;
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv1Weights, 64, embed * 3, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv1Biases, 1, 64, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv2Weights, 64, embed * 5, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv2Biases, 1, 64, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv3Weights, 64, embed * 7, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(conv3Biases, 1, 64, false);
+
+        int convHidden = 64 * 3 * maxSeqLen;
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(fc1WeightsCpuLayout, fc1WeightsCpuLayout.Length / convHidden, convHidden, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(fc1Biases, 1, fc1Biases.Length, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(fc2WeightsCpuLayout, 2, fc2WeightsCpuLayout.Length / 2, false);
+        ps[idx++].Tensor = ReverseGradTensor<T>.FromMatrix(fc2Biases, 1, fc2Biases.Length, false);
+    }
+
     public int[] Predict(int[] tokenIds)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);
