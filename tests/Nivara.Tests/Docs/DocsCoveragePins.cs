@@ -16,10 +16,10 @@ internal static class DocsCoveragePins
     /// superseded by the ranges above. The <c>ColumnStorage.cs</c> citations in the scorecard row
     /// were rewritten in place, so they cancel. 107 + 4 - 3 = 108.
     /// </summary>
-    internal const int ExpectedCitationCount = 108;
+    internal const int ExpectedCitationCount = 113;
 
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
-    internal const int ExpectedCitedDocumentCount = 18;
+    internal const int ExpectedCitedDocumentCount = 19;
 
     /// <summary>
     /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus the 43 under
@@ -37,10 +37,10 @@ internal static class DocsCoveragePins
     /// taking this count from 53 to 54: <c>docs/adr/</c> is scanned recursively, so a new ADR file
     /// enters scope on arrival even though it changes no code.
     /// </summary>
-    internal const int ExpectedDocumentCount = 54;
+    internal const int ExpectedDocumentCount = 55;
 
     /// <summary><c>File.cs:NN</c> citations discovered across the narrowed markdown scope. Pinned deliberately.</summary>
-    internal const int ExpectedCodeCitationCount = 24;
+    internal const int ExpectedCodeCitationCount = 27;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
@@ -50,5 +50,5 @@ internal static class DocsCoveragePins
     /// plan documents the new ADR names — the roadmap phase it ratifies and the review whose
     /// scorecard it corrects. 226 + 1 + 2 = 229.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 229;
+    internal const int ExpectedDocumentReferenceCount = 230;
 }
