@@ -15,6 +15,8 @@ internal static class DocsCoveragePins
     /// <c>ArrowInterop.cs:973-1057</c> range and one for <c>ArrowInterop.cs:999-1015</c>, both
     /// superseded by the ranges above. The <c>ColumnStorage.cs</c> citations in the scorecard row
     /// were rewritten in place, so they cancel. 107 + 4 - 3 = 108.
+    /// ADR-008 (#850) added 3 symbol citations in ADR-008/AGENTS.md and converted 2 shorthand
+    /// `:NN` citations in ARROW-REVIEW.md to full symbol form. 108 + 3 + 2 = 113.
     /// </summary>
     internal const int ExpectedCitationCount = 113;
 
@@ -36,6 +38,7 @@ internal static class DocsCoveragePins
     /// The validity-mask ratification added <c>docs/adr/007-byte-wise-null-mask-fast-path.md</c>,
     /// taking this count from 53 to 54: <c>docs/adr/</c> is scanned recursively, so a new ADR file
     /// enters scope on arrival even though it changes no code.
+    /// ADR-008 added `docs/adr/008-symbol-anchored-citations.md`, taking this count from 54 to 55.
     /// </summary>
     internal const int ExpectedDocumentCount = 55;
 
@@ -49,6 +52,7 @@ internal static class DocsCoveragePins
     /// line in the <c>AGENTS.md</c> index (<c>AGENTS.md</c> is in the widened scope), and two for the
     /// plan documents the new ADR names — the roadmap phase it ratifies and the review whose
     /// scorecard it corrects. 226 + 1 + 2 = 229.
+    /// ADR-008 added one reference to the new ADR in the AGENTS.md index. 229 + 1 = 230.
     /// </summary>
     internal const int ExpectedDocumentReferenceCount = 230;
 }
