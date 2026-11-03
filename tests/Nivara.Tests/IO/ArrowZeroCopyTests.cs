@@ -224,6 +224,42 @@ public class ArrowZeroCopyTests
     }
 
     [Test]
+    public void ToArrowTable_ZeroCopyEmptyColumn_ProducesEmptyArray()
+    {
+        var column = NivaraColumn<int>.Create(System.Array.Empty<int>());
+        var frame = NivaraFrame.Create("values", column);
+
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+        var array = Int32ArrayOf(table);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(array.Length, Is.EqualTo(0));
+            Assert.That(array.NullCount, Is.EqualTo(0));
+            Assert.That(array.Data.Buffers[1].IsEmpty, Is.True);
+        });
+    }
+
+    [Test]
+    public void ToArrowTable_ZeroCopyAllNullColumn_ReportsEveryRowNull()
+    {
+        var column = NivaraColumnFactory.CreateFromNullable(new int?[] { null, null, null });
+        var frame = NivaraFrame.Create("values", column);
+
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+        var array = Int32ArrayOf(table);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(array.Length, Is.EqualTo(3));
+            Assert.That(array.NullCount, Is.EqualTo(3));
+            Assert.That(array.IsNull(0), Is.True);
+            Assert.That(array.IsNull(1), Is.True);
+            Assert.That(array.IsNull(2), Is.True);
+        });
+    }
+
+    [Test]
     public void ToArrowTable_ZeroCopyStringColumn_ThrowsUnsupportedTypeNamingColumn()
     {
         var column = NivaraColumn<string>.Create(new[] { "alpha", "beta" });
