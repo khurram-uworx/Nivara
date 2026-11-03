@@ -206,6 +206,16 @@ public static class OnnxExporter
 
         public string Conv2d(string inputName, Conv2d<T> module)
         {
+            ArgumentNullException.ThrowIfNull(module);
+            if (module.Groups <= 0
+                || module.InChannels % module.Groups != 0
+                || module.OutChannels % module.Groups != 0)
+                throw new NotSupportedException("Conv2d export requires groups > 0 with channels divisible by groups.");
+            if (module.KernelSize <= 0 || module.Stride <= 0)
+                throw new NotSupportedException("Conv2d export requires positive kernel size and stride.");
+            if (module.PaddingTop < 0 || module.PaddingBottom < 0
+                || module.PaddingLeft < 0 || module.PaddingRight < 0)
+                throw new NotSupportedException("Conv2d export requires non-negative padding.");
             var wName = New("conv2d_weight");
             var wShape = new[] { module.OutChannels, module.InChannels / module.Groups, module.KernelSize, module.KernelSize };
             var wData = new T[module.Weight!.Tensor.Length];
@@ -239,8 +249,8 @@ public static class OnnxExporter
                 int w = inShape2d[3];
                 int oH = (h + module.PaddingTop + module.PaddingBottom - module.KernelSize) / module.Stride + 1;
                 int oW = (w + module.PaddingLeft + module.PaddingRight - module.KernelSize) / module.Stride + 1;
-                if (oH <= 0) oH = h;
-                if (oW <= 0) oW = w;
+                if (oH <= 0 || oW <= 0)
+                    throw new NotSupportedException($"Conv2d export produced non-positive output dimensions ({oH}x{oW}).");
                 SetShape(outName, new[] { n, module.OutChannels, oH, oW });
             }
             return outName;
