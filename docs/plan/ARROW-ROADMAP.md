@@ -14,13 +14,13 @@ Concretely, when this roadmap is done:
 
 - A column has an explicit **physical layout** (`Flat<T>`, `VariableBinary`, `Dictionary`), decoupled from its logical type; strings are offset+data buffers, not reference arrays.
 - **Validity is a first-class bitmap** with a documented representation and a cheap bool↔bitmap conversion at the boundaries.
-- **Zero-copy actually works** — internally (slices/views share buffers) and at the interop boundary (Arrow arrays and tensors are built from existing `Memory<T>` buffers, exposed through real APIs — the placeholder `UseZeroCopy` option is gone, not kept lying).
+- **Zero-copy actually works** — internally (slices/views share buffers) and at the interop boundary, where the opt-in `ArrowConversionOptions.UseZeroCopy` hands a flat primitive column's data buffer straight to the Arrow array (Phase D, export only so far).
 - **Columns are chunked** — a frame is chunk-aligned columns, so append/concat are cheap and streaming/record-batch boundaries are natural.
 - Arrow IPC and Parquet are the **zero-copy handoff** at the edges, not a conversion ritual.
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`), Arrow/Parquet interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, recorded in `CHANGELOG.md`, so all interchange conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:999-1015`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs:951`), while **import** and Parquet conversion still copy; and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:1096-1121`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
 
 ### Non-goals (explicit)
 
@@ -138,26 +138,28 @@ by round-trip parity in the interop layer, and never regress null-correctness.
 
 ---
 
-### Phase D — Real zero-copy, both directions *(credibility win)*
+### Phase D — Real zero-copy, both directions *(credibility win; export half landed)*
 
-**Motivation:** Every Arrow/Parquet interchange path copies today — the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94). This phase adds the real zero-copy APIs back.
+**Motivation:** Every Arrow/Parquet interchange path copied, and the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94). *Landed (issues #835, #836):* the export half is real — `ArrowConversionOptions.UseZeroCopy` shares a flat primitive column's data buffer with the Arrow array instead of copying, and is backed by aliasing, slice, lifetime, IPC and null-parity tests.
 
 **Scope:**
-- Re-introduce the zero-copy interop path (the placeholder `TryCreateZeroCopy*Array` methods were removed) with real `MemoryMarshal`/buffer-handoff implementations: build Apache.Arrow arrays from existing `Memory<T>` (data buffer + validity bitmap) instead of builders+`Append`.
-- ✅ *Done as of the storage consolidation:* the internal column→`Tensor<T>` view is now real and public — `NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()` return `ColumnStorage<T>.AsTensor()`, a lazy zero-copy view (no per-access `FlattenTo` allocation, cached). What remains is the *interop* half (Arrow/Parquet) on this page.
-- Expose zero-copy through a dedicated option (e.g. a re-added `UseZeroCopy`) that engages only when the layout is compatible, throws/fails loudly when it cannot, and **never silently copies while reporting zero-copy**.
+- ✅ *Done (export, #835/#836):* `ArrowInterop.ToArrowTable`/`ToArrowArray` build Apache.Arrow arrays from the column's existing `Memory<T>` for flat `byte`/`sbyte`/`short`/`ushort`/`int`/`uint`/`long`/`ulong`/`float`/`double`/`Half` columns. Null-bearing columns share the values buffer and rebuild the validity bitmap (a byte-wise, true-at-null mask cannot alias a bit-packed, true-at-valid one). An ineligible layout throws `UnsupportedTypeException` naming the column rather than silently copying. Export-only: `FromArrowTable` ignores the option.
+- *Remaining:* the **import** half — `FromArrowTable` still materialises columns element by element, and Parquet conversion copies in both directions.
+- ✅ *Done as of the storage consolidation:* the internal column→`Tensor<T>` view is now real and public — `NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()` return `ColumnStorage<T>.AsTensor()`, a lazy zero-copy view (no per-access `FlattenTo` allocation, cached).
+- Extend the dedicated `UseZeroCopy` option to import on the same terms: engage only when the layout is compatible and **never silently copy while reporting zero-copy**.
 - `MemoryMarshal.AsBytes` for unmanaged flat layouts + Arrow buffers; `ReadOnlyMemory<T>` sharing into `Tensor<T>`/`TensorSpan<T>` where the BCL allows.
 
-**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs`, `src/Nivara.Extensions/IO/ArrowConversionOptions.cs` (option re-added here), `src/Nivara/Storage/ColumnStorage.cs`, `src/Nivara/Tensors/TensorInteropExtensions.cs`.
+**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs`, `src/Nivara.Extensions/IO/ArrowConversionOptions.cs`, `src/Nivara.Extensions/IO/ArrowValidityMask.cs`, `src/Nivara/Storage/ColumnStorage.cs`, `src/Nivara/Tensors/TensorInteropExtensions.cs`.
 
-**Dependencies:** Phases A–C (zero-copy needs chunked, layout-explicit, bitmap-validity columns).
+**Dependencies:** Phases A–C for the **import** half (sharing a validity buffer needs the bitmap representation and the layout model). The export half bypassed them: only the values buffer is shared, and the validity bitmap is rebuilt per call.
 
 **Acceptance criteria:**
-- Interop benchmark shows zero-copy paths actually share buffers (no element-loop copies) for flat, null-free and bitmapped cases.
-- Round-trip tests confirm shared-buffer reads are consistent (immutability guarantees no mutation).
-- An explicit zero-copy request on an incompatible layout fails loudly (clear exception) rather than silently copying.
+- ✅ Export: tests show the Arrow data buffer aliases the column's array (no element loop) for flat primitive columns, null-free and null-bearing.
+- ✅ Export: shared-buffer reads agree with the copying path bit for bit, including the validity bitmap.
+- ✅ An explicit zero-copy request on an incompatible layout fails loudly with a clear exception.
+- Remaining: the same three properties for `FromArrowTable` and for Parquet in both directions.
 
-**Risks:** Apache.Arrow's buffer APIs vs. `Tensor<T>` internal layout (nint dims, padding); memory-lifecycle safety of handing managed `Memory<T>` to native-bound arrays. Mitigation: pin/`MemoryManager<T>` ownership, keep owned-buffer semantics explicit (AGENTS.md zero-copy notes already flag this).
+**Risks:** Apache.Arrow's buffer APIs vs. `Tensor<T>` internal layout (nint dims, padding); memory-lifecycle safety of handing managed `Memory<T>` to native-bound arrays. Mitigation: pin/`MemoryManager<T>` ownership, keep owned-buffer semantics explicit (AGENTS.md zero-copy notes already flag this). Import adds the reverse risk: an Arrow buffer owned by an IPC reader must not outlive the reader, so an aliased import needs an ownership rule before it is safe.
 
 ---
 

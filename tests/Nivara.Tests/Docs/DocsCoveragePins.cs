@@ -6,8 +6,17 @@ namespace Nivara.Tests.Docs;
 /// </summary>
 internal static class DocsCoveragePins
 {
-    /// <summary>Count of citations found repository-wide. Pinned deliberately: see the coverage test.</summary>
-    internal const int ExpectedCitationCount = 107;
+    /// <summary>
+    /// Count of citations found repository-wide. Pinned deliberately: see the coverage test.
+    /// The zero-copy Arrow decision gate (#836) took this from 107 to 108. Four citations were
+    /// added: three for the import-flattening range <c>ArrowInterop.cs:1096-1121</c> (roadmap,
+    /// review scorecard, review §4.1) and one for the export entry point
+    /// <c>ArrowInterop.cs:951</c>. Three were removed: two for the stale
+    /// <c>ArrowInterop.cs:973-1057</c> range and one for <c>ArrowInterop.cs:999-1015</c>, both
+    /// superseded by the ranges above. The <c>ColumnStorage.cs</c> citations in the scorecard row
+    /// were rewritten in place, so they cancel. 107 + 4 - 3 = 108.
+    /// </summary>
+    internal const int ExpectedCitationCount = 108;
 
     /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
     internal const int ExpectedCitedDocumentCount = 18;
