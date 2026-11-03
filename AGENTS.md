@@ -184,6 +184,7 @@ See `docs/adr/` for recorded decisions:
 - **ADR-005** (`docs/adr/005-snippet-gate-authoring-contract.md`): Read before editing a fenced ```csharp block in a gated doc, or adding one. Each fence compiles alone; `<!-- gate -->` keys are `mode`/`preamble`/`locals`/`exclude`/`reason`; `preamble:` resolves to exactly one namespace, one namespace per name.
 - **ADR-006** (`docs/adr/006-streaming-memory-budget-exposure.md`): The streaming memory budget is exposed through a context-taking `AsStream(NivaraExecutionContext)` overload (the strategy stays internal); the bare `AsStream()` keeps its 10,000-row default, and the caller's context is cloned before execution.
 - **ADR-007** (`docs/adr/007-byte-wise-null-mask-fast-path.md`): The byte-wise `ReadOnlySpan<bool>` null mask is the canonical validity representation in core; bit-packed validity, and the polarity inversion it needs, exist only at the Arrow boundary. A span-first `ArrowValidityMask` helper exists and is unit-tested, but the boundary conversion is still element-wise until `ArrowInterop` calls it.
+- **ADR-008** (`docs/adr/008-symbol-anchored-citations.md`): Documentation citations anchor to source symbols (e.g. `src/Nivara/Storage/ColumnStorage.cs::AsSpan()`) instead of line numbers. The gate resolves symbols with Roslyn (cached per file); signatures are appended only to disambiguate overloads. Line-number form retired after migration.
 
 ## Agent Framework Workflow Patterns
 

@@ -23,6 +23,16 @@ wave this through: `src/Nivara/Execution/NivaraExecutionContext.cs:1-100000`
 
 `Program.cs:1`
 
+## Symbols that do not exist
+
+`src/Nivara/Execution/NivaraExecutionContext.cs::DefinitelyNotAMember`
+
+## Symbols with ambiguous overloads and no signature
+
+`src/Nivara/Schema.cs::GetHashCode`
+
 ## Citations that must still pass, so the fixture proves it is not simply rejecting everything
 
 `src/Nivara/Execution/NivaraExecutionContext.cs:1`
+
+`src/Nivara/Execution/NivaraExecutionContext.cs::MemoryBudget`
