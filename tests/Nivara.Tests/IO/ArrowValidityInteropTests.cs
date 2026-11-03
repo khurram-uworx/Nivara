@@ -3,7 +3,6 @@ using Apache.Arrow.Types;
 using Nivara;
 using Nivara.IO;
 using NUnit.Framework;
-using System.Runtime.InteropServices;
 
 namespace Nivara.Tests.IO;
 

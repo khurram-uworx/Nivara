@@ -1,5 +1,4 @@
 using Apache.Arrow;
-using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
 using Nivara.IO;
 using NUnit.Framework;
