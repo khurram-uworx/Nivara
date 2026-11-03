@@ -65,6 +65,26 @@ public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, IFl
         return fc2.Forward(h);
     }
 
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+    {
+        var emb = context.Embedding(inputName, embedding);
+        var ncl = context.TransposeAxes(emb, new[] { 0, 2, 1 });
+
+        var c1 = context.Relu(context.Conv1d(ncl, conv1));
+        var c2 = context.Relu(context.Conv1d(ncl, conv2));
+        var c3 = context.Relu(context.Conv1d(ncl, conv3));
+
+        int branchChannels = conv1.OutChannels;
+        c1 = context.Reshape(c1, new[] { -1, branchChannels * maxSeqLen });
+        c2 = context.Reshape(c2, new[] { -1, branchChannels * maxSeqLen });
+        c3 = context.Reshape(c3, new[] { -1, branchChannels * maxSeqLen });
+
+        var cat = context.Concat(new[] { c1, c2, c3 }, 1);
+        var h = context.Relu(context.Linear(cat, fc1));
+        // Dropout is identity in Eval mode, so it is omitted from the exported graph.
+        return context.Linear(h, fc2);
+    }
+
     public int[] Predict(int[] tokenIds)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);
