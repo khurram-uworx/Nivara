@@ -218,9 +218,9 @@ by round-trip parity in the interop layer, and never regress null-correctness.
 
 ## 2. Sequencing rationale
 
-**Why chunks first:** Phase A is the structural keystone — B (layout), C (bitmap validity), and D (zero-copy) all need a chunked, boundary-shaped column model to be natural. Without it, every other phase is bolted onto the wrong shape.
+**Why chunks first:** Phase A remains the structural keystone, but the reality check is now honest: Phase C (validity wiring, #833/#840/#843) and the export half of Phase D (#835/#836) both landed *without* it, because sharing a flat values buffer and packing a validity bitmap do not need a chunked model. What still genuinely needs A is the import half of D (Arrow/Parquet buffers outliving their reader; a validity/ownership rule across chunks), Phase F (record-batch-shaped scanning), and any chunk-aware operator work. B (layout/variable-binary strings) and E (dictionary encoding) are not on the import path and can be tackled for their own analytic reasons; A makes them cleaner, not possible. Without chunks, every chunk-aware phase is bolted onto a single-contiguous-array shape.
 
-**Credibility vs. polish:** Phase D (real zero-copy) is the user-visible credibility win — it re-introduces the zero-copy API the claims-integrity triage removed (issue #94). Phases B and C are the physics that make D cheap and correct. Phase E is the analytical payoff; F is the streaming payoff.
+**Credibility vs. polish:** The export half of Phase D is the landed credibility win — it re-introduces the zero-copy API the claims-integrity triage removed (issue #94) and is covered by aliasing, slice, lifetime, IPC and null-parity tests. Phases B and C (the latter delivered) are the physics that make the import half cheap and correct. Phase E is the analytical payoff; F is the streaming payoff.
 
 **Cross-roadmap convergence:**
 
@@ -231,7 +231,7 @@ by round-trip parity in the interop layer, and never regress null-correctness.
 | F · Interchange scanning | 4 · Async streaming | Same async chunk pipeline |
 | C · Bitmap validity | 2 · Generic-math collapse | Same null-aware kernel machinery |
 
-Both roadmaps sit on the same foundation (typed, null-aware, span-first columns). Phase A here should be sequenced against POLARS-ROADMAP Phase 1 (typed expression engine): they are independent — expression typing does not need chunks, and chunks do not need expression typing — but both must land before Phase D/F merge points.
+Both roadmaps sit on the same foundation (typed, null-aware, span-first columns). Phase A here should be sequenced against POLARS-ROADMAP Phase 1 (typed expression engine): they are independent — expression typing does not need chunks, and chunks do not need expression typing — and the export half of Phase D has already landed without either. The remaining D/F merge points (import zero-copy, record-batch scanning) still need both.
 
 **What we leverage, not reinvent:** the existing storage seam (`IColumnStorage<T>`, sole-owner `ColumnStorage<T>`), the async members already on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs::IQuerySource`), `ColumnStorage<T>.Slice` (already a true `ReadOnlyMemory` view — proof the pattern works), `KernelSelector`, and the Arrow/Parquet interop test suite in `tests/Nivara.Tests/IO/`.
 
