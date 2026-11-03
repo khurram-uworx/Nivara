@@ -30,6 +30,12 @@
   <ItemGroup>
     <PackageReference Include="Streamix" Version="1.2.3" />
     <PackageReference Include="System.Numerics.Tensors" Version="11.0.0-rc.3.26522.148" />
+    <PackageReference Include="Google.Protobuf" Version="3.36.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.83.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Onnx\onnx.proto" GrpcServices="None" OutputDir="Onnx\Generated" />
   </ItemGroup>
 
   <ItemGroup>
