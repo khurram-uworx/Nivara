@@ -33,11 +33,12 @@ follow-up, not part of this plan.)
      branches; the remaining work is exposing generic-math methods on the
      column surface.
 
-2. `docs/plan/ARROW-ROADMAP.md` (Where we are today):
-   `ArrowInterop.cs:999-1015` now resolves to `CreateZeroCopyHalf` after the
-   #835 zero-copy export work, not the chunked-array flattening loop.
-   - Retarget to the shifted import loop:
-     `ArrowInterop.cs:1100-1116`.
+2. `docs/plan/ARROW-ROADMAP.md` (Where we are today) was still stale when the
+   plan was written (`ArrowInterop.cs:999-1015` resolved to `CreateZeroCopyHalf`),
+   but `main` has since absorbed the #836 reconciliation (`a12a52dd`), which
+   already retargeted the import-flattening claim to
+   `ArrowInterop.cs:1096-1121` and recorded the export-only zero-copy boundary.
+   Re-audited against the current tree: correct, no change needed here.
 
 No stale citations found in:
 
@@ -52,15 +53,17 @@ No stale citations found in:
 
 ## Proposed changes
 
-- Retarget the two citations above, preserving citation counts.
+- Retarget the POLARS-ROADMAP citation to the arithmetic operator overloads,
+  preserving citation count.
 - Adjust the POLARS-ROADMAP sentence that made the now-false
   "explicit `float`/`double` branches" claim.
+- No change to `ARROW-ROADMAP.md`: #836 already corrected it.
 - No code changes, no new documents.
 
 ## Coverage pins
 
-Both edits are count-preserving retargets. Expected to leave
-`DocsCoveragePins.ExpectedCitationCount` (107),
+The surviving edit is a count-preserving retarget. Expected to leave
+`DocsCoveragePins.ExpectedCitationCount` (108, after #836),
 `ExpectedCitedDocumentCount` (18),
 `ExpectedDocumentCount` (54),
 `ExpectedCodeCitationCount` (24), and
@@ -70,7 +73,7 @@ comment rather than bumping silently.
 
 ## Blast radius
 
-- Documentation only: two markdown files under `docs/plan/`.
+- Documentation only: one markdown file under `docs/plan/`.
 - No source, test, or public-API behaviour changes.
 - The docs gate (`Nivara.Tests.Docs`) is the affected test surface. The
   citation gate checks resolution, not semantics, so green before and after is
@@ -86,8 +89,9 @@ comment rather than bumping silently.
 ## Planned commits
 
 1. `docs: plan citation sweep for issue #841 in TODO.md`
-2. `docs(plan): retarget stale citations in POLARS and ARROW roadmaps`
-3. `docs: remove TODO.md - plan executed`
+2. `docs: revise #841 plan after the #836 ARROW reconciliation`
+3. `docs(plan): retarget stale POLARS-ROADMAP citation`
+4. `docs: remove TODO.md - plan executed`
 
 ## GitHub issues log
 
