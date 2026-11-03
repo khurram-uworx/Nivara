@@ -807,6 +807,103 @@ public static class OnnxExporter
             return outName;
         }
 
+        public string TransposeAxes(string inputName, int[] perm)
+        {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
+            var outName = New("transpose_out");
+            var attr = new AttributeProto { Name = "perm", Type = AttributeProto.Types.AttributeType.Ints };
+            attr.Ints.AddRange(perm.Select(v => (long)v));
+            AddNode("Transpose", new[] { inputName }, new[] { outName }, new[] { attr });
+            var inShape = GetShape(inputName);
+            int[] outShape;
+            if (inShape.Length > 0 && inShape.Length == perm.Length)
+                outShape = perm.Select(i => inShape[i]).ToArray();
+            else
+                outShape = inShape.ToArray();
+            SetShape(outName, outShape);
+            RecordOnnxExportDiagnostic(__m, "TransposeAxes", "Transpose", 0);
+            return outName;
+        }
+
+        public string Reshape(string inputName, int[] newShape)
+        {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
+            var initName = New("shape_const");
+            var tp = new TensorProto { Name = initName, DataType = (int)TensorProto.Types.DataType.Int64 };
+            tp.Dims.Add(newShape.Length);
+            var bytes = new byte[newShape.Length * 8];
+            var longs = newShape.Select(v => (long)v).ToArray();
+            Buffer.BlockCopy(longs, 0, bytes, 0, bytes.Length);
+            tp.RawData = ByteString.CopyFrom(bytes);
+            graph.Initializer.Add(tp);
+            SetShape(initName, new[] { newShape.Length });
+            var outName = New("reshape_out");
+            AddNode("Reshape", new[] { inputName, initName }, new[] { outName });
+            SetShape(outName, newShape);
+            RecordOnnxExportDiagnostic(__m, "Reshape", "Reshape", 0);
+            return outName;
+        }
+
+        public string Concat(string[] inputNames, int axis)
+        {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
+            var outName = New("concat_out");
+            var attr = new AttributeProto { Name = "axis", Type = AttributeProto.Types.AttributeType.Int, I = axis };
+            AddNode("Concat", inputNames, new[] { outName }, new[] { attr });
+            var inShape = GetShape(inputNames[0]);
+            var outShape = inShape.ToArray();
+            if (inShape.Length > 0 && axis >= 0 && axis < inShape.Length)
+            {
+                int total = 0;
+                bool known = true;
+                foreach (var n in inputNames)
+                {
+                    var s = GetShape(n);
+                    if (s.Length <= axis || s[axis] <= 0) { known = false; break; }
+                    total += s[axis];
+                }
+                if (known) outShape[axis] = total;
+            }
+            SetShape(outName, outShape);
+            RecordOnnxExportDiagnostic(__m, "Concat", "Concat", 0);
+            return outName;
+        }
+
+        public string ReduceMean(string inputName, int[] axes, bool keepDims = false)
+        {
+            var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
+            var axesName = New("reduce_axes");
+            var tp = new TensorProto { Name = axesName, DataType = (int)TensorProto.Types.DataType.Int64 };
+            tp.Dims.Add(axes.Length);
+            var axesLong = axes.Select(v => (long)v).ToArray();
+            var bytes = new byte[axes.Length * 8];
+            Buffer.BlockCopy(axesLong, 0, bytes, 0, bytes.Length);
+            tp.RawData = ByteString.CopyFrom(bytes);
+            graph.Initializer.Add(tp);
+            SetShape(axesName, new[] { axes.Length });
+            var outName = New("reduce_mean_out");
+            var attr = new AttributeProto { Name = "keepdims", Type = AttributeProto.Types.AttributeType.Int, I = keepDims ? 1 : 0 };
+            AddNode("ReduceMean", new[] { inputName, axesName }, new[] { outName }, new[] { attr });
+            var inShape = GetShape(inputName);
+            var axisSet = new HashSet<int>(axes.Select(a => a < 0 ? inShape.Length + a : a));
+            var outShape = new List<int>();
+            for (int i = 0; i < inShape.Length; i++)
+            {
+                if (axisSet.Contains(i))
+                {
+                    if (keepDims) outShape.Add(1);
+                }
+                else
+                {
+                    outShape.Add(inShape[i]);
+                }
+            }
+            if (outShape.Count == 0) outShape.Add(1);
+            SetShape(outName, outShape.ToArray());
+            RecordOnnxExportDiagnostic(__m, "ReduceMean", "ReduceMean", 0);
+            return outName;
+        }
+
         public string Add(string left, string right)
         {
             var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
@@ -843,6 +940,10 @@ public static class OnnxExporter
         string IOnnxExportContext<T>.Sigmoid(string inputName) => Sigmoid(inputName);
         string IOnnxExportContext<T>.Tanh(string inputName) => Tanh(inputName);
         string IOnnxExportContext<T>.Add(string left, string right) => Add(left, right);
+        string IOnnxExportContext<T>.TransposeAxes(string inputName, int[] perm) => TransposeAxes(inputName, perm);
+        string IOnnxExportContext<T>.Reshape(string inputName, int[] newShape) => Reshape(inputName, newShape);
+        string IOnnxExportContext<T>.Concat(string[] inputNames, int axis) => Concat(inputNames, axis);
+        string IOnnxExportContext<T>.ReduceMean(string inputName, int[] axes, bool keepDims) => ReduceMean(inputName, axes, keepDims);
 
         static T[] ToArray(ReverseGradTensor<T>? tensor)
         {
