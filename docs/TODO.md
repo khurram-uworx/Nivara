@@ -50,4 +50,7 @@ Retarget every `File.cs:NN` citation in that file to its enclosing symbol (`::Me
 - `DocsCoveragePins` counts unchanged if migration is one-for-one (verify in G2).
 
 ## GitHub issues log
-- (to be populated during execution)
+- [x] #850 — Docs: re-sweep ARROW-REVIEW.md citations (this PR, pilot migration)
+- [ ] #852 — Migrate remaining plan documents to symbol-anchored citations
+- [ ] #853 — Migrate root docs, blog posts, and cs citations to symbol anchors
+- [ ] #854 — Retire legacy File.cs:NN citation form from the gate
