@@ -82,13 +82,13 @@ The data is crunched, but the crunching is bookkeeping: one finite vocabulary
 
 **2. How MiniLM uses it.** This is node #1 in the chain — text goes in, a `[128]` vector of
 token ids comes out. MiniLM's tokenizer is WordPiece (`MiniLMTokenizer.Load/Encode`,
-`src/Nivara.Extensions/AI/BertModel.cs:437-463`):
+`src/Nivara.Extensions/AI/BertModel.cs::MiniLMDistilled<TModel, TWeight>`):
 
 - `[CLS]` and `[SEP]` are added around the sentence (`addSpecialTokens: true`,
-  `BertModel.cs:449`). Standard BERT ids: `[PAD]=0`, `[UNK]=100`, `[CLS]=101`, `[SEP]=102`,
+  `BertModel.cs::MiniLMDistilled<TModel, TWeight>`). Standard BERT ids: `[PAD]=0`, `[UNK]=100`, `[CLS]=101`, `[SEP]=102`,
   `[MASK]=103` — the program prints the first 10 input token ids so you can verify
-  (`samples/NivaraInference/Program.cs:669-673`).
-- Sequences are padded to `maxLen = 128` with the padding token (`BertModel.cs:459-461`),
+  (`samples/NivaraInference/Program.cs::Main`).
+- Sequences are padded to `maxLen = 128` with the padding token (`BertModel.cs::MiniLMDistilled<TModel, TWeight>`),
   and an attention mask `[0,1]` marks real vs padded positions (attention reads it in
   post 3).
 - **Why subwords:** a finite vocabulary can't cover all of English, so unknown words are
@@ -111,7 +111,7 @@ this is float math on those integers.
 computation. Each token id picks one row out of a big matrix:
 
 ```csharp
-// src/Nivara/AutoDiff/Nn/Embedding.cs:42-63
+// src/Nivara/AutoDiff/Nn/Embedding.cs::Embedding(int,int)
 var tokenIds = new int[totalTokens];
 for (int i = 0; i < totalTokens; i++)
     tokenIds[i] = int.CreateChecked(input.Data[i]);
@@ -125,13 +125,13 @@ for (int i = 0; i < totalTokens; i++)
 var result = ReverseGradOperations.Gather(weight.Tensor, tokenIds);
 ```
 
-`Gather` is row lookup on axis 0 (`ReverseGradOperations.cs:1834`). Think `dict[tokenId]` —
+`Gather` is row lookup on axis 0 (`ReverseGradOperations.cs::Slice`). Think `dict[tokenId]` —
 an array indexed by an integer — or, in hardware terms, a ROM / content-addressable table.
 The entire "math" of this node is `out[i] = table[token_id[i]]`.
 
 **2. How MiniLM uses it.** The table is `[vocab_size=30522, hidden=384]`
-(`Embedding<T>` constructor, `src/Nivara/AutoDiff/Nn/Embedding.cs:18-33`; config in
-`BertConfig`, `BertModel.cs:8-16`) — and it is **11,720,448 of the ~22.6M parameters:
+(`Embedding<T>` constructor, `src/Nivara/AutoDiff/Nn/Embedding.cs::Embedding<TModel, TWeight>`; config in
+`BertConfig`, `BertModel.cs::BertConfig`) — and it is **11,720,448 of the ~22.6M parameters:
 more than half the model.** The rows became meaningful *during training*; at inference
 this is pure read-only memory. This is the piece that turns integers into vectors, and it
 is where "most AI parameters aren't math, they're memory."
@@ -164,7 +164,7 @@ var hidden  = ReverseGradOperations.Add(wordEmb, posEmb);   // ← a wire sum
 ```
 
 Position ids are literally `0, 1, 2, ...` per sequence, generated at forward time
-(`BertEncoder.Forward`, `BertModel.cs:258-272`). "Adding a position vector" is adding 384
+(`BertEncoder.Forward`, `BertModel.cs::Forward(ReverseGradTensor<TModel>)`). "Adding a position vector" is adding 384
 numbers, position by position.
 
 **2. How MiniLM uses it.** The lookup table gives identical vectors to identical tokens no
@@ -172,12 +172,12 @@ matter where they appear — "bank" in "river bank" and "bank loan" get the same
 position table is what lets the model distinguish word #1 from word #2. Analogy: a state
 machine needs a clock/counter to know where it is; the position table is the counter.
 
-- Table length `max_position_embeddings = 512` (`BertConfig`, `BertModel.cs:14`);
+- Table length `max_position_embeddings = 512` (`BertConfig`, `BertModel.cs::MaxPositionEmbeddings`);
   `[512, 384]` = 196,608 params.
 - The three lookups — token, position, segment — are **summed element-wise**
   (`ReverseGradOperations.Add`): no averaging, no concatenation, just a wire sum. Good
   spot for a "signals get mixed here" diagram: three `[128,384]` signals → one `[128,384]`.
-- DistilBERT skips the segment table (`includeTokenTypeEmbedding: false`, `BertModel.cs:15`).
+- DistilBERT skips the segment table (`includeTokenTypeEmbedding: false`, `BertModel.cs::VocabSize`).
 
 Piece this node contributes: word identity (table) + word order (table) merged into one
 vector per token — and the first example of the model "mixing" signals, the reason
@@ -205,11 +205,11 @@ y[i] = (x[i] − μ) / sqrt(σ² + ε) · γ[i] + β[i]
 ```
 
 "Variance" is just "how far the numbers spread from the mean" — no more. The kernel is the
-same three steps in code, `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs:45-80` (two passes:
+same three steps in code, `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs::Forward` (two passes:
 row means, then diff → dot → inverse std → scale):
 
 ```csharp
-// LayerNormKernel.cs:45-52 (pass 1 — row means)
+// LayerNormKernel.cs::Forward (pass 1 — row means)
 for (int r = 0; r < rows; r++)
 {
     int offset = r * normalizedShape;
@@ -218,7 +218,7 @@ for (int r = 0; r < rows; r++)
     mean[r] = sum / T.CreateChecked(normalizedShape);
 }
 
-// LayerNormKernel.cs:66-79 (pass 2 — normalize + affine)
+// LayerNormKernel.cs::Forward (pass 2 — normalize + affine)
 T sumSq = T.CreateChecked(double.CreateChecked(TensorPrimitives.Dot(diffSpan, diffSpan)));
 T variance = sumSq / T.CreateChecked(normalizedShape);
 invStd[r] = T.One / T.CreateChecked(Math.Sqrt(double.CreateChecked(variance + eps)));
@@ -237,7 +237,7 @@ features, then re-apply the learned knobs. This is the recording-console node.
   LayerNorm subtracts the **DC offset** (mean), scales by **loudness** (std), then re-applies
   **γ** and **β** — the per-band sliders on an equalizer you leave in a fixed position
   (γ is per-dimension, so per-band gain; β is per-band trim). γ starts at **1**, β at **0**
-  (`LayerNorm.cs:37-41`) — the model "learns" the knob positions during training.
+  (`LayerNorm.cs::LayerNorm`) — the model "learns" the knob positions during training.
 - **Why manage each signal's level individually? Because a signal is a mix of frequencies.**
   A token's 384 values are 384 components stacked into one waveform. Each band's LED meter
   can look fine on its own — but when the bands align, the *combined* peak is far hotter
@@ -254,10 +254,10 @@ features, then re-apply the learned knobs. This is the recording-console node.
   each mixer — **13 total** (1 here + 2 in each of the 6 layers). This is also why it sits
   after every mixer: each mix is new collective clipping risk.
 - **ε = "don't compute gain on silence"** — the tiny floor so you never divide by zero.
-  `LayerNorm.Forward` validates rank ≥ 2 and the last-dim match (`LayerNorm.cs:48-53`).
+  `LayerNorm.Forward` validates rank ≥ 2 and the last-dim match (`LayerNorm.cs::LayerNorm`).
 
 **The ε gotcha (what I learned):** the BERT config ships `layer_norm_eps = 1e-12`
-(`BertConfig.LayerNormEps`, `BertModel.cs:16`), which is *not* PyTorch's LayerNorm default
+(`BertConfig.LayerNormEps`, `BertModel.cs::LayerNormEps`), which is *not* PyTorch's LayerNorm default
 of `1e-5`. Copying the wrong ε degrades outputs silently — no error, no warning. The model
 spec *includes* its constants.
 
@@ -279,7 +279,7 @@ for each row r, for each output channel j:
 
 i.e. `y = x·Wᵀ + b`: multiply each input value by a weight, add them all up, add one bias.
 That is the entire node — every output number is one "weighted vote tally." Weight is stored
-`[out=384, in=384]` row-major (`Linear.cs:36-39`); each row of W is one threshold gate's
+`[out=384, in=384]` row-major (`Linear.cs::Linear(int,int,bool,IInitializer<TWeight>?,IInitializer<TModel>?)`); each row of W is one threshold gate's
 weight list, and the output row is every gate's tally against the input row.
 
 **2. How MiniLM uses it.** The workhorse node. In the chain itself it's not part of the
@@ -292,7 +292,7 @@ built from, the ones posts 2–4 cover:
 
 One instance is `384×384 + 384 bias = 147,840` params; MiniLM runs it **4×** inside each
 attention (post 2) and **2×** inside each FFN (post 4). `Linear.Forward`,
-`src/Nivara/AutoDiff/Nn/Linear.cs:55-68`:
+`src/Nivara/AutoDiff/Nn/Linear.cs::Linear(int,int,bool,IInitializer<TWeight>?,IInitializer<TModel>?)`:
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -309,9 +309,9 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 }
 ```
 
-Bias is a row-broadcast add (`AddBias`, `ReverseGradOperations.cs:49-102`); the shape
+Bias is a row-broadcast add (`AddBias`, `ReverseGradOperations.cs::Add`); the shape
 contract is `[aRows,aCols] × [bRows,bCols]` with `aCols == bRows`
-(`ReverseGradOperations.cs:250-253`).
+(`ReverseGradOperations.cs::Divide`).
 
 The threshold-vote picture:
 
@@ -335,17 +335,17 @@ options:
 - Build a transposed copy per forward — wasteful in inference, where you may run the model
   thousands of times on the same weights.
 - Or teach the kernel a transposed-B mode: `a @ bᵀ` with `b` in raw layout, zero copies.
-  Nivara does the second: `MatMulTransposedB` (`ReverseGradOperations.cs:304-343`) is
+  Nivara does the second: `MatMulTransposedB` (`ReverseGradOperations.cs::ReverseGradOperations`) is
   inference-only and builds **no** gradient graph; the transposed copy is built once and
-  cached only when gradients are enabled (`Linear.GetTransposedWeight`, `Linear.cs:70-82`,
+  cached only when gradients are enabled (`Linear.GetTransposedWeight`, `Linear.cs::Forward`,
   cache invalidated by `weight.Version`).
 
 ## 7. What I learned building these (the retrospective hooks)
 
 1. **Shapes are the type system.** The #1 bug class was shape mismatches. Once I started
    tracing `[L,D] × [D,D] → [L,D]` with the same discipline as type-checking, the model
-   built itself. LayerNorm throws on rank < 2 (`LayerNorm.cs:51`), MatMul throws on
-   `aCols != bRows` (`ReverseGradOperations.cs:250`) — these guards are the compile-time
+   built itself. LayerNorm throws on rank < 2 (`LayerNorm.cs::LayerNorm`), MatMul throws on
+   `aCols != bRows` (`ReverseGradOperations.cs::Divide`) — these guards are the compile-time
    errors you wish every ML API had.
 2. **Half the model is a lookup table.** 11.7M of 22.6M params are a read-only memory.
    "The AI is mostly a database with amplifiers bolted on."

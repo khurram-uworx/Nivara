@@ -89,11 +89,11 @@ The pillars below are the concrete translation.
 | Pillar | Status | Evidence | Roadmap |
 | --- | --- | --- | --- |
 | 1 · GC-aware pooled memory | ✅ Native | Sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`); zero-copy `AsTensor()` view cached; `BufferPool`/`ArrayPool` in hot paths (Adam/AdamW, AccumulateGradient); immutability + structural sharing | Done |
-| 2 · Typed expression → fused kernels | ✅ Native | Every expression-bearing operation — filter, select, group-by, sort, window, rank — constructs a `FusedExpressionEvaluator`, which compiles the `ColumnExpression` AST to a cached delegate over typed leaf arrays (`src/Nivara/Expressions/FusedExpressionEvaluator.cs:16-33`). `FusedKernel` is the fallback, and non-fusible expressions **throw** rather than fall back to a boxed interpreter (`src/Nivara/Expressions/FusedKernel.cs:17`); see §4 | Done |
-| 3 · Generic math (SAIS) | 🟡 Partial | AutoDiff is `IFloatingPointIeee754<T>` + generic `TensorPrimitives`, and the column layer has since followed: `NivaraColumn<T>` arithmetic dispatches through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs:72-73`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs:41-42`); type support is a predicate, not a float/double switch (`src/Nivara/NivaraColumn.cs:175-190`). What is still missing is generic-math *methods* on the column surface | Phase 2 |
+| 2 · Typed expression → fused kernels | ✅ Native | Every expression-bearing operation — filter, select, group-by, sort, window, rank — constructs a `FusedExpressionEvaluator`, which compiles the `ColumnExpression` AST to a cached delegate over typed leaf arrays (`src/Nivara/Expressions/FusedExpressionEvaluator.cs::FusedExpressionEvaluator`). `FusedKernel` is the fallback, and non-fusible expressions **throw** rather than fall back to a boxed interpreter (`src/Nivara/Expressions/FusedKernel.cs::FusedKernel`); see §4 | Done |
+| 3 · Generic math (SAIS) | 🟡 Partial | AutoDiff is `IFloatingPointIeee754<T>` + generic `TensorPrimitives`, and the column layer has since followed: `NivaraColumn<T>` arithmetic dispatches through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs::Add(ReadOnlySpan<T>,T,Span<T>)`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs::addTensorPrimitive(ReadOnlySpan<T>,ReadOnlySpan<T>,Span<T>)`); type support is a predicate, not a float/double switch (`src/Nivara/NivaraColumn.cs::validateTypeSupportsOperation`). What is still missing is generic-math *methods* on the column surface | Phase 2 |
 | 4 · BCL tensor substrate | ✅ Native | `TensorPrimitives` kernels in `TensorsHelper.cs`, `NivaraTensorExtensions.cs`; `Tensor<T>` storage | Done |
 | 5 · Plan + optimizer | ✅ Strong | `QueryPlan`, `QueryOptimizer`, `OptimizationEngine`, pushdown/fusion/elimination rules (`src/Nivara/Optimization/`) | Phase 2 (kernel fusion) |
-| 6 · Async-first streaming | 🟡 Partial | Async seams exist on `IQuerySource` (`src/Nivara/Query/IQueryInterfaces.cs:34-52`); strategies implemented, but pipeline is pull-chunk, not async-native | Phase 4 |
+| 6 · Async-first streaming | 🟡 Partial | Async seams exist on `IQuerySource` (`src/Nivara/Query/IQueryInterfaces.cs::IQuerySource`); strategies implemented, but pipeline is pull-chunk, not async-native | Phase 4 |
 | 7 · Arrow as interchange | ✅ Native | `ToArrowTable`/`FromArrow` in `src/Nivara.Extensions/IO/ArrowInterop.cs`; Parquet; internal stays `Tensor`/`Memory` | Done |
 | 8 · Source generators | ❌ Absent | No analyzer/generator project exists | Phase 5 |
 | 9 · NativeAOT + LibraryImport | ❌ Absent | Not exercised; aspirational | Post-roadmap |
@@ -115,7 +115,7 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
 Every query predicate or projection that goes through `QueryFrame` (`.Where(...)`,
 `.Select(...)`) is now evaluated by `FusedExpressionEvaluator`
-(`src/Nivara/Expressions/FusedExpressionEvaluator.cs:16-33`), which lowers a validated
+(`src/Nivara/Expressions/FusedExpressionEvaluator.cs::FusedExpressionEvaluator`), which lowers a validated
 `ColumnExpression` AST into a single-pass kernel over the whole column with **no intermediate
 columns and no per-element `object?` boxing** — the exact phrase that type's own documentation
 now uses. This is not one call site: filter, select, group-by, sort, window and rank operations
@@ -123,14 +123,14 @@ each construct an evaluator, so there is no surviving path around it.
 
 **How the boxing was removed:**
 - The primary target compiles the expression tree with `System.Linq.Expressions` into a
-  **cached delegate over typed leaf arrays** (`FusedExpressionEvaluator.cs:20-22`). The leaves
+  **cached delegate over typed leaf arrays** (`FusedExpressionEvaluator.cs::FusedExpressionEvaluator`). The leaves
   are the columns' own backing arrays, so even a sliced column is read in place and chunked
   execution addresses the contiguous backing array directly — no whole-column snapshot copy
   (`:24-26`).
 - The straight-line loop body is emitted by the JIT and **auto-vectorizes** for numeric leaves
   (`:23`) — which is the thing the old interpreter could not do at all.
 - Where the compiled target cannot be built, a generic node-tree kernel (`FusedKernel`,
-  `src/Nivara/Expressions/FusedKernel.cs:17`) runs instead: still typed, still span-based
+  `src/Nivara/Expressions/FusedKernel.cs::FusedKernel`) runs instead: still typed, still span-based
   (`:29-30`).
 - Expressions that cannot be fused at all **throw**. There is deliberately no boxed fallback to
   regress into, so the old failure mode cannot return quietly (`:30`).
@@ -139,7 +139,7 @@ each construct an evaluator, so there is no surviving path around it.
   (`:31-32`).
 
 **The gap is guarded, not merely closed.** The evaluator counts how many evaluations took each
-of its four paths — fused, compiled, span-kernel, `TensorPrimitives` (`FusedExpressionEvaluator.cs:36-39`)
+of its four paths — fused, compiled, span-kernel, `TensorPrimitives` (`FusedExpressionEvaluator.cs::fusedPathEvaluationCount`)
 — and guardrail tests assert the fused path is actually selected. A silent regression to an
 interpreter therefore fails the build instead of quietly halving throughput.
 
@@ -148,14 +148,14 @@ interpreter therefore fails the build instead of quietly halving throughput.
   the codebase is the optional label index, and the only `object?` parameters left are window
   fill and null handlers.
 - `OrderBy` accepts computed keys. `SortByExpressionOperation`
-  (`src/Nivara/Operations/SortByExpressionOperation.cs:49`) sorts on
+  (`src/Nivara/Operations/SortByExpressionOperation.cs::SortByExpressionOperation`) sorts on
   `SortExpressionKey(ColumnExpression key, …)` (`:19`) evaluated through the fused evaluator, so
   the "expressions are not first-class typed values" symptom is gone. What remains is a naming
   artefact: the query surface is `NivaraQuery` (`src/Nivara/Linq/NivaraQuery.cs`), formerly
   `NivaraLinqExtensions`.
 
 **Still true from the original analysis:** two front ends, one back end. The DSL operator
-overloads on `ColumnExpression` (`src/Nivara/Expressions/ColumnExpression.cs:38-326`) and the
+overloads on `ColumnExpression` (`src/Nivara/Expressions/ColumnExpression.cs::ColumnExpression`) and the
 LINQ-ish surface both produce the same AST. That convergence is precisely why fixing the back
 end fixed both front ends at once, and it is why the original review called this the
 highest-leverage change in the project. That judgement was right.
@@ -165,8 +165,8 @@ highest-leverage change in the project. That judgement was right.
 ## 5. Secondary gaps
 
 1. **No operator-level fusion rule (still open).** The inert `OperationFusionRule` was removed; the optimizer currently focuses on pushdown and column elimination. Kernel-level expression fusion is provided by `FusedExpressionEvaluator`, but chained plan operators still materialize intermediate columns. **Scope decision pending** — add a fusion rule or drop from the Polars lens.
-2. **Window functions — built since this review.** `WindowSpec` (`src/Nivara/Operations/WindowSpec.cs:15`) plus `WindowOperations` and `WindowFrameExtensions` provide `Over()`, rolling, cumulative, shift/lead/lag, row number and rank, including over computed window sources. This was the largest *analytical feature* gap versus Polars that the review identified, and it is now closed.
-3. **Generic-math collapse partly done.** `NivaraColumn<T>` arithmetic no longer branches on `float`/`double` explicitly: it routes through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs:72-73`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs:41-42`). What remains is that the column *surface* still exposes per-type methods rather than generic-math ones.
+2. **Window functions — built since this review.** `WindowSpec` (`src/Nivara/Operations/WindowSpec.cs::WindowSpec`) plus `WindowOperations` and `WindowFrameExtensions` provide `Over()`, rolling, cumulative, shift/lead/lag, row number and rank, including over computed window sources. This was the largest *analytical feature* gap versus Polars that the review identified, and it is now closed.
+3. **Generic-math collapse partly done.** `NivaraColumn<T>` arithmetic no longer branches on `float`/`double` explicitly: it routes through `NumericKernelDispatcher` (`src/Nivara/Helpers/NumericKernelDispatcher.cs::Add(ReadOnlySpan<T>,T,Span<T>)`), which resolves a cached delegate per element type over generic spans (`src/Nivara/NivaraColumn.cs::addTensorPrimitive(ReadOnlySpan<T>,ReadOnlySpan<T>,Span<T>)`). What remains is that the column *surface* still exposes per-type methods rather than generic-math ones.
 4. **Async streaming delivered (v1.4.0 + #331).** `CollectAsync`/`AsStream`/`AsStream(context)` are genuine async end to end. The remaining sync-primary shape of `IQuerySource` is intentional; the `khurram/async` async-first refactor branch is abandoned/stale and should be deleted.
 5. **No source generators.** The uniquely-.NET differentiator is untouched (see Pillar 8, Phase 5).
 

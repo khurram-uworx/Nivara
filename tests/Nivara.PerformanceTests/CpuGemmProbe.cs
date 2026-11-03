@@ -21,15 +21,15 @@ namespace Nivara.PerformanceTests;
 ///
 /// 1. There is no BCL matrix multiply to compare against. <c>TensorPrimitives.Dot</c> is
 ///    the *vector* dot product, and <c>Tensor.MatrixMultiply</c> has not shipped
-///    (dotnet/runtime#95863, noted at TensorsHelper.cs:30-36). So the CPU ceiling has to
+///    (dotnet/runtime#95863, noted at TensorsHelper.cs::TensorsHelper). So the CPU ceiling has to
 ///    be written here.
 /// 2. The in-tree GEMM is already row-parallel. <c>GradKernels.MatMulTransposedB</c>
 ///    delegates to <c>TensorsHelper.MultiplyCore</c>, which reaches
-///    <c>Parallel.For</c> (TensorsHelper.cs:191) behind <c>ShouldParallelize</c>. Issue
+///    <c>Parallel.For</c> (TensorsHelper.cs::MultiplyCoreFloat) behind <c>ShouldParallelize</c>. Issue
 ///    #456 reported a missing <c>Parallel.For</c>; it is not missing, and #456 is closed.
 /// 3. The remaining suspect is the kernel's *shape*: <c>MultiplyRowFloat</c> computes
 ///    every output element as its own <c>TensorPrimitives.Dot</c> over K
-///    (TensorsHelper.cs:293), so a 512x1024 @ 1024x3072 GEMM runs 1.57M independent
+///    (TensorsHelper.cs::MultiplyCoreGeneric), so a 512x1024 @ 1024x3072 GEMM runs 1.57M independent
 ///    horizontal reductions of length 1024 instead of holding an output tile in
 ///    registers across the K loop.
 ///
@@ -37,7 +37,7 @@ namespace Nivara.PerformanceTests;
 /// over disjoint output rows, JB output columns accumulated in register-resident
 /// <see cref="Vector{T}"/>s across the whole K loop, storing only at the end. It also
 /// drops the two per-call preps the in-tree path pays — a full <c>RentCopy</c> of A
-/// (TensorsHelper.cs:341) and a pooled staging copy of B — neither of which is
+/// (TensorsHelper.cs::MultiplyRowScalar) and a pooled staging copy of B — neither of which is
 /// necessary, since output rows are disjoint and A/B are read-only.
 ///
 /// Every leg is gated against the same host double-precision truth the GPU gate uses

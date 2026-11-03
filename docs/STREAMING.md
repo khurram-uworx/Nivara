@@ -122,7 +122,7 @@ chunkSize = clamp((memoryBudget / 10) / 100 bytes-per-row, 1_000, 100_000)
   | 1,073,741,824 — the 1 GB default | 107,374,182 | 1,073,741 | 100,000 (clamped) |
 
 The default `MemoryBudget` is **1 GB** (`1024 * 1024 * 1024`, assigned in
-`NivaraExecutionContext.cs:17`). That is above the unclamped range, so the default always
+`NivaraExecutionContext.cs::NivaraExecutionContext()`). That is above the unclamped range, so the default always
 yields the 100,000-row ceiling. It is the *core query pipeline's* budget and is unrelated
 to the 256 MB default owned by the IO-layer `StreamingBufferManager` — see
 §"AC3 resolution" below.
@@ -187,14 +187,14 @@ the shipped contract.
 `StreamingBufferManager.IsMemoryBudgetExceeded` (Nivara.Extensions) is an IO-layer-only
 helper for chunk-buffered readers (CSV/Parquet). It is **intentionally not** wired into
 `StreamingExecutionStrategy`. Its 256 MB default therefore describes the IO layer only; the
-core pipeline's default is the 1 GB in `NivaraExecutionContext.cs:17`.
+core pipeline's default is the 1 GB in `NivaraExecutionContext.cs::NivaraExecutionContext()`.
 
 ### Setting the budget
 
 The derivation in §"Memory budget → chunk size" is reachable through the context-taking
 `AsStream` overload (recorded as
 [ADR-006](adr/006-streaming-memory-budget-exposure.md)). Set
-`NivaraExecutionContext.MemoryBudget` (`NivaraExecutionContext.cs:43`), pass the context, and
+`NivaraExecutionContext.MemoryBudget` (`NivaraExecutionContext.cs::MemoryBudget`), pass the context, and
 leave `ChunkSize` null, e.g.
 `new NivaraExecutionContext(ExecutionStrategy.Streaming) { MemoryBudget = 64 * 1024 * 1024 }`
 to `AsStream(context)` — a 64 MB budget derives a 67,108-row chunk. The context is cloned

@@ -210,7 +210,7 @@ static partial class DocSnippetExtractor
         var sum = 1 + 1;
         ```
 
-        Grounding: `src/Nivara/Execution/NivaraExecutionContext.cs:17`.
+        Grounding: `src/Nivara/Execution/NivaraExecutionContext.cs::NivaraExecutionContext()`.
         """;
 
     /// <summary>Removes the probe document, and only if this scope is what created it.</summary>

@@ -57,7 +57,7 @@ integer quantization). They must be widened to a float type for computation.
 extracts `int[]` internally via `int.CreateChecked(input.Data[i])`.
 
 ```csharp
-// Embedding.cs:45-47
+// Embedding.cs::Embedding(int,int)
 var tokenIds = new int[totalTokens];
 for (int i = 0; i < totalTokens; i++)
     tokenIds[i] = int.CreateChecked(input.Data[i]);
@@ -75,7 +75,7 @@ represent integers up to 2048).
 wrapper.
 
 ```csharp
-// CrossEntropyLoss.cs:21
+// CrossEntropyLoss.cs::CrossEntropyLoss
 public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, int[] targets)
 ```
 

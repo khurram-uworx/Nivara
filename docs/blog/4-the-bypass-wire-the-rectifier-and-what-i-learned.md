@@ -27,7 +27,7 @@
 
 - The attention stage routes information *between* tokens; the FFN transforms each token
   *independently* — no cross-token mixing, each of the 128 rows goes through the same
-  two Linear layers (`BertLayer.Forward`, `src/Nivara.Extensions/AI/BertModel.cs:177-189`):
+  two Linear layers (`BertLayer.Forward`, `src/Nivara.Extensions/AI/BertModel.cs::Forward(ReverseGradTensor<TModel>)`):
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -46,8 +46,8 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 ```
 
 - `fc1` is `Linear(384, 1536)` and `fc2` is `Linear(1536, 384)` (`BertLayer` constructor,
-  `BertModel.cs:159-175`). The intermediate size `1536` is 4× the hidden size
-  (`BertConfig.IntermediateSize`, `BertModel.cs:13`).
+  `BertModel.cs::attn`). The intermediate size `1536` is 4× the hidden size
+  (`BertConfig.IntermediateSize`, `BertModel.cs::IntermediateSize`).
 - **Analogy:** expand the signal into a wider scratch register (more "headroom" to form
   intermediate features), apply a nonlinearity, then fold it back to the bus width. It's a
   two-stage amplifier where the rectifier sits between the stages.
@@ -58,7 +58,7 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
   1536-wide workbench — each lane can specialize in one combination — the rectifier keeps
   each lane's answer from canceling, and the second Linear folds the useful lanes back into
   the 384-wide bus the next layer expects. The "4×" is not a law; it's a configuration
-  choice, like a buffer size (`BertConfig.IntermediateSize`, `BertModel.cs:13`). Wide enough
+  choice, like a buffer size (`BertConfig.IntermediateSize`, `BertModel.cs::IntermediateSize`). Wide enough
   to form rich combinations, cheap enough to keep the math fast.
 - Param note: the FFN (~1.18M per layer) is roughly twice the attention stack (~0.59M) —
   the "boring" layers are the expensive ones.
@@ -83,7 +83,7 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
   layer that builds on the last.
 - **ReLU** (`max(x, 0)`) is a hard diode: negatives → 0, positives pass through. Sharp
   corner at 0. Kernel: `ReverseGradOperations.Relu` at
-  `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs:879-905`.
+  `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs::BatchedMultiHeadAttention(ReverseGradTensor<T>,ReverseGradTensor<T>,ReverseGradTensor<T>,int,T,ReverseGradTensor<T>?,int,int)`.
 - **GELU** is the soft version — it passes `x` scaled by "how confident we are that x is
   positive":
 
@@ -97,7 +97,7 @@ GELU(x) = x · Φ(x) = x · ½(1 + erf(x/√2))
 
   For large positive x, Φ(x)→1 so GELU(x)≈x. For large negative x, Φ(x)→0 so GELU(x)≈0.
   Around 0 it's smooth — small signals pass *partially*, unlike ReLU's hard cutoff.
-- Exact-erf kernel (`src/Nivara/AutoDiff/Operations/GradKernels.cs:212-223`, generic over
+- Exact-erf kernel (`src/Nivara/AutoDiff/Operations/GradKernels.cs::GradKernels`, generic over
   `IFloatingPointIeee754<T>` — the formula itself is line 221):
 
 ```csharp
@@ -112,7 +112,7 @@ for (int i = 0; i < input.Length; i++)
   Note the shape: this is the one flavor that **stays scalar**, and that isn't an oversight.
   The tanh flavor below is `TensorPrimitives` from end to end, so it auto-vectorizes for free.
   `erf` has no BCL primitive to hang a `Vector<T>` off — `Erf` here is a scalar
-  Abramowitz–Stegun polynomial with a data-dependent sign branch (`GradKernels.cs:845-856`) —
+  Abramowitz–Stegun polynomial with a data-dependent sign branch (`GradKernels.cs::GradKernels`) —
   so the exact-erf path drops to a plain loop and pays for its accuracy in throughput.
 
 ### Three look-alike flavors, and the bug they caused
@@ -129,7 +129,7 @@ for (int i = 0; i < input.Length; i++)
   activation → `classifier (768→2)`. HuggingFace's architecture uses **ReLU** there; a
   naive port used exact GELU. Result: logits drifted by ~**0.05**, and argmax flipped on
   borderline sentences. Documented at `samples/NivaraInference/README.md:192`; the fixed
-  head in `samples/Nivara.Samples/DistilBertModel.cs:27-39`:
+  head in `samples/Nivara.Samples/DistilBertModel.cs::DistilBertForSequenceClassification`:
 
 ```csharp
 var encoded = encoder.ForwardBatched(inputIds, attentionMask, batchSize, seqLen);
@@ -143,7 +143,7 @@ return logits;
 - **How it was found:** the reference-comparison methodology (section 6) — run the same
   input through the PyTorch reference and the port, compare layer by layer; a per-layer
   diff, not eyeballing final accuracy, pinpointed the head activation.
-- BERT-family encoder FFN uses exact erf (`BertModel.cs:184`, `:197`); the head uses ReLU.
+- BERT-family encoder FFN uses exact erf (`BertModel.cs::Forward(ReverseGradTensor<TModel>)`, `:197`); the head uses ReLU.
   A model can use different flavors in different places — read the source, don't assume.
 
 ## 3. The bypass wire: residual connections
@@ -155,7 +155,7 @@ return logits;
 | `[128, 384]` + `[128, 384]` | `[128, 384]` | 0 | `out = block(x) + x` | bypass / feedback wire |
 
 - Every sub-block is wrapped: `h = Attn(x) + x`, then `h2 = FFN(h) + h`
-  (`BertModel.cs:180`, `:186`). The block only ever learns a **delta**; the input always
+  (`BertModel.cs::Forward(ReverseGradTensor<TModel>)`, `:186`). The block only ever learns a **delta**; the input always
   passes through untouched.
 - Two engineering reasons to tell the audience:
 
@@ -173,7 +173,7 @@ return logits;
 
 - After 6 layers the output is `[128, 384]`. For a *sentence* embedding, the sample takes
   **row 0** — the `[CLS]` token's row (`MiniLMDistilled.Forward`,
-  `BertModel.cs:338-343`):
+  `BertModel.cs::Forward(int[])`):
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -185,15 +185,15 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 ```
 
   In a batched classifier head it's the same idea: `Gather(encoded, [0, seqLen, 2·seqLen, …])`
-  (`DistilBertModel.cs:44-50`). Analogy: pin 0 of the bus — the convention is that the
+  (`DistilBertModel.cs::DistilBertForSequenceClassification`). Analogy: pin 0 of the bus — the convention is that the
   first token's row carries the sentence summary. Why row 0 specifically? Because during
   training the model was *told* the `[CLS]` position must summarize the whole sentence, so
   it learned to route the useful bits there. A designated output pin — by contract, not by
   magic.
 
-- **L2 normalization** (`BertModel.cs:376-397`): divide every element by the vector's
+- **L2 normalization** (`BertModel.cs::BertEncoder<TModel, TWeight>`): divide every element by the vector's
   magnitude, producing a **unit vector** (the sample prints `L2 norm: ~1.0`,
-  `samples/NivaraInference/Program.cs:1096`).
+  `samples/NivaraInference/Program.cs::RunMobileNetV2SilkCompare`).
 - Why: magnitude stops mattering, direction survives — so
   `cosine(a,b) = dot(a,b) / (|a|·|b|) = dot(a,b)` for unit vectors. Two sentences are
   "similar" iff their 384-d directions are close. This closes the loop on the running
@@ -275,8 +275,8 @@ running example lands on one cosine — cat vs dog high, cat vs programming low.
 - GELU exact: `x·½(1+erf(x/√2))`; tanh approx: `x·½(1+tanh(√(2/π)·(x+0.044715x³)))`; ReLU: `max(x,0)`.
 - MiniLM + DistilBERT encoder use exact GELU; the SST-2 head uses **ReLU**; GPT-style uses tanh-approx.
 - GELU/ReLU bug: logits off by ~0.05, argmax flips on borderline cases (`README.md:192`).
-- Residuals: `out = block(x) + x` after attention and FFN (`BertModel.cs:180,186`).
-- Readout: row 0 = [CLS]; L2-normalize → unit vector; cosine == dot for unit vectors (`BertModel.cs:338-343,376-397`).
+- Residuals: `out = block(x) + x` after attention and FFN (`BertModel.cs::Forward(ReverseGradTensor<TModel>),186`).
+- Readout: row 0 = [CLS]; L2-normalize → unit vector; cosine == dot for unit vectors (`BertModel.cs::Forward(int[]),376-397`).
 - Verification: DistilBERT hidden states max abs diff 5e-6 / cosine 0.99999988; SST-2 logits 9.5e-7, 8/8 argmax (`README.md:180,196`).
 - Perf: MiniLM 11 ms vs 110 ms; DistilBERT 31 ms vs 186 ms (CPU, 128 tokens) (`README.md:218-230`).
 

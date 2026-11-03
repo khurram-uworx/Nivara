@@ -93,7 +93,7 @@ public class StreamixScenarioTests
         // asserting otherwise would fail on correct code. Both sides are summed from the same
         // per-window RowCount, so this cannot detect loss inside a window either. What it does
         // pin down is that RunWindowedAnalytics counts a window exactly once: it skips the
-        // counter on the zero-row early return (StreamixScenarios.cs:84 precedes :109) and
+        // counter on the zero-row early return (StreamixScenarios.cs::RunWindowedAnalytics precedes :109) and
         // appends each result once, so a result that were counted but not returned, or vice
         // versa, would break the identity. WindowResult.Empty contributes 0 to both sides.
         Assert.Multiple(() =>

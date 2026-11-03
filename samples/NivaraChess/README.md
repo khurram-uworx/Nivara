@@ -156,7 +156,7 @@ NivaraChess drove several core library additions and fixes. The original spec id
 | Gap | Problem | Resolution |
 |-----|---------|------------|
 | **No Gather / sparse lookup** | NNUE needs to look up rows from a weight matrix by index and sum them. Building a one-hot matrix for each position is wasteful. | `SparseEmbedding<T>` and `SparseEmbeddingBag<T>` added to `src/Nivara/AutoDiff/Nn/SparseEmbedding.cs`. Forward uses `TensorPrimitives.Add` for sum pooling; backward uses scatter-add for gradient accumulation. |
-| **No Reshape(-1) auto-inference** | Reshape validated all dimensions and didn't support -1 inference. Sparse embeddings need to reshape between flat and batched representations. | `GradTensor.Reshape(-1)` added at `src/Nivara/AutoDiff/GradTensor.cs:76-113`. Infers the missing dimension from total element count. |
+| **No Reshape(-1) auto-inference** | Reshape validated all dimensions and didn't support -1 inference. Sparse embeddings need to reshape between flat and batched representations. | `GradTensor.Reshape(-1)` added at `src/Nivara/AutoDiff/GradTensor.cs::Reshape`. Infers the missing dimension from total element count. |
 | **Variable-length batch inputs** | Chess positions have varying numbers of pieces (0–32), but `TensorDataset<T>` assumes fixed `[B, F]` shapes. | Workaround: fixed-size bag of active features, padded to `MaxActiveFeatures` with sentinel -1 indices, masked out in the forward pass. |
 | **No board representation utilities** | No chess-related utilities in Nivara or .NET standard libraries. | Built inline in `ChessBoard.cs`: FEN parsing/generation, 8×8 board representation, material scoring, piece-square tables, halfKP feature encoding. |
 
@@ -166,7 +166,7 @@ NivaraChess drove several core library additions and fixes. The original spec id
 |---------|----------|---------|
 | `SparseEmbedding<T>` | `src/Nivara/AutoDiff/Nn/SparseEmbedding.cs` | Sparse lookup + sum pooling module, wraps `SparseEmbeddingBag<T>` |
 | `SparseEmbeddingBag<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Sum-pooled sparse embedding: gathers rows by index, sums them. Forward and backward have TensorPrimitives SIMD paths for null-free tensors. |
-| `GradTensor.Reshape(-1)` | `src/Nivara/AutoDiff/GradTensor.cs:76-113` | Auto-infer one dimension during reshape |
+| `GradTensor.Reshape(-1)` | `src/Nivara/AutoDiff/GradTensor.cs::Reshape` | Auto-infer one dimension during reshape |
 
 ### Core library performance fixes driven by this example
 

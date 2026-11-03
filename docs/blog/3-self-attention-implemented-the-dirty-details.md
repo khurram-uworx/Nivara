@@ -30,7 +30,7 @@
   `[h·32, (h+1)·32)` of the `[128, 384]` matrix. In row-major storage, token *r*, head *h*
   starts at element `r·384 + h·32`.
 - The stride math that runs the whole layer (`AttentionKernels.GatherHead`,
-  `src/Nivara/AutoDiff/Operations/AttentionKernels.cs:21-26`):
+  `src/Nivara/AutoDiff/Operations/AttentionKernels.cs::AttentionKernels<T>`):
 
 ```csharp
 public static void GatherHead(ReadOnlySpan<T> src, Span<T> dst, int rows, int D, int head, int headDim)
@@ -44,7 +44,7 @@ public static void GatherHead(ReadOnlySpan<T> src, Span<T> dst, int rows, int D,
 ## 2. The per-head pipeline (the whole forward)
 
 `ReverseGradOperations.MultiHeadAttention` — signature and validation at
-`src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs:362-393`; the hot loop
+`src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs::MatMul`; the hot loop
 (`:425-445`):
 
 ```csharp
@@ -82,7 +82,7 @@ write-back.
 - Fix: **pack** each head's columns into a contiguous span once, run all kernels on
   contiguous spans, then **scatter** results back. The packing is a cheap gather; the
   matmuls are the expensive part and they get contiguous memory.
-- `PackHeads` (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs:45-49`):
+- `PackHeads` (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs::PackHeads`):
 
 ```csharp
 public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int numHeads, int headDim)
@@ -92,7 +92,7 @@ public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int num
 }
 ```
 
-- The comment above the class says it all (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs:9-17`): packed once so every
+- The comment above the class says it all (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs::AttentionKernels<T>`): packed once so every
   matmul feeds the SIMD `MultiplyCore` path "with zero per-head transposes (QKᵀ uses the
   transposed-B layout directly)." This is an engineer's cache-locality lesson, not an ML
   lesson.
@@ -104,7 +104,7 @@ public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int num
   `bTransposed: true` — it reads K in transposed order internally.
 - Same trick as Post 1's Linear (`MatMulTransposedB`), but inside the hottest loop of the
   model. Source note: `TensorsHelper.MultiplyCore(..., bTransposed: true)`, and the doc
-  comment at `ReverseGradOperations.cs:346-355` states the transposed-B layout "equals K's
+  comment at `ReverseGradOperations.cs::MatMul` states the transposed-B layout "equals K's
   raw layout."
 - **Lesson:** avoid materializing transposes in a hot path; teach the kernel to read
   transposed instead. One fewer `[kvLen,headDim]` copy per head per layer.
@@ -113,7 +113,7 @@ public static void PackHeads(ReadOnlySpan<T> src, Span<T> dst, int rows, int num
 
 - `exp(x)` overflows float at ~`x > 88`. Attention scores can exceed that.
 - The fix is numerically trivial and universally missed in tutorials
-  (`src/Nivara/AutoDiff/Operations/GradKernels.cs:493-520`, one generic kernel):
+  (`src/Nivara/AutoDiff/Operations/GradKernels.cs::SoftmaxGradientBitmask`, one generic kernel):
 
 ```csharp
 T max = input[0];
@@ -145,7 +145,7 @@ TensorPrimitives.Divide(output, TensorPrimitives.Sum(output), output);
   after softmax, no matter what.
 - So instead of branching in the hot loop, the mask is a **pre-built additive matrix**
   of 0s and `-∞`. Adding it to the scores is just one vectorized add. The mask builder
-  (`MultiheadAttention.CreatePaddingMask`, `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs:138-155`):
+  (`MultiheadAttention.CreatePaddingMask`, `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs::Forward(ReverseGradTensor<T>,ReverseGradTensor<T>,ReverseGradTensor<T>,bool,ReverseGradTensor<T>?)`):
 
 ```csharp
 ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLen, int kvLen)
@@ -176,12 +176,12 @@ ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLe
   in, a zero weight out, fully vectorized.
 - The same mechanism powers causal masks (a future/upper-triangle `-∞` block) — 
   `ModuleHelpers<T>.CreateCausalMask` is called when `causal` is set
-  (`MultiheadAttention.cs:126-136`).
+  (`MultiheadAttention.cs::MultiheadAttention`).
 
 ## 7. Inference vs training: two different programs
 
 - The `MultiHeadAttention` op checks `GradientUtils.ShouldTrackGrad(query, key, value)`
-  (`ReverseGradOperations.cs:395`). In inference it returns **leaf tensors** and allocates
+  (`ReverseGradOperations.cs::ReverseGradOperations`). In inference it returns **leaf tensors** and allocates
   no graph nodes and no `savedWeights` (`:423`).
 - Training saves the softmax weights per head to compute dQ/dK/dV later (`:439-440`, and the
   backward VJP at `:450-521`) — that memory is *only* allocated inside a `Grad()` scope.
@@ -198,7 +198,7 @@ ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLe
 2. **The `-∞` mask removed an entire code path.** No `if masked` branch anywhere in the
    kernel. The mask is data.
 3. **Packing heads is the difference between SIMD-friendly and cache-hostile.** All the
-   matmuls feed `TensorsHelper.MultiplyCore` over contiguous spans (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs:9-17`).
+   matmuls feed `TensorsHelper.MultiplyCore` over contiguous spans (`src/Nivara/AutoDiff/Operations/AttentionKernels.cs::AttentionKernels<T>`).
 4. **Softmax max-subtraction is non-negotiable** — scores genuinely exceed exp's range;
    the naive formula is a latent `NaN`.
 5. **Honest performance (worth writing down):** MiniLM at 128 tokens: PyTorch **11 ms** vs
@@ -207,7 +207,7 @@ ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLe
    Publishing this number is a feature: it shows the concept is right and the optimization
    is a known, bounded problem.
 6. **Constants are part of the model spec.** The scale `1/√32` is baked into the module
-   constructor (`MultiheadAttention.cs:40`; `BertSelfAttention`, `BertModel.cs:61`). `d`,
+   constructor (`MultiheadAttention.cs::MultiheadAttention`; `BertSelfAttention`, `BertModel.cs::BertSelfAttention(int,int)`). `d`,
    `eps`, `num_heads` are read from `config.json` at load time. Getting the scale wrong
    silently breaks training dynamics.
 

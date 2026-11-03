@@ -220,7 +220,7 @@ All notable changes to Nivara are documented here. Released versions are publish
   reduced coverage rather than a quiet pass.
 
   **Limitation:** the gate checks that a citation *resolves*, not that the cited lines support
-  the sentence around them. `docs/plan/POLARS-REVIEW.md` cited `NivaraColumn.cs:188-208` for a
+  the sentence around them. `docs/plan/POLARS-REVIEW.md` cited `NivaraColumn.cs::validateTypeSupportsOperation` for a
   float/double type-switch claim while those lines hold `getTypeSize` — perfectly resolvable, and
   still wrong. That one needs a reader.
 
@@ -473,7 +473,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
   Also corrects `AGENTS.md` and `docs/STREAMING.md`, which both stated the default streaming
   memory budget as 256 MB — the IO-layer `StreamingBufferManager`'s constant, not the core
-  pipeline's. The real default is 1 GB (`NivaraExecutionContext.cs:17`), already asserted by
+  pipeline's. The real default is 1 GB (`NivaraExecutionContext.cs::NivaraExecutionContext()`), already asserted by
   `ExecutionContextTests`; both docs now name the 256 MB's owner, and the worked example is
   denominated in bytes with a row strictly inside the clamp so the arithmetic is checkable (the
   old example clamped both 256 MB and 1 GB to the same answer, which is why it could not detect
