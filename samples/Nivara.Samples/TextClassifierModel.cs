@@ -55,9 +55,9 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, IFloati
         var ps = GetParameters().Values.ToArray();
         ps[0].Tensor = ReverseGradTensor<T>.FromMatrix(embeddingWeights, VocabSize, EmbeddingDim, requiresGrad: false);
         ps[1].Tensor = ReverseGradTensor<T>.FromMatrix(fc1WeightsCpuLayout, fc1WeightsCpuLayout.Length / EmbeddingDim, EmbeddingDim, requiresGrad: false);
-        ps[2].Tensor = ReverseGradTensor<T>.FromArray(fc1Biases, requiresGrad: false);
+        ps[2].Tensor = ReverseGradTensor<T>.FromMatrix(fc1Biases, 1, fc1Biases.Length, requiresGrad: false);
         ps[3].Tensor = ReverseGradTensor<T>.FromMatrix(fc2WeightsCpuLayout, 2, fc2WeightsCpuLayout.Length / 2, requiresGrad: false);
-        ps[4].Tensor = ReverseGradTensor<T>.FromArray(fc2Biases, requiresGrad: false);
+        ps[4].Tensor = ReverseGradTensor<T>.FromMatrix(fc2Biases, 1, fc2Biases.Length, requiresGrad: false);
     }
 
     public int[] Predict(int[] tokenIds)
