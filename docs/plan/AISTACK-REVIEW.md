@@ -9,8 +9,7 @@ This document evaluates Nivara through a third lens: **"What would AI data infra
 
 The first two lenses asked whether Nivara behaves like a query engine born in .NET (`docs/plan/POLARS-REVIEW.md`) and like a columnar memory system born in .NET (`docs/plan/ARROW-REVIEW.md`). This lens asks whether Nivara is the *data layer* the local .NET AI ecosystem is missing.
 
-**Verdict:** this is Nivara's **strongest** lens. The Polars lens found a fatal flaw (the boxed expression evaluator); the Arrow lens found zero-copy scaffolding. This lens finds neither — the project has already invested here. Nivara complements the .NET AI stack at ~80–85%, and the gaps are narrow and *additive*: ONNX export/import, an embedding-column data type, and a dataset/evaluation layer.
-
+**Verdict:** this is Nivara's **strongest** lens. The Polars lens found a fatal flaw (the boxed expression evaluator); the Arrow lens found zero-copy scaffolding. This lens finds neither — the project has already invested here. Nivara complements the .NET AI stack at ~80–85%, and the gaps are narrow and *additive*: ONNX *export* (import/inference is a first-party ML.NET concern), an embedding convention rather than a column kind, and a dataset/evaluation layer.
 ---
 
 ## 1. The target: the .NET AI stack, local only
@@ -106,18 +105,14 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 
 All three are additive; nothing architectural needs tearing down.
 
-1. **ONNX export/import (highest value).** Nivara-trained AutoDiff modules export to `.onnx` → run anywhere ONNX Runtime runs; ONNX models import → inference over Nivara frames. This is what turns Nivara from a self-contained training stack into the *data layer of the local .NET AI ecosystem*. (SafeTensors import is already the delivered half of "interchange" — dtype-aware loader + model layer + `StateDictLoader`; ONNX is the remaining half.)
-2. **Embedding column as a first-class column kind.** A column whose elements are vectors, with similarity/top-k, and native `Microsoft.Extensions.AI.Embedding<T>` interop — so generated embeddings land in frames as data (the MEAI `IEmbeddingGenerator` pattern in samples becomes a data-layer feature, not an app-layer one).
-3. **Dataset + evaluation layer.** Split/shuffle/batch as frame operations feeding `TrainingLoop`, plus metrics (accuracy, F1, loss curves, confusion matrices) computed on frames.
-
+1. **ONNX export (highest value, re-scoped 2026-11-03).** Export Nivara-trained AutoDiff modules to `.onnx` → run inference anywhere ONNX Runtime or ML.NET runs. Import/inference inside Nivara is a non-goal — ML.NET (`Microsoft.ML.OnnxTransformer`) and ONNX Runtime own that, first-party (consistent with `docs/TENSORS.md`). This export capability is what turns Nivara into the *data layer* whose trained models leave the building. (SafeTensors import is already the delivered half of "interchange" — dtype-aware loader + model layer + `StateDictLoader`; ONNX export is the remaining half.) See follow-up issue #866.2. **Embedding convention (re-scoped 2026-11-03 — flat `[rows, dim]` frame, no new column kind).** A documented tabular convention (column of `float[]`) with similarity/top-k kernels and native `Microsoft.Extensions.AI.Embedding<T>` interop — so generated embeddings land in frames as data. No embedding column type; ARROW Phase B dependency removed. See follow-up issue #867.3. **Dataset + evaluation layer (metrics re-scoped 2026-11-03 — frame-scoped metric ops only).** Split/shuffle/batch as frame operations feeding `TrainingLoop`; metrics reduced to *frame-producing* ops (confusion matrix, per-class accuracy, regression summary). Pipeline-level evaluation stays in ML.NET (first-party). See follow-up issue #868.
 ---
 
 ## 6. Summary
 
 The one-line verdict:
 
-> Nivara is already the best-placed of the three lenses — it complements the **local .NET AI stack** at ~85%, proving the pattern in samples (MEAI, ML.NET, Ollama, SafeTensors, PyTorch parity). What's missing is the last mile of *interchange and data types*: ONNX export/import, an embedding-column type wired to `Microsoft.Extensions.AI`, and a dataset/evaluation layer.
-
+> Nivara is already the best-placed of the three lenses — it complements the **local .NET AI stack** at ~85%, proving the pattern in samples (MEAI, ML.NET, Ollama, SafeTensors, PyTorch parity). What's missing is the last mile of *interchange and convention*: ONNX *export* (import/inference deferred to ML.NET), an embedding convention rather than a column kind wired to `Microsoft.Extensions.AI`, and a dataset/evaluation layer (re-scoped to frame-scoped metric ops). See follow-up issues #866, #867, #868.
 The roadmap to close that last mile is in **`docs/plan/AISTACK-ROADMAP.md`**.
 
 ## Related documents

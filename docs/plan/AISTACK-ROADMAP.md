@@ -57,8 +57,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 > ### Phase 1 (original) — ONNX export/import *(the highest-value bridge)*
 **Motivation:** Nivara-trained modules currently speak only their own JSON state dicts and SafeTensors. ONNX is the universal local model format; export/import is what turns Nivara from a self-contained training stack into the data layer of the local .NET AI ecosystem.
 
-**Status note (reassessed 2026-10-23):** SafeTensors import side delivered (dtype-aware loader + model layer + `StateDictLoader`); ONNX export/import remains open.
-
+**Status note (reassessed 2026-10-23 / re-scoped 2026-11-03):** SafeTensors import side delivered (dtype-aware loader + model layer + `StateDictLoader`); **ONNX export** remains open (import/inference deferred to ML.NET/ONNX Runtime, first-party). See follow-up issue #866.
 **Scope:**
 - **Export:** traverse the module graph (`Module<T>`, `StateDict()`) and emit a minimal ONNX graph for the common module set — `Linear`, `Embedding`, `Conv1d`/`Conv2d`, `BatchNorm`, `LayerNorm`/`RMSNorm`, `TransformerBlock`/`MultiheadAttention`, activations, `Sequential` — including weights and inference-mode ops.
 - **Import:** parse ONNX protobuf and materialize inference into Nivara (via a span-based ONNX reader or `Microsoft.ML.OnnxRuntime` in `Nivara.Extensions`), landing output tensors into frames.
@@ -215,8 +214,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 ## 3. Cross-cutting conventions (every phase)
 
-- **Diagnostics:** record ONNX export/import, layout, and metric-kernel decisions via `OperationDiagnostics` / `ExecutionEngine.LastDiagnostics`.
-- **Testing:** NUnit 4.x, `Method_Scenario_ExpectedBehavior`, parity fixtures against PyTorch references (extend the NivaraTorch pattern), round-trip tests (train→export→ONNX Runtime→compare), null-semantics property tests.
+- **Diagnostics:** record ONNX export (and layout/metric-kernel) decisions via `OperationDiagnostics` / `ExecutionEngine.LastDiagnostics`.- **Testing:** NUnit 4.x, `Method_Scenario_ExpectedBehavior`, parity fixtures against PyTorch references (extend the NivaraTorch pattern), round-trip tests (train→export→ONNX Runtime→compare), null-semantics property tests.
 - **Null semantics:** ADR-001 holds; predicted/target nulls excluded from metrics; no NaN sentinels anywhere.
 - **No runtime cloud dependency:** any `Microsoft.Extensions.AI`-typed interop stays in `Nivara.Extensions`/samples, never core.
 - **No comments in code** beyond non-obvious decisions; `.editorconfig` is authoritative.
