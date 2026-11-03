@@ -22,6 +22,13 @@ if (options.Help)
     return;
 }
 
+if (options.Silk)
+{
+    Console.Error.WriteLine("--silk is not yet implemented for NivaraClassifier (tracked by #883).");
+    Environment.ExitCode = 2;
+    return;
+}
+
 if (options.Command == "train")
     RunTraining(options);
 else if (options.Command == "predict")
@@ -407,6 +414,7 @@ sealed class Options
     public int Seed { get; set; } = 42;
     public string Mode { get; set; } = "linear";
     public bool Help { get; set; }
+    public bool Silk { get; set; }
 
     public static Options Parse(string[] args)
     {
@@ -464,6 +472,9 @@ sealed class Options
                 case "--mode":
                     o.Mode = ReadString(args, ref i, args[i]);
                     break;
+                case "--silk":
+                    o.Silk = true;
+                    break;
                 case "--help":
                 case "-h":
                     o.Help = true;
@@ -508,6 +519,7 @@ sealed class Options
               --lr <rate>             Learning rate (default: 0.001)
               --seed <n>              Random seed (default: 42)
               --mode <mode>           Model mode: linear or conv (default: linear)
+               --silk                  Silk/OpenCL GPU path (plumbing only until #883)
               --help, -h              Show this help
             """);
     }
