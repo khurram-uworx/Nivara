@@ -70,8 +70,10 @@ in core. Bit-packed validity exists only at the Arrow boundary.**
 - 1 byte per element against Arrow's 1 bit: **8× the validity memory, only when nulls exist**. It is
   additive to the data payload, which for typical element widths is the larger term, but it is real
   and is not "slight".
-- The Arrow boundary converts per element today, so interop pays both a packing cost and a boxing
-  cost until the buffer-level helper is wired into the boundary.
+- The flat-primitive Arrow boundary now converts through the buffer-level `ArrowValidityMask`
+  helper (issues #833, #840, #843); the element-wise path remains only for variable-binary
+  (`string`/`char`) layouts, where a per-value pass is required to build the offset and data
+  buffers.
 
 **Revisit when:**
 
