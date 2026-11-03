@@ -19,10 +19,11 @@ an agent that lands on a stale number reads the wrong code with no warning.
 
 **Citations anchor to a source symbol, not a line number.**
 
-1. **New form: `File.cs::MemberName`.** The member name is a class, struct,
-   interface, record, enum, method, constructor, property, field, or event declared
-   in that file. A signature is appended only when needed to disambiguate
-   overloads: `File.cs::Slice(int, int)`.
+1. **New form: a source path followed by `::` and a member name**, e.g.
+   `src/Nivara/Storage/ColumnStorage.cs::AsSpan()`. The member name is a class,
+   struct, interface, record, enum, method, constructor, property, field, or event
+   declared in that file. A signature is appended only when needed to disambiguate
+   overloads, e.g. `src/Nivara/Storage/ColumnStorage.cs::Slice(int, int)`.
 2. **The gate resolves symbols with Roslyn.** It parses each cited `.cs` file once
    (cached) into a member index and checks that the named symbol exists, with the
    given signature when supplied. No regex is used against source.
