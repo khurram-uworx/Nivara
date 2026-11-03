@@ -33,5 +33,5 @@ internal static class DocsCoveragePins
     /// document-reference occurrence (TENSORS.md did not previously reference that path),
     /// so 230 -> 231. Deliberate addition; not a drop.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 231;
+    internal const int ExpectedDocumentReferenceCount = 232;   // +1: README Silk requirement cites `docs/SILK.md`
 }
