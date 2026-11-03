@@ -38,6 +38,27 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
     readonly int maxSeqLen;
     readonly NormType normType;
 
+    /// <summary>Gets the embedding dimension.</summary>
+    public int NEmbd => nEmbd;
+    /// <summary>Gets the number of attention heads.</summary>
+    public int NHead => nHead;
+    /// <summary>Gets the head dimension.</summary>
+    public int HeadDim => headDim;
+    /// <summary>Gets the selected normalization type.</summary>
+    public NormType NormType => normType;
+    /// <summary>Gets the query projection.</summary>
+    public Linear<T> QProj => qProj;
+    /// <summary>Gets the key projection.</summary>
+    public Linear<T> KProj => kProj;
+    /// <summary>Gets the value projection.</summary>
+    public Linear<T> VProj => vProj;
+    /// <summary>Gets the output projection.</summary>
+    public Linear<T> OProj => oProj;
+    /// <summary>Gets the first MLP projection.</summary>
+    public Linear<T> MlpFc1 => mlpFc1;
+    /// <summary>Gets the second MLP projection.</summary>
+    public Linear<T> MlpFc2 => mlpFc2;
+
     /// <summary>
     /// Creates a pre-norm transformer block.
     /// </summary>
@@ -101,6 +122,10 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
     /// </summary>
     /// <param name="input">The input tensor</param>
     /// <returns>The block output</returns>
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.TransformerBlock(inputName, this, 0); // sequence length resolved from graph shape inside
+
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));

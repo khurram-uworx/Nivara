@@ -248,4 +248,7 @@ public sealed class Embedding<T> : Embedding<T, T>
         : base(numEmbeddings, embeddingDim)
     {
     }
+
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.Embedding(inputName, this);
 }

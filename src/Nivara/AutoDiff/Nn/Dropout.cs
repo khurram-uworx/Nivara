@@ -31,6 +31,9 @@ public sealed class Dropout<T> : Module<T> where T : struct, IFloatingPointIeee7
     /// </summary>
     /// <param name="input">The input tensor</param>
     /// <returns>The dropped-out (or unchanged) tensor</returns>
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName) => inputName;
+
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));

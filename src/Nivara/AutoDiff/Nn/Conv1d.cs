@@ -42,6 +42,10 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
     /// <summary>Gets the bias parameter, or null when bias is disabled.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.Conv1d(inputName, this);
+
     /// <summary>
     /// Creates a 1D convolution layer with Kaiming-initialized weights.
     /// </summary>

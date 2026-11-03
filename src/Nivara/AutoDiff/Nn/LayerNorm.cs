@@ -30,6 +30,10 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
     /// <summary>Gets the learnable beta parameter, or null when <c>affine</c> or <c>bias</c> is false.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <inheritdoc />
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.LayerNorm(inputName, this);
+
     /// <summary>
     /// Creates a layer normalization layer. Gamma is initialized to one and, when a bias is
     /// requested, beta to zero. <paramref name="affine"/> false removes both parameters;

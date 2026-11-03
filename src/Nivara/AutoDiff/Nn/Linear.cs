@@ -242,4 +242,7 @@ public sealed class Linear<T> : Linear<T, T>
         : base(inFeatures, outFeatures, bias, weightInitializer, biasInitializer)
     {
     }
+
+    public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
+        => context.Linear(inputName, this);
 }
