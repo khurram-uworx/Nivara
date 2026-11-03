@@ -126,6 +126,33 @@ public class ArrowZeroCopyTests
     }
 
     [Test]
+    public unsafe void ToArrowTable_ZeroCopyDataBuffer_PinAtByteOffset_PointsAtThatElement()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 10, 20, 30, 40 });
+        var frame = NivaraFrame.Create("values", column);
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+
+        var dataBuffer = Int32ArrayOf(table).Data.Buffers[1];
+        using var handle = dataBuffer.Memory.Slice(sizeof(int), sizeof(int)).Pin();
+
+        Assert.That(*(int*)handle.Pointer, Is.EqualTo(20));
+    }
+
+    [Test]
+    public unsafe void ToArrowTable_ZeroCopySlicedBuffer_PinAtZero_PointsAtSliceStart()
+    {
+        var source = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
+        var slice = source.Slice(2, 3);
+        var frame = NivaraFrame.Create("values", slice);
+        var table = ArrowInterop.ToArrowTable(frame, ZeroCopy);
+
+        var dataBuffer = Int32ArrayOf(table).Data.Buffers[1];
+        using var handle = dataBuffer.Memory.Pin();
+
+        Assert.That(*(int*)handle.Pointer, Is.EqualTo(3));
+    }
+
+    [Test]
     public void ToArrowTable_ZeroCopyNullBearingColumn_ThrowsUnsupportedTypeNamingColumn()
     {
         var column = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });

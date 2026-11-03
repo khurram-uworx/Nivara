@@ -958,24 +958,24 @@ public static class ArrowInterop
 
         return typeof(T) switch
         {
-            Type t when t == typeof(byte) => CreateZeroCopyPrimitive((NivaraColumn<byte>)(object)column, UInt8Type.Default, sizeof(byte)),
-            Type t when t == typeof(sbyte) => CreateZeroCopyPrimitive((NivaraColumn<sbyte>)(object)column, Int8Type.Default, sizeof(sbyte)),
-            Type t when t == typeof(short) => CreateZeroCopyPrimitive((NivaraColumn<short>)(object)column, Int16Type.Default, sizeof(short)),
-            Type t when t == typeof(ushort) => CreateZeroCopyPrimitive((NivaraColumn<ushort>)(object)column, UInt16Type.Default, sizeof(ushort)),
-            Type t when t == typeof(int) => CreateZeroCopyPrimitive((NivaraColumn<int>)(object)column, Int32Type.Default, sizeof(int)),
-            Type t when t == typeof(uint) => CreateZeroCopyPrimitive((NivaraColumn<uint>)(object)column, UInt32Type.Default, sizeof(uint)),
-            Type t when t == typeof(long) => CreateZeroCopyPrimitive((NivaraColumn<long>)(object)column, Int64Type.Default, sizeof(long)),
-            Type t when t == typeof(ulong) => CreateZeroCopyPrimitive((NivaraColumn<ulong>)(object)column, UInt64Type.Default, sizeof(ulong)),
-            Type t when t == typeof(float) => CreateZeroCopyPrimitive((NivaraColumn<float>)(object)column, FloatType.Default, sizeof(float)),
-            Type t when t == typeof(double) => CreateZeroCopyPrimitive((NivaraColumn<double>)(object)column, DoubleType.Default, sizeof(double)),
-            Type t when t == typeof(Half) => CreateZeroCopyHalf((NivaraColumn<Half>)(object)column),
+            Type t when t == typeof(byte) => CreateZeroCopyPrimitive((NivaraColumn<byte>)(object)column, UInt8Type.Default),
+            Type t when t == typeof(sbyte) => CreateZeroCopyPrimitive((NivaraColumn<sbyte>)(object)column, Int8Type.Default),
+            Type t when t == typeof(short) => CreateZeroCopyPrimitive((NivaraColumn<short>)(object)column, Int16Type.Default),
+            Type t when t == typeof(ushort) => CreateZeroCopyPrimitive((NivaraColumn<ushort>)(object)column, UInt16Type.Default),
+            Type t when t == typeof(int) => CreateZeroCopyPrimitive((NivaraColumn<int>)(object)column, Int32Type.Default),
+            Type t when t == typeof(uint) => CreateZeroCopyPrimitive((NivaraColumn<uint>)(object)column, UInt32Type.Default),
+            Type t when t == typeof(long) => CreateZeroCopyPrimitive((NivaraColumn<long>)(object)column, Int64Type.Default),
+            Type t when t == typeof(ulong) => CreateZeroCopyPrimitive((NivaraColumn<ulong>)(object)column, UInt64Type.Default),
+            Type t when t == typeof(float) => CreateZeroCopyPrimitive((NivaraColumn<float>)(object)column, FloatType.Default),
+            Type t when t == typeof(double) => CreateZeroCopyPrimitive((NivaraColumn<double>)(object)column, DoubleType.Default),
+            Type t when t == typeof(Half) => CreateZeroCopyPrimitive((NivaraColumn<Half>)(object)column, new HalfFloatType()),
             _ => throw new UnsupportedTypeException(typeof(T),
                 $"{label} has element type '{typeof(T).Name}', which has no zero-copy export layout. " +
                 $"The type is supported by the copying path; set {nameof(ArrowConversionOptions.UseZeroCopy)} = false to use it.")
         };
     }
 
-    private static IArrowArray CreateZeroCopyPrimitive<T>(NivaraColumn<T> column, IArrowType arrowType, int elementSize) where T : unmanaged
+    private static IArrowArray CreateZeroCopyPrimitive<T>(NivaraColumn<T> column, IArrowType arrowType) where T : unmanaged
     {
         if (column.Storage is not ColumnStorage<T> storage)
             throw new InvalidOperationException("Zero-copy Arrow conversion requires array-backed column storage.");
@@ -985,7 +985,7 @@ public static class ArrowInterop
 
         int count = column.Length;
         var manager = new UnmanagedMemoryManager<T>(segment.Array, segment.Offset, count);
-        var byteMemory = manager.Memory.Slice(0, count * elementSize);
+        var byteMemory = manager.Memory.Slice(0, count * Unsafe.SizeOf<T>());
         var dataBuffer = new ArrowBuffer(byteMemory);
 
         var arrayData = new ArrayData(arrowType, count, 0, 0,
@@ -994,25 +994,14 @@ public static class ArrowInterop
         return ArrowArrayFactory.BuildArray(arrayData);
     }
 
-    private static IArrowArray CreateZeroCopyHalf(NivaraColumn<Half> column)
-    {
-        if (column.Storage is not ColumnStorage<Half> storage)
-            throw new InvalidOperationException("Zero-copy Arrow conversion requires array-backed column storage.");
-
-        if (!MemoryMarshal.TryGetArray(storage.Data, out var segment) || segment.Array is null)
-            throw new InvalidOperationException("Zero-copy Arrow conversion requires contiguous array-backed storage.");
-
-        int count = column.Length;
-        var manager = new UnmanagedMemoryManager<Half>(segment.Array, segment.Offset, count);
-        var byteMemory = manager.Memory.Slice(0, count * 2);
-        var dataBuffer = new ArrowBuffer(byteMemory);
-
-        var arrayData = new ArrayData(new HalfFloatType(), count, 0, 0,
-            new[] { ArrowBuffer.Empty, dataBuffer }, System.Array.Empty<ArrayData>());
-
-        return ArrowArrayFactory.BuildArray(arrayData);
-    }
-
+    /// <summary>
+    /// Exposes a <typeparamref name="T"/>[] as a <see cref="MemoryManager{T}"/> of bytes so an
+    /// Arrow buffer can share it without copying.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="MemoryManager{T}.Pin"/> takes an index in the manager's element unit, which here
+    /// is <see cref="byte"/> — not in <typeparamref name="T"/> elements.
+    /// </remarks>
     private sealed class UnmanagedMemoryManager<T> : MemoryManager<byte> where T : unmanaged
     {
         private readonly T[] _array;
@@ -1034,8 +1023,9 @@ public static class ArrowInterop
             var handle = GCHandle.Alloc(_array, GCHandleType.Pinned);
             unsafe
             {
-                void* ptr = Unsafe.AsPointer(ref MemoryMarshal.GetArrayDataReference(_array));
-                ptr = (byte*)ptr + (_start + elementIndex) * Unsafe.SizeOf<T>();
+                byte* ptr = (byte*)handle.AddrOfPinnedObject()
+                    + (_start * Unsafe.SizeOf<T>())
+                    + elementIndex;
                 return new MemoryHandle(ptr, handle, this);
             }
         }
