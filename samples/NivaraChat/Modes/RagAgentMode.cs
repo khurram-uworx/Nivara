@@ -60,60 +60,91 @@ public static class RagAgentMode
             allChunks.AddRange(RagChunker.ChunkMarkdown(content, f, repoRoot));
         }
 
-        if (!string.IsNullOrEmpty(ctx.AclGroup))
-        {
-            var before = allChunks.Count;
-            allChunks = allChunks.Where(c => c.AclGroup == ctx.AclGroup).ToList();
-            Console.WriteLine($"ACL group '{ctx.AclGroup}': {allChunks.Count}/{before} chunks visible.");
-            if (allChunks.Count == 0) { Console.WriteLine("No chunks visible under this ACL group."); return; }
-        }
-
-        Console.WriteLine($"Indexing {allChunks.Count} chunks from {mdFiles.Length} files (store={ctx.Store})...");
+        Console.WriteLine($"Chunked {allChunks.Count} chunks from {mdFiles.Length} files (store={ctx.Store})...");
         sw.Restart();
-
-        float[]?[] embeddings = new float[allChunks.Count][];
-        for (int i = 0; i < allChunks.Count; i++)
-        {
-            var c = allChunks[i];
-            if (string.IsNullOrWhiteSpace(c.Content)) { embeddings[i] = null; continue; }
-            try { embeddings[i] = embedder.Embed(c.Content); } catch { embeddings[i] = null; }
-            if ((i + 1) % 50 == 0 || i == allChunks.Count - 1)
-                Console.Write($"\r  Embedded {i + 1}/{allChunks.Count} chunks...   ");
-        }
-        Console.WriteLine();
 
         bool useFrame = !string.Equals(ctx.Store, "inmemory", StringComparison.OrdinalIgnoreCase);
 
+        float[]?[] embeddings = new float[allChunks.Count][];
         NivaraFrame? frame = null;
         CommunityToolkit.VectorData.InMemory.InMemoryVectorStore? vectorStore = null;
         VectorStoreCollection<string, DocumentChunk>? collection = null;
 
-        if (useFrame)
+        var indexPath = RagIndexCache.ResolvePath(ctx, resolvedDocsDir);
+        bool useCache = !ctx.NoCache && useFrame;
+        if (useCache && !ctx.Rebuild && RagIndexCache.IsValid(indexPath, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk))
         {
+            Console.WriteLine($"Loading cached index: {indexPath}");
+            var loaded = RagIndexCache.Load(indexPath, out int dim);
+            allChunks = RagIndexCache.ToChunks(loaded, dim);
+            embeddings = RagIndexCache.ToEmbeddings(loaded, dim);
             var cols = new List<(string Name, IColumn)>();
-            cols.Add(("ChunkId", (IColumn)NivaraColumn<object>.CreateForReferenceType(allChunks.Select(c => (object)c.ChunkId).ToArray())));
+            cols.Add(("ChunkId", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.ChunkId).ToArray())));
             cols.Add(("Source", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Source).ToArray())));
             cols.Add(("Title", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Title).ToArray())));
             cols.Add(("SectionPath", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.SectionPath).ToArray())));
             cols.Add(("AclGroup", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.AclGroup).ToArray())));
             cols.Add(("Content", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Content).ToArray())));
-            cols.Add(("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(embeddings.Select(e => e).ToArray()!)));
+            var embCol = NivaraColumn<float[]>.CreateForReferenceType(embeddings.Select(e => e).ToArray()!);
+            cols.Add(("Embedding", (IColumn)embCol));
             frame = NivaraFrame.Create(cols.ToArray());
+            sw.Stop();
+            Console.WriteLine($"  Loaded {allChunks.Count} chunks in {sw.ElapsedMilliseconds} ms\n");
         }
         else
         {
-            var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
-            vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(new() { EmbeddingGenerator = generator });
-            collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
-            await collection.EnsureCollectionExistsAsync();
-            foreach (var chunk in allChunks)
+            for (int i = 0; i < allChunks.Count; i++)
             {
-                await collection.UpsertAsync(new DocumentChunk { Key = chunk.ChunkId, Text = chunk.Content, Source = chunk.Source });
+                var c = allChunks[i];
+                if (string.IsNullOrWhiteSpace(c.Content)) { embeddings[i] = null; continue; }
+                try { embeddings[i] = embedder.Embed(c.Content); } catch { embeddings[i] = null; }
+                if ((i + 1) % 50 == 0 || i == allChunks.Count - 1)
+                    Console.Write($"\r  Embedded {i + 1}/{allChunks.Count} chunks...   ");
             }
+            Console.WriteLine();
+
+            if (useFrame)
+            {
+                var cols = new List<(string Name, IColumn)>();
+                cols.Add(("ChunkId", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.ChunkId).ToArray())));
+                cols.Add(("Source", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Source).ToArray())));
+                cols.Add(("Title", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Title).ToArray())));
+                cols.Add(("SectionPath", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.SectionPath).ToArray())));
+                cols.Add(("AclGroup", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.AclGroup).ToArray())));
+                cols.Add(("Content", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Content).ToArray())));
+                cols.Add(("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(embeddings.Select(e => e).ToArray()!)));
+                frame = NivaraFrame.Create(cols.ToArray());
+            }
+            else
+            {
+                var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+                vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(new() { EmbeddingGenerator = generator });
+                collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
+                await collection.EnsureCollectionExistsAsync();
+                foreach (var chunk in allChunks)
+                {
+                    await collection.UpsertAsync(new DocumentChunk { Key = chunk.ChunkId, Text = chunk.Content, Source = chunk.Source });
+                }
+            }
+
+            if (useCache && useFrame && frame != null)
+            {
+                try
+                {
+                    RagIndexCache.Save(indexPath, frame, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk, embedder.Dimension);
+                    Console.WriteLine($"  Cached index to {indexPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  Cache save failed: {ex.Message}");
+                }
+            }
+
+            sw.Stop();
+            Console.WriteLine($"  Indexed in {sw.ElapsedMilliseconds} ms\n");
         }
 
-        sw.Stop();
-        Console.WriteLine($"  Indexed in {sw.ElapsedMilliseconds} ms\n");
+        // ACL filter applied in search delegate (row op)
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
         var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
@@ -125,17 +156,27 @@ public static class RagAgentMode
             var results = new List<TextSearchProvider.TextSearchResult>();
             if (useFrame && frame != null)
             {
+                NivaraFrame workFrame = frame;
+                List<RagChunk> workChunks = allChunks;
+                if (!string.IsNullOrEmpty(ctx.AclGroup))
+                {
+                    var mask = NivaraColumn<bool>.Create(allChunks.Select(c => c.AclGroup == ctx.AclGroup).ToArray());
+                    workFrame = frame.FilterByMask(mask);
+                    workChunks = allChunks.Where(c => c.AclGroup == ctx.AclGroup).ToList();
+                    if (workChunks.Count == 0) return results;
+                }
+
                 float[]? qVec = null;
                 try { qVec = embedder.Embed(query); } catch { qVec = null; }
                 NivaraSeries<float> scores;
                 if (qVec == null)
-                    scores = frame.RowCosineSimilarity("Embedding", (float[]?)null, labels: frame.GetColumn<object>("ChunkId"));
+                    scores = workFrame.RowCosineSimilarity("Embedding", (float[]?)null, labels: workFrame.GetColumn<string>("ChunkId"));
                 else
-                    scores = frame.RowCosineSimilarity("Embedding", qVec, labels: frame.GetColumn<object>("ChunkId"));
+                    scores = workFrame.RowCosineSimilarity("Embedding", qVec, labels: workFrame.GetColumn<string>("ChunkId"));
                 var top = scores.TopKDescending(ctx.TopK);
                 foreach (var (label, _) in top)
                 {
-                    var chunk = allChunks.FirstOrDefault(c => c.ChunkId == label);
+                    var chunk = workChunks.FirstOrDefault(c => c.ChunkId == label);
                     if (chunk == null) continue;
                     results.Add(new TextSearchProvider.TextSearchResult { Text = chunk.Content, SourceName = chunk.Source });
                 }

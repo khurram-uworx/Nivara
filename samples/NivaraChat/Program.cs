@@ -23,6 +23,9 @@ if (args.Length > 0)
     string? aclGroup = null;
     bool roundTrip = false;
     string store = "frame";
+    string? index = null;
+    bool rebuild = false;
+    bool noCache = false;
 
     for (int i = 1; i < args.Length; i++)
     {
@@ -36,9 +39,12 @@ if (args.Length > 0)
         if (args[i] == "--acl-group" && i + 1 < args.Length) aclGroup = args[++i];
         if (args[i] == "--roundtrip") roundTrip = true;
         if (args[i] == "--store" && i + 1 < args.Length) store = args[++i];
+        if (args[i] == "--index" && i + 1 < args.Length) index = args[++i];
+        if (args[i] == "--rebuild") rebuild = true;
+        if (args[i] == "--no-cache") noCache = true;
     }
 
-    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store);
+    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache);
 
     switch (mode)
     {
@@ -194,6 +200,9 @@ void PrintUsage()
     Console.WriteLine("  --acl-group <name>   ACL filter for --rag/--rag-agent (e.g. adr, docs, plan)");
     Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag");
     Console.WriteLine("  --store <frame|inmemory>  Retrieval backend (default: frame)");
+    Console.WriteLine("  --index <path>            Cache index parquet path (default: hashed under samples/data/nivara/rag_cache)");
+    Console.WriteLine("  --rebuild                 Force rebuild of the cached index");
+    Console.WriteLine("  --no-cache                Disable index caching");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");

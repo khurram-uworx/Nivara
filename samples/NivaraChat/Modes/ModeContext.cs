@@ -16,4 +16,7 @@ public sealed record ModeContext(
     bool UseSilk = false,
     string? AclGroup = null,
     bool ShowRoundTrip = false,
-    string Store = "frame");
+    string Store = "frame",
+    string? Index = null,
+    bool Rebuild = false,
+    bool NoCache = false);
