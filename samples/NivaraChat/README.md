@@ -117,6 +117,9 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--acl-group <name>` | — | ACL filter for `--rag`/`--rag-agent` (e.g. `adr`, `docs`, `plan`) |
 | `--roundtrip` | — | Show embedding round-trip details for `--rag` |
 | `--store <frame\|inmemory>` | `frame` | Retrieval backend for `--rag`/`--rag-agent` |
+| `--index <path>` | hashed default | Cache index parquet path |
+| `--rebuild` | — | Force rebuild of the cached index |
+| `--no-cache` | — | Disable index caching |
 
 ## Modes of use
 
