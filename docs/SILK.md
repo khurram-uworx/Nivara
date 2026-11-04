@@ -756,3 +756,13 @@ per classifier, and the CPU-layout round trip exact.
 - [OpenCL 1.2 Specification](https://registry.khronos.org/OpenCL/specs/opencl-1.2.pdf)
 - [Khronos OpenCL](https://www.khronos.org/opencl/)
 - Series: [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
+
+## Running device-dependent tests locally
+
+Device-dependent (OpenCL/Silk) tests are categorized [Category("Gpu")] and are excluded from the main CI filter.
+
+- With an OpenCL GPU available:
+  ``powershell
+  dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "Category=Gpu"
+  ``n- On CI (no GPU) these tests are excluded by Category!=Gpu and skip via Assert.Ignore when run manually.
+
