@@ -97,6 +97,9 @@ public static class NivaraEmbeddingExtensions
         ArgumentNullException.ThrowIfNull(frame);
 
         var column = frame.GetColumn<float[]>(embeddingColumnName);
+        if (column.Length == 0)
+            return new GeneratedEmbeddings<Embedding<float>>();
+
         var resolvedDimension = resolveDimension(column, dimension, embeddingColumnName);
         var result = new GeneratedEmbeddings<Embedding<float>>(column.Length);
 

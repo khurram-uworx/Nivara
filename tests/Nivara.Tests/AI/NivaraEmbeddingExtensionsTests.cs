@@ -93,6 +93,16 @@ public class NivaraEmbeddingExtensionsTests
         Assert.That(Vectors(frame).HasNulls, Is.False);
     }
 
+    [Test]
+    public void ToGeneratedEmbeddings_EmptyColumn_ReturnsEmptyResult()
+    {
+        var frame = VectorFrame();
+
+        var generated = frame.ToGeneratedEmbeddings(Embedding);
+
+        Assert.That(generated.Count, Is.EqualTo(0));
+    }
+
     // ── float[] column → flat [rows, dim] frame ─────────────────────
 
     [Test]
