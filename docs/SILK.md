@@ -606,7 +606,15 @@ geometry helpers, and are the kernels listed in `KernelNames` under the vision f
 
 As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
 
-## 14. CLI surface and the gate
+## 13c. Conv text classifier (NivaraClassifier sample)
+
+`GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) trains the `ConvTextClassifierModel` (three Conv1d branches k=3/5/7 → concat → FC1 → ReLU → FC2) end to end on the device:
+
+- **Forward** is fully on-device: three `Conv2d` (H=1 spelling of conv1d) launches into branch-major subviews of one `convOutBuf`, a single in-place `Relu`, then `GemmEpilogue` (branch 0 seeds FC1 with bias) + two `GemmAdd` (branches 1–2 accumulate into the same `hBuf`) + one `Relu`, and a final `GemmEpilogue` for FC2. No concat copy and no transpose: FC1 is three accumulated GEMMs over branch-major activation blocks.
+- **Backward** runs on the host (softmax → FC2 → FC1 → per-branch conv with ReLU masks → embedding scatter), with gradients averaged over the batch to match `CrossEntropyLoss`'s `Reduction.Mean`.
+- **Optimizer** is an in-class Adam (not AutoDiff's `Adam<T>`), preserving the sample's learning-rate recipe; weights transfer to/from the CPU `Module` layout through `SetWeightsCpuLayout`/`ExportCpuLayout`.
+
+Parity is pinned in `tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` (forward logits within 2e-4, gradients within 5e-4 against a reverse-mode AutoDiff reference on identical weights).
 
 - **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,

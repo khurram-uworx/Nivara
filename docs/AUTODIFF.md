@@ -592,7 +592,18 @@ Pre-built text classification pipeline: `Embedding → MeanPool → Linear(hidde
 - `Forward(input)` — logits for each class (mean-pooled over sequence)
 - `Predict(int[] tokenIds)` — returns `int[]` of predicted class indices per batch
 
-### TokenClassifierModel\<T\> *(samples)*
+### ConvTextClassifierModel\<T\> *(samples)*
+
+> Lives in `samples/NivaraClassifier/ConvTextClassifierModel.cs` (namespace `NivaraClassifier`).
+
+```csharp
+public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+// new ConvTextClassifierModel<T>(vocabSize, embeddingDim, hiddenDim, numClasses, maxSeqLen, dropout: 0.3f)
+```
+
+Multi-kernel convolutional text classifier: `Embedding → (Conv1d k=3/5/7 → ReLU) ×3 → concat → Linear(hidden) → ReLU → Linear(numClasses)`. Three parallel convolution branches (kernel sizes 3, 5, 7) are concatenated before the fully-connected head.
+
+On the Silk (OpenCL) path, `GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) reproduces this forward on-device — three `Conv2d` (H=1) kernels feeding three accumulated `GemmBias`/`GemmAdd` branches into a single `Relu` — and runs the backward pass on the host (softmax → FC2 → FC1 → per-branch conv → embedding scatter) followed by an in-class Adam step. Weights transfer to/from the CPU `Module` layout via `SetWeightsCpuLayout`/`ExportCpuLayout`, so the trained model serializes through the normal `ModelSerializer`/`ConvTextClassifierModel` path. Dropout is disabled on the GPU path to match the deterministic AutoDiff reference used for parity.
 
 > Moved out of core in 1.2.0 — lives in `samples/Nivara.Samples/TokenClassifierModel.cs` (namespace `Nivara.AutoDiff.Nn`). Reference the `Nivara.Samples` project to use it.
 

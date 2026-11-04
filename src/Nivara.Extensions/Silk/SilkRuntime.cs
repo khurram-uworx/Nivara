@@ -190,7 +190,15 @@ public sealed unsafe class SilkRuntime : IDisposable
     /// are the three contiguous blocks of the packed qkv result. The view shares the parent's
     /// storage, so the parent must outlive it; the caller releases it via <see cref="Release"/>.
     /// </summary>
-    public nint CreateSubview(nint parent, int elementOffset, int elementCount)
+    public nint CreateSubview(nint parent, int elementOffset, int elementCount) =>
+        CreateSubview(parent, elementOffset, elementCount, readOnly: true);
+
+    /// <summary>
+    /// Same view with kernel-write access. The text-CNN conv branches write disjoint branch
+    /// blocks straight into a shared flat `convOut` buffer the FC GEMM reads without a concat
+    /// copy; only a sub-buffer that is writable can carry that output.
+    /// </summary>
+    public nint CreateSubview(nint parent, int elementOffset, int elementCount, bool readOnly)
     {
         var region = new BufferRegion
         {
@@ -199,7 +207,8 @@ public sealed unsafe class SilkRuntime : IDisposable
         };
 
         int err = 0;
-        nint view = cl.CreateSubBuffer(parent, MemFlags.ReadOnly, BufferCreateType.Region, ref region, out err);
+        nint view = cl.CreateSubBuffer(parent, readOnly ? MemFlags.ReadOnly : MemFlags.ReadWrite,
+            BufferCreateType.Region, ref region, out err);
         if (err != 0 || view == 0)
             throw new InvalidOperationException(
                 $"Silk clCreateSubBuffer(offset {elementOffset}, {elementCount} floats) failed ({err}).");
