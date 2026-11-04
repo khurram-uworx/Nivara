@@ -1,15 +1,16 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.VectorData;
+using Nivara;
 using Nivara.AI;
 using NivaraChat.Helpers;
+using Nivara.Samples;
 using OllamaSharp;
+using System.Numerics.Tensors;
 
 namespace NivaraChat.Modes;
 
-/// <summary>
-/// --rag-agent: RAG pipeline with a TextSearchProvider that auto-injects retrieved context
-/// before each LLM call inside the agent workflow.
-/// </summary>
 public static class RagAgentMode
 {
     public static async Task Run(ModeContext ctx)
@@ -26,28 +27,22 @@ public static class RagAgentMode
         if (!Directory.Exists(minilmDir))
         {
             Console.WriteLine($"MiniLM model not found at: {minilmDir}");
-            Console.WriteLine("Download model files (model.safetensors, config.json, vocab.txt) to that directory.");
             return;
         }
 
         Console.WriteLine("Loading MiniLM embedding model...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+        using var embedder = MiniLMEmbedder.Create(minilmDir, ctx.UseSilk);
         sw.Stop();
-        Console.WriteLine($"  Dimensions: {generator.EmbeddingDimension}");
+        Console.WriteLine($"  Backend:    {(ctx.UseSilk ? "Silk (OpenCL)" : "CPU")}");
+        Console.WriteLine($"  Dimensions: {embedder.Dimension}");
         Console.WriteLine($"  Loaded in:  {sw.ElapsedMilliseconds} ms\n");
-
-        var vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(
-            new() { EmbeddingGenerator = generator });
-        var collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
-        await collection.EnsureCollectionExistsAsync();
 
         var repoRoot = ModeHelpers.GetRepoRoot();
         var resolvedDocsDir = ctx.DocsDir ?? Path.Combine(repoRoot, "docs");
         var mdFiles = Directory.Exists(resolvedDocsDir)
-            ? Directory.GetFiles(resolvedDocsDir, "*.md")
+            ? Directory.GetFiles(resolvedDocsDir, "*.md", SearchOption.AllDirectories)
             : [];
-
         var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
         if (File.Exists(readmePath))
             mdFiles = [.. mdFiles, readmePath];
@@ -58,9 +53,62 @@ public static class RagAgentMode
             return;
         }
 
-        Console.WriteLine($"Indexing {mdFiles.Length} markdown files...");
+        var allChunks = new List<RagChunk>();
+        foreach (var f in mdFiles)
+        {
+            var content = await File.ReadAllTextAsync(f);
+            allChunks.AddRange(RagChunker.ChunkMarkdown(content, f, repoRoot));
+        }
+
+        if (!string.IsNullOrEmpty(ctx.AclGroup))
+        {
+            var before = allChunks.Count;
+            allChunks = allChunks.Where(c => c.AclGroup == ctx.AclGroup).ToList();
+            Console.WriteLine($"ACL group '{ctx.AclGroup}': {allChunks.Count}/{before} chunks visible.");
+            if (allChunks.Count == 0) { Console.WriteLine("No chunks visible under this ACL group."); return; }
+        }
+
+        Console.WriteLine($"Indexing {allChunks.Count} chunks from {mdFiles.Length} files (store={ctx.Store})...");
         sw.Restart();
-        await DocumentChunker.IndexMarkdownFiles(collection, mdFiles);
+
+        float[]?[] embeddings = new float[allChunks.Count][];
+        for (int i = 0; i < allChunks.Count; i++)
+        {
+            var c = allChunks[i];
+            if (string.IsNullOrWhiteSpace(c.Content)) { embeddings[i] = null; continue; }
+            try { embeddings[i] = embedder.Embed(c.Content); } catch { embeddings[i] = null; }
+        }
+
+        bool useFrame = !string.Equals(ctx.Store, "inmemory", StringComparison.OrdinalIgnoreCase);
+
+        NivaraFrame? frame = null;
+        CommunityToolkit.VectorData.InMemory.InMemoryVectorStore? vectorStore = null;
+        VectorStoreCollection<string, DocumentChunk>? collection = null;
+
+        if (useFrame)
+        {
+            var cols = new List<(string Name, IColumn)>();
+            cols.Add(("ChunkId", (IColumn)NivaraColumn<object>.CreateForReferenceType(allChunks.Select(c => (object)c.ChunkId).ToArray())));
+            cols.Add(("Source", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Source).ToArray())));
+            cols.Add(("Title", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Title).ToArray())));
+            cols.Add(("SectionPath", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.SectionPath).ToArray())));
+            cols.Add(("AclGroup", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.AclGroup).ToArray())));
+            cols.Add(("Content", (IColumn)NivaraColumn<string>.Create(allChunks.Select(c => c.Content).ToArray())));
+            cols.Add(("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(embeddings.Select(e => e).ToArray()!)));
+            frame = NivaraFrame.Create(cols.ToArray());
+        }
+        else
+        {
+            var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+            vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(new() { EmbeddingGenerator = generator });
+            collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
+            await collection.EnsureCollectionExistsAsync();
+            foreach (var chunk in allChunks)
+            {
+                await collection.UpsertAsync(new DocumentChunk { Key = chunk.ChunkId, Text = chunk.Content, Source = chunk.Source });
+            }
+        }
+
         sw.Stop();
         Console.WriteLine($"  Indexed in {sw.ElapsedMilliseconds} ms\n");
 
@@ -68,55 +116,62 @@ public static class RagAgentMode
         var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
         Console.WriteLine("Ollama connected.\n");
 
-        var textSearch = new TextSearchProvider(
-            async (query, ct) =>
+        // TextSearchProvider search delegate
+        async Task<IEnumerable<TextSearchProvider.TextSearchResult>> SearchAsync(string query, CancellationToken ct)
+        {
+            var results = new List<TextSearchProvider.TextSearchResult>();
+            if (useFrame && frame != null)
             {
-                var results = new List<TextSearchProvider.TextSearchResult>();
-                await foreach (var result in collection.SearchAsync(query, ctx.TopK, cancellationToken: ct))
+                float[]? qVec = null;
+                try { qVec = embedder.Embed(query); } catch { qVec = null; }
+                NivaraSeries<float> scores;
+                if (qVec == null)
+                    scores = frame.RowCosineSimilarity("Embedding", (float[]?)null, labels: frame.GetColumn<object>("ChunkId"));
+                else
+                    scores = frame.RowCosineSimilarity("Embedding", qVec, labels: frame.GetColumn<object>("ChunkId"));
+                var top = scores.TopKDescending(ctx.TopK);
+                foreach (var (label, _) in top)
                 {
-                    results.Add(new TextSearchProvider.TextSearchResult
-                    {
-                        Text = result.Record.Text,
-                        SourceName = result.Record.Source
-                    });
+                    var chunk = allChunks.FirstOrDefault(c => c.ChunkId == label);
+                    if (chunk == null) continue;
+                    results.Add(new TextSearchProvider.TextSearchResult { Text = chunk.Content, SourceName = chunk.Source });
                 }
-                return results;
-            },
-            new TextSearchProviderOptions
+            }
+            else if (collection != null)
             {
-                SearchTime = TextSearchProviderOptions.TextSearchBehavior.BeforeAIInvoke,
-                RecentMessageMemoryLimit = 2
-            });
+                await foreach (var r in collection.SearchAsync(query, ctx.TopK, cancellationToken: ct))
+                    results.Add(new TextSearchProvider.TextSearchResult { Text = r.Record.Text, SourceName = r.Record.Source });
+            }
+            return results;
+        }
 
-        var baseAgent = new ChatClientAgent(chatClient,
-            name: "NivaraRagAgent",
+        var textSearch = new TextSearchProvider(SearchAsync, new TextSearchProviderOptions
+        {
+            SearchTime = TextSearchProviderOptions.TextSearchBehavior.BeforeAIInvoke,
+            RecentMessageMemoryLimit = 2
+        });
+
+        var baseAgent = new ChatClientAgent(chatClient, name: "NivaraRagAgent",
             instructions: "You are a helpful assistant that answers questions about the Nivara project using the provided context. Always base your answers on the retrieved context.");
 
-        var agent = new AIAgentBuilder(baseAgent)
-            .UseAIContextProviders(textSearch)
-            .Build();
+        var agent = new AIAgentBuilder(baseAgent).UseAIContextProviders(textSearch).Build();
 
         Console.WriteLine($"Top-K: {ctx.TopK} chunks. TextSearchProvider auto-injects context before each LLM call.");
         Console.WriteLine("Type a question (or 'quit' to exit):\n");
 
         async Task RunQuery(string query)
         {
-            var run = await InProcessExecution.RunAsync(
-                new WorkflowBuilder(agent).WithOutputFrom(agent).Build(),
-                query);
-
+            var run = await InProcessExecution.RunAsync(new WorkflowBuilder(agent).WithOutputFrom(agent).Build(), query);
             Console.WriteLine("\n--- RAG Agent Response ---");
             foreach (var evt in run.NewEvents)
             {
                 switch (evt)
                 {
                     case AgentResponseUpdateEvent updateEvt:
-                        if (updateEvt.Update?.Text is string text && !string.IsNullOrEmpty(text))
-                            Console.Write(text);
+                        if (updateEvt.Update?.Text is string text && !string.IsNullOrEmpty(text)) Console.Write(text);
                         break;
                     case AgentResponseEvent agentEvt:
-                        if (agentEvt.Data is string data && !string.IsNullOrEmpty(data))
-                            Console.WriteLine(data);
+                        if (agentEvt.Data is string data && !string.IsNullOrEmpty(data)) Console.WriteLine(data);
                         break;
                 }
             }
@@ -124,9 +179,7 @@ public static class RagAgentMode
         }
 
         if (ctx.SingleShotText != null)
-        {
             await RunQuery(ctx.SingleShotText);
-        }
         else
         {
             while (true)
