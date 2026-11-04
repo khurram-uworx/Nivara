@@ -1,9 +1,8 @@
 using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
-namespace NivaraClassifier;
+namespace Nivara.AutoDiff.Nn;
 
 public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {

@@ -1,7 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Silk;
 using NUnit.Framework;
@@ -10,8 +9,9 @@ namespace Nivara.Tests.Gpu;
 
 /// <summary>
 /// Pins the device forward (#901 groundwork) of <see cref="GpuTextConvClassifier"/> against the
-/// AutoDiff reference (Embedding -> Conv1d branches -> concat -> FC1 -> ReLU -> FC2) on identical
-/// weights, and pins the host backward against a reverse-mode autograd pass on the same batch.
+/// real CPU model (<c>ConvTextClassifierModel&lt;float&gt;</c>, Dropout identity in Eval) on
+/// identical weights, and pins the host backward against a reverse-mode autograd pass on the same
+/// batch.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -137,7 +137,7 @@ public sealed class GpuTextConvClassifierTests
         Assert.That(worst, Is.LessThan(GradEps), $"{name}: worst gradient diff {worst}");
     }
 
-    static GpuTextConvClassifier DeviceGated(int seed, out ReferenceModel reference)
+    static GpuTextConvClassifier DeviceGated(int seed, out ConvTextClassifierModel<float> reference)
     {
         GpuTextConvClassifier gpu;
         try
@@ -149,13 +149,56 @@ public sealed class GpuTextConvClassifierTests
             Assert.Ignore("No OpenCL GPU available; skipping GpuTextConvClassifier verification.");
             throw;
         }
-        reference = new ReferenceModel(seed);
-        gpu.SetWeightsCpuLayout(
-            Vocab, Embed, SeqLen,
-            reference.Embedding, reference.Conv1W, reference.Conv1B, reference.Conv2W,
-            reference.Conv2B, reference.Conv3W, reference.Conv3B,
-            reference.Fc1W, reference.Fc1B, reference.Fc2W, reference.Fc2B);
+        reference = new ConvTextClassifierModel<float>(Vocab, Embed, Hidden, 2, SeqLen);
+
+        var rng = new Random(seed + 1);
+        float[] emb = Randoms(Vocab * Embed, rng);
+        float[] c1w = Randoms(64 * Embed * 3, rng);
+        float[] c1b = Randoms(64, rng);
+        float[] c2w = Randoms(64 * Embed * 5, rng);
+        float[] c2b = Randoms(64, rng);
+        float[] c3w = Randoms(64 * Embed * 7, rng);
+        float[] c3b = Randoms(64, rng);
+        int convHidden = 64 * 3 * SeqLen;
+        float[] fc1w = Randoms(Hidden * convHidden, rng);
+        float[] fc1b = Randoms(Hidden, rng);
+        float[] fc2w = Randoms(2 * Hidden, rng);
+        float[] fc2b = Randoms(2, rng);
+
+        SeedReference(reference, emb, c1w, c1b, c2w, c2b, c3w, c3b, fc1w, fc1b, fc2w, fc2b);
+        reference.Eval();
+        gpu.SetWeightsCpuLayout(Vocab, Embed, SeqLen,
+            emb, c1w, c1b, c2w, c2b, c3w, c3b, fc1w, fc1b, fc2w, fc2b);
         return gpu;
+    }
+
+    static float[] Randoms(int count, Random rng)
+    {
+        var values = new float[count];
+        for (int i = 0; i < count; i++) values[i] = (float)(rng.NextDouble() * 0.2 - 0.1);
+        return values;
+    }
+
+    /// <summary>Seeds the reference model's parameters in place with <c>requiresGrad: true</c>;
+    /// its <c>SetWeights</c> would attach non-differentiable tensors. Parameter order matches
+    /// <see cref="ConvTextClassifierModel{T}.SetWeights"/>: embedding, conv1..3 (w, b), fc1, fc2.</summary>
+    static void SeedReference(ConvTextClassifierModel<float> reference,
+        float[] emb, float[] c1w, float[] c1b, float[] c2w, float[] c2b, float[] c3w, float[] c3b,
+        float[] fc1w, float[] fc1b, float[] fc2w, float[] fc2b)
+    {
+        var ps = reference.GetParameters().Values.ToArray();
+        ps[0].Tensor = ReverseGradTensor<float>.FromMatrix(emb, Vocab, Embed, requiresGrad: true);
+        ps[1].Tensor = ReverseGradTensor<float>.FromMatrix(c1w, 64, Embed * 3, requiresGrad: true);
+        ps[2].Tensor = ReverseGradTensor<float>.FromArray(c1b, requiresGrad: true);
+        ps[3].Tensor = ReverseGradTensor<float>.FromMatrix(c2w, 64, Embed * 5, requiresGrad: true);
+        ps[4].Tensor = ReverseGradTensor<float>.FromArray(c2b, requiresGrad: true);
+        ps[5].Tensor = ReverseGradTensor<float>.FromMatrix(c3w, 64, Embed * 7, requiresGrad: true);
+        ps[6].Tensor = ReverseGradTensor<float>.FromArray(c3b, requiresGrad: true);
+        int convHidden = 64 * 3 * SeqLen;
+        ps[7].Tensor = ReverseGradTensor<float>.FromMatrix(fc1w, Hidden, convHidden, requiresGrad: true);
+        ps[8].Tensor = ReverseGradTensor<float>.FromMatrix(fc1b, 1, Hidden, requiresGrad: true);
+        ps[9].Tensor = ReverseGradTensor<float>.FromMatrix(fc2w, 2, Hidden, requiresGrad: true);
+        ps[10].Tensor = ReverseGradTensor<float>.FromMatrix(fc2b, 1, 2, requiresGrad: true);
     }
 
     static float[] GradOf(Nivara.AutoDiff.Nn.Parameter<float> p)
@@ -182,7 +225,7 @@ public sealed class GpuTextConvClassifierTests
         return labels;
     }
 
-    static float[] ForwardReference(ReferenceModel reference, int[] tokens, int batch)
+    static float[] ForwardReference(ConvTextClassifierModel<float> reference, int[] tokens, int batch)
     {
         var data = new float[tokens.Length];
         for (int i = 0; i < tokens.Length; i++) data[i] = tokens[i];
@@ -193,96 +236,4 @@ public sealed class GpuTextConvClassifierTests
         return arr;
     }
 
-    /// <summary>Autograd mirror of the device forward, seeded with the same weights.</summary>
-    sealed class ReferenceModel : Module<float>
-    {
-        readonly Embedding<float> embedding;
-        readonly Conv1d<float> conv1;
-        readonly Conv1d<float> conv2;
-        readonly Conv1d<float> conv3;
-        readonly Linear<float> fc1;
-        readonly Linear<float> fc2;
-
-        public ReferenceModel(int seed)
-        {
-            var rng = new Random(seed + 1);
-            embedding = new Embedding<float>(Vocab, Embed);
-            conv1 = new Conv1d<float>(Embed, 64, kernelSize: 3, padding: 1);
-            conv2 = new Conv1d<float>(Embed, 64, kernelSize: 5, padding: 2);
-            conv3 = new Conv1d<float>(Embed, 64, kernelSize: 7, padding: 3);
-            fc1 = new Linear<float>(64 * 3 * SeqLen, Hidden, bias: true);
-            fc2 = new Linear<float>(Hidden, 2, bias: true);
-            RegisterModules(embedding, conv1, conv2, conv3, fc1, fc2);
-
-            SeedWeights(
-                Randoms(Vocab * Embed, rng),
-                Randoms(64 * Embed * 3, rng), Randoms(64, rng),
-                Randoms(64 * Embed * 5, rng), Randoms(64, rng),
-                Randoms(64 * Embed * 7, rng), Randoms(64, rng),
-                Randoms(Hidden * (64 * 3 * SeqLen), rng), Randoms(Hidden, rng),
-                Randoms(2 * Hidden, rng), Randoms(2, rng));
-        }
-
-        public float[] Embedding { get; private set; } = [];
-        public float[] Conv1W { get; private set; } = [];
-        public float[] Conv1B { get; private set; } = [];
-        public float[] Conv2W { get; private set; } = [];
-        public float[] Conv2B { get; private set; } = [];
-        public float[] Conv3W { get; private set; } = [];
-        public float[] Conv3B { get; private set; } = [];
-        public float[] Fc1W { get; private set; } = [];
-        public float[] Fc1B { get; private set; } = [];
-        public float[] Fc2W { get; private set; } = [];
-        public float[] Fc2B { get; private set; } = [];
-
-        void SeedWeights(float[] embedding, float[] conv1W, float[] conv1B, float[] conv2W, float[] conv2B,
-            float[] conv3W, float[] conv3B, float[] fc1W, float[] fc1B, float[] fc2W, float[] fc2B)
-        {
-            Embedding = embedding;
-            Conv1W = conv1W; Conv1B = conv1B;
-            Conv2W = conv2W; Conv2B = conv2B;
-            Conv3W = conv3W; Conv3B = conv3B;
-            Fc1W = fc1W; Fc1B = fc1B;
-            Fc2W = fc2W; Fc2B = fc2B;
-
-            var ps = GetParameters().Values.ToArray();
-            ps[0].Tensor = ReverseGradTensor<float>.FromMatrix(Embedding, Vocab, Embed, requiresGrad: true);
-            ps[1].Tensor = ReverseGradTensor<float>.FromMatrix(Conv1W, 64, Embed * 3, requiresGrad: true);
-            ps[2].Tensor = ReverseGradTensor<float>.FromArray(Conv1B, requiresGrad: true);
-            ps[3].Tensor = ReverseGradTensor<float>.FromMatrix(Conv2W, 64, Embed * 5, requiresGrad: true);
-            ps[4].Tensor = ReverseGradTensor<float>.FromArray(Conv2B, requiresGrad: true);
-            ps[5].Tensor = ReverseGradTensor<float>.FromMatrix(Conv3W, 64, Embed * 7, requiresGrad: true);
-            ps[6].Tensor = ReverseGradTensor<float>.FromArray(Conv3B, requiresGrad: true);
-            int convHidden = 64 * 3 * SeqLen;
-            ps[7].Tensor = ReverseGradTensor<float>.FromMatrix(Fc1W, Hidden, convHidden, requiresGrad: true);
-            ps[8].Tensor = ReverseGradTensor<float>.FromMatrix(Fc1B, 1, Hidden, requiresGrad: true);
-            ps[9].Tensor = ReverseGradTensor<float>.FromMatrix(Fc2W, 2, Hidden, requiresGrad: true);
-            ps[10].Tensor = ReverseGradTensor<float>.FromMatrix(Fc2B, 1, 2, requiresGrad: true);
-        }
-
-        static float[] Randoms(int count, Random rng)
-        {
-            var values = new float[count];
-            for (int i = 0; i < count; i++) values[i] = (float)(rng.NextDouble() * 0.2 - 0.1);
-            return values;
-        }
-
-        public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> input)
-        {
-            var emb = embedding.Forward(input);
-            var ncl = ReverseGradOperations.TransposeAxes(emb, 1, 2);
-            var c1 = ReverseGradOperations.Relu(conv1.Forward(ncl));
-            var c2 = ReverseGradOperations.Relu(conv2.Forward(ncl));
-            var c3 = ReverseGradOperations.Relu(conv3.Forward(ncl));
-            int b = c1.Shape[0];
-            c1.Reshape(b, c1.Shape[1] * c1.Shape[2]);
-            c2.Reshape(b, c2.Shape[1] * c2.Shape[2]);
-            c3.Reshape(b, c3.Shape[1] * c3.Shape[2]);
-            var cat = ReverseGradOperations.Concat([c1, c2, c3], axis: 1);
-            var h = ReverseGradOperations.Relu(fc1.Forward(cat));
-            return fc2.Forward(h);
-        }
-
-        public override string ExportToOnnx(IOnnxExportContext<float> context, string inputName) => inputName;
-    }
 }
