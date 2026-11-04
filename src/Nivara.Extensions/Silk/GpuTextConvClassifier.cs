@@ -343,9 +343,6 @@ public sealed class GpuTextConvClassifier : IDisposable
         return result;
     }
 
-    /// <summary>Per-epoch training outcome: mean cross-entropy loss and wall-clock duration.</summary>
-    public readonly record struct SilkTrainEpoch(int Epoch, float Loss, TimeSpan Elapsed);
-
     /// <summary>
     /// Trains in place against the device forward with host-computed gradients (two branch
     /// convs are only worth device backward once #900 lands; here the branch convs, FC and
@@ -399,8 +396,8 @@ public sealed class GpuTextConvClassifier : IDisposable
                 int n = Math.Min(start + batchSize, sampleCount) - start;
                 if (n <= 0) continue;
 
-                batchTokens = Obtain(ref batchTokens, n * seqLen);
-                batchLabels = Obtain(ref batchLabels, n);
+                batchTokens = SilkLoss.Obtain(ref batchTokens, n * seqLen);
+                batchLabels = SilkLoss.Obtain(ref batchLabels, n);
                 for (int i = 0; i < n; i++)
                 {
                     int src = indices[start + i];
@@ -414,7 +411,7 @@ public sealed class GpuTextConvClassifier : IDisposable
                 ApplyAdam(adam, learningRate);
                 UploadWeights();
 
-                lossSum += CrossEntropy(logits, batchLabels, n);
+                lossSum += SilkLoss.CrossEntropy(logits, batchLabels, n);
                 lossBatches++;
             }
 
@@ -423,26 +420,6 @@ public sealed class GpuTextConvClassifier : IDisposable
         }
 
         return results;
-    }
-
-    static float CrossEntropy(float[] logits, int[] labels, int n)
-    {
-        float loss = 0f;
-        for (int i = 0; i < n; i++)
-        {
-            float e0 = MathF.Exp(logits[i * 2]);
-            float e1 = MathF.Exp(logits[i * 2 + 1]);
-            float p0 = e0 / (e0 + e1);
-            loss += labels[i] == 0 ? -MathF.Log(p0) : -MathF.Log(1f - p0);
-        }
-        return loss / n;
-    }
-
-    static T[] Obtain<T>(ref T[] buffer, int length)
-    {
-        if (buffer.Length >= length) return buffer;
-        buffer = new T[length];
-        return buffer;
     }
 
     sealed class AdamState(float[] values)
@@ -493,14 +470,14 @@ public sealed class GpuTextConvClassifier : IDisposable
         int hidLen = n * hiddenDim;
         int embLen = n * embeddingDim * seqLen;
 
-        gradEmb = Obtain(ref gradEmb, embedding.Length);
-        gradFc1 = Obtain(ref gradFc1, fc1W.Length + fc1B.Length);
-        gradFc2 = Obtain(ref gradFc2, fc2W.Length + fc2B.Length);
-        gradConv = Obtain(ref gradConv, conv1W.Length + conv1B.Length + conv2W.Length + conv2B.Length + conv3W.Length + conv3B.Length);
-        gradZ = Obtain(ref gradZ, n * 2);
-        gradDh = Obtain(ref gradDh, hidLen);
-        gradA = Obtain(ref gradA, outLen);
-        gradInput = Obtain(ref gradInput, embLen);
+        gradEmb = SilkLoss.Obtain(ref gradEmb, embedding.Length);
+        gradFc1 = SilkLoss.Obtain(ref gradFc1, fc1W.Length + fc1B.Length);
+        gradFc2 = SilkLoss.Obtain(ref gradFc2, fc2W.Length + fc2B.Length);
+        gradConv = SilkLoss.Obtain(ref gradConv, conv1W.Length + conv1B.Length + conv2W.Length + conv2B.Length + conv3W.Length + conv3B.Length);
+        gradZ = SilkLoss.Obtain(ref gradZ, n * 2);
+        gradDh = SilkLoss.Obtain(ref gradDh, hidLen);
+        gradA = SilkLoss.Obtain(ref gradA, outLen);
+        gradInput = SilkLoss.Obtain(ref gradInput, embLen);
         Array.Clear(gradEmb);
         Array.Clear(gradFc1);
         Array.Clear(gradFc2);
@@ -512,16 +489,7 @@ public sealed class GpuTextConvClassifier : IDisposable
 
         // Softmax + cross-entropy input gradient (two classes; softmax stays numerically
         // bounded because logits come from a linear layer).
-        for (int i = 0; i < n; i++)
-        {
-            float e0 = MathF.Exp(logits[i * 2]);
-            float e1 = MathF.Exp(logits[i * 2 + 1]);
-            float z = e0 + e1;
-            float p0 = e0 / z;
-            int label = labels[i];
-            gradZ[i * 2 + 0] = p0 - (label == 0 ? 1f : 0f);
-            gradZ[i * 2 + 1] = 1f - p0 - (label == 1 ? 1f : 0f);
-        }
+        SilkLoss.InputGradient(logits, labels, n, 1f, gradZ);
 
         Span<float> gFc1w = gradFc1.AsSpan(0, fc1W.Length);
         Span<float> gFc1b = gradFc1.AsSpan(fc1W.Length, fc1B.Length);
