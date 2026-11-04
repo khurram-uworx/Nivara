@@ -137,13 +137,30 @@ internal static class SilkKernels
     public const string MaxPool2d = "maxpool2d";
     public const string AdaptiveAvgPool2d = "adaptive_avgpool2d";
 
+    // Text-classifier backward kernels (#900): transposed-operand GEMMs, elementwise backward,
+    // reductions, and the fused Adam step.
+    public const string GemmNt = "gemm_row4_nt";
+    public const string GemmTn = "gemm_row4_tn";
+    public const string ReluBackward = "relu_backward";
+    public const string ColSum = "col_sum";
+    public const string Fill = "fill";
+    public const string Conv2dBackwardWeight = "conv2d_backward_weight";
+    public const string Conv2dBackwardInput = "conv2d_backward_input";
+    public const string Conv2dBackwardBias = "conv2d_backward_bias";
+    public const string AdamUpdate = "adam_update";
+
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
-        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16, DecodeGqaAttentionOprojFused,
+        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
+        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
+        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+        DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
+        GemmNt, GemmTn, ReluBackward, ColSum, Fill,
+        Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
     ];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
@@ -387,10 +404,32 @@ internal static class SilkKernels
             y[idx] = gelu_exact(x[xBase + col]) * x[xBase + intermediate + col];
         }
 
-        /* Shared accumulation for the Row4 GEMM family, including the bias-free store.
-           Deliberately one macro: the byte-identity claim rests on every variant adding the
-           same f32 values to the same accumulator in the same order, so the text must not
-           be able to drift between them. The store after the macro is the only difference.
+        /* The accumulation core every f32 Row4 GEMM variant shares: the K-loop's barrier, the
+           unrolled ascending-K mul+add body and the c0..c3 column bases. Deliberately one
+           macro — the byte-identity claim rests on every variant adding the same f32 values
+           to the same accumulator in the same order, so this text lives in exactly one place
+           and cannot drift between the forward, BF16 and NT/TN backward variants. The tile
+           loads before it and the store after it are the only per-variant differences. */
+        #define GEMM_ACCUMULATE_CORE \
+            barrier(CLK_LOCAL_MEM_FENCE); \
+            _Pragma("unroll 16") for (uint k = 0; k < TILE; ++k) { \
+                float av = smem[x + k * TILE]; \
+                uint bBase = TILE + y * BLOCK; \
+                a0 += av * smem[k + (bBase + 0) * TILE]; \
+                a1 += av * smem[k + (bBase + 1) * TILE]; \
+                a2 += av * smem[k + (bBase + 2) * TILE]; \
+                a3 += av * smem[k + (bBase + 3) * TILE]; \
+            } \
+            barrier(CLK_LOCAL_MEM_FENCE); \
+            } \
+            uint c0 = colBase + y * BLOCK + 0; \
+            uint c1 = colBase + y * BLOCK + 1; \
+            uint c2 = colBase + y * BLOCK + 2; \
+            uint c3 = colBase + y * BLOCK + 3;
+
+        /* Shared tile loads and accumulation for the forward Row4 GEMM family, including the
+           bias-free store. The accumulation body is `GEMM_ACCUMULATE_CORE`; the loads above
+           it and the store after the macro are the only per-variant differences.
 
            The scratch tile is a private layout: element [i, j] lives at i + j*TILE, so the
            first index is the contiguous one. Only the store/load pairs have to agree on it, and
@@ -451,21 +490,7 @@ internal static class SilkKernels
                         } \
                     } \
                 } \
-                barrier(CLK_LOCAL_MEM_FENCE); \
-                _Pragma("unroll 16") for (uint k = 0; k < TILE; ++k) { \
-                    float av = smem[x + k * TILE]; \
-                    uint bBase = TILE + y * BLOCK; \
-                    a0 += av * smem[k + (bBase + 0) * TILE]; \
-                    a1 += av * smem[k + (bBase + 1) * TILE]; \
-                    a2 += av * smem[k + (bBase + 2) * TILE]; \
-                    a3 += av * smem[k + (bBase + 3) * TILE]; \
-                } \
-                barrier(CLK_LOCAL_MEM_FENCE); \
-            } \
-            uint c0 = colBase + y * BLOCK + 0; \
-            uint c1 = colBase + y * BLOCK + 1; \
-            uint c2 = colBase + y * BLOCK + 2; \
-            uint c3 = colBase + y * BLOCK + 3;
+            GEMM_ACCUMULATE_CORE
 
 
 
@@ -511,21 +536,86 @@ internal static class SilkKernels
                         } \
                     } \
                 } \
-                barrier(CLK_LOCAL_MEM_FENCE); \
-                _Pragma("unroll 16") for (uint k = 0; k < TILE; ++k) { \
-                    float av = smem[x + k * TILE]; \
-                    uint bBase = TILE + y * BLOCK; \
-                    a0 += av * smem[k + (bBase + 0) * TILE]; \
-                    a1 += av * smem[k + (bBase + 1) * TILE]; \
-                    a2 += av * smem[k + (bBase + 2) * TILE]; \
-                    a3 += av * smem[k + (bBase + 3) * TILE]; \
+            GEMM_ACCUMULATE_CORE
+
+        /* Backward GEMM variants. Same `GEMM_ACCUMULATE_CORE` accumulation as the forward
+           Row4 GEMMs (ascending-K mul + add, no contraction), so a host replay of the same
+           order is byte-identical; only the tile LOADS change. gemm_row4_nt takes B stored row-major [bCols, aCols] and
+           transposes it in the load (dH = dZ·W2ᵀ, dPooled = dH·W1ᵀ, dA = dH·W1ᵀ(branch));
+           gemm_row4_tn takes A stored row-major [aCols, aRows] and transposes it in the load
+           (dW2 = hᵀ·dZ, dW1 = pooledᵀ·dH). The transposed loads are scalar — the vload4 path
+           needs elements contiguous along the load direction, which a transposed operand
+           destroys — but the load is a small fraction of the MAC loop. */
+        #define GEMM_NT_ACCUMULATE \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
                 } \
-                barrier(CLK_LOCAL_MEM_FENCE); \
-            } \
-            uint c0 = colBase + y * BLOCK + 0; \
-            uint c1 = colBase + y * BLOCK + 1; \
-            uint c2 = colBase + y * BLOCK + 2; \
-            uint c3 = colBase + y * BLOCK + 3;
+                uint bRow = k0 + x; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    for (uint w = 0; w < BLOCK; ++w) { \
+                        uint outCol = outCol0 + w; \
+                        smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                            (bRow < aCols && outCol < bCols) ? b[outCol * aCols + bRow] : 0.0f; \
+                    } \
+                } \
+            GEMM_ACCUMULATE_CORE
+
+        #define GEMM_TN_ACCUMULATE \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    for (uint aw = 0u; aw < 4u; ++aw) { \
+                        uint aCol = aColBase + aw; \
+                        smem[x + (y * 4u + aw) * TILE] = \
+                            (outRow < aRows && aCol < aCols) ? a[aCol * aRows + outRow] : 0.0f; \
+                    } \
+                } \
+                uint bRow = k0 + x; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols) { \
+                        float4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = bv.s0; \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = bv.s1; \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = bv.s2; \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = bv.s3; \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0.0f; \
+                        } \
+                    } \
+                } \
+            GEMM_ACCUMULATE_CORE
 
         inline uint qkv_dest(uint j, uint outRow, uint aRows, uint blockWidth)
         {
@@ -1187,6 +1277,237 @@ internal static class SilkKernels
                     sum += input[inIdx];
                 }
             output[idx] = sum / (float)(H * W);
+        }
+
+        /* ---- Text-classifier backward (#900). The GEMM-shaped pieces are the NT/TN row4
+           variants above; the rest are the small elementwise/reduction kernels the two
+           classifier training loops need. All reductions accumulate in one ascending order so
+           a host replay of the same order is byte-identical (file-scope FP_CONTRACT OFF). ---- */
+
+        __kernel void gemm_row4_nt(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_NT_ACCUMULATE
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        __kernel void gemm_row4_tn(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_TN_ACCUMULATE
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        /* d flows back only where the forward activation was positive; act is the POST-activation
+           buffer (ReLU(x) > 0 iff x > 0), which both classifiers already keep device-resident. */
+        __kernel void relu_backward(
+            __global const float* d,
+            __global const float* act,
+            __global float* y,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            y[idx] = act[idx] > 0.0f ? d[idx] : 0.0f;
+        }
+
+        /* y[j] = scale * sum_i x[i*cols + j] — FC bias gradients. The scale is applied once at
+           the end, so the host replay is: accumulate ascending, then multiply. */
+        __kernel void col_sum(
+            __global const float* x,
+            __global float* y,
+            const uint rows,
+            const uint cols,
+            const float scale)
+        {
+            uint col = get_global_id(0);
+            if (col >= cols) return;
+            float acc = 0.0f;
+            for (uint r = 0; r < rows; ++r)
+                acc += x[r * cols + col];
+            y[col] = acc * scale;
+        }
+
+        /* y[i] = value — zeroing the dX workspace before the three branch launches of
+           conv2d_backward_input accumulate into it. */
+        __kernel void fill(
+            __global float* y,
+            const float value,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            y[idx] = value;
+        }
+
+        /* dW[oc, ic, kh, kw] = sum over (n, oh, ow) of dA[n, oc, oh, ow] * X[n, ic, ih, iw],
+           ih = oh*strideH - padTop + kh, iw = ow*strideW - padLeft + kw. Same NCHW layout,
+           stride/pad/groups geometry and weight layout ((oc*inCperGroup + icg)*kH*kW + ...) as
+           the forward conv2d. Not a GEMM — the reduction domain shifts per kernel position —
+           so it is a direct kernel; one work-item per weight element. */
+        __kernel void conv2d_backward_weight(
+            __global const float* dA,
+            __global const float* input,
+            __global float* dW,
+            const uint N, const uint C, const uint H, const uint W,
+            const uint outC, const uint kH, const uint kW,
+            const uint strideH, const uint strideW,
+            const uint padTop, const uint padLeft,
+            const uint groups, const uint oH, const uint oW)
+        {
+            uint inCperGroup = C / groups;
+            uint outCperGroup = outC / groups;
+            uint idx = get_global_id(0);
+            uint total = outC * inCperGroup * kH * kW;
+            if (idx >= total) return;
+            uint kw2 = idx % kW;
+            uint tmp = idx / kW;
+            uint kh2 = tmp % kH;
+            tmp = tmp / kH;
+            uint icg = tmp % inCperGroup;
+            tmp = tmp / inCperGroup;
+            uint oc = tmp;
+            uint g = oc / outCperGroup;
+            uint ic = g * inCperGroup + icg;
+            uint wIdx = ((oc * inCperGroup) + icg) * kH * kW + kh2 * kW + kw2;
+
+            float acc = 0.0f;
+            for (uint n = 0; n < N; ++n)
+            {
+                for (uint oh = 0; oh < oH; ++oh)
+                {
+                    int ih = (int)(oh * strideH) - (int)padTop + (int)kh2;
+                    if (ih < 0 || ih >= (int)H) continue;
+                    for (uint ow = 0; ow < oW; ++ow)
+                    {
+                        int iw = (int)(ow * strideW) - (int)padLeft + (int)kw2;
+                        if (iw < 0 || iw >= (int)W) continue;
+                        uint dIdx = ((n * outC + oc) * oH + oh) * oW + ow;
+                        uint iIdx = ((n * C + ic) * H + (uint)ih) * W + (uint)iw;
+                        acc += dA[dIdx] * input[iIdx];
+                    }
+                }
+            }
+            dW[wIdx] = acc;
+        }
+
+        /* dX[n, ic, ih, iw] = sum over (oc of ic's group, kh, kw) of dA[n, oc, oh, ow] *
+           W[oc, icg, kh, kw], where oh is the output position that maps back to ih: oh*strideH
+           - padTop + kh == ih, i.e. oh = (ih + padTop - kh) / strideH when it divides evenly.
+           ACCUMULATES: the text CNN launches it once per branch, so the caller zeroes dX
+           first (fill) and the three launches sum. */
+        __kernel void conv2d_backward_input(
+            __global const float* dA,
+            __global const float* weight,
+            __global float* dX,
+            const uint N, const uint C, const uint H, const uint W,
+            const uint outC, const uint kH, const uint kW,
+            const uint strideH, const uint strideW,
+            const uint padTop, const uint padLeft,
+            const uint groups, const uint oH, const uint oW)
+        {
+            uint idx = get_global_id(0);
+            uint total = N * C * H * W;
+            if (idx >= total) return;
+            uint iw = idx % W;
+            uint tmp = idx / W;
+            uint ih = tmp % H;
+            tmp = tmp / H;
+            uint ic = tmp % C;
+            tmp = tmp / C;
+            uint n = tmp;
+
+            uint inCperGroup = C / groups;
+            uint outCperGroup = outC / groups;
+            uint g = ic / inCperGroup;
+            uint icg = ic - g * inCperGroup;
+
+            float acc = 0.0f;
+            for (uint ocg = 0; ocg < outCperGroup; ++ocg)
+            {
+                uint oc = g * outCperGroup + ocg;
+                for (uint kh = 0; kh < kH; ++kh)
+                {
+                    int ohRaw = (int)ih + (int)padTop - (int)kh;
+                    if (ohRaw < 0 || ohRaw % strideH != 0) continue;
+                    uint oh = (uint)ohRaw / strideH;
+                    if (oh >= oH) continue;
+                    for (uint kw = 0; kw < kW; ++kw)
+                    {
+                        int owRaw = (int)iw + (int)padLeft - (int)kw;
+                        if (owRaw < 0 || owRaw % strideW != 0) continue;
+                        uint ow = (uint)owRaw / strideW;
+                        if (ow >= oW) continue;
+                        uint dIdx = ((n * outC + oc) * oH + oh) * oW + ow;
+                        uint wIdx = ((oc * inCperGroup) + icg) * kH * kW + kh * kW + kw;
+                        acc += dA[dIdx] * weight[wIdx];
+                    }
+                }
+            }
+            dX[idx] += acc;
+        }
+
+        /* db[oc] = sum over (n, oh, ow) of dA[n, oc, oh, ow]. */
+        __kernel void conv2d_backward_bias(
+            __global const float* dA,
+            __global float* db,
+            const uint N, const uint outC, const uint oH, const uint oW)
+        {
+            uint oc = get_global_id(0);
+            if (oc >= outC) return;
+            float acc = 0.0f;
+            for (uint n = 0; n < N; ++n)
+                for (uint i = 0; i < oH * oW; ++i)
+                    acc += dA[(n * outC + oc) * oH * oW + i];
+            db[oc] = acc;
+        }
+
+        /* Fused Adam step (beta1 = 0.9, beta2 = 0.999, eps = 1e-8 — the constants the host
+           AdamState uses). bc1/bc2 are the bias corrections 1-beta^t, precomputed host-side so
+           the kernel stays elementwise. Gradients arrive already batch-averaged. */
+        __kernel void adam_update(
+            __global float* w,
+            __global const float* g,
+            __global float* m,
+            __global float* v,
+            const float lr,
+            const float bc1,
+            const float bc2,
+            const float eps,
+            const uint n)
+        {
+            uint i = get_global_id(0);
+            if (i >= n) return;
+            float grad = g[i];
+            float m1 = 0.9f * m[i] + 0.1f * grad;
+            float v1 = 0.999f * v[i] + 0.001f * grad * grad;
+            m[i] = m1;
+            v[i] = v1;
+            w[i] -= lr * (m1 / bc1) / (sqrt(v1 / bc2) + eps);
         }
 
         /* Decode (single-query) GQA attention. q: [numHeads*headDim], kCache/vCache: [kvLen, numKvHeads*headDim].
