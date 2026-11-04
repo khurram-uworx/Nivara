@@ -66,6 +66,7 @@ null row — never a zero vector, which would silently score 0 against everythin
 | --- | --- |
 | null `float[]` row → dimension frame | every `E*` cell null in that row |
 | null row scored | **null score** for that row only |
+| a column with no non-null embedding, scored | **every** score null; the query supplies the dimension |
 | null element in the query | **every** score null |
 | `null` passed as a `float[]` query | every score null |
 | fully null dimension row → vector column | null embedding |

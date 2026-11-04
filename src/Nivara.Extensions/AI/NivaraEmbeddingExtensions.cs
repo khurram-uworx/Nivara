@@ -397,10 +397,16 @@ public static class NivaraEmbeddingExtensions
         ArgumentNullException.ThrowIfNull(query);
 
         var column = frame.GetColumn<float[]>(embeddingColumnName);
-        var resolvedDimension = resolveDimension(column, null, embeddingColumnName);
-        if (query.Length != resolvedDimension)
+        var columnDimension = tryResolveDimension(column, embeddingColumnName);
+        if (columnDimension is { } known && query.Length != known)
             throw new ArgumentException(
-                $"Query length ({query.Length}) must match the embedding dimension ({resolvedDimension}).",
+                $"Query length ({query.Length}) must match the embedding dimension ({known}).",
+                nameof(query));
+
+        var resolvedDimension = columnDimension ?? query.Length;
+        if (resolvedDimension <= 0)
+            throw new ArgumentException(
+                $"Query length must be positive when column '{embeddingColumnName}' holds no non-null embedding.",
                 nameof(query));
 
         var matrix = frame.ToEmbeddingMatrix(embeddingColumnName, dimension: resolvedDimension);
@@ -416,10 +422,11 @@ public static class NivaraEmbeddingExtensions
         if (query is not null)
             return NivaraSeries<float>.Create(query);
 
-        var dimension = resolveDimension(
+        // An all-null query masks every score, so its length never reaches the kernel. One
+        // dimension is enough to build the matrix when the column cannot supply a dimension.
+        var dimension = tryResolveDimension(
             frame.GetColumn<float[]>(embeddingColumnName),
-            null,
-            embeddingColumnName);
+            embeddingColumnName) ?? 1;
 
         var values = new float[dimension];
         var mask = new bool[dimension];
@@ -437,6 +444,14 @@ public static class NivaraEmbeddingExtensions
             return explicitDimension;
         }
 
+        return tryResolveDimension(column, embeddingColumnName)
+            ?? throw new InvalidOperationException(
+                $"Column '{embeddingColumnName}' holds no non-null embedding, so the dimension cannot be inferred. "
+                + "Pass 'dimension' explicitly.");
+    }
+
+    static int? tryResolveDimension(NivaraColumn<float[]> column, string embeddingColumnName)
+    {
         for (var row = 0; row < column.Length; row++)
         {
             if (column.IsNull(row))
@@ -451,9 +466,7 @@ public static class NivaraEmbeddingExtensions
             return vector.Length;
         }
 
-        throw new InvalidOperationException(
-            $"Column '{embeddingColumnName}' holds no non-null embedding, so the dimension cannot be inferred. "
-            + "Pass 'dimension' explicitly.");
+        return null;
     }
 
     static int inferMatrixDimension(NivaraFrame matrixFrame, string columnPrefix)

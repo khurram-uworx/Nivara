@@ -510,14 +510,37 @@ public class NivaraEmbeddingExtensionsTests
     }
 
     [Test]
-    public void RowCosineSimilarity_AllNullColumn_Throws()
+    public void RowCosineSimilarity_AllNullColumn_UsesQueryDimensionAndScoresAllNull()
+    {
+        var frame = VectorFrame(null, null);
+
+        var scores = frame.RowCosineSimilarity(Embedding, new[] { 1f, 0f });
+
+        Assert.That(scores.Length, Is.EqualTo(2));
+        Assert.That(scores.IsNull(0), Is.True);
+        Assert.That(scores.IsNull(1), Is.True);
+    }
+
+    [Test]
+    public void RowCosineSimilarity_NullArrayQueryAndAllNullColumn_ScoresAllNull()
     {
         var frame = VectorFrame([null]);
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            frame.RowCosineSimilarity(Embedding, new[] { 1f, 0f }));
+        var scores = frame.RowCosineSimilarity(Embedding, (float[]?)null);
 
-        Assert.That(ex!.Message, Does.Contain("dimension"));
+        Assert.That(scores.Length, Is.EqualTo(1));
+        Assert.That(scores.IsNull(0), Is.True);
+    }
+
+    [Test]
+    public void RowCosineSimilarity_EmptyQueryAndAllNullColumn_Throws()
+    {
+        var frame = VectorFrame([null]);
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            frame.RowCosineSimilarity(Embedding, Array.Empty<float>()));
+
+        Assert.That(ex!.Message, Does.Contain("must be positive"));
     }
 
     // ── the access-control path #912 depends on ─────────────────────
