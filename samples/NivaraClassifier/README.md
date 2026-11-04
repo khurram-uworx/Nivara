@@ -49,7 +49,7 @@ dotnet run --project samples/NivaraClassifier -- --command onnx-compare --load s
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--command`, `-c <cmd>` | `train` | Command: `train`, `predict`, `generate` |
+| `--command`, `-c <cmd>` | `train` | Command: `train`, `predict`, `generate`, `benchmark`, `onnx-compare` |
 | `--data-path <path>` | `samples/data/sentiment_data.csv` | CSV data file (columns: text, label) |
 | `--save <path>` | - | Save trained model + tokenizer |
 | `--load <path>` | - | Load trained model + tokenizer |
@@ -78,6 +78,46 @@ Trains the model on the CSV at `--data-path`. Prints epoch loss, batch timing, a
 
 ### Prediction (`--command predict`)
 Interactive REPL: type sentences, get predicted sentiment. Requires a trained model via `--load`.
+
+### Benchmark (`--command benchmark`)
+
+Measures the sample's CPU and Silk paths on one machine and prints a comparison table. Requires a Release build (Debug builds refuse to measure, because `Nivara.dll` is unoptimised there while `System.Numerics.Tensors` stays ReadyToRun-optimised).
+
+```bash
+# CPU only
+dotnet run -c Release --project samples/NivaraClassifier -- --benchmark
+
+# CPU vs Silk (needs an OpenCL-capable GPU)
+dotnet run -c Release --project samples/NivaraClassifier -- --benchmark --silk
+
+# Conv model, single batch size
+dotnet run -c Release --project samples/NivaraClassifier -- --benchmark --silk --mode conv --batch-size 32
+```
+
+Protocol (mirrors `tests/Nivara.PerformanceTests/LayaForwardProbe`): 5 calibration iterations, 1 warmup, then 3 timed rounds of ~20 ms each (round length = `ceil(20 ms / per-iteration cost)`, capped at 2000), with the CPU/Silk side that runs first alternating per round so load drift cannot systematically penalise one side. Reports median (primary), min, max, iterations and ops/s. `--batch-size` pins a single value; otherwise the default sweep `{1, 8, 32, 128}` runs.
+
+Legs: `cpu/silk forward`, `cpu/silk predict`, `cpu/silk epoch` (one epoch, `epochs: 1`), `silk construct` (per-instance OpenCL `BuildProgram`) and `silk transfer` (upload `B x E` + download `B x 2` floats, nothing else). One weight set feeds both sides.
+
+#### Measured (linear, defaults: vocab=5000, embed=32, hidden=64, seq=20, 1000 rows, seed 42, Intel Iris Xe iGPU)
+
+| batch | cpu forward | silk forward | cpu predict | silk predict | cpu epoch | silk epoch | transfer/forward |
+|------:|------------:|-------------:|------------:|-------------:|----------:|-----------:|-----------------:|
+| 1 | 20.4 us | 97.5 us | 19.5 us | 96.0 us | 1586 ms | 1737 ms | 1.7 % |
+| 8 | 40.3 us | 141.4 us | 37.5 us | 141.9 us | 224 ms | 178 ms | 1.9 % |
+| 32 | 73.4 us | 171.5 us | 86.5 us | 158.2 us | 37.5 ms | 54.2 ms | 1.2 % |
+| 128 | 428.8 us | 255.0 us | 523.1 us | 399.4 us | 23.6 ms | 27.0 ms | 0.9 % |
+
+Silk/cput ratio (median): forward 4.78x / 3.51x / 2.34x / 0.59x; predict 4.92x / 3.78x / 1.83x / 0.76x; epoch 1.10x / 0.79x / 1.44x / 1.15x (batch 1 / 8 / 32 / 128). `silk construct`: runtime 0.20 s, classifier 0.02 s. `silk transfer` stays under 2 % of the Silk forward cost at every batch, so host/device traffic is not the bottleneck -- the fixed per-call OpenCL dispatch overhead is.
+
+The run also prints an `=== End-to-end (full train + predict all) ===` block: total training time for `--epochs` epochs and total predict-all time, for CPU and (if `--silk`) Silk. This is the closest thing to an actual-use-case number; the per-batch table above is the micro-benchmark.
+
+#### Heuristic
+
+- **Do not enable Silk for `linear` at batch < 128.** At batch 1-32 every measured forward/predict is 2-5x slower than CPU, and epoch times are within noise or worse. The per-call dispatch cost (~100 us) dwarfs the work.
+- **Silk becomes worth it for `linear` at batch >= 128**, where forward/predict finally beat CPU (0.59x / 0.76x) because the two device GEMMs amortise the dispatch. Epoch is still ~1.15x, so for training the win is marginal -- prefer CPU unless inference throughput at large batch is the goal.
+- **`conv` is a different story**: Silk beats CPU on every measured leg from batch 8 upward (forward 0.46x at batch 8, 0.23x at batch 32, 0.24x at batch 128; epoch 0.26x / 0.14x / 0.11x), because the device-side conv + fused Adam work dominates the dispatch cost. Enable Silk for `conv` whenever an OpenCL device is present.
+- **Short-lived processes**: `silk construct` costs ~0.2 s (dominated by the runtime's `BuildProgram`). A process that does a handful of inferences never recovers that; only enable Silk for long-running services or batch jobs.
+- **No OpenCL device**: the runtime constructor throws `InvalidOperationException`; the benchmark and the sample fall back to the CPU path and exit 0.
 
 ## Architecture
 

@@ -23,9 +23,9 @@ if (options.Help)
     return;
 }
 
-if (options.Silk && options.Command is not ("train" or "predict"))
+if (options.Silk && options.Command is not ("train" or "predict" or "benchmark"))
 {
-    Console.Error.WriteLine("--silk is supported only with --command train or --command predict.");
+    Console.Error.WriteLine("--silk is supported only with --command train, predict or benchmark.");
     Environment.ExitCode = 2;
     return;
 }
@@ -35,10 +35,18 @@ if (options.Silk && options.Command == "predict" && !string.IsNullOrWhiteSpace(o
     Environment.ExitCode = 2;
     return;
 }
+if (options.Command == "benchmark" && !string.IsNullOrWhiteSpace(options.LoadOnnxPath))
+{
+    Console.Error.WriteLine("--benchmark does not use --load-onnx; it measures the Nivara and Silk paths.");
+    Environment.ExitCode = 2;
+    return;
+}
 if (options.Command == "train")
     RunTraining(options);
 else if (options.Command == "predict")
     RunPrediction(options);
+else if (options.Command == "benchmark")
+    Benchmark.Run(options);
 else if (options.Command == "generate")
     RunGenerate(options);
 else if (options.Command == "onnx-compare")
@@ -606,6 +614,7 @@ sealed class Options
     public string Mode { get; set; } = "linear";
     public bool Help { get; set; }
     public bool Silk { get; set; }
+    public bool BatchSizeExplicit { get; set; }
 
     public static Options Parse(string[] args)
     {
@@ -638,6 +647,7 @@ sealed class Options
                     break;
                 case "--batch-size":
                     o.BatchSize = ReadInt(args, ref i, args[i]);
+                    o.BatchSizeExplicit = true;
                     break;
                 case "--embedding-dim":
                     o.EmbeddingDim = ReadInt(args, ref i, args[i]);
@@ -662,6 +672,9 @@ sealed class Options
                     break;
                 case "--mode":
                     o.Mode = ReadString(args, ref i, args[i]);
+                    break;
+                case "--benchmark":
+                    o.Command = "benchmark";
                     break;
                 case "--silk":
                     o.Silk = true;
@@ -691,17 +704,18 @@ sealed class Options
               train         Train model on generated/loaded data (default)
               predict       Interactive prediction with saved model
               generate      Generate synthetic training CSV
+              benchmark     Measure CPU vs Silk forward/predict/epoch (Release builds only)
               onnx-compare  Compare Nivara vs ONNX Runtime on a few samples
 
             Options:
-              --command, -c <cmd>     Command: train, predict, generate
+              --command, -c <cmd>     Command: train, predict, generate, benchmark, onnx-compare
               --data-path <path>      CSV data file (default: samples/data/sentiment_data.csv)
               --save <path>           Save trained model
               --load <path>           Load model for prediction
               --export-onnx <path>    Export trained model to ONNX
               --load-onnx <path>      Load ONNX model for prediction (uses ORT)
               --epochs <n>            Training epochs (default: 10)
-              --batch-size <n>        Batch size (default: 32)
+              --batch-size <n>        Batch size (default: 32; benchmark sweeps 1, 8, 32, 128 unless set)
               --embedding-dim <n>     Embedding dimension (default: 32)
               --hidden-dim <n>        Hidden layer dimension (default: 64)
               --max-seq-len <n>       Max sequence length (default: 20)
