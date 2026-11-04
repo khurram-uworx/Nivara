@@ -8,22 +8,36 @@ internal static class DocsCoveragePins
 {
     /// <summary>
     /// Count of citations found repository-wide. Pinned deliberately: see the coverage test.
+    /// +3: <c>docs/EMBEDDINGS.md</c> cites <c>NivaraFrame.RowCosineSimilarity()</c> twice and
+    /// <c>NivaraFrame.RowDot()</c> once, so 113 -> 116. Deliberate addition; not a drop.
     /// </summary>
-    internal const int ExpectedCitationCount = 113;
+    internal const int ExpectedCitationCount = 116;
 
-    /// <summary>Count of documents carrying at least one citation. Pinned deliberately.</summary>
-    internal const int ExpectedCitedDocumentCount = 19;
+    /// <summary>
+    /// Count of documents carrying at least one citation. Pinned deliberately.
+    /// +1: <c>docs/EMBEDDINGS.md</c> is new and cites three symbols, so 19 -> 20.
+    /// </summary>
+    internal const int ExpectedCitedDocumentCount = 20;
 
     /// <summary>
     /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus other under
     /// <c>docs/</c>. Pinned so a shrinking scope cannot look like a pass. A transient plan document at
     /// <c>docs/TODO.md</c> does <em>not</em> increase this number - excluding it is the point, and it is
     /// what keeps the count stable across a workflow that commits one.
+    /// +1: <c>docs/EMBEDDINGS.md</c> joins the 9 root files and the 47 already under <c>docs/</c>,
+    /// so 56 -> 57.
     /// </summary>
-    internal const int ExpectedDocumentCount = 56;
+    internal const int ExpectedDocumentCount = 57;
 
-    /// <summary><c>File.cs:NN</c> citations discovered across the narrowed markdown scope. Pinned deliberately.</summary>
-    internal const int ExpectedCodeCitationCount = 27;
+    /// <summary>
+    /// Source citations discovered across the narrowed markdown scope, in both forms: the
+    /// <c>File.cs:NN</c> line form and the <c>File.cs::Symbol</c> form ADR-008 prefers.
+    /// Pinned deliberately.
+    /// +3: <c>docs/EMBEDDINGS.md</c>'s three symbol-form citations, so 27 -> 30. They count here
+    /// because this pin counts every citation that names a source file, not only the retired
+    /// line-number form.
+    /// </summary>
+    internal const int ExpectedCodeCitationCount = 30;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
@@ -32,6 +46,9 @@ internal static class DocsCoveragePins
     /// points at `docs/plan/AISTACK-ROADMAP.md` (Phase 1 re-scope to export-only) — one new
     /// document-reference occurrence (TENSORS.md did not previously reference that path),
     /// so 230 -> 231. Deliberate addition; not a drop.
+    /// 232: +1 for the README Silk requirement citing `docs/SILK.md`.
+    /// +3 (#867): `docs/TENSORS.md` now points at `docs/EMBEDDINGS.md`, and that document points
+    /// back at `docs/plan/AISTACK-ROADMAP.md` and `docs/TENSORS.md`, so 232 -> 235.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 232;   // +1: README Silk requirement cites `docs/SILK.md`
+    internal const int ExpectedDocumentReferenceCount = 235;
 }
