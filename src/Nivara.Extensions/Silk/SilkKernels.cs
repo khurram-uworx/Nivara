@@ -2628,39 +2628,32 @@ internal static class SilkKernels
 
         __kernel void embedding_backward_pool(
             __global const int* ids, __global const float* dPooled, __global float* gradEmb,
-            const uint vocabSize, const uint batchSize, const uint seqLen, const uint embedDim,
+            const uint batchSize, const uint seqLen, const uint embedDim,
             const float poolScale)
         {
-            uint idx = get_global_id(0);
-            uint total = vocabSize * embedDim;
-            if (idx >= total) return;
-            uint v = idx / embedDim;
-            uint e = idx % embedDim;
-            float acc = 0.0f;
+            uint e = get_global_id(0);
+            if (e >= embedDim) return;
             for (uint b = 0; b < batchSize; ++b)
                 for (uint s = 0; s < seqLen; ++s)
-                    if ((uint)ids[b * seqLen + s] == v)
-                        acc += poolScale * dPooled[b * embedDim + e];
-            gradEmb[idx] = acc;
+                {
+                    uint tid = (uint)ids[b * seqLen + s];
+                    gradEmb[tid * embedDim + e] += poolScale * dPooled[b * embedDim + e];
+                }
         }
 
         __kernel void embedding_backward_input(
             __global const int* ids, __global const float* dX, __global float* gradEmb,
-            const uint vocabSize, const uint batchSize, const uint seqLen, const uint embedDim)
+            const uint batchSize, const uint seqLen, const uint embedDim)
         {
-            uint idx = get_global_id(0);
-            uint total = vocabSize * embedDim;
-            if (idx >= total) return;
-            uint v = idx / embedDim;
-            uint e = idx % embedDim;
-            float acc = 0.0f;
+            uint e = get_global_id(0);
+            if (e >= embedDim) return;
             for (uint b = 0; b < batchSize; ++b)
                 for (uint s = 0; s < seqLen; ++s)
-                    if ((uint)ids[b * seqLen + s] == v) {
-                        uint dIdx = b * embedDim * seqLen + e * seqLen + s;
-                        acc += dX[dIdx];
-                    }
-            gradEmb[idx] = acc;
+                {
+                    uint tid = (uint)ids[b * seqLen + s];
+                    uint dIdx = b * embedDim * seqLen + e * seqLen + s;
+                    gradEmb[tid * embedDim + e] += dX[dIdx];
+                }
         }
 
         """;

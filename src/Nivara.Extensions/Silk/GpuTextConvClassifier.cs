@@ -597,8 +597,9 @@ public sealed class GpuTextConvClassifier : IDisposable
         EnsureTokenBuffer(batch * seqLen);
         runtime.Upload(tokenIdBuf, tokens.AsSpan());
 
+        SilkLauncher.Fill(runtime, dEmbBuf, 0f, embedding.Length);
         SilkLauncher.EmbeddingBackwardInput(runtime, tokenIdBuf, dXBuf.Handle, dEmbBuf,
-            vocabSize, batch, seqLen, embeddingDim);
+            batch, seqLen, embeddingDim);
 
         gradEmb = SilkLoss.Obtain(ref gradEmb, embedding.Length);
         var dEmb = runtime.Download(dEmbBuf, embedding.Length);

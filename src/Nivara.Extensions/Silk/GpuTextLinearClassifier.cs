@@ -393,8 +393,9 @@ public sealed class GpuTextLinearClassifier : IDisposable
         runtime.Upload(tokenIdBuf, tokens.AsSpan());
 
         float poolScale = 1f / Math.Max(1, seqLen);
+        SilkLauncher.Fill(runtime, dEmbBuf, 0f, embedding.Length);
         SilkLauncher.EmbeddingBackwardPool(runtime, tokenIdBuf, dPooledBuf.Handle, dEmbBuf,
-            vocabSize, batch, seqLen, embeddingDim, poolScale);
+            batch, seqLen, embeddingDim, poolScale);
 
         gradEmb = SilkLoss.Obtain(ref gradEmb, embedding.Length);
         var dEmb = runtime.Download(dEmbBuf, embedding.Length);
