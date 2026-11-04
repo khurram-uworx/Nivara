@@ -44,8 +44,15 @@ public class QwenToolsNivaraLoopTests
         var sentimentModelPath = Path.Combine(NivaraModelsDir, "sentiment_model.json");
         if (File.Exists(sentimentModelPath))
         {
-            var (m, t) = ModeHelpers.LoadSentimentModel(NivaraModelsDir);
-            CachedSentiment = (m, t);
+            try
+            {
+                var (m, t) = ModeHelpers.LoadSentimentModel(NivaraModelsDir);
+                CachedSentiment = (m, t);
+            }
+            catch
+            {
+                CachedSentiment = null;
+            }
         }
     }
 
