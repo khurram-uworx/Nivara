@@ -77,7 +77,10 @@ public static class RagAgentMode
             var c = allChunks[i];
             if (string.IsNullOrWhiteSpace(c.Content)) { embeddings[i] = null; continue; }
             try { embeddings[i] = embedder.Embed(c.Content); } catch { embeddings[i] = null; }
+            if ((i + 1) % 50 == 0 || i == allChunks.Count - 1)
+                Console.Write($"\r  Embedded {i + 1}/{allChunks.Count} chunks...   ");
         }
+        Console.WriteLine();
 
         bool useFrame = !string.Equals(ctx.Store, "inmemory", StringComparison.OrdinalIgnoreCase);
 
