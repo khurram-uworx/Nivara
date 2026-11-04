@@ -51,6 +51,7 @@ static partial class DocSnippetExtractor
     internal static readonly string[] GatedDocuments =
     [
         "docs/AGENT-CODE-EXAMPLES.md",
+        "docs/EMBEDDINGS.md",
         "docs/STREAMING.md",
         "EXAMPLES.md",
         "GETTING-STARTED.md",

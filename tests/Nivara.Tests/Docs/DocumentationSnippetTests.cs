@@ -167,14 +167,14 @@ public class DocumentationSnippetTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(gated.Count - excludedCount, Is.EqualTo(106),
+            Assert.That(gated.Count - excludedCount, Is.EqualTo(110),
                 "expected 72 GETTING-STARTED.md + 22 EXAMPLES.md + 9 docs/STREAMING.md "
-                + "+ 3 docs/AGENT-CODE-EXAMPLES.md blocks");
+                + "+ 3 docs/AGENT-CODE-EXAMPLES.md + 4 docs/EMBEDDINGS.md blocks");
             Assert.That(excludedCount, Is.EqualTo(2));
             Assert.That(ungatedCount, Is.EqualTo(144));
-            Assert.That(all.Length, Is.EqualTo(252),
+            Assert.That(all.Length, Is.EqualTo(256),
                 "the repository-wide snippet count moved; update this number deliberately. The gate "
-                + "covers 108 of these blocks, so the remaining 142 are unverified and a drop here is "
+                + "compiles 110 of these blocks, so the remaining 144 are unverified and a drop here is "
                 + "reduced coverage, not a neutral event");
         });
     }
