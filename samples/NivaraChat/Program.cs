@@ -19,6 +19,10 @@ if (args.Length > 0)
     float confidenceThreshold = 0.8f;
     string? docsDir = null;
     int topK = 3;
+    bool useSilk = false;
+    string? aclGroup = null;
+    bool roundTrip = false;
+    string store = "frame";
 
     for (int i = 1; i < args.Length; i++)
     {
@@ -28,9 +32,13 @@ if (args.Length > 0)
         if (args[i] == "--threshold" && i + 1 < args.Length) confidenceThreshold = float.Parse(args[++i]);
         if (args[i] == "--docs-dir" && i + 1 < args.Length) docsDir = args[++i];
         if (args[i] == "--top-k" && i + 1 < args.Length) topK = int.Parse(args[++i]);
+        if (args[i] == "--silk") useSilk = true;
+        if (args[i] == "--acl-group" && i + 1 < args.Length) aclGroup = args[++i];
+        if (args[i] == "--roundtrip") roundTrip = true;
+        if (args[i] == "--store" && i + 1 < args.Length) store = args[++i];
     }
 
-    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK);
+    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store);
 
     switch (mode)
     {
@@ -182,6 +190,10 @@ void PrintUsage()
     Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff / --online-learning (default: 0.8)");
     Console.WriteLine("  --docs-dir <path>    Documents directory for --rag (default: docs/ + README.md)");
     Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag (default: 3)");
+    Console.WriteLine("  --silk               Use Silk OpenCL MiniLM backend for --rag/--rag-agent");
+    Console.WriteLine("  --acl-group <name>   ACL filter for --rag/--rag-agent (e.g. adr, docs, plan)");
+    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag");
+    Console.WriteLine("  --store <frame|inmemory>  Retrieval backend (default: frame)");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
