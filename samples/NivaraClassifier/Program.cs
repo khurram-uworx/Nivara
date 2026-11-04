@@ -104,7 +104,8 @@ void RunTraining(Options opt)
         Array.Copy(encoded, 0, testTokens, i * opt.MaxSeqLen, opt.MaxSeqLen);
     }
 
-    if (opt.Silk && opt.Mode == "conv")
+    bool wantSilk = opt.Silk || (opt.AutoSilk && ShouldAutoSilk(opt));
+    if (wantSilk && opt.Mode == "conv")
     {
         GpuTextConvClassifier? silkConv = null;
         try
@@ -118,6 +119,8 @@ void RunTraining(Options opt)
 
         if (silkConv is not null)
         {
+            if (!opt.Silk && opt.AutoSilk)
+                Console.WriteLine("Auto-selected Silk for conv mode (OpenCL available).");
             Console.WriteLine("Training conv on Silk (device forward, device backward)...");
             var epochs = silkConv.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate, opt.Seed);
             foreach (var e in epochs)
@@ -155,7 +158,7 @@ void RunTraining(Options opt)
         }
     }
 
-    if (opt.Silk)
+    if (wantSilk)
     {
         GpuTextLinearClassifier? silkModel = null;
         try
@@ -169,6 +172,8 @@ void RunTraining(Options opt)
 
         if (silkModel is not null)
         {
+            if (!opt.Silk && opt.AutoSilk)
+                Console.WriteLine($"Auto-selected Silk for linear mode (batch {opt.BatchSize} >= 128, OpenCL available).");
             Console.WriteLine("Training on Silk (device backward, device Adam)...");
             var epochs = silkModel.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate, opt.Seed);
             foreach (var e in epochs)
@@ -315,7 +320,8 @@ void RunPrediction(Options opt)
     Func<int[], int[]> predict;
     IDisposable? silkGpu = null;
     Func<int[], int[]>? silkPredict = null;
-    if (opt.Silk)
+    bool wantSilkPredict = opt.Silk || (opt.AutoSilk && opt.Mode == "conv");
+    if (wantSilkPredict)
     {
         try
         {
@@ -592,6 +598,15 @@ void RunPredictionOnnx(Options opt)
     }
 }
 
+static bool ShouldAutoSilk(Options opt)
+{
+    // Heuristic from README: Silk is worth enabling when:
+    // - conv mode: always (device-side conv + fused Adam dominate dispatch cost)
+    // - linear mode: only at batch >= 128 (dispatch cost amortizes over two GEMMs)
+    if (opt.Mode == "conv") return true;
+    return opt.BatchSize >= 128;
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 sealed class Options
@@ -614,6 +629,7 @@ sealed class Options
     public string Mode { get; set; } = "linear";
     public bool Help { get; set; }
     public bool Silk { get; set; }
+    public bool AutoSilk { get; set; } = true;
     public bool BatchSizeExplicit { get; set; }
 
     public static Options Parse(string[] args)
@@ -679,6 +695,12 @@ sealed class Options
                 case "--silk":
                     o.Silk = true;
                     break;
+                case "--auto-silk":
+                    o.AutoSilk = true;
+                    break;
+                case "--no-auto-silk":
+                    o.AutoSilk = false;
+                    break;
                 case "--help":
                 case "-h":
                     o.Help = true;
@@ -725,6 +747,8 @@ sealed class Options
               --seed <n>              Random seed (default: 42)
               --mode <mode>           Model mode: linear or conv (default: linear)
                --silk                  Train/predict on the Silk/OpenCL device (linear and conv)
+               --auto-silk             Enable auto-selection of Silk when beneficial (default: on)
+               --no-auto-silk          Disable auto-selection; use CPU unless --silk is given
               --help, -h              Show this help
             """);
     }
