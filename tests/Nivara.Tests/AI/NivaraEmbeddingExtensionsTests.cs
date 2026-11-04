@@ -589,6 +589,29 @@ public class NivaraEmbeddingExtensionsTests
     // ── generate → frame ────────────────────────────────────────────
 
     [Test]
+    public async Task EndToEnd_GenerateFilterScoreRetrieve()
+    {
+        var generator = new NivaraEmbeddingGenerator<string>(
+            text => [text.Length, 1f, 0f],
+            embeddingDimension: 3);
+
+        var frame = (await generator.GenerateFrameAsync(["a", "bb", "ccc"]))
+            .WithColumn("ChunkId", NivaraColumn<object>.CreateForReferenceType(["c0", "c1", "c2"]));
+
+        var visible = frame.FilterByMask(NivaraColumn<bool>.Create([true, false, true]));
+
+        var scores = visible.RowCosineSimilarity(
+            Embedding,
+            new[] { 3f, 1f, 0f },
+            labels: visible.GetColumn<object>("ChunkId"));
+
+        var top = scores.TopKDescending(1);
+
+        Assert.That(top, Has.Length.EqualTo(1));
+        Assert.That(top[0].Label, Is.EqualTo("c2"));
+    }
+
+    [Test]
     public async Task GenerateFrameAsync_LandsGeneratedVectors()
     {
         var generator = new NivaraEmbeddingGenerator<string>(
