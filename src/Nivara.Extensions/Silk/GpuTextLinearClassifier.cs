@@ -318,8 +318,8 @@ public sealed class GpuTextLinearClassifier : IDisposable
                 int n = Math.Min(start + batchSize, sampleCount) - start;
                 if (n <= 0) continue;
 
-                batchTokens = SilkLoss.Obtain(ref batchTokens, n * seqLen);
-                batchLabels = SilkLoss.Obtain(ref batchLabels, n);
+                if (batchTokens is null || batchTokens.Length != n * seqLen) batchTokens = new int[n * seqLen];
+                if (batchLabels is null || batchLabels.Length != n) batchLabels = new int[n];
                 for (int i = 0; i < n; i++)
                 {
                     int src = indices[start + i];
