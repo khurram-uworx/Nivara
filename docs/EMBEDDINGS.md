@@ -31,6 +31,12 @@ Metadata and labels stay on the source frame and are passed to the scoring call
 as `labels`. Convert once, score, discard the matrix; keeping both forms live
 doubles the embedding bytes in memory.
 
+An empty frame has no row to infer a dimension from, so `ToEmbeddingMatrix`
+needs `dimension` passed explicitly there. The `RowCosineSimilarity` and
+`RowDot` wrappers take the dimension from the query instead, so scoring an
+empty (for example, fully filtered) frame needs nothing extra and yields an
+empty series.
+
 ## Generate, store, score, retrieve
 
 ```csharp

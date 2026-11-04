@@ -573,6 +573,19 @@ public class NivaraEmbeddingExtensionsTests
         Assert.That(scores.IsNull(1), Is.False);
     }
 
+    [Test]
+    public void FilterByMask_EmptyAllowedSet_ScoresToEmptySeries()
+    {
+        var frame = VectorFrame([1f, 2f], [3f, 4f]);
+        var mask = NivaraColumn<bool>.Create([false, false]);
+
+        var filtered = frame.FilterByMask(mask);
+        var scores = filtered.RowCosineSimilarity(Embedding, new[] { 1f, 0f });
+
+        Assert.That(filtered.RowCount, Is.EqualTo(0));
+        Assert.That(scores.Length, Is.EqualTo(0));
+    }
+
     // ── generate → frame ────────────────────────────────────────────
 
     [Test]
