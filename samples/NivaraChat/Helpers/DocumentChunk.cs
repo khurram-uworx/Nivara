@@ -2,6 +2,97 @@ using Microsoft.Extensions.VectorData;
 
 namespace NivaraChat.Helpers;
 
+/// <summary>
+/// Metadata-rich chunk used by the Nivara-convention RAG path (#912).
+/// </summary>
+public sealed record RagChunk(
+    string ChunkId,
+    string Source,
+    string Title,
+    string SectionPath,
+    string AclGroup,
+    string Content);
+
+public static class RagChunker
+{
+    public static List<RagChunk> ChunkMarkdown(string content, string sourcePath, string repoRoot)
+    {
+        var chunks = new List<RagChunk>();
+        // First, walk lines to pair each paragraph with the most recent heading.
+        var lines = content.Split('\n');
+        string title = Path.GetFileNameWithoutExtension(sourcePath);
+        string section = title;
+        var paraLines = new List<string>();
+        int idx = 0;
+
+        void FlushParagraph()
+        {
+            var text = string.Join("\n", paraLines).Trim();
+            paraLines.Clear();
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (text.Length > 1200)
+            {
+                int pos = 0;
+                while (pos < text.Length)
+                {
+                    int len = Math.Min(500, text.Length - pos);
+                    var piece = text.Substring(pos, len).Trim();
+                    if (!string.IsNullOrEmpty(piece))
+                        chunks.Add(MakeChunk(sourcePath, repoRoot, title, section, piece, idx++));
+                    pos += len;
+                }
+            }
+            else
+            {
+                chunks.Add(MakeChunk(sourcePath, repoRoot, title, section, text, idx++));
+            }
+        }
+
+        foreach (var raw in lines)
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.TrimStart().StartsWith("#"))
+            {
+                FlushParagraph();
+                var h = line.TrimStart('#').Trim();
+                if (!string.IsNullOrEmpty(h)) { title = h; section = h; }
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                FlushParagraph();
+            }
+            else
+            {
+                paraLines.Add(line);
+            }
+        }
+        FlushParagraph();
+
+        if (chunks.Count == 0)
+            chunks.Add(MakeChunk(sourcePath, repoRoot, title, section, content.Trim(), 0));
+
+        return chunks;
+    }
+
+    static RagChunk MakeChunk(string sourcePath, string repoRoot, string title, string section, string content, int idx)
+    {
+        var source = Path.GetFileName(sourcePath);
+        string aclGroup;
+        try
+        {
+            var rel = Path.GetRelativePath(repoRoot, sourcePath);
+            var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+            aclGroup = parts.Length > 1 ? parts[0].ToLowerInvariant() : "public";
+        }
+        catch
+        {
+            aclGroup = "public";
+        }
+        return new RagChunk($"{source}-{idx}", source, title, section, aclGroup, content);
+    }
+}
+
 public sealed class DocumentChunk
 {
     [VectorStoreKey]
