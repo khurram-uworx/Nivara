@@ -10,8 +10,8 @@ namespace Nivara.Tests.Gpu;
 /// <summary>
 /// Pins the device forward (#901 groundwork) of <see cref="GpuTextConvClassifier"/> against the
 /// real CPU model (<c>ConvTextClassifierModel&lt;float&gt;</c>, Dropout identity in Eval) on
-/// identical weights, and pins the host backward against a reverse-mode autograd pass on the same
-/// batch.
+/// identical weights, and pins the device backward (#900) against a reverse-mode autograd pass on
+/// the same batch.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,7 +44,7 @@ public sealed class GpuTextConvClassifierTests
         int batch = 4;
         int[] tokens = Tokens(batch, 11);
 
-        var (logits, _, _) = gpu.ForwardBatch(tokens, batch, collectBackwardState: false);
+        var logits = gpu.ForwardBatch(tokens, batch);
         var logitsRef = ForwardReference(reference, tokens, batch);
 
         float worst = 0f;
@@ -61,12 +61,14 @@ public sealed class GpuTextConvClassifierTests
         int[] tokens = Tokens(batch, 17);
         int[] labels = Labels(batch, 19);
 
-        var (logits, _, _) = gpu.ForwardBatch(tokens, batch, collectBackwardState: true);
-        gpu.BackwardAndSetGradients(logits, tokens, labels, batch);
+        var logits = gpu.ForwardBatch(tokens, batch);
+        gpu.Backward(logits, tokens, labels, batch);
+        var (devC1w, devC1b, devC2w, devC2b, devC3w, devC3b, devFc1w, devFc1b, devFc2w, devFc2b) =
+            gpu.DownloadGradients();
 
         var lossFn = new CrossEntropyLoss<float>();
         float lossRef;
-        float[] gradEmb, gradC1w, gradC1b, gradC2w, gradC2b, gradC3w, gradC3b, gradFc1wCpu, gradFc1b, gradFc2wCpu, gradFc2b, rawGradFc1w, rawGradFc2w;
+        float[] gradEmb, gradC1w, gradC1b, gradC2w, gradC2b, gradC3w, gradC3b, refFc1wCpu, refFc1b, refFc2wCpu, refFc2b;
         using (var scope = GradientUtils.Grad())
         {
             var data = new float[tokens.Length];
@@ -77,39 +79,43 @@ public sealed class GpuTextConvClassifierTests
             lossTensor.Backward();
 
             var ps = reference.GetParameters().Values.ToArray();
-            rawGradFc1w = GradOf(ps[7]); // CPU layout [out, in] = [Hidden, convHidden]
-            rawGradFc2w = GradOf(ps[9]); // CPU layout [out, in] = [2, Hidden]
-            (gradEmb, gradC1w, gradC1b, gradC2w, gradC2b, gradC3w, gradC3b, rawGradFc1w, gradFc1b, rawGradFc2w, gradFc2b) =
-                (GradOf(ps[0]), GradOf(ps[1]), GradOf(ps[2]), GradOf(ps[3]), GradOf(ps[4]), GradOf(ps[5]),
-                 GradOf(ps[6]), GradOf(ps[7]), GradOf(ps[8]), GradOf(ps[9]), GradOf(ps[10]));
-
-            // Transpose device FC grads (GPU [in, out]) into CPU layout ([out, in]) for comparison.
-            int convHidden = 64 * 3 * SeqLen;
-            gradFc1wCpu = new float[Hidden * convHidden];
-            var devFc1 = gpu.gradFc1.AsSpan(0, Hidden * convHidden).ToArray();
-            for (int j = 0; j < convHidden; j++)
-                for (int h = 0; h < Hidden; h++)
-                    gradFc1wCpu[h * convHidden + j] = devFc1[j * Hidden + h];
-
-            gradFc2wCpu = new float[2 * Hidden];
-            var devFc2 = gpu.gradFc2.AsSpan(0, 2 * Hidden).ToArray();
-            for (int h = 0; h < Hidden; h++)
-                for (int c = 0; c < 2; c++)
-                    gradFc2wCpu[c * Hidden + h] = devFc2[h * 2 + c];
+            refFc1wCpu = GradOf(ps[7]); // CPU layout [out, in] = [Hidden, convHidden]
+            refFc2wCpu = GradOf(ps[9]); // CPU layout [out, in] = [2, Hidden]
+            gradEmb = GradOf(ps[0]);
+            gradC1w = GradOf(ps[1]);
+            gradC1b = GradOf(ps[2]);
+            gradC2w = GradOf(ps[3]);
+            gradC2b = GradOf(ps[4]);
+            gradC3w = GradOf(ps[5]);
+            gradC3b = GradOf(ps[6]);
+            refFc1b = GradOf(ps[8]);
+            refFc2b = GradOf(ps[10]);
         }
+
+        // Device FC weight grads arrive in the GPU [in, out] layout; transpose into the CPU
+        // [out, in] layout for comparison.
+        int convHidden = 64 * 3 * SeqLen;
+        var devFc1wCpu = new float[Hidden * convHidden];
+        for (int j = 0; j < convHidden; j++)
+            for (int h = 0; h < Hidden; h++)
+                devFc1wCpu[h * convHidden + j] = devFc1w[j * Hidden + h];
+        var devFc2wCpu = new float[2 * Hidden];
+        for (int h = 0; h < Hidden; h++)
+            for (int c = 0; c < 2; c++)
+                devFc2wCpu[c * Hidden + h] = devFc2w[h * 2 + c];
 
         Assert.That(lossRef, Is.LessThan(10f), $"unexpected loss {lossRef}");
         AssertGrad("embedding", gpu.gradEmb, gradEmb);
-        AssertGrad("conv1W", gpu.gradConv.AsSpan(0, gradC1w.Length).ToArray(), gradC1w);
-        AssertGrad("conv1B", gpu.gradConv.AsSpan(gradC1w.Length, gradC1b.Length).ToArray(), gradC1b);
-        AssertGrad("conv2W", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length, gradC2w.Length).ToArray(), gradC2w);
-        AssertGrad("conv2B", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length + gradC2w.Length, gradC2b.Length).ToArray(), gradC2b);
-        AssertGrad("conv3W", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length + gradC2w.Length + gradC2b.Length, gradC3w.Length).ToArray(), gradC3w);
-        AssertGrad("conv3B", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length + gradC2w.Length + gradC2b.Length + gradC3w.Length, gradC3b.Length).ToArray(), gradC3b);
-        AssertGrad("fc1W", gradFc1wCpu, rawGradFc1w);
-        AssertGrad("fc1B", gpu.gradFc1.AsSpan(Hidden * (64 * 3 * SeqLen), Hidden).ToArray(), gradFc1b);
-        AssertGrad("fc2W", gradFc2wCpu, rawGradFc2w);
-        AssertGrad("fc2B", gpu.gradFc2.AsSpan(2 * Hidden, 2).ToArray(), gradFc2b);
+        AssertGrad("conv1W", devC1w, gradC1w);
+        AssertGrad("conv1B", devC1b, gradC1b);
+        AssertGrad("conv2W", devC2w, gradC2w);
+        AssertGrad("conv2B", devC2b, gradC2b);
+        AssertGrad("conv3W", devC3w, gradC3w);
+        AssertGrad("conv3B", devC3b, gradC3b);
+        AssertGrad("fc1W", devFc1wCpu, refFc1wCpu);
+        AssertGrad("fc1B", devFc1b, refFc1b);
+        AssertGrad("fc2W", devFc2wCpu, refFc2wCpu);
+        AssertGrad("fc2B", devFc2b, refFc2b);
     }
 
     [Test]
@@ -126,6 +132,67 @@ public sealed class GpuTextConvClassifierTests
         Assert.That(round.Fc1W.Length, Is.EqualTo(Hidden * convHidden));
         Assert.That(gpu.ExportFc1Weight().Length, Is.EqualTo(convHidden * Hidden));
         Assert.That(round.Fc2W.Length, Is.EqualTo(2 * Hidden));
+    }
+
+    [Test]
+    public void Train_LossDecreases_OnSeparableData()
+    {
+        using var gpu = DeviceGated(29, out _);
+        const int samples = 48;
+        var rng = new Random(31);
+        var tokens = new int[samples * SeqLen];
+        var labels = new int[samples];
+        for (int i = 0; i < samples; i++)
+        {
+            labels[i] = i % 2;
+            tokens[i * SeqLen] = labels[i] == 0 ? 2 : 5;
+            for (int s = 1; s < SeqLen; s++) tokens[i * SeqLen + s] = rng.Next(1, Vocab);
+        }
+
+        var epochs = gpu.Train(tokens, labels, batchSize: 8, seqLen: SeqLen, epochs: 6, learningRate: 0.05f, seed: 37);
+
+        Assert.That(epochs.Count, Is.EqualTo(6));
+        for (int i = 0; i < epochs.Count; i++)
+        {
+            Assert.That(epochs[i].Epoch, Is.EqualTo(i));
+            Assert.That(float.IsFinite(epochs[i].Loss), Is.True, $"epoch {i} loss not finite");
+        }
+        Assert.That(epochs[^1].Loss, Is.LessThan(0.7f * epochs[0].Loss),
+            $"loss did not fall: {epochs[0].Loss} -> {epochs[^1].Loss}");
+
+        // The host mirrors must reflect the trained device weights after Train returns.
+        var round = gpu.ExportCpuLayout();
+        foreach (var weights in new[] { round.Embedding, round.Conv1W, round.Conv1B, round.Conv2W,
+            round.Conv2B, round.Conv3W, round.Conv3B, round.Fc1W, round.Fc1B, round.Fc2W, round.Fc2B })
+            foreach (float w in weights)
+                Assert.That(float.IsFinite(w), Is.True, "host mirrors must stay finite after Train");
+
+        // Trained weights must classify the training signal correctly.
+        var probeTokens = new[] { 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        Assert.That(gpu.Predict(probeTokens, SeqLen)[0], Is.EqualTo(0));
+        var probeTokens2 = new[] { 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        Assert.That(gpu.Predict(probeTokens2, SeqLen)[0], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Members_AfterDispose_ThrowObjectDisposed()
+    {
+        var gpu = DeviceGated(41, out _);
+        gpu.Dispose();
+        gpu.Dispose(); // idempotent
+
+        float[] emb = new float[Vocab * Embed];
+        Assert.Throws<ObjectDisposedException>(() => gpu.Forward(Tokens(2, 3), 2));
+        Assert.Throws<ObjectDisposedException>(() => gpu.Predict(Tokens(2, 3), SeqLen));
+        Assert.Throws<ObjectDisposedException>(() => gpu.ExportEmbedding());
+        Assert.Throws<ObjectDisposedException>(() => gpu.ExportConv1Weight());
+        Assert.Throws<ObjectDisposedException>(() => gpu.ExportFc1Weight());
+        Assert.Throws<ObjectDisposedException>(() => gpu.SetWeights(emb,
+            new float[64 * Embed * 3], new float[64], new float[64 * Embed * 5], new float[64],
+            new float[64 * Embed * 7], new float[64], new float[Hidden * (64 * 3 * SeqLen)],
+            new float[Hidden], new float[Hidden * 2], new float[2]));
+        Assert.Throws<ObjectDisposedException>(() =>
+            gpu.Train(new int[2 * SeqLen], new int[2], 2, SeqLen, 1, 0.1f, 1));
     }
 
     static void AssertGrad(string name, float[] actual, float[] expected)
