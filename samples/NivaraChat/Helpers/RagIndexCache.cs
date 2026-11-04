@@ -22,7 +22,7 @@ public static class RagIndexCache
     public static string DefaultPath(string docsDir, bool useSilk)
     {
         var hash = ComputeHash(docsDir, useSilk);
-        var dir = Path.Combine(ModeHelpers.GetRepoRoot(), "samples", "data", "nivara", "rag_cache");
+        var dir = Path.Combine(ModeHelpers.GetRepoRoot(), "samples", "data", "nivarachat", "rag_cache");
         Directory.CreateDirectory(dir);
         return Path.Combine(dir, $"rag_index_{hash}.parquet");
     }
