@@ -98,36 +98,17 @@ void RunTraining(Options opt)
 
     if (opt.Silk && opt.Mode == "conv")
     {
-        Console.WriteLine("Training conv on Silk (host companion)...");
+        Console.WriteLine("Training conv on Silk (full-device forward, host backward)...");
         var silkConv = new GpuTextConvClassifier(tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, opt.MaxSeqLen, opt.Seed);
-        silkConv.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate, opt.Seed);
+        var epochs = silkConv.Train(trainTokens, trainLabels, opt.BatchSize, opt.MaxSeqLen, opt.Epochs, (float)opt.LearningRate, opt.Seed);
+        foreach (var e in epochs)
+            Console.WriteLine($"  epoch {e.Epoch}: loss={e.Loss:F4} ({e.Elapsed.TotalSeconds:F1}s)");
 
-        int embed = opt.EmbeddingDim;
-        int hidden = opt.HiddenDim;
-        int convHidden = 64 * 3 * opt.MaxSeqLen;
-
-        float[] emb = silkConv.ExportEmbedding();
-        float[] c1w = silkConv.ExportConv1Weight();
-        float[] c1b = silkConv.ExportConv1Bias();
-        float[] c2w = silkConv.ExportConv2Weight();
-        float[] c2b = silkConv.ExportConv2Bias();
-        float[] c3w = silkConv.ExportConv3Weight();
-        float[] c3b = silkConv.ExportConv3Bias();
-
-        float[] gpuFc1 = silkConv.ExportFc1Weight();
-        var cpuFc1 = new float[hidden * convHidden];
-        for (int h = 0; h < hidden; h++)
-            for (int j = 0; j < convHidden; j++)
-                cpuFc1[h * convHidden + j] = gpuFc1[j * hidden + h];
-
-        float[] gpuFc2 = silkConv.ExportFc2Weight();
-        var cpuFc2 = new float[2 * hidden];
-        for (int h = 0; h < hidden; h++)
-            for (int c = 0; c < 2; c++)
-                cpuFc2[c * hidden + h] = gpuFc2[h * 2 + c];
-
-        var cpuModel = new ConvTextClassifierModel<float>(tokenizer.VocabSize, embed, hidden, 2, opt.MaxSeqLen);
-        cpuModel.SetWeights(tokenizer.VocabSize, embed, opt.MaxSeqLen, emb, c1w, c1b, c2w, c2b, c3w, c3b, cpuFc1, silkConv.ExportFc1Bias(), cpuFc2, silkConv.ExportFc2Bias());
+        var layout = silkConv.ExportCpuLayout();
+        var cpuModel = new ConvTextClassifierModel<float>(tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, 2, opt.MaxSeqLen);
+        cpuModel.SetWeights(tokenizer.VocabSize, opt.EmbeddingDim, opt.MaxSeqLen,
+            layout.Embedding, layout.Conv1W, layout.Conv1B, layout.Conv2W, layout.Conv2B,
+            layout.Conv3W, layout.Conv3B, layout.Fc1W, layout.Fc1B, layout.Fc2W, layout.Fc2B);
 
         int convCorrect = 0;
         for (int i = 0; i < testLabels.Length; i++)
