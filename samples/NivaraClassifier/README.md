@@ -109,6 +109,8 @@ Legs: `cpu/silk forward`, `cpu/silk predict`, `cpu/silk epoch` (one epoch, `epoc
 
 Silk/cput ratio (median): forward 4.78x / 3.51x / 2.34x / 0.59x; predict 4.92x / 3.78x / 1.83x / 0.76x; epoch 1.10x / 0.79x / 1.44x / 1.15x (batch 1 / 8 / 32 / 128). `silk construct`: runtime 0.20 s, classifier 0.02 s. `silk transfer` stays under 2 % of the Silk forward cost at every batch, so host/device traffic is not the bottleneck -- the fixed per-call OpenCL dispatch overhead is.
 
+The run also prints an `=== End-to-end (full train + predict all) ===` block: total training time for `--epochs` epochs and total predict-all time, for CPU and (if `--silk`) Silk. This is the closest thing to an actual-use-case number; the per-batch table above is the micro-benchmark.
+
 #### Heuristic
 
 - **Do not enable Silk for `linear` at batch < 128.** At batch 1-32 every measured forward/predict is 2-5x slower than CPU, and epoch times are within noise or worse. The per-call dispatch cost (~100 us) dwarfs the work.

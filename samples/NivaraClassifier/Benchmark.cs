@@ -244,6 +244,8 @@ internal static class Benchmark
         PrintTable(results);
         PrintRatios(results);
 
+        RunEndToEnd(opt, conv, corpus, vocab, embed, hidden, seqLen, sampleCount);
+
         cpuModel.Dispose();
         linear?.Dispose();
         gpuConv?.Dispose();
@@ -465,6 +467,102 @@ internal static class Benchmark
 
     static string Seconds(double ms)
         => (ms / 1000.0).ToString("F3", CultureInfo.InvariantCulture) + "s";
+
+
+    static void RunEndToEnd(Options opt, bool conv, (int[] Tokens, int[] Labels) corpus,
+        int vocab, int embed, int hidden, int seqLen, int sampleCount)
+    {
+        int batchSize = opt.BatchSize > 0 ? opt.BatchSize : 32;
+        int epochs = opt.Epochs > 0 ? opt.Epochs : 1;
+        float lr = (float)opt.LearningRate;
+
+        Console.WriteLine();
+        Console.WriteLine($"=== End-to-end (full train + predict all, batch={batchSize}, epochs={epochs}) ===");
+
+        // CPU
+        Module<float> cpuModel;
+        if (conv)
+        {
+            var m = new ConvTextClassifierModel<float>(vocab, embed, hidden, numClasses: 2, seqLen);
+            cpuModel = m;
+        }
+        else
+        {
+            var m = new TextClassifierModel<float>(vocab, embed, hidden, numClasses: 2, seqLen);
+            cpuModel = m;
+        }
+        cpuModel.Train();
+
+        var frame = FrameBuilder.BuildDocumentClassificationFrame(corpus.Tokens, corpus.Labels, sampleCount, seqLen);
+        string[] features = Enumerable.Range(0, seqLen).Select(d => $"tok_{d}").ToArray();
+        var dataset = new TensorDataset<float>(frame, features, ["label"]);
+        var lossFn = new CrossEntropyLoss<float>();
+        var optimizer = new Adam<float>(learningRate: lr);
+        optimizer.AddParameterGroup(cpuModel.GetParameters().Values);
+        var loader = new DataLoader<float>(dataset, batchSize, shuffle: true, seed: opt.Seed);
+        var loop = new TrainingLoop<float>(cpuModel, loader,
+            (logits, targets) =>
+            {
+                int rows = logits.Length / 2;
+                var classes = new int[rows];
+                for (int i = 0; i < rows; i++)
+                    classes[i] = int.CreateChecked(targets.Data[i]);
+                return lossFn.Forward(logits, classes);
+            },
+            optimizer, epochs: epochs);
+
+        var trainSw = Stopwatch.StartNew();
+        loop.Run();
+        trainSw.Stop();
+        cpuModel.Eval();
+
+        var predictSw = Stopwatch.StartNew();
+        if (conv)
+            _ = ((ConvTextClassifierModel<float>)cpuModel).Predict(corpus.Tokens);
+        else
+            _ = ((TextClassifierModel<float>)cpuModel).Predict(corpus.Tokens);
+        predictSw.Stop();
+
+        Console.WriteLine($"  cpu   train {Seconds(trainSw.Elapsed.TotalMilliseconds)}  predict-all {Milliseconds(predictSw.Elapsed.TotalMilliseconds)}");
+
+        // Silk
+        if (opt.Silk)
+        {
+            try
+            {
+                if (conv)
+                {
+                    var fresh = new GpuTextConvClassifier(vocab, embed, hidden, seqLen, opt.Seed);
+                    var tsw = Stopwatch.StartNew();
+                    fresh.Train(corpus.Tokens, corpus.Labels, batchSize, seqLen, epochs, lr, opt.Seed);
+                    tsw.Stop();
+                    var psw = Stopwatch.StartNew();
+                    _ = fresh.Predict(corpus.Tokens, seqLen);
+                    psw.Stop();
+                    Console.WriteLine($"  silk  train {Seconds(tsw.Elapsed.TotalMilliseconds)}  predict-all {Milliseconds(psw.Elapsed.TotalMilliseconds)}");
+                    fresh.Dispose();
+                }
+                else
+                {
+                    var fresh = new GpuTextLinearClassifier(vocab, embed, hidden, opt.Seed);
+                    var tsw = Stopwatch.StartNew();
+                    fresh.Train(corpus.Tokens, corpus.Labels, batchSize, seqLen, epochs, lr, opt.Seed);
+                    tsw.Stop();
+                    var psw = Stopwatch.StartNew();
+                    _ = fresh.Predict(corpus.Tokens, seqLen);
+                    psw.Stop();
+                    Console.WriteLine($"  silk  train {Seconds(tsw.Elapsed.TotalMilliseconds)}  predict-all {Milliseconds(psw.Elapsed.TotalMilliseconds)}");
+                    fresh.Dispose();
+                }
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.WriteLine($"  silk  unavailable: {ex.Message}");
+            }
+        }
+
+        cpuModel.Dispose();
+    }
 
     readonly record struct LegResult(int Batch, string Leg, TimingSummary Timing, int Iterations, int? BytesPerOp);
 }
