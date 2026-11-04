@@ -49,6 +49,7 @@ internal static class DocsCoveragePins
     /// 232: +1 for the README Silk requirement citing `docs/SILK.md`.
     /// +3 (#867): `docs/TENSORS.md` now points at `docs/EMBEDDINGS.md`, and that document points
     /// back at `docs/plan/AISTACK-ROADMAP.md` and `docs/TENSORS.md`, so 232 -> 235.
+    /// +1 (#867): the CHANGELOG entry for the convention points at `docs/EMBEDDINGS.md`, so 235 -> 236.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 235;
+    internal const int ExpectedDocumentReferenceCount = 236;
 }

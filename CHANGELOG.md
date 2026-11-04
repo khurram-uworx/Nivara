@@ -6,6 +6,15 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Embeddings have a documented frame convention and Microsoft.Extensions.AI glue (#867)** — a
+  `NivaraColumn<float[]>` is the storage and interop form, a frame of `E0..E{n-1}` float columns is
+  the form the existing `RowCosineSimilarity` / `RowDot` kernels already understand, and there is no
+  new column kind. `Nivara.AI.NivaraEmbeddingExtensions` adds `ToNivaraFrame`,
+  `ToGeneratedEmbeddings`, `ToEmbeddingMatrix`, `ToEmbeddingFrame`, `GenerateFrameAsync`, and
+  scoring wrappers on the vector column. Nulls are never guessed: a null row crossing into
+  Microsoft.Extensions.AI needs a `NullEmbeddingReplacement`, a partially null matrix row needs a
+  `PartialEmbeddingRepair`, and both throw naming the row and the parameter when a policy is
+  reachable but absent. Core is untouched; the convention is documented in `docs/EMBEDDINGS.md`.
 - **Qwen teacher distillation runs on the Silk backend** — `qwen --silk distill` labels the teacher
   set through `GenerateSilk` on one reused session, and both backends now share the prompt-and-parse
   seam inside `RunDistillCore`, so they can only differ in the generation call. `--silk` no longer
