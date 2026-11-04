@@ -12,4 +12,11 @@ public sealed record ModeContext(
     string? SingleShotText,
     float ConfidenceThreshold,
     string? DocsDir,
-    int TopK);
+    int TopK,
+    bool UseSilk = false,
+    string? AclGroup = null,
+    bool ShowRoundTrip = false,
+    string Store = "frame",
+    string? Index = null,
+    bool Rebuild = false,
+    bool NoCache = false);
