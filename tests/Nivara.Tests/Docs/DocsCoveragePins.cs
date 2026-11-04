@@ -50,6 +50,8 @@ internal static class DocsCoveragePins
     /// +3 (#867): `docs/TENSORS.md` now points at `docs/EMBEDDINGS.md`, and that document points
     /// back at `docs/plan/AISTACK-ROADMAP.md` and `docs/TENSORS.md`, so 232 -> 235.
     /// +1 (#867): the CHANGELOG entry for the convention points at `docs/EMBEDDINGS.md`, so 235 -> 236.
+    /// +2 (#867): the AGENTS.md implementation-map line names that document as both link text and
+    /// link target, matching the Silk bullet's style, so 236 -> 238. Two occurrences, not one.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 236;
+    internal const int ExpectedDocumentReferenceCount = 238;
 }
