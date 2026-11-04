@@ -80,6 +80,10 @@ internal static class SilkKernels
 
     public const string EmbedSum = "embed_sum";
     public const string GatherRows = "gather_rows";
+    public const string EmbeddingGatherPool = "embedding_gather_pool";
+    public const string EmbeddingGatherInput = "embedding_gather_input";
+    public const string EmbeddingBackwardPool = "embedding_backward_pool";
+    public const string EmbeddingBackwardInput = "embedding_backward_input";
     public const string LayerNormResidual = "layer_norm_residual";
     public const string LayerNorm = "layer_norm";
     public const string Add = "add";
@@ -161,6 +165,7 @@ internal static class SilkKernels
         GroupedHashReducePartial,
         GemmNt, GemmTn, ReluBackward, ColSum, Fill,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
+        EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
@@ -2586,6 +2591,76 @@ internal static class SilkKernels
                 uint outRow = outRowBase + x * BR + 3;
                 if (outRow < aRows) { uint dst = outRow * bCols + d; if (d + 0 < bCols) c[dst + 0] = acc30; if (d + 1 < bCols) c[dst + 1] = acc31; if (d + 2 < bCols) c[dst + 2] = acc32; if (d + 3 < bCols) c[dst + 3] = acc33; }
             }
+        }
+
+        __kernel void embedding_gather_pool(
+            __global const int* ids, __global const float* table, __global float* out,
+            const uint batchSize, const uint seqLen, const uint embedDim)
+        {
+            uint idx = get_global_id(0);
+            uint total = batchSize * embedDim;
+            if (idx >= total) return;
+            uint b = idx / embedDim;
+            uint e = idx % embedDim;
+            float acc = 0.0f;
+            for (uint s = 0; s < seqLen; ++s) {
+                int tid = ids[b * seqLen + s];
+                acc += table[(uint)tid * embedDim + e];
+            }
+            float denom = seqLen > 0u ? (float)seqLen : 1.0f;
+            out[idx] = acc / denom;
+        }
+
+        __kernel void embedding_gather_input(
+            __global const int* ids, __global const float* table, __global float* out,
+            const uint batchSize, const uint seqLen, const uint embedDim)
+        {
+            uint idx = get_global_id(0);
+            uint total = batchSize * embedDim * seqLen;
+            if (idx >= total) return;
+            uint s = idx % seqLen;
+            uint tmp = idx / seqLen;
+            uint e = tmp % embedDim;
+            uint b = tmp / embedDim;
+            int tid = ids[b * seqLen + s];
+            out[idx] = table[(uint)tid * embedDim + e];
+        }
+
+        __kernel void embedding_backward_pool(
+            __global const int* ids, __global const float* dPooled, __global float* gradEmb,
+            const uint vocabSize, const uint batchSize, const uint seqLen, const uint embedDim,
+            const float poolScale)
+        {
+            uint idx = get_global_id(0);
+            uint total = vocabSize * embedDim;
+            if (idx >= total) return;
+            uint v = idx / embedDim;
+            uint e = idx % embedDim;
+            float acc = 0.0f;
+            for (uint b = 0; b < batchSize; ++b)
+                for (uint s = 0; s < seqLen; ++s)
+                    if ((uint)ids[b * seqLen + s] == v)
+                        acc += poolScale * dPooled[b * embedDim + e];
+            gradEmb[idx] = acc;
+        }
+
+        __kernel void embedding_backward_input(
+            __global const int* ids, __global const float* dX, __global float* gradEmb,
+            const uint vocabSize, const uint batchSize, const uint seqLen, const uint embedDim)
+        {
+            uint idx = get_global_id(0);
+            uint total = vocabSize * embedDim;
+            if (idx >= total) return;
+            uint v = idx / embedDim;
+            uint e = idx % embedDim;
+            float acc = 0.0f;
+            for (uint b = 0; b < batchSize; ++b)
+                for (uint s = 0; s < seqLen; ++s)
+                    if ((uint)ids[b * seqLen + s] == v) {
+                        uint dIdx = b * embedDim * seqLen + e * seqLen + s;
+                        acc += dX[dIdx];
+                    }
+            gradEmb[idx] = acc;
         }
 
         """;
