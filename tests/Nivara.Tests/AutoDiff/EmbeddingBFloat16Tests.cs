@@ -33,8 +33,10 @@ public class EmbeddingBFloat16Tests
 
         // The int[] path looks up the true row (501); the BF16-tensor path looks up the
         // rounded row (500 or 502). They must differ, proving integer indices must be
-        // passed exactly for correct BF16/Half transformer inference.
-        Assert.That(exactSpan[0], Is.Not.EqualTo(corruptSpan[0]));
+        // passed exactly for correct BF16/Half transformer inference. Compare the whole
+        // row (not a single element) so a coincidental scalar equality cannot mask a
+        // regression.
+        Assert.That(corruptSpan.ToArray(), Is.Not.EqualTo(exactSpan.ToArray()));
     }
 
     [Test]
