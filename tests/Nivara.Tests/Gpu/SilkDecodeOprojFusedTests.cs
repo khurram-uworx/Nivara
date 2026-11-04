@@ -9,6 +9,7 @@ namespace Nivara.Tests.Gpu;
 /// inputs, including tail widths and short kvLen. Uses a small head count so the fused
 /// path is runnable on devices with a 256-slot work-group limit.
 /// </summary>
+[Category("Gpu")]
 public sealed class SilkDecodeOprojFusedTests
 {
     const int NumHeads = 4;

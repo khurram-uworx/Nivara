@@ -13,6 +13,7 @@ namespace Nivara.Tests.Gpu;
 /// build option (<c>SilkRuntime.BuildProgram</c> passes none), so it is pinned by device-vs-device
 /// bitwise determinism plus a tolerance against the host formula.
 /// </summary>
+[Category("Gpu")]
 public sealed class SilkBackwardKernelTests
 {
     static SilkRuntime Device()

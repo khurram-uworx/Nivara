@@ -4,6 +4,7 @@ using NUnit.Framework;
 namespace Nivara.Tests.Gpu;
 
 [TestFixture]
+[Category("Gpu")]
 public class SilkGroupedHashReduceTests
 {
     [Test]

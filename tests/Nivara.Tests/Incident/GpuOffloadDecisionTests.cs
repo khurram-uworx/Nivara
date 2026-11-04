@@ -5,6 +5,7 @@ using NUnit.Framework;
 namespace Nivara.Tests.Incident;
 
 [TestFixture]
+[Category("Gpu")]
 public class GpuOffloadDecisionTests
 {
     const int TotalRecords = 5_000;

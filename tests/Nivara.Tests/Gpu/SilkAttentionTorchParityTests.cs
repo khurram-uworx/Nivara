@@ -12,6 +12,7 @@ namespace Nivara.Tests.Gpu;
 /// an independent reference rather than against our own other backend.
 /// </summary>
 [TestFixture]
+[Category("Gpu")]
 public sealed class SilkAttentionTorchParityTests
 {
     static SilkRuntime Device()
