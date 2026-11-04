@@ -113,6 +113,10 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
 | `--docs-dir <path>` | `docs/` | Documents directory for `--rag` and `--rag-agent` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
+| `--silk` | — | Use Silk OpenCL MiniLM backend for `--rag`/`--rag-agent` |
+| `--acl-group <name>` | — | ACL filter for `--rag`/`--rag-agent` (e.g. `adr`, `docs`, `plan`) |
+| `--roundtrip` | — | Show embedding round-trip details for `--rag` |
+| `--store <frame\|inmemory>` | `frame` | Retrieval backend for `--rag`/`--rag-agent` |
 
 ## Modes of use
 
