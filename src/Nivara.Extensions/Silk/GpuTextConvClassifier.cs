@@ -1,13 +1,17 @@
 namespace Nivara.Silk;
 
 /// <summary>
-/// TextCNN classifier (embedding -> conv branches -> FC1 -> ReLU -> FC2) on Silk/OpenCL.
-/// The whole forward executes on the device: the three conv branches run through the existing
-/// NCHW <c>Conv2d</c> kernel with H=1 into disjoint sub-buffers of one flat workspace. The
-/// branch outputs stay branch-major, so FC1 accumulates as three GEMMs (one per branch's row
-/// block of the FC1 weight, via <c>GemmBias</c> + <c>GemmAdd</c>) and no concat copy is needed.
-/// Training computes gradients on the host (#900 tracks device-side backward kernels), so the
-/// optimized path is the same path the weights run in.
+/// TextCNN classifier (embedding → conv branches → FC1 → ReLU → FC2) on Silk/OpenCL. The whole
+/// forward executes on the device: the three conv branches run through the existing NCHW
+/// <c>Conv2d</c> kernel with H=1 into disjoint sub-buffers of one flat workspace, and the branch
+/// outputs stay branch-major so FC1 accumulates as three GEMMs without a concat copy. Backward is
+/// device-side too (#900): the batch-averaged dZ is computed on the host from the downloaded
+/// logits and uploaded, then the transposed-operand GEMMs, the ReLU masks, the conv backward
+/// kernels and the fused <c>adam_update</c> step all run against device buffers — every parameter
+/// except the embedding is device-authoritative during training, and the host mirrors refresh
+/// when <c>Train</c> returns. The embedding stays host-resident (gather and scatter are host
+/// work; a device-resident table with a CAS-scatter backward is a measured follow-up) and takes
+/// its Adam step on the host through <see cref="SilkLoss.AdamStep"/>.
 /// </summary>
 public sealed class GpuTextConvClassifier : IDisposable
 {
@@ -22,9 +26,8 @@ public sealed class GpuTextConvClassifier : IDisposable
     int convHidden => BranchChannels * seqLen * BranchCount;
     int branchFIn => BranchChannels * seqLen;
 
-    // Weights live on the host in the GPU-facing layout (export-ready) and are mirrored to the
-    // device each update; the embedding stays host-only because the per-batch conv input upload
-    // is small while a vocab-sized embedding upload each batch would not be.
+    // The embedding is host-only (see the class remark); every other weight lives on the device
+    // during training and the host arrays are the export surface, refreshed after Train.
     readonly float[] embedding;
     readonly int[] kernelSizes = [3, 5, 7];
     readonly float[] conv1W, conv1B;
@@ -39,28 +42,36 @@ public sealed class GpuTextConvClassifier : IDisposable
     // FC1 weight row blocks for the three branches, read-only sub-buffers of fc1Buf.
     nint[] fc1BranchBufs = [];
 
+    // Gradient buffers, one per device parameter tensor — the packed layout the host backward
+    // used (#903) is gone; each tensor's gradient feeds its own fused Adam step.
+    nint dConv1WBuf, dConv1BBuf, dConv2WBuf, dConv2BBuf, dConv3WBuf, dConv3BBuf;
+    nint dFc1Buf, dFc1BBuf, dFc2Buf, dFc2BBuf;
+
+    // Device Adam moments, one first/second pair per device parameter tensor. Allocate returns
+    // uninitialized memory, so they are zero-filled at construction and whenever a Train run
+    // starts a fresh optimizer.
+    nint[] momentBufs = [];
+
     SilkRuntime.SilkBuffer inputBuf = SilkRuntime.SilkBuffer.Empty;
     SilkRuntime.SilkBuffer convOutBuf = SilkRuntime.SilkBuffer.Empty;
     SilkRuntime.SilkBuffer hBuf = SilkRuntime.SilkBuffer.Empty;
     SilkRuntime.SilkBuffer logitsBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dzBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dHBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dABuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dXBuf = SilkRuntime.SilkBuffer.Empty;
 
-    // Persistent host activations and gradient scratch, grown to the largest batch seen.
+    // Host scratch: the pooling/gather input, the embedding scatter and the embedding's Adam step.
     float[] hostInput = [];
-    float[] hostConvOut = [];
-    float[] hostHidden = [];
-    float[] gradZ = [];
-    float[] gradDh = [];
-    float[] gradA = [];
-    float[] gradInput = [];
     internal float[] gradEmb = [];
-    internal float[] gradFc1 = [];
-    internal float[] gradFc2 = [];
-    internal float[] gradConv = [];
+    float[] embAdamFirst = [];
+    float[] embAdamSecond = [];
     int[] batchTokens = [];
     int[] batchLabels = [];
 
     List<nint> activeSubviews = [];
 
+    int adamStep;
     bool disposed;
 
     public string DeviceName => runtime.DeviceName;
@@ -104,12 +115,68 @@ public sealed class GpuTextConvClassifier : IDisposable
         fc1BiasBuf = runtime.Allocate(fc1B.Length);
         fc2Buf = runtime.Allocate(fc2W.Length);
         fc2BiasBuf = runtime.Allocate(fc2B.Length);
+        dConv1WBuf = runtime.Allocate(conv1W.Length);
+        dConv1BBuf = runtime.Allocate(conv1B.Length);
+        dConv2WBuf = runtime.Allocate(conv2W.Length);
+        dConv2BBuf = runtime.Allocate(conv2B.Length);
+        dConv3WBuf = runtime.Allocate(conv3W.Length);
+        dConv3BBuf = runtime.Allocate(conv3B.Length);
+        dFc1Buf = runtime.Allocate(fc1W.Length);
+        dFc1BBuf = runtime.Allocate(fc1B.Length);
+        dFc2Buf = runtime.Allocate(fc2W.Length);
+        dFc2BBuf = runtime.Allocate(fc2B.Length);
+
+        momentBufs = new nint[20];
+        for (int i = 0; i < momentBufs.Length; i++)
+        {
+            int len = i switch
+            {
+                0 or 1 => conv1W.Length,
+                2 or 3 => conv1B.Length,
+                4 or 5 => conv2W.Length,
+                6 or 7 => conv2B.Length,
+                8 or 9 => conv3W.Length,
+                10 or 11 => conv3B.Length,
+                12 or 13 => fc1W.Length,
+                14 or 15 => fc1B.Length,
+                16 or 17 => fc2W.Length,
+                _ => fc2B.Length,
+            };
+            momentBufs[i] = runtime.Allocate(len);
+        }
+        ZeroMomentBuffers();
 
         fc1BranchBufs = new nint[BranchCount];
         for (int br = 0; br < BranchCount; br++)
             fc1BranchBufs[br] = runtime.CreateSubview(fc1Buf, br * branchFIn * hiddenDim, branchFIn * hiddenDim);
 
         UploadWeights();
+    }
+
+    void ThrowIfDisposed()
+    {
+        if (disposed) throw new ObjectDisposedException(nameof(GpuTextConvClassifier));
+    }
+
+    void ZeroMomentBuffers()
+    {
+        for (int i = 0; i < momentBufs.Length; i++)
+        {
+            int len = i switch
+            {
+                0 or 1 => conv1W.Length,
+                2 or 3 => conv1B.Length,
+                4 or 5 => conv2W.Length,
+                6 or 7 => conv2B.Length,
+                8 or 9 => conv3W.Length,
+                10 or 11 => conv3B.Length,
+                12 or 13 => fc1W.Length,
+                14 or 15 => fc1B.Length,
+                16 or 17 => fc2W.Length,
+                _ => fc2B.Length,
+            };
+            SilkLauncher.Fill(runtime, momentBufs[i], 0f, len);
+        }
     }
 
     void UploadWeights()
@@ -126,6 +193,22 @@ public sealed class GpuTextConvClassifier : IDisposable
         runtime.Upload(fc2BiasBuf, fc2B.AsSpan());
     }
 
+    /// <summary>Downloads the trained weights back into the host mirrors. Called when
+    /// <c>Train</c> returns; while training runs the device buffers are authoritative.</summary>
+    void RefreshHostMirrors()
+    {
+        runtime.Download(conv1Buf, conv1W.Length).CopyTo(conv1W, 0);
+        runtime.Download(conv1BiasBuf, conv1B.Length).CopyTo(conv1B, 0);
+        runtime.Download(conv2Buf, conv2W.Length).CopyTo(conv2W, 0);
+        runtime.Download(conv2BiasBuf, conv2B.Length).CopyTo(conv2B, 0);
+        runtime.Download(conv3Buf, conv3W.Length).CopyTo(conv3W, 0);
+        runtime.Download(conv3BiasBuf, conv3B.Length).CopyTo(conv3B, 0);
+        runtime.Download(fc1Buf, fc1W.Length).CopyTo(fc1W, 0);
+        runtime.Download(fc1BiasBuf, fc1B.Length).CopyTo(fc1B, 0);
+        runtime.Download(fc2Buf, fc2W.Length).CopyTo(fc2W, 0);
+        runtime.Download(fc2BiasBuf, fc2B.Length).CopyTo(fc2B, 0);
+    }
+
     /// <summary>Sets all weights; FC and conv arrays use the GPU layout (same as Export*).</summary>
     public void SetWeights(
         float[] embeddingWeights,
@@ -135,6 +218,7 @@ public sealed class GpuTextConvClassifier : IDisposable
         float[] fc1Weights, float[] fc1Biases,
         float[] fc2Weights, float[] fc2Biases)
     {
+        ThrowIfDisposed();
         ValidateAndCopy(embeddingWeights, conv1Weights, conv1Biases, conv2Weights, conv2Biases,
             conv3Weights, conv3Biases, fc1Weights, fc1Biases, fc2Weights, fc2Biases);
         UploadWeights();
@@ -153,6 +237,7 @@ public sealed class GpuTextConvClassifier : IDisposable
         float[] fc1WeightsCpu, float[] fc1Biases,
         float[] fc2WeightsCpu, float[] fc2Biases)
     {
+        ThrowIfDisposed();
         if (vocabSize != this.vocabSize || embeddingDim != this.embeddingDim || maxSeqLen != this.seqLen)
             throw new ArgumentException("Shape mismatch with the classifier's configured dimensions.");
         if (fc1WeightsCpu is null || fc1WeightsCpu.Length != hiddenDim * convHidden)
@@ -207,23 +292,24 @@ public sealed class GpuTextConvClassifier : IDisposable
         Array.Copy(fc2Biases, fc2B, fc2B.Length);
     }
 
-    public float[] ExportEmbedding() { var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
-    public float[] ExportConv1Weight() { var a = new float[conv1W.Length]; Array.Copy(conv1W, a, a.Length); return a; }
-    public float[] ExportConv1Bias() { var a = new float[conv1B.Length]; Array.Copy(conv1B, a, a.Length); return a; }
-    public float[] ExportConv2Weight() { var a = new float[conv2W.Length]; Array.Copy(conv2W, a, a.Length); return a; }
-    public float[] ExportConv2Bias() { var a = new float[conv2B.Length]; Array.Copy(conv2B, a, a.Length); return a; }
-    public float[] ExportConv3Weight() { var a = new float[conv3W.Length]; Array.Copy(conv3W, a, a.Length); return a; }
-    public float[] ExportConv3Bias() { var a = new float[conv3B.Length]; Array.Copy(conv3B, a, a.Length); return a; }
-    public float[] ExportFc1Weight() { var a = new float[fc1W.Length]; Array.Copy(fc1W, a, a.Length); return a; }
-    public float[] ExportFc1Bias() { var a = new float[fc1B.Length]; Array.Copy(fc1B, a, a.Length); return a; }
-    public float[] ExportFc2Weight() { var a = new float[fc2W.Length]; Array.Copy(fc2W, a, a.Length); return a; }
-    public float[] ExportFc2Bias() { var a = new float[fc2B.Length]; Array.Copy(fc2B, a, a.Length); return a; }
+    public float[] ExportEmbedding() { ThrowIfDisposed(); var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
+    public float[] ExportConv1Weight() { ThrowIfDisposed(); var a = new float[conv1W.Length]; Array.Copy(conv1W, a, a.Length); return a; }
+    public float[] ExportConv1Bias() { ThrowIfDisposed(); var a = new float[conv1B.Length]; Array.Copy(conv1B, a, a.Length); return a; }
+    public float[] ExportConv2Weight() { ThrowIfDisposed(); var a = new float[conv2W.Length]; Array.Copy(conv2W, a, a.Length); return a; }
+    public float[] ExportConv2Bias() { ThrowIfDisposed(); var a = new float[conv2B.Length]; Array.Copy(conv2B, a, a.Length); return a; }
+    public float[] ExportConv3Weight() { ThrowIfDisposed(); var a = new float[conv3W.Length]; Array.Copy(conv3W, a, a.Length); return a; }
+    public float[] ExportConv3Bias() { ThrowIfDisposed(); var a = new float[conv3B.Length]; Array.Copy(conv3B, a, a.Length); return a; }
+    public float[] ExportFc1Weight() { ThrowIfDisposed(); var a = new float[fc1W.Length]; Array.Copy(fc1W, a, a.Length); return a; }
+    public float[] ExportFc1Bias() { ThrowIfDisposed(); var a = new float[fc1B.Length]; Array.Copy(fc1B, a, a.Length); return a; }
+    public float[] ExportFc2Weight() { ThrowIfDisposed(); var a = new float[fc2W.Length]; Array.Copy(fc2W, a, a.Length); return a; }
+    public float[] ExportFc2Bias() { ThrowIfDisposed(); var a = new float[fc2B.Length]; Array.Copy(fc2B, a, a.Length); return a; }
 
     /// <summary>All weights transposed into the CPU <c>Module</c> layout.</summary>
     public (float[] Embedding, float[] Conv1W, float[] Conv1B, float[] Conv2W, float[] Conv2B,
         float[] Conv3W, float[] Conv3B, float[] Fc1W, float[] Fc1B, float[] Fc2W, float[] Fc2B)
         ExportCpuLayout()
     {
+        ThrowIfDisposed();
         var fc1Cpu = new float[hiddenDim * convHidden];
         for (int h = 0; h < hiddenDim; h++)
             for (int j = 0; j < convHidden; j++)
@@ -237,15 +323,15 @@ public sealed class GpuTextConvClassifier : IDisposable
             fc2Cpu, ExportFc2Bias());
     }
 
-    public float[] Forward(int[] tokenIds, int batchSize) =>
-        ForwardBatch(tokenIds, batchSize, collectBackwardState: false).Logits;
-
-    /// <summary>
-    /// Device forward that also returns the activations host backward needs: the post-ReLU conv
-    /// outputs (with the conv input replicated host-side) and the post-ReLU FC1 activations.
-    /// </summary>
-    internal (float[] Logits, float[] ConvOut, float[] Hidden) ForwardBatch(int[] tokenIds, int batchSize, bool collectBackwardState)
+    public float[] Forward(int[] tokenIds, int batchSize)
     {
+        ThrowIfDisposed();
+        return ForwardBatch(tokenIds, batchSize);
+    }
+
+    internal float[] ForwardBatch(int[] tokenIds, int batchSize)
+    {
+        ThrowIfDisposed();
         if (tokenIds is null || tokenIds.Length != batchSize * seqLen)
             throw new ArgumentException("Batched token ids must be exactly batchSize × seqLen.");
 
@@ -254,7 +340,8 @@ public sealed class GpuTextConvClassifier : IDisposable
         int hidLen = batchSize * hiddenDim;
         int branchBatch = batchSize * branchFIn;
 
-        var input = new float[inputLen];
+        hostInput = SilkLoss.Obtain(ref hostInput, inputLen);
+        var input = hostInput;
         for (int b = 0; b < batchSize; b++)
         {
             int bBase = b * embeddingDim * seqLen;
@@ -272,7 +359,7 @@ public sealed class GpuTextConvClassifier : IDisposable
         hBuf = runtime.Ensure(hBuf, hidLen);
         logitsBuf = runtime.Ensure(logitsBuf, batchSize * 2);
         inputBuf = runtime.Ensure(inputBuf, inputLen);
-        runtime.Upload(inputBuf.Handle, input.AsSpan());
+        runtime.Upload(inputBuf.Handle, input.AsSpan(0, inputLen));
 
         activeSubviews.Clear();
         try
@@ -308,13 +395,7 @@ public sealed class GpuTextConvClassifier : IDisposable
                 hBuf.Handle, fc2Buf, logitsBuf.Handle, fc2BiasBuf,
                 batchSize, hiddenDim, 2);
 
-            var logits = runtime.Download(logitsBuf.Handle, batchSize * 2);
-            if (!collectBackwardState) return (logits, [], []);
-
-            hostInput = input;
-            hostConvOut = runtime.Download(convOutBuf.Handle, outLen);
-            hostHidden = runtime.Download(hBuf.Handle, hidLen);
-            return (logits, hostConvOut, hostHidden);
+            return runtime.Download(logitsBuf.Handle, batchSize * 2);
         }
         finally
         {
@@ -325,6 +406,7 @@ public sealed class GpuTextConvClassifier : IDisposable
 
     public int[] Predict(int[] tokenIds, int seqLen)
     {
+        ThrowIfDisposed();
         if (seqLen != this.seqLen)
             throw new ArgumentException("seqLen does not match the configured sequence length.", nameof(seqLen));
         if (tokenIds is null || tokenIds.Length % seqLen != 0)
@@ -343,16 +425,15 @@ public sealed class GpuTextConvClassifier : IDisposable
         return result;
     }
 
-    /// <summary>Per-epoch training outcome: mean cross-entropy loss and wall-clock duration.</summary>
-    public readonly record struct SilkTrainEpoch(int Epoch, float Loss, TimeSpan Elapsed);
-
     /// <summary>
-    /// Trains in place against the device forward with host-computed gradients (two branch
-    /// convs are only worth device backward once #900 lands; here the branch convs, FC and
-    /// embedding scattering all run on the host so the on-device weights stay authoritative).
+    /// Trains in place against the device forward and the device backward (#900), with the fused
+    /// <c>adam_update</c> step for every device parameter and the host Adam step for the
+    /// host-resident embedding. Each call starts a fresh optimizer (moments zeroed, step counter
+    /// reset).
     /// </summary>
     public IReadOnlyList<SilkTrainEpoch> Train(int[] tokens, int[] labels, int batchSize, int seqLen, int epochs, float learningRate, int seed)
     {
+        ThrowIfDisposed();
         if (tokens is null || labels is null) throw new ArgumentNullException();
         if (tokens.Length % seqLen != 0) throw new ArgumentException("Token shape mismatch.");
         if (seqLen != this.seqLen) throw new ArgumentException("seqLen does not match the configured sequence length.");
@@ -361,25 +442,16 @@ public sealed class GpuTextConvClassifier : IDisposable
         if (batchSize <= 0) throw new ArgumentOutOfRangeException(nameof(batchSize));
         if (epochs <= 0) throw new ArgumentOutOfRangeException(nameof(epochs));
 
-        var results = new List<SilkTrainEpoch>(epochs);
-        int batchesPerEpoch = (sampleCount + batchSize - 1) / batchSize;
-        var rng = new Random(seed);
-        var adam = new[]
-        {
-            new AdamState(embedding),
-            new AdamState(conv1W),
-            new AdamState(conv1B),
-            new AdamState(conv2W),
-            new AdamState(conv2B),
-            new AdamState(conv3W),
-            new AdamState(conv3B),
-            new AdamState(fc1W),
-            new AdamState(fc1B),
-            new AdamState(fc2W),
-            new AdamState(fc2B),
-        };
+        adamStep = 0;
+        ZeroMomentBuffers();
+        embAdamFirst = new float[embedding.Length];
+        embAdamSecond = new float[embedding.Length];
         batchTokens = [];
         batchLabels = [];
+
+        var results = new List<SilkTrainEpoch>(epochs);
+        int batchesPerEpoch = (sampleCount + batchSize - 1) / batchSize;
+        var shuffle = new Random(seed);
 
         for (int epoch = 0; epoch < epochs; epoch++)
         {
@@ -387,7 +459,7 @@ public sealed class GpuTextConvClassifier : IDisposable
             int[] indices = Enumerable.Range(0, sampleCount).ToArray();
             for (int i = indices.Length - 1; i > 0; i--)
             {
-                int j = rng.Next(i + 1);
+                int j = shuffle.Next(i + 1);
                 (indices[i], indices[j]) = (indices[j], indices[i]);
             }
 
@@ -399,8 +471,8 @@ public sealed class GpuTextConvClassifier : IDisposable
                 int n = Math.Min(start + batchSize, sampleCount) - start;
                 if (n <= 0) continue;
 
-                batchTokens = Obtain(ref batchTokens, n * seqLen);
-                batchLabels = Obtain(ref batchLabels, n);
+                batchTokens = SilkLoss.Obtain(ref batchTokens, n * seqLen);
+                batchLabels = SilkLoss.Obtain(ref batchLabels, n);
                 for (int i = 0; i < n; i++)
                 {
                     int src = indices[start + i];
@@ -408,13 +480,11 @@ public sealed class GpuTextConvClassifier : IDisposable
                     batchLabels[i] = labels[src];
                 }
 
-                var (logits, _, _) = ForwardBatch(batchTokens, n, collectBackwardState: true);
-                BackwardAndSetGradients(logits, batchTokens, batchLabels, n);
+                var logits = ForwardBatch(batchTokens, n);
+                Backward(logits, batchTokens, batchLabels, n);
+                AdamUpdateAll(learningRate);
 
-                ApplyAdam(adam, learningRate);
-                UploadWeights();
-
-                lossSum += CrossEntropy(logits, batchLabels, n);
+                lossSum += SilkLoss.CrossEntropy(logits, batchLabels, n);
                 lossBatches++;
             }
 
@@ -422,213 +492,168 @@ public sealed class GpuTextConvClassifier : IDisposable
             results.Add(new SilkTrainEpoch(epoch, lossBatches > 0 ? lossSum / lossBatches : 0f, sw.Elapsed));
         }
 
+        RefreshHostMirrors();
         return results;
     }
 
-    static float CrossEntropy(float[] logits, int[] labels, int n)
-    {
-        float loss = 0f;
-        for (int i = 0; i < n; i++)
-        {
-            float e0 = MathF.Exp(logits[i * 2]);
-            float e1 = MathF.Exp(logits[i * 2 + 1]);
-            float p0 = e0 / (e0 + e1);
-            loss += labels[i] == 0 ? -MathF.Log(p0) : -MathF.Log(1f - p0);
-        }
-        return loss / n;
-    }
-
-    static T[] Obtain<T>(ref T[] buffer, int length)
-    {
-        if (buffer.Length >= length) return buffer;
-        buffer = new T[length];
-        return buffer;
-    }
-
-    sealed class AdamState(float[] values)
-    {
-        readonly float[] first = new float[values.Length];
-        readonly float[] second = new float[values.Length];
-        int step;
-
-        public void Update(ReadOnlySpan<float> gradient, float learningRate)
-        {
-            step++;
-            float bc1 = 1f - MathF.Pow(0.9f, step);
-            float bc2 = 1f - MathF.Pow(0.999f, step);
-            for (int i = 0; i < values.Length; i++)
-            {
-                first[i] = 0.9f * first[i] + 0.1f * gradient[i];
-                second[i] = 0.999f * second[i] + 0.001f * gradient[i] * gradient[i];
-                values[i] -= learningRate * (first[i] / bc1) / (MathF.Sqrt(second[i] / bc2) + 1e-8f);
-            }
-        }
-    }
-
-    void ApplyAdam(AdamState[] adam, float learningRate)
-    {
-        int c1 = conv1W.Length, c2 = conv2W.Length, c3 = conv3W.Length;
-        int branchBlock = BranchChannels;
-        adam[0].Update(gradEmb, learningRate);
-        adam[1].Update(gradConv.AsSpan(0, c1), learningRate);
-        adam[2].Update(gradConv.AsSpan(c1, BranchChannels), learningRate);
-        adam[3].Update(gradConv.AsSpan(c1 + branchBlock, c2), learningRate);
-        adam[4].Update(gradConv.AsSpan(c1 + branchBlock + c2, BranchChannels), learningRate);
-        adam[5].Update(gradConv.AsSpan(c1 + branchBlock + c2 + branchBlock, c3), learningRate);
-        adam[6].Update(gradConv.AsSpan(c1 + branchBlock + c2 + branchBlock + c3, BranchChannels), learningRate);
-        adam[7].Update(gradFc1.AsSpan(0, fc1W.Length), learningRate);
-        adam[8].Update(gradFc1.AsSpan(fc1W.Length, fc1B.Length), learningRate);
-        adam[9].Update(gradFc2.AsSpan(0, fc2W.Length), learningRate);
-        adam[10].Update(gradFc2.AsSpan(fc2W.Length, fc2B.Length), learningRate);
-    }
-
     /// <summary>
-    /// Computes gradients for one batch from the device forward's activations (host backward;
-    /// #900 tracks moving this to the device). Gradients accumulate into the flat grad arrays
-    /// the Adam step is bound to and an averaged copy of each is applied by <see cref="ApplyAdam"/>.
+    /// One backward pass over the device activations the last forward left resident: uploads the
+    /// batch-averaged dZ, runs the FC/conv backward chain on the device, and scatters the input
+    /// gradient into <see cref="gradEmb"/> on the host (the conv forward is a plain lookup, so no
+    /// pooling factor applies). No optimizer step — gradients stay in the device gradient buffers
+    /// and <see cref="gradEmb"/> until <see cref="AdamUpdateAll"/>.
     /// </summary>
-    internal void BackwardAndSetGradients(float[] logits, int[] tokens, int[] labels, int n)
+    internal void Backward(float[] logits, int[] tokens, int[] labels, int batch)
     {
-        int outLen = n * convHidden;
-        int hidLen = n * hiddenDim;
-        int embLen = n * embeddingDim * seqLen;
+        ThrowIfDisposed();
+        if (logits is null || logits.Length != batch * 2)
+            throw new ArgumentException("Logit count mismatch.", nameof(logits));
+        if (tokens is null || tokens.Length != batch * seqLen)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokens));
+        if (labels is null || labels.Length != batch)
+            throw new ArgumentException("Label count mismatch.", nameof(labels));
 
-        gradEmb = Obtain(ref gradEmb, embedding.Length);
-        gradFc1 = Obtain(ref gradFc1, fc1W.Length + fc1B.Length);
-        gradFc2 = Obtain(ref gradFc2, fc2W.Length + fc2B.Length);
-        gradConv = Obtain(ref gradConv, conv1W.Length + conv1B.Length + conv2W.Length + conv2B.Length + conv3W.Length + conv3B.Length);
-        gradZ = Obtain(ref gradZ, n * 2);
-        gradDh = Obtain(ref gradDh, hidLen);
-        gradA = Obtain(ref gradA, outLen);
-        gradInput = Obtain(ref gradInput, embLen);
+        int outLen = batch * convHidden;
+        int hidLen = batch * hiddenDim;
+        int inputLen = batch * embeddingDim * seqLen;
+        int branchBatch = batch * branchFIn;
+
+        dzBuf = runtime.Ensure(dzBuf, batch * 2);
+        dHBuf = runtime.Ensure(dHBuf, hidLen);
+        dABuf = runtime.Ensure(dABuf, outLen);
+        dXBuf = runtime.Ensure(dXBuf, inputLen);
+
+        var dz = new float[batch * 2];
+        SilkLoss.InputGradient(logits, labels, batch, 1f / batch, dz);
+        runtime.Upload(dzBuf.Handle, dz);
+
+        SilkLauncher.ColSum(runtime, dzBuf.Handle, dFc2BBuf, batch, 2, 1f);
+        SilkLauncher.GemmTn(runtime, hBuf.Handle, dzBuf.Handle, dFc2Buf,
+            aRows: hiddenDim, aCols: batch, bCols: 2);
+        SilkLauncher.GemmNt(runtime, dzBuf.Handle, fc2Buf, dHBuf.Handle,
+            aRows: batch, aCols: 2, bCols: hiddenDim);
+        SilkLauncher.ReluBackward(runtime, dHBuf.Handle, hBuf.Handle, dHBuf.Handle, hidLen);
+        SilkLauncher.ColSum(runtime, dHBuf.Handle, dFc1BBuf, batch, hiddenDim, 1f);
+
+        activeSubviews.Clear();
+        try
+        {
+            for (int br = 0; br < BranchCount; br++)
+            {
+                int k = KernelSize(br);
+                int pad = k / 2;
+
+                // dW1 branch block = convOut(branch)ᵀ·dH, written into a writable row block of
+                // the dFc1 buffer; dA branch block = dH·W1ᵀ(branch), written into a writable
+                // branch block of the flat dA workspace.
+                nint convOutView = runtime.CreateSubview(convOutBuf.Handle, br * branchBatch, branchBatch, readOnly: false);
+                activeSubviews.Add(convOutView);
+                nint dW1View = runtime.CreateSubview(dFc1Buf, br * branchFIn * hiddenDim, branchFIn * hiddenDim, readOnly: false);
+                activeSubviews.Add(dW1View);
+                nint dAView = runtime.CreateSubview(dABuf.Handle, br * branchBatch, branchBatch, readOnly: false);
+                activeSubviews.Add(dAView);
+
+                SilkLauncher.GemmTn(runtime, convOutView, dHBuf.Handle, dW1View,
+                    aRows: branchFIn, aCols: batch, bCols: hiddenDim);
+                SilkLauncher.GemmNt(runtime, dHBuf.Handle, fc1BranchBufs[br], dAView,
+                    aRows: batch, aCols: hiddenDim, bCols: branchFIn);
+                SilkLauncher.ReluBackward(runtime, dAView, convOutView, dAView, branchBatch);
+
+                nint weightBuf = br switch { 0 => conv1Buf, 1 => conv2Buf, _ => conv3Buf };
+                nint dWeightBuf = br switch { 0 => dConv1WBuf, 1 => dConv2WBuf, _ => dConv3WBuf };
+                nint dBiasBuf = br switch { 0 => dConv1BBuf, 1 => dConv2BBuf, _ => dConv3BBuf };
+                SilkLauncher.Conv2dBackwardWeight(runtime, dAView, inputBuf.Handle, dWeightBuf,
+                    N: batch, C: embeddingDim, H: 1, W: seqLen,
+                    outC: BranchChannels, kH: 1, kW: k,
+                    strideH: 1, strideW: 1, padTop: 0, padLeft: pad, groups: 1, oH: 1, oW: seqLen);
+                SilkLauncher.Conv2dBackwardBias(runtime, dAView, dBiasBuf,
+                    N: batch, outC: BranchChannels, oH: 1, oW: seqLen);
+            }
+
+            // dX accumulates the three branches: zero first, then one launch per branch.
+            SilkLauncher.Fill(runtime, dXBuf.Handle, 0f, inputLen);
+            for (int br = 0; br < BranchCount; br++)
+            {
+                int k = KernelSize(br);
+                int pad = k / 2;
+                nint weightBuf = br switch { 0 => conv1Buf, 1 => conv2Buf, _ => conv3Buf };
+                nint dAView = runtime.CreateSubview(dABuf.Handle, br * branchBatch, branchBatch, readOnly: false);
+                activeSubviews.Add(dAView);
+                SilkLauncher.Conv2dBackwardInput(runtime, dAView, weightBuf, dXBuf.Handle,
+                    N: batch, C: embeddingDim, H: 1, W: seqLen,
+                    outC: BranchChannels, kH: 1, kW: k,
+                    strideH: 1, strideW: 1, padTop: 0, padLeft: pad, groups: 1, oH: 1, oW: seqLen);
+            }
+        }
+        finally
+        {
+            foreach (var view in activeSubviews) runtime.Release(view);
+            activeSubviews.Clear();
+        }
+
+        var dX = runtime.Download(dXBuf.Handle, inputLen);
+
+        gradEmb = SilkLoss.Obtain(ref gradEmb, embedding.Length);
         Array.Clear(gradEmb);
-        Array.Clear(gradFc1);
-        Array.Clear(gradFc2);
-        Array.Clear(gradConv);
-        Array.Clear(gradZ, 0, n * 2);
-        Array.Clear(gradDh, 0, hidLen);
-        Array.Clear(gradA, 0, outLen);
-        Array.Clear(gradInput, 0, embLen);
-
-        // Softmax + cross-entropy input gradient (two classes; softmax stays numerically
-        // bounded because logits come from a linear layer).
-        for (int i = 0; i < n; i++)
-        {
-            float e0 = MathF.Exp(logits[i * 2]);
-            float e1 = MathF.Exp(logits[i * 2 + 1]);
-            float z = e0 + e1;
-            float p0 = e0 / z;
-            int label = labels[i];
-            gradZ[i * 2 + 0] = p0 - (label == 0 ? 1f : 0f);
-            gradZ[i * 2 + 1] = 1f - p0 - (label == 1 ? 1f : 0f);
-        }
-
-        Span<float> gFc1w = gradFc1.AsSpan(0, fc1W.Length);
-        Span<float> gFc1b = gradFc1.AsSpan(fc1W.Length, fc1B.Length);
-        Span<float> gFc2w = gradFc2.AsSpan(0, fc2W.Length);
-        Span<float> gFc2b = gradFc2.AsSpan(fc2W.Length, 2);
-        Span<float> gC1w = gradConv.AsSpan(0, conv1W.Length);
-        Span<float> gC1b = gradConv.AsSpan(conv1W.Length, BranchChannels);
-        Span<float> gC2w = gradConv.AsSpan(conv1W.Length + BranchChannels, conv2W.Length);
-        Span<float> gC2b = gradConv.AsSpan(conv1W.Length + BranchChannels + conv2W.Length, BranchChannels);
-        Span<float> gC3w = gradConv.AsSpan(conv1W.Length + BranchChannels + conv2W.Length + BranchChannels, conv3W.Length);
-        Span<float> gC3b = gradConv.AsSpan(
-            conv1W.Length + BranchChannels + conv2W.Length + BranchChannels + conv3W.Length, BranchChannels);
-
-        for (int i = 0; i < n; i++)
-        {
-            float g0 = gradZ[i * 2], g1 = gradZ[i * 2 + 1];
-            gFc2b[0] += g0; gFc2b[1] += g1;
-            for (int h = 0; h < hiddenDim; h++)
-            {
-                float hv = hostHidden[i * hiddenDim + h];
-                gFc2w[h * 2 + 0] += hv * g0;
-                gFc2w[h * 2 + 1] += hv * g1;
-                gradDh[i * hiddenDim + h] = hv > 0f
-                    ? fc2W[h * 2 + 0] * g0 + fc2W[h * 2 + 1] * g1
-                    : 0f;
-            }
-        }
-
-        int branchBatch = n * branchFIn;
-        for (int b = 0; b < n; b++)
-        {
-            for (int h = 0; h < hiddenDim; h++)
-            {
-                float g = gradDh[b * hiddenDim + h];
-                if (g == 0f) continue;
-                gFc1b[h] += g;
-                for (int j = 0; j < convHidden; j++)
-                {
-                    int jRem = j % branchFIn;
-                    int aIndex = (j / branchFIn) * branchBatch + b * branchFIn + jRem;
-                    gFc1w[j * hiddenDim + h] += hostConvOut[aIndex] * g;
-                    gradA[aIndex] += fc1W[j * hiddenDim + h] * g;
-                }
-            }
-        }
-
-        // Conv weight grads and dInput; activations are branch-major, matching the device convOut.
-        for (int br = 0; br < BranchCount; br++)
-        {
-            int k = KernelSize(br);
-            int pad = k / 2;
-            Span<float> gradW = br switch { 0 => gC1w, 1 => gC2w, _ => gC3w };
-            Span<float> gradBias = br switch { 0 => gC1b, 1 => gC2b, _ => gC3b };
-            float[] w = br switch { 0 => conv1W, 1 => conv2W, _ => conv3W };
-            for (int b = 0; b < n; b++)
-            {
-                int bInBase = b * embeddingDim * seqLen;
-                int bConvBase = br * branchBatch + b * branchFIn;
-                for (int oc = 0; oc < BranchChannels; oc++)
-                {
-                    int wBase = oc * embeddingDim * k;
-                    for (int s = 0; s < seqLen; s++)
-                    {
-                        int aIndex = bConvBase + oc * seqLen + s;
-                        float g = gradA[aIndex];
-                        if (hostConvOut[aIndex] <= 0f || g == 0f) continue;
-                        gradBias[oc] += g;
-                        for (int ic = 0; ic < embeddingDim; ic++)
-                        {
-                            for (int kx = 0; kx < k; kx++)
-                            {
-                                int inS = s - pad + kx;
-                                if (inS < 0 || inS >= seqLen) continue;
-                                int inIndex = bInBase + ic * seqLen + inS;
-                                gradW[wBase + ic * k + kx] += hostInput[inIndex] * g;
-                                gradInput[inIndex] += w[wBase + ic * k + kx] * g;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Embedding scatter: a straight sum over positions — the forward is a plain lookup,
-        // so no pooling factor applies.
-        for (int b = 0; b < n; b++)
+        for (int b = 0; b < batch; b++)
         {
             for (int s = 0; s < seqLen; s++)
             {
                 int tidBase = tokens[b * seqLen + s] * embeddingDim;
                 int bBase = b * embeddingDim * seqLen;
                 for (int e = 0; e < embeddingDim; e++)
-                    gradEmb[tidBase + e] += gradInput[bBase + e * seqLen + s];
+                    gradEmb[tidBase + e] += dX[bBase + e * seqLen + s];
             }
         }
-
-        // Gradients are summed per batch; average before the optimizer step.
-        float inv = 1f / n;
-        Scale(gradEmb, inv);
-        Scale(gradFc1, inv);
-        Scale(gradFc2, inv);
-        Scale(gradConv, inv);
     }
 
-    static void Scale(Span<float> span, float factor)
+    /// <summary>Applies one Adam step: the fused device kernel to every device parameter (conv
+    /// weights/biases, FC1/FC2 weights/biases) and <see cref="SilkLoss.AdamStep"/> to the
+    /// host-resident embedding. One step counter is shared; every parameter takes the same bias
+    /// correction.</summary>
+    internal void AdamUpdateAll(float learningRate)
     {
-        for (int i = 0; i < span.Length; i++) span[i] *= factor;
+        adamStep++;
+        float bc1 = 1f - MathF.Pow(0.9f, adamStep);
+        float bc2 = 1f - MathF.Pow(0.999f, adamStep);
+
+        (nint weight, nint grad, nint first, nint second, int count)[] tensors =
+        [
+            (conv1Buf, dConv1WBuf, momentBufs[0], momentBufs[1], conv1W.Length),
+            (conv1BiasBuf, dConv1BBuf, momentBufs[2], momentBufs[3], conv1B.Length),
+            (conv2Buf, dConv2WBuf, momentBufs[4], momentBufs[5], conv2W.Length),
+            (conv2BiasBuf, dConv2BBuf, momentBufs[6], momentBufs[7], conv2B.Length),
+            (conv3Buf, dConv3WBuf, momentBufs[8], momentBufs[9], conv3W.Length),
+            (conv3BiasBuf, dConv3BBuf, momentBufs[10], momentBufs[11], conv3B.Length),
+            (fc1Buf, dFc1Buf, momentBufs[12], momentBufs[13], fc1W.Length),
+            (fc1BiasBuf, dFc1BBuf, momentBufs[14], momentBufs[15], fc1B.Length),
+            (fc2Buf, dFc2Buf, momentBufs[16], momentBufs[17], fc2W.Length),
+            (fc2BiasBuf, dFc2BBuf, momentBufs[18], momentBufs[19], fc2B.Length),
+        ];
+        foreach (var t in tensors)
+            SilkLauncher.AdamUpdate(runtime, t.weight, t.grad, t.first, t.second, learningRate, bc1, bc2, 1e-8f, t.count);
+
+        SilkLoss.AdamStep(embedding, embAdamFirst, embAdamSecond, gradEmb, learningRate, bc1, bc2);
+    }
+
+    /// <summary>Downloads every device gradient; the FC weights arrive in the GPU layout (the
+    /// CPU layout is their transpose). Used by the parity fixture.</summary>
+    internal (float[] Conv1W, float[] Conv1B, float[] Conv2W, float[] Conv2B,
+        float[] Conv3W, float[] Conv3B, float[] Fc1W, float[] Fc1B, float[] Fc2W, float[] Fc2B)
+        DownloadGradients()
+    {
+        ThrowIfDisposed();
+        return (
+            runtime.Download(dConv1WBuf, conv1W.Length),
+            runtime.Download(dConv1BBuf, conv1B.Length),
+            runtime.Download(dConv2WBuf, conv2W.Length),
+            runtime.Download(dConv2BBuf, conv2B.Length),
+            runtime.Download(dConv3WBuf, conv3W.Length),
+            runtime.Download(dConv3BBuf, conv3B.Length),
+            runtime.Download(dFc1Buf, fc1W.Length),
+            runtime.Download(dFc1BBuf, fc1B.Length),
+            runtime.Download(dFc2Buf, fc2W.Length),
+            runtime.Download(dFc2BBuf, fc2B.Length));
     }
 
     public void Dispose()
@@ -641,6 +666,10 @@ public sealed class GpuTextConvClassifier : IDisposable
         runtime.Release(convOutBuf.Handle);
         runtime.Release(hBuf.Handle);
         runtime.Release(logitsBuf.Handle);
+        runtime.Release(dzBuf.Handle);
+        runtime.Release(dHBuf.Handle);
+        runtime.Release(dABuf.Handle);
+        runtime.Release(dXBuf.Handle);
         runtime.Dispose();
         disposed = true;
     }
@@ -655,7 +684,19 @@ public sealed class GpuTextConvClassifier : IDisposable
         runtime.Release(conv3BiasBuf);
         foreach (var block in fc1BranchBufs) runtime.Release(block);
         runtime.Release(fc1Buf);
+        runtime.Release(fc1BiasBuf);
         runtime.Release(fc2Buf);
         runtime.Release(fc2BiasBuf);
+        runtime.Release(dConv1WBuf);
+        runtime.Release(dConv1BBuf);
+        runtime.Release(dConv2WBuf);
+        runtime.Release(dConv2BBuf);
+        runtime.Release(dConv3WBuf);
+        runtime.Release(dConv3BBuf);
+        runtime.Release(dFc1Buf);
+        runtime.Release(dFc1BBuf);
+        runtime.Release(dFc2Buf);
+        runtime.Release(dFc2BBuf);
+        foreach (var moment in momentBufs) runtime.Release(moment);
     }
 }

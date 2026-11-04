@@ -396,18 +396,28 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 
 ```csharp
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
- Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
- RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax, GemmAdd, GemmGemvAdd, MlpBlock, DecodeGqaAttentionOprojFused,
- Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d]
+ Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
+ RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
+ GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+ DecodeGqaAttentionOprojFused,
+ Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
+ GroupedHashReducePartial,
+ GemmNt, GemmTn, ReluBackward, ColSum, Fill,
+ Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate]
 ```
 
-i.e. four families: the original eight BERT encoder kernels (`embed_sum`, `gather_rows`,
+i.e. the families by origin: the original eight BERT encoder kernels (`embed_sum`, `gather_rows`,
 `layer_norm_residual`, the four Row4 epilogues, `batched_attention`); the seven ModernBERT/Laya
 ports (`layer_norm`, `add`, `add_bias`, `split_columns`, `rotary`, `geglu`, `gemm_row4`); the
 Qwen/SmolLM decode kernels (`rms_norm`, `rms_norm_lm_head`, `rms_norm_gemv`, `silu`, `swiglu`,
-`causal_gqa_attention`, `decode_gqa_attention`, `argmax`, `gemm_row4_add`); and the vision
-kernels (`conv2d`, `batchnorm_eval`, `relu`, `relu6`, `maxpool2d`, `adaptive_avgpool2d`). The
-array order is the creation list, not the source order.
+`causal_gqa_attention`, `decode_gqa_attention`, `argmax`, `gemm_row4_add`) plus their fused and
+measured-candidate derivatives (`gemm_reg2x4`, `gemm_reg4x4`, `batched_attention_sliding`,
+`gemm_gemv_add`, `mlp_block`, `decode_gqa_attention_oproj_fused`) and the packed-BF16 transport
+quartet (`gemm_row4_bf16`, `gemm_gemv_add_bf16`, `rms_norm_gemv_bf16`, `mlp_block_bf16`); the
+vision kernels (`conv2d`, `batchnorm_eval`, `relu`, `relu6`, `maxpool2d`, `adaptive_avgpool2d`);
+the analytics kernel (`grouped_hash_reduce_partial`); and the classifier-backward family (#900):
+the transposed-operand GEMMs, the elementwise/reduction backward pieces and the fused Adam step.
+The array order is the creation list, not the source order.
 
 Each is a port of the same-shape ILGPU kernel with the operation order preserved — same strictly
 ascending K-reduction, same tile geometry where the kernel is tiled, same fused epilogues:
@@ -447,6 +457,23 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `relu6` | `x, y, n` | elementwise clamp to [0, 6] |
 | `maxpool2d` | `input, output, N, C, H, W, kH, kW, strideH, strideW, pad*, oH, oW` | 2D max pooling |
 | `adaptive_avgpool2d` | `input, output, N, C, H, W` | global average pool to 1x1 |
+| `gemm_reg2x4` | `a, b, c, aRows, aCols, bCols` | measured 2×4-register-tile GEMM candidate (#784); plain ascending-K, kept for the geometry A/B |
+| `gemm_reg4x4` | as above | the 4×4-register-tile candidate from the same A/B |
+| `batched_attention_sliding` | same args as `batched_attention` | sliding-window attention the launcher picks when the band is finite and narrow enough for the local cache (`band ≥ 0` and `2·band + 1 ≤ SlidingAttentionCacheSize`) |
+| `gemm_row4_bf16` | `a, b, c, aRows, aCols, bCols` (B packed BF16) | Row4 GEMM with B transported as packed BF16 ushort, widened in-shader; same accumulation core |
+| `gemm_gemv_add_bf16` | `a, b, c, residual, aCols, bCols` | the decode GEMV + residual add over packed-BF16 B |
+| `rms_norm_gemv_bf16` | as `rms_norm_gemv` | the fused decode projections over packed-BF16 weights |
+| `mlp_block_bf16` | as `mlp_block` | the fused single-token MLP block over packed-BF16 weights |
+| `grouped_hash_reduce_partial` | `serviceIds, statusCodes, durations, partialCounts, partialErrors, partialSums, n, groupCount` | incident analytics: per-work-group partial (count, 5xx errors, duration sum) per service group, merged on the host |
+| `gemm_row4_nt` | `a, b, c, aRows, aCols, bCols` (B stored `[N,K]`) | backward GEMM `A·Bᵀ` with the transpose in the tile load (`dH = dZ·W2ᵀ`, `dPooled = dH·W1ᵀ`); same accumulation core as the forward Row4 GEMMs, so the host replay stays byte-identical (#900) |
+| `gemm_row4_tn` | `a, b, c, aRows, aCols, bCols` (A stored `[K,M]`) | backward GEMM `Aᵀ·B` with the transpose in the tile load (`dW2 = hᵀ·dZ`, `dW1 = pooledᵀ·dH`) (#900) |
+| `relu_backward` | `d, act, y, n` | ReLU mask backward: `y = act > 0 ? d : 0`; `act` is the post-activation buffer (ReLU(x) > 0 iff x > 0) |
+| `col_sum` | `x, y, rows, cols, scale` | `y[j] = scale·Σ_i x[i·cols + j]` — FC bias gradients; the scale is applied once after the ascending accumulation |
+| `fill` | `y, value, n` | constant fill — zeroes the dX workspace before the per-branch `conv2d_backward_input` launches accumulate into it |
+| `conv2d_backward_weight` | `dA, input, dW, N, C, H, W, outC, kH, kW, stride*, pad*, groups, oH, oW` | convolution weight gradient; same NCHW/stride/pad/groups geometry and weight layout as `conv2d` (padBottom/padRight do not enter the index math), one work-item per weight element |
+| `conv2d_backward_input` | `dA, weight, dX, ...` (same geometry) | convolution input gradient; **accumulates** (`dX +=`) — zero via `fill` first, the text CNN launches it once per branch over the same dX |
+| `conv2d_backward_bias` | `dA, db, N, outC, oH, oW` | convolution bias gradient |
+| `adam_update` | `w, g, m, v, lr, bc1, bc2, eps, n` | fused Adam step (β1 0.9, β2 0.999, ε 1e-8 — the host `AdamState` constants); `bc1`/`bc2` are the bias corrections precomputed host-side, gradients arrive already batch-averaged |
 
 ### 11.2 Geometry
 
@@ -465,10 +492,11 @@ returns zero — which is how a trailing output slot is omitted rather than laun
 
 ### 11.3 Bit-identity: the macro and the pragma
 
-The Row4 GEMM family, including the bias-free `gemm_row4` store, shares **one** accumulation macro, `GEMM_ROW4_ACCUMULATE` (`SilkKernels.cs::Source`)
+The Row4 GEMM family, including the bias-free `gemm_row4` store and the #900 backward NT/TN
+variants, shares **one** accumulation macro, `GEMM_ACCUMULATE_CORE` (`SilkKernels.cs::Source`)
 deliberately: the byte-identity claim rests on every variant adding the same f32
 values to the same accumulators in the same order, so the text must not be able to drift between
-them. The store after the macro is the only difference. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
+them. The tile loads before it and the store after it are the only per-variant differences. The inner product is a plain `acc += a * b` — **not** `fma()` — and `#pragma OPENCL FP_CONTRACT
 OFF` (uppercase; the lowercase spelling the spec also admits is not honoured here) keeps the driver
 from fusing it, because that is what ILGPU produces. The gate replays each dot product three ways in
 the same ascending-K order and reports the hit counts: ILGPU matches `mul+add` on 100% of elements
@@ -515,6 +543,19 @@ deliberately **not** in the ILGPU byte-identity list. Its contraction is the sam
 `mul+add` as `gemm_row4_add` with `aRows == 1`, and that equivalence is pinned by
 `SilkGemmGemvAddTests` (bit-identity) plus the `MeasureCpuReference` cell in
 `SilkKernelsGate`.
+
+The #900 backward GEMMs (`gemm_row4_nt`, `gemm_row4_tn`) extend the same claim to the transposed
+operands: they invoke the same `GEMM_ACCUMULATE_CORE` and transpose only the tile **load** (B
+row-major `[N,K]` for NT, A row-major `[K,M]` for TN). The transposed loads are scalar — `vload4`
+needs elements contiguous along the load direction, which a transposed operand destroys — but the
+load is a small fraction of the MAC loop. No operand copies are made and no transposed weight
+buffers exist. Like `gemm_gemv_add` they are Silk-only and deliberately **not** in the ILGPU
+byte-identity list; `SilkBackwardKernelTests` pins each bit-for-bit against a CPU replay of the
+same ascending order. The Adam step (`adam_update`) is the one backward kernel that cannot claim
+byte identity: fp32 divide and sqrt are not guaranteed correctly rounded without the
+`-cl-fp32-correctly-rounded-divide-sqrt` build option, and `BuildProgram` passes no options, so
+`SilkBackwardKernelTests` pins it by device-vs-device bitwise determinism plus a tolerance
+against the host formula instead.
 
 ## 12. The runtime (`SilkRuntime`)
 
@@ -606,15 +647,40 @@ geometry helpers, and are the kernels listed in `KernelNames` under the vision f
 
 As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
 
-## 13c. Conv text classifier (NivaraClassifier sample)
+## 13c. Text classifiers (NivaraClassifier sample)
 
-`GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) trains the `ConvTextClassifierModel` (three Conv1d branches k=3/5/7 → concat → FC1 → ReLU → FC2) end to end on the device:
+`GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) trains the
+`ConvTextClassifierModel` (three Conv1d branches k=3/5/7 → concat → FC1 → ReLU → FC2) end to end
+on the device (#900):
 
 - **Forward** is fully on-device: three `Conv2d` (H=1 spelling of conv1d) launches into branch-major subviews of one `convOutBuf`, a single in-place `Relu`, then `GemmEpilogue` (branch 0 seeds FC1 with bias) + two `GemmAdd` (branches 1–2 accumulate into the same `hBuf`) + one `Relu`, and a final `GemmEpilogue` for FC2. No concat copy and no transpose: FC1 is three accumulated GEMMs over branch-major activation blocks.
-- **Backward** runs on the host (softmax → FC2 → FC1 → per-branch conv with ReLU masks → embedding scatter), with gradients averaged over the batch to match `CrossEntropyLoss`'s `Reduction.Mean`.
-- **Optimizer** is an in-class Adam (not AutoDiff's `Adam<T>`), preserving the sample's learning-rate recipe; weights transfer to/from the CPU `Module` layout through `SetWeightsCpuLayout`/`ExportCpuLayout`.
+- **Backward** is device-side too: the host computes the batch-averaged softmax dZ from the
+  downloaded logits (`SilkLoss.InputGradient`, the `1/n` of `CrossEntropyLoss`'s mean reduction
+  folded in) and uploads it; then per branch `gemm_row4_tn` writes the FC1 weight-block gradient
+  into a writable row block of `dFc1`, `gemm_row4_nt` maps dH back onto the branch, `relu_backward`
+  masks it, and `conv2d_backward_weight`/`conv2d_backward_bias` close the branch; `fill` +
+  three accumulating `conv2d_backward_input` launches produce dX; the host scatters dX into
+  `gradEmb` (the forward is a plain embedding lookup, so no pooling factor applies).
+- **Optimizer** is the fused `adam_update` kernel for every device parameter (per-tensor moment
+  buffers) and the host Adam step (`SilkLoss.AdamStep`) for the host-resident embedding — a
+  vocab-sized gradient upload per batch is not worth the round trip; a device-resident table with
+  a CAS-scatter backward is a measured follow-up. Device buffers are authoritative during
+  training; host mirrors refresh when `Train` returns, so the trained model still serializes
+  through the normal `ModelSerializer`/`ConvTextClassifierModel` path via `ExportCpuLayout`.
+  `Dropout` is disabled on the GPU path (`Eval`) to match the deterministic AutoDiff reference
+  used for parity.
 
-Parity is pinned in `tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` (forward logits within 2e-4, gradients within 5e-4 against a reverse-mode AutoDiff reference on identical weights).
+`GpuTextLinearClassifier` (`src/Nivara.Extensions/Silk/GpuTextLinearClassifier.cs`) is the same
+shape without convolutions: gather + mean pool on the host (dX scatter then divides by
+`max(1, seqLen)`), `gemm_row4_relu`/`gemm_row4_bias` forward on the device, and the identical
+backward chain (`gemm_row4_tn` → `gemm_row4_nt` → `relu_backward` → `col_sum`) with the fused
+Adam step.
+
+Parity is pinned in `tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` and
+`tests/Nivara.Tests/Gpu/GpuTextLinearClassifierTests.cs`: forward logits within 2e-4 and batch
+gradients within 5e-4 against reverse-mode AutoDiff on identical weights (the device GEMMs
+reassociate, so these are tolerance bounds, not bit-identity claims), a loss-decreasing smoke run
+per classifier, and the CPU-layout round trip exact.
 
 - **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
@@ -664,7 +730,9 @@ Parity is pinned in `tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` (forw
    `SilkBertEncoderRunner`. A model that is not BERT-shaped adds a runner, the way ModernBERT and
    Laya did. Do not fold those into the BERT runner.
 2. Add a kernel only if the operation is not already in `KernelNames`; reuse
-   `GEMM_ROW4_ACCUMULATE` for any new GEMM so the byte-identity claim keeps holding.
+   `GEMM_ACCUMULATE_CORE` for any new f32 GEMM — through the forward macro, or through the
+   NT/TN backward variants when an operand is stored transposed — so the byte-identity claim
+   keeps holding.
 3. Keep the accumulation order identical to the CPU reference of the same shape — the gate compares
    them directly.
 4. Keep `KernelNames` in sync with the translation unit (add the name constant).

@@ -695,4 +695,146 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemvGroupSize]);
     }
 
+    /// <summary><c>C[M,N] = A[M,K]·Bᵀ</c> where B is stored row-major <c>[N,K]</c> — the
+    /// transposed-B backward GEMM (<c>dH = dZ·W2ᵀ</c>, <c>dPooled = dH·W1ᵀ</c>).</summary>
+    public static void GemmNt(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmNt, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmNt, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmNt, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmNt, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmNt, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmNt, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmNt, aRows, bCols);
+    }
+
+    /// <summary><c>C[M,N] = Aᵀ·B</c> where A is stored row-major <c>[K,M]</c> — the transposed-A
+    /// backward GEMM (<c>dW2 = hᵀ·dZ</c>, <c>dW1 = pooledᵀ·dH</c>).</summary>
+    public static void GemmTn(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmTn, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmTn, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmTn, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmTn, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmTn, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmTn, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmTn, aRows, bCols);
+    }
+
+    public static void ReluBackward(SilkRuntime runtime, nint d, nint act, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.ReluBackward, 0, d);
+        runtime.SetBuffer(SilkKernels.ReluBackward, 1, act);
+        runtime.SetBuffer(SilkKernels.ReluBackward, 2, y);
+        runtime.SetUInt32(SilkKernels.ReluBackward, 3, (uint)n);
+        runtime.Run(SilkKernels.ReluBackward, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    /// <summary><c>y[j] = scale·Σ_i x[i·cols + j]</c> — FC bias gradients over a batch.</summary>
+    public static void ColSum(SilkRuntime runtime, nint x, nint y, int rows, int cols, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.ColSum, 0, x);
+        runtime.SetBuffer(SilkKernels.ColSum, 1, y);
+        runtime.SetUInt32(SilkKernels.ColSum, 2, (uint)rows);
+        runtime.SetUInt32(SilkKernels.ColSum, 3, (uint)cols);
+        runtime.SetFloat32(SilkKernels.ColSum, 4, scale);
+        runtime.Run(SilkKernels.ColSum, [(nuint)SilkKernels.LinearGlobal(cols)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void Fill(SilkRuntime runtime, nint y, float value, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Fill, 0, y);
+        runtime.SetFloat32(SilkKernels.Fill, 1, value);
+        runtime.SetUInt32(SilkKernels.Fill, 2, (uint)n);
+        runtime.Run(SilkKernels.Fill, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    /// <summary>Convolution weight gradient. Same NCHW/stride/pad/groups geometry and weight
+    /// layout as <see cref="Conv2d"/>; <c>padBottom</c>/<c>padRight</c> do not enter the index
+    /// math (they only shape <c>oH</c>/<c>oW</c>), so they are not kernel arguments.</summary>
+    public static void Conv2dBackwardWeight(
+        SilkRuntime runtime, nint dA, nint input, nint dW,
+        int N, int C, int H, int W, int outC, int kH, int kW,
+        int strideH, int strideW, int padTop, int padLeft, int groups, int oH, int oW)
+    {
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardWeight, 0, dA);
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardWeight, 1, input);
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardWeight, 2, dW);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 3, (uint)N);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 4, (uint)C);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 5, (uint)H);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 6, (uint)W);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 7, (uint)outC);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 8, (uint)kH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 9, (uint)kW);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 10, (uint)strideH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 11, (uint)strideW);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 12, (uint)padTop);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 13, (uint)padLeft);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 14, (uint)groups);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 15, (uint)oH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardWeight, 16, (uint)oW);
+        int total = outC * (C / groups) * kH * kW;
+        runtime.Run(SilkKernels.Conv2dBackwardWeight, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    /// <summary>Convolution input gradient. <b>Accumulates</b> into <c>dX</c>: zero it first
+    /// (<see cref="Fill"/>) when the accumulated total should start from zero — the text CNN
+    /// launches it once per branch over the same <c>dX</c>.</summary>
+    public static void Conv2dBackwardInput(
+        SilkRuntime runtime, nint dA, nint weight, nint dX,
+        int N, int C, int H, int W, int outC, int kH, int kW,
+        int strideH, int strideW, int padTop, int padLeft, int groups, int oH, int oW)
+    {
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardInput, 0, dA);
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardInput, 1, weight);
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardInput, 2, dX);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 3, (uint)N);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 4, (uint)C);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 5, (uint)H);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 6, (uint)W);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 7, (uint)outC);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 8, (uint)kH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 9, (uint)kW);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 10, (uint)strideH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 11, (uint)strideW);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 12, (uint)padTop);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 13, (uint)padLeft);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 14, (uint)groups);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 15, (uint)oH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardInput, 16, (uint)oW);
+        int total = N * C * H * W;
+        runtime.Run(SilkKernels.Conv2dBackwardInput, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void Conv2dBackwardBias(SilkRuntime runtime, nint dA, nint db, int N, int outC, int oH, int oW)
+    {
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardBias, 0, dA);
+        runtime.SetBuffer(SilkKernels.Conv2dBackwardBias, 1, db);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardBias, 2, (uint)N);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardBias, 3, (uint)outC);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardBias, 4, (uint)oH);
+        runtime.SetUInt32(SilkKernels.Conv2dBackwardBias, 5, (uint)oW);
+        runtime.Run(SilkKernels.Conv2dBackwardBias, [(nuint)SilkKernels.LinearGlobal(outC)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    /// <summary>Fused Adam step over <paramref name="count"/> elements; gradients are already
+    /// batch-averaged and <paramref name="biasCorrection1"/>/<paramref name="biasCorrection2"/>
+    /// are <c>1-β^t</c> for the shared step <c>t</c>.</summary>
+    public static void AdamUpdate(
+        SilkRuntime runtime, nint weights, nint gradients, nint firstMoment, nint secondMoment,
+        float learningRate, float biasCorrection1, float biasCorrection2, float epsilon, int count)
+    {
+        runtime.SetBuffer(SilkKernels.AdamUpdate, 0, weights);
+        runtime.SetBuffer(SilkKernels.AdamUpdate, 1, gradients);
+        runtime.SetBuffer(SilkKernels.AdamUpdate, 2, firstMoment);
+        runtime.SetBuffer(SilkKernels.AdamUpdate, 3, secondMoment);
+        runtime.SetFloat32(SilkKernels.AdamUpdate, 4, learningRate);
+        runtime.SetFloat32(SilkKernels.AdamUpdate, 5, biasCorrection1);
+        runtime.SetFloat32(SilkKernels.AdamUpdate, 6, biasCorrection2);
+        runtime.SetFloat32(SilkKernels.AdamUpdate, 7, epsilon);
+        runtime.SetUInt32(SilkKernels.AdamUpdate, 8, (uint)count);
+        runtime.Run(SilkKernels.AdamUpdate, [(nuint)SilkKernels.LinearGlobal(count)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
 }

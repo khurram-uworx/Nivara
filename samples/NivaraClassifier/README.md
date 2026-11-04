@@ -65,7 +65,7 @@ dotnet run --project samples/NivaraClassifier -- --command onnx-compare --load s
 | `--lr <float>` | 0.001 | Learning rate |
 | `--seed <int>` | 42 | RNG seed |
 | `--mode <linear\|conv>` | `linear` | Model: `linear` = Embedding → MeanPool → MLP, `conv` = Embedding → Conv1d (kernels 3,5,7) → Concat → MLP |
-| `--silk` | - | Silk/OpenCL path: linear training + prediction; conv prediction (conv training uses a host companion) |
+| `--silk` | - | Silk/OpenCL path: linear and conv training (device backward + fused Adam) + prediction; falls back to the CPU path when no OpenCL device is available |
 | `--help`, `-h` | — | Show CLI help |
 
 ## Modes of use

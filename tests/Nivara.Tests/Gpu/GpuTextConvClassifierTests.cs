@@ -1,7 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Silk;
 using NUnit.Framework;
@@ -10,8 +9,9 @@ namespace Nivara.Tests.Gpu;
 
 /// <summary>
 /// Pins the device forward (#901 groundwork) of <see cref="GpuTextConvClassifier"/> against the
-/// AutoDiff reference (Embedding -> Conv1d branches -> concat -> FC1 -> ReLU -> FC2) on identical
-/// weights, and pins the host backward against a reverse-mode autograd pass on the same batch.
+/// real CPU model (<c>ConvTextClassifierModel&lt;float&gt;</c>, Dropout identity in Eval) on
+/// identical weights, and pins the device backward (#900) against a reverse-mode autograd pass on
+/// the same batch.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,7 +44,7 @@ public sealed class GpuTextConvClassifierTests
         int batch = 4;
         int[] tokens = Tokens(batch, 11);
 
-        var (logits, _, _) = gpu.ForwardBatch(tokens, batch, collectBackwardState: false);
+        var logits = gpu.ForwardBatch(tokens, batch);
         var logitsRef = ForwardReference(reference, tokens, batch);
 
         float worst = 0f;
@@ -61,12 +61,14 @@ public sealed class GpuTextConvClassifierTests
         int[] tokens = Tokens(batch, 17);
         int[] labels = Labels(batch, 19);
 
-        var (logits, _, _) = gpu.ForwardBatch(tokens, batch, collectBackwardState: true);
-        gpu.BackwardAndSetGradients(logits, tokens, labels, batch);
+        var logits = gpu.ForwardBatch(tokens, batch);
+        gpu.Backward(logits, tokens, labels, batch);
+        var (devC1w, devC1b, devC2w, devC2b, devC3w, devC3b, devFc1w, devFc1b, devFc2w, devFc2b) =
+            gpu.DownloadGradients();
 
         var lossFn = new CrossEntropyLoss<float>();
         float lossRef;
-        float[] gradEmb, gradC1w, gradC1b, gradC2w, gradC2b, gradC3w, gradC3b, gradFc1wCpu, gradFc1b, gradFc2wCpu, gradFc2b, rawGradFc1w, rawGradFc2w;
+        float[] gradEmb, gradC1w, gradC1b, gradC2w, gradC2b, gradC3w, gradC3b, refFc1wCpu, refFc1b, refFc2wCpu, refFc2b;
         using (var scope = GradientUtils.Grad())
         {
             var data = new float[tokens.Length];
@@ -77,39 +79,43 @@ public sealed class GpuTextConvClassifierTests
             lossTensor.Backward();
 
             var ps = reference.GetParameters().Values.ToArray();
-            rawGradFc1w = GradOf(ps[7]); // CPU layout [out, in] = [Hidden, convHidden]
-            rawGradFc2w = GradOf(ps[9]); // CPU layout [out, in] = [2, Hidden]
-            (gradEmb, gradC1w, gradC1b, gradC2w, gradC2b, gradC3w, gradC3b, rawGradFc1w, gradFc1b, rawGradFc2w, gradFc2b) =
-                (GradOf(ps[0]), GradOf(ps[1]), GradOf(ps[2]), GradOf(ps[3]), GradOf(ps[4]), GradOf(ps[5]),
-                 GradOf(ps[6]), GradOf(ps[7]), GradOf(ps[8]), GradOf(ps[9]), GradOf(ps[10]));
-
-            // Transpose device FC grads (GPU [in, out]) into CPU layout ([out, in]) for comparison.
-            int convHidden = 64 * 3 * SeqLen;
-            gradFc1wCpu = new float[Hidden * convHidden];
-            var devFc1 = gpu.gradFc1.AsSpan(0, Hidden * convHidden).ToArray();
-            for (int j = 0; j < convHidden; j++)
-                for (int h = 0; h < Hidden; h++)
-                    gradFc1wCpu[h * convHidden + j] = devFc1[j * Hidden + h];
-
-            gradFc2wCpu = new float[2 * Hidden];
-            var devFc2 = gpu.gradFc2.AsSpan(0, 2 * Hidden).ToArray();
-            for (int h = 0; h < Hidden; h++)
-                for (int c = 0; c < 2; c++)
-                    gradFc2wCpu[c * Hidden + h] = devFc2[h * 2 + c];
+            refFc1wCpu = GradOf(ps[7]); // CPU layout [out, in] = [Hidden, convHidden]
+            refFc2wCpu = GradOf(ps[9]); // CPU layout [out, in] = [2, Hidden]
+            gradEmb = GradOf(ps[0]);
+            gradC1w = GradOf(ps[1]);
+            gradC1b = GradOf(ps[2]);
+            gradC2w = GradOf(ps[3]);
+            gradC2b = GradOf(ps[4]);
+            gradC3w = GradOf(ps[5]);
+            gradC3b = GradOf(ps[6]);
+            refFc1b = GradOf(ps[8]);
+            refFc2b = GradOf(ps[10]);
         }
+
+        // Device FC weight grads arrive in the GPU [in, out] layout; transpose into the CPU
+        // [out, in] layout for comparison.
+        int convHidden = 64 * 3 * SeqLen;
+        var devFc1wCpu = new float[Hidden * convHidden];
+        for (int j = 0; j < convHidden; j++)
+            for (int h = 0; h < Hidden; h++)
+                devFc1wCpu[h * convHidden + j] = devFc1w[j * Hidden + h];
+        var devFc2wCpu = new float[2 * Hidden];
+        for (int h = 0; h < Hidden; h++)
+            for (int c = 0; c < 2; c++)
+                devFc2wCpu[c * Hidden + h] = devFc2w[h * 2 + c];
 
         Assert.That(lossRef, Is.LessThan(10f), $"unexpected loss {lossRef}");
         AssertGrad("embedding", gpu.gradEmb, gradEmb);
-        AssertGrad("conv1W", gpu.gradConv.AsSpan(0, gradC1w.Length).ToArray(), gradC1w);
-        AssertGrad("conv1B", gpu.gradConv.AsSpan(gradC1w.Length, gradC1b.Length).ToArray(), gradC1b);
-        AssertGrad("conv2W", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length, gradC2w.Length).ToArray(), gradC2w);
-        AssertGrad("conv2B", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length + gradC2w.Length, gradC2b.Length).ToArray(), gradC2b);
-        AssertGrad("conv3W", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length + gradC2w.Length + gradC2b.Length, gradC3w.Length).ToArray(), gradC3w);
-        AssertGrad("conv3B", gpu.gradConv.AsSpan(gradC1w.Length + gradC1b.Length + gradC2w.Length + gradC2b.Length + gradC3w.Length, gradC3b.Length).ToArray(), gradC3b);
-        AssertGrad("fc1W", gradFc1wCpu, rawGradFc1w);
-        AssertGrad("fc1B", gpu.gradFc1.AsSpan(Hidden * (64 * 3 * SeqLen), Hidden).ToArray(), gradFc1b);
-        AssertGrad("fc2W", gradFc2wCpu, rawGradFc2w);
-        AssertGrad("fc2B", gpu.gradFc2.AsSpan(2 * Hidden, 2).ToArray(), gradFc2b);
+        AssertGrad("conv1W", devC1w, gradC1w);
+        AssertGrad("conv1B", devC1b, gradC1b);
+        AssertGrad("conv2W", devC2w, gradC2w);
+        AssertGrad("conv2B", devC2b, gradC2b);
+        AssertGrad("conv3W", devC3w, gradC3w);
+        AssertGrad("conv3B", devC3b, gradC3b);
+        AssertGrad("fc1W", devFc1wCpu, refFc1wCpu);
+        AssertGrad("fc1B", devFc1b, refFc1b);
+        AssertGrad("fc2W", devFc2wCpu, refFc2wCpu);
+        AssertGrad("fc2B", devFc2b, refFc2b);
     }
 
     [Test]
@@ -128,6 +134,67 @@ public sealed class GpuTextConvClassifierTests
         Assert.That(round.Fc2W.Length, Is.EqualTo(2 * Hidden));
     }
 
+    [Test]
+    public void Train_LossDecreases_OnSeparableData()
+    {
+        using var gpu = DeviceGated(29, out _);
+        const int samples = 48;
+        var rng = new Random(31);
+        var tokens = new int[samples * SeqLen];
+        var labels = new int[samples];
+        for (int i = 0; i < samples; i++)
+        {
+            labels[i] = i % 2;
+            tokens[i * SeqLen] = labels[i] == 0 ? 2 : 5;
+            for (int s = 1; s < SeqLen; s++) tokens[i * SeqLen + s] = rng.Next(1, Vocab);
+        }
+
+        var epochs = gpu.Train(tokens, labels, batchSize: 8, seqLen: SeqLen, epochs: 6, learningRate: 0.05f, seed: 37);
+
+        Assert.That(epochs.Count, Is.EqualTo(6));
+        for (int i = 0; i < epochs.Count; i++)
+        {
+            Assert.That(epochs[i].Epoch, Is.EqualTo(i));
+            Assert.That(float.IsFinite(epochs[i].Loss), Is.True, $"epoch {i} loss not finite");
+        }
+        Assert.That(epochs[^1].Loss, Is.LessThan(0.7f * epochs[0].Loss),
+            $"loss did not fall: {epochs[0].Loss} -> {epochs[^1].Loss}");
+
+        // The host mirrors must reflect the trained device weights after Train returns.
+        var round = gpu.ExportCpuLayout();
+        foreach (var weights in new[] { round.Embedding, round.Conv1W, round.Conv1B, round.Conv2W,
+            round.Conv2B, round.Conv3W, round.Conv3B, round.Fc1W, round.Fc1B, round.Fc2W, round.Fc2B })
+            foreach (float w in weights)
+                Assert.That(float.IsFinite(w), Is.True, "host mirrors must stay finite after Train");
+
+        // Trained weights must classify the training signal correctly.
+        var probeTokens = new[] { 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        Assert.That(gpu.Predict(probeTokens, SeqLen)[0], Is.EqualTo(0));
+        var probeTokens2 = new[] { 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+        Assert.That(gpu.Predict(probeTokens2, SeqLen)[0], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Members_AfterDispose_ThrowObjectDisposed()
+    {
+        var gpu = DeviceGated(41, out _);
+        gpu.Dispose();
+        gpu.Dispose(); // idempotent
+
+        float[] emb = new float[Vocab * Embed];
+        Assert.Throws<ObjectDisposedException>(() => gpu.Forward(Tokens(2, 3), 2));
+        Assert.Throws<ObjectDisposedException>(() => gpu.Predict(Tokens(2, 3), SeqLen));
+        Assert.Throws<ObjectDisposedException>(() => gpu.ExportEmbedding());
+        Assert.Throws<ObjectDisposedException>(() => gpu.ExportConv1Weight());
+        Assert.Throws<ObjectDisposedException>(() => gpu.ExportFc1Weight());
+        Assert.Throws<ObjectDisposedException>(() => gpu.SetWeights(emb,
+            new float[64 * Embed * 3], new float[64], new float[64 * Embed * 5], new float[64],
+            new float[64 * Embed * 7], new float[64], new float[Hidden * (64 * 3 * SeqLen)],
+            new float[Hidden], new float[Hidden * 2], new float[2]));
+        Assert.Throws<ObjectDisposedException>(() =>
+            gpu.Train(new int[2 * SeqLen], new int[2], 2, SeqLen, 1, 0.1f, 1));
+    }
+
     static void AssertGrad(string name, float[] actual, float[] expected)
     {
         Assert.That(actual.Length, Is.EqualTo(expected.Length), name);
@@ -137,7 +204,7 @@ public sealed class GpuTextConvClassifierTests
         Assert.That(worst, Is.LessThan(GradEps), $"{name}: worst gradient diff {worst}");
     }
 
-    static GpuTextConvClassifier DeviceGated(int seed, out ReferenceModel reference)
+    static GpuTextConvClassifier DeviceGated(int seed, out ConvTextClassifierModel<float> reference)
     {
         GpuTextConvClassifier gpu;
         try
@@ -149,13 +216,56 @@ public sealed class GpuTextConvClassifierTests
             Assert.Ignore("No OpenCL GPU available; skipping GpuTextConvClassifier verification.");
             throw;
         }
-        reference = new ReferenceModel(seed);
-        gpu.SetWeightsCpuLayout(
-            Vocab, Embed, SeqLen,
-            reference.Embedding, reference.Conv1W, reference.Conv1B, reference.Conv2W,
-            reference.Conv2B, reference.Conv3W, reference.Conv3B,
-            reference.Fc1W, reference.Fc1B, reference.Fc2W, reference.Fc2B);
+        reference = new ConvTextClassifierModel<float>(Vocab, Embed, Hidden, 2, SeqLen);
+
+        var rng = new Random(seed + 1);
+        float[] emb = Randoms(Vocab * Embed, rng);
+        float[] c1w = Randoms(64 * Embed * 3, rng);
+        float[] c1b = Randoms(64, rng);
+        float[] c2w = Randoms(64 * Embed * 5, rng);
+        float[] c2b = Randoms(64, rng);
+        float[] c3w = Randoms(64 * Embed * 7, rng);
+        float[] c3b = Randoms(64, rng);
+        int convHidden = 64 * 3 * SeqLen;
+        float[] fc1w = Randoms(Hidden * convHidden, rng);
+        float[] fc1b = Randoms(Hidden, rng);
+        float[] fc2w = Randoms(2 * Hidden, rng);
+        float[] fc2b = Randoms(2, rng);
+
+        SeedReference(reference, emb, c1w, c1b, c2w, c2b, c3w, c3b, fc1w, fc1b, fc2w, fc2b);
+        reference.Eval();
+        gpu.SetWeightsCpuLayout(Vocab, Embed, SeqLen,
+            emb, c1w, c1b, c2w, c2b, c3w, c3b, fc1w, fc1b, fc2w, fc2b);
         return gpu;
+    }
+
+    static float[] Randoms(int count, Random rng)
+    {
+        var values = new float[count];
+        for (int i = 0; i < count; i++) values[i] = (float)(rng.NextDouble() * 0.2 - 0.1);
+        return values;
+    }
+
+    /// <summary>Seeds the reference model's parameters in place with <c>requiresGrad: true</c>;
+    /// its <c>SetWeights</c> would attach non-differentiable tensors. Parameter order matches
+    /// <see cref="ConvTextClassifierModel{T}.SetWeights"/>: embedding, conv1..3 (w, b), fc1, fc2.</summary>
+    static void SeedReference(ConvTextClassifierModel<float> reference,
+        float[] emb, float[] c1w, float[] c1b, float[] c2w, float[] c2b, float[] c3w, float[] c3b,
+        float[] fc1w, float[] fc1b, float[] fc2w, float[] fc2b)
+    {
+        var ps = reference.GetParameters().Values.ToArray();
+        ps[0].Tensor = ReverseGradTensor<float>.FromMatrix(emb, Vocab, Embed, requiresGrad: true);
+        ps[1].Tensor = ReverseGradTensor<float>.FromMatrix(c1w, 64, Embed * 3, requiresGrad: true);
+        ps[2].Tensor = ReverseGradTensor<float>.FromArray(c1b, requiresGrad: true);
+        ps[3].Tensor = ReverseGradTensor<float>.FromMatrix(c2w, 64, Embed * 5, requiresGrad: true);
+        ps[4].Tensor = ReverseGradTensor<float>.FromArray(c2b, requiresGrad: true);
+        ps[5].Tensor = ReverseGradTensor<float>.FromMatrix(c3w, 64, Embed * 7, requiresGrad: true);
+        ps[6].Tensor = ReverseGradTensor<float>.FromArray(c3b, requiresGrad: true);
+        int convHidden = 64 * 3 * SeqLen;
+        ps[7].Tensor = ReverseGradTensor<float>.FromMatrix(fc1w, Hidden, convHidden, requiresGrad: true);
+        ps[8].Tensor = ReverseGradTensor<float>.FromMatrix(fc1b, 1, Hidden, requiresGrad: true);
+        ps[9].Tensor = ReverseGradTensor<float>.FromMatrix(fc2w, 2, Hidden, requiresGrad: true);
+        ps[10].Tensor = ReverseGradTensor<float>.FromMatrix(fc2b, 1, 2, requiresGrad: true);
     }
 
     static float[] GradOf(Nivara.AutoDiff.Nn.Parameter<float> p)
@@ -182,7 +292,7 @@ public sealed class GpuTextConvClassifierTests
         return labels;
     }
 
-    static float[] ForwardReference(ReferenceModel reference, int[] tokens, int batch)
+    static float[] ForwardReference(ConvTextClassifierModel<float> reference, int[] tokens, int batch)
     {
         var data = new float[tokens.Length];
         for (int i = 0; i < tokens.Length; i++) data[i] = tokens[i];
@@ -193,96 +303,4 @@ public sealed class GpuTextConvClassifierTests
         return arr;
     }
 
-    /// <summary>Autograd mirror of the device forward, seeded with the same weights.</summary>
-    sealed class ReferenceModel : Module<float>
-    {
-        readonly Embedding<float> embedding;
-        readonly Conv1d<float> conv1;
-        readonly Conv1d<float> conv2;
-        readonly Conv1d<float> conv3;
-        readonly Linear<float> fc1;
-        readonly Linear<float> fc2;
-
-        public ReferenceModel(int seed)
-        {
-            var rng = new Random(seed + 1);
-            embedding = new Embedding<float>(Vocab, Embed);
-            conv1 = new Conv1d<float>(Embed, 64, kernelSize: 3, padding: 1);
-            conv2 = new Conv1d<float>(Embed, 64, kernelSize: 5, padding: 2);
-            conv3 = new Conv1d<float>(Embed, 64, kernelSize: 7, padding: 3);
-            fc1 = new Linear<float>(64 * 3 * SeqLen, Hidden, bias: true);
-            fc2 = new Linear<float>(Hidden, 2, bias: true);
-            RegisterModules(embedding, conv1, conv2, conv3, fc1, fc2);
-
-            SeedWeights(
-                Randoms(Vocab * Embed, rng),
-                Randoms(64 * Embed * 3, rng), Randoms(64, rng),
-                Randoms(64 * Embed * 5, rng), Randoms(64, rng),
-                Randoms(64 * Embed * 7, rng), Randoms(64, rng),
-                Randoms(Hidden * (64 * 3 * SeqLen), rng), Randoms(Hidden, rng),
-                Randoms(2 * Hidden, rng), Randoms(2, rng));
-        }
-
-        public float[] Embedding { get; private set; } = [];
-        public float[] Conv1W { get; private set; } = [];
-        public float[] Conv1B { get; private set; } = [];
-        public float[] Conv2W { get; private set; } = [];
-        public float[] Conv2B { get; private set; } = [];
-        public float[] Conv3W { get; private set; } = [];
-        public float[] Conv3B { get; private set; } = [];
-        public float[] Fc1W { get; private set; } = [];
-        public float[] Fc1B { get; private set; } = [];
-        public float[] Fc2W { get; private set; } = [];
-        public float[] Fc2B { get; private set; } = [];
-
-        void SeedWeights(float[] embedding, float[] conv1W, float[] conv1B, float[] conv2W, float[] conv2B,
-            float[] conv3W, float[] conv3B, float[] fc1W, float[] fc1B, float[] fc2W, float[] fc2B)
-        {
-            Embedding = embedding;
-            Conv1W = conv1W; Conv1B = conv1B;
-            Conv2W = conv2W; Conv2B = conv2B;
-            Conv3W = conv3W; Conv3B = conv3B;
-            Fc1W = fc1W; Fc1B = fc1B;
-            Fc2W = fc2W; Fc2B = fc2B;
-
-            var ps = GetParameters().Values.ToArray();
-            ps[0].Tensor = ReverseGradTensor<float>.FromMatrix(Embedding, Vocab, Embed, requiresGrad: true);
-            ps[1].Tensor = ReverseGradTensor<float>.FromMatrix(Conv1W, 64, Embed * 3, requiresGrad: true);
-            ps[2].Tensor = ReverseGradTensor<float>.FromArray(Conv1B, requiresGrad: true);
-            ps[3].Tensor = ReverseGradTensor<float>.FromMatrix(Conv2W, 64, Embed * 5, requiresGrad: true);
-            ps[4].Tensor = ReverseGradTensor<float>.FromArray(Conv2B, requiresGrad: true);
-            ps[5].Tensor = ReverseGradTensor<float>.FromMatrix(Conv3W, 64, Embed * 7, requiresGrad: true);
-            ps[6].Tensor = ReverseGradTensor<float>.FromArray(Conv3B, requiresGrad: true);
-            int convHidden = 64 * 3 * SeqLen;
-            ps[7].Tensor = ReverseGradTensor<float>.FromMatrix(Fc1W, Hidden, convHidden, requiresGrad: true);
-            ps[8].Tensor = ReverseGradTensor<float>.FromMatrix(Fc1B, 1, Hidden, requiresGrad: true);
-            ps[9].Tensor = ReverseGradTensor<float>.FromMatrix(Fc2W, 2, Hidden, requiresGrad: true);
-            ps[10].Tensor = ReverseGradTensor<float>.FromMatrix(Fc2B, 1, 2, requiresGrad: true);
-        }
-
-        static float[] Randoms(int count, Random rng)
-        {
-            var values = new float[count];
-            for (int i = 0; i < count; i++) values[i] = (float)(rng.NextDouble() * 0.2 - 0.1);
-            return values;
-        }
-
-        public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> input)
-        {
-            var emb = embedding.Forward(input);
-            var ncl = ReverseGradOperations.TransposeAxes(emb, 1, 2);
-            var c1 = ReverseGradOperations.Relu(conv1.Forward(ncl));
-            var c2 = ReverseGradOperations.Relu(conv2.Forward(ncl));
-            var c3 = ReverseGradOperations.Relu(conv3.Forward(ncl));
-            int b = c1.Shape[0];
-            c1.Reshape(b, c1.Shape[1] * c1.Shape[2]);
-            c2.Reshape(b, c2.Shape[1] * c2.Shape[2]);
-            c3.Reshape(b, c3.Shape[1] * c3.Shape[2]);
-            var cat = ReverseGradOperations.Concat([c1, c2, c3], axis: 1);
-            var h = ReverseGradOperations.Relu(fc1.Forward(cat));
-            return fc2.Forward(h);
-        }
-
-        public override string ExportToOnnx(IOnnxExportContext<float> context, string inputName) => inputName;
-    }
 }
