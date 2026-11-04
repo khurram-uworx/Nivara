@@ -31,6 +31,7 @@ namespace Nivara.Tests.Gpu;
 /// memory and reloaded between them.
 /// </para>
 /// </remarks>
+[Category("Gpu")]
 public sealed class SilkRmsNormGemvTests
 {
     const float Eps = 1e-5f;

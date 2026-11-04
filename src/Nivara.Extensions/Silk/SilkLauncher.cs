@@ -837,4 +837,53 @@ internal static class SilkLauncher
         runtime.Run(SilkKernels.AdamUpdate, [(nuint)SilkKernels.LinearGlobal(count)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void EmbeddingGatherPool(SilkRuntime runtime, nint ids, nint table, nint output, int batchSize, int seqLen, int embedDim)
+    {
+        runtime.SetBuffer(SilkKernels.EmbeddingGatherPool, 0, ids);
+        runtime.SetBuffer(SilkKernels.EmbeddingGatherPool, 1, table);
+        runtime.SetBuffer(SilkKernels.EmbeddingGatherPool, 2, output);
+        runtime.SetUInt32(SilkKernels.EmbeddingGatherPool, 3, (uint)batchSize);
+        runtime.SetUInt32(SilkKernels.EmbeddingGatherPool, 4, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.EmbeddingGatherPool, 5, (uint)embedDim);
+        int total = batchSize * embedDim;
+        runtime.Run(SilkKernels.EmbeddingGatherPool, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void EmbeddingGatherInput(SilkRuntime runtime, nint ids, nint table, nint output, int batchSize, int seqLen, int embedDim)
+    {
+        runtime.SetBuffer(SilkKernels.EmbeddingGatherInput, 0, ids);
+        runtime.SetBuffer(SilkKernels.EmbeddingGatherInput, 1, table);
+        runtime.SetBuffer(SilkKernels.EmbeddingGatherInput, 2, output);
+        runtime.SetUInt32(SilkKernels.EmbeddingGatherInput, 3, (uint)batchSize);
+        runtime.SetUInt32(SilkKernels.EmbeddingGatherInput, 4, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.EmbeddingGatherInput, 5, (uint)embedDim);
+        int total = batchSize * embedDim * seqLen;
+        runtime.Run(SilkKernels.EmbeddingGatherInput, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void EmbeddingBackwardPool(SilkRuntime runtime, nint ids, nint dPooled, nint gradEmb, int batchSize, int seqLen, int embedDim, float poolScale)
+    {
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardPool, 0, ids);
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardPool, 1, dPooled);
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardPool, 2, gradEmb);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardPool, 3, (uint)batchSize);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardPool, 4, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardPool, 5, (uint)embedDim);
+        runtime.SetFloat32(SilkKernels.EmbeddingBackwardPool, 6, poolScale);
+        int total = embedDim;
+        runtime.Run(SilkKernels.EmbeddingBackwardPool, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void EmbeddingBackwardInput(SilkRuntime runtime, nint ids, nint dX, nint gradEmb, int batchSize, int seqLen, int embedDim)
+    {
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardInput, 0, ids);
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardInput, 1, dX);
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardInput, 2, gradEmb);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardInput, 3, (uint)batchSize);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardInput, 4, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardInput, 5, (uint)embedDim);
+        int total = embedDim;
+        runtime.Run(SilkKernels.EmbeddingBackwardInput, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
 }

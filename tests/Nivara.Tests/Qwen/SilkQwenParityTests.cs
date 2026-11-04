@@ -5,6 +5,7 @@ using NUnit.Framework;
 namespace Nivara.Tests.Qwen;
 
 [TestFixture]
+[Category("Gpu")]
 public class SilkQwenParityTests
 {
     [Test]

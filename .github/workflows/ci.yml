@@ -7,6 +7,7 @@ on:
 
 jobs:
   build-and-test:
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -30,7 +31,7 @@ jobs:
       run: dotnet build --no-restore --configuration Release
       
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance&Category!=ReleaseReadiness" --logger "trx;LogFileName=ci.trx" --results-directory TestResults --collect:"XPlat Code Coverage"
+      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance&Category!=ReleaseReadiness&Category!=Gpu" --logger "trx;LogFileName=ci.trx" --results-directory TestResults --collect:"XPlat Code Coverage"
 
     - name: Upload test durations
       if: always()

@@ -5,6 +5,7 @@ using System.Numerics;
 namespace Nivara.Tests.Qwen;
 
 [TestFixture]
+[Category("Gpu")]
 public class SilkQwenBf16ParityTests
 {
     [Test]

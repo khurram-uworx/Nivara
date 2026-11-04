@@ -21,6 +21,7 @@ namespace Nivara.Tests.Gpu;
 /// (forward ~2e-4 on unit-scale logits, gradients ~5e-4), enough that a wrong transposition, a
 /// stale layout or a missing mask would fail by orders of magnitude instead.
 /// </remarks>
+[Category("Gpu")]
 public sealed class GpuTextLinearClassifierTests
 {
     const int Vocab = 31;

@@ -659,12 +659,13 @@ on the device (#900):
   folded in) and uploads it; then per branch `gemm_row4_tn` writes the FC1 weight-block gradient
   into a writable row block of `dFc1`, `gemm_row4_nt` maps dH back onto the branch, `relu_backward`
   masks it, and `conv2d_backward_weight`/`conv2d_backward_bias` close the branch; `fill` +
-  three accumulating `conv2d_backward_input` launches produce dX; the host scatters dX into
-  `gradEmb` (the forward is a plain embedding lookup, so no pooling factor applies).
+  three accumulating `conv2d_backward_input` launches produce dX; the device scatter
+  (`embedding_backward_input`) reduces dX into `dEmbBuf` deterministically
+  (the forward is a plain embedding lookup, so no pooling factor applies).
 - **Optimizer** is the fused `adam_update` kernel for every device parameter (per-tensor moment
-  buffers) and the host Adam step (`SilkLoss.AdamStep`) for the host-resident embedding — a
-  vocab-sized gradient upload per batch is not worth the round trip; a device-resident table with
-  a CAS-scatter backward is a measured follow-up. Device buffers are authoritative during
+  buffers), including the device-resident embedding table and its moments. The embedding scatter
+  is a deterministic on-device reduction (`embedding_backward_input`/`embedding_backward_pool`),
+  not an atomic CAS. Device buffers are authoritative during
   training; host mirrors refresh when `Train` returns, so the trained model still serializes
   through the normal `ModelSerializer`/`ConvTextClassifierModel` path via `ExportCpuLayout`.
   `Dropout` is disabled on the GPU path (`Eval`) to match the deterministic AutoDiff reference
@@ -756,3 +757,13 @@ per classifier, and the CPU-layout round trip exact.
 - [OpenCL 1.2 Specification](https://registry.khronos.org/OpenCL/specs/opencl-1.2.pdf)
 - [Khronos OpenCL](https://www.khronos.org/opencl/)
 - Series: [SPIR-V / Level Zero](../tests/Nivara.GpuProbe/SPIRV.md) · [SYCL / oneAPI](../tests/Nivara.GpuProbe/SYCL.md) · [DX12](../tests/Nivara.GpuProbe/DX12.md) · [OpenVINO](../tests/Nivara.GpuProbe/OPENVINO.md) · [ILGPU](ILGPU.md) · [ComputeSharp](../tests/Nivara.GpuProbe/COMPUTESHARP.md) · [Silk.NET OpenCL](SILK.md)
+
+## Running device-dependent tests locally
+
+Device-dependent (OpenCL/Silk) tests are categorized [Category("Gpu")] and are excluded from the main CI filter.
+
+- With an OpenCL GPU available:
+  ``powershell
+  dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "Category=Gpu"
+  ``n- On CI (no GPU) these tests are excluded by Category!=Gpu and skip via Assert.Ignore when run manually.
+

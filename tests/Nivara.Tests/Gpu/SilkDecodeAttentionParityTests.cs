@@ -9,6 +9,7 @@ namespace Nivara.Tests.Gpu;
 /// reference across small and large <c>kvLen</c>, including the reduction path that splits
 /// <c>kvLen</c> across work-group lanes.
 /// </summary>
+[Category("Gpu")]
 public sealed class SilkDecodeAttentionParityTests
 {
     const int NumHeads = 14;

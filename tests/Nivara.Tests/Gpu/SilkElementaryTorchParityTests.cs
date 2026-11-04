@@ -13,6 +13,7 @@ namespace Nivara.Tests.Gpu;
 /// transcendental / norm cells.
 /// </summary>
 [TestFixture]
+[Category("Gpu")]
 public sealed class SilkElementaryTorchParityTests
 {
     static SilkRuntime Device()

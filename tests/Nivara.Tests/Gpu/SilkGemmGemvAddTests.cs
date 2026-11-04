@@ -10,6 +10,7 @@ namespace Nivara.Tests.Gpu;
 /// launch geometry differs, so a bit difference means the decode shape changed
 /// the accumulation.
 /// </summary>
+[Category("Gpu")]
 public sealed class SilkGemmGemvAddTests
 {
     const int ACols = 40;

@@ -7,9 +7,9 @@ namespace Nivara.Silk;
 /// everything downstream — the transposed-operand GEMMs (<c>gemm_row4_tn</c>/<c>gemm_row4_nt</c>),
 /// the ReLU mask, the bias reductions and the fused <c>adam_update</c> step — consumes and produces
 /// device buffers, so FC1/FC2 are device-authoritative during training and the host mirrors are
-/// refreshed when <c>Train</c> returns. The embedding stays host-resident (gather, mean pool and
-/// scatter are host work; a device-resident table with a CAS-scatter backward is a measured
-/// follow-up) and takes its Adam step on the host through <see cref="SilkLoss.AdamStep"/>.
+/// refreshed when <c>Train</c> returns. The embedding is device-resident: gather and mean pool run on the device, the
+/// backward scatter is a deterministic on-device reduction, and the table takes the fused
+/// <c>adam_update</c> step. Host mirrors refresh when <c>Train</c> returns.
 /// </summary>
 public sealed class GpuTextLinearClassifier : IDisposable
 {
@@ -44,11 +44,14 @@ public sealed class GpuTextLinearClassifier : IDisposable
     SilkRuntime.SilkBuffer dW2Buf = SilkRuntime.SilkBuffer.Empty;
     SilkRuntime.SilkBuffer db2Buf = SilkRuntime.SilkBuffer.Empty;
 
-    // Host scratch for the pooling pass, the embedding scatter and the embedding's Adam step.
+    // Device-resident embedding table (moments below) + token-id upload buffer.
+    nint embBuf, embWm, embWv, dEmbBuf;
+    nint tokenIdBuf;
+    int tokenIdCap;
+
+    // Host scratch for the pooled output and the (downloaded) embedding gradient.
     float[] pooled = [];
     internal float[] gradEmb = [];
-    float[] embAdamFirst = [];
-    float[] embAdamSecond = [];
     int[] batchTokens = [];
     int[] batchLabels = [];
 
@@ -85,6 +88,12 @@ public sealed class GpuTextLinearClassifier : IDisposable
         fc2Wv = runtime.Allocate(fc2Weight.Length);
         fc2Bm = runtime.Allocate(fc2Bias.Length);
         fc2Bv = runtime.Allocate(fc2Bias.Length);
+
+        embBuf = runtime.Allocate(embedding.Length);
+        embWm = runtime.Allocate(embedding.Length);
+        embWv = runtime.Allocate(embedding.Length);
+        dEmbBuf = runtime.Allocate(embedding.Length);
+
         ZeroMomentBuffers();
 
         UploadWeights();
@@ -170,7 +179,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
         Array.Copy(fc2Biases, fc2Bias, fc2Bias.Length);
     }
 
-    public float[] ExportEmbedding() { ThrowIfDisposed(); var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
+    public float[] ExportEmbedding() { ThrowIfDisposed(); var emb = runtime.Download(embBuf, embedding.Length); emb.CopyTo(embedding, 0); var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
     public float[] ExportFc1Weight() { ThrowIfDisposed(); var a = new float[fc1Weight.Length]; Array.Copy(fc1Weight, a, a.Length); return a; }
     public float[] ExportFc1Bias() { ThrowIfDisposed(); var a = new float[fc1Bias.Length]; Array.Copy(fc1Bias, a, a.Length); return a; }
     public float[] ExportFc2Weight() { ThrowIfDisposed(); var a = new float[fc2Weight.Length]; Array.Copy(fc2Weight, a, a.Length); return a; }
@@ -195,6 +204,8 @@ public sealed class GpuTextLinearClassifier : IDisposable
     /// <c>Train</c> returns; while training runs the device buffers are authoritative.</summary>
     void RefreshHostMirrors()
     {
+        var emb = runtime.Download(embBuf, embedding.Length);
+        emb.CopyTo(embedding, 0);
         var fc1 = runtime.Download(fc1Buf, fc1Weight.Length);
         fc1.CopyTo(fc1Weight, 0);
         var fc1b = runtime.Download(fc1BiasBuf, fc1Bias.Length);
@@ -210,25 +221,19 @@ public sealed class GpuTextLinearClassifier : IDisposable
         if (tokenIds is null || tokenIds.Length != batchSize * seqLen)
             throw new ArgumentException("Token array size mismatch.", nameof(tokenIds));
 
-        pooled = SilkLoss.Obtain(ref pooled, batchSize * embeddingDim);
-        for (int i = 0; i < batchSize * embeddingDim; i++) pooled[i] = 0f;
-        for (int b = 0; b < batchSize; b++)
-        {
-            for (int s = 0; s < seqLen; s++)
-            {
-                int tid = tokenIds[b * seqLen + s];
-                if (tid < 0 || tid >= vocabSize) throw new ArgumentOutOfRangeException(nameof(tokenIds));
-                for (int e = 0; e < embeddingDim; e++)
-                    pooled[b * embeddingDim + e] += embedding[tid * embeddingDim + e];
-            }
-            for (int e = 0; e < embeddingDim; e++)
-                pooled[b * embeddingDim + e] /= Math.Max(1, seqLen);
-        }
+        if (tokenIds is null || tokenIds.Length != batchSize * seqLen)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokenIds));
+        for (int i = 0; i < tokenIds.Length; i++)
+            if (tokenIds[i] < 0 || tokenIds[i] >= vocabSize) throw new ArgumentOutOfRangeException(nameof(tokenIds));
 
         pooledBuf = runtime.Ensure(pooledBuf, batchSize * embeddingDim);
         hBuf = runtime.Ensure(hBuf, batchSize * hiddenDim);
         logitsBuf = runtime.Ensure(logitsBuf, batchSize * 2);
-        runtime.Upload(pooledBuf.Handle, pooled.AsSpan(0, batchSize * embeddingDim));
+
+        EnsureTokenBuffer(batchSize * seqLen);
+        runtime.Upload(tokenIdBuf, tokenIds.AsSpan());
+
+        SilkLauncher.EmbeddingGatherPool(runtime, tokenIdBuf, embBuf, pooledBuf.Handle, batchSize, seqLen, embeddingDim);
 
         SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmRelu,
             pooledBuf.Handle, fc1Buf, hBuf.Handle, fc1BiasBuf,
@@ -243,8 +248,8 @@ public sealed class GpuTextLinearClassifier : IDisposable
     {
         ThrowIfDisposed();
         ForwardCore(tokenIds, batchSize, seqLen);
-        pooledOut = new float[batchSize * embeddingDim];
-        Array.Copy(pooled, pooledOut, pooledOut.Length);
+        pooledOut = runtime.Download(pooledBuf.Handle, batchSize * embeddingDim);
+        pooled = pooledOut;
         hiddenOut = runtime.Download(hBuf.Handle, batchSize * hiddenDim);
         return runtime.Download(logitsBuf.Handle, batchSize * 2);
     }
@@ -293,8 +298,6 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
         adamStep = 0;
         ZeroMomentBuffers();
-        embAdamFirst = new float[embedding.Length];
-        embAdamSecond = new float[embedding.Length];
 
         var results = new List<SilkTrainEpoch>(epochs);
         int batchesPerEpoch = (sampleCount + batchSize - 1) / batchSize;
@@ -386,19 +389,17 @@ public sealed class GpuTextLinearClassifier : IDisposable
         SilkLauncher.GemmNt(runtime, dHBuf.Handle, fc1Buf, dPooledBuf.Handle,
             aRows: batch, aCols: hiddenDim, bCols: embeddingDim);
 
-        var dPooled = runtime.Download(dPooledBuf.Handle, batch * embeddingDim);
+        EnsureTokenBuffer(batch * seqLen);
+        runtime.Upload(tokenIdBuf, tokens.AsSpan());
+
+        float poolScale = 1f / Math.Max(1, seqLen);
+        SilkLauncher.Fill(runtime, dEmbBuf, 0f, embedding.Length);
+        SilkLauncher.EmbeddingBackwardPool(runtime, tokenIdBuf, dPooledBuf.Handle, dEmbBuf,
+            batch, seqLen, embeddingDim, poolScale);
 
         gradEmb = SilkLoss.Obtain(ref gradEmb, embedding.Length);
-        Array.Clear(gradEmb);
-        float poolScale = 1f / Math.Max(1, seqLen);
-        for (int i = 0; i < batch; i++)
-            for (int s = 0; s < seqLen; s++)
-            {
-                int tidBase = tokens[i * seqLen + s] * embeddingDim;
-                int iBase = i * embeddingDim;
-                for (int e = 0; e < embeddingDim; e++)
-                    gradEmb[tidBase + e] += poolScale * dPooled[iBase + e];
-            }
+        var dEmb = runtime.Download(dEmbBuf, embedding.Length);
+        dEmb.CopyTo(gradEmb, 0);
     }
 
     /// <summary>Applies one Adam step: the fused device kernel to FC1/FC2 (weights and biases) and
@@ -415,7 +416,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
         SilkLauncher.AdamUpdate(runtime, fc2Buf, dW2Buf.Handle, fc2Wm, fc2Wv, learningRate, bc1, bc2, 1e-8f, fc2Weight.Length);
         SilkLauncher.AdamUpdate(runtime, fc2BiasBuf, db2Buf.Handle, fc2Bm, fc2Bv, learningRate, bc1, bc2, 1e-8f, fc2Bias.Length);
 
-        SilkLoss.AdamStep(embedding, embAdamFirst, embAdamSecond, gradEmb, learningRate, bc1, bc2);
+        SilkLauncher.AdamUpdate(runtime, embBuf, dEmbBuf, embWm, embWv, learningRate, bc1, bc2, 1e-8f, embedding.Length);
     }
 
     internal (float[] Fc1W, float[] Fc1B, float[] Fc2W, float[] Fc2B) DownloadGradients()
@@ -430,6 +431,8 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
     void ZeroMomentBuffers()
     {
+        SilkLauncher.Fill(runtime, embWm, 0f, embedding.Length);
+        SilkLauncher.Fill(runtime, embWv, 0f, embedding.Length);
         SilkLauncher.Fill(runtime, fc1Wm, 0f, fc1Weight.Length);
         SilkLauncher.Fill(runtime, fc1Wv, 0f, fc1Weight.Length);
         SilkLauncher.Fill(runtime, fc1Bm, 0f, fc1Bias.Length);
@@ -442,10 +445,19 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
     void UploadWeights()
     {
+        runtime.Upload(embBuf, embedding.AsSpan());
         runtime.Upload(fc1Buf, fc1Weight.AsSpan());
         runtime.Upload(fc1BiasBuf, fc1Bias.AsSpan());
         runtime.Upload(fc2Buf, fc2Weight.AsSpan());
         runtime.Upload(fc2BiasBuf, fc2Bias.AsSpan());
+    }
+
+    void EnsureTokenBuffer(int count)
+    {
+        if (tokenIdBuf != 0 && tokenIdCap >= count) return;
+        if (tokenIdBuf != 0) runtime.Release(tokenIdBuf);
+        tokenIdBuf = runtime.AllocateBytes((ulong)count * sizeof(int));
+        tokenIdCap = count;
     }
 
     public void Dispose()
@@ -463,6 +475,11 @@ public sealed class GpuTextLinearClassifier : IDisposable
         runtime.Release(fc2Wv);
         runtime.Release(fc2Bm);
         runtime.Release(fc2Bv);
+        runtime.Release(embBuf);
+        runtime.Release(embWm);
+        runtime.Release(embWv);
+        runtime.Release(dEmbBuf);
+        if (tokenIdBuf != 0) runtime.Release(tokenIdBuf);
         runtime.Release(pooledBuf.Handle);
         runtime.Release(hBuf.Handle);
         runtime.Release(logitsBuf.Handle);

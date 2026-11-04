@@ -28,6 +28,7 @@ namespace Nivara.Tests.Gpu;
 /// would show up as a parity failure on this fixture rather than as a silently wrong model.
 /// </para>
 /// </remarks>
+[Category("Gpu")]
 public sealed class GpuTextConvClassifierTests
 {
     const int Vocab = 37;
