@@ -81,9 +81,8 @@ public static class RagChunker
         string aclGroup;
         try
         {
-            var rel = Path.GetRelativePath(repoRoot, sourcePath);
-            var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-            aclGroup = parts.Length > 1 ? parts[0].ToLowerInvariant() : "public";
+            var parent = Path.GetFileName(Path.GetDirectoryName(sourcePath));
+            aclGroup = string.IsNullOrEmpty(parent) ? "public" : parent.ToLowerInvariant();
         }
         catch
         {
