@@ -66,6 +66,7 @@ dotnet run --project samples/NivaraClassifier -- --command onnx-compare --load s
 | `--seed <int>` | 42 | RNG seed |
 | `--mode <linear\|conv>` | `linear` | Model: `linear` = Embedding → MeanPool → MLP, `conv` = Embedding → Conv1d (kernels 3,5,7) → Concat → MLP |
 | `--silk` | - | Silk/OpenCL path: linear and conv training (device backward + fused Adam) + prediction; falls back to the CPU path when no OpenCL device is available |
+| `--auto-silk` | on | Auto-select Silk when beneficial (conv: always if device available; linear: only at batch >= 128). Use `--no-auto-silk` to disable. |
 | `--help`, `-h` | — | Show CLI help |
 
 ## Modes of use
@@ -118,6 +119,7 @@ The run also prints an `=== End-to-end (full train + predict all) ===` block: to
 - **`conv` is a different story**: Silk beats CPU on every measured leg from batch 8 upward (forward 0.46x at batch 8, 0.23x at batch 32, 0.24x at batch 128; epoch 0.26x / 0.14x / 0.11x), because the device-side conv + fused Adam work dominates the dispatch cost. Enable Silk for `conv` whenever an OpenCL device is present.
 - **Short-lived processes**: `silk construct` costs ~0.2 s (dominated by the runtime's `BuildProgram`). A process that does a handful of inferences never recovers that; only enable Silk for long-running services or batch jobs.
 - **No OpenCL device**: the runtime constructor throws `InvalidOperationException`; the benchmark and the sample fall back to the CPU path and exit 0.
+- **Auto-silk**: by default (`--auto-silk`, on), the sample auto-selects Silk when the heuristic says it is beneficial: conv mode whenever an OpenCL device is available, linear mode only at batch >= 128. Use `--no-auto-silk` to force CPU unless `--silk` is given.
 
 ## Architecture
 
