@@ -647,15 +647,40 @@ geometry helpers, and are the kernels listed in `KernelNames` under the vision f
 
 As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
 
-## 13c. Conv text classifier (NivaraClassifier sample)
+## 13c. Text classifiers (NivaraClassifier sample)
 
-`GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) trains the `ConvTextClassifierModel` (three Conv1d branches k=3/5/7 → concat → FC1 → ReLU → FC2) end to end on the device:
+`GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) trains the
+`ConvTextClassifierModel` (three Conv1d branches k=3/5/7 → concat → FC1 → ReLU → FC2) end to end
+on the device (#900):
 
 - **Forward** is fully on-device: three `Conv2d` (H=1 spelling of conv1d) launches into branch-major subviews of one `convOutBuf`, a single in-place `Relu`, then `GemmEpilogue` (branch 0 seeds FC1 with bias) + two `GemmAdd` (branches 1–2 accumulate into the same `hBuf`) + one `Relu`, and a final `GemmEpilogue` for FC2. No concat copy and no transpose: FC1 is three accumulated GEMMs over branch-major activation blocks.
-- **Backward** runs on the host (softmax → FC2 → FC1 → per-branch conv with ReLU masks → embedding scatter), with gradients averaged over the batch to match `CrossEntropyLoss`'s `Reduction.Mean`.
-- **Optimizer** is an in-class Adam (not AutoDiff's `Adam<T>`), preserving the sample's learning-rate recipe; weights transfer to/from the CPU `Module` layout through `SetWeightsCpuLayout`/`ExportCpuLayout`.
+- **Backward** is device-side too: the host computes the batch-averaged softmax dZ from the
+  downloaded logits (`SilkLoss.InputGradient`, the `1/n` of `CrossEntropyLoss`'s mean reduction
+  folded in) and uploads it; then per branch `gemm_row4_tn` writes the FC1 weight-block gradient
+  into a writable row block of `dFc1`, `gemm_row4_nt` maps dH back onto the branch, `relu_backward`
+  masks it, and `conv2d_backward_weight`/`conv2d_backward_bias` close the branch; `fill` +
+  three accumulating `conv2d_backward_input` launches produce dX; the host scatters dX into
+  `gradEmb` (the forward is a plain embedding lookup, so no pooling factor applies).
+- **Optimizer** is the fused `adam_update` kernel for every device parameter (per-tensor moment
+  buffers) and the host Adam step (`SilkLoss.AdamStep`) for the host-resident embedding — a
+  vocab-sized gradient upload per batch is not worth the round trip; a device-resident table with
+  a CAS-scatter backward is a measured follow-up. Device buffers are authoritative during
+  training; host mirrors refresh when `Train` returns, so the trained model still serializes
+  through the normal `ModelSerializer`/`ConvTextClassifierModel` path via `ExportCpuLayout`.
+  `Dropout` is disabled on the GPU path (`Eval`) to match the deterministic AutoDiff reference
+  used for parity.
 
-Parity is pinned in `tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` (forward logits within 2e-4, gradients within 5e-4 against a reverse-mode AutoDiff reference on identical weights).
+`GpuTextLinearClassifier` (`src/Nivara.Extensions/Silk/GpuTextLinearClassifier.cs`) is the same
+shape without convolutions: gather + mean pool on the host (dX scatter then divides by
+`max(1, seqLen)`), `gemm_row4_relu`/`gemm_row4_bias` forward on the device, and the identical
+backward chain (`gemm_row4_tn` → `gemm_row4_nt` → `relu_backward` → `col_sum`) with the fused
+Adam step.
+
+Parity is pinned in `tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` and
+`tests/Nivara.Tests/Gpu/GpuTextLinearClassifierTests.cs`: forward logits within 2e-4 and batch
+gradients within 5e-4 against reverse-mode AutoDiff on identical weights (the device GEMMs
+reassociate, so these are tolerance bounds, not bit-identity claims), a loss-decreasing smoke run
+per classifier, and the CPU-layout round trip exact.
 
 - **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
