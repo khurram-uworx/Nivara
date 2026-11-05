@@ -7,6 +7,8 @@ namespace NivaraChat.Modes;
 /// <summary>
 /// --embed: embedding search — index documents in-memory and retrieve the most relevant ones
 /// for a query via IEmbeddingGenerator + TensorPrimitives cosine similarity.
+/// Deliberately the primitive path: parallel arrays, hand-written cosine loop, no labels/nulls/ACL/round-trip/cache.
+/// See the embedding convention doc (EMBEDDINGS.md) and --rag for the convention version.
 /// </summary>
 public static class EmbeddingMode
 {

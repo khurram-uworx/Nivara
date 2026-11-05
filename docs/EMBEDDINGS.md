@@ -159,6 +159,64 @@ var top = scores.TopKDescending(1);
 Console.WriteLine($"{top[0].Label}: {top[0].Score:F4}");
 ```
 
+## Worked contrast: the primitive path and the convention path
+
+NivaraChat carries both shapes deliberately, and reading them side by side is the
+point of the two modes.
+
+| | `--embed` (`EmbeddingMode.cs::Run()`) | `--rag` (`RagMode.cs::Run(ModeContext)`) |
+| --- | --- | --- |
+| Row identity | array index (`0`, `1`, …) | `ChunkId` label column, returned by `TopKDescending` |
+| Storage | two parallel arrays (`string[]` documents + `GeneratedEmbeddings<Embedding<float>>`) | one `NivaraFrame`: metadata columns + `Embedding` |
+| Scoring | per-row `TensorPrimitives.CosineSimilarity` loop | `RowCosineSimilarity("Embedding", query, labels: …)` |
+| Ranking | `OrderByDescending(…).Take(4)` | `TopKDescending(ctx.TopK)` (nulls last, excluded) |
+| Missing embedding | not representable — a null would throw while reading the vector | null row → all-null vector → null score, excluded |
+| Row selection / ACL | none; would need parallel rebuilds | `FilterByMask` before scoring (`--acl-group`) |
+| Round-trip | none | `--roundtrip`: `ToEmbeddingMatrix` → `ToEmbeddingFrame` → `ToGeneratedEmbeddings` |
+| Persistence | re-embeds on every start | `RagIndexCache.cs::Save()` writes the dimension frame to Parquet; `RagIndexCache.cs::ToEmbeddings()` rebuilds the column |
+| Backend | MiniLM CPU only | CPU or Silk (`--silk`), same retrieval |
+| Top-K | fixed at 4 | `--top-k` |
+
+The primitive loop is this, and it is the whole point of the mode:
+
+<!-- gate
+locals: float[] query = [1f, 0f, 0f]; Microsoft.Extensions.AI.GeneratedEmbeddings<Microsoft.Extensions.AI.Embedding<float>> vectors = new();
+-->
+```csharp
+using Microsoft.Extensions.AI;
+
+var scores = new float[vectors.Count];
+for (var i = 0; i < scores.Length; i++)
+    scores[i] = TensorPrimitives.CosineSimilarity(query, vectors[i].Vector.Span);
+
+var ranked = scores
+    .Select((score, index) => (score, index))
+    .OrderByDescending(entry => entry.score)
+    .Take(4)
+    .ToList();
+```
+
+`--embed` is deliberately not migrated to the convention: keeping it as the
+before-state is what makes the cost visible, and `--rag` is the same problem
+solved the convention way. The two files are meant to be read side by side.
+Issue #919 originally proposed migrating `--embed`; the decision was to keep it
+as the contrast and let `--rag` carry the convention.
+
+### What the convention does not remove
+
+- **Label → row is still a lookup.** `TopKDescending` returns the stringified label;
+  `RagMode` maps it back through its chunk list, because the frame has no
+  lookup-by-key. Alignment is guaranteed for the columns the frame holds, not for
+  caller-side bookkeeping.
+- **The wrapper converts on every call.** `RowCosineSimilarity("Embedding", …)` builds
+  `ToEmbeddingMatrix` each time. For many queries against one corpus, convert once
+  and call the core `NivaraFrame.RowCosineSimilarity` kernel (as the first example
+  in this document does).
+- **No ANN.** Retrieval is an exact row scan followed by `TopKDescending`.
+
+The behaviour above is pinned by
+`tests/Nivara.Tests/AI/NivaraEmbeddingExtensionsTests.cs::EndToEnd_GenerateFilterScoreRetrieve()`.
+
 ## What this convention is not
 
 - Not a column kind. There is no `NivaraColumn<Embedding<float>>`; the convention
@@ -169,8 +227,11 @@ Console.WriteLine($"{top[0].Label}: {top[0].Score:F4}");
   `TensorPrimitives` over a materialised row-major buffer.
 - Not a vector index. There is no ANN structure; retrieval is an exact scan
   followed by `TopKDescending`.
-- Not a persistence format. Embeddings round-trip through the existing CSV,
-  JSON, Arrow and Parquet adapters as a column, with their null mask.
+- Not a persistence format. A `float[]` column cannot be written by the Arrow or
+  Parquet adapters (`UnsupportedTypeException`), and CSV/JSON are read sources.
+  Persist the dimension frame instead: `ToEmbeddingMatrix` before writing,
+  `ToEmbeddingFrame` after reading, which is what `RagIndexCache` does. A null
+  row survives as all-null dimension cells and comes back as a null embedding.
 
 The full surface lives in `src/Nivara.Extensions/AI/NivaraEmbeddingExtensions.cs`.
 The MEAI generator it builds on is

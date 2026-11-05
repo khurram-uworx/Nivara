@@ -190,10 +190,12 @@ Tested examples:
 The validator model was trained on `"original || response"` format for consistency checking. High scores indicate the response is consistent with the query. Max 3 iterations — if all fail, the last attempt is returned with a notice.
 
 ### Embedding search (`--embed`)
+**This mode is deliberately the primitive path.** It keeps the 8 documents and their vectors in two parallel arrays and ranks them with a hand-written `TensorPrimitives.CosineSimilarity` loop (`OrderByDescending(...).Take(4)`). There are no labels, no null rows, no ACL filter, no round-trip and no cache, and the top-K is fixed at 4. It is the "before" state for the embedding convention documented in [the embedding convention](../../docs/EMBEDDINGS.md): compare `EmbeddingMode.cs` with `RagMode.cs` side by side. Issue #919 originally proposed migrating this mode to the convention; the decision was to keep it as the friction baseline so the cost stays visible, and let `--rag` carry the convention.
+
 Indexes 8 knowledge documents using `IEmbeddingGenerator` backed by a local MiniLM transformer, then runs an interactive REPL. Type a query and the system retrieves the top-4 most relevant documents ranked by cosine similarity. This demonstrates the retrieval step for RAG (Retrieval-Augmented Generation) — in a full pipeline, retrieved context would be injected into the LLM prompt via `TextSearchProvider`. Uses `NivaraEmbeddingGenerator<string>` from `Nivara.Extensions`, the same interface as OpenAI/Ollama embedding providers.
 
 ### RAG pipeline (`--rag`)
-Full Retrieval-Augmented Generation pipeline. Loads real Nivara documentation (markdown files from `docs/` + `README.md`), chunks them into paragraphs, indexes via `InMemoryVectorStore` with auto-embedding from the local MiniLM model, then runs an interactive REPL. User questions are matched against stored chunks via cosine similarity, top-K chunks are injected into a manually constructed prompt, and the LLM generates a grounded answer. Shows retrieval time and LLM time separately. Requires `--ollama`.
+Full Retrieval-Augmented Generation pipeline. This is the **convention example**: documents are landed as one `NivaraFrame` carrying metadata columns (`ChunkId`, `Source`, `Title`, `SectionPath`, `AclGroup`, `Content`) plus an `Embedding` column of `float[]`, and retrieval runs through `RowCosineSimilarity` + `TopKDescending` — the #867 convention documented in [the embedding convention](../../docs/EMBEDDINGS.md). The index is cached to Parquet in the dimension-frame form (`--index`, `--rebuild`, `--no-cache`); `--store inmemory` keeps the legacy `InMemoryVectorStore` path for comparison. Loads real Nivara documentation (markdown files from `docs/` + `README.md`), chunks them into paragraphs, embeds with the local MiniLM model (CPU or Silk via `--silk`), then runs an interactive REPL. ACL filtering (`--acl-group`) is a `FilterByMask` row op before scoring. User questions are matched against stored chunks via cosine similarity, top-K chunks are injected into a manually constructed prompt, and the LLM generates a grounded answer. Shows retrieval time and LLM time separately. Requires `--ollama`.
 
 ```
 Documents (docs/*.md, README.md)
@@ -202,8 +204,8 @@ Documents (docs/*.md, README.md)
 ChunkText (paragraph splitting, ~500 chars)
     │
     v
-InMemoryVectorStore + MiniLMEmbeddingGenerator
-    │  auto-embeds each chunk via Nivara IEmbeddingGenerator
+NivaraFrame (metadata + Embedding) + MiniLMEmbedder
+    │  embeds each chunk; NivaraFrame + RowCosineSimilarity retrieval
     v
 User query
     │
@@ -221,10 +223,10 @@ Tested examples:
 
 | Input | Top-K | Retrieval | LLM | Answer quality |
 |-------|-------|-----------|-----|----------------|
-| `"How does embedding search work?"` | 3 | 371ms | 27.5s | Describes MiniLM → InMemoryVectorStore → cosine similarity pipeline |
+| `"How does embedding search work?"` | 3 | 371ms | 27.5s | Describes MiniLM → NivaraFrame → RowCosineSimilarity pipeline |
 | `"What is NivaraChat?"` | 3 | 538ms | 17.2s | Correctly identifies RAG pipeline with MiniLM + TextSearchProvider |
 
-Uses: `MiniLMEmbeddingGenerator.Create()`, `InMemoryVectorStore`, `DocumentChunker.ChunkText()`, `collection.SearchAsync()`.
+Uses: `MiniLMEmbedder.Create()`, `NivaraFrame` (metadata + `Embedding`), `RowCosineSimilarity`, `TopKDescending`, `FilterByMask`, `RagIndexCache` (Parquet dimension-frame cache), `DocumentChunker.ChunkText()`. Legacy comparison: `--store inmemory` (`InMemoryVectorStore`, `collection.SearchAsync()`).
 
 ### RAG agent (`--rag-agent`)
 Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. Requires `--ollama`.
@@ -233,7 +235,7 @@ Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent
 Documents (same as --rag)
     │
     v
-InMemoryVectorStore + MiniLMEmbeddingGenerator
+NivaraFrame (metadata + Embedding) + MiniLMEmbedder
     │
     v
 TextSearchProvider (SearchTime = BeforeAIInvoke)
@@ -496,8 +498,8 @@ NivaraChat/
 │   ├── CriticMode.cs                  # --critic (writer-critic loop)
 │   ├── IntentMode.cs                  # --intent (5-class routing to specialist executors)
 │   ├── OnlineLearningMode.cs          # --online-learning (LLM feedback + retrain)
-│   ├── EmbeddingMode.cs               # --embed (embedding search demo)
-│   ├── RagMode.cs                     # --rag (retrieval-augmented generation)
+│   ├── EmbeddingMode.cs               # --embed (primitive contrast: parallel arrays + TensorPrimitives)
+│   ├── RagMode.cs                     # --rag (the #867 convention: frame + RowCosineSimilarity)
 │   └── RagAgentMode.cs                # --rag-agent (RAG with TextSearchProvider)
 ├── Executors/                         # Agent Framework Executor<string, string> subclasses
 │   ├── TextRouter.cs                  # Pass-through executor for fan-out routing
@@ -614,6 +616,10 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 | `AsAIAgent()` | Program.cs | Convert `IChatClient` to `ChatClientAgent` |
 | `ChatClientAgent` | Program.cs | Agent Framework participant from `IChatClient` |
 | `NivaraEmbeddingGenerator<T>` | Nivara.Extensions | `IEmbeddingGenerator<TInput, Embedding<float>>` implementation for local models |
+| `NivaraFrame.RowCosineSimilarity` / `RowDot` | RagMode.cs, RagAgentMode.cs | #867 convention retrieval over a `float[]` column (converts to the dimension frame internally) |
+| `TopKDescending` | RagMode.cs, RagAgentMode.cs | labeled top-K retrieval; nulls last and excluded |
+| `ToEmbeddingMatrix` / `ToEmbeddingFrame` / `ToGeneratedEmbeddings` | RagMode.cs (`--roundtrip`), RagIndexCache.cs | round-trip + Parquet cache persistence in the dimension-frame form |
+| `FilterByMask` | RagMode.cs, RagAgentMode.cs | ACL row selection before scoring |
 | `TrainingLoop.Run(startEpoch)` | IntentTrainer.cs | Resume training from checkpoint |
 | `Optimizer.StateDict()/LoadStateDict()` | IntentTrainer.cs | Save/restore optimizer state for incremental training |
 | `ModelSerializer` (optimizer state) | IntentTrainer.cs | Persist optimizer state in checkpoints |
