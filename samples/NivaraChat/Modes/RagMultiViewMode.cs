@@ -34,6 +34,8 @@ public static class RagMultiViewMode
             + $"agreement Agree <= {MultiViewExplorer.AgreeBound:0.00}, Mild <= {MultiViewExplorer.MildBound:0.00}");
         Console.WriteLine();
 
+        if (ctx.ShowRoundTrip)
+            index.PrintRoundTrip();
         if (!index.HasVisibleChunks)
         {
             Console.WriteLine($"No chunks visible under ACL group '{ctx.AclGroup}'.");

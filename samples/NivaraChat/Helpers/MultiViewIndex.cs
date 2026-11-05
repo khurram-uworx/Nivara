@@ -1,4 +1,6 @@
+using Microsoft.Extensions.AI;
 using Nivara;
+using Nivara.AI;
 using Nivara.Samples;
 using NivaraChat.Modes;
 using System.Diagnostics;
@@ -42,6 +44,9 @@ public sealed class MultiViewIndex : IDisposable
 
     /// <summary>Embedding dimension of the loaded model.</summary>
     public int Dimension => embedder.Dimension;
+
+    /// <summary>Whether retrieval runs over the convention frame/matrices (always true for multi-view).</summary>
+    public bool UseFrame => true;
 
     /// <summary>Chunks visible under the configured ACL filter.</summary>
     public IReadOnlyList<MultiViewChunk> Chunks => chunks;
@@ -208,6 +213,75 @@ public sealed class MultiViewIndex : IDisposable
         var hits = MultiViewScoring.Rank(metadata, matrices, chunks, vector, weights, topK);
         sw.Stop();
         return (hits, sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>Prints the Content-view frame ↔ matrix ↔ GeneratedEmbeddings round-trip diagnostics.</summary>
+    public void PrintRoundTrip()
+    {
+        Console.WriteLine("\n  Round-trip (Content view):");
+
+        var matrix = metadata.ToEmbeddingMatrix("VectorContent", "ContentE", Dimension);
+        var rebuilt = matrix.ToEmbeddingFrame("VectorContent", "ContentE");
+        var original = metadata.GetColumn<float[]>("VectorContent");
+        var restored = rebuilt.GetColumn<float[]>("VectorContent");
+
+        var mismatches = 0;
+        for (var row = 0; row < metadata.RowCount; row++)
+        {
+            var left = original.IsNull(row) ? null : original[row];
+            var right = restored.IsNull(row) ? null : restored[row];
+            if (!VectorsEqual(left, right))
+                mismatches++;
+        }
+
+        Console.WriteLine($"    frame rows={metadata.RowCount}, matrix cols={matrix.ColumnCount}, rebuilt rows={rebuilt.RowCount}, mismatches={mismatches}");
+
+        try
+        {
+            var hasNulls = false;
+            for (var row = 0; row < original.Length; row++)
+            {
+                if (original.IsNull(row))
+                {
+                    hasNulls = true;
+                    break;
+                }
+            }
+
+            NullEmbeddingReplacement? policy = hasNulls ? ((row, dim) => new float[dim]) : null;
+            var generated = metadata.ToGeneratedEmbeddings("VectorContent", policy, Dimension);
+            var roundTrippedFrame = generated.ToNivaraFrame("VectorContent");
+            var roundTripped = roundTrippedFrame.GetColumn<float[]>("VectorContent");
+
+            var genMismatches = 0;
+            for (var row = 0; row < metadata.RowCount; row++)
+            {
+                var left = original.IsNull(row) ? null : original[row];
+                var right = roundTripped.IsNull(row) ? null : roundTripped[row];
+                if (!VectorsEqual(left, right))
+                    genMismatches++;
+            }
+
+            Console.WriteLine($"    ToGeneratedEmbeddings count={generated.Count}, round-trip mismatches={genMismatches}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"    ToGeneratedEmbeddings: {ex.Message}");
+        }
+    }
+
+    static bool VectorsEqual(float[]? left, float[]? right)
+    {
+        if (left is null || right is null)
+            return left is null && right is null;
+        if (left.Length != right.Length)
+            return false;
+        for (var i = 0; i < left.Length; i++)
+        {
+            if (left[i] != right[i])
+                return false;
+        }
+        return true;
     }
 
     public void Dispose() => embedder.Dispose();

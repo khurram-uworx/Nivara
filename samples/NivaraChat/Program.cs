@@ -210,7 +210,7 @@ void PrintUsage()
     Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag/--rag-agent (default: 3)");
     Console.WriteLine("  --silk               Use Silk OpenCL MiniLM backend for --rag/--rag-agent");
     Console.WriteLine("  --acl-group <name>   ACL filter for --rag/--rag-agent (e.g. adr, docs, plan)");
-    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag/--rag-agent");
+    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag/--rag-agent/--rag-multiview");
     Console.WriteLine("  --store <frame|inmemory>  Retrieval backend (default: frame)");
     Console.WriteLine("  --index <path>            Cache index parquet path (default: hashed under samples/data/nivara/rag_cache)");
     Console.WriteLine("  --rebuild                 Force rebuild of the cached index");

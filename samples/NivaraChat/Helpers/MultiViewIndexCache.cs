@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Nivara;
 using Nivara.AI;
 using Nivara.IO;
@@ -261,5 +262,45 @@ public static class MultiViewIndexCache
             vectors[row] = column.IsNull(row) ? null : column[row];
 
         return vectors;
+    }
+
+    /// <summary>
+    /// Converts the cached Content view dimension columns back into a <c>float[]?</c> array,
+    /// mirroring <see cref="RagIndexCache.ToEmbeddings"/>.
+    /// </summary>
+    public static float[]?[] ToEmbeddings(NivaraFrame loaded, int dimension)
+        => Vectors(loaded, "VectorContent", "ContentE", dimension);
+
+    /// <summary>
+    /// Converts the cached dimension columns for one view back into a <c>float[]?</c> array.
+    /// </summary>
+    public static float[]?[] ToEmbeddings(NivaraFrame loaded, string vectorColumn, string prefix, int dimension)
+        => Vectors(loaded, vectorColumn, prefix, dimension);
+
+    /// <summary>
+    /// Converts the cached Content view into <see cref="GeneratedEmbeddings{TEmbedding}"/>,
+    /// mirroring the <c>--rag --roundtrip</c> demonstration.
+    /// </summary>
+    public static GeneratedEmbeddings<Embedding<float>> ToGeneratedEmbeddings(
+        NivaraFrame loaded,
+        int dimension,
+        NullEmbeddingReplacement? nullReplacement = null)
+    {
+        var frame = loaded.ToEmbeddingFrame("VectorContent", "ContentE", dimension);
+        return frame.ToGeneratedEmbeddings("VectorContent", nullReplacement, dimension);
+    }
+
+    /// <summary>
+    /// Converts one cached view into <see cref="GeneratedEmbeddings{TEmbedding}"/>.
+    /// </summary>
+    public static GeneratedEmbeddings<Embedding<float>> ToGeneratedEmbeddings(
+        NivaraFrame loaded,
+        string vectorColumn,
+        string prefix,
+        int dimension,
+        NullEmbeddingReplacement? nullReplacement = null)
+    {
+        var frame = loaded.ToEmbeddingFrame(vectorColumn, prefix, dimension);
+        return frame.ToGeneratedEmbeddings(vectorColumn, nullReplacement, dimension);
     }
 }
