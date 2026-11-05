@@ -20,4 +20,5 @@ public sealed record ModeContext(
     string? Index = null,
     bool Rebuild = false,
     bool NoCache = false,
-    int BatchSize = 32);
+    int BatchSize = 32,
+    int ChunkSize = 500);
