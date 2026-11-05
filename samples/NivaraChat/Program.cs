@@ -26,6 +26,7 @@ if (args.Length > 0)
     string? index = null;
     bool rebuild = false;
     bool noCache = false;
+    int batchSize = 32;
 
     for (int i = 1; i < args.Length; i++)
     {
@@ -42,9 +43,10 @@ if (args.Length > 0)
         if (args[i] == "--index" && i + 1 < args.Length) index = args[++i];
         if (args[i] == "--rebuild") rebuild = true;
         if (args[i] == "--no-cache") noCache = true;
+        if (args[i] == "--batch-size" && i + 1 < args.Length) batchSize = int.Parse(args[++i]);
     }
 
-    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache);
+    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize);
 
     switch (mode)
     {
@@ -203,6 +205,7 @@ void PrintUsage()
     Console.WriteLine("  --index <path>            Cache index parquet path (default: hashed under samples/data/nivara/rag_cache)");
     Console.WriteLine("  --rebuild                 Force rebuild of the cached index");
     Console.WriteLine("  --no-cache                Disable index caching");
+    Console.WriteLine("  --batch-size <int>        Embedding batch size for --rag/--rag-agent ingestion (default: 32)");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");

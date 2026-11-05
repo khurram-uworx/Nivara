@@ -19,4 +19,5 @@ public sealed record ModeContext(
     string Store = "frame",
     string? Index = null,
     bool Rebuild = false,
-    bool NoCache = false);
+    bool NoCache = false,
+    int BatchSize = 32);
