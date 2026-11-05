@@ -68,16 +68,17 @@ public class RagIndexCacheTests
     }
 
     [Test]
-    public void Save_WhenLockHeld_SkipsWithoutThrowing()
+    public void TrySave_WhenLockHeld_ReturnsFalseWithoutHanging()
     {
         var frame = BuildFrame(new[] { 1f, 0f });
         using var heldLock = new FileStream(
             indexPath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
         var start = DateTime.UtcNow;
-        Assert.DoesNotThrow(() => RagIndexCache.Save(indexPath, frame, tempDir, [], useSilk: false, dimension: 2));
+        var saved = RagIndexCache.TrySave(indexPath, frame, tempDir, [], useSilk: false, dimension: 2);
         var elapsed = DateTime.UtcNow - start;
 
+        Assert.That(saved, Is.False);
         Assert.That(elapsed, Is.LessThan(TimeSpan.FromSeconds(5)));
         Assert.That(File.Exists(indexPath), Is.False);
     }

@@ -224,8 +224,10 @@ public sealed class RagIndex : IDisposable
                 {
                     try
                     {
-                        RagIndexCache.Save(indexPath, frame, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk, embedder.Dimension);
-                        Console.WriteLine($"  Cached index to {indexPath}");
+                        if (RagIndexCache.TrySave(indexPath, frame, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk, embedder.Dimension))
+                            Console.WriteLine($"  Cached index to {indexPath}");
+                        else
+                            Console.WriteLine("  Cache save skipped: another process is writing the index.");
                     }
                     catch (Exception ex)
                     {

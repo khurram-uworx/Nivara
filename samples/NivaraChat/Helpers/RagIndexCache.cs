@@ -65,6 +65,9 @@ public static class RagIndexCache
     }
 
     public static void Save(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension)
+        => TrySave(indexPath, vectorFrame, docsDir, mdFiles, useSilk, dimension);
+
+    public static bool TrySave(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension)
     {
         var matrix = vectorFrame.ToEmbeddingMatrix("Embedding");
         var cols = new List<(string Name, IColumn)>();
@@ -90,7 +93,7 @@ public static class RagIndexCache
 
         var lockPath = indexPath + ".lock";
         if (!TryAcquireLock(lockPath, out var lockStream))
-            return;
+            return false;
 
         using (lockStream)
         {
@@ -103,6 +106,7 @@ public static class RagIndexCache
                 File.WriteAllText(tempManifestPath, JsonSerializer.Serialize(manifest));
                 File.Move(tempIndexPath, indexPath, overwrite: true);
                 File.Move(tempManifestPath, manifestPath, overwrite: true);
+                return true;
             }
             finally
             {
