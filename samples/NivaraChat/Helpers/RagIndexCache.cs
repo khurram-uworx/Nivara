@@ -12,13 +12,38 @@ public static class RagIndexCache
 {
     const int LockTimeoutMilliseconds = 1000;
 
-    public sealed record Manifest(string Backend, int Dimension, int ChunkCount, DateTime DocsMaxMtime, string DocsDir);
+    /// <summary>Current manifest schema version. Bump on any cache-format change.</summary>
+    public const int SchemaVersion = 1;
+    public const int CurrentSchemaVersion = SchemaVersion;
+    public const int ManifestSchemaVersion = SchemaVersion;
+
+    public sealed record Manifest(
+        string Backend,
+        int Dimension,
+        int ChunkCount,
+        DateTime DocsMaxMtime,
+        string DocsDir,
+        string ContentHash = "",
+        int SchemaVersion = 0);
 
     public static string ComputeHash(string docsDir, bool useSilk)
     {
         using var sha = SHA256.Create();
         var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(docsDir + "|" + (useSilk ? "silk" : "cpu")));
         return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
+    }
+
+    public static string ComputeContentHash(IEnumerable<string> mdFiles)
+    {
+        using var sha = SHA256.Create();
+        foreach (var f in mdFiles ?? [])
+        {
+            var bytes = File.ReadAllBytes(f);
+            if (bytes.Length > 0)
+                sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
+        }
+        sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
     }
 
     public static string DefaultPath(string docsDir, bool useSilk)
@@ -46,12 +71,16 @@ public static class RagIndexCache
             return false;
         try
         {
-            var m = JsonSerializer.Deserialize<Manifest>(File.ReadAllText(manifestPath));
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var m = JsonSerializer.Deserialize<Manifest>(File.ReadAllText(manifestPath), options);
             if (m == null) return false;
             if (m.Backend != (useSilk ? "silk" : "cpu")) return false;
             if (!string.Equals(m.DocsDir, docsDir, StringComparison.Ordinal)) return false;
+            if (m.SchemaVersion != SchemaVersion) return false;
             var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
             if (m.DocsMaxMtime != maxMtime) return false;
+            var contentHash = ComputeContentHash(mdFiles);
+            if (!string.Equals(m.ContentHash, contentHash, StringComparison.Ordinal)) return false;
             return true;
         }
         catch
@@ -85,7 +114,8 @@ public static class RagIndexCache
         }
         var saveFrame = NivaraFrame.Create(cols.ToArray());
         var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
-        var manifest = new Manifest(useSilk ? "silk" : "cpu", dimension, vectorFrame.RowCount, maxMtime, docsDir);
+        var contentHash = ComputeContentHash(mdFiles);
+        var manifest = new Manifest(useSilk ? "silk" : "cpu", dimension, vectorFrame.RowCount, maxMtime, docsDir, contentHash, SchemaVersion);
 
         var directory = Path.GetDirectoryName(indexPath);
         if (!string.IsNullOrEmpty(directory))
