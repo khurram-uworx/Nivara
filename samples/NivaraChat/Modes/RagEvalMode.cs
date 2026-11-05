@@ -21,7 +21,9 @@ public static class RagEvalMode
         var labelsPath = Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "relevance.tsv");
         var reportPath = ctx.ReportPath is null ? null : ResolveReportPath(ctx.ReportPath, repoRoot);
 
+        var buildSw = Stopwatch.StartNew();
         using var index = await MultiViewIndex.BuildAsync(ctx);
+        buildSw.Stop();
         if (index is null)
             return;
 
@@ -193,6 +195,29 @@ public static class RagEvalMode
         var mild = allHits.Count(h => h.MaxDivergence is { } d && d > MultiViewExplorer.AgreeBound && d <= MultiViewExplorer.MildBound);
         var strong = allHits.Count(h => h.MaxDivergence is { } d && d > MultiViewExplorer.MildBound);
         Console.WriteLine($"  Agreement: agree={agree}, mild={mild}, strong={strong}");
+
+        // Cost reporting.
+        var cacheDir = Path.Combine(repoRoot, "samples", "data", "nivarachat", "rag_multiview_cache");
+        var indexSize = Directory.Exists(cacheDir)
+            ? Directory.GetFiles(cacheDir, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length)
+            : 0L;
+        var uniqueTexts = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var chunk in index.Chunks)
+        {
+            uniqueTexts.Add(chunk.Content);
+            uniqueTexts.Add(chunk.Title);
+            uniqueTexts.Add(chunk.Section);
+            if (chunk.Code is not null)
+                uniqueTexts.Add(chunk.Code);
+        }
+        var avgLatency = results.Count == 0 ? 0d : results.Average(r => r.LatencyMs);
+        Console.WriteLine();
+        Console.WriteLine("  Cost:");
+        Console.WriteLine($"    build time:    {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"    unique texts:  {uniqueTexts.Count}");
+        Console.WriteLine($"    chunks:        {index.Chunks.Count}");
+        Console.WriteLine($"    index size:    {indexSize} bytes");
+        Console.WriteLine($"    avg query ms:  {avgLatency:0.0}");
 
         // Verbose per-query movement.
         if (ctx.Verbose)
