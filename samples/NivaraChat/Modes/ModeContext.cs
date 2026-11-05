@@ -21,4 +21,7 @@ public sealed record ModeContext(
     bool Rebuild = false,
     bool NoCache = false,
     int BatchSize = 32,
-    int ChunkSize = 500);
+    int ChunkSize = 500,
+    bool Explore = false,
+    string? ReportPath = null,
+    string? Weights = null);

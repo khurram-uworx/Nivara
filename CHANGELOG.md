@@ -6,6 +6,19 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Multi-view retrieval sample: four views per chunk, late fusion and disagreement analysis (#914)**
+  — `--rag-multiview` in `samples/NivaraChat` embeds every section-scoped chunk four times in the
+  same MiniLM space (Content, Title, Section, Code), scores each view independently with the
+  existing `RowCosineSimilarity` kernel, fuses the scores late with weights renormalized per row
+  over the views the chunk actually has, names the winning view (`BestSpace`, ties broken in
+  declaration order), and reports the Content-vs-each-view divergence plus a rank band measured
+  from the query's top hit. `--explore` buckets the whole visible corpus by absolute divergence
+  (Agree ≤ 0.05, Mild ≤ 0.15, Strong above) and keeps chunks with fewer than two scored views out
+  of the agreement counts; `--report` writes the table and buckets as markdown; `--weights`
+  overrides the 0.5/0.2/0.2/0.1 default. The multi-view index has its own Parquet cache type with
+  its own `SchemaVersion` and `ChunkerVersion` salt, so it cannot be mistaken for the single-view
+  #912 cache. A non-finite view score (a zero-magnitude vector yields `NaN`) is treated as a
+  missing view. Sample-local only: no `src/` change.
 - **Embeddings have a documented frame convention and Microsoft.Extensions.AI glue (#867)** — a
   `NivaraColumn<float[]>` is the storage and interop form, a frame of `E0..E{n-1}` float columns is
   the form the existing `RowCosineSimilarity` / `RowDot` kernels already understand, and there is no

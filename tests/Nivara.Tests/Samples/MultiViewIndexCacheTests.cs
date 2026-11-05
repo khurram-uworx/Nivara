@@ -107,6 +107,23 @@ public class MultiViewIndexCacheTests
     }
 
     [Test]
+    public void IsValid_ExpectedDimension_MustMatchTheManifest()
+    {
+        var (metadata, matrices, _) = Sample();
+        MultiViewIndexCache.TrySave(indexPath, metadata, matrices, docsDir, mdFiles, useSilk: false, dimension: 3);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                MultiViewIndexCache.IsValid(indexPath, docsDir, mdFiles, useSilk: false, chunkSize: 500, expectedDimension: 3),
+                Is.True);
+            Assert.That(
+                MultiViewIndexCache.IsValid(indexPath, docsDir, mdFiles, useSilk: false, chunkSize: 500, expectedDimension: 384),
+                Is.False);
+        });
+    }
+
+    [Test]
     public void IsValid_MissingIndexOrManifest_IsFalse()
     {
         Assert.Multiple(() =>

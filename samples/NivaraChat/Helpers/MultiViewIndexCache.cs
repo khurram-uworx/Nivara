@@ -84,7 +84,8 @@ public static class MultiViewIndexCache
         string docsDir,
         List<string> mdFiles,
         bool useSilk,
-        int chunkSize = 500)
+        int chunkSize = 500,
+        int? expectedDimension = null)
     {
         if (!File.Exists(indexPath)) return false;
         var manifestPath = indexPath + ".manifest.json";
@@ -102,6 +103,7 @@ public static class MultiViewIndexCache
             if (!string.Equals(m.DocsDir, docsDir, StringComparison.Ordinal)) return false;
             if (m.SchemaVersion != SchemaVersion) return false;
             if (!string.Equals(m.ChunkerVersion, ChunkerVersion, StringComparison.Ordinal)) return false;
+            if (expectedDimension is { } expected && m.Dimension != expected) return false;
             var manifestChunkSize = m.ChunkSize == 0 ? 500 : m.ChunkSize;
             if (manifestChunkSize != chunkSize) return false;
             var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;

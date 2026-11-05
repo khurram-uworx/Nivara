@@ -65,6 +65,11 @@ dotnet run --project samples/NivaraChat -- --rag --ollama --text "How does embed
 dotnet run --project samples/NivaraChat -- --rag-agent --text "What is NivaraChat?"
 dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is NivaraChat?"
 
+# Multi-view retrieval (#914): four views per chunk, late fusion, disagreement report (no LLM)
+dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?"
+dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --explore --report multiview.md
+dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --weights content=0.7,section=0.3
+
 # Online learning from LLM feedback (requires --ollama)
 dotnet run --project samples/NivaraChat -- --online-learning --ollama
 
@@ -103,6 +108,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
+| `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
@@ -113,16 +119,19 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
-| `--docs-dir <path>` | `docs/` | Documents directory for `--rag` and `--rag-agent` modes |
+| `--docs-dir <path>` | `docs/` | Documents directory for `--rag`, `--rag-agent` and `--rag-multiview` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
-| `--silk` | — | Use Silk OpenCL MiniLM backend for `--rag`/`--rag-agent` |
-| `--acl-group <name>` | — | ACL filter for `--rag`/`--rag-agent` (e.g. `adr`, `docs`, `plan`) |
+| `--silk` | — | Use Silk OpenCL MiniLM backend for `--rag`/`--rag-agent`/`--rag-multiview` |
+| `--acl-group <name>` | — | ACL filter for `--rag`/`--rag-agent`/`--rag-multiview` (e.g. `adr`, `docs`, `plan`) |
 | `--roundtrip` | — | Show embedding round-trip details for `--rag` |
 | `--store <frame\|inmemory>` | `frame` | Retrieval backend for `--rag`/`--rag-agent` |
 | `--index <path>` | hashed default | Cache index parquet path |
 | `--rebuild` | — | Force rebuild of the cached index |
 | `--no-cache` | — | Disable index caching |
-| `--chunk-size <int>` | `500` | Max chunk size (chars) for RAG chunking (`--rag`/`--rag-agent`) |
+| `--chunk-size <int>` | `500` | Max chunk size (chars) for RAG chunking (`--rag`/`--rag-agent`/`--rag-multiview`) |
+| `--explore` | — | `--rag-multiview`: bucket every visible chunk by view disagreement, not just the top-K |
+| `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
+| `--weights <spec>` | `content=0.5,title=0.2,section=0.2,code=0.1` | `--rag-multiview`: late-fusion weights, renormalized per chunk over the views it has. Unknown names, negative values and an all-zero total are rejected |
 ## Modes of use
 
 ### Training (`--train`)
@@ -229,6 +238,47 @@ Tested examples:
 | `"What is NivaraChat?"` | 3 | 538ms | 17.2s | Correctly identifies RAG pipeline with MiniLM + TextSearchProvider |
 
 Uses: `MiniLMEmbedder.Create()`, `NivaraFrame` (metadata + `Embedding`), `RowCosineSimilarity`, `TopKDescending`, `FilterByMask`, `RagIndexCache` (Parquet dimension-frame cache), `DocumentChunker.ChunkText()`. Legacy comparison: `--store inmemory` (`InMemoryVectorStore`, `collection.SearchAsync()`).
+
+### Multi-view retrieval (`--rag-multiview`)
+A sample-only demonstration of issue #914. Instead of embedding each chunk once, every chunk is embedded **four times**, once per representation, all in the same 384-d MiniLM space:
+
+| View | Text | Missing when |
+|------|------|--------------|
+| Content | The chunk as written: prose plus any fenced blocks | Never |
+| Title | Document title (the H1, else the file-name stem) — constant per file | Never |
+| Section | Heading breadcrumb, `H1 > H2 > H3`; H4 and deeper bound a chunk but do not extend the breadcrumb | Never |
+| Code | Only the fence bodies inside the chunk | The chunk has no fenced blocks |
+
+Chunks are **section-scoped**: a contiguous run of one section's prose and whole fenced blocks, bounded by `--chunk-size`. That is what keeps Content and Code from being the same text — one chunk per fence would make their divergence ~0 for every code chunk — so a hit whose winning view is `Code` says the fence, not the prose, is what matched. A fence is never split; a paragraph longer than `--chunk-size` is split at whitespace.
+
+Each view is scored independently with the frame's `RowCosineSimilarity` kernel, then fused late. The four weights are renormalized per row over the views that actually have a score, so a chunk without code is not penalized for its missing view: a missing view is dropped from fusion, from `BestSpace` and from divergence. The same rule treats a non-finite score as missing — a zero-magnitude vector makes `TensorPrimitives.CosineSimilarity` return `NaN`, which must never poison the fused score.
+
+The table prints the fused score, the **rank band** (gap from the query's top hit: `Near` ≤ 0.02, `Distinct` ≤ 0.08, else `Weak`), the winning view (`Content`/`Title`/`Section`/`Code`, ties broken in that declaration order), the four raw scores, and the widest **divergence** (absolute difference between the Content score and each other view's score). `--explore` ranks the whole visible corpus and buckets it by absolute divergence — `Agree` ≤ 0.05, `Mild` ≤ 0.15, `Strong` above that, plus an `InsufficientViews` bucket for chunks with fewer than two scored views — and prints a one-line explanation of each example. `--report <path>` writes the same table plus the buckets as markdown; relative paths resolve under the gitignored `samples/data/nivarachat/`.
+
+```
+Documents (docs/**/*.md, README.md)
+    │
+    v
+MultiViewChunker (section-scoped chunks; fence-aware; title in a pre-scan)
+    │  Content / Title / Section / Code per chunk
+    v
+Deduplicated view texts  →  MiniLMEmbedder  →  MultiViewScoring.BuildFrame
+    │  one frame: metadata + 4 × float[] + Content/Title coherence
+    v
+MultiViewMatrices (4 flat [rows, 384] frames, built once)  →  MultiViewIndexCache
+    │
+    v
+Query  →  4 × RowCosineSimilarity  →  per-row renormalized fusion
+    │  fused score, BestSpace, divergences, max divergence, rank band
+    v
+Console table  +  --explore buckets  +  --report markdown
+```
+
+`Title` and `Section` repeat heavily across a corpus, so view texts are deduplicated before embedding — a full-corpus run embeds roughly 2,000 unique texts rather than one per chunk per view. The multi-view index has its own cache type and its own `SchemaVersion`/`ChunkerVersion` salt (`samples/data/nivarachat/rag_multiview_cache/`), so it can never be mistaken for the single-view #912 cache; `--index`, `--rebuild` and `--no-cache` behave as they do for `--rag`.
+
+Two documented limits: MiniLM truncates at 128 tokens on both backends, so a long Content or Code view loses its tail; and the mode reports retrieval signal only — it does not call an LLM.
+
+Uses: `MultiViewChunker`, `MultiViewScoring` (`BuildFrame`, `Rank`, `FusionWeights`, `MultiViewMatrices`), `MultiViewExplorer` (`Bucketize`, `Explain`), `MultiViewIndex`/`MultiViewIndexCache`, and the same `RowCosineSimilarity`/`TopKDescending` convention as `--rag`.
 
 ### RAG agent (`--rag-agent`)
 Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. **Ollama is optional**: without `--ollama` the mode behaves like `--rag` in list-only mode (prints `#rank score [source] "snippet..."` per query); with `--ollama` it runs the agent workflow and prints the retrieved set for each provider search. `--roundtrip` prints the frame ↔ matrix ↔ `ToGeneratedEmbeddings` diagnostics once after the index builds (not per provider search). ACL filtering (`--acl-group`) applies to the frame store only; `--store inmemory` ignores it.
@@ -502,6 +552,7 @@ NivaraChat/
 │   ├── OnlineLearningMode.cs          # --online-learning (LLM feedback + retrain)
 │   ├── EmbeddingMode.cs               # --embed (primitive contrast: parallel arrays + TensorPrimitives)
 │   ├── RagMode.cs                     # --rag (the #867 convention: frame + RowCosineSimilarity)
+│   ├── RagMultiViewMode.cs            # --rag-multiview (#914: four views, late fusion, disagreement)
 │   └── RagAgentMode.cs                # --rag-agent (RAG with TextSearchProvider)
 ├── Executors/                         # Agent Framework Executor<string, string> subclasses
 │   ├── TextRouter.cs                  # Pass-through executor for fan-out routing
@@ -527,6 +578,14 @@ NivaraChat/
 ├── Helpers/
 │   ├── ModelInferenceHelper.cs        # Shared inference pipeline (DRY)
 │   ├── DocumentChunk.cs               # DocumentChunk + DocumentChunker for RAG indexing
+│   ├── RagSearch.cs                   # RagIndex + RagSearch (--rag frame store and ranking)
+│   ├── RagIndexCache.cs               # #912 single-view Parquet index cache
+│   ├── MultiViewChunk.cs              # #914 fence-aware section-scoped multi-view chunker
+│   ├── MultiViewScoring.cs            # #914 per-view scoring, late fusion, divergence, rank bands
+│   ├── MultiViewExplorer.cs           # #914 agreement buckets and explanations
+│   ├── MultiViewIndexCache.cs         # #914 multi-view Parquet index cache
+│   ├── MultiViewIndex.cs              # #914 build pipeline (chunk, dedupe, embed, cache, filter)
+│   ├── IndexCacheFile.cs              # Shared lock / temp / atomic replace / footer read
 │   ├── FeedbackCollector.cs           # LLM fallback + feedback buffer (--online-learning)
 │   └── WriterCriticLoop.cs            # Bounded writer-critic retry loop (--critic)
 ├── Tools/
