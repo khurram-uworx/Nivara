@@ -1,8 +1,8 @@
-using System.Text.Json;
 using Nivara;
 using Nivara.AI;
 using NivaraChat.Helpers;
 using NUnit.Framework;
+using System.Text.Json;
 
 namespace Nivara.Tests.Samples;
 

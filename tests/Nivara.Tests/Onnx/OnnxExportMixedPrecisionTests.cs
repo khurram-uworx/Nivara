@@ -4,7 +4,6 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.Onnx;
 using NUnit.Framework;
-using System.Numerics;
 
 namespace Nivara.Tests.Onnx;
 

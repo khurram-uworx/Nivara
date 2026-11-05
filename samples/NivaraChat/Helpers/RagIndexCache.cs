@@ -1,11 +1,10 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Nivara;
 using Nivara.AI;
 using Nivara.IO;
 using NivaraChat.Modes;
-using Parquet;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace NivaraChat.Helpers;
 

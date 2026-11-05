@@ -1,10 +1,9 @@
-using System.Numerics;
 using Google.Protobuf;
-using Onnx;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Operations;
 using Nivara.Diagnostics;
+using Onnx;
+using System.Numerics;
 
 namespace Nivara.Onnx;
 

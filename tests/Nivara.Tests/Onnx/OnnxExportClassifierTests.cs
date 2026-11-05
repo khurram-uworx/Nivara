@@ -3,9 +3,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.Onnx;
-using NivaraClassifier;
 using NUnit.Framework;
-using System.Numerics;
 
 namespace Nivara.Tests.Onnx;
 
