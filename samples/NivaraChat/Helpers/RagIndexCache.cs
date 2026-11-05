@@ -5,6 +5,7 @@ using Nivara;
 using Nivara.AI;
 using Nivara.IO;
 using NivaraChat.Modes;
+using Parquet;
 
 namespace NivaraChat.Helpers;
 
@@ -83,11 +84,28 @@ public static class RagIndexCache
             if (m.DocsMaxMtime != maxMtime) return false;
             var contentHash = ComputeContentHash(mdFiles);
             if (!string.Equals(m.ContentHash, contentHash, StringComparison.Ordinal)) return false;
-            // chunk-count check: the manifest must agree with the persisted dimension frame
+            // chunk-count + dimension check: the manifest must agree with the persisted
+            // Parquet footer (row count and number of E* dimension columns). Reading only
+            // the footer metadata keeps this cheap (no full load).
             try
             {
-                var loaded = NivaraFrameIOExtensions.LoadParquet(indexPath);
-                if (loaded.RowCount != m.ChunkCount) return false;
+                var reader = Parquet.ParquetReader.CreateAsync(indexPath, null, CancellationToken.None).GetAwaiter().GetResult();
+                try
+                {
+                    if (reader.Metadata!.NumRows != m.ChunkCount) return false;
+                    var dimensionColumns = 0;
+                    foreach (var field in reader.Schema!.DataFields)
+                    {
+                        if (field.Name.Length > 1 && field.Name[0] == 'E' &&
+                            int.TryParse(field.Name.AsSpan(1), out _))
+                            dimensionColumns++;
+                    }
+                    if (dimensionColumns != m.Dimension) return false;
+                }
+                finally
+                {
+                    reader.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
             }
             catch
             {
