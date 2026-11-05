@@ -116,13 +116,13 @@ Configurations: fused, content-only, and leave-one-view-out (zero each of Conten
 ## Implementation steps
 
 1. Wire `--rag-eval` into `Program.cs`.
-2. Add `RagEvalJudge.cs`, `RagEvalMetrics.cs`, `RagEvalLabels.cs`.
+2. Add `RagEvalJudge.cs`, `RagEvalMetrics.cs`, `RagEvalLabels.cs`, and `EvalGroundTruth.cs` (TSV loader plus deterministic auto-derived heading/title pair generator).
 3. Add `RagEvalMode.cs` orchestrating build, label, retrieval, scoring, output.
 4. Reuse `MultiViewIndex.BuildAsync` and `MultiViewScoring.Rank`.
-5. Generate initial `queries.tsv`.
+5. Generate initial `queries.tsv` (hand-curated plus auto-derived pairs).
 6. Add offline cached-label path.
 7. Document mode in README.
-8. Add unit tests for metrics/parsing.
+8. Add unit tests for metrics/parsing in `tests/Nivara.Tests/Samples/RagEvalMetricsTests.cs`.
 9. Run formatting and docs/snippet gates.
 
 ## Acceptance criteria mapping
@@ -140,4 +140,5 @@ Configurations: fused, content-only, and leave-one-view-out (zero each of Conten
 - LLM judge bias; aggregate runs and keep temperature low.
 - Cloud model availability/latency; cache labels aggressively.
 - Chunker mismatch handled by content-only decisive comparison.
+- Deterministic fallback: metric helpers are pure and unit-tested; `--offline` runs from cached labels only.
 - MiniLM availability affects runtime.
