@@ -173,14 +173,14 @@ point of the two modes.
 | Missing embedding | not representable — a null would throw while reading the vector | null row → all-null vector → null score, excluded |
 | Row selection / ACL | none; would need parallel rebuilds | `FilterByMask` before scoring (`--acl-group`) |
 | Round-trip | none | `--roundtrip`: `ToEmbeddingMatrix` → `ToEmbeddingFrame` → `ToGeneratedEmbeddings` |
-| Persistence | re-embeds on every start | `RagIndexCache.Save()` writes the dimension frame to Parquet; `ToEmbeddings()` rebuilds the column |
+| Persistence | re-embeds on every start | `RagIndexCache.cs::Save()` writes the dimension frame to Parquet; `RagIndexCache.cs::ToEmbeddings()` rebuilds the column |
 | Backend | MiniLM CPU only | CPU or Silk (`--silk`), same retrieval |
 | Top-K | fixed at 4 | `--top-k` |
 
 The primitive loop is this, and it is the whole point of the mode:
 
 <!-- gate
-locals: float[] query = [1f, 0f, 0f]; GeneratedEmbeddings<Embedding<float>> vectors = new();
+locals: float[] query = [1f, 0f, 0f]; Microsoft.Extensions.AI.GeneratedEmbeddings<Microsoft.Extensions.AI.Embedding<float>> vectors = new();
 -->
 ```csharp
 using Microsoft.Extensions.AI;
@@ -213,6 +213,9 @@ as the contrast and let `--rag` carry the convention.
   and call the core `NivaraFrame.RowCosineSimilarity` kernel (as the first example
   in this document does).
 - **No ANN.** Retrieval is an exact row scan followed by `TopKDescending`.
+
+The behaviour above is pinned by
+`tests/Nivara.Tests/AI/NivaraEmbeddingExtensionsTests.cs::EndToEnd_GenerateFilterScoreRetrieve()`.
 
 ## What this convention is not
 
