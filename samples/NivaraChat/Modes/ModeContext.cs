@@ -24,4 +24,10 @@ public sealed record ModeContext(
     int ChunkSize = 500,
     bool Explore = false,
     string? ReportPath = null,
-    string? Weights = null);
+    string? Weights = null,
+    bool Offline = false,
+    int Runs = 3,
+    double Temperature = 0.2,
+    bool GradeAll = false,
+    bool Verbose = false,
+    string? Queries = null);

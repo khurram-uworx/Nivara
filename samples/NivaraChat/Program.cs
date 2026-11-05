@@ -31,6 +31,12 @@ if (args.Length > 0)
     bool explore = false;
     string? reportPath = null;
     string? weights = null;
+    bool offline = false;
+    int runs = 3;
+    double temperature = 0.2;
+    bool gradeAll = false;
+    bool verbose = false;
+    string? queries = null;
     for (int i = 1; i < args.Length; i++)
     {
         if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
@@ -51,9 +57,15 @@ if (args.Length > 0)
         if (args[i] == "--explore") explore = true;
         if (args[i] == "--report" && i + 1 < args.Length) reportPath = args[++i];
         if (args[i] == "--weights" && i + 1 < args.Length) weights = args[++i];
+        if (args[i] == "--offline") offline = true;
+        if (args[i] == "--runs" && i + 1 < args.Length) runs = int.Parse(args[++i]);
+        if (args[i] == "--temperature" && i + 1 < args.Length) temperature = double.Parse(args[++i]);
+        if (args[i] == "--grade-all") gradeAll = true;
+        if (args[i] == "--verbose") verbose = true;
+        if (args[i] == "--queries" && i + 1 < args.Length) queries = args[++i];
     }
 
-    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights);
+    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights, offline, runs, temperature, gradeAll, verbose, queries);
     switch (mode)
     {
         case "--train":
@@ -88,6 +100,9 @@ if (args.Length > 0)
             break;
         case "--rag-multiview":
             await RagMultiViewMode.Run(ctx);
+            break;
+        case "--rag-eval":
+            await RagEvalMode.Run(ctx);
             break;
         case "--intent-train":
             TrainingMode.RunIntentTrain(ctx, fromCli: true);

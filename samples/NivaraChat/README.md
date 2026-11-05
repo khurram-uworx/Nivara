@@ -70,6 +70,9 @@ dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr -
 dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --explore --report multiview.md
 dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --weights content=0.7,section=0.3
 
+# RAG evaluation (#943): LLM-as-judge paired comparison (requires Ollama)
+dotnet run --project samples/NivaraChat -- --rag-eval --ollama --model beam:cloud --queries samples/data/nivarachat/eval/queries.tsv --top-k 10
+
 # Online learning from LLM feedback (requires --ollama)
 dotnet run --project samples/NivaraChat -- --online-learning --ollama
 
@@ -109,6 +112,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
+| `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
@@ -132,6 +136,12 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--explore` | — | `--rag-multiview`: bucket every visible chunk by view disagreement, not just the top-K |
 | `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
 | `--weights <spec>` | `content=0.5,title=0.2,section=0.2,code=0.1` | `--rag-multiview`: late-fusion weights, renormalized per chunk over the views it has. Unknown names, negative values and an all-zero total are rejected |
+| `--queries <path>` | `samples/data/nivarachat/eval/queries.tsv` | `--rag-eval`: ground-truth TSV path | 
+| `--runs <n>` | `3` | `--rag-eval`: judge runs per query | 
+| `--temperature <f>` | `0.2` | `--rag-eval`: judge sampling temperature | 
+| `--grade-all` | — | `--rag-eval`: grade every visible chunk (true recall; slower) | 
+| `--verbose` | — | `--rag-eval`: print per-query chunk movement | 
+| `--offline` | — | `--rag-eval`: use cached labels only; no judge calls |
 ## Modes of use
 
 ### Training (`--train`)
