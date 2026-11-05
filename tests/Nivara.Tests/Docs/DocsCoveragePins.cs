@@ -15,8 +15,11 @@ internal static class DocsCoveragePins
     /// <c>RagIndexCache.cs::ToEmbeddings()</c> and
     /// <c>NivaraEmbeddingExtensionsTests.cs::EndToEnd_GenerateFilterScoreRetrieve()</c>,
     /// so 116 -> 121. Deliberate addition; not a drop.
+    /// +7: the multi-view section cites seven sample helpers, so 121 -> 128. Deliberate addition; not a drop.
+    /// (The bare <c>NivaraFrame.RowCosineSimilarity()</c> mention is not a citation because it carries no
+    /// file path; only the parenthesised file-qualified form counts.)
     /// </summary>
-    internal const int ExpectedCitationCount = 121;
+    internal const int ExpectedCitationCount = 128;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
@@ -42,8 +45,9 @@ internal static class DocsCoveragePins
     /// because this pin counts every citation that names a source file, not only the retired
     /// line-number form.
     /// +5: the new worked-contrast section cites five source files, so 30 -> 35.
+    /// +7: the multi-view section of docs/EMBEDDINGS.md cites seven sample helpers, so 35 -> 42.
     /// </summary>
-    internal const int ExpectedCodeCitationCount = 35;
+    internal const int ExpectedCodeCitationCount = 42;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.

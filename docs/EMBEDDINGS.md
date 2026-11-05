@@ -217,6 +217,74 @@ as the contrast and let `--rag` carry the convention.
 The behaviour above is pinned by
 `tests/Nivara.Tests/AI/NivaraEmbeddingExtensionsTests.cs::EndToEnd_GenerateFilterScoreRetrieve()`.
 
+## Multiple views of the same corpus
+
+The convention above stores one vector per row. That is enough when the text that
+gets embedded is the text that matters, but a chunk's *title*, its *section
+heading*, and the *code* inside it each carry a different signal, and a single
+vector averages them into one number. Multi-view retrieval (#914) keeps them
+separate: every chunk is embedded several times in the same 384-d space, once
+per representation, and the representations are scored independently before being
+combined.
+
+The four views used by the `--rag-multiview` sample are:
+
+- **Content** — the chunk as written, prose and fenced blocks together.
+- **Title** — the document title, constant per file.
+- **Section** — the heading breadcrumb, `H1 > H2 > H3`. Headings at H4 and
+  deeper bound a chunk but do not extend the breadcrumb.
+- **Code** — only the fence bodies inside the chunk; missing when the chunk has
+  no fenced blocks.
+
+Chunks are **section-scoped**: a contiguous run of one section's prose and whole
+fenced blocks, bounded by a size limit. A fence is never split, and a paragraph
+longer than the limit is split at whitespace. That scoping is what keeps Content
+and Code from being the same text — one chunk per fence would make their
+divergence ~0 for every code chunk, so a hit whose winning view is `Code` would
+say nothing.
+
+Each view lands in the same convention frame as a `float[]` column, so the
+existing kernel does the work:
+`samples/NivaraChat/Helpers/MultiViewScoring.cs::MultiViewScoring.BuildFrame()`
+assembles metadata plus the four vector columns plus a Content/Title coherence
+column in one `NivaraFrame.Create(...)` call (a `float[]` column cannot be added
+with `WithColumn`), and
+`samples/NivaraChat/Helpers/MultiViewScoring.cs::MultiViewScoring.Rank()` scores
+each view with `NivaraFrame.RowCosineSimilarity()`.
+
+Fusion is **late** and **per row**: the four scores are combined with weights
+renormalized over the views that actually have a score, so a chunk without code is
+not penalized for its missing view. A missing view is dropped from fusion, from
+`BestSpace`, and from divergence. The same rule treats a non-finite score as
+missing — a zero-magnitude vector makes `TensorPrimitives.CosineSimilarity`
+return `NaN`, which must never poison the fused score. Weights default to
+0.5 Content / 0.2 Section / 0.2 Title / 0.1 Code and can be overridden through
+`samples/NivaraChat/Helpers/MultiViewScoring.cs::FusionWeights.TryParse()`.
+
+The winning view is named per hit (`BestSpace`, ties broken in declaration order:
+Content, Title, Section, Code), and the widest disagreement between Content and
+each other view is reported as an absolute cosine difference. Rank bands are
+measured from the query's top fused score (Near ≤ 0.02, Distinct ≤ 0.08,
+else Weak); agreement bands are the same kind of absolute difference (Agree ≤
+0.05, Mild ≤ 0.15, else Strong). Chunks with fewer than two scored views land
+in an `InsufficientViews` bucket instead of being counted as agreement — see
+`samples/NivaraChat/Helpers/MultiViewExplorer.cs::MultiViewExplorer.Bucketize()`.
+
+Two practical notes. Titles and sections repeat heavily, so view texts are
+deduplicated before embedding — a full-corpus run embeds roughly 2,000 unique
+texts rather than one per chunk per view, which is what
+`samples/NivaraChat/Helpers/MultiViewIndex.cs::MultiViewIndex.BuildAsync()` does.
+And MiniLM truncates at 128 tokens on both backends, so a long Content or Code
+view loses its tail; the mode reports retrieval signal only and calls no LLM.
+
+The multi-view index has its own cache type with its own `SchemaVersion` and a
+`ChunkerVersion` salt in both the file hash and the manifest, so it can never be
+mistaken for the single-view cache described above:
+`samples/NivaraChat/Helpers/MultiViewIndexCache.cs::MultiViewIndexCache.TrySave()`
+writes metadata plus the four prefixed dimension blocks as one Parquet, and
+`samples/NivaraChat/Helpers/MultiViewIndexCache.cs::MultiViewIndexCache.IsValid()`
+rejects a cache whose footer does not hold one dimension block per view.
+
 ## What this convention is not
 
 - Not a column kind. There is no `NivaraColumn<Embedding<float>>`; the convention

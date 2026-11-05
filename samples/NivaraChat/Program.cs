@@ -28,6 +28,9 @@ if (args.Length > 0)
     bool noCache = false;
     int batchSize = 32;
     int chunkSize = 500;
+    bool explore = false;
+    string? reportPath = null;
+    string? weights = null;
     for (int i = 1; i < args.Length; i++)
     {
         if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
@@ -45,9 +48,12 @@ if (args.Length > 0)
         if (args[i] == "--no-cache") noCache = true;
         if (args[i] == "--batch-size" && i + 1 < args.Length) batchSize = int.Parse(args[++i]);
         if (args[i] == "--chunk-size" && i + 1 < args.Length) chunkSize = int.Parse(args[++i]);
+        if (args[i] == "--explore") explore = true;
+        if (args[i] == "--report" && i + 1 < args.Length) reportPath = args[++i];
+        if (args[i] == "--weights" && i + 1 < args.Length) weights = args[++i];
     }
 
-    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize);
+    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights);
     switch (mode)
     {
         case "--train":
@@ -79,6 +85,9 @@ if (args.Length > 0)
             break;
         case "--rag-agent":
             await RagAgentMode.Run(ctx);
+            break;
+        case "--rag-multiview":
+            await RagMultiViewMode.Run(ctx);
             break;
         case "--intent-train":
             TrainingMode.RunIntentTrain(ctx, fromCli: true);
@@ -185,6 +194,7 @@ void PrintUsage()
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
     Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer (Ollama optional)");
     Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection (Ollama optional)");
+    Console.WriteLine("  --rag-multiview      Multi-view retrieval (#914): four views per chunk, late fusion, disagreement report");
     Console.WriteLine("  --intent-train       Train the 5-class intent classifier");
     Console.WriteLine("  --intent             Intent routing: classify input, route to specialist executor");
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
@@ -200,13 +210,16 @@ void PrintUsage()
     Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag/--rag-agent (default: 3)");
     Console.WriteLine("  --silk               Use Silk OpenCL MiniLM backend for --rag/--rag-agent");
     Console.WriteLine("  --acl-group <name>   ACL filter for --rag/--rag-agent (e.g. adr, docs, plan)");
-    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag/--rag-agent");
+    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag/--rag-agent/--rag-multiview");
     Console.WriteLine("  --store <frame|inmemory>  Retrieval backend (default: frame)");
     Console.WriteLine("  --index <path>            Cache index parquet path (default: hashed under samples/data/nivara/rag_cache)");
     Console.WriteLine("  --rebuild                 Force rebuild of the cached index");
     Console.WriteLine("  --no-cache                Disable index caching");
     Console.WriteLine("  --batch-size <int>        Embedding batch size for --rag/--rag-agent ingestion (default: 32)");
     Console.WriteLine("  --chunk-size <int>        Max chunk size (chars) for RAG chunking (default: 500)");
+    Console.WriteLine("  --explore                 --rag-multiview: bucket all visible chunks by view disagreement");
+    Console.WriteLine("  --report <path>           --rag-multiview: write a markdown report (relative paths land under samples/data/nivarachat)");
+    Console.WriteLine("  --weights <spec>          --rag-multiview: e.g. content=0.5,title=0.2,section=0.2,code=0.1");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
