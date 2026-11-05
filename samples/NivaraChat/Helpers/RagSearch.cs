@@ -191,18 +191,39 @@ public sealed class RagIndex : IDisposable
                 Console.WriteLine($"Indexing {allChunks.Count} chunks from {mdFiles.Length} files (store={ctx.Store})...");
                 sw.Restart();
 
-                for (int i = 0; i < allChunks.Count; i++)
+                int batchSize = Math.Max(1, ctx.BatchSize);
+                for (int start = 0; start < allChunks.Count; start += batchSize)
                 {
-                    var c = allChunks[i];
-                    if (string.IsNullOrWhiteSpace(c.Content))
+                    int count = Math.Min(batchSize, allChunks.Count - start);
+                    var texts = new string[count];
+                    for (int j = 0; j < count; j++)
+                        texts[j] = allChunks[start + j].Content;
+
+                    float[][]? batch = null;
+                    try { batch = embedder.EmbedBatch(texts); }
+                    catch { batch = null; }
+
+                    for (int j = 0; j < count; j++)
                     {
-                        embeddings[i] = null;
-                        continue;
+                        int i = start + j;
+                        if (batch is { } values && j < values.Length && values[j] is { } vector)
+                        {
+                            embeddings[i] = vector;
+                            continue;
+                        }
+
+                        var content = allChunks[i].Content;
+                        if (string.IsNullOrWhiteSpace(content))
+                        {
+                            embeddings[i] = null;
+                            continue;
+                        }
+                        try { embeddings[i] = embedder.Embed(content); }
+                        catch { embeddings[i] = null; }
                     }
-                    try { embeddings[i] = embedder.Embed(c.Content); }
-                    catch { embeddings[i] = null; }
-                    if ((i + 1) % 50 == 0 || i == allChunks.Count - 1)
-                        Console.Write($"\r  Embedded {i + 1}/{allChunks.Count} chunks...   ");
+
+                    if ((start + count) % 50 == 0 || start + count == allChunks.Count)
+                        Console.Write($"\r  Embedded {start + count}/{allChunks.Count} chunks...   ");
                 }
                 Console.WriteLine();
 
