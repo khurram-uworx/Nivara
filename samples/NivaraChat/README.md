@@ -57,10 +57,12 @@ dotnet run --project samples/NivaraChat -- --critic --ollama --text "Explain qua
 # Embedding search (index documents, retrieve context via IEmbeddingGenerator)
 dotnet run --project samples/NivaraChat -- --embed
 
-# RAG pipeline: chunk docs, retrieve context, LLM generate answer (requires --ollama)
+# RAG pipeline: chunk docs, retrieve context (Ollama optional for LLM answer)
+dotnet run --project samples/NivaraChat -- --rag --text "How does embedding search work?"
 dotnet run --project samples/NivaraChat -- --rag --ollama --text "How does embedding search work?"
 
-# RAG agent: same with TextSearchProvider auto-context injection (requires --ollama)
+# RAG agent: same retrieval, TextSearchProvider auto-context injection (Ollama optional)
+dotnet run --project samples/NivaraChat -- --rag-agent --text "What is NivaraChat?"
 dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is NivaraChat?"
 
 # Online learning from LLM feedback (requires --ollama)
@@ -100,7 +102,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--critic` | — | Mode: writer-critic loop — LLM writes, Nivara scores, retry if poor |
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
-| `--rag-agent` | — | Mode: RAG agent — same as `--rag` with `TextSearchProvider` auto-context injection |
+| `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
@@ -195,7 +197,7 @@ The validator model was trained on `"original || response"` format for consisten
 Indexes 8 knowledge documents using `IEmbeddingGenerator` backed by a local MiniLM transformer, then runs an interactive REPL. Type a query and the system retrieves the top-4 most relevant documents ranked by cosine similarity. This demonstrates the retrieval step for RAG (Retrieval-Augmented Generation) — in a full pipeline, retrieved context would be injected into the LLM prompt via `TextSearchProvider`. Uses `NivaraEmbeddingGenerator<string>` from `Nivara.Extensions`, the same interface as OpenAI/Ollama embedding providers.
 
 ### RAG pipeline (`--rag`)
-Full Retrieval-Augmented Generation pipeline. This is the **convention example**: documents are landed as one `NivaraFrame` carrying metadata columns (`ChunkId`, `Source`, `Title`, `SectionPath`, `AclGroup`, `Content`) plus an `Embedding` column of `float[]`, and retrieval runs through `RowCosineSimilarity` + `TopKDescending` — the #867 convention documented in [the embedding convention](../../docs/EMBEDDINGS.md). The index is cached to Parquet in the dimension-frame form (`--index`, `--rebuild`, `--no-cache`); `--store inmemory` keeps the legacy `InMemoryVectorStore` path for comparison. Loads real Nivara documentation (markdown files from `docs/` + `README.md`), chunks them into paragraphs, embeds with the local MiniLM model (CPU or Silk via `--silk`), then runs an interactive REPL. ACL filtering (`--acl-group`) is a `FilterByMask` row op before scoring. User questions are matched against stored chunks via cosine similarity, top-K chunks are injected into a manually constructed prompt, and the LLM generates a grounded answer. Shows retrieval time and LLM time separately. Requires `--ollama`.
+Full Retrieval-Augmented Generation pipeline. This is the **convention example**: documents are landed as one `NivaraFrame` carrying metadata columns (`ChunkId`, `Source`, `Title`, `SectionPath`, `AclGroup`, `Content`) plus an `Embedding` column of `float[]`, and retrieval runs through `RowCosineSimilarity` + `TopKDescending` — the #867 convention documented in [the embedding convention](../../docs/EMBEDDINGS.md). The index is cached to Parquet in the dimension-frame form (`--index`, `--rebuild`, `--no-cache`); `--store inmemory` keeps the legacy `InMemoryVectorStore` path for comparison. Loads real Nivara documentation (markdown files from `docs/` + `README.md`), chunks them into paragraphs, embeds with the local MiniLM model (CPU or Silk via `--silk`), then runs an interactive REPL. ACL filtering (`--acl-group`) is a `FilterByMask` row op before scoring. User questions are matched against stored chunks via cosine similarity, top-K chunks are injected into a manually constructed prompt, and the LLM generates a grounded answer when `--ollama` is supplied; without `--ollama` the mode lists the retrieved chunks and their scores. Shows retrieval time and LLM time separately. Ollama is optional.
 
 ```
 Documents (docs/*.md, README.md)
@@ -229,7 +231,7 @@ Tested examples:
 Uses: `MiniLMEmbedder.Create()`, `NivaraFrame` (metadata + `Embedding`), `RowCosineSimilarity`, `TopKDescending`, `FilterByMask`, `RagIndexCache` (Parquet dimension-frame cache), `DocumentChunker.ChunkText()`. Legacy comparison: `--store inmemory` (`InMemoryVectorStore`, `collection.SearchAsync()`).
 
 ### RAG agent (`--rag-agent`)
-Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. Requires `--ollama`.
+Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. **Ollama is optional**: without `--ollama` the mode behaves like `--rag` in list-only mode (prints `#rank score [source] "snippet..."` per query); with `--ollama` it runs the agent workflow and prints the retrieved set for each provider search. `--roundtrip` prints the frame ↔ matrix ↔ `ToGeneratedEmbeddings` diagnostics once after the index builds (not per provider search). ACL filtering (`--acl-group`) applies to the frame store only; `--store inmemory` ignores it.
 
 ```
 Documents (same as --rag)
