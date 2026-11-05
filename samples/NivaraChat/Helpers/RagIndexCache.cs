@@ -4,14 +4,11 @@ using Nivara.IO;
 using NivaraChat.Modes;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace NivaraChat.Helpers;
 
 public static class RagIndexCache
 {
-    const int LockTimeoutMilliseconds = 1000;
-
     /// <summary>Current manifest schema version. Bump on any cache-format change.</summary>
     public const int SchemaVersion = 1;
     public const int CurrentSchemaVersion = SchemaVersion;
@@ -67,12 +64,11 @@ public static class RagIndexCache
         if (!File.Exists(manifestPath)) return false;
 
         var lockPath = indexPath + ".lock";
-        if (!TryAcquireLock(lockPath, out var lockStream))
+        if (!IndexCacheFile.TryAcquireLock(lockPath, out var lockStream))
             return false;
         try
         {
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var m = JsonSerializer.Deserialize<Manifest>(File.ReadAllText(manifestPath), options);
+            var m = IndexCacheFile.ReadJson<Manifest>(manifestPath);
             if (m == null) return false;
             if (m.Backend != (useSilk ? "silk" : "cpu")) return false;
             if (!string.Equals(m.DocsDir, docsDir, StringComparison.Ordinal)) return false;
@@ -86,31 +82,12 @@ public static class RagIndexCache
             // chunk-count + dimension check: the manifest must agree with the persisted
             // Parquet footer (row count and number of E* dimension columns). Reading only
             // the footer metadata keeps this cheap (no full load).
-            try
-            {
-                var reader = Parquet.ParquetReader.CreateAsync(indexPath, null, CancellationToken.None).GetAwaiter().GetResult();
-                try
-                {
-                    if (reader.Metadata!.NumRows != m.ChunkCount) return false;
-                    var dimensionColumns = 0;
-                    foreach (var field in reader.Schema!.DataFields)
-                    {
-                        if (field.Name.Length > 1 && field.Name[0] == 'E' &&
-                            int.TryParse(field.Name.AsSpan(1), out _))
-                            dimensionColumns++;
-                    }
-                    if (dimensionColumns != m.Dimension) return false;
-                }
-                finally
-                {
-                    reader.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                }
-            }
-            catch
-            {
+            if (!IndexCacheFile.TryReadFooter(indexPath, out var rowCount, out var fieldNames))
                 return false;
-            }
-            return true;
+            if (rowCount != m.ChunkCount) return false;
+            var dimensionColumns = fieldNames.Count(name =>
+                name.Length > 1 && name[0] == 'E' && int.TryParse(name.AsSpan(1), out _));
+            return dimensionColumns == m.Dimension;
         }
         catch
         {
@@ -148,35 +125,18 @@ public static class RagIndexCache
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        var lockPath = indexPath + ".lock";
-        if (!TryAcquireLock(lockPath, out var lockStream))
-            return false;
-
-        using (lockStream)
+        var manifestPath = indexPath + ".manifest.json";
+        return IndexCacheFile.TrySaveAtomically(indexPath, manifestPath, (tempIndexPath, tempManifestPath) =>
         {
-            var manifestPath = indexPath + ".manifest.json";
-            var tempIndexPath = TempPath(indexPath);
-            var tempManifestPath = TempPath(manifestPath);
-            try
-            {
-                saveFrame.ToParquet(tempIndexPath);
-                File.WriteAllText(tempManifestPath, JsonSerializer.Serialize(manifest));
-                File.Move(tempIndexPath, indexPath, overwrite: true);
-                File.Move(tempManifestPath, manifestPath, overwrite: true);
-                return true;
-            }
-            finally
-            {
-                TryDelete(tempIndexPath);
-                TryDelete(tempManifestPath);
-            }
-        }
+            saveFrame.ToParquet(tempIndexPath);
+            IndexCacheFile.WriteJson(tempManifestPath, manifest);
+        });
     }
 
     public static NivaraFrame Load(string indexPath, out int dimension)
     {
         var lockPath = indexPath + ".lock";
-        if (!TryAcquireLock(lockPath, out var lockStream))
+        if (!IndexCacheFile.TryAcquireLock(lockPath, out var lockStream))
             throw new IOException($"Cache is locked by another process: {lockPath}");
 
         using (lockStream)
@@ -218,47 +178,5 @@ public static class RagIndexCache
         for (int i = 0; i < loaded.RowCount; i++)
             result[i] = embCol[i];
         return result;
-    }
-
-    static bool TryAcquireLock(string lockPath, out FileStream? lockStream)
-    {
-        var deadline = DateTime.UtcNow.AddMilliseconds(LockTimeoutMilliseconds);
-        while (true)
-        {
-            try
-            {
-                lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                return true;
-            }
-            catch (IOException)
-            {
-                if (DateTime.UtcNow >= deadline)
-                {
-                    lockStream = null;
-                    return false;
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                lockStream = null;
-                return false;
-            }
-
-            Thread.Sleep(25);
-        }
-    }
-
-    static string TempPath(string path) => path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-
-    static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-        catch
-        {
-        }
     }
 }
