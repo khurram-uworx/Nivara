@@ -18,8 +18,8 @@ Everything is sample-local. No `src/` changes.
 | Views vs models | Four views, one MiniLM model, one 384-d space |
 | Title view | Document title (H1, else filename stem) — constant per file |
 | Section view | `H1 > H2 > H3` breadcrumb |
-| Code view | One chunk per fenced block; prose chunks carry a null Code view |
-| Chunking | Fence-aware; ```` ``` ```` and `~~~` lines are never headings |
+| Code view | Fence bodies inside the chunk; null when the chunk contains no fences |
+| Chunking | Section-scoped: a contiguous run of one section (prose + fences) bounded by `--chunk-size`, so Content and Code never repeat one another |
 | Fusion weights | 0.5 Content / 0.2 Section / 0.2 Title / 0.1 Code, renormalized per row over non-null views; `--weights` override |
 | Rank bands | Gap from the query's top fused score: Near <= 0.02, Distinct <= 0.08, Weak > 0.08 |
 | Disagreement bands | Absolute cosine difference: Agree <= 0.05, Mild <= 0.15, Strong > 0.15 |
@@ -61,8 +61,8 @@ public sealed record MultiViewChunk(
     string Title,        // document title
     string Section,      // "H1 > H2 > H3"
     string AclGroup,     // first folder under docs/, else "public"
-    string Content,      // never empty
-    string? Code);       // fence body, or null for prose chunks
+    string Content,      // the chunk as written: prose plus any fenced blocks
+    string? Code);       // fence bodies only, or null when the chunk has no fences
 
 public static class MultiViewChunker
 {
@@ -71,9 +71,12 @@ public static class MultiViewChunker
 }
 ```
 
-Behavior: fence-aware scan; H1 sets the document title; H2/H3 build the breadcrumb; H4+
-does not extend the breadcrumb; prose splits at paragraph boundaries and then at
-`maxChunkSize`; each fence body becomes its own chunk above a minimum length; empty input
+Behavior: fence-aware scan; H1 sets the document title (found in a pre-scan so every chunk in
+the file carries it); H2/H3 build the breadcrumb; H4+ bounds a chunk but does not extend the
+breadcrumb; a chunk is a contiguous run of one section's blocks (prose paragraphs and whole
+fences), flushed when the next block would exceed `maxChunkSize` or a heading starts; a
+paragraph larger than `maxChunkSize` is split at whitespace, a fence never is; each chunk's
+`Code` view is the concatenation of its fence bodies, null when it has none. Empty input
 yields no chunks.
 
 ### 3. `Helpers/MultiViewScoring.cs` (new)
