@@ -20,12 +20,12 @@ public class MultiViewScoringTests
     static readonly float[] Content10 = [1f, 0f];
 
     static MultiViewChunk Chunk(int index, string? code = null) => new(
-        $"docs/a.md#{index}",
+        $"corpus/a.md#{index}",
         "a.md",
-        "docs/a.md",
+        "corpus/a.md",
         "Doc",
         $"Doc > S{index}",
-        "docs",
+        "corpus",
         $"content {index}",
         code);
 
@@ -322,7 +322,7 @@ public class MultiViewScoringTests
         Assert.Multiple(() =>
         {
             Assert.That(filtered.RowCount, Is.EqualTo(2));
-            Assert.That(filtered.GetColumn<string>("ChunkId")[0], Is.EqualTo("docs/a.md#0"));
+            Assert.That(filtered.GetColumn<string>("ChunkId")[0], Is.EqualTo("corpus/a.md#0"));
             Assert.That(filtered.GetColumn<float[]>("VectorContent")[1], Is.EqualTo(Content11));
             Assert.That(filtered.GetColumn<float[]>("VectorTitle")[1], Is.EqualTo(Content01));
             Assert.That(filtered.GetColumn<float[]>("VectorSection")[1], Is.EqualTo(Content10));
@@ -342,7 +342,7 @@ public class MultiViewScoringTests
         Assert.Multiple(() =>
         {
             Assert.That(sliced.RowCount, Is.EqualTo(2));
-            Assert.That(sliced.GetColumn<string>("ChunkId")[0], Is.EqualTo("docs/a.md#1"));
+            Assert.That(sliced.GetColumn<string>("ChunkId")[0], Is.EqualTo("corpus/a.md#1"));
             Assert.That(sliced.GetColumn<float[]>("VectorContent")[0], Is.EqualTo(Content01));
             Assert.That(sliced.GetColumn<float[]>("VectorContent")[1], Is.EqualTo(Content11));
             Assert.That(sliced.GetColumn<float[]>("VectorTitle")[0], Is.Null);

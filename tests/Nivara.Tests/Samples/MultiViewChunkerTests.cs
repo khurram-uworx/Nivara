@@ -16,7 +16,7 @@ public class MultiViewChunkerTests
     static string Source(string relative) =>
         Path.Combine(RepoRoot, relative.Replace('/', Path.DirectorySeparatorChar));
 
-    static List<MultiViewChunk> Chunk(string markdown, int maxChunkSize = 500, string relative = "docs/multi.md") =>
+    static List<MultiViewChunk> Chunk(string markdown, int maxChunkSize = 500, string relative = "corpus/multi.md") =>
         MultiViewChunker.ChunkMarkdown(markdown, Source(relative), RepoRoot, maxChunkSize);
 
     [Test]
@@ -172,7 +172,7 @@ public class MultiViewChunkerTests
             Body.
             """;
 
-        var chunks = Chunk(markdown, relative: "docs/guide.md");
+        var chunks = Chunk(markdown, relative: "corpus/guide.md");
 
         Assert.That(chunks, Has.Count.EqualTo(1));
         Assert.Multiple(() =>
@@ -250,7 +250,7 @@ public class MultiViewChunkerTests
     [Test]
     public void ChunkMarkdown_AclGroup_IsParentFolderName()
     {
-        var nested = Chunk("# T\n\nBody.", relative: "docs/adr/001-decision.md");
+        var nested = Chunk("# T\n\nBody.", relative: "corpus/adr/001-decision.md");
         var root = Chunk("# T\n\nBody.", relative: "README.md");
 
         Assert.Multiple(() =>
@@ -263,13 +263,13 @@ public class MultiViewChunkerTests
     [Test]
     public void ChunkMarkdown_DuplicateFileNamesAcrossFolders_ProduceDistinctChunkIds()
     {
-        var first = Chunk("# A\n\nBody.", relative: "docs/a/README.md");
-        var second = Chunk("# B\n\nBody.", relative: "docs/b/README.md");
+        var first = Chunk("# A\n\nBody.", relative: "corpus/a/README.md");
+        var second = Chunk("# B\n\nBody.", relative: "corpus/b/README.md");
 
         Assert.Multiple(() =>
         {
-            Assert.That(first[0].ChunkId, Is.EqualTo("docs/a/README.md#0"));
-            Assert.That(second[0].ChunkId, Is.EqualTo("docs/b/README.md#0"));
+            Assert.That(first[0].ChunkId, Is.EqualTo("corpus/a/README.md#0"));
+            Assert.That(second[0].ChunkId, Is.EqualTo("corpus/b/README.md#0"));
             Assert.That(first[0].ChunkId, Is.Not.EqualTo(second[0].ChunkId));
         });
     }

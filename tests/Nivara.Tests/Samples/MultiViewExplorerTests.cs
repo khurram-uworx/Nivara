@@ -11,7 +11,7 @@ namespace Nivara.Tests.Samples;
 public class MultiViewExplorerTests
 {
     static readonly MultiViewChunk Chunk =
-        new("docs/a.md#0", "a.md", "docs/a.md", "Doc", "Doc > S", "docs", "content", "var x = 1;");
+        new("corpus/a.md#0", "a.md", "corpus/a.md", "Doc", "Doc > S", "corpus", "content", "var x = 1;");
 
     static MultiViewHit Hit(
         ViewScores scores,
@@ -164,6 +164,6 @@ public class MultiViewExplorerTests
     {
         var hit = Hit(new ViewScores(null, null, null, null), fused: null, best: null);
 
-        Assert.That(MultiViewExplorer.Explain(hit), Is.EqualTo("docs/a.md#0: no view scored."));
+        Assert.That(MultiViewExplorer.Explain(hit), Is.EqualTo("corpus/a.md#0: no view scored."));
     }
 }

@@ -52,9 +52,9 @@ public class MultiViewIndexCacheTests
     {
         var chunks = new List<MultiViewChunk>
         {
-            new("docs/a.md#0", "a.md", "docs/a.md", "A", "A > One", "a", "content 0", "var x = 1;"),
-            new("docs/a.md#1", "a.md", "docs/a.md", "A", "A > Two", "a", "content 1", null),
-            new("docs/b.md#0", "b.md", "docs/b.md", "B", "B", "docs", "content 2", null)
+            new("corpus/a.md#0", "a.md", "corpus/a.md", "A", "A > One", "a", "content 0", "var x = 1;"),
+            new("corpus/a.md#1", "a.md", "corpus/a.md", "A", "A > Two", "a", "content 1", null),
+            new("corpus/b.md#0", "b.md", "corpus/b.md", "B", "B", "corpus", "content 2", null)
         };
 
         float[]?[] content = [Vector(dimension, 0), Vector(dimension, 1), Vector(dimension, 2)];
