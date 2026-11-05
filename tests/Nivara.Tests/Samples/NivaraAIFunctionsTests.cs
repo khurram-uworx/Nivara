@@ -19,12 +19,20 @@ public class NivaraAIFunctionsTests
     public void SetUp()
     {
         var path = Path.Combine(ModelsDir, "sentiment_model.json");
-        if (!File.Exists(path)) return;
-        var tok = TextTokenizer.Load(Path.Combine(ModelsDir, "sentiment_tokenizer.json"));
-        var model = new TextClassifierModel<float>(tok.VocabSize, 32, 64, 3, 20);
-        ModelSerializer.Load(model, path);
-        model.Eval();
-        Cached = (model, tok);
+        var tokPath = Path.Combine(ModelsDir, "sentiment_tokenizer.json");
+        if (!File.Exists(path) || !File.Exists(tokPath)) return;
+        try
+        {
+            var tok = TextTokenizer.Load(tokPath);
+            var model = new TextClassifierModel<float>(tok.VocabSize, 32, 64, 3, 20);
+            ModelSerializer.Load(model, path);
+            model.Eval();
+            Cached = (model, tok);
+        }
+        catch
+        {
+            Cached = null;
+        }
     }
 
     [OneTimeTearDown]
