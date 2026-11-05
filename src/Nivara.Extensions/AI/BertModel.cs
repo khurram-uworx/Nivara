@@ -621,11 +621,60 @@ public static class MiniLMEmbeddingGenerator
             return result;
         };
 
+        Func<IEnumerable<string>, IEnumerable<float[]>> batchEmbeddingFactory = texts =>
+        {
+            var input = texts.ToList();
+            if (input.Count == 0)
+                return [];
+
+            var flatIds = new int[input.Count * maxLen];
+            var flatMask = new float[input.Count * maxLen];
+            for (int b = 0; b < input.Count; b++)
+            {
+                var (ids, mask, _) = MiniLMTokenizer.Encode(tokenizer, input[b], maxLen);
+                for (int s = 0; s < maxLen; s++)
+                {
+                    flatIds[b * maxLen + s] = (int)ids[s];
+                    flatMask[b * maxLen + s] = mask[s];
+                }
+            }
+
+            var maskTensor = ReverseGradTensor<float>.FromArray(flatMask, requiresGrad: false);
+            maskTensor.Reshape(flatMask.Length);
+            var hidden = model.ForwardBatched(flatIds, maskTensor, input.Count, maxLen);
+
+            var data = new float[hidden.Length];
+            hidden.Data.CopyTo(data, 0f);
+
+            var result = new float[input.Count][];
+            for (int b = 0; b < input.Count; b++)
+            {
+                var cls = new float[config.HiddenSize];
+                Array.Copy(data, b * maxLen * config.HiddenSize, cls, 0, config.HiddenSize);
+                L2Normalize(cls);
+                result[b] = cls;
+            }
+            return result;
+        };
+
         return new NivaraEmbeddingGenerator<string>(
             embeddingFactory,
+            batchEmbeddingFactory,
             config.HiddenSize,
             providerName,
             defaultModelId: "all-minilm-l6-v2");
+    }
+
+    static void L2Normalize(float[] v)
+    {
+        float norm = 0f;
+        foreach (var x in v) norm += x * x;
+        norm = MathF.Sqrt(norm);
+        if (norm > 1e-12f)
+        {
+            float inv = 1f / norm;
+            for (int i = 0; i < v.Length; i++) v[i] *= inv;
+        }
     }
 }
 
