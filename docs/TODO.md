@@ -60,7 +60,7 @@ public sealed record MultiViewChunk(
     string SourcePath,   // repo-relative path
     string Title,        // document title
     string Section,      // "H1 > H2 > H3"
-    string AclGroup,     // first folder under docs/, else "public"
+    string AclGroup,     // parent folder name, matching RagChunker; "public" at the root
     string Content,      // the chunk as written: prose plus any fenced blocks
     string? Code);       // fence bodies only, or null when the chunk has no fences
 
