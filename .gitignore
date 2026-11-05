@@ -355,7 +355,11 @@ samples/data/compare_smollm_py_bf16.bin
 samples/data/compare_smollm_logits_py_bf16.bin
 
 samples/data/diag/
-samples/data/nivarachat
+samples/data/nivarachat/*
+!samples/data/nivarachat/eval/
+samples/data/nivarachat/eval/*
+!samples/data/nivarachat/eval/queries.tsv
+!samples/data/nivarachat/eval/relevance.tsv
 
 samples/data/mobilenet_v2/
 samples/data/resnet18/

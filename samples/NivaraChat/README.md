@@ -286,6 +286,19 @@ Console table  +  --explore buckets  +  --report markdown
 
 `Title` and `Section` repeat heavily across a corpus, so view texts are deduplicated before embedding — a full-corpus run embeds roughly 2,000 unique texts rather than one per chunk per view. The multi-view index has its own cache type and its own `SchemaVersion`/`ChunkerVersion` salt (`samples/data/nivarachat/rag_multiview_cache/`), so it can never be mistaken for the single-view #912 cache; `--index`, `--rebuild` and `--no-cache` behave as they do for `--rag`.
 
+### RAG evaluation (`--rag-eval`)
+
+Runs an LLM-as-judge experiment: builds the multi-view index, evaluates `fused` against
+`content-only` and leave-one-view-out configurations, and prints paired metrics, win/loss/tie,
+diagnostics, and cost. Requires `--ollama` (for example `--model beam:cloud`) unless `--offline`
+is used with cached labels in `samples/data/nivarachat/eval/relevance.tsv`.
+
+Interpretation:
+- If fused MRR/nDCG are not significantly better than content-only, multi-view is only an
+  explainability layer.
+- A `BestSpace` distribution dominated by Content means other views rarely win.
+- A small Strong disagreement bucket means the views largely agree.
+
 Two documented limits: MiniLM truncates at 128 tokens on both backends, so a long Content or Code view loses its tail; and the mode reports retrieval signal only — it does not call an LLM.
 
 Uses: `MultiViewChunker`, `MultiViewScoring` (`BuildFrame`, `Rank`, `FusionWeights`, `MultiViewMatrices`), `MultiViewExplorer` (`Bucketize`, `Explain`), `MultiViewIndex`/`MultiViewIndexCache`, and the same `RowCosineSimilarity`/`TopKDescending` convention as `--rag`.
