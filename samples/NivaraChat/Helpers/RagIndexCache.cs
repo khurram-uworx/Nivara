@@ -10,7 +10,7 @@ namespace NivaraChat.Helpers;
 
 public static class RagIndexCache
 {
-    const int LockTimeoutMilliseconds = 2000;
+    const int LockTimeoutMilliseconds = 1000;
 
     public sealed record Manifest(string Backend, int Dimension, int ChunkCount, DateTime DocsMaxMtime, string DocsDir);
 
