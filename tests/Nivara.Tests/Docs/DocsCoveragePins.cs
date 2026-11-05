@@ -10,8 +10,13 @@ internal static class DocsCoveragePins
     /// Count of citations found repository-wide. Pinned deliberately: see the coverage test.
     /// +3: <c>docs/EMBEDDINGS.md</c> cites <c>NivaraFrame.RowCosineSimilarity()</c> twice and
     /// <c>NivaraFrame.RowDot()</c> once, so 113 -> 116. Deliberate addition; not a drop.
+    /// +5: the new worked-contrast section cites <c>EmbeddingMode.cs::Run()</c>,
+    /// <c>RagMode.cs::Run(ModeContext)</c>, <c>RagIndexCache.cs::Save()</c>,
+    /// <c>RagIndexCache.cs::ToEmbeddings()</c> and
+    /// <c>NivaraEmbeddingExtensionsTests.cs::EndToEnd_GenerateFilterScoreRetrieve()</c>,
+    /// so 116 -> 121. Deliberate addition; not a drop.
     /// </summary>
-    internal const int ExpectedCitationCount = 116;
+    internal const int ExpectedCitationCount = 121;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
@@ -36,8 +41,9 @@ internal static class DocsCoveragePins
     /// +3: <c>docs/EMBEDDINGS.md</c>'s three symbol-form citations, so 27 -> 30. They count here
     /// because this pin counts every citation that names a source file, not only the retired
     /// line-number form.
+    /// +5: the new worked-contrast section cites five source files, so 30 -> 35.
     /// </summary>
-    internal const int ExpectedCodeCitationCount = 30;
+    internal const int ExpectedCodeCitationCount = 35;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
@@ -52,6 +58,8 @@ internal static class DocsCoveragePins
     /// +1 (#867): the CHANGELOG entry for the convention points at `docs/EMBEDDINGS.md`, so 235 -> 236.
     /// +2 (#867): the AGENTS.md implementation-map line names that document as both link text and
     /// link target, matching the Silk bullet's style, so 236 -> 238. Two occurrences, not one.
+    /// +2: the NivaraChat README links to docs/EMBEDDINGS.md from the --embed and --rag sections,
+    /// so 238 -> 240.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 238;
+    internal const int ExpectedDocumentReferenceCount = 240;
 }
