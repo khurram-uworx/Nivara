@@ -181,8 +181,8 @@ void PrintUsage()
     Console.WriteLine("  --tools              LLM orchestrator calls Nivara models as AIFunction tools");
     Console.WriteLine("  --critic             Writer-critic loop: LLM writes, Nivara scores, retry if poor");
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
-    Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer");
-    Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection");
+    Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer (Ollama optional)");
+    Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection (Ollama optional)");
     Console.WriteLine("  --intent-train       Train the 5-class intent classifier");
     Console.WriteLine("  --intent             Intent routing: classify input, route to specialist executor");
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
@@ -194,11 +194,11 @@ void PrintUsage()
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
     Console.WriteLine("  --text \"<message>\"   Single-shot: run pipeline on one message and exit");
     Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff / --online-learning (default: 0.8)");
-    Console.WriteLine("  --docs-dir <path>    Documents directory for --rag (default: docs/ + README.md)");
-    Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag (default: 3)");
+    Console.WriteLine("  --docs-dir <path>    Documents directory for --rag/--rag-agent (default: docs/ + README.md)");
+    Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag/--rag-agent (default: 3)");
     Console.WriteLine("  --silk               Use Silk OpenCL MiniLM backend for --rag/--rag-agent");
     Console.WriteLine("  --acl-group <name>   ACL filter for --rag/--rag-agent (e.g. adr, docs, plan)");
-    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag");
+    Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag/--rag-agent");
     Console.WriteLine("  --store <frame|inmemory>  Retrieval backend (default: frame)");
     Console.WriteLine("  --index <path>            Cache index parquet path (default: hashed under samples/data/nivara/rag_cache)");
     Console.WriteLine("  --rebuild                 Force rebuild of the cached index");
