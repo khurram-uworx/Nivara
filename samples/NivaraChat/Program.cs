@@ -206,7 +206,8 @@ void PrintUsage()
     Console.WriteLine("  --rebuild                 Force rebuild of the cached index");
     Console.WriteLine("  --no-cache                Disable index caching");
     Console.WriteLine("  --batch-size <int>        Embedding batch size for --rag/--rag-agent ingestion (default: 32)");
-    Console.WriteLine("  --chunk-size <int>        Max chunk size (chars) for RAG chunking (default: 500)");    Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
+    Console.WriteLine("  --chunk-size <int>        Max chunk size (chars) for RAG chunking (default: 500)");
+    Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
     Console.WriteLine("  --smollm options:    --model-dir --precision --text --max-new-tokens --help");
