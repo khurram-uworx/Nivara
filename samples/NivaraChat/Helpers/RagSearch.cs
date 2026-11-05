@@ -181,8 +181,21 @@ public sealed class RagIndex : IDisposable
                 sw.Restart();
                 var loaded = RagIndexCache.Load(indexPath, out int dim);
                 allChunks = RagIndexCache.ToChunks(loaded, dim);
-                embeddings = RagIndexCache.ToEmbeddings(loaded, dim);
-                frame = BuildFrame(allChunks, embeddings);
+
+                // Reuse the cached frame's columns directly instead of round-tripping
+                // through ToEmbeddings + BuildFrame (issue #926 cache parity cleanup).
+                var cols = new List<(string Name, IColumn)>();
+                foreach (var name in new[] { "ChunkId", "Source", "Title", "SectionPath", "AclGroup", "Content" })
+                {
+                    if (!loaded.HasColumn(name))
+                        continue;
+                    cols.Add((name, (IColumn)loaded.GetColumn<string>(name)));
+                }
+                var embeddingColumn = loaded.ToEmbeddingFrame("Embedding", dimension: dim)
+                    .GetColumn<float[]>("Embedding");
+                cols.Add(("Embedding", (IColumn)embeddingColumn));
+                frame = NivaraFrame.Create(cols.ToArray());
+
                 sw.Stop();
                 Console.WriteLine($"  Loaded {allChunks.Count} chunks in {sw.ElapsedMilliseconds} ms\n");
             }
