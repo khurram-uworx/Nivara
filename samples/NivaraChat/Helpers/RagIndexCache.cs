@@ -81,6 +81,16 @@ public static class RagIndexCache
             if (m.DocsMaxMtime != maxMtime) return false;
             var contentHash = ComputeContentHash(mdFiles);
             if (!string.Equals(m.ContentHash, contentHash, StringComparison.Ordinal)) return false;
+            // chunk-count check: the manifest must agree with the persisted dimension frame
+            try
+            {
+                var loaded = NivaraFrameIOExtensions.LoadParquet(indexPath);
+                if (loaded.RowCount != m.ChunkCount) return false;
+            }
+            catch
+            {
+                return false;
+            }
             return true;
         }
         catch
