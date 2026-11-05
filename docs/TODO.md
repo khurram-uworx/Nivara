@@ -118,6 +118,21 @@ ACL filtering and matrix construction happen once at index build, not per query.
 sample-locally from the two `float[]` columns (no `Abs` kernel exists; divergence is
 computed in the same span loop).
 
+A view score that is not finite (a zero-magnitude vector yields NaN from
+`TensorPrimitives.CosineSimilarity`) is treated as a **missing** view: it is excluded from
+fusion, BestSpace and divergence exactly as a null score is. Tested with an injected NaN.
+
+### Grounding (G1)
+
+- `TensorPrimitives.CosineSimilarity(ReadOnlySpan<float>, ReadOnlySpan<float>)` is confirmed
+  by the official .NET SIMD guidance and is already used by
+  `TensorsHelper.RowCosineSimilarity` and `EmbeddingMode`.
+- `NivaraFrame.RowCosineSimilarity`, the `float[]` vector-column overload,
+  `FilterByMask`, `ToEmbeddingMatrix`/`ToEmbeddingFrame` and
+  `NivaraColumn<float>.CreateFromSpans` exist with the signatures the plan uses.
+- Nothing in the grounding pass requires a decision; the NaN rule above is an engineering
+  guard, not a product choice.
+
 ### 4. `Helpers/MultiViewExplorer.cs` (new)
 
 ```csharp
