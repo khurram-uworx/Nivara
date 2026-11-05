@@ -159,7 +159,7 @@ public sealed class RagIndex : IDisposable
         foreach (var f in mdFiles)
         {
             var content = await File.ReadAllTextAsync(f, ct);
-            allChunks.AddRange(RagChunker.ChunkMarkdown(content, f, repoRoot));
+            allChunks.AddRange(RagChunker.ChunkMarkdown(content, f, repoRoot, ctx.ChunkSize));
         }
 
         Console.WriteLine($"Chunked {allChunks.Count} chunks from {mdFiles.Length} files (store={ctx.Store})...");
@@ -175,7 +175,7 @@ public sealed class RagIndex : IDisposable
 
         try
         {
-            if (useCache && !ctx.Rebuild && RagIndexCache.IsValid(indexPath, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk))
+            if (useCache && !ctx.Rebuild && RagIndexCache.IsValid(indexPath, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk, ctx.ChunkSize))
             {
                 Console.WriteLine($"Loading cached index: {indexPath}");
                 sw.Restart();
@@ -245,7 +245,7 @@ public sealed class RagIndex : IDisposable
                 {
                     try
                     {
-                        if (RagIndexCache.TrySave(indexPath, frame, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk, embedder.Dimension))
+                        if (RagIndexCache.TrySave(indexPath, frame, resolvedDocsDir, mdFiles.ToList(), ctx.UseSilk, embedder.Dimension, ctx.ChunkSize))
                             Console.WriteLine($"  Cached index to {indexPath}");
                         else
                             Console.WriteLine("  Cache save skipped: another process is writing the index.");

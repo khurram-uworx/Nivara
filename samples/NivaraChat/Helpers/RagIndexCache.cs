@@ -24,12 +24,12 @@ public static class RagIndexCache
         DateTime DocsMaxMtime,
         string DocsDir,
         string ContentHash = "",
-        int SchemaVersion = 0);
-
-    public static string ComputeHash(string docsDir, bool useSilk)
+        int SchemaVersion = 0,
+        int ChunkSize = 500);
+    public static string ComputeHash(string docsDir, bool useSilk, int chunkSize = 500)
     {
         using var sha = SHA256.Create();
-        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(docsDir + "|" + (useSilk ? "silk" : "cpu")));
+        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(docsDir + "|" + (useSilk ? "silk" : "cpu") + "|" + chunkSize));
         return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
     }
 
@@ -46,9 +46,9 @@ public static class RagIndexCache
         return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
     }
 
-    public static string DefaultPath(string docsDir, bool useSilk)
+    public static string DefaultPath(string docsDir, bool useSilk, int chunkSize = 500)
     {
-        var hash = ComputeHash(docsDir, useSilk);
+        var hash = ComputeHash(docsDir, useSilk, chunkSize);
         var dir = Path.Combine(ModeHelpers.GetRepoRoot(), "samples", "data", "nivarachat", "rag_cache");
         Directory.CreateDirectory(dir);
         return Path.Combine(dir, $"rag_index_{hash}.parquet");
@@ -57,10 +57,10 @@ public static class RagIndexCache
     public static string ResolvePath(ModeContext ctx, string docsDir)
     {
         if (!string.IsNullOrEmpty(ctx.Index)) return ctx.Index!;
-        return DefaultPath(docsDir, ctx.UseSilk);
+        return DefaultPath(docsDir, ctx.UseSilk, ctx.ChunkSize);
     }
 
-    public static bool IsValid(string indexPath, string docsDir, List<string> mdFiles, bool useSilk)
+    public static bool IsValid(string indexPath, string docsDir, List<string> mdFiles, bool useSilk, int chunkSize = 500)
     {
         if (!File.Exists(indexPath)) return false;
         var manifestPath = indexPath + ".manifest.json";
@@ -77,6 +77,8 @@ public static class RagIndexCache
             if (m.Backend != (useSilk ? "silk" : "cpu")) return false;
             if (!string.Equals(m.DocsDir, docsDir, StringComparison.Ordinal)) return false;
             if (m.SchemaVersion != SchemaVersion) return false;
+            var manifestChunkSize = m.ChunkSize == 0 ? 500 : m.ChunkSize;
+            if (manifestChunkSize != chunkSize) return false;
             var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
             if (m.DocsMaxMtime != maxMtime) return false;
             var contentHash = ComputeContentHash(mdFiles);
@@ -103,10 +105,9 @@ public static class RagIndexCache
         }
     }
 
-    public static void Save(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension)
-        => TrySave(indexPath, vectorFrame, docsDir, mdFiles, useSilk, dimension);
-
-    public static bool TrySave(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension)
+    public static void Save(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension, int chunkSize = 500)
+        => TrySave(indexPath, vectorFrame, docsDir, mdFiles, useSilk, dimension, chunkSize);
+    public static bool TrySave(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension, int chunkSize = 500)
     {
         var matrix = vectorFrame.ToEmbeddingMatrix("Embedding");
         var cols = new List<(string Name, IColumn)>();
@@ -125,8 +126,7 @@ public static class RagIndexCache
         var saveFrame = NivaraFrame.Create(cols.ToArray());
         var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
         var contentHash = ComputeContentHash(mdFiles);
-        var manifest = new Manifest(useSilk ? "silk" : "cpu", dimension, vectorFrame.RowCount, maxMtime, docsDir, contentHash, SchemaVersion);
-
+        var manifest = new Manifest(useSilk ? "silk" : "cpu", dimension, vectorFrame.RowCount, maxMtime, docsDir, contentHash, SchemaVersion, chunkSize);
         var directory = Path.GetDirectoryName(indexPath);
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);

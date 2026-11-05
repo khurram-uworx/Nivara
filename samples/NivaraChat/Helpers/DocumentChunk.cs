@@ -15,7 +15,7 @@ public sealed record RagChunk(
 
 public static class RagChunker
 {
-    public static List<RagChunk> ChunkMarkdown(string content, string sourcePath, string repoRoot)
+    public static List<RagChunk> ChunkMarkdown(string content, string sourcePath, string repoRoot, int maxChunkSize = 500)
     {
         var chunks = new List<RagChunk>();
         // First, walk lines to pair each paragraph with the most recent heading.
@@ -35,7 +35,7 @@ public static class RagChunker
                 int pos = 0;
                 while (pos < text.Length)
                 {
-                    int len = Math.Min(500, text.Length - pos);
+                    int len = Math.Min(maxChunkSize, text.Length - pos);
                     var piece = text.Substring(pos, len).Trim();
                     if (!string.IsNullOrEmpty(piece))
                         chunks.Add(MakeChunk(sourcePath, repoRoot, title, section, piece, idx++));

@@ -122,7 +122,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--index <path>` | hashed default | Cache index parquet path |
 | `--rebuild` | — | Force rebuild of the cached index |
 | `--no-cache` | — | Disable index caching |
-
+| `--chunk-size <int>` | `500` | Max chunk size (chars) for RAG chunking (`--rag`/`--rag-agent`) |
 ## Modes of use
 
 ### Training (`--train`)
