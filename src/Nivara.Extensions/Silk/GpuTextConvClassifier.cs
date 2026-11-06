@@ -630,9 +630,9 @@ public sealed class GpuTextConvClassifier : IDisposable
             (fc2BiasBuf, dFc2BBuf, momentBufs[18], momentBufs[19], fc2B.Length),
         ];
         foreach (var t in tensors)
-            SilkLauncher.AdamUpdate(runtime, t.weight, t.grad, t.first, t.second, learningRate, bc1, bc2, 1e-8f, t.count);
+            SilkLauncher.AdamUpdate(runtime, t.weight, t.grad, t.first, t.second, learningRate, bc1, bc2, 1e-8f, 0f, t.count);
 
-        SilkLauncher.AdamUpdate(runtime, embBuf, dEmbBuf, embWm, embWv, learningRate, bc1, bc2, 1e-8f, embedding.Length);
+        SilkLauncher.AdamUpdate(runtime, embBuf, dEmbBuf, embWm, embWv, learningRate, bc1, bc2, 1e-8f, 0f, embedding.Length);
     }
 
     /// <summary>Downloads every device gradient; the FC weights arrive in the GPU layout (the

@@ -354,8 +354,8 @@ public sealed class SilkBackwardKernelTests
         silk.Upload(sm1, m); silk.Upload(sv1, v);
         silk.Upload(sm2, m); silk.Upload(sv2, v);
 
-        SilkLauncher.AdamUpdate(silk, sw1, sg, sm1, sv1, lr, bc1, bc2, eps, count);
-        SilkLauncher.AdamUpdate(silk, sw2, sg, sm2, sv2, lr, bc1, bc2, eps, count);
+        SilkLauncher.AdamUpdate(silk, sw1, sg, sm1, sv1, lr, bc1, bc2, eps, 0f, count);
+        SilkLauncher.AdamUpdate(silk, sw2, sg, sm2, sv2, lr, bc1, bc2, eps, 0f, count);
         silk.Finish();
 
         float[] run1 = silk.Download(sw1, count);
@@ -380,5 +380,339 @@ public sealed class SilkBackwardKernelTests
 
         silk.Release(sw1); silk.Release(sw2); silk.Release(sg);
         silk.Release(sm1); silk.Release(sv1); silk.Release(sm2); silk.Release(sv2);
+    }
+
+    [Test]
+    public void AdamUpdate_WithWeightDecay_MatchesHostFormula()
+    {
+        const int count = 1000;
+        const float lr = 0.01f, bc1 = 0.1f, bc2 = 0.001f, eps = 1e-8f, wd = 0.01f;
+        using var silk = Device();
+        float[] w = Randoms(count, 0x90000085);
+        float[] g = Randoms(count, 0x90000086);
+        float[] m = Randoms(count, 0x90000087);
+        float[] v = Randoms(count, 0x90000088);
+        nint sw = silk.Allocate(count);
+        nint sg = silk.Allocate(count);
+        nint sm = silk.Allocate(count);
+        nint sv = silk.Allocate(count);
+        silk.Upload(sw, w); silk.Upload(sg, g); silk.Upload(sm, m); silk.Upload(sv, v);
+
+        SilkLauncher.AdamUpdate(silk, sw, sg, sm, sv, lr, bc1, bc2, eps, wd, count);
+        silk.Finish();
+        float[] got = silk.Download(sw, count);
+
+        float worst = 0f;
+        for (int i = 0; i < count; i++)
+        {
+            float m1 = 0.9f * m[i] + 0.1f * g[i];
+            float v1 = 0.999f * v[i] + 0.001f * g[i] * g[i];
+            float host = w[i] - lr * ((m1 / bc1) / (MathF.Sqrt(v1 / bc2) + eps) + wd * w[i]);
+            worst = Math.Max(worst, Math.Abs(got[i] - host));
+        }
+        Assert.That(worst, Is.LessThan(1e-5f), $"adamw worst device-vs-host diff {worst}");
+
+        silk.Release(sw); silk.Release(sg); silk.Release(sm); silk.Release(sv);
+    }
+
+    [Test]
+    public void AttentionBackward_MatchesCpuReplay_AndIsDeterministicOnDevice()
+    {
+        // The forward keeps no softmax, so the backward re-derives it; exp() is not correctly
+        // rounded on either side, which is why this follows the adam_update pattern (bit-equal
+        // device-vs-device, tolerance against the host replay) instead of AssertBits.
+        //
+        // The last case (seqLen 1, batch 3) leaves one batch element fully masked, which pins the
+        // -INFINITY branch that must write zeros instead of evaluating exp(-inf - -inf).
+        (int batch, int seqLen, int heads, int headDim, int band)[] shapes =
+            [(2, 5, 3, 4, -1), (1, 4, 2, 3, 1), (3, 1, 2, 2, -1)];
+        const float scale = 0.5f;
+        using var silk = Device();
+
+        foreach (var (batch, seqLen, numHeads, headDim, band) in shapes)
+        {
+            int rows = batch * seqLen, D = numHeads * headDim;
+            int block = rows * D, total = batch * numHeads * seqLen;
+
+            float[] q = Randoms(block, 0x90000091);
+            float[] k = Randoms(block, 0x90000092);
+            float[] v = Randoms(block, 0x90000093);
+            float[] qkv = [.. q, .. k, .. v];
+            float[] dAttn = Randoms(rows * D, 0x90000094);
+
+            // Padding mask: batch element b keeps seqLen - (b % 2) key positions.
+            var mask = new float[rows];
+            for (int b = 0; b < batch; b++)
+                for (int s = 0; s < seqLen - (b % 2); s++)
+                    mask[b * seqLen + s] = 1f;
+
+            nint sqkv1 = silk.Allocate(qkv.Length);
+            nint sqkv2 = silk.Allocate(qkv.Length);
+            nint smask = silk.Allocate(mask.Length);
+            nint sdAttn = silk.Allocate(dAttn.Length);
+            nint sprobs1 = silk.Allocate(total * seqLen);
+            nint sprobs2 = silk.Allocate(total * seqLen);
+            nint sdelta1 = silk.Allocate(total);
+            nint sdelta2 = silk.Allocate(total);
+            nint sdqkv1 = silk.Allocate(qkv.Length);
+            nint sdqkv2 = silk.Allocate(qkv.Length);
+            silk.Upload(sqkv1, qkv);
+            silk.Upload(sqkv2, qkv);
+            silk.Upload(smask, mask);
+            silk.Upload(sdAttn, dAttn);
+
+            foreach (var (dqkv, probs, delta) in new[] { (sdqkv1, sprobs1, sdelta1), (sdqkv2, sprobs2, sdelta2) })
+            {
+                SilkLauncher.AttentionBackwardPrep(
+                    silk, sqkv1, smask, sdAttn, probs, delta, batch, seqLen, numHeads, headDim, band, scale);
+                SilkLauncher.AttentionBackwardDq(
+                    silk, sqkv1, probs, delta, sdAttn, dqkv, batch, seqLen, numHeads, headDim, scale);
+                SilkLauncher.AttentionBackwardDkv(
+                    silk, sqkv1, probs, delta, sdAttn, dqkv, batch, seqLen, numHeads, headDim, scale);
+            }
+            silk.Finish();
+
+            float[] gotProbs = silk.Download(sprobs1, total * seqLen);
+            float[] gotDelta = silk.Download(sdelta1, total);
+            float[] gotDqkv = silk.Download(sdqkv1, qkv.Length);
+
+            // Device-vs-device: identical inputs must produce identical bits.
+            AssertBits(silk.Download(sprobs2, total * seqLen), gotProbs, "attention probs");
+            AssertBits(silk.Download(sdelta2, total), gotDelta, "attention delta");
+            AssertBits(silk.Download(sdqkv2, qkv.Length), gotDqkv, "attention dQkv");
+
+            var (wantProbs, wantDelta, wantDqkv) = AttentionBackwardReference(
+                qkv, mask, dAttn, batch, seqLen, numHeads, headDim, band, scale);
+
+            float worst = 0f;
+            for (int i = 0; i < gotProbs.Length; i++)
+                worst = Math.Max(worst, Math.Abs(gotProbs[i] - wantProbs[i]));
+            for (int i = 0; i < gotDelta.Length; i++)
+                worst = Math.Max(worst, Math.Abs(gotDelta[i] - wantDelta[i]));
+            for (int i = 0; i < gotDqkv.Length; i++)
+                worst = Math.Max(worst, Math.Abs(gotDqkv[i] - wantDqkv[i]));
+
+            Assert.That(worst, Is.LessThan(1e-5f),
+                $"attention backward worst device-vs-host diff {worst} (batch={batch}, seq={seqLen}, heads={numHeads}, headDim={headDim}, band={band})");
+
+            silk.Release(sqkv1); silk.Release(sqkv2); silk.Release(smask); silk.Release(sdAttn);
+            silk.Release(sprobs1); silk.Release(sprobs2); silk.Release(sdelta1); silk.Release(sdelta2);
+            silk.Release(sdqkv1); silk.Release(sdqkv2);
+        }
+    }
+
+    [Test]
+    public void Gelu_SplitForm_IsBitIdenticalToTheFusedEpilogue()
+    {
+        // The training forward needs GELU's pre-activation, so it runs gemm_row4_bias -> gelu
+        // instead of gemm_row4_gelu. Both call the same gelu_exact() on the same a+b value, so
+        // the split must reproduce the fused store exactly — not within a tolerance.
+        (int rows, int k, int n)[] shapes = [(16, 32, 64), (17, 33, 9), (5, 2, 2)];
+        using var silk = Device();
+        foreach (var (rows, k, n) in shapes)
+        {
+            float[] a = Randoms(rows * k, 0x900000A1);
+            float[] b = Randoms(n * k, 0x900000A2);
+            float[] bias = Randoms(n, 0x900000A3);
+            nint sa = silk.Allocate(a.Length);
+            nint sb = silk.Allocate(b.Length);
+            nint sbias = silk.Allocate(bias.Length);
+            nint fused = silk.Allocate(rows * n);
+            nint split = silk.Allocate(rows * n);
+            silk.Upload(sa, a); silk.Upload(sb, b); silk.Upload(sbias, bias);
+
+            SilkLauncher.GemmEpilogue(silk, SilkKernels.GemmGelu, sa, sb, fused, sbias, rows, k, n, null);
+            SilkLauncher.GemmEpilogue(silk, SilkKernels.GemmBias, sa, sb, split, sbias, rows, k, n, null);
+            SilkLauncher.Gelu(silk, split, split, rows * n);
+            silk.Finish();
+
+            AssertBits(silk.Download(split, rows * n), silk.Download(fused, rows * n),
+                $"gelu split vs gemm_row4_gelu rows={rows} k={k} n={n}");
+
+            silk.Release(sa); silk.Release(sb); silk.Release(sbias);
+            silk.Release(fused); silk.Release(split);
+        }
+    }
+
+    [Test]
+    public void EmbeddingBackwardRows_MatchesCpuReplay_BitForBit()
+    {
+        (int rows, int embedDim, int vocab)[] shapes = [(7, 5, 4), (1, 1, 2), (33, 8, 6)];
+        using var silk = Device();
+        foreach (var (rows, embedDim, vocab) in shapes)
+        {
+            var rng = new Random(0x9000B1);
+            int[] ids = new int[rows];
+            for (int i = 0; i < rows; i++) ids[i] = rng.Next(vocab);
+            float[] dX = Randoms(rows * embedDim, 0x900000B2);
+            float[] grad = Randoms(vocab * embedDim, 0x900000B3);
+
+            nint sids = silk.Allocate(rows);
+            nint sdX = silk.Allocate(dX.Length);
+            nint sgrad = silk.Allocate(grad.Length);
+            silk.Upload(sids, ids);
+            silk.Upload(sdX, dX);
+            silk.Upload(sgrad, grad);
+
+            SilkLauncher.EmbeddingBackwardRows(silk, sids, sdX, sgrad, rows, embedDim);
+            silk.Finish();
+            float[] got = silk.Download(sgrad, grad.Length);
+
+            var want = (float[])grad.Clone();
+            for (int e = 0; e < embedDim; e++)
+                for (int r = 0; r < rows; r++)
+                    want[ids[r] * embedDim + e] += dX[r * embedDim + e];
+
+            AssertBits(got, want, $"embedding_backward_rows rows={rows} dim={embedDim}");
+            silk.Release(sids); silk.Release(sdX); silk.Release(sgrad);
+        }
+    }
+
+    [Test]
+    public void ScatterRows_WritesOnlyTheClsRowsOfAPrezeroedBuffer()
+    {
+        const int batch = 3, seqLen = 4, embedDim = 5;
+        using var silk = Device();
+        float[] dX = Randoms(batch * seqLen * embedDim, 0x900000C1);
+        float[] dCls = Randoms(batch * embedDim, 0x900000C2);
+        nint sdX = silk.Allocate(dX.Length);
+        nint sdCls = silk.Allocate(dCls.Length);
+        silk.Upload(sdX, dX);
+        silk.Upload(sdCls, dCls);
+
+        SilkLauncher.ScatterRows(silk, sdCls, sdX, batch, seqLen, embedDim);
+        silk.Finish();
+        float[] got = silk.Download(sdX, dX.Length);
+
+        var want = (float[])dX.Clone();
+        for (int b = 0; b < batch; b++)
+            for (int e = 0; e < embedDim; e++)
+                want[(b * seqLen) * embedDim + e] = dCls[b * embedDim + e];
+
+        AssertBits(got, want, "scatter_rows");
+        silk.Release(sdX); silk.Release(sdCls);
+    }
+
+    /// <summary>
+    /// Replays the three attention-backward kernels on the host in the same accumulation order:
+    /// ascending keys for the softmax pass, ascending keys per output component for dQ, and
+    /// ascending queries per key for dK/dV. qkv is block-major [Q][K][V], each <c>rows x D</c>.
+    /// </summary>
+    static (float[] Probs, float[] Delta, float[] Dqkv) AttentionBackwardReference(
+        float[] qkv, float[] mask, float[] dAttn,
+        int batch, int seqLen, int numHeads, int headDim, int band, float scale)
+    {
+        int rows = batch * seqLen, D = numHeads * headDim, block = rows * D;
+        int total = batch * numHeads * seqLen;
+        var probs = new float[total * seqLen];
+        var delta = new float[total];
+        var dqkv = new float[qkv.Length];
+
+        static float Dot(float[] a, int aBase, float[] b, int bBase, int n)
+        {
+            float acc = 0f;
+            for (int i = 0; i < n; i++) acc += a[aBase + i] * b[bBase + i];
+            return acc;
+        }
+
+        bool Keep(int b, int qPos, int j) =>
+            mask[b * seqLen + j] >= 0.5f && (band < 0 || Math.Abs(qPos - j) <= band);
+
+        for (int b = 0; b < batch; b++)
+            for (int h = 0; h < numHeads; h++)
+                for (int qPos = 0; qPos < seqLen; qPos++)
+                {
+                    int idx = (b * numHeads + h) * seqLen + qPos;
+                    int qRow = b * seqLen + qPos;
+                    int qBase = qRow * D + h * headDim;
+                    int dAttnBase = qRow * D + h * headDim;
+                    int probsBase = idx * seqLen;
+
+                    float mx = float.NegativeInfinity;
+                    for (int j = 0; j < seqLen; j++)
+                        if (Keep(b, qPos, j))
+                            mx = MathF.Max(mx, Dot(qkv, qBase, qkv, block + (b * seqLen + j) * D + h * headDim, headDim) * scale);
+
+                    if (float.IsNegativeInfinity(mx))
+                    {
+                        delta[idx] = 0f;
+                        continue;
+                    }
+
+                    float sum = 0f;
+                    for (int j = 0; j < seqLen; j++)
+                        if (Keep(b, qPos, j))
+                            sum += MathF.Exp(Dot(qkv, qBase, qkv, block + (b * seqLen + j) * D + h * headDim, headDim) * scale - mx);
+
+                    float acc = 0f;
+                    for (int j = 0; j < seqLen; j++)
+                    {
+                        float p = Keep(b, qPos, j)
+                            ? MathF.Exp(Dot(qkv, qBase, qkv, block + (b * seqLen + j) * D + h * headDim, headDim) * scale - mx) / sum
+                            : 0f;
+                        probs[probsBase + j] = p;
+                        float dotV = Dot(dAttn, dAttnBase, qkv, 2 * block + (b * seqLen + j) * D + h * headDim, headDim);
+                        acc += p * dotV;
+                    }
+                    delta[idx] = acc;
+                }
+
+        for (int b = 0; b < batch; b++)
+            for (int h = 0; h < numHeads; h++)
+                for (int qPos = 0; qPos < seqLen; qPos++)
+                {
+                    int idx = (b * numHeads + h) * seqLen + qPos;
+                    int qRow = b * seqLen + qPos;
+                    int qOutBase = qRow * 3 * D + h * headDim;
+                    int dAttnBase = qRow * D + h * headDim;
+                    int probsBase = idx * seqLen;
+
+                    for (int d = 0; d < headDim; d++)
+                    {
+                        float acc = 0f;
+                        for (int j = 0; j < seqLen; j++)
+                        {
+                            float dotV = Dot(dAttn, dAttnBase, qkv, 2 * block + (b * seqLen + j) * D + h * headDim, headDim);
+                            float ds = probs[probsBase + j] * (dotV - delta[idx]);
+                            acc += ds * qkv[block + (b * seqLen + j) * D + h * headDim + d];
+                        }
+                        dqkv[qOutBase + d] = acc * scale;
+                    }
+                }
+
+        for (int b = 0; b < batch; b++)
+            for (int h = 0; h < numHeads; h++)
+                for (int jPos = 0; jPos < seqLen; jPos++)
+                {
+                    int jRow = b * seqLen + jPos;
+                    int kOutBase = jRow * 3 * D + D + h * headDim;
+                    int vOutBase = jRow * 3 * D + 2 * D + h * headDim;
+                    var dk = new float[headDim];
+                    var dv = new float[headDim];
+
+                    for (int i = 0; i < seqLen; i++)
+                    {
+                        int rowIdx = (b * numHeads + h) * seqLen + i;
+                        int dAttnBase = (b * seqLen + i) * D + h * headDim;
+                        float p = probs[rowIdx * seqLen + jPos];
+                        if (p == 0f) continue;
+                        float dotV = Dot(dAttn, dAttnBase, qkv, 2 * block + (b * seqLen + jPos) * D + h * headDim, headDim);
+                        float ds = p * (dotV - delta[rowIdx]);
+                        int qBase = (b * seqLen + i) * D + h * headDim;
+                        for (int d = 0; d < headDim; d++)
+                        {
+                            dv[d] += p * dAttn[dAttnBase + d];
+                            dk[d] += ds * qkv[qBase + d];
+                        }
+                    }
+
+                    for (int d = 0; d < headDim; d++)
+                    {
+                        dqkv[kOutBase + d] = dk[d] * scale;
+                        dqkv[vOutBase + d] = dv[d];
+                    }
+                }
+
+        return (probs, delta, dqkv);
     }
 }

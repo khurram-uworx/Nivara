@@ -31,11 +31,6 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     const int NumClasses = 2;
     const string Backend = "Silk";
 
-    const string PreWKey = "pre_classifier.weight";
-    const string PreBKey = "pre_classifier.bias";
-    const string ClsWKey = "classifier.weight";
-    const string ClsBKey = "classifier.bias";
-
     readonly SilkRuntime runtime;
     readonly int hiddenDim;
     readonly int intermediateDim;
@@ -44,20 +39,8 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     readonly int numLayers;
     readonly float eps;
     readonly float scale;
-    readonly bool hasTokenType;
-    readonly BertGpuNaming naming;
 
-    readonly nint wordEmb;
-    readonly nint posEmb;
-    readonly nint embLnW;
-    readonly nint embLnB;
-    readonly nint tokenTypeEmb;
-    readonly bool hasHead;
-    readonly nint preW;
-    readonly nint preB;
-    readonly nint clsW;
-    readonly nint clsB;
-    readonly LayerSilkWeights[] layers;
+    readonly SilkBertWeights weights;
 
     readonly nint x;
     readonly nint qkv;
@@ -91,7 +74,6 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         BertGpuNaming naming)
     {
         this.runtime = runtime;
-        this.naming = naming;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -102,40 +84,7 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
 
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        hasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
-
-        string emb = BertGpuKeys.Embeddings(naming);
-        wordEmb = UploadPlain(tensors, $"{emb}.word_embeddings.weight");
-        posEmb = UploadPlain(tensors, $"{emb}.position_embeddings.weight");
-        embLnW = UploadPlain(tensors, $"{emb}.LayerNorm.weight");
-        embLnB = UploadPlain(tensors, $"{emb}.LayerNorm.bias");
-
-        // Only row 0 of the token-type table is read (all-zero token-type ids, mirroring the CPU
-        // includeTokenTypeEmbedding default), so this is one row rather than the checkpoint's two.
-        hasTokenType = tensors.ContainsKey($"{emb}.token_type_embeddings.weight");
-        tokenTypeEmb = Register(runtime.Allocate(hiddenDim));
-        if (hasTokenType)
-            runtime.Upload(tokenTypeEmb,
-                WeightLayout.Req(tensors, $"{emb}.token_type_embeddings.weight", Backend).Data.AsSpan(0, hiddenDim));
-
-        layers = new LayerSilkWeights[numLayers];
-        for (int i = 0; i < numLayers; i++)
-            layers[i] = UploadLayer(tensors, i);
-
-        // Classifier head: pre_classifier (hidden→hidden, ReLU) then classifier (hidden→numClasses).
-        // Allocated even when the checkpoint has no head so Dispose is unconditional; uploaded only
-        // when hasHead.
-        preW = Register(runtime.Allocate(hiddenDim * hiddenDim));
-        preB = Register(runtime.Allocate(hiddenDim));
-        clsW = Register(runtime.Allocate(NumClasses * hiddenDim));
-        clsB = Register(runtime.Allocate(NumClasses));
-        if (hasHead)
-        {
-            runtime.Upload(preW, WeightLayout.Transposed(tensors, PreWKey, Backend));
-            runtime.Upload(preB, WeightLayout.Req(tensors, PreBKey, Backend).Data);
-            runtime.Upload(clsW, WeightLayout.Transposed(tensors, ClsWKey, Backend));
-            runtime.Upload(clsB, WeightLayout.Req(tensors, ClsBKey, Backend).Data);
-        }
+        weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: false);
 
         int rowsCap = MaxBatch * MaxSeqLen;
         x = Register(runtime.Allocate(rowsCap * hiddenDim));
@@ -187,8 +136,8 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
 
         // embeddings: one fused word/pos (+ token-type row 0) gather/sum, then the embedding
         // LayerNorm as a zero-residual layer norm.
-        LaunchEmbedSum(rows * hiddenDim, hasTokenType ? 1 : 0);
-        LaunchLayerNormResidual(x, zeroResidual, embLnW, embLnB, x, rows, hiddenDim);
+        LaunchEmbedSum(rows * hiddenDim, weights.HasTokenType ? 1 : 0);
+        LaunchLayerNormResidual(x, zeroResidual, weights.EmbLnW.Handle, weights.EmbLnB.Handle, x, rows, hiddenDim);
 
         // q/k/v are the three contiguous blocks of the packed qkv result; attention reads them as
         // read-only sub-buffer views (the OpenCL analogue of the ILGPU runner's qkv SubViews).
@@ -200,16 +149,16 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         {
             for (int i = 0; i < numLayers; i++)
             {
-                var w = layers[i];
+                var w = weights.Layers[i];
 
-                LaunchGemm(SilkKernels.GemmQkv, x, w.Wqkv, qkv, w.Bqkv, rows, hiddenDim, 3 * hiddenDim, hiddenDim);
+                LaunchGemm(SilkKernels.GemmQkv, x, w.Wqkv.Handle, qkv, w.Bqkv.Handle, rows, hiddenDim, 3 * hiddenDim, hiddenDim);
                 LaunchAttention(q, k, v, maskBuf, attn, batch, seqLen);
 
-                LaunchGemm(SilkKernels.GemmBias, attn, w.O, h, w.Bo, rows, hiddenDim, hiddenDim);
-                LaunchLayerNormResidual(h, x, w.Ln1W, w.Ln1B, h, rows, hiddenDim);
-                LaunchGemm(SilkKernels.GemmGelu, h, w.W1, f1, w.B1, rows, hiddenDim, intermediateDim);
-                LaunchGemm(SilkKernels.GemmBias, f1, w.W2, attn, w.B2, rows, intermediateDim, hiddenDim);
-                LaunchLayerNormResidual(attn, h, w.Ln2W, w.Ln2B, x, rows, hiddenDim);
+                LaunchGemm(SilkKernels.GemmBias, attn, w.O.Handle, h, w.Bo.Handle, rows, hiddenDim, hiddenDim);
+                LaunchLayerNormResidual(h, x, w.Ln1W.Handle, w.Ln1B.Handle, h, rows, hiddenDim);
+                LaunchGemm(SilkKernels.GemmGelu, h, w.W1.Handle, f1, w.B1.Handle, rows, hiddenDim, intermediateDim);
+                LaunchGemm(SilkKernels.GemmBias, f1, w.W2.Handle, attn, w.B2.Handle, rows, intermediateDim, hiddenDim);
+                LaunchLayerNormResidual(attn, h, w.Ln2W.Handle, w.Ln2B.Handle, x, rows, hiddenDim);
             }
         }
         finally
@@ -220,7 +169,7 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         }
 
         float[]? logitsArr = null;
-        if (hasHead)
+        if (weights.HasHead)
         {
             // The CLS row of each batch row is row b*seqLen (position 0), matching the CPU/ILGPU
             // head: gather it, then pre_classifier (ReLU) → classifier (bias only).
@@ -230,8 +179,8 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
 
             runtime.Upload(clsIdsBuf, clsIds.AsSpan(0, batch));
             LaunchGather(clsOut, x, clsIdsBuf, hiddenDim, batch * hiddenDim);
-            LaunchGemm(SilkKernels.GemmRelu, clsOut, preW, h, preB, batch, hiddenDim, hiddenDim);
-            LaunchGemm(SilkKernels.GemmBias, h, clsW, logits, clsB, batch, hiddenDim, NumClasses);
+            LaunchGemm(SilkKernels.GemmRelu, clsOut, weights.PreW.Handle, h, weights.PreB.Handle, batch, hiddenDim, hiddenDim);
+            LaunchGemm(SilkKernels.GemmBias, h, weights.ClsW.Handle, logits, weights.ClsB.Handle, batch, hiddenDim, NumClasses);
             logitsArr = runtime.Download(logits, batch * NumClasses);
         }
 
@@ -243,13 +192,16 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         foreach (nint buffer in owned)
             runtime.Release(buffer);
         owned.Clear();
+        weights.Dispose();
     }
 
     // ── launch helpers ────────────────────────────────────────────
 
     void LaunchEmbedSum(int total, int includeTokenType)
         => SilkLauncher.EmbedSum(
-            runtime, idsBuf, posIdsBuf, wordEmb, posEmb, tokenTypeEmb, x, total, hiddenDim, includeTokenType);
+            runtime, idsBuf, posIdsBuf,
+            weights.WordEmb.Handle, weights.PosEmb.Handle, weights.TokenTypeEmb.Handle,
+            x, total, hiddenDim, includeTokenType);
 
     void LaunchLayerNormResidual(nint a, nint b, nint gamma, nint beta, nint y, int rows, int cols)
         => SilkLauncher.LayerNormResidual(runtime, a, b, gamma, beta, y, rows, cols, eps);
@@ -269,73 +221,11 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     void LaunchGather(nint output, nint table, nint ids, int hidden, int total)
         => SilkLauncher.Gather(runtime, table, ids, output, total, hidden);
 
-    // ── weight upload ─────────────────────────────────────────────
-
-    LayerSilkWeights UploadLayer(Dictionary<string, (float[] Data, int[] Shape)> tensors, int index)
-    {
-        string q = BertGpuKeys.Attention(naming, index, 'q');
-        string k = BertGpuKeys.Attention(naming, index, 'k');
-        string v = BertGpuKeys.Attention(naming, index, 'v');
-        string o = BertGpuKeys.Attention(naming, index, 'o');
-        string ffn1 = BertGpuKeys.Ffn(naming, index, 1);
-        string ffn2 = BertGpuKeys.Ffn(naming, index, 2);
-        string ln1 = BertGpuKeys.LayerNorm(naming, index, 1);
-        string ln2 = BertGpuKeys.LayerNorm(naming, index, 2);
-
-        var (wqkv, bqkv) = WeightLayout.QkvPacked(tensors, q, k, v, Backend);
-        return new LayerSilkWeights
-        {
-            Wqkv = Upload(wqkv),
-            Bqkv = Upload(bqkv),
-            O = UploadTransposed(tensors, $"{o}.weight"),
-            W1 = UploadTransposed(tensors, $"{ffn1}.weight"),
-            W2 = UploadTransposed(tensors, $"{ffn2}.weight"),
-            Bo = UploadPlain(tensors, $"{o}.bias"),
-            B1 = UploadPlain(tensors, $"{ffn1}.bias"),
-            B2 = UploadPlain(tensors, $"{ffn2}.bias"),
-            Ln1W = UploadPlain(tensors, $"{ln1}.weight"),
-            Ln1B = UploadPlain(tensors, $"{ln1}.bias"),
-            Ln2W = UploadPlain(tensors, $"{ln2}.weight"),
-            Ln2B = UploadPlain(tensors, $"{ln2}.bias")
-        };
-    }
-
-    nint UploadPlain(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => Upload(WeightLayout.Req(tensors, key, Backend).Data);
-
-    nint UploadTransposed(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
-        => Upload(WeightLayout.Transposed(tensors, key, Backend));
-
-    nint Upload(float[] data)
-    {
-        nint buffer = Register(runtime.Allocate(data.Length));
-        runtime.Upload(buffer, data);
-        return buffer;
-    }
-
     /// <summary>Allocates and registers a buffer for release in <see cref="Dispose"/>. The element
     /// count is bytes/4, so it is the same call for float and int payloads.</summary>
     nint Register(nint buffer)
     {
         owned.Add(buffer);
         return buffer;
-    }
-
-    /// <summary>One layer's uploaded weights: packed q/k/v projection + bias, the four projections,
-    /// their biases, and the two LayerNorm gamma/beta pairs.</summary>
-    sealed class LayerSilkWeights
-    {
-        public nint Wqkv;
-        public nint Bqkv;
-        public nint O;
-        public nint W1;
-        public nint W2;
-        public nint Bo;
-        public nint B1;
-        public nint B2;
-        public nint Ln1W;
-        public nint Ln1B;
-        public nint Ln2W;
-        public nint Ln2B;
     }
 }

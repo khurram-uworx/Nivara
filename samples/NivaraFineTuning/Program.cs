@@ -80,9 +80,8 @@ sealed record CliArgs
             }
         }
 
-        // --silk train is accepted: the device forward/backward seam is in progress (#953);
-        // training currently runs on the CPU AutoDiff path and matches its accuracy. The device
-        // trainer lands in a follow-up (#956).
+        // --silk train now runs the full forward/backward/optimizer on the OpenCL device via
+        // SilkDistilBertTrainer (#956); falls back to exit 1 when OpenCL is unavailable.
 
         return new CliArgs
         {
@@ -118,11 +117,11 @@ Options:
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
   --help          Show this help message
-  --silk          Run eval/predict on the OpenCL GPU via Silk (F32-only); training runs on CPU AutoDiff (device seam #953/#956)
+  --silk          Run train/eval/predict on the OpenCL GPU via Silk (F32-only); training fails with exit 1 when OpenCL is unavailable
 
 GPU:
-  Training is CPU-only. Eval and predict may use --silk for OpenCL inference;
-  falls back to the CPU model when OpenCL is unavailable.
+  Training (--silk) runs forward, backward and AdamW on the OpenCL device. Eval and predict may
+  use --silk for OpenCL inference; falls back to the CPU model when OpenCL is unavailable.
 
 Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
@@ -140,7 +139,7 @@ static class Program
 
         return cli.Mode switch
         {
-            "train" => RunTrain(cli),
+            "train" => cli.Silk ? RunTrainSilk(cli) : RunTrain(cli),
             "eval" => RunEval(cli),
             "predict" => RunPredict(cli),
             _ => throw new ArgumentException($"Unknown mode '{cli.Mode}'. Use --help for usage.")
@@ -246,6 +245,122 @@ static class Program
         Console.WriteLine("Done.");
 
         return 0;
+    }
+
+    static int RunTrainSilk(CliArgs cli)
+    {
+        var modelPath = cli.ModelDir;
+        var dataPath = cli.DataDir;
+
+        EnsureExists(Path.Combine(modelPath, "config.json"), "DistilBERT config.json");
+        EnsureExists(Path.Combine(modelPath, "model.safetensors"), "DistilBERT model.safetensors");
+        EnsureExists(Path.Combine(modelPath, "vocab.txt"), "DistilBERT vocab.txt");
+        var sst2Dir = Path.Combine(dataPath, "sst2");
+        EnsureExists(Path.Combine(sst2Dir, "train-00000-of-00001.parquet"), "SST-2 train.parquet");
+        EnsureExists(Path.Combine(sst2Dir, "validation-00000-of-00001.parquet"), "SST-2 dev.parquet");
+
+        Console.WriteLine($"Loading DistilBERT config from {modelPath}...");
+        var distilConfig = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelPath, "config.json")));
+        var bertConfig = distilConfig.ToBertConfig();
+        Console.WriteLine($"  dim={distilConfig.Dim}, layers={distilConfig.NLayers}, heads={distilConfig.NHeads}");
+
+        Console.WriteLine("Loading SafeTensors weights...");
+        var tensors = SafeTensorsLoader.Read(Path.Combine(modelPath, "model.safetensors"));
+        Console.WriteLine($"  Loaded {tensors.Count} tensors");
+
+        Console.WriteLine("Building CPU model (numClasses=2)...");
+        using var model = new DistilBertForSequenceClassification<float>(bertConfig, numClasses: 2);
+        model.LoadWeights(tensors);
+        model.Train();
+        Console.WriteLine("  Model built, encoder weights loaded, classifier head random-initialized.");
+
+        Console.WriteLine("Initializing OpenCL device (Silk)...");
+        SilkRuntime runtime;
+        try
+        {
+            runtime = new SilkRuntime();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"OpenCL device unavailable: {ex.Message}");
+            return 1;
+        }
+        using (runtime)
+        {
+            int maxBatch = Math.Min(cli.BatchSize, 8);
+            int maxSeqLen = Math.Min(cli.MaxLen, 128);
+            if (maxBatch != cli.BatchSize)
+                Console.WriteLine($"  (batch size clamped to device cap {maxBatch})");
+            if (maxSeqLen != cli.MaxLen)
+                Console.WriteLine($"  (seq len clamped to device cap {maxSeqLen})");
+
+            using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen);
+            Console.WriteLine($"  Device: {trainer.DeviceName}, classes={trainer.NumClasses}");
+
+            Console.WriteLine($"Loading tokenizer from {modelPath}/vocab.txt...");
+            var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelPath, "vocab.txt"));
+
+            Console.WriteLine($"Loading SST-2 dataset from {dataPath}...");
+            var dataset = Sst2Dataset.LoadFromParquet(dataPath);
+
+            Console.WriteLine("Tokenizing training set...");
+            var trainData = dataset.Train;
+            if (cli.MaxExamples > 0 && cli.MaxExamples < trainData.Count)
+            {
+                trainData = trainData.Take(cli.MaxExamples).ToList();
+                Console.WriteLine($"  (limited to {cli.MaxExamples} examples by --max-examples)");
+            }
+            var trainTokenized = Sst2Dataset.Tokenize(tokenizer, trainData, cli.MaxLen);
+            Console.WriteLine($"  {trainTokenized.Count} examples, seqLen={cli.MaxLen}");
+
+            Console.WriteLine("Tokenizing dev set...");
+            var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, cli.MaxLen);
+            Console.WriteLine($"  {devTokenized.Count} examples");
+
+            var lossFn = new CrossEntropyLoss<float>();
+
+            int sampleCount = trainTokenized.Count;
+            int seqLen = Math.Min(cli.MaxLen, maxSeqLen);
+            int[] allTokens = new int[sampleCount * cli.MaxLen];
+            float[] allMask = new float[sampleCount * cli.MaxLen];
+            int[] allLabels = new int[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                for (int j = 0; j < cli.MaxLen; j++)
+                {
+                    allTokens[i * cli.MaxLen + j] = (int)trainTokenized[i].TokenIds[j];
+                    allMask[i * cli.MaxLen + j] = trainTokenized[i].AttentionMask[j];
+                }
+                allLabels[i] = trainTokenized[i].Label;
+            }
+
+            for (int epoch = 1; epoch <= cli.Epochs; epoch++)
+            {
+                Console.WriteLine($"\n=== Epoch {epoch}/{cli.Epochs} ===");
+
+                var epochResults = trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, 1, cli.Lr, 0.01f, seed: epoch);
+                float avgTrainLoss = epochResults.Count > 0 ? epochResults[0].Loss : 0f;
+                Console.WriteLine($"Epoch {epoch} training complete. Avg loss: {avgTrainLoss:F4}");
+
+                // Materialize the trained weights into the CPU model for dev eval.
+                var exported = trainer.ExportCheckpoint();
+                model.LoadWeights(exported);
+                model.Eval();
+
+                var (devLoss, devAcc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
+                Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
+
+                model.Train();
+            }
+
+            Console.WriteLine($"\nSaving fine-tuned model to {cli.SavePath}...");
+            var finalExported = trainer.ExportCheckpoint();
+            model.LoadWeights(finalExported);
+            ModelSerializer.Save(model, cli.SavePath);
+            Console.WriteLine("Done.");
+
+            return 0;
+        }
     }
 
     static int RunEval(CliArgs cli)
