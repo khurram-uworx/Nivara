@@ -60,4 +60,4 @@ Separate class (not mutate inference runner) to keep per-layer activation storag
 - docs/SILK.md (remove CPU-only note for FineTuning training)
 
 ## GitHub issues log
-- (none yet)
+- [ ] #956 — full device backward for SilkDistilBertTrainer (follow-up to #953)
