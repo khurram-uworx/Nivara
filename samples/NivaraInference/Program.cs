@@ -66,12 +66,12 @@ class Program
         ["minilm"] = ["", "benchmark", "compare", "similarity"],
         ["distilbert"] = ["", "benchmark", "compare"],
         ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
-        ["modernbert"] = ["", "benchmark", "compare"],
+        ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
         ["laya"] = ["", "benchmark", "compare"],
         ["smollm"] = ["", "benchmark", "generate"],
         ["qwen"] = ["", "benchmark", "tools", "distill"],
-        ["mobilenet_v2"] = ["", "benchmark", "compare"],
-        ["resnet18"] = ["", "benchmark", "compare"],
+        ["mobilenet_v2"] = ["", "benchmark", "compare", "compare_diag"],
+        ["resnet18"] = ["", "benchmark", "compare", "compare_diag"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -674,6 +674,7 @@ class Program
                     var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
                     if (benchmark) return RunMobileNetV2SilkBenchmark(mobSilkTensors);
                     if (compare) return RunMobileNetV2SilkCompare(mobSilkTensors);
+                    if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
                     return RunMobileNetV2SilkInference(mobSilkTensors, mode);
                 }
                 if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
@@ -685,6 +686,7 @@ class Program
                     var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
                     if (benchmark) return RunResNet18SilkBenchmark(resSilkTensors);
                     if (compare) return RunResNet18SilkCompare(resSilkTensors);
+                    if (compareDiag) return RunCompareDiag(tensors, "resnet18");
                     return RunResNet18SilkInference(resSilkTensors, mode);
                 }
                 if (compareDiag) return RunCompareDiag(tensors, "resnet18");
@@ -749,6 +751,7 @@ class Program
                     OpenModernBertSession open = SilkModernBertSession.Open;
                     if (benchmark) return ModernBert.BenchmarkGpu(mbSilkTensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(mbSilkTensors, modelDir, open);
+                    if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                     return ModernBert.RunGpu(mbSilkTensors, modelDir, open);
                 }
                 if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
