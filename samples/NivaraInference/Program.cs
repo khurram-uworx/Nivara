@@ -63,9 +63,9 @@ class Program
     // trunk. Kept separate from GpuModes because --silk's model scope is still narrower.
     static readonly Dictionary<string, string[]> SilkModes = new()
     {
-        ["minilm"] = ["", "benchmark", "compare"],
+        ["minilm"] = ["", "benchmark", "compare", "similarity"],
         ["distilbert"] = ["", "benchmark", "compare"],
-        ["distilbert_sst"] = ["", "benchmark", "compare"],
+        ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
         ["modernbert"] = ["", "benchmark", "compare"],
         ["laya"] = ["", "benchmark", "compare"],
         ["smollm"] = ["", "benchmark", "generate"],
@@ -694,6 +694,7 @@ class Program
                 if (useSilk)
                 {
                     var miniSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (mode == "similarity") return RunMiniLmSilkSimilarity(miniSilkTensors);
                     if (benchmark) return BenchmarkMiniLmSilk(miniSilkTensors);
                     if (compare) return RunMiniLmSilkCompare(miniSilkTensors);
                     return RunMiniLmSilkInference(miniSilkTensors);
@@ -717,6 +718,7 @@ class Program
                 if (useSilk)
                 {
                     var sstSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    if (mode == "predict") return RunDistilBertSstSilkPredict(sstSilkTensors);
                     if (benchmark) return BenchmarkDistilBertSstSilk(sstSilkTensors);
                     if (compare) return RunDistilBertSstSilkCompare(sstSilkTensors);
                     return RunDistilBertSstSilkInference(sstSilkTensors);
@@ -1840,6 +1842,81 @@ class Program
 
     // MiniLM's GPU entry points go through Silk only (hand-authored OpenCL stack).
 
+    static int RunMiniLmSilkSimilarity(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Cosine Similarity Demo (Silk) ===");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "minilm");
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoder(config, tensors, BertGpuNaming.Bert);
+        buildSw.Stop();
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+
+        Console.WriteLine($"Sentences ({sentences.Length}):");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.WriteLine($"  [{i}] {sentences[i]}");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelDir, "vocab.txt"));
+        var embeddings = new float[sentences.Length][];
+        const int maxLen = 128;
+        for (int s = 0; s < sentences.Length; s++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, sentences[s], maxLen);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            var hidden = result.Hidden;
+
+            var cls = new float[config.HiddenSize];
+            Array.Copy(hidden, 0, cls, 0, config.HiddenSize);
+
+            float norm = 0f;
+            foreach (var x in cls) norm += x * x;
+            norm = MathF.Sqrt(norm);
+            if (norm > 1e-12f)
+            {
+                float inv = 1f / norm;
+                for (int i = 0; i < cls.Length; i++) cls[i] *= inv;
+            }
+            embeddings[s] = cls;
+        }
+
+        Console.WriteLine("Cosine Similarity Matrix:");
+        Console.Write("       ");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.Write($"  [{i}]   ");
+        Console.WriteLine();
+
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            Console.Write($"  [{i}]  ");
+            for (int j = 0; j < sentences.Length; j++)
+            {
+                float sim = TensorPrimitives.CosineSimilarity(embeddings[i].AsSpan(), embeddings[j].AsSpan());
+                Console.Write($"{sim,7:F4} ");
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine();
+
+        return 0;
+    }
+
     static int RunMiniLmSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunMiniLmInference("Silk", OpenSilkEncoder, tensors);
 
@@ -2375,6 +2452,46 @@ class Program
         return 0;
     }
 
+
+    static int RunDistilBertSstSilkPredict(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Interactive Sentiment (Silk) ===");
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoder(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        buildSw.Stop();
+        var runner = session.Runner;
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+        Console.WriteLine("Type a movie review and press Enter (or 'quit' to exit).\n");
+
+        string? line;
+        while ((line = Console.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (string.IsNullOrEmpty(line) || line.Equals("quit", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, line, maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+            var sw = Stopwatch.StartNew();
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            sw.Stop();
+
+            var logits = result.Logits ?? Array.Empty<float>();
+            var (argMax, probs) = DistilBertSst.Softmax(logits.AsSpan());
+            Console.WriteLine($"  Sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)  [{sw.ElapsedMilliseconds} ms]");
+        }
+
+        return 0;
+    }
 
     static int RunDistilBertSstSilkInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertSstBackendInference("Silk", OpenSilkEncoder, tensors);
