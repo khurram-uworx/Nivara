@@ -3,6 +3,7 @@ using Nivara.AI;
 using Nivara.AutoDiff.Nn;
 using Nivara.Primitives;
 using Nivara.Samples;
+using Nivara.Silk;
 using NivaraChat.Modes;
 using NivaraChat.Tools;
 using System.Diagnostics;
@@ -75,6 +76,13 @@ public static class QwenMode
         try
         {
             var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
+
+            if (options.UseSilk)
+            {
+                await ExecuteSilk(config, tokenizer, modelDir, tensors, options);
+                return;
+            }
+
             var model = LlamaLoader.Load<T, T>(config, tensors);
 
             string[]? knownNames = null;
@@ -174,8 +182,7 @@ public static class QwenMode
     /// turn, and the model produces the final answer. The loop is capped at
     /// <see cref="MaxToolLoopIterations"/> so a model that never answers still exits cleanly.
     /// </summary>
-    static async Task RunToolsWeather<T>(QwenChatClient<T> client, string? initialText)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunToolsWeather(IChatClient client, string? initialText)
     {
         var weather = QwenSampleTools.CreateWeatherTool();
         var history = new List<ChatMessage>
@@ -227,8 +234,7 @@ public static class QwenMode
         }
     }
 
-    static async Task RunToolsNivara<T>(QwenChatClient<T> client, string? initialText, IReadOnlyList<AIFunction> tools)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunToolsNivara(IChatClient client, string? initialText, IReadOnlyList<AIFunction> tools)
     {
         var history = new List<ChatMessage>
         {
@@ -303,8 +309,7 @@ public static class QwenMode
         }
     }
 
-    static async Task RunSingleTurn<T>(QwenChatClient<T> client, string text)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunSingleTurn(IChatClient client, string text)
     {
         Console.WriteLine($"\nYou: {text}");
         Console.Write("Qwen: ");
@@ -322,8 +327,7 @@ public static class QwenMode
         Console.WriteLine($"\n\n[streamed {tokens} tokens in {sw.ElapsedMilliseconds} ms — {TokensPerSecond(tokens, sw.Elapsed)}]\n");
     }
 
-    static async Task RunRepl<T>(QwenChatClient<T> client)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunRepl(IChatClient client)
     {
         Console.WriteLine("Interactive chat (type 'quit' or 'exit' to leave).\n");
         var history = new List<ChatMessage>();
@@ -371,6 +375,112 @@ public static class QwenMode
     static string GetRepoRoot()
         => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
+    static async Task ExecuteSilk<T>(
+        LlamaConfig config,
+        Gpt2BpeTokenizer tokenizer,
+        string modelDir,
+        Dictionary<string, (T[] Data, int[] Shape)> tensors,
+        QwenOptions options)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var silkConfig = new QwenSilkConfig
+        {
+            HiddenSize = config.HiddenSize,
+            NumHiddenLayers = config.NumHiddenLayers,
+            NumAttentionHeads = config.NumAttentionHeads,
+            NumKeyValueHeads = config.NumKeyValueHeads,
+            IntermediateSize = config.IntermediateSize,
+            VocabSize = config.VocabSize,
+            MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+            RmsNormEps = config.RmsNormEps,
+            RopeTheta = config.RopeTheta,
+        };
+
+        SilkQwenSession session;
+        if (typeof(T) == typeof(float))
+            session = SilkQwenSession.Open(silkConfig, (dynamic)tensors);
+        else if (typeof(T) == typeof(BFloat16))
+            session = SilkQwenSession.Open(silkConfig, (dynamic)tensors);
+        else
+            throw new NotSupportedException($"Silk Qwen chat does not support compute type {typeof(T).Name}.");
+
+        if (options.Mode == "tools-weather")
+        {
+            using var client = new SilkQwenChatClient(
+                session,
+                tokenizer,
+                config,
+                maxNewTokens: options.MaxNewTokens,
+                temperature: options.Temperature,
+                topP: options.HasTopP ? options.TopP : null,
+                seed: options.Seed,
+                useKvCache: options.UseKvCache,
+                knownToolNames: new[] { QwenSampleTools.WeatherToolName });
+
+            await RunToolsWeather(client, options.Text);
+            return;
+        }
+
+        if (options.Mode == "tools-nivara")
+        {
+            var nivaraModelsDir = Path.Combine(GetRepoRoot(), "samples", "data", "nivarachat");
+            if (!File.Exists(Path.Combine(nivaraModelsDir, "sentiment_model.json")))
+            {
+                Console.WriteLine($"Nivara models not found in '{nivaraModelsDir}'. Run --train first.");
+                return;
+            }
+            var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(nivaraModelsDir);
+            var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(nivaraModelsDir);
+            var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
+            NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok);
+
+            var tools = NivaraAIFunctions.CreateRegistered(
+                sentimentModel, sentimentTok,
+                entityModel, entityTok,
+                validatorModel, validatorTok,
+                options.NivaraTools ?? "all").ToList();
+
+            using (var client = new SilkQwenChatClient(
+                session,
+                tokenizer,
+                config,
+                maxNewTokens: options.MaxNewTokens,
+                temperature: options.Temperature,
+                topP: options.HasTopP ? options.TopP : null,
+                seed: options.Seed,
+                useKvCache: options.UseKvCache,
+                knownToolNames: tools.Select(t => t.Name).ToArray()))
+            {
+                await RunToolsNivara(client, options.Text, tools);
+            }
+
+            sentimentModel.Dispose();
+            entityModel.Dispose();
+            validatorModel.Dispose();
+            return;
+        }
+
+        using (var client = new SilkQwenChatClient(
+            session,
+            tokenizer,
+            config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache,
+            knownToolNames: null))
+        {
+            if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+            {
+                await RunSingleTurn(client, options.Text ?? "The capital of France is");
+                return;
+            }
+
+            await RunRepl(client);
+        }
+    }
+
     static QwenOptions ParseArgs(string[] args)
     {
         var options = new QwenOptions();
@@ -386,6 +496,7 @@ public static class QwenMode
             else if (args[i] == "--no-kv-cache") options.UseKvCache = false;
             else if (args[i] == "--text" && i + 1 < args.Length) options.Text = args[++i];
             else if (args[i] == "--nivara-tools" && i + 1 < args.Length) options.NivaraTools = args[++i];
+            else if (args[i] == "--silk") options.UseSilk = true;
             else if (args[i] is "-h" or "--help") options.ShowHelp = true;
         }
         options.Mode = args.Length > 0 ? args[0] : "";
@@ -421,6 +532,7 @@ public static class QwenMode
               --kv-cache             Use the KV cache for faster generation (default)
               --no-kv-cache          Re-run the full forward per token (no cache)
               --text <string>        Single-shot prompt (skips REPL)
+              --silk                 Use Silk/OpenCL backend for generation (plain/chat/tools)
               -h, --help             Show this help
             """);
     }
@@ -436,6 +548,7 @@ public static class QwenMode
         public bool HasTopP { get; set; }
         public int? Seed { get; set; }
         public bool UseKvCache { get; set; } = true;
+        public bool UseSilk { get; set; }
         public string? Text { get; set; }
         public string? NivaraTools { get; set; }
         public bool ShowHelp { get; set; }
