@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.Primitives;
+using Nivara.Silk;
 using Nivara.Samples;
 using System.Diagnostics;
 using System.Numerics;
@@ -92,6 +93,7 @@ public static class SmollmMode
                 case "--seed": options.Seed = int.Parse(args[++i]); break;
                 case "--kv-cache": options.UseKvCache = true; break;
                 case "--no-kv-cache": options.UseKvCache = false; break;
+                case "--silk": options.UseSilk = true; break;
                 case "--text": options.Text = args[++i]; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
@@ -124,9 +126,16 @@ public static class SmollmMode
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
 
-        Console.WriteLine($"Loading SmolLM-135M-Instruct ({options.Precision})...");
+        Console.WriteLine($"Loading SmolLM-135M-Instruct ({options.Precision}){(options.UseSilk ? " via Silk/OpenCL" : "")}...");
         var loadSw = Stopwatch.StartNew();
-        if (options.Precision == "bf16")
+        if (options.UseSilk)
+        {
+            if (options.Precision == "bf16")
+                await RunSilkBFloat16(config, tokenizer, modelDir, options);
+            else
+                await RunSilkFloat(config, tokenizer, modelDir, options);
+        }
+        else if (options.Precision == "bf16")
             await Run<BFloat16>(config, tokenizer, modelDir, options);
         else
             await Run<float>(config, tokenizer, modelDir, options);
@@ -182,8 +191,7 @@ public static class SmollmMode
         return true; // caller restores to false
     }
 
-    static async Task RunSingleTurn<T>(SmolLMChatClient<T> client, string text)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunSingleTurn(IChatClient client, string text)
     {
         Console.WriteLine($"\nYou: {text}");
         Console.Write("SmolLM: ");
@@ -207,8 +215,7 @@ public static class SmollmMode
         return $"{tokens / elapsed.TotalSeconds:F1} tok/s";
     }
 
-    static async Task RunRepl<T>(SmolLMChatClient<T> client)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunRepl(IChatClient client)
     {
         Console.WriteLine("Interactive chat (type 'quit' or 'exit' to leave).\n");
         var history = new List<ChatMessage>();
@@ -247,6 +254,76 @@ public static class SmollmMode
         }
     }
 
+    static async Task RunSilkFloat(
+        LlamaConfig config,
+        Gpt2BpeTokenizer tokenizer,
+        string modelDir,
+        SmollmOptions options)
+    {
+        var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
+        var session = SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        Console.WriteLine($"  Device:    {session.DeviceName}");
+        using var client = new SilkSmolLMChatClient(
+            session,
+            tokenizer,
+            config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache);
+
+        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+        {
+            await RunSingleTurn(client, options.Text ?? "The capital of France is");
+            return;
+        }
+
+        await RunRepl(client);
+    }
+
+    static async Task RunSilkBFloat16(
+        LlamaConfig config,
+        Gpt2BpeTokenizer tokenizer,
+        string modelDir,
+        SmollmOptions options)
+    {
+        var tensors = SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelDir, "model.safetensors"));
+        var session = SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        Console.WriteLine($"  Device:    {session.DeviceName}");
+        using var client = new SilkSmolLMChatClient(
+            session,
+            tokenizer,
+            config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache);
+
+        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+        {
+            await RunSingleTurn(client, options.Text ?? "The capital of France is");
+            return;
+        }
+
+        await RunRepl(client);
+    }
+
+    static Nivara.Silk.SmolLMConfig ToSilkConfig(LlamaConfig config) => new()
+    {
+        HiddenSize = config.HiddenSize,
+        NumHiddenLayers = config.NumHiddenLayers,
+        NumAttentionHeads = config.NumAttentionHeads,
+        NumKeyValueHeads = config.NumKeyValueHeads,
+        IntermediateSize = config.IntermediateSize,
+        VocabSize = config.VocabSize,
+        MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+        RmsNormEps = config.RmsNormEps,
+        RopeTheta = config.RopeTheta,
+        AttentionBias = config.AttentionBias,
+    };
+
     static string GetRepoRoot()
         => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
@@ -272,6 +349,7 @@ public static class SmollmMode
               --seed <n>             RNG seed for reproducible sampling (default 0)
               --kv-cache             Use the KV cache for faster generation (default)
               --no-kv-cache          Re-run the full forward per token (no cache)
+              --silk                 Use Silk OpenCL backend for SmolLM chat/plain generation
               --text <string>        Single-shot prompt (skips REPL)
               -h, --help             Show this help
             """);
@@ -290,5 +368,6 @@ public static class SmollmMode
         public bool UseKvCache { get; set; } = true;
         public string? Text { get; set; }
         public bool ShowHelp { get; set; }
+        public bool UseSilk { get; set; }
     }
 }

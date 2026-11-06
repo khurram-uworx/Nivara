@@ -56,7 +56,10 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu be
 # MiniLM on the OpenCL iGPU (Silk only -- hand-authored OpenCL kernels; F32-only)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 
-# BERT-family encoders on the OpenCL iGPU (ILGPU 1.5.3; --ilgpu is F32-only in this phase)
+# BERT-family encoders on the OpenCL iGPU.
+# NOTE: the former GPU sample half was removed in #814. The live GPU flag is now
+# `--silk` (hand-authored OpenCL); older GPU snippets below are historical
+# baselines retained for the performance tables.
 dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu            # encoder + decision head
 

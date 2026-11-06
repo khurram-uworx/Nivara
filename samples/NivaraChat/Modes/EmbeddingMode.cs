@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Nivara.AI;
+using Nivara.Samples;
 using System.Numerics.Tensors;
 
 namespace NivaraChat.Modes;
@@ -12,7 +13,7 @@ namespace NivaraChat.Modes;
 /// </summary>
 public static class EmbeddingMode
 {
-    public static void Run()
+    public static void Run(ModeContext ctx)
     {
         Console.WriteLine("=== NivaraChat — Embedding Search ===\n");
 
@@ -26,12 +27,13 @@ public static class EmbeddingMode
 
         Console.WriteLine("Loading MiniLM embedding model...");
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+        var generator = MiniLMEmbedder.CreateGenerator(minilmDir, ctx.UseSilk);
         var metadata = generator.GetService(typeof(EmbeddingGeneratorMetadata), null) as EmbeddingGeneratorMetadata;
         sw.Stop();
         Console.WriteLine($"  Provider:     {metadata?.ProviderName ?? "Nivara-MiniLM"}");
         Console.WriteLine($"  Model:        {metadata?.DefaultModelId ?? "all-minilm-l6-v2"}");
-        Console.WriteLine($"  Dimensions:   {generator.EmbeddingDimension}");
+        var embedMeta = generator.GetService(typeof(EmbeddingGeneratorMetadata), null) as EmbeddingGeneratorMetadata;
+        Console.WriteLine($"  Dimensions:   {embedMeta?.DefaultModelDimensions ?? 0}");
         Console.WriteLine($"  Loaded in:    {sw.ElapsedMilliseconds} ms\n");
 
         var documents = new[]

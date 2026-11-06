@@ -277,7 +277,7 @@ public static class Laya
         Console.WriteLine("~1.0 on the shipped checkpoint regardless of input (upstream NandhaKishorM/laya#185,");
         Console.WriteLine("documented on the model card). Do not gate anything on it.");
         Console.WriteLine();
-        Console.WriteLine("Run 'laya --ilgpu compare' for the GPU-vs-CPU parity gate.");
+        Console.WriteLine("Run 'laya --silk compare' for the GPU-vs-CPU parity gate.");
         return 0;
     }
 

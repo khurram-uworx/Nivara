@@ -291,19 +291,13 @@ public class InferenceCliArgumentTests
     public void SilkSmolLM_Precision_Rejected() =>
         AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk is F32-only");
 
-    /// <summary>
-    /// <c>minilm</c> carries <c>similarity</c> on the CPU path but not on Silk, so the mode guard
-    /// is the only thing between validation and the weight load. <c>qwen --silk distill</c> used to
-    /// be the vehicle here; once distill became a Silk mode, every accepted qwen mode was also a
-    /// Silk mode, which left no qwen invocation for this property to test.
-    /// </summary>
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
     {
-        CliResult result = Run("minilm", "--silk", "similarity");
+        CliResult result = Run("smollm", "--silk", "ab");
         Assert.That(result.StdErr, Does.Not.Contain(ModelLookupMessage),
             "the --silk mode guard must run before the model-file check");
-        AssertRejected(result, "--silk does not support mode 'similarity' for 'minilm'");
+        AssertRejected(result, "--silk does not support mode 'ab' for 'smollm'");
     }
 
     [Test]
@@ -312,8 +306,8 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SilkUnsupportedMode_Rejected() =>
-        AssertRejected(Run("minilm", "--silk", "similarity"),
-            "--silk does not support mode 'similarity' for 'minilm'");
+        AssertRejected(Run("smollm", "--silk", "ab"),
+            "--silk does not support mode 'ab' for 'smollm'");
 
     /// <summary>
     /// <c>compare_diag</c> is not a Laya mode at all, so the general allow-list rejects it before
@@ -328,11 +322,6 @@ public class InferenceCliArgumentTests
     [Test]
     public void SilkLaya_Precision_Rejected() =>
         AssertRejected(Run("laya", "--silk", "--precision", "fp16"), "--silk is F32-only");
-
-    [Test]
-    public void SilkModernBert_CompareDiag_Rejected() =>
-        AssertRejected(Run("modernbert", "--silk", "compare_diag"),
-            "--silk does not support mode 'compare_diag' for 'modernbert'");
 
     /// <summary>
     /// The F32 message, rather than the model-scope reject, is what proves <c>modernbert</c> is in

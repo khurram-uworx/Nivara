@@ -246,7 +246,7 @@ public sealed class RagIndex : IDisposable
                 }
                 else
                 {
-                    var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+                    var generator = MiniLMEmbedder.CreateGenerator(minilmDir, ctx.UseSilk);
                     vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(new() { EmbeddingGenerator = generator });
                     collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
                     await collection.EnsureCollectionExistsAsync(ct);

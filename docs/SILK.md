@@ -365,8 +365,8 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
 real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
 Qwen, MobileNetV2, and ResNet-18**, F32 only. Qwen and the vision models expose their own mode
-sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`, and it is
-mutually exclusive with `--ilgpu`.
+sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`. F32 only (no
+bf16/fp16 translation unit).
 
 | file | role |
 |---|---|
@@ -639,13 +639,14 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
 encoder. They use the same `SilkRuntime`, plus `rms_norm`, `swiglu`, `causal_gqa_attention`,
 `decode_gqa_attention`, `decode_gqa_attention_oproj_fused`, `mlp_block`, `gemm_gemv_add`, and `argmax`.
 Qwen exposes `benchmark`, plain, tools, and KV-cache modes through `SilkQwenSession`; SmolLM exposes
-`benchmark` and `generate`.
+`benchmark` and `generate`. `NivaraChat --smollm --silk` now also serves the same SmolLM decoder as an
+`IChatClient` for chat/plain generation through `SilkSmolLMChatClient`.
 
 `SilkMobileNetV2GpuRunner` and `SilkResNet18GpuRunner` run the vision stack: `conv2d`, `batchnorm_eval`,
 `relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side
 geometry helpers, and are the kernels listed in `KernelNames` under the vision family.
 
-As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
+As with the encoders, these are F32 only.
 
 ## 13c. Text classifiers (NivaraClassifier sample)
 
@@ -685,9 +686,10 @@ per classifier, and the CPU-layout round trip exact.
 
 - **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
-  `benchmark`, `tools`, `distill`); `mobilenet_v2` and `resnet18` (empty, `benchmark`, `compare`). `compare_diag`
-  stays rejected. SmolLM and Qwen are causal decoders (not encoders) and own their runners, as do the
-  MobileNetV2 and ResNet-18 vision runners.
+  `benchmark`, `tools`, `distill`); `mobilenet_v2`, `resnet18`, and `modernbert` also carry
+  `compare_diag`, which routes to the existing CPU/AutoDiff diagnostic path rather than to a Silk
+  runner (the Silk runners expose only final outputs). SmolLM and Qwen are causal decoders (not
+  encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by
@@ -696,8 +698,8 @@ per classifier, and the CPU-layout round trip exact.
   (`qwen --silk distill` held that role until distill became a Silk mode.)
 - **F32-only**: `--silk --precision bf16|fp16` is rejected (there is no bf16/fp16 translation unit).
 - **`--gpu` is rejected, not aliased** to `--ilgpu`, so an old invocation fails loudly.
-- **`OpenSilkEncoder`/`OpenIlgpuEncoder`** share the `OpenEncoder` delegate and one set of entry-point
-  bodies, so a fix to one backend cannot be forgotten in the other.
+- **`OpenSilkEncoder`** implements the `OpenEncoder` delegate shared by the MiniLM/DistilBERT
+  SST-2 entry points, so the CPU and Silk paths stay structurally identical.
 - **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
   (`SilkKernelsGate.cs`). It runs the CPU reference and the Silk kernels **in one process** and
   requires **byte-identity** for `gemm_row4`, `gemm_row4_bias`, `gemm_row4_qkv`, `gemm_row4_relu`,
@@ -724,6 +726,32 @@ per classifier, and the CPU-layout round trip exact.
   the cross-backend rows are now historical; the current acceleration results and Silk-only scope are in
   [docs/ACCELERATION.md](ACCELERATION.md), and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
   The compare and the benchmark remain separate verdicts.
+
+## 13d. Wiring coverage (user-facing entry points)
+
+Silk (`--silk`) is honoured by the following user-facing entry points as of this release:
+
+- **NivaraChat**
+  - `--embed --silk` — embedding search (MiniLM CLS vectors; `SilkEmbeddingGenerator` wrapper).
+  - `--intent --silk` — intent router's factual-retrieval MiniLM generator.
+  - `--rag* --silk`, `--rag-multiview --silk` — RAG ingestion/search embeddings
+    (already wired via `MiniLMEmbedder.Create`).
+  - `--smollm --silk` (and `--smollm --precision bf16 --silk`) — SmolLM chat/plain
+    generation on `SilkSmolLMChatClient`.
+  - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.
+- **NivaraInference**
+  - `minilm {default, benchmark, compare, similarity}`; `distilbert …`; `distilbert_sst
+    {default, benchmark, compare, predict}`; `modernbert {default, benchmark, compare, compare_diag}`;
+    `laya {default, benchmark, compare}`; `smollm {default, benchmark, generate}`; `qwen …`;
+    `mobilenet_v2`, `resnet18 {default, benchmark, compare, compare_diag}`.
+- **NivaraClassifier** — `train/predict/benchmark` for the conv and linear text classifiers
+  (`GpuTextConvClassifier` / `GpuTextLinearClassifier`).
+- **NivaraIncident.Cli** — `--gpu` grouped-aggregation path (`grouped_hash_reduce_partial`).
+
+Deliberately out of scope (no Silk seam exists yet):
+- `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
+- `minilm --silk compare_diag` is not a mode (diagnostics is an AutoDiff/CPU path).
+- `NivaraFineTuning` and `AutoDiff` training are CPU-only; issue #883 tracks a GPU trainer seam.
 
 ## 15. Adding a model to the Silk path
 
