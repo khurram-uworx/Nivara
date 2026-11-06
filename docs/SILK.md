@@ -403,7 +403,9 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
  Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
  GroupedHashReducePartial,
  GemmNt, GemmTn, ReluBackward, ColSum, Fill,
- Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate]
+ Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
+ AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv, Gelu,
+ EmbeddingBackwardRows, ScatterRows]
 ```
 
 i.e. the families by origin: the original eight BERT encoder kernels (`embed_sum`, `gather_rows`,
@@ -474,6 +476,12 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `conv2d_backward_input` | `dA, weight, dX, ...` (same geometry) | convolution input gradient; **accumulates** (`dX +=`) — zero via `fill` first, the text CNN launches it once per branch over the same dX |
 | `conv2d_backward_bias` | `dA, db, N, outC, oH, oW` | convolution bias gradient |
 | `adam_update` | `w, g, m, v, lr, bc1, bc2, eps, n` | fused Adam step (β1 0.9, β2 0.999, ε 1e-8 — the host `AdamState` constants); `bc1`/`bc2` are the bias corrections precomputed host-side, gradients arrive already batch-averaged |
+| `attention_backward_prep` | `qkv, mask, dAttn, probs, delta, batch, seqLen, numHeads, headDim, band, scale` | re-derives the softmax and `delta_i = Σ_j p_ij (dO_i·V_j)`; writes `probs` and `delta`; fully masked query rows write zeros (no 0/0 NaN) |
+| `attention_backward_dq` | `qkv, probs, delta, dAttn, dQkv, batch, seqLen, numHeads, headDim, scale` | `dQ_i = scale·Σ_j p_ij (dotV_ij − delta_i) K_j`; writes the q block of the row-major `[rows, 3·hidden]` gradient |
+| `attention_backward_dkv` | same args | `dV_j = Σ_i p_ij dO_i`, `dK_j = scale·Σ_i p_ij (dotV_ij − delta_i) Q_i`; writes the k and v blocks |
+| `gelu` | `x, y, n` | elementwise `gelu_exact(x)` — the split form of `gemm_row4_gelu`, bit-identical to it, so the training forward can keep the pre-activation for `gelu_backward` |
+| `embedding_backward_rows` | `ids, dX, gradEmb, rows, embedDim` | row-major embedding scatter `gradEmb[ids[r]] += dX[r]` for a `[rows, hidden]` activation; accumulates, so the gradient buffer must be zeroed first |
+| `scatter_rows` | `dCls, dX, batchSize, seqLen, embedDim` | `gather_rows` backward: writes `dCls[b]` into row `b·seqLen` of a pre-zeroed `[batch·seqLen, hidden]` buffer |
 
 ### 11.2 Geometry
 
@@ -727,6 +735,36 @@ per classifier, and the CPU-layout round trip exact.
   [docs/ACCELERATION.md](ACCELERATION.md), and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
   The compare and the benchmark remain separate verdicts.
 
+## 13e. SilkDistilBertTrainer (#956)
+
+`SilkDistilBertTrainer` (`src/Nivara.Extensions/Silk/SilkDistilBertTrainer.cs`) trains a
+DistilBERT sequence-classification head end to end on the device:
+
+- **Forward** materialises every layer intermediate (`qkv`, `attn`, pre-norm sums `p1`/`p2`,
+  `h1`, `f1pre`, `f1post`) instead of reusing one set of buffers, so the reverse chain has
+  something to differentiate. It runs `gemm_row4_bias` + `gelu` (bit-identical to `gemm_row4_gelu`)
+  and `layer_norm` over a materialised `add` (bit-identical to `layer_norm_residual` with a zero
+  partner), so its logits are byte-identical to `SilkBertEncoderRunner`.
+- **Backward** is the composed chain: head (classifier → ReLU → pre_classifier → CLS scatter) →
+  per layer (LN2 → FC2 → GELU → FC1 → LN1 → attention → qkv) → embedding LN → word/position
+  embedding scatter. Weight gradients are written directly in device layout (`gemm_row4_tn` with
+  the same packed q/k/v column blocks), bias and LayerNorm-parameter gradients via `col_sum`
+  scaled by 1.0 (the mean loss already scaled dLogits by 1/batch). The attention backward writes
+  its gradient row-major `[rows, 3·hidden]` in q|k|v column order even though the forward's packed
+  q/k/v output is block-major, so `dW`/`dB`/`dX` reuse the plain GEMM path with no unpack pass.
+- **Optimizer** is one `adam_update` per parameter with the caller's weight decay (0.01 by
+  default, matching the CPU path's single parameter group); the two moment buffers are zeroed at
+  the start of `Train`.
+- **Materialization** is `ExportCheckpoint()` (HF-keyed, CPU layout) + `model.LoadWeights(...)` +
+  `ModelSerializer.Save` — no device checkpoint format. `ExportGradients()` inverts the same layout
+  so the device gradients can be compared key-for-key with a reverse-mode pass.
+- Caps come from the constructor (`maxBatch`, `maxSeqLen`); the trainer throws when the
+  checkpoint has no `pre_classifier`/`classifier` head.
+
+Parity is pinned in `tests/Nivara.Tests/Gpu/SilkDistilBertTrainerTests.cs`: forward logits within
+2e-4 and every parameter gradient within 5e-4 against `DistilBertForSequenceClassification<float>`
+driven through `CrossEntropyLoss`, on a 2-layer / hidden-32 / 4-head / vocab-64 / seqLen-8 model.
+
 ## 13d. Wiring coverage (user-facing entry points)
 
 Silk (`--silk`) is honoured by the following user-facing entry points as of this release:
@@ -751,7 +789,8 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
 Deliberately out of scope (no Silk seam exists yet):
 - `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
 - `minilm --silk compare_diag` is not a mode (diagnostics is an AutoDiff/CPU path).
-- `NivaraFineTuning` and `AutoDiff` training are CPU-only; issue #883 tracks a GPU trainer seam.
+- `AutoDiff` training is CPU-only; `NivaraFineTuning --mode train --silk` runs on the device via
+  `SilkDistilBertTrainer` (#956).
 
 ## 15. Adding a model to the Silk path
 
