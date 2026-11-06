@@ -663,7 +663,7 @@ public sealed class SilkBackwardKernelTests
                 {
                     int idx = (b * numHeads + h) * seqLen + qPos;
                     int qRow = b * seqLen + qPos;
-                    int qOutBase = qRow * D + h * headDim;
+                    int qOutBase = qRow * 3 * D + h * headDim;
                     int dAttnBase = qRow * D + h * headDim;
                     int probsBase = idx * seqLen;
 
@@ -685,8 +685,8 @@ public sealed class SilkBackwardKernelTests
                 for (int jPos = 0; jPos < seqLen; jPos++)
                 {
                     int jRow = b * seqLen + jPos;
-                    int kOutBase = block + jRow * D + h * headDim;
-                    int vOutBase = 2 * block + jRow * D + h * headDim;
+                    int kOutBase = jRow * 3 * D + D + h * headDim;
+                    int vOutBase = jRow * 3 * D + 2 * D + h * headDim;
                     var dk = new float[headDim];
                     var dv = new float[headDim];
 
@@ -696,7 +696,7 @@ public sealed class SilkBackwardKernelTests
                         int dAttnBase = (b * seqLen + i) * D + h * headDim;
                         float p = probs[rowIdx * seqLen + jPos];
                         if (p == 0f) continue;
-                        float dotV = Dot(dAttn, dAttnBase, qkv, vOutBase, headDim);
+                        float dotV = Dot(dAttn, dAttnBase, qkv, 2 * block + (b * seqLen + jPos) * D + h * headDim, headDim);
                         float ds = p * (dotV - delta[rowIdx]);
                         int qBase = (b * seqLen + i) * D + h * headDim;
                         for (int d = 0; d < headDim; d++)

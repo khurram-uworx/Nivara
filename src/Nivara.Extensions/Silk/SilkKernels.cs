@@ -1367,9 +1367,11 @@ internal static class SilkKernels
                                         dK_j = scale * sum_i p_ij (dotV_ij - delta_i) Q_i
 
            qkv is gemm_row4_qkv's BLOCK-MAJOR output — [Q (rows x D)][K][V], the same layout the
-           forward attention consumes through three sub-buffer views — so a block base is
-           <block offset> + row * D + dOffset and no packing or unpacking is needed. dQkv is
-           written in that same layout, so it feeds the qkv backward GEMMs directly.
+           forward attention consumes through three sub-buffer views — so a READ base is
+           <block offset> + row * D + dOffset. dQkv is a GRADIENT buffer with no reader but the
+           qkv backward GEMMs, so it is written row-major [rows, 3*D] in q|k|v column order: the
+           layout WeightLayout.QkvPacked gives the weight, which lets dW/dB/dX reuse the plain
+           GemmTn/GemmNt/col_sum path with no unpacking pass.
 
            probs is [batch * heads * seqLen, seqLen] and delta is [batch * heads * seqLen]. A
            fully masked query row writes zeros rather than evaluating exp(-inf - -inf).
@@ -1498,7 +1500,7 @@ internal static class SilkKernels
             uint dOffset = h * headDim;
             uint qRow = b * seqLen + qPos;
             uint probsBase = idx * seqLen;
-            uint qOutBase = qRow * D + dOffset;
+            uint qOutBase = qRow * (3u * D) + dOffset;
             uint dAttnBase = qRow * D + dOffset;
 
             /* Ascending j per accumulated component: dS_ij is one scalar per (query, key), so it is
@@ -1545,13 +1547,12 @@ internal static class SilkKernels
             uint jPos = rem - h * seqLen;
 
             uint D = numHeads * headDim;
-            uint rows = batch * seqLen;
-            uint kOff = rows * D;
-            uint vOff = 2u * rows * D;
             uint dOffset = h * headDim;
             uint jRow = b * seqLen + jPos;
-            uint kOutBase = kOff + jRow * D + dOffset;
-            uint vOutBase = vOff + jRow * D + dOffset;
+            uint rows = batch * seqLen;
+            uint vOff = 2u * rows * D;
+            uint kOutBase = jRow * (3u * D) + D + dOffset;
+            uint vOutBase = jRow * (3u * D) + 2u * D + dOffset;
 
             float dk[MAXHEADDIM];
             float dv[MAXHEADDIM];
@@ -1563,7 +1564,7 @@ internal static class SilkKernels
                 uint dAttnBase = (b * seqLen + i) * D + dOffset;
                 float p = probs[rowIdx * seqLen + jPos];
                 if (p == 0.0f) continue;
-                float ds = p * (attn_backward_dotv(qkv, dAttn, vOutBase, dAttnBase, headDim) - delta[rowIdx]);
+                float ds = p * (attn_backward_dotv(qkv, dAttn, vOff + jRow * D + dOffset, dAttnBase, headDim) - delta[rowIdx]);
                 uint qBase = (b * seqLen + i) * D + dOffset;
                 for (uint d = 0; d < headDim; ++d)
                 {
