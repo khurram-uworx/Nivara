@@ -904,10 +904,13 @@ internal static class SilkLauncher
 
     /// <summary>Fused Adam step over <paramref name="count"/> elements; gradients are already
     /// batch-averaged and <paramref name="biasCorrection1"/>/<paramref name="biasCorrection2"/>
-    /// are <c>1-β^t</c> for the shared step <c>t</c>.</summary>
+    /// are <c>1-β^t</c> for the shared step <c>t</c>. <paramref name="weightDecay"/> is AdamW's
+    /// decoupled decay (<c>w ← w − lr·(m̂/(√v̂+ε) + wd·w)</c>); the classifiers pass <c>0</c>.
+    /// </summary>
     public static void AdamUpdate(
         SilkRuntime runtime, nint weights, nint gradients, nint firstMoment, nint secondMoment,
-        float learningRate, float biasCorrection1, float biasCorrection2, float epsilon, int count)
+        float learningRate, float biasCorrection1, float biasCorrection2, float epsilon,
+        float weightDecay, int count)
     {
         runtime.SetBuffer(SilkKernels.AdamUpdate, 0, weights);
         runtime.SetBuffer(SilkKernels.AdamUpdate, 1, gradients);
@@ -917,7 +920,8 @@ internal static class SilkLauncher
         runtime.SetFloat32(SilkKernels.AdamUpdate, 5, biasCorrection1);
         runtime.SetFloat32(SilkKernels.AdamUpdate, 6, biasCorrection2);
         runtime.SetFloat32(SilkKernels.AdamUpdate, 7, epsilon);
-        runtime.SetUInt32(SilkKernels.AdamUpdate, 8, (uint)count);
+        runtime.SetFloat32(SilkKernels.AdamUpdate, 8, weightDecay);
+        runtime.SetUInt32(SilkKernels.AdamUpdate, 9, (uint)count);
         runtime.Run(SilkKernels.AdamUpdate, [(nuint)SilkKernels.LinearGlobal(count)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 

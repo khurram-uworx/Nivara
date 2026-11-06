@@ -411,12 +411,12 @@ public sealed class GpuTextLinearClassifier : IDisposable
         float bc1 = 1f - MathF.Pow(0.9f, adamStep);
         float bc2 = 1f - MathF.Pow(0.999f, adamStep);
 
-        SilkLauncher.AdamUpdate(runtime, fc1Buf, dW1Buf.Handle, fc1Wm, fc1Wv, learningRate, bc1, bc2, 1e-8f, fc1Weight.Length);
-        SilkLauncher.AdamUpdate(runtime, fc1BiasBuf, db1Buf.Handle, fc1Bm, fc1Bv, learningRate, bc1, bc2, 1e-8f, fc1Bias.Length);
-        SilkLauncher.AdamUpdate(runtime, fc2Buf, dW2Buf.Handle, fc2Wm, fc2Wv, learningRate, bc1, bc2, 1e-8f, fc2Weight.Length);
-        SilkLauncher.AdamUpdate(runtime, fc2BiasBuf, db2Buf.Handle, fc2Bm, fc2Bv, learningRate, bc1, bc2, 1e-8f, fc2Bias.Length);
+        SilkLauncher.AdamUpdate(runtime, fc1Buf, dW1Buf.Handle, fc1Wm, fc1Wv, learningRate, bc1, bc2, 1e-8f, 0f, fc1Weight.Length);
+        SilkLauncher.AdamUpdate(runtime, fc1BiasBuf, db1Buf.Handle, fc1Bm, fc1Bv, learningRate, bc1, bc2, 1e-8f, 0f, fc1Bias.Length);
+        SilkLauncher.AdamUpdate(runtime, fc2Buf, dW2Buf.Handle, fc2Wm, fc2Wv, learningRate, bc1, bc2, 1e-8f, 0f, fc2Weight.Length);
+        SilkLauncher.AdamUpdate(runtime, fc2BiasBuf, db2Buf.Handle, fc2Bm, fc2Bv, learningRate, bc1, bc2, 1e-8f, 0f, fc2Bias.Length);
 
-        SilkLauncher.AdamUpdate(runtime, embBuf, dEmbBuf, embWm, embWv, learningRate, bc1, bc2, 1e-8f, embedding.Length);
+        SilkLauncher.AdamUpdate(runtime, embBuf, dEmbBuf, embWm, embWv, learningRate, bc1, bc2, 1e-8f, 0f, embedding.Length);
     }
 
     internal (float[] Fc1W, float[] Fc1B, float[] Fc2W, float[] Fc2B) DownloadGradients()

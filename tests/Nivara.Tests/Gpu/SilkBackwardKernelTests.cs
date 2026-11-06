@@ -354,8 +354,8 @@ public sealed class SilkBackwardKernelTests
         silk.Upload(sm1, m); silk.Upload(sv1, v);
         silk.Upload(sm2, m); silk.Upload(sv2, v);
 
-        SilkLauncher.AdamUpdate(silk, sw1, sg, sm1, sv1, lr, bc1, bc2, eps, count);
-        SilkLauncher.AdamUpdate(silk, sw2, sg, sm2, sv2, lr, bc1, bc2, eps, count);
+        SilkLauncher.AdamUpdate(silk, sw1, sg, sm1, sv1, lr, bc1, bc2, eps, 0f, count);
+        SilkLauncher.AdamUpdate(silk, sw2, sg, sm2, sv2, lr, bc1, bc2, eps, 0f, count);
         silk.Finish();
 
         float[] run1 = silk.Download(sw1, count);
@@ -380,6 +380,39 @@ public sealed class SilkBackwardKernelTests
 
         silk.Release(sw1); silk.Release(sw2); silk.Release(sg);
         silk.Release(sm1); silk.Release(sv1); silk.Release(sm2); silk.Release(sv2);
+    }
+
+    [Test]
+    public void AdamUpdate_WithWeightDecay_MatchesHostFormula()
+    {
+        const int count = 1000;
+        const float lr = 0.01f, bc1 = 0.1f, bc2 = 0.001f, eps = 1e-8f, wd = 0.01f;
+        using var silk = Device();
+        float[] w = Randoms(count, 0x90000085);
+        float[] g = Randoms(count, 0x90000086);
+        float[] m = Randoms(count, 0x90000087);
+        float[] v = Randoms(count, 0x90000088);
+        nint sw = silk.Allocate(count);
+        nint sg = silk.Allocate(count);
+        nint sm = silk.Allocate(count);
+        nint sv = silk.Allocate(count);
+        silk.Upload(sw, w); silk.Upload(sg, g); silk.Upload(sm, m); silk.Upload(sv, v);
+
+        SilkLauncher.AdamUpdate(silk, sw, sg, sm, sv, lr, bc1, bc2, eps, wd, count);
+        silk.Finish();
+        float[] got = silk.Download(sw, count);
+
+        float worst = 0f;
+        for (int i = 0; i < count; i++)
+        {
+            float m1 = 0.9f * m[i] + 0.1f * g[i];
+            float v1 = 0.999f * v[i] + 0.001f * g[i] * g[i];
+            float host = w[i] - lr * ((m1 / bc1) / (MathF.Sqrt(v1 / bc2) + eps) + wd * w[i]);
+            worst = Math.Max(worst, Math.Abs(got[i] - host));
+        }
+        Assert.That(worst, Is.LessThan(1e-5f), $"adamw worst device-vs-host diff {worst}");
+
+        silk.Release(sw); silk.Release(sg); silk.Release(sm); silk.Release(sv);
     }
 
     [Test]

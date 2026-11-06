@@ -1809,6 +1809,7 @@ internal static class SilkKernels
             const float bc1,
             const float bc2,
             const float eps,
+            const float weightDecay,
             const uint n)
         {
             uint i = get_global_id(0);
@@ -1818,7 +1819,13 @@ internal static class SilkKernels
             float v1 = 0.999f * v[i] + 0.001f * grad * grad;
             m[i] = m1;
             v[i] = v1;
-            w[i] -= lr * (m1 / bc1) / (sqrt(v1 / bc2) + eps);
+            /* The zero-decay branch repeats the pre-#956 expression verbatim: an unconditional
+               `update + 0 * w` would reassociate the lr multiply and move every classifier weight
+               by an ulp. */
+            if (weightDecay != 0.0f)
+                w[i] -= lr * ((m1 / bc1) / (sqrt(v1 / bc2) + eps) + weightDecay * w[i]);
+            else
+                w[i] -= lr * (m1 / bc1) / (sqrt(v1 / bc2) + eps);
         }
 
         /* Decode (single-query) GQA attention. q: [numHeads*headDim], kCache/vCache: [kvLen, numKvHeads*headDim].
