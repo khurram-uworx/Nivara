@@ -153,6 +153,22 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict
 
 Type sentences and get POSITIVE/NEGATIVE with confidence percentage. Type `quit` to exit.
 
+### Silk (OpenCL GPU)
+
+```bash
+# Train on the OpenCL device (forward/backward/AdamW on device; exits 1 if OpenCL is unavailable)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 4 --max-examples 25
+
+# Evaluate a fine-tuned model on the device (falls back to the CPU model if OpenCL is unavailable)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval --silk
+
+# Interactive prediction on the device
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict --silk
+```
+
+`--silk` is F32-only. Training requires a device; eval and predict fall back to the CPU model
+when one is not available.
+
 ### Custom options
 
 ```bash

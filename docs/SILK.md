@@ -720,7 +720,9 @@ per classifier, and the CPU-layout round trip exact.
   encode, and the exit code counts correctness failures only. Shapes: MiniLM (seq 128, hidden 384, 12
   heads, headDim 32) and DistilBERT (seq 128, hidden 768, 12 heads, headDim 64) — DistilBERT drives
   `headDim` to `MaxHeadDim`, the attention kernel's compiled local-memory bound. An unavailable device
-  or program exits `UNBUILT` (10).
+  or program exits `UNBUILT` (10). The gate covers the forward kernels shared by the runners; the
+  trainer's backward/Adam kernels are exercised by `SilkDistilBertTrainerTests` (gradient parity)
+  rather than byte-identity.
 - **End-to-end compares are the other half.** `minilm --silk compare`, `distilbert --silk compare` and
   `distilbert_sst --silk compare` each check the GPU against the **same-process CPU** at
   `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` — with pooled-embedding cosine for MiniLM, and the PyTorch 3-way
@@ -785,12 +787,13 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
 - **NivaraClassifier** — `train/predict/benchmark` for the conv and linear text classifiers
   (`GpuTextConvClassifier` / `GpuTextLinearClassifier`).
 - **NivaraIncident.Cli** — `--gpu` grouped-aggregation path (`grouped_hash_reduce_partial`).
+- **NivaraFineTuning** — `--mode {train,eval,predict} --silk`: training (forward, backward, AdamW)
+  runs on the device via `SilkDistilBertTrainer`; eval and predict use `SilkBertEncoderRunner`.
+  F32-only; train exits 1 when OpenCL is unavailable, eval/predict fall back to the CPU model.
 
 Deliberately out of scope (no Silk seam exists yet):
 - `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
 - `minilm --silk compare_diag` is not a mode (diagnostics is an AutoDiff/CPU path).
-- `AutoDiff` training is CPU-only; `NivaraFineTuning --mode train --silk` runs on the device via
-  `SilkDistilBertTrainer` (#956).
 
 ## 15. Adding a model to the Silk path
 
