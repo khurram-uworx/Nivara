@@ -1,12 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using System.Diagnostics;
 using NivaraChat.Helpers;
 using OllamaSharp;
+using System.Diagnostics;
+using System.Text.Json;
 
 namespace NivaraChat.Modes;
 
@@ -166,8 +161,8 @@ public static class RagEvalMode
 
             results.Add(new QueryResult(q.Query, retrievedByConfig, perConfig, grades, (double)latencySum / Math.Max(1, latencyCount)));
 
-        if (results.Count % 50 == 0 || results.Count == queries.Count)
-            Console.WriteLine($"  Evaluated {results.Count}/{queries.Count} queries...");
+            if (results.Count % 50 == 0 || results.Count == queries.Count)
+                Console.WriteLine($"  Evaluated {results.Count}/{queries.Count} queries...");
         }
 
         // Aggregate.

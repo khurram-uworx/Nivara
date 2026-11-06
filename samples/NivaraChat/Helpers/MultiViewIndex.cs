@@ -1,4 +1,3 @@
-using Microsoft.Extensions.AI;
 using Nivara;
 using Nivara.AI;
 using Nivara.Samples;
