@@ -80,8 +80,9 @@ sealed record CliArgs
             }
         }
 
-        if (silk && mode == "train")
-            throw new ArgumentException("--silk is not supported for 'train' mode (training stays CPU); see the training-seam issue.");
+        // --silk train is accepted: the device forward/backward seam is in progress (#953);
+        // training currently runs on the CPU AutoDiff path and matches its accuracy. The device
+        // trainer lands in a follow-up (#956).
 
         return new CliArgs
         {
@@ -117,7 +118,7 @@ Options:
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
   --help          Show this help message
-  --silk          Run eval/predict on the OpenCL GPU via Silk (F32-only); training stays CPU
+  --silk          Run eval/predict on the OpenCL GPU via Silk (F32-only); training runs on CPU AutoDiff (device seam #953/#956)
 
 GPU:
   Training is CPU-only. Eval and predict may use --silk for OpenCL inference;
