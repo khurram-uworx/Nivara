@@ -62,6 +62,40 @@ public static class MiniLMEmbedder
         return CreateCpu(modelDir);
     }
 
+    public static IEmbeddingGenerator<string, Embedding<float>> CreateGenerator(string modelDir, bool useSilk)
+    {
+        if (!useSilk)
+            return MiniLMEmbeddingGenerator.Create(modelDir);
+
+        var handle = CreateSilk(modelDir);
+        return new SilkEmbeddingGenerator(handle);
+    }
+
+    sealed class SilkEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>, IDisposable
+    {
+        readonly Handle _handle;
+        readonly NivaraEmbeddingGenerator<string> _inner;
+
+        public SilkEmbeddingGenerator(Handle handle)
+        {
+            _handle = handle;
+            _inner = new NivaraEmbeddingGenerator<string>(handle.Embed, handle.EmbedBatch, handle.Dimension, "Nivara-MiniLM (Silk)", "all-minilm-l6-v2");
+        }
+
+        public int EmbeddingDimension => _inner.EmbeddingDimension;
+
+        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values,
+            EmbeddingGenerationOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => _inner.GenerateAsync(values, options, cancellationToken);
+
+        public object? GetService(Type serviceType, object? serviceKey)
+            => _inner.GetService(serviceType, serviceKey);
+
+        public void Dispose() => _handle.Dispose();
+    }
+
     public static float[][] EmbedBatch(Handle embedder, IEnumerable<string> texts)
     {
         ArgumentNullException.ThrowIfNull(embedder);

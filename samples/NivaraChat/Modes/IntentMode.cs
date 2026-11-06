@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Nivara.AI;
+using Nivara.Samples;
 using NivaraChat.Executors;
 using NivaraChat.Helpers;
 using NivaraChat.Tools;
@@ -44,7 +45,7 @@ public static class IntentMode
         if (Directory.Exists(minilmDir))
         {
             Console.WriteLine("Loading MiniLM embedding model for factual retrieval...");
-            var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+            var generator = MiniLMEmbedder.CreateGenerator(minilmDir, ctx.UseSilk);
             vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(
                 new() { EmbeddingGenerator = generator });
             var collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
