@@ -365,8 +365,8 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
 real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
 Qwen, MobileNetV2, and ResNet-18**, F32 only. Qwen and the vision models expose their own mode
-sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`, and it is
-mutually exclusive with `--ilgpu`.
+sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`. F32 only (no
+bf16/fp16 translation unit).
 
 | file | role |
 |---|---|
@@ -646,7 +646,7 @@ Qwen exposes `benchmark`, plain, tools, and KV-cache modes through `SilkQwenSess
 `relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side
 geometry helpers, and are the kernels listed in `KernelNames` under the vision family.
 
-As with the encoders, these are F32 only and mutually exclusive with `--ilgpu`.
+As with the encoders, these are F32 only.
 
 ## 13c. Text classifiers (NivaraClassifier sample)
 
@@ -697,8 +697,8 @@ per classifier, and the CPU-layout round trip exact.
   (`qwen --silk distill` held that role until distill became a Silk mode.)
 - **F32-only**: `--silk --precision bf16|fp16` is rejected (there is no bf16/fp16 translation unit).
 - **`--gpu` is rejected, not aliased** to `--ilgpu`, so an old invocation fails loudly.
-- **`OpenSilkEncoder`/`OpenIlgpuEncoder`** share the `OpenEncoder` delegate and one set of entry-point
-  bodies, so a fix to one backend cannot be forgotten in the other.
+- **`OpenSilkEncoder`** implements the `OpenEncoder` delegate shared by the MiniLM/DistilBERT
+  SST-2 entry points, so the CPU and Silk paths stay structurally identical.
 - **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
   (`SilkKernelsGate.cs`). It runs the CPU reference and the Silk kernels **in one process** and
   requires **byte-identity** for `gemm_row4`, `gemm_row4_bias`, `gemm_row4_qkv`, `gemm_row4_relu`,

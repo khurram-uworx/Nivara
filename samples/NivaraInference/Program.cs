@@ -340,11 +340,11 @@ class Program
             Console.WriteLine("                     stack (src/Nivara.Extensions/Silk/SilkKernels.cs). 'minilm' /");
             Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
             Console.WriteLine("                     default/benchmark/compare modes; 'qwen' adds tools/distill. Competing");
-            Console.WriteLine("                     with --ilgpu, so the two are mutually exclusive.");
+            Console.WriteLine("                     F32 only -- there is no bf16/fp16 Silk translation unit.");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
-            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --ilgpu / --silk. The CPU path no");
+            Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --silk. The CPU path no");
             Console.WriteLine("                   longer builds a dense [L, L] mask (#476), so it has no dense-mask cap; a");
             Console.WriteLine("                   length above max_position_embeddings is skipped. A length below the");
             Console.WriteLine("                   sentence truncates it. (--seq is modernbert-only; --warmup / --iters");
