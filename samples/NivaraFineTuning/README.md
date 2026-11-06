@@ -153,6 +153,22 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict
 
 Type sentences and get POSITIVE/NEGATIVE with confidence percentage. Type `quit` to exit.
 
+### Silk (OpenCL GPU)
+
+```bash
+# Train on the OpenCL device (forward/backward/AdamW on device; exits 1 if OpenCL is unavailable)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 4 --max-examples 25
+
+# Evaluate a fine-tuned model on the device (exits 1 if OpenCL is unavailable)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval --silk
+
+# Interactive prediction on the device
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict --silk
+```
+
+`--silk` is F32-only. A device is required in every mode; the run exits with status 1 when
+OpenCL is unavailable (no CPU fallback). Use the same command without `--silk` for the CPU path.
+
 ### Custom options
 
 ```bash
@@ -186,7 +202,9 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 
 ### Expected timing
 
-Fine-tuning runs entirely in managed C# on CPU. For `--max-examples 25 --batch-size 2 --epochs 1 -c Release`
+By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
+backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
+unavailable). For `--max-examples 25 --batch-size 2 --epochs 1 -c Release` on CPU,
 expect **~3.4 s/batch** steady-state (measured 2026-08-14, see [Performance benchmarks](#performance-benchmarks));
 a full 67K-example epoch extrapolates to ~32 hours. Keep `--max-len` at the default 128 and use
 `--max-examples` to validate the pipeline before committing to a full run.

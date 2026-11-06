@@ -117,11 +117,11 @@ Options:
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
   --help          Show this help message
-  --silk          Run train/eval/predict on the OpenCL GPU via Silk (F32-only); training fails with exit 1 when OpenCL is unavailable
+  --silk          Run train/eval/predict on the OpenCL GPU via Silk (F32-only); fails with exit 1 when OpenCL is unavailable
 
 GPU:
-  Training (--silk) runs forward, backward and AdamW on the OpenCL device. Eval and predict may
-  use --silk for OpenCL inference; falls back to the CPU model when OpenCL is unavailable.
+  --silk runs forward (and, for train, backward and AdamW) on the OpenCL device. F32-only;
+  exits 1 when OpenCL is unavailable (no CPU fallback).
 
 Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
@@ -395,7 +395,8 @@ static class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Silk/OpenCL unavailable ({ex.Message}); using the CPU model.");
+                Console.Error.WriteLine($"OpenCL device unavailable: {ex.Message}");
+                return 1;
             }
         }
 
@@ -487,7 +488,8 @@ static class Program
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Silk/OpenCL unavailable ({ex.Message}); using the CPU model.");
+                Console.Error.WriteLine($"OpenCL device unavailable: {ex.Message}");
+                return 1;
             }
         }
 
