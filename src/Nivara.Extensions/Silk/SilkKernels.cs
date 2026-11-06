@@ -155,6 +155,12 @@ internal static class SilkKernels
     public const string Conv2dBackwardBias = "conv2d_backward_bias";
     public const string AdamUpdate = "adam_update";
 
+    // Transformer-training backward kernels (#956): the multi-head attention gradient, split into
+    // three deterministic launches so each output element has one writer and an ascending loop.
+    public const string AttentionBackwardPrep = "attention_backward_prep";
+    public const string AttentionBackwardDq = "attention_backward_dq";
+    public const string AttentionBackwardDkv = "attention_backward_dkv";
+
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
@@ -167,6 +173,7 @@ internal static class SilkKernels
         GroupedHashReducePartial,
         GemmNt, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
+        AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
 
@@ -1340,6 +1347,229 @@ internal static class SilkKernels
             uint idx = get_global_id(0);
             if (idx >= n) return;
             y[idx] = act[idx] > 0.0f ? d[idx] : 0.0f;
+        }
+
+        /* ---------------------------------------------------------------------------------------
+           batched_attention backward (#956). The forward keeps no softmax, so the backward
+           re-derives it in three deterministic launches, each with one work item per output
+           element and an ascending inner loop (the property the CPU-replay test pins):
+
+             prep  — per (b, h, query): p_ij and delta_i = sum_j p_ij (dO_i . V_j)
+             dq    — per (b, h, query): dQ_i[d] = scale * sum_j p_ij (dotV_ij - delta_i) K_j[d]
+             dkv   — per (b, h, key):   dV_j = sum_i p_ij dO_i
+                                        dK_j = scale * sum_i p_ij (dotV_ij - delta_i) Q_i
+
+           qkv is gemm_row4_qkv's BLOCK-MAJOR output — [Q (rows x D)][K][V], the same layout the
+           forward attention consumes through three sub-buffer views — so a block base is
+           <block offset> + row * D + dOffset and no packing or unpacking is needed. dQkv is
+           written in that same layout, so it feeds the qkv backward GEMMs directly.
+
+           probs is [batch * heads * seqLen, seqLen] and delta is [batch * heads * seqLen]. A
+           fully masked query row writes zeros rather than evaluating exp(-inf - -inf).
+
+           dS_ij is the gradient with respect to the SCALED score (q.k * scale is the forward's
+           contraction), so the scale multiplies the K and Q terms below, not p. */
+
+        inline float attn_backward_score(
+            __global const float* qkv, uint qBase, uint kBase, uint headDim, float scale)
+        {
+            float acc = 0.0f;
+            for (uint d = 0; d < headDim; ++d)
+                acc += qkv[qBase + d] * qkv[kBase + d];
+            return acc * scale;
+        }
+
+        /* dO_i . V_j — the one contraction every attention-gradient kernel needs and none can
+           cache. Kept ahead of its callers because OpenCL C has no hoisted declarations. */
+        inline float attn_backward_dotv(
+            __global const float* qkv,
+            __global const float* dAttn,
+            uint vBase,
+            uint dAttnBase,
+            uint headDim)
+        {
+            float acc = 0.0f;
+            for (uint d = 0; d < headDim; ++d)
+                acc += dAttn[dAttnBase + d] * qkv[vBase + d];
+            return acc;
+        }
+
+        __kernel void attention_backward_prep(
+            __global const float* qkv,
+            __global const float* mask,
+            __global const float* dAttn,
+            __global float* probs,
+            __global float* delta,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const int band,
+            const float scale)
+        {
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint qPos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint rows = batch * seqLen;
+            uint kOff = rows * D;
+            uint vOff = 2u * rows * D;
+            uint dOffset = h * headDim;
+            uint qRow = b * seqLen + qPos;
+            uint maskBase = b * seqLen;
+            uint probsBase = idx * seqLen;
+            uint qBase = qRow * D + dOffset;
+            uint dAttnBase = qRow * D + dOffset;
+
+            int qp = (int)qPos;
+            int sl = (int)seqLen;
+
+            float mx = -INFINITY;
+            for (int j = 0; j < sl; ++j)
+                if (attn_keep(mask, maskBase, qp, j, band))
+                    mx = fmax(mx, attn_backward_score(
+                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale));
+
+            if (mx == -INFINITY)
+            {
+                for (uint j = 0; j < seqLen; ++j) probs[probsBase + j] = 0.0f;
+                delta[idx] = 0.0f;
+                return;
+            }
+
+            float sum = 0.0f;
+            for (int j = 0; j < sl; ++j)
+                if (attn_keep(mask, maskBase, qp, j, band))
+                    sum += exp(attn_backward_score(
+                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale) - mx);
+
+            float acc = 0.0f;
+            for (int j = 0; j < sl; ++j)
+            {
+                float p = attn_keep(mask, maskBase, qp, j, band)
+                    ? exp(attn_backward_score(
+                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale) - mx) / sum
+                    : 0.0f;
+                probs[probsBase + (uint)j] = p;
+                acc += p * attn_backward_dotv(
+                    qkv, dAttn, vOff + (b * seqLen + (uint)j) * D + dOffset, dAttnBase, headDim);
+            }
+            delta[idx] = acc;
+        }
+
+        __kernel void attention_backward_dq(
+            __global const float* qkv,
+            __global const float* probs,
+            __global const float* delta,
+            __global const float* dAttn,
+            __global float* dQkv,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint qPos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint rows = batch * seqLen;
+            uint kOff = rows * D;
+            uint vOff = 2u * rows * D;
+            uint dOffset = h * headDim;
+            uint qRow = b * seqLen + qPos;
+            uint probsBase = idx * seqLen;
+            uint qOutBase = qRow * D + dOffset;
+            uint dAttnBase = qRow * D + dOffset;
+
+            /* Ascending j per accumulated component: dS_ij is one scalar per (query, key), so it is
+               derived once and fanned out to the headDim accumulators rather than recomputing the
+               V contraction per component. */
+            float dq[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d) dq[d] = 0.0f;
+
+            float dl = delta[idx];
+            for (uint j = 0; j < seqLen; ++j)
+            {
+                float ds = probs[probsBase + j]
+                    * (attn_backward_dotv(qkv, dAttn, vOff + (b * seqLen + j) * D + dOffset, dAttnBase, headDim)
+                        - dl);
+                if (ds == 0.0f) continue;
+                uint kBase = kOff + (b * seqLen + j) * D + dOffset;
+                for (uint d = 0; d < headDim; ++d)
+                    dq[d] += ds * qkv[kBase + d];
+            }
+
+            for (uint d = 0; d < headDim; ++d)
+                dQkv[qOutBase + d] = dq[d] * scale;
+        }
+
+        __kernel void attention_backward_dkv(
+            __global const float* qkv,
+            __global const float* probs,
+            __global const float* delta,
+            __global const float* dAttn,
+            __global float* dQkv,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint jPos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint rows = batch * seqLen;
+            uint kOff = rows * D;
+            uint vOff = 2u * rows * D;
+            uint dOffset = h * headDim;
+            uint jRow = b * seqLen + jPos;
+            uint kOutBase = kOff + jRow * D + dOffset;
+            uint vOutBase = vOff + jRow * D + dOffset;
+
+            float dk[MAXHEADDIM];
+            float dv[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d) { dk[d] = 0.0f; dv[d] = 0.0f; }
+
+            for (uint i = 0; i < seqLen; ++i)
+            {
+                uint rowIdx = (b * numHeads + h) * seqLen + i;
+                uint dAttnBase = (b * seqLen + i) * D + dOffset;
+                float p = probs[rowIdx * seqLen + jPos];
+                if (p == 0.0f) continue;
+                float ds = p * (attn_backward_dotv(qkv, dAttn, vOutBase, dAttnBase, headDim) - delta[rowIdx]);
+                uint qBase = (b * seqLen + i) * D + dOffset;
+                for (uint d = 0; d < headDim; ++d)
+                {
+                    dv[d] += p * dAttn[dAttnBase + d];
+                    dk[d] += ds * qkv[qBase + d];
+                }
+            }
+
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dQkv[kOutBase + d] = dk[d] * scale;
+                dQkv[vOutBase + d] = dv[d];
+            }
         }
 
         /* gelu_backward: d flows back through the GELU exact derivative. act is the PRE-activation
