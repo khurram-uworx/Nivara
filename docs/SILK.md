@@ -751,8 +751,6 @@ Deliberately out of scope (no Silk seam exists yet):
 - `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
 - `minilm --silk compare_diag` is not a mode (diagnostics is an AutoDiff/CPU path).
 - `NivaraFineTuning` and `AutoDiff` training are CPU-only; issue #883 tracks a GPU trainer seam.
-- ILGPU and `--ilgpu` are no longer live: `--ilgpu` was removed with #814; the former
-  `--ilgpu`/`--silk` mutual-exclusion check now only ever sees `--silk`.
 
 ## 15. Adding a model to the Silk path
 
