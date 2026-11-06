@@ -639,7 +639,8 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
 encoder. They use the same `SilkRuntime`, plus `rms_norm`, `swiglu`, `causal_gqa_attention`,
 `decode_gqa_attention`, `decode_gqa_attention_oproj_fused`, `mlp_block`, `gemm_gemv_add`, and `argmax`.
 Qwen exposes `benchmark`, plain, tools, and KV-cache modes through `SilkQwenSession`; SmolLM exposes
-`benchmark` and `generate`.
+`benchmark` and `generate`. `NivaraChat --smollm --silk` now also serves the same SmolLM decoder as an
+`IChatClient` for chat/plain generation through `SilkSmolLMChatClient`.
 
 `SilkMobileNetV2GpuRunner` and `SilkResNet18GpuRunner` run the vision stack: `conv2d`, `batchnorm_eval`,
 `relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side
