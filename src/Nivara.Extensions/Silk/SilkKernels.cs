@@ -146,6 +146,8 @@ internal static class SilkKernels
     public const string GemmNt = "gemm_row4_nt";
     public const string GemmTn = "gemm_row4_tn";
     public const string ReluBackward = "relu_backward";
+    public const string GeluBackward = "gelu_backward";
+    public const string LayerNormBackward = "layer_norm_backward";
     public const string ColSum = "col_sum";
     public const string Fill = "fill";
     public const string Conv2dBackwardWeight = "conv2d_backward_weight";
@@ -163,7 +165,7 @@ internal static class SilkKernels
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
-        GemmNt, GemmTn, ReluBackward, ColSum, Fill,
+        GemmNt, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
@@ -1338,6 +1340,73 @@ internal static class SilkKernels
             uint idx = get_global_id(0);
             if (idx >= n) return;
             y[idx] = act[idx] > 0.0f ? d[idx] : 0.0f;
+        }
+
+        /* gelu_backward: d flows back through the GELU exact derivative. act is the PRE-activation
+           buffer (the input to GELU), since the derivative depends on x, not on GELU(x). */
+        __kernel void gelu_backward(
+            __global const float* d,
+            __global const float* act,
+            __global float* y,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            float v = act[idx];
+            float invSqrt2 = 0.7071067811865475f;
+            float invSqrt2Pi = 0.3989422804014327f;
+            float cdf = 0.5f * (1.0f + erf(v * invSqrt2));
+            float pdf = exp(-0.5f * v * v) * invSqrt2Pi;
+            y[idx] = (cdf + v * pdf) * d[idx];
+        }
+
+        /* layer_norm_backward: backward through LayerNorm (no residual). Inputs: d (grad of
+           normed output), x (pre-norm input), gamma. Outputs: dx (grad input), dgammaAcc and
+           dbetaAcc (per-element products to be reduced with col_sum). eps matches forward. */
+        __kernel void layer_norm_backward(
+            __global const float* d,
+            __global const float* x,
+            __global const float* gamma,
+            __global float* dx,
+            __global float* dgammaAcc,
+            __global float* dbetaAcc,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint idx = get_global_id(0);
+            uint total = rows * cols;
+            if (idx >= total) return;
+            uint row = idx / cols;
+            uint col = idx % cols;
+            uint base = row * cols;
+
+            float mean = 0.0f;
+            for (uint c = 0; c < cols; ++c) mean += x[base + c];
+            mean /= (float)cols;
+            float var = 0.0f;
+            for (uint c = 0; c < cols; ++c) {
+                float diff = x[base + c] - mean;
+                var += diff * diff;
+            }
+            var /= (float)cols;
+            float invStd = 1.0f / sqrt(var + eps);
+
+            float normalized = (x[idx] - mean) * invStd;
+            dgammaAcc[idx] = d[idx] * normalized;
+            dbetaAcc[idx] = d[idx];
+
+            float meanD = 0.0f;
+            float meanDNorm = 0.0f;
+            for (uint c = 0; c < cols; ++c) {
+                float nrm = (x[base + c] - mean) * invStd;
+                meanD += d[base + c];
+                meanDNorm += d[base + c] * nrm;
+            }
+            meanD /= (float)cols;
+            meanDNorm /= (float)cols;
+
+            dx[idx] = (gamma[col] * invStd) * (d[idx] - meanD - normalized * meanDNorm);
         }
 
         /* y[j] = scale * sum_i x[i*cols + j] — FC bias gradients. The scale is applied once at
