@@ -202,7 +202,9 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 
 ### Expected timing
 
-Fine-tuning runs entirely in managed C# on CPU. For `--max-examples 25 --batch-size 2 --epochs 1 -c Release`
+By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
+backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
+unavailable). For `--max-examples 25 --batch-size 2 --epochs 1 -c Release` on CPU,
 expect **~3.4 s/batch** steady-state (measured 2026-08-14, see [Performance benchmarks](#performance-benchmarks));
 a full 67K-example epoch extrapolates to ~32 hours. Keep `--max-len` at the default 128 and use
 `--max-examples` to validate the pipeline before committing to a full run.
