@@ -789,7 +789,7 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
 - **NivaraIncident.Cli** — `--gpu` grouped-aggregation path (`grouped_hash_reduce_partial`).
 - **NivaraFineTuning** — `--mode {train,eval,predict} --silk`: training (forward, backward, AdamW)
   runs on the device via `SilkDistilBertTrainer`; eval and predict use `SilkBertEncoderRunner`.
-  F32-only; train exits 1 when OpenCL is unavailable, eval/predict fall back to the CPU model.
+  F32-only; exits 1 when OpenCL is unavailable (no CPU fallback).
 
 Deliberately out of scope (no Silk seam exists yet):
 - `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
