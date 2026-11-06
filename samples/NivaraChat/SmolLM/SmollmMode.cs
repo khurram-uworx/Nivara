@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.Primitives;
+using Nivara.Silk;
 using Nivara.Samples;
 using System.Diagnostics;
 using System.Numerics;
@@ -92,6 +93,7 @@ public static class SmollmMode
                 case "--seed": options.Seed = int.Parse(args[++i]); break;
                 case "--kv-cache": options.UseKvCache = true; break;
                 case "--no-kv-cache": options.UseKvCache = false; break;
+                case "--silk": options.UseSilk = true; break;
                 case "--text": options.Text = args[++i]; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
@@ -124,9 +126,16 @@ public static class SmollmMode
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
 
-        Console.WriteLine($"Loading SmolLM-135M-Instruct ({options.Precision})...");
+        Console.WriteLine($"Loading SmolLM-135M-Instruct ({options.Precision}){(options.UseSilk ? " via Silk/OpenCL" : "")}...");
         var loadSw = Stopwatch.StartNew();
-        if (options.Precision == "bf16")
+        if (options.UseSilk)
+        {
+            if (options.Precision == "bf16")
+                await RunSilkBFloat16(config, tokenizer, modelDir, options);
+            else
+                await RunSilkFloat(config, tokenizer, modelDir, options);
+        }
+        else if (options.Precision == "bf16")
             await Run<BFloat16>(config, tokenizer, modelDir, options);
         else
             await Run<float>(config, tokenizer, modelDir, options);
@@ -290,5 +299,6 @@ public static class SmollmMode
         public bool UseKvCache { get; set; } = true;
         public string? Text { get; set; }
         public bool ShowHelp { get; set; }
+        public bool UseSilk { get; set; }
     }
 }
