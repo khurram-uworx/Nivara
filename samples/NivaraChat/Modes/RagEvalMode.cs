@@ -17,7 +17,12 @@ public static class RagEvalMode
         Console.WriteLine("=== NivaraChat - RAG Evaluation (#943) ===\n");
 
         var repoRoot = ModeHelpers.GetRepoRoot();
-        var queriesPath = ctx.Queries ?? Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "queries.tsv");
+        var queriesCandidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "queries.tsv"),
+            Path.Combine(repoRoot, "samples", "NivaraChat", "queries.tsv")
+        };
+        var queriesPath = ctx.Queries ?? queriesCandidates.FirstOrDefault(File.Exists) ?? queriesCandidates[0];
         var labelsPath = Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "relevance.tsv");
         var reportPath = ctx.ReportPath is null ? null : ResolveReportPath(ctx.ReportPath, repoRoot);
 

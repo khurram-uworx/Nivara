@@ -136,7 +136,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--explore` | — | `--rag-multiview`: bucket every visible chunk by view disagreement, not just the top-K |
 | `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
 | `--weights <spec>` | `content=0.5,title=0.2,section=0.2,code=0.1` | `--rag-multiview`: late-fusion weights, renormalized per chunk over the views it has. Unknown names, negative values and an all-zero total are rejected |
-| `--queries <path>` | `samples/data/nivarachat/eval/queries.tsv` | `--rag-eval`: ground-truth TSV path | 
+| `--queries <path>` | `queries.tsv` (copied to output) | `--rag-eval`: ground-truth TSV path | 
 | `--runs <n>` | `3` | `--rag-eval`: judge runs per query | 
 | `--temperature <f>` | `0.2` | `--rag-eval`: judge sampling temperature | 
 | `--grade-all` | — | `--rag-eval`: grade every visible chunk (true recall; slower) | 
