@@ -730,6 +730,29 @@ internal static class SilkLauncher
         runtime.Run(SilkKernels.ReluBackward, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void GeluBackward(SilkRuntime runtime, nint d, nint act, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.GeluBackward, 0, d);
+        runtime.SetBuffer(SilkKernels.GeluBackward, 1, act);
+        runtime.SetBuffer(SilkKernels.GeluBackward, 2, y);
+        runtime.SetUInt32(SilkKernels.GeluBackward, 3, (uint)n);
+        runtime.Run(SilkKernels.GeluBackward, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void LayerNormBackward(SilkRuntime runtime, nint d, nint x, nint gamma, nint dx, nint dgammaAcc, nint dbetaAcc, int rows, int cols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.LayerNormBackward, 0, d);
+        runtime.SetBuffer(SilkKernels.LayerNormBackward, 1, x);
+        runtime.SetBuffer(SilkKernels.LayerNormBackward, 2, gamma);
+        runtime.SetBuffer(SilkKernels.LayerNormBackward, 3, dx);
+        runtime.SetBuffer(SilkKernels.LayerNormBackward, 4, dgammaAcc);
+        runtime.SetBuffer(SilkKernels.LayerNormBackward, 5, dbetaAcc);
+        runtime.SetUInt32(SilkKernels.LayerNormBackward, 6, (uint)rows);
+        runtime.SetUInt32(SilkKernels.LayerNormBackward, 7, (uint)cols);
+        runtime.SetFloat32(SilkKernels.LayerNormBackward, 8, eps);
+        runtime.Run(SilkKernels.LayerNormBackward, [(nuint)SilkKernels.LinearGlobal(rows * cols)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     /// <summary><c>y[j] = scale·Σ_i x[i·cols + j]</c> — FC bias gradients over a batch.</summary>
     public static void ColSum(SilkRuntime runtime, nint x, nint y, int rows, int cols, float scale)
     {

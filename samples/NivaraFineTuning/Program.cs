@@ -6,6 +6,7 @@ using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
+using Nivara.Silk;
 
 namespace NivaraFineTuning;
 
@@ -20,6 +21,7 @@ sealed record CliArgs
     public string ModelDir { get; init; } = "";
     public string SavePath { get; init; } = "";
     public int MaxExamples { get; init; }
+    public bool Silk { get; init; }
 
     public static CliArgs Parse(string[] args)
     {
@@ -33,6 +35,7 @@ sealed record CliArgs
         int batchSize = 4;
         int maxLen = 128;
         int maxExamples = 0;
+        bool silk = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -66,6 +69,9 @@ sealed record CliArgs
                 case "--save-path" when i + 1 < args.Length:
                     savePath = args[++i];
                     break;
+                case "--silk":
+                    silk = true;
+                    break;
                 case "--help":
                 case "-h":
                     PrintHelp();
@@ -73,6 +79,10 @@ sealed record CliArgs
                     break;
             }
         }
+
+        // --silk train is accepted: the device forward/backward seam is in progress (#953);
+        // training currently runs on the CPU AutoDiff path and matches its accuracy. The device
+        // trainer lands in a follow-up (#956).
 
         return new CliArgs
         {
@@ -84,7 +94,8 @@ sealed record CliArgs
             MaxExamples = maxExamples,
             DataDir = dataDir,
             ModelDir = modelDir,
-            SavePath = savePath
+            SavePath = savePath,
+            Silk = silk
         };
     }
 
@@ -107,6 +118,11 @@ Options:
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
   --help          Show this help message
+  --silk          Run eval/predict on the OpenCL GPU via Silk (F32-only); training runs on CPU AutoDiff (device seam #953/#956)
+
+GPU:
+  Training is CPU-only. Eval and predict may use --silk for OpenCL inference;
+  falls back to the CPU model when OpenCL is unavailable.
 
 Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
@@ -256,10 +272,78 @@ static class Program
         Console.WriteLine($"Loading SST-2 dev set from {dataPath}...");
         var dataset = Sst2Dataset.LoadFromParquet(dataPath);
 
+        if (cli.Silk)
+        {
+            try
+            {
+                return RunEvalSilk(cli, config, model, tokenizer, dataset);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Silk/OpenCL unavailable ({ex.Message}); using the CPU model.");
+            }
+        }
+
         var lossFn = new CrossEntropyLoss<float>();
         var (loss, acc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
         Console.WriteLine($"\nResults - loss: {loss:F4}, accuracy: {acc:F2}%");
 
+        return 0;
+    }
+
+    static int RunEvalSilk(CliArgs cli, DistilBertConfig config, DistilBertForSequenceClassification<float> model,
+        BertTokenizer tokenizer, Sst2Dataset dataset)
+    {
+        var silkTensors = model.ToSilkTensors();
+        var bertConfig = config.ToBertConfig();
+
+        using var runtime = new SilkRuntime();
+        using var runner = new SilkBertEncoderRunner(runtime, bertConfig, silkTensors, BertGpuNaming.DistilBert);
+
+        Console.WriteLine($"Silk device: {runner.DeviceName}");
+
+        var tokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, cli.MaxLen);
+        var batches = Sst2Dataset.CreateBatches(tokenized, cli.BatchSize, shuffle: false).ToList();
+
+        float totalLoss = 0f;
+        int correct = 0;
+        int total = 0;
+
+        foreach (var batch in batches)
+        {
+            var intIds = Array.ConvertAll(batch.TokenIds, x => (int)x);
+            var result = runner.Forward(intIds, batch.AttentionMask, batch.BatchSize, batch.SeqLen);
+            var logits = result.Logits ?? Array.Empty<float>();
+
+            // accuracy
+            for (int i = 0; i < batch.BatchSize; i++)
+            {
+                int predicted = logits[i * 2 + 1] > logits[i * 2] ? 1 : 0;
+                if (predicted == batch.Labels[i]) correct++;
+            }
+            total += batch.BatchSize;
+
+            // mean cross-entropy per batch
+            float batchLoss = 0f;
+            for (int i = 0; i < batch.BatchSize; i++)
+            {
+                float l0 = logits[i * 2];
+                float l1 = logits[i * 2 + 1];
+                float max = MathF.Max(l0, l1);
+                float e0 = MathF.Exp(l0 - max);
+                float e1 = MathF.Exp(l1 - max);
+                float sum = e0 + e1;
+                int label = batch.Labels[i];
+                float prob = (label == 0 ? e0 : e1) / sum;
+                batchLoss += -MathF.Log(prob);
+            }
+            batchLoss /= batch.BatchSize;
+            totalLoss += batchLoss;
+        }
+
+        float loss = totalLoss / batches.Count;
+        float acc = (float)correct / total * 100f;
+        Console.WriteLine($"\nResults (Silk) - loss: {loss:F4}, accuracy: {acc:F2}%");
         return 0;
     }
 
@@ -279,6 +363,18 @@ static class Program
 
         Console.WriteLine($"Loading tokenizer from {modelPath}/vocab.txt...");
         var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelPath, "vocab.txt"));
+
+        if (cli.Silk)
+        {
+            try
+            {
+                return RunPredictSilk(cli, config, model, tokenizer);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Silk/OpenCL unavailable ({ex.Message}); using the CPU model.");
+            }
+        }
 
         Console.WriteLine("\n=== Interactive Sentiment Predictor ===");
         Console.WriteLine("Type a sentence and press Enter (or 'quit' to exit).\n");
@@ -301,6 +397,44 @@ static class Program
             var total = posConf + negConf;
             var sentiment = posConf > negConf ? "POSITIVE" : "NEGATIVE";
             var confidence = Math.Max(posConf, negConf) / total * 100;
+
+            Console.WriteLine($"  Sentiment: {sentiment} ({confidence:F1}%)");
+        }
+
+        return 0;
+    }
+
+    static int RunPredictSilk(CliArgs cli, DistilBertConfig config, DistilBertForSequenceClassification<float> model,
+        BertTokenizer tokenizer)
+    {
+        var silkTensors = model.ToSilkTensors();
+        var bertConfig = config.ToBertConfig();
+
+        using var runtime = new SilkRuntime();
+        using var runner = new SilkBertEncoderRunner(runtime, bertConfig, silkTensors, BertGpuNaming.DistilBert);
+
+        Console.WriteLine($"Silk device: {runner.DeviceName}");
+        Console.WriteLine("\n=== Interactive Sentiment Predictor (Silk) ===");
+        Console.WriteLine("Type a sentence and press Enter (or 'quit' to exit).\n");
+
+        int maxLen = cli.MaxLen;
+        string? line;
+        while ((line = Console.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (string.IsNullOrEmpty(line) || line.Equals("quit", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, line, maxLen);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            var logits = result.Logits ?? Array.Empty<float>();
+            float posConf = logits.Length > 1 ? logits[1] : 0f;
+            float negConf = logits.Length > 0 ? logits[0] : 0f;
+            float total = posConf + negConf;
+            var sentiment = posConf > negConf ? "POSITIVE" : "NEGATIVE";
+            var confidence = total > 0 ? Math.Max(posConf, negConf) / total * 100 : 0;
 
             Console.WriteLine($"  Sentiment: {sentiment} ({confidence:F1}%)");
         }

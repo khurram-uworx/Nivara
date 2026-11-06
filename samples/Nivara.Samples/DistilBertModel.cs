@@ -2,6 +2,7 @@ using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using System.Linq;
 using System.Numerics;
 
 namespace Nivara.Samples;
@@ -82,6 +83,67 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
             StateDictLoader.LoadLinearWidened(classifier, tensors, "classifier");
 
         Eval();
+    }
+
+    /// <summary>
+    /// Walks this model's parameters in registration order and produces the Silk/OpenCL
+    /// checkpoint-shaped tensor dictionary (HF-style <c>[out, in]</c> arrays) consumed by
+    /// <see cref="Nivara.Silk.SilkBertEncoderRunner"/>. Registration order is the contract:
+    /// encoder (word/pos embeddings, embed LayerNorm, per-layer norms/attention/ffn) then
+    /// <c>pre_classifier</c> then <c>classifier</c>.
+    /// </summary>
+    public Dictionary<string, (float[] Data, int[] Shape)> ToSilkTensors()
+    {
+        if (typeof(T) != typeof(float))
+            throw new InvalidOperationException("ToSilkTensors is only supported for float models.");
+
+        var result = new Dictionary<string, (float[] Data, int[] Shape)>();
+        var parameters = GetParameters().Values.ToList();
+        int idx = 0;
+
+        Func<Parameter<T>, (float[] Data, int[] Shape)> conv = param =>
+        {
+            var tensor = param.Tensor;
+            var src = new T[tensor.Length];
+            tensor.Data.CopyTo(src, default(T)!);
+            var data = new float[src.Length];
+            for (int j = 0; j < src.Length; j++)
+                data[j] = float.CreateChecked(src[j]);
+            return (data, (int[])tensor.Shape.Clone());
+        };
+
+        string emb = "distilbert.embeddings";
+        result[$"{emb}.word_embeddings.weight"] = conv(parameters[idx++]);
+        result[$"{emb}.position_embeddings.weight"] = conv(parameters[idx++]);
+        result[$"{emb}.LayerNorm.weight"] = conv(parameters[idx++]);
+        result[$"{emb}.LayerNorm.bias"] = conv(parameters[idx++]);
+
+        for (int l = 0; l < encoder.layers.Length; l++)
+        {
+            string layer = $"distilbert.transformer.layer.{l}";
+            result[$"{layer}.sa_layer_norm.weight"] = conv(parameters[idx++]);
+            result[$"{layer}.sa_layer_norm.bias"] = conv(parameters[idx++]);
+            foreach (var proj in new[] { "q_lin", "k_lin", "v_lin", "out_lin" })
+            {
+                result[$"{layer}.attention.{proj}.weight"] = conv(parameters[idx++]);
+                result[$"{layer}.attention.{proj}.bias"] = conv(parameters[idx++]);
+            }
+            result[$"{layer}.output_layer_norm.weight"] = conv(parameters[idx++]);
+            result[$"{layer}.output_layer_norm.bias"] = conv(parameters[idx++]);
+            result[$"{layer}.ffn.lin1.weight"] = conv(parameters[idx++]);
+            result[$"{layer}.ffn.lin1.bias"] = conv(parameters[idx++]);
+            result[$"{layer}.ffn.lin2.weight"] = conv(parameters[idx++]);
+            result[$"{layer}.ffn.lin2.bias"] = conv(parameters[idx++]);
+        }
+
+        result["pre_classifier.weight"] = conv(parameters[idx++]);
+        result["pre_classifier.bias"] = conv(parameters[idx++]);
+        result["classifier.weight"] = conv(parameters[idx++]);
+        result["classifier.bias"] = conv(parameters[idx++]);
+
+        if (idx != parameters.Count)
+            throw new InvalidOperationException($"Unexpected parameter count: consumed {idx} of {parameters.Count}.");
+        return result;
     }
 }
 
