@@ -161,6 +161,12 @@ internal static class SilkKernels
     public const string AttentionBackwardDq = "attention_backward_dq";
     public const string AttentionBackwardDkv = "attention_backward_dkv";
 
+    // Training glue (#956): the split GELU (keeps the pre-activation), the row-major embedding
+    // scatter, and the gather_rows backward.
+    public const string Gelu = "gelu";
+    public const string EmbeddingBackwardRows = "embedding_backward_rows";
+    public const string ScatterRows = "scatter_rows";
+
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
@@ -174,6 +180,7 @@ internal static class SilkKernels
         GemmNt, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
+        Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
 
@@ -2953,6 +2960,42 @@ internal static class SilkKernels
                     uint dIdx = b * embedDim * seqLen + e * seqLen + s;
                     gradEmb[tid * embedDim + e] += dX[dIdx];
                 }
+        }
+
+        /* The split half of gemm_row4_gelu: same gelu_exact() text, so running
+           gemm_row4_bias -> gelu reproduces the fused epilogue bit for bit while keeping the
+           pre-activation that gelu_backward needs. */
+        __kernel void gelu(__global const float* x, __global float* y, const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            y[idx] = gelu_exact(x[idx]);
+        }
+
+        /* Row-major embedding scatter for a [rows, hidden] activation: ids[row] picks the table
+           row, one work item per embedding column, rows ascending and deterministic.
+           embedding_backward_input is the pooled classifier's column-major sibling and cannot
+           address this layout. */
+        __kernel void embedding_backward_rows(
+            __global const int* ids, __global const float* dX, __global float* gradEmb,
+            const uint rows, const uint embedDim)
+        {
+            uint e = get_global_id(0);
+            if (e >= embedDim) return;
+            for (uint r = 0; r < rows; ++r)
+                gradEmb[(uint)ids[r] * embedDim + e] += dX[r * embedDim + e];
+        }
+
+        /* gather_rows backward (the CLS pick): dX is a pre-zeroed [rows, hidden] buffer whose row
+           b * seqLen receives dCls[b]. One work item per column, batch ascending. */
+        __kernel void scatter_rows(
+            __global const float* dCls, __global float* dX,
+            const uint batchSize, const uint seqLen, const uint embedDim)
+        {
+            uint e = get_global_id(0);
+            if (e >= embedDim) return;
+            for (uint b = 0; b < batchSize; ++b)
+                dX[(b * seqLen) * embedDim + e] = dCls[b * embedDim + e];
         }
 
         """;

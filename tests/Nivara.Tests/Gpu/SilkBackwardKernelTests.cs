@@ -468,6 +468,98 @@ public sealed class SilkBackwardKernelTests
         }
     }
 
+    [Test]
+    public void Gelu_SplitForm_IsBitIdenticalToTheFusedEpilogue()
+    {
+        // The training forward needs GELU's pre-activation, so it runs gemm_row4_bias -> gelu
+        // instead of gemm_row4_gelu. Both call the same gelu_exact() on the same a+b value, so
+        // the split must reproduce the fused store exactly — not within a tolerance.
+        (int rows, int k, int n)[] shapes = [(16, 32, 64), (17, 33, 9), (5, 2, 2)];
+        using var silk = Device();
+        foreach (var (rows, k, n) in shapes)
+        {
+            float[] a = Randoms(rows * k, 0x900000A1);
+            float[] b = Randoms(n * k, 0x900000A2);
+            float[] bias = Randoms(n, 0x900000A3);
+            nint sa = silk.Allocate(a.Length);
+            nint sb = silk.Allocate(b.Length);
+            nint sbias = silk.Allocate(bias.Length);
+            nint fused = silk.Allocate(rows * n);
+            nint split = silk.Allocate(rows * n);
+            silk.Upload(sa, a); silk.Upload(sb, b); silk.Upload(sbias, bias);
+
+            SilkLauncher.GemmEpilogue(silk, SilkKernels.GemmGelu, sa, sb, fused, sbias, rows, k, n, null);
+            SilkLauncher.GemmEpilogue(silk, SilkKernels.GemmBias, sa, sb, split, sbias, rows, k, n, null);
+            SilkLauncher.Gelu(silk, split, split, rows * n);
+            silk.Finish();
+
+            AssertBits(silk.Download(split, rows * n), silk.Download(fused, rows * n),
+                $"gelu split vs gemm_row4_gelu rows={rows} k={k} n={n}");
+
+            silk.Release(sa); silk.Release(sb); silk.Release(sbias);
+            silk.Release(fused); silk.Release(split);
+        }
+    }
+
+    [Test]
+    public void EmbeddingBackwardRows_MatchesCpuReplay_BitForBit()
+    {
+        (int rows, int embedDim, int vocab)[] shapes = [(7, 5, 4), (1, 1, 2), (33, 8, 6)];
+        using var silk = Device();
+        foreach (var (rows, embedDim, vocab) in shapes)
+        {
+            var rng = new Random(0x9000B1);
+            int[] ids = new int[rows];
+            for (int i = 0; i < rows; i++) ids[i] = rng.Next(vocab);
+            float[] dX = Randoms(rows * embedDim, 0x900000B2);
+            float[] grad = Randoms(vocab * embedDim, 0x900000B3);
+
+            nint sids = silk.Allocate(rows);
+            nint sdX = silk.Allocate(dX.Length);
+            nint sgrad = silk.Allocate(grad.Length);
+            silk.Upload(sids, ids);
+            silk.Upload(sdX, dX);
+            silk.Upload(sgrad, grad);
+
+            SilkLauncher.EmbeddingBackwardRows(silk, sids, sdX, sgrad, rows, embedDim);
+            silk.Finish();
+            float[] got = silk.Download(sgrad, grad.Length);
+
+            var want = (float[])grad.Clone();
+            for (int e = 0; e < embedDim; e++)
+                for (int r = 0; r < rows; r++)
+                    want[ids[r] * embedDim + e] += dX[r * embedDim + e];
+
+            AssertBits(got, want, $"embedding_backward_rows rows={rows} dim={embedDim}");
+            silk.Release(sids); silk.Release(sdX); silk.Release(sgrad);
+        }
+    }
+
+    [Test]
+    public void ScatterRows_WritesOnlyTheClsRowsOfAPrezeroedBuffer()
+    {
+        const int batch = 3, seqLen = 4, embedDim = 5;
+        using var silk = Device();
+        float[] dX = Randoms(batch * seqLen * embedDim, 0x900000C1);
+        float[] dCls = Randoms(batch * embedDim, 0x900000C2);
+        nint sdX = silk.Allocate(dX.Length);
+        nint sdCls = silk.Allocate(dCls.Length);
+        silk.Upload(sdX, dX);
+        silk.Upload(sdCls, dCls);
+
+        SilkLauncher.ScatterRows(silk, sdCls, sdX, batch, seqLen, embedDim);
+        silk.Finish();
+        float[] got = silk.Download(sdX, dX.Length);
+
+        var want = (float[])dX.Clone();
+        for (int b = 0; b < batch; b++)
+            for (int e = 0; e < embedDim; e++)
+                want[(b * seqLen) * embedDim + e] = dCls[b * embedDim + e];
+
+        AssertBits(got, want, "scatter_rows");
+        silk.Release(sdX); silk.Release(sdCls);
+    }
+
     /// <summary>
     /// Replays the three attention-backward kernels on the host in the same accumulation order:
     /// ascending keys for the softmax pass, ascending keys per output component for dQ, and

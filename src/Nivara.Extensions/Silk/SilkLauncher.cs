@@ -970,4 +970,38 @@ internal static class SilkLauncher
         runtime.Run(SilkKernels.EmbeddingBackwardInput, [(nuint)SilkKernels.LinearGlobal(total)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    /// <summary><c>y = gelu_exact(x)</c> elementwise — the split form of the
+    /// <c>gemm_row4_gelu</c> epilogue, bit-identical to it.</summary>
+    public static void Gelu(SilkRuntime runtime, nint x, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Gelu, 0, x);
+        runtime.SetBuffer(SilkKernels.Gelu, 1, y);
+        runtime.SetUInt32(SilkKernels.Gelu, 2, (uint)n);
+        Linear(runtime, SilkKernels.Gelu, n);
+    }
+
+    /// <summary>Row-major embedding scatter: <c>gradEmb[ids[r]] += dX[r]</c> for a
+    /// <c>[rows, embedDim]</c> activation.</summary>
+    public static void EmbeddingBackwardRows(SilkRuntime runtime, nint ids, nint dX, nint gradEmb, int rows, int embedDim)
+    {
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardRows, 0, ids);
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardRows, 1, dX);
+        runtime.SetBuffer(SilkKernels.EmbeddingBackwardRows, 2, gradEmb);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardRows, 3, (uint)rows);
+        runtime.SetUInt32(SilkKernels.EmbeddingBackwardRows, 4, (uint)embedDim);
+        Linear(runtime, SilkKernels.EmbeddingBackwardRows, embedDim);
+    }
+
+    /// <summary><c>gather_rows</c> backward: writes <c>dCls[b]</c> into row <c>b * seqLen</c> of a
+    /// pre-zeroed <c>[batchSize * seqLen, embedDim]</c> buffer.</summary>
+    public static void ScatterRows(SilkRuntime runtime, nint dCls, nint dX, int batchSize, int seqLen, int embedDim)
+    {
+        runtime.SetBuffer(SilkKernels.ScatterRows, 0, dCls);
+        runtime.SetBuffer(SilkKernels.ScatterRows, 1, dX);
+        runtime.SetUInt32(SilkKernels.ScatterRows, 2, (uint)batchSize);
+        runtime.SetUInt32(SilkKernels.ScatterRows, 3, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.ScatterRows, 4, (uint)embedDim);
+        Linear(runtime, SilkKernels.ScatterRows, embedDim);
+    }
+
 }
