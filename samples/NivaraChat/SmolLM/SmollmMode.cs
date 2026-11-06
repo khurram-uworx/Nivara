@@ -191,8 +191,7 @@ public static class SmollmMode
         return true; // caller restores to false
     }
 
-    static async Task RunSingleTurn<T>(SmolLMChatClient<T> client, string text)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunSingleTurn(IChatClient client, string text)
     {
         Console.WriteLine($"\nYou: {text}");
         Console.Write("SmolLM: ");
@@ -216,8 +215,7 @@ public static class SmollmMode
         return $"{tokens / elapsed.TotalSeconds:F1} tok/s";
     }
 
-    static async Task RunRepl<T>(SmolLMChatClient<T> client)
-        where T : struct, IFloatingPointIeee754<T>
+    static async Task RunRepl(IChatClient client)
     {
         Console.WriteLine("Interactive chat (type 'quit' or 'exit' to leave).\n");
         var history = new List<ChatMessage>();
@@ -256,6 +254,76 @@ public static class SmollmMode
         }
     }
 
+    static async Task RunSilkFloat(
+        LlamaConfig config,
+        Gpt2BpeTokenizer tokenizer,
+        string modelDir,
+        SmollmOptions options)
+    {
+        var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
+        var session = SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        Console.WriteLine($"  Device:    {session.DeviceName}");
+        using var client = new SilkSmolLMChatClient(
+            session,
+            tokenizer,
+            config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache);
+
+        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+        {
+            await RunSingleTurn(client, options.Text ?? "The capital of France is");
+            return;
+        }
+
+        await RunRepl(client);
+    }
+
+    static async Task RunSilkBFloat16(
+        LlamaConfig config,
+        Gpt2BpeTokenizer tokenizer,
+        string modelDir,
+        SmollmOptions options)
+    {
+        var tensors = SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelDir, "model.safetensors"));
+        var session = SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        Console.WriteLine($"  Device:    {session.DeviceName}");
+        using var client = new SilkSmolLMChatClient(
+            session,
+            tokenizer,
+            config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache);
+
+        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+        {
+            await RunSingleTurn(client, options.Text ?? "The capital of France is");
+            return;
+        }
+
+        await RunRepl(client);
+    }
+
+    static Nivara.Silk.SmolLMConfig ToSilkConfig(LlamaConfig config) => new()
+    {
+        HiddenSize = config.HiddenSize,
+        NumHiddenLayers = config.NumHiddenLayers,
+        NumAttentionHeads = config.NumAttentionHeads,
+        NumKeyValueHeads = config.NumKeyValueHeads,
+        IntermediateSize = config.IntermediateSize,
+        VocabSize = config.VocabSize,
+        MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+        RmsNormEps = config.RmsNormEps,
+        RopeTheta = config.RopeTheta,
+        AttentionBias = config.AttentionBias,
+    };
+
     static string GetRepoRoot()
         => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
@@ -281,6 +349,7 @@ public static class SmollmMode
               --seed <n>             RNG seed for reproducible sampling (default 0)
               --kv-cache             Use the KV cache for faster generation (default)
               --no-kv-cache          Re-run the full forward per token (no cache)
+              --silk                 Use Silk OpenCL backend for SmolLM chat/plain generation
               --text <string>        Single-shot prompt (skips REPL)
               -h, --help             Show this help
             """);
