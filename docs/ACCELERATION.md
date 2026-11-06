@@ -186,7 +186,7 @@ band. Shapes: MiniLM (seq 128, hidden 384, 12 heads, headDim 32) and DistilBERT 
 correctness gate. An unavailable device or program exits `UNBUILT` (10).
 
 CLI allow-list (`SilkModes`): `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, `laya` with empty, `benchmark`,
-or `compare`; Qwen with `""`, `benchmark`, or `tools`; `compare_diag` remains rejected. Checks run in this order:
+or `compare`; Qwen with `""`, `benchmark`, or `tools`; `mobilenet_v2`, `resnet18`, and `modernbert` also carry `compare_diag` (routed to the CPU diagnostic path). Checks run in this order:
 mutual exclusion, model scope before model-file lookup, F32-only, and no `--gpu` alias.
 
 ## 7. Open work

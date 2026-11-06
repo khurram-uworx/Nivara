@@ -686,9 +686,10 @@ per classifier, and the CPU-layout round trip exact.
 
 - **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
-  `benchmark`, `tools`, `distill`); `mobilenet_v2` and `resnet18` (empty, `benchmark`, `compare`). `compare_diag`
-  stays rejected. SmolLM and Qwen are causal decoders (not encoders) and own their runners, as do the
-  MobileNetV2 and ResNet-18 vision runners.
+  `benchmark`, `tools`, `distill`); `mobilenet_v2`, `resnet18`, and `modernbert` also carry
+  `compare_diag`, which routes to the existing CPU/AutoDiff diagnostic path rather than to a Silk
+  runner (the Silk runners expose only final outputs). SmolLM and Qwen are causal decoders (not
+  encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
   `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
 - **The model-scope guard runs before any model-file lookup** — pinned by
@@ -740,9 +741,9 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
   - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.
 - **NivaraInference**
   - `minilm {default, benchmark, compare, similarity}`; `distilbert …`; `distilbert_sst
-    {default, benchmark, compare, predict}`; `modernbert {default, benchmark, compare}`;
+    {default, benchmark, compare, predict}`; `modernbert {default, benchmark, compare, compare_diag}`;
     `laya {default, benchmark, compare}`; `smollm {default, benchmark, generate}`; `qwen …`;
-    `mobilenet_v2`, `resnet18 {default, benchmark, compare}`.
+    `mobilenet_v2`, `resnet18 {default, benchmark, compare, compare_diag}`.
 - **NivaraClassifier** — `train/predict/benchmark` for the conv and linear text classifiers
   (`GpuTextConvClassifier` / `GpuTextLinearClassifier`).
 - **NivaraIncident.Cli** — `--gpu` grouped-aggregation path (`grouped_hash_reduce_partial`).
