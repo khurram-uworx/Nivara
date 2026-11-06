@@ -277,6 +277,15 @@ texts rather than one per chunk per view, which is what
 And MiniLM truncates at 128 tokens on both backends, so a long Content or Code
 view loses its tail; the mode reports retrieval signal only and calls no LLM.
 
+Early evaluation (#943, 100-query LLM-as-judge run): fused retrieval beat content-only
+with nDCG@10 0.698 vs 0.596 (68 wins / 31 losses / 1 tie, sign-test p=0.0003,
+Cohen's d=0.422). The top hits' winning views were Title 557 / Content 348 /
+Section 69 / Code 26, and agreement buckets were 134 agree / 354 mild / 512 strong.
+Dropping only Title, Section, or Code degraded fused only modestly (0.688-0.693),
+while dropping Content fell to 0.601. So multi-view helps modestly on relevance and
+clearly adds explainability; the design's fallback semantics (non-finite scores and
+missing views excluded from fusion, BestSpace, and divergence) remain important.
+
 The multi-view index has its own cache type with its own `SchemaVersion` and a
 `ChunkerVersion` salt in both the file hash and the manifest, so it can never be
 mistaken for the single-view cache described above:

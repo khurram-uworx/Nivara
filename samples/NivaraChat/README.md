@@ -70,6 +70,9 @@ dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr -
 dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --explore --report multiview.md
 dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --weights content=0.7,section=0.3
 
+# RAG evaluation (#943): LLM-as-judge paired comparison (requires Ollama)
+dotnet run --project samples/NivaraChat -- --rag-eval --ollama --model beam:cloud --queries samples/data/nivarachat/eval/queries.tsv --top-k 10
+
 # Online learning from LLM feedback (requires --ollama)
 dotnet run --project samples/NivaraChat -- --online-learning --ollama
 
@@ -109,6 +112,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
+| `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
@@ -132,6 +136,12 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--explore` | — | `--rag-multiview`: bucket every visible chunk by view disagreement, not just the top-K |
 | `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
 | `--weights <spec>` | `content=0.5,title=0.2,section=0.2,code=0.1` | `--rag-multiview`: late-fusion weights, renormalized per chunk over the views it has. Unknown names, negative values and an all-zero total are rejected |
+| `--queries <path>` | `queries.tsv` (copied to output) | `--rag-eval`: ground-truth TSV path | 
+| `--runs <n>` | `3` | `--rag-eval`: judge runs per query | 
+| `--temperature <f>` | `0.2` | `--rag-eval`: judge sampling temperature | 
+| `--grade-all` | — | `--rag-eval`: grade every visible chunk (true recall; slower) | 
+| `--verbose` | — | `--rag-eval`: print per-query chunk movement | 
+| `--offline` | — | `--rag-eval`: use cached labels only; no judge calls |
 ## Modes of use
 
 ### Training (`--train`)
@@ -275,6 +285,19 @@ Console table  +  --explore buckets  +  --report markdown
 ```
 
 `Title` and `Section` repeat heavily across a corpus, so view texts are deduplicated before embedding — a full-corpus run embeds roughly 2,000 unique texts rather than one per chunk per view. The multi-view index has its own cache type and its own `SchemaVersion`/`ChunkerVersion` salt (`samples/data/nivarachat/rag_multiview_cache/`), so it can never be mistaken for the single-view #912 cache; `--index`, `--rebuild` and `--no-cache` behave as they do for `--rag`.
+
+### RAG evaluation (`--rag-eval`)
+
+Runs an LLM-as-judge experiment: builds the multi-view index, evaluates `fused` against
+`content-only` and leave-one-view-out configurations, and prints paired metrics, win/loss/tie,
+diagnostics, and cost. Requires `--ollama` (for example `--model beam:cloud`) unless `--offline`
+is used with cached labels in `samples/data/nivarachat/eval/relevance.tsv`.
+
+Interpretation:
+- If fused MRR/nDCG are not significantly better than content-only, multi-view is only an
+  explainability layer.
+- A `BestSpace` distribution dominated by Content means other views rarely win.
+- A small Strong disagreement bucket means the views largely agree.
 
 Two documented limits: MiniLM truncates at 128 tokens on both backends, so a long Content or Code view loses its tail; and the mode reports retrieval signal only — it does not call an LLM.
 
