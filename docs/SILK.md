@@ -726,6 +726,34 @@ per classifier, and the CPU-layout round trip exact.
   [docs/ACCELERATION.md](ACCELERATION.md), and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
   The compare and the benchmark remain separate verdicts.
 
+## 13d. Wiring coverage (user-facing entry points)
+
+Silk (`--silk`) is honoured by the following user-facing entry points as of this release:
+
+- **NivaraChat**
+  - `--embed --silk` — embedding search (MiniLM CLS vectors; `SilkEmbeddingGenerator` wrapper).
+  - `--intent --silk` — intent router's factual-retrieval MiniLM generator.
+  - `--rag* --silk`, `--rag-multiview --silk` — RAG ingestion/search embeddings
+    (already wired via `MiniLMEmbedder.Create`).
+  - `--smollm --silk` (and `--smollm --precision bf16 --silk`) — SmolLM chat/plain
+    generation on `SilkSmolLMChatClient`.
+  - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.
+- **NivaraInference**
+  - `minilm {default, benchmark, compare, similarity}`; `distilbert …`; `distilbert_sst
+    {default, benchmark, compare, predict}`; `modernbert {default, benchmark, compare}`;
+    `laya {default, benchmark, compare}`; `smollm {default, benchmark, generate}`; `qwen …`;
+    `mobilenet_v2`, `resnet18 {default, benchmark, compare}`.
+- **NivaraClassifier** — `train/predict/benchmark` for the conv and linear text classifiers
+  (`GpuTextConvClassifier` / `GpuTextLinearClassifier`).
+- **NivaraIncident.Cli** — `--gpu` grouped-aggregation path (`grouped_hash_reduce_partial`).
+
+Deliberately out of scope (no Silk seam exists yet):
+- `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
+- `minilm --silk compare_diag` is not a mode (diagnostics is an AutoDiff/CPU path).
+- `NivaraFineTuning` and `AutoDiff` training are CPU-only; issue #883 tracks a GPU trainer seam.
+- ILGPU and `--ilgpu` are no longer live: `--ilgpu` was removed with #814; the former
+  `--ilgpu`/`--silk` mutual-exclusion check now only ever sees `--silk`.
+
 ## 15. Adding a model to the Silk path
 
 1. The runtime is model-agnostic. A BERT-shaped model changes `SilkKernels.Source` and
