@@ -279,7 +279,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
                 lossSum += SilkLoss.CrossEntropy(batchLogits, batchLabels, n, numClasses);
 
                 SilkLoss.InputGradient(batchLogits, batchLabels, n, numClasses, 1f / n, batchGradient);
-                Backward(n, seqLen, batchGradient);
+                Backward(n, seqLen, batchGradient.AsSpan(0, n * numClasses));
                 AdamUpdateAll(learningRate, weightDecay);
                 lossBatches++;
             }

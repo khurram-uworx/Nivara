@@ -294,7 +294,7 @@ static class Program
             if (maxSeqLen != cli.MaxLen)
                 Console.WriteLine($"  (seq len clamped to device cap {maxSeqLen})");
 
-            using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, tensors, BertGpuNaming.DistilBert, maxBatch, maxSeqLen);
+            using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen);
             Console.WriteLine($"  Device: {trainer.DeviceName}, classes={trainer.NumClasses}");
 
             Console.WriteLine($"Loading tokenizer from {modelPath}/vocab.txt...");
@@ -326,8 +326,11 @@ static class Program
             int[] allLabels = new int[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
-                Array.Copy(trainTokenized[i].TokenIds, 0, allTokens, i * cli.MaxLen, cli.MaxLen);
-                Array.Copy(trainTokenized[i].AttentionMask, 0, allMask, i * cli.MaxLen, cli.MaxLen);
+                for (int j = 0; j < cli.MaxLen; j++)
+                {
+                    allTokens[i * cli.MaxLen + j] = (int)trainTokenized[i].TokenIds[j];
+                    allMask[i * cli.MaxLen + j] = trainTokenized[i].AttentionMask[j];
+                }
                 allLabels[i] = trainTokenized[i].Label;
             }
 

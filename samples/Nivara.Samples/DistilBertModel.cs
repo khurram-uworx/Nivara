@@ -109,7 +109,13 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
             var data = new float[src.Length];
             for (int j = 0; j < src.Length; j++)
                 data[j] = float.CreateChecked(src[j]);
-            return (data, (int[])tensor.Shape.Clone());
+            // Linear biases are stored as [1, outFeatures] in the AutoDiff tensor but the
+            // checkpoint (and Silk) convention is a flat [outFeatures] vector; squeeze so the
+            // device upload and LoadWeights round-trip agree.
+            var shape = (int[])tensor.Shape.Clone();
+            if (shape.Length == 2 && shape[0] == 1)
+                shape = new[] { shape[1] };
+            return (data, shape);
         };
 
         string emb = "distilbert.embeddings";
