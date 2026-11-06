@@ -1,8 +1,9 @@
 namespace Nivara.AI;
 
 /// <summary>
-/// A BERT-family encoder forward the sample runner drives without naming a backend. ILGPU
-/// (<c>BertEncoderGpuRunner</c>) and Silk.NET OpenCL (<c>SilkBertEncoderRunner</c>) both
+/// A BERT-family encoder forward the sample runner drives without naming a backend. The Silk.NET
+/// OpenCL backend (<c>SilkBertEncoderRunner</c>) implements it, so the MiniLM entry points in
+/// <c>NivaraInference</c> are written once and
 /// implement it, so the MiniLM entry points in <c>NivaraInference</c> are written once and
 /// pick a device at construction — the two paths stay comparable because they are the same
 /// code with a different <see cref="Forward"/> behind it.
@@ -21,7 +22,7 @@ public interface IBertEncoderRunner : IDisposable
 
 /// <summary>
 /// A ModernBERT encoder forward the sample drives without naming a backend. The device buffer
-/// stays behind the session: ILGPU's is a <c>MemoryBuffer1D</c>, Silk's is an <c>nint</c>.
+/// stays behind the session (Silk uses an <c>nint</c> device buffer handle).
 /// </summary>
 public interface IModernBertGpuSession : IDisposable
 {
