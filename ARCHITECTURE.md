@@ -372,6 +372,25 @@ Nivara supports multiple execution strategies via the `Nivara.Execution.Executio
 - Configurable degree of parallelism
 - Best for compute-heavy workloads on multi-core systems
 
+#### Execution Context Configuration
+
+```csharp
+var context = new Nivara.Execution.ExecutionContext
+{
+    Strategy = Nivara.Execution.ExecutionStrategy.Parallel,
+    MaxDegreeOfParallelism = Environment.ProcessorCount,
+    MemoryBudget = 1024 * 1024 * 1024, // 1GB
+    CancellationToken = cancellationToken,
+    Progress = progressReporter,
+    ExecutionDiagnostics = new ExecutionDiagnostics()
+};
+
+// After execution, inspect diagnostics
+var engine = new ExecutionEngine();
+var result = engine.Execute(plan, context);
+Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
+```
+
 ### Planning Stages
 
 1. **Logical Plan Construction**
@@ -592,6 +611,18 @@ Nivara includes diagnostic tooling to aid development and optimization:
 - Much improved debuggability and trust
 
 Diagnostics are intentionally explicit and opt-in.
+
+```csharp
+var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+
+var result = Nivara.Diagnostics.DiagnosticHelper.ExecuteWithDiagnostics(
+    diagnostics,
+    "ComplexQuery",
+    () => /* operation */,
+    rowCount);
+
+Console.WriteLine(diagnostics.GenerateReport());
+```
 
 ---
 
