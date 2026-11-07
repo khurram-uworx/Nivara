@@ -8,7 +8,7 @@ both sides are run in the same session.
 
 The C# CPU path no longer builds a dense `[L, L]` mask (#476), so it has no 2048 cap; a CPU row
 for any length up to the model's position limit is `modernbert benchmark --seq N`. Longer rows can
-still be timed on the GPU side with `modernbert --ilgpu benchmark --seq N`.
+still be timed on the GPU side with `modernbert --silk benchmark --seq N`.
 
 The two sides do not warm up identically: this script runs 3 untimed passes (`WARMUP_PASSES`),
 the C# mode 1. The docstring here used to claim "one untimed pass ... deliberately", which

@@ -282,7 +282,7 @@ public static class Laya
     }
 
     /// <summary>
-    /// <c>laya --ilgpu benchmark</c>. Padded to the config's <c>max_len</c> exactly as the CPU
+    /// <c>laya --silk benchmark</c>. Padded to the config's <c>max_len</c> exactly as the CPU
     /// benchmark is, so the two tables are comparable question for question: the encoder is timed
     /// and the head on the same rows the CPU head is timed on, and the head's key-padding mask makes
     /// the padding a numeric no-op.

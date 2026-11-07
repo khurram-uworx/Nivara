@@ -94,6 +94,45 @@ For each benchmark: **open the README → follow the `## Release Benchmark` sect
 run the commands → update the tables with fresh Prev/Current numbers.** Do not skip
 any benchmark — if one cannot be run, say so in the PR with the reason.
 
+**Cross-machine rule:** if the Prev reading was on a different machine (or a
+codebase version that changed the measurement), set **Prev to `—`** and note the
+machine difference in the table footer. Do not compute ratios across machines —
+a Nivara improvement plus a PyTorch improvement from more cores looks like a
+regression when it is not.
+
+**Silk backend (from the next release):** benchmarks for samples that support a
+`--silk` variant (`minilm`, `distilbert`, `distilbert_sst`, `laya`, `modernbert`
+where applicable, and the Qwen generation paths) must run **both** the CPU and the
+Silk variant in the same session and record a Silk column (ops/s or ms/op, same
+units as the CPU column) plus its ratio. CPU-only numbers are not sufficient
+once the Silk backend ships as a first-class path (see issue #984). Silk runs
+are AC-power-only and require the OpenCL device/driver to be recorded alongside
+the machine line.
+
+**Capture output for review:** when a human runs these benchmarks on behalf of
+an agent (or for later re-measurement), put every command in a temporary
+`release.cmd` at the repository root that redirects each command's console
+output to a `%TEMP%` file, run it, and delete the script afterwards (it is
+commit noise and must never be committed). Hand back the `%TEMP%` file paths
+rather than pasting output into chat. Example lines inside `release.cmd`:
+`dotnet run --project <proj> -c Release -- ... > %TEMP%\\<name>-vX.Y.Z.txt 2>&1`
+The core harness JSON file should also be saved under `%TEMP%` (e.g.
+`%TEMP%\\nivara-perf-vX.Y.Z.json`) so the JSON evidence can be attached to
+the PR without committing a large binary. The script may `cd` into sample
+directories, but it must end back at the repository root.
+
+**Regenerating benchmark tables safely (hidden-tag technique):** wrap each
+results table in the README with HTML comments `<!--hidden-start-->` ... `<!--hidden-end-->`,
+then regenerate only the rows between those markers from the captured
+JSON/console output using a short Python script. Keep a `.bak` copy, review the
+diff, then remove the markers before committing. Preserve the regenerator script
+in the sample's `Python/` folder (e.g.
+`samples/NivaraInference/Python/regen_perf_table.py --json <file> --readme <file>`,
+and the matching copies under `samples/NivaraIncident/Python/` and
+`samples/NivaraFineTuning/Python/`) so the next release can reuse it;
+NivaraInference/Python is the canonical template and the others may diverge as
+their table schemas evolve.
+
 ### Step 6 — Commit, PR, merge
 
 Commit the release prep (docs + version bump) on a branch, open a PR, and merge to
@@ -114,6 +153,10 @@ The PR description must include:
   output where applicable).
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
 - The CD test results (3200+ tests passing).
+
+The PR must show a green CI check before merging. Do not merge with `--admin`
+until CI passes, and do not merge a docs-only PR without confirming `dotnet build
+Nivara.slnx` and the targeted test suite are green locally.
 
 ### Step 7 — Verify the build before tagging
 

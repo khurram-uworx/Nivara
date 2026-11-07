@@ -5,11 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU5104</WarningsNotAsErrors>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>2.0.0-preview</PackageVersion>
+    <PackageVersion>1.5.0</PackageVersion>
     <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, the BERT-family model layer, and the Silk OpenCL GPU backend for Nivara</Description>
-    <PackageReleaseNotes>v1.4.0: Public ScanAsQueryFrame lazy streaming factories for CSV/JSON/Parquet; genuinely async chunk reads for CSV and JSON lazy sources (JsonRecordStreamReader for true streaming JSON array parsing); Parquet row-group predicate pushdown and chunk-based streaming via ParquetLazySource; CsvOptions.SchemaInferenceRows renamed to SchemaInferenceRecords; streaming budget tracker and window overlap buffer support; Streamix reactive streaming scenarios (fault-tolerant, windowed analytics, online AutoDiff learning); NivaraFlux bridge (ToFlux, ToFluxRows, ToNivaraFrameAsync); various streaming and execution fixes. Existing surface: Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure, immutable options with With() builders.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.0: Promoted Silk (OpenCL) backend and BERT-family model layer (BertModel, ModernBertModel, LayaHeadModel, tokenizers, loaders, GPU seam) into Nivara.Extensions (namespace Nivara.Silk / Nivara.AI); added NivaraEmbeddingExtensions for the float[] / E0..En frame convention and Microsoft.Extensions.AI conversion; real opt-in zero-copy Arrow export; mask-based nullable column storage handling; Streamix backpressure and pivot advances. Existing surface: Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure, immutable options with With() builders. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>

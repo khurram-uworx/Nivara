@@ -48,8 +48,7 @@ static partial class DocReferenceExtractor
     /// </summary>
     static readonly HashSet<(string File, string Target)> Tolerated =
     [
-        ("CHANGELOG.md", "docs/REVIEW-2026-08-12.md"),
-        ("CHANGELOG.md", "docs/TODO.md"),
+
         ("docs/ROADMAP-SUGGESTION.md", "docs/TODO.md"),
         ("docs/adr/005-snippet-gate-authoring-contract.md", "docs/TODO.md"),
         ("docs/plan/ARROW-REVIEW.md", "docs/IDEA.md"),

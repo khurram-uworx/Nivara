@@ -3,6 +3,8 @@ import time
 import sys
 import os
 import torch
+# Pin thread count so the Nivara-vs-PyTorch ratio is comparable across machines.
+torch.set_num_threads(os.cpu_count() or 1)
 import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(__file__))

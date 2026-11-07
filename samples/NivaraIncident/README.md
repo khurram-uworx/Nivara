@@ -74,7 +74,7 @@ dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./samples/
 | `--chunk-size <int>` | `100000` | Rows per chunk (replay and `--stream`) |
 | `--stream` | — | Stream analysis results in chunks (analyze only) |
 | `--benchmark` | — | Time each analysis individually (analyze only) |
-| `bench-stream` | - | Streaming vs eager memory/elapsed sweep (standalone mode) |
+| `--quick` | — | Shorthand for `--benchmark --iterations 1` (single pass; use for release prep on large datasets) || `bench-stream` | - | Streaming vs eager memory/elapsed sweep (standalone mode) |
 | `bench-kernels` | - | Kernel vectorization visibility report (standalone mode) |
 | `bench-gpu` | - | GPU-vs-CPU grouped aggregation benchmark (availability-guarded) |
 | `streamix` | - | Run Streamix streaming scenarios (fault-tolerant, windowed, AutoDiff) |

@@ -251,7 +251,7 @@ Reproduce with:
 
 ```
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu
-dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu benchmark
+dotnet run --project samples/NivaraInference -c Release -- laya --silk benchmark
 dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
 ```
 
