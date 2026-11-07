@@ -338,9 +338,29 @@ static class Program
             {
                 Console.WriteLine($"\n=== Epoch {epoch}/{cli.Epochs} ===");
 
-                var epochResults = trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, 1, cli.Lr, 0.01f, seed: epoch);
+                float epochLossSum = 0f;
+                int epochBatchCount = 0;
+                var epochBatchElapsed = new List<TimeSpan>();
+
+                var epochResults = trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, 1, cli.Lr, 0.01f, seed: epoch,
+                    onBatchCompleted: (e, b, total, loss, elapsed) =>
+                    {
+                        epochLossSum += loss;
+                        epochBatchCount++;
+                        float runningAvg = epochLossSum / epochBatchCount;
+                        epochBatchElapsed.Add(elapsed);
+                        Console.WriteLine($"  Batch {b}/{total} [{elapsed.TotalSeconds:F1}s] - loss: {runningAvg:F4}");
+                    });
                 float avgTrainLoss = epochResults.Count > 0 ? epochResults[0].Loss : 0f;
                 Console.WriteLine($"Epoch {epoch} training complete. Avg loss: {avgTrainLoss:F4}");
+                if (epochBatchElapsed.Count > 1)
+                {
+                    double steadySumMs = 0;
+                    for (int i = 1; i < epochBatchElapsed.Count; i++)
+                        steadySumMs += epochBatchElapsed[i].TotalMilliseconds;
+                    double steadyMs = steadySumMs / (epochBatchElapsed.Count - 1);
+                    Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
+                }
 
                 // Materialize the trained weights into the CPU model for dev eval.
                 var exported = trainer.ExportCheckpoint();
