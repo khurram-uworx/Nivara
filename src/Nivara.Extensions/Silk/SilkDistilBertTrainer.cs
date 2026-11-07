@@ -212,7 +212,8 @@ public sealed class SilkDistilBertTrainer : IDisposable
     /// </summary>
     public IReadOnlyList<SilkTrainEpoch> Train(
         int[] tokenIds, float[] attentionMask, int[] labels,
-        int batchSize, int seqLen, int epochs, float learningRate, float weightDecay, int seed)
+        int batchSize, int seqLen, int epochs, float learningRate, float weightDecay, int seed,
+        Action<int, int, int, float, TimeSpan>? onBatchCompleted = null)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(tokenIds);
@@ -265,6 +266,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
                 int n = Math.Min(start + batchSize, sampleCount) - start;
                 if (n <= 0) continue;
 
+                var batchSw = System.Diagnostics.Stopwatch.StartNew();
                 for (int i = 0; i < n; i++)
                 {
                     int source = order[start + i];
@@ -276,12 +278,15 @@ public sealed class SilkDistilBertTrainer : IDisposable
                 UploadBatch(batchTokens.AsSpan(0, n * seqLen), batchMask.AsSpan(0, n * seqLen), n, seqLen);
                 ForwardCore(n, seqLen);
                 var batchLogits = runtime.Download(logits, n * numClasses);
-                lossSum += SilkLoss.CrossEntropy(batchLogits, batchLabels, n, numClasses);
+                float batchLoss = SilkLoss.CrossEntropy(batchLogits, batchLabels, n, numClasses);
+                lossSum += batchLoss;
 
                 SilkLoss.InputGradient(batchLogits, batchLabels, n, numClasses, 1f / n, batchGradient);
                 Backward(n, seqLen, batchGradient.AsSpan(0, n * numClasses));
                 AdamUpdateAll(learningRate, weightDecay);
                 lossBatches++;
+                batchSw.Stop();
+                onBatchCompleted?.Invoke(epoch + 1, b + 1, batchesPerEpoch, batchLoss, batchSw.Elapsed);
             }
 
             stopwatch.Stop();
