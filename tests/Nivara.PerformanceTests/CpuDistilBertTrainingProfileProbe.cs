@@ -1,7 +1,9 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
+using Nivara.AI;
 using Nivara.Samples;
 using System.Diagnostics;
 
