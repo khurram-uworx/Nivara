@@ -88,12 +88,41 @@ public static class RagLearnMode
             RetrievalEvaluation.EvaluateFixed("fixed(content-only)", new FusionWeights(1f, 0f, 0f, 0f), test, topK)
         };
 
-        using var fusion = new FusionModel();
-        var parity = InitialParity(fusion, test, topK);
-        var fusionReport = RetrievalTrainer.Train(fusion, train, validation, options, topK);
+        var maxRows = queries.Count == 0 ? 1 : queries.Max(q => q.RowCount);
+        IFusionRanker fusion;
+        double parity;
+        TrainingReport fusionReport;
+        if (ctx.UseSilk)
+        {
+            try
+            {
+                var silkGlobal = SilkRetrievalTrainer.CreateGlobal(options.LearningRate, options.WeightDecay, maxRows);
+                fusion = new SilkFusionRanker(silkGlobal);
+                parity = InitialParity(fusion, test, topK);
+                fusionReport = silkGlobal.Train(train, validation, options, topK);
+                Console.WriteLine($"  Fusion training: Silk/OpenCL ({silkGlobal.DeviceName}), listwise per-query");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\n  Silk fusion unavailable ({ex.Message}); falling back to CPU training for fusion.");
+                var cpuFusion = new FusionModel();
+                fusion = cpuFusion;
+                parity = InitialParity(fusion, test, topK);
+                fusionReport = RetrievalTrainer.Train(cpuFusion, train, validation, options, topK);
+            }
+        }
+        else
+        {
+            var cpuFusion = new FusionModel();
+            fusion = cpuFusion;
+            parity = InitialParity(fusion, test, topK);
+            fusionReport = RetrievalTrainer.Train(cpuFusion, train, validation, options, topK);
+        }
+
+
         results.Add(RetrievalEvaluation.Evaluate("learned-global", fusion, test, topK));
 
-        GatedFusionModel? gated = null;
+        IFusionRanker? gated = null;
         TrainingReport? gatedReport = null;
         RankerResult? gatedResult = null;
         var gateKind = ParseGate(ctx.Gate);
@@ -103,10 +132,33 @@ public static class RagLearnMode
         }
         else
         {
-            gated = new GatedFusionModel(gateKind.Value, index.Dimension);
-            gatedReport = RetrievalTrainer.Train(gated, train, validation, options, topK);
+            if (ctx.UseSilk)
+            {
+                try
+                {
+                    var silkGated = gateKind.Value == GateFeatureKind.ScoreStats
+                        ? SilkRetrievalTrainer.CreateForStats(options.LearningRate, options.WeightDecay, maxRows)
+                        : SilkRetrievalTrainer.CreateForEmbed(options.LearningRate, options.WeightDecay, maxRows, index.Dimension);
+                    gatedReport = silkGated.Train(train, validation, options, topK);
+                    gated = new SilkFusionRanker(silkGated);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"\n  Silk gate unavailable ({ex.Message}); falling back to CPU training for the gate.");
+                    var cpuGated = new GatedFusionModel(gateKind.Value, index.Dimension);
+                    gatedReport = RetrievalTrainer.Train(cpuGated, train, validation, options, topK);
+                    gated = cpuGated;
+                }
+            }
+            else
+            {
+                var cpuGated = new GatedFusionModel(gateKind.Value, index.Dimension);
+                gatedReport = RetrievalTrainer.Train(cpuGated, train, validation, options, topK);
+                gated = cpuGated;
+            }
             gatedResult = RetrievalEvaluation.Evaluate($"learned-gated({KindName(gateKind.Value)})", gated, test, topK);
             results.Add(gatedResult);
+            PrintTraining($"learned-gated({KindName(gateKind.Value)})", gatedReport);
         }
 
         PrintTable(results);
@@ -116,7 +168,7 @@ public static class RagLearnMode
 
         PrintTraining("learned-global", fusionReport);
         if (gatedReport is not null)
-            PrintTraining($"learned-gated({KindName(gated!.Kind)})", gatedReport);
+            PrintTraining($"learned-gated({KindName(gateKind!.Value)})", gatedReport);
 
         Console.WriteLine();
         Console.WriteLine("  Learned weights:");
@@ -126,7 +178,9 @@ public static class RagLearnMode
         Console.WriteLine($"    learned: {FormatWeights(learnedWeights)}");
         if (gated is not null)
         {
-            var mean = MeanGateWeights(gated, test);
+            var mean = gated is SilkFusionRanker silkRanker
+                ? MeanGateWeightsSilk(silkRanker.Trainer, test)
+                : MeanGateWeights((GatedFusionModel)gated, test);
             Console.WriteLine($"    gated:   {FormatWeights(mean)} (mean over test queries)");
         }
 
@@ -150,7 +204,7 @@ public static class RagLearnMode
         }
 
         var reportPath = ResolveReportPath(ctx.ReportPath, repoRoot);
-        WriteReport(reportPath, labels, options, topK, candidates, split, train.Count, parity, results, comparisons, learnedWeights, gated, test);
+        WriteReport(reportPath, labels, options, topK, candidates, split, train.Count, parity, results, comparisons, learnedWeights, gated, test, gateKind);
         Console.WriteLine();
         Console.WriteLine($"  Report written to {reportPath}");
 
@@ -319,9 +373,9 @@ public static class RagLearnMode
     /// Maximum absolute difference between an untrained model's fused scores and the #914 fusion.
     /// This is the parity property stated as a number in the product, not only in a test.
     /// </summary>
-    static double InitialParity(FusionModel model, IReadOnlyList<TrainingQuery> queries, int topK)
+    static double InitialParity(IFusionRanker model, IReadOnlyList<TrainingQuery> queries, int topK)
     {
-        var worst = 0d;
+        var worst = 0d; TrainingQuery? worstQuery = null; int worstR = 0;
         foreach (var query in queries)
         {
             if (!query.IsUsable)
@@ -330,9 +384,11 @@ public static class RagLearnMode
             var learned = RetrievalEvaluation.Scores(model, query);
             var baseline = RetrievalEvaluation.FixedScores(query, FusionWeights.Default);
             for (var row = 0; row < learned.Length && row < baseline.Length; row++)
-                worst = Math.Max(worst, Math.Abs(learned[row] - baseline[row]));
+            {
+                var diff = Math.Abs(learned[row] - baseline[row]);
+                if (diff > worst) { worst = diff; worstQuery = query; worstR = row; }
+            }
         }
-
         return worst;
     }
 
@@ -359,6 +415,22 @@ public static class RagLearnMode
 
         return mean;
     }
+    static float[] MeanGateWeightsSilk(SilkRetrievalTrainer model, IReadOnlyList<TrainingQuery> queries)
+    {
+        var mean = new float[TrainingSetBuilder.ViewCount];
+        var count = 0;
+        foreach (var query in queries)
+        {
+            if (!query.IsUsable) continue;
+            var weights = model.WeightsFor(query);
+            for (var view = 0; view < mean.Length; view++) mean[view] += weights[view];
+            count++;
+        }
+        if (count == 0) return mean;
+        for (var view = 0; view < mean.Length; view++) mean[view] /= count;
+        return mean;
+    }
+
 
     static string FormatWeights(IReadOnlyList<float> weights) =>
         string.Join(", ", Enumerable.Range(0, weights.Count)
@@ -451,8 +523,9 @@ public static class RagLearnMode
         IReadOnlyList<RankerResult> results,
         IReadOnlyList<PairedComparison> comparisons,
         IReadOnlyList<float> learnedWeights,
-        GatedFusionModel? gated,
-        IReadOnlyList<TrainingQuery> test)
+        IFusionRanker? gated,
+        IReadOnlyList<TrainingQuery> test,
+        GateFeatureKind? gateKind)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
@@ -491,8 +564,15 @@ public static class RagLearnMode
         var fixedWeights = new[] { FusionWeights.Default.Content, FusionWeights.Default.Title, FusionWeights.Default.Section, FusionWeights.Default.Code };
         content.AppendLine($"- fixed: {FormatWeights(fixedWeights)}");
         content.AppendLine($"- learned-global: {FormatWeights(learnedWeights)}");
-        if (gated is not null)
-            content.AppendLine($"- learned-gated({KindName(gated.Kind)}): {FormatWeights(MeanGateWeights(gated, test))} (mean over test queries)");
+        if (gated is not null && gateKind is not null)
+        {
+            float[] gatedMean;
+            if (gated is GatedFusionModel gm)
+                gatedMean = MeanGateWeights(gm, test);
+            else
+                gatedMean = MeanGateWeightsSilk(((SilkFusionRanker)gated).Trainer, test);
+            content.AppendLine($"- learned-gated({KindName(gateKind.Value)}): {FormatWeights(gatedMean)} (mean over test queries)");
+        }
 
         content.AppendLine();
         content.AppendLine("## Reading this report");
