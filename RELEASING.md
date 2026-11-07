@@ -127,9 +127,11 @@ then regenerate only the rows between those markers from the captured
 JSON/console output using a short Python script. Keep a `.bak` copy, review the
 diff, then remove the markers before committing. Preserve the regenerator script
 in the sample's `Python/` folder (e.g.
-`samples/NivaraInference/Python/regen_perf_table.py --json <file> --readme <file>`)
-so the next release can reuse it; NivaraInference/Python is the canonical home
-for these helpers.
+`samples/NivaraInference/Python/regen_perf_table.py --json <file> --readme <file>`,
+and the matching copies under `samples/NivaraIncident/Python/` and
+`samples/NivaraFineTuning/Python/`) so the next release can reuse it;
+NivaraInference/Python is the canonical template and the others may diverge as
+their table schemas evolve.
 
 ### Step 6 — Commit, PR, merge
 
