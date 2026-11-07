@@ -3,7 +3,7 @@
 
 Usage (from repository root):
     python samples/NivaraInference/Python/regen_perf_table.py \
-        --json %TEMP%\\nivara-perf-vX.Y.Z.json \
+        --json release\\vX.Y.Z\\nivara-perf-vX.Y.Z.json \
         --readme tests/Nivara.PerformanceTests/README.md
 
 The target table must be bracketed by HTML comments:
