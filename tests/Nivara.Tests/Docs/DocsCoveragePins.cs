@@ -36,7 +36,7 @@ internal static class DocsCoveragePins
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
 // +2: #991 inference release note now cites docs/SILK.md alongside docs/ACCELERATION.md.
-// +14: top-level doc refresh (README, GETTING-STARTED, EXAMPLES, ARCHITECTURE, AGENTS) added
-// markdown links to the promoted docs (EMBEDDINGS, SAFETENSORS, SILK, ONNX, etc.).
-internal const int ExpectedDocumentReferenceCount = 235;
+    // +14: top-level doc refresh (README, GETTING-STARTED, EXAMPLES, ARCHITECTURE, AGENTS) added
+    // markdown links to the promoted docs (EMBEDDINGS, SAFETENSORS, SILK, ONNX, etc.).
+    internal const int ExpectedDocumentReferenceCount = 235;
 }
