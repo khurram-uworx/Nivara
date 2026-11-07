@@ -264,6 +264,22 @@ python modernbert_benchmark.py --seq 256
 GPU/OpenCL (`--silk`) rows for the BERT family are intentionally left as `—` in this prep: no captured `--silk benchmark` output was available in the 1.5 `%TEMP%` evidence, so no numbers are invented here. See `docs/ACCELERATION.md` and `docs/SILK.md` for the published iGPU baselines.
 
 
+
+**GPU (iGPU, `--ilgpu`)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power:
+
+| Model | GPU Nivara | CPU Nivara | vs CPU |
+|-------|-----------|------------|--------|
+| **MiniLM** | 24.1 ms | 71.2 ms | **~3.0× faster** |
+| **DistilBERT** | 63.3 ms | 209.7 ms | **~3.3× faster** |
+| **DistilBERT SST-2** | 63.8 ms | 199.9 ms | **~3.1× faster** |
+
+These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --silk benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+
+The MiniLM table above is the AC-powered `--ilgpu` baseline. The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+
+See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
+
+
 ## Sample data
 
 | File | Purpose |
