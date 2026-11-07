@@ -78,10 +78,10 @@ static partial class DocSnippetExtractor
         "docs/SILK.md",
         "docs/STREAMING-PROPOSAL.md",
         "docs/TENSORS.md",
-        "docs/blog/1-the-workhorses-from-words-to-numbers.md",
-        "docs/blog/2-self-attention-the-soft-crossbar-switch.md",
-        "docs/blog/3-self-attention-implemented-the-dirty-details.md",
-        "docs/blog/4-the-bypass-wire-the-rectifier-and-what-i-learned.md",
+        "docs/blog/bert/1-the-workhorses-from-words-to-numbers.md",
+        "docs/blog/bert/2-self-attention-the-soft-crossbar-switch.md",
+        "docs/blog/bert/3-self-attention-implemented-the-dirty-details.md",
+        "docs/blog/bert/4-the-bypass-wire-the-rectifier-and-what-i-learned.md",
         "docs/research/AGENT-FRAMEWORK.md",
     ];
 

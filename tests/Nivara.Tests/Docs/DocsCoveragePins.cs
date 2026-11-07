@@ -13,27 +13,27 @@ internal static class DocsCoveragePins
     // (RetrievalTrainer.cs::FusionModel, RetrievalTrainer.cs::RetrievalTrainer.Train(),
     // RetrievalTrainingData.cs::CandidatePool.Select(), RetrievalTrainingData.cs::QuerySplit.Create(),
     // RetrievalEvaluation.cs::RetrievalEvaluation.Compare()).
-    internal const int ExpectedCitationCount = 133;
+    internal const int ExpectedCitationCount = 150;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
     /// </summary>
-    internal const int ExpectedCitedDocumentCount = 20;
+    internal const int ExpectedCitedDocumentCount = 23;
 
     /// <summary>
     /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus other under
     /// </summary>
-    internal const int ExpectedDocumentCount = 57;
+    internal const int ExpectedDocumentCount = 60;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
     /// </summary>
     // +5: same five citations as ExpectedCitationCount, all in code-citation form.
-    internal const int ExpectedCodeCitationCount = 47;
+    internal const int ExpectedCodeCitationCount = 52;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 240;
+    internal const int ExpectedDocumentReferenceCount = 245;
 }

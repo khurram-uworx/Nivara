@@ -18,6 +18,10 @@ public interface IFusionRanker
     /// <summary>Number of gate features consumed per query; zero for a global fusion.</summary>
     int FeatureCount { get; }
 
+    /// <summary>Current query-independent weights, or any representative for query-gated models.</summary>
+    float[] Weights { get; }
+
+
     /// <summary>The trainable leaf parameters, in optimizer group order.</summary>
     IReadOnlyList<Parameter<float>> TrainableParameters { get; }
 
@@ -39,7 +43,7 @@ public interface IFusionRanker
 static class MaskedFusion
 {
     /// <summary>
-    /// <c>fused = ((S ⊙ M) @ w) / (M @ w)</c>, the AutoDiff form of
+    /// <c>fused = ((S Ã¢Å â„¢ M) @ w) / (M @ w)</c>, the AutoDiff form of
     /// <see cref="MultiViewScoring.Fuse"/> for every row at once.
     /// </summary>
     /// <remarks>
@@ -56,7 +60,7 @@ static class MaskedFusion
     {
         if (scores.Length != rows * TrainingSetBuilder.ViewCount)
             throw new ArgumentException(
-                $"Score block length ({scores.Length}) must be rows × {TrainingSetBuilder.ViewCount} ({rows * TrainingSetBuilder.ViewCount}).",
+                $"Score block length ({scores.Length}) must be rows Ãƒâ€” {TrainingSetBuilder.ViewCount} ({rows * TrainingSetBuilder.ViewCount}).",
                 nameof(scores));
         if (weights.Length != TrainingSetBuilder.ViewCount)
             throw new ArgumentException(
@@ -239,6 +243,8 @@ public sealed class GatedFusionModel : Module<float>, IFusionRanker
         RegisterParameters(weight, bias);
     }
 
+    public float[] Weights => MaskedFusion.Weights(MaskedFusion.ToArray(bias.Tensor));
+
     public GateFeatureKind Kind => kind;
 
     public Parameter<float> Weight => weight;
@@ -337,7 +343,7 @@ public enum LossKind
 
     /// <summary>
     /// Pairwise logistic loss over every ordered pair with a grade difference. The pair logits are
-    /// <c>A @ fused</c> with a constant ±1 matrix, which is also gather-free.
+    /// <c>A @ fused</c> with a constant Ã‚Â±1 matrix, which is also gather-free.
     /// </summary>
     Pairwise
 }
