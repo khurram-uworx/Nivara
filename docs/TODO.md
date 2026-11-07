@@ -10,8 +10,8 @@ Add `SilkDistilBertTrainerTests.Train_LossDecreases` in `tests/Nivara.Tests/Gpu/
 
 - Reuse `Make()` (2-layer / hidden-32 / 4-head / vocab-64 / seqLen-8 config, `maxBatch: 4`, `maxSeqLen: 16`).
 - Build a separable toy dataset: label `i % 2`, first token `2` for class 0 and `5` for class 1, remaining positions random, all attention masks `1`.
-- Run `trainer.Train(...)` for 4 epochs, batch 4, LR 0.05, weight decay 0.01, seed 41.
-- Assert epoch count, finite losses, and `epochs[^1].Loss < 0.5f * epochs[0].Loss`.
+- Run `trainer.Train(...)` for 8 epochs, batch 4, LR 0.1, weight decay 0.01, seed 41.
+- Assert epoch count, finite losses, and `epochs[^1].Loss < 0.75f * epochs[0].Loss`.
 
 No changes to trainer or kernel code.
 
