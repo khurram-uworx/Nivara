@@ -300,22 +300,12 @@ public static class MultiViewScoring
                     nameof(matrices));
         }
 
-        if (topK <= 0 || count == 0 || query is null || query.Length == 0)
+        if (topK <= 0 || count == 0)
             return [];
 
-        if (matrices.Content.ColumnCount != query.Length)
-            throw new ArgumentException(
-                $"Query length ({query.Length}) must match the embedding dimension ({matrices.Content.ColumnCount}).",
-                nameof(query));
-
-        var querySeries = NivaraSeries<float>.Create(query);
-        var scores = new[]
-        {
-            ReadScores(matrices.Content.RowCosineSimilarity(querySeries), count),
-            ReadScores(matrices.Title.RowCosineSimilarity(querySeries), count),
-            ReadScores(matrices.Section.RowCosineSimilarity(querySeries), count),
-            ReadScores(matrices.Code.RowCosineSimilarity(querySeries), count)
-        };
+        var scoreRows = ScoreAll(matrices, count, query);
+        if (scoreRows.Length == 0)
+            return [];
 
         var coherence = vectorFrame.GetColumn<float>("CoherenceContentTitle");
         var fusedValues = new float[count];
@@ -324,7 +314,7 @@ public static class MultiViewScoring
 
         for (var row = 0; row < count; row++)
         {
-            var viewScores = new ViewScores(scores[0][row], scores[1][row], scores[2][row], scores[3][row]);
+            var viewScores = scoreRows[row];
             var fused = Fuse(viewScores, weights);
             if (fused is null)
             {
@@ -370,6 +360,55 @@ public static class MultiViewScoring
         return ranked;
     }
 
+    /// <summary>
+    /// Scores every row under each of the four views, without ranking or fusing. A null entry means
+    /// the row has no vector for that view (or the score was not finite). Returns an empty array when
+    /// the query is missing, so <see cref="Rank"/> and the training pipeline share one empty-input
+    /// rule instead of each inventing its own.
+    /// </summary>
+    /// <param name="matrices">The four <c>[rows, dim]</c> view matrices</param>
+    /// <param name="rowCount">Number of rows the caller expects; must match every matrix</param>
+    /// <param name="query">The query embedding, or null when embedding failed</param>
+    /// <exception cref="ArgumentException">
+    /// A matrix row or column count does not match the caller's expectation.
+    /// </exception>
+    public static ViewScores[] ScoreAll(MultiViewMatrices matrices, int rowCount, float[]? query)
+    {
+        ArgumentNullException.ThrowIfNull(matrices);
+        ArgumentOutOfRangeException.ThrowIfNegative(rowCount);
+
+        foreach (var matrix in new[] { matrices.Content, matrices.Title, matrices.Section, matrices.Code })
+        {
+            if (matrix.RowCount != rowCount)
+                throw new ArgumentException(
+                    $"Matrix row count ({matrix.RowCount}) must match the expected row count ({rowCount}).",
+                    nameof(rowCount));
+        }
+
+        if (rowCount == 0 || query is null || query.Length == 0)
+            return [];
+
+        if (matrices.Content.ColumnCount != query.Length)
+            throw new ArgumentException(
+                $"Query length ({query.Length}) must match the embedding dimension ({matrices.Content.ColumnCount}).",
+                nameof(query));
+
+        var querySeries = NivaraSeries<float>.Create(query);
+        var scores = new[]
+        {
+            ReadScores(matrices.Content.RowCosineSimilarity(querySeries), rowCount),
+            ReadScores(matrices.Title.RowCosineSimilarity(querySeries), rowCount),
+            ReadScores(matrices.Section.RowCosineSimilarity(querySeries), rowCount),
+            ReadScores(matrices.Code.RowCosineSimilarity(querySeries), rowCount)
+        };
+
+        var rows = new ViewScores[rowCount];
+        for (var row = 0; row < rowCount; row++)
+            rows[row] = new ViewScores(scores[0][row], scores[1][row], scores[2][row], scores[3][row]);
+
+        return rows;
+    }
+
     static NivaraColumn<float[]> VectorColumn(IReadOnlyList<float[]?> vectors)
     {
         var values = new float[vectors.Count][];
@@ -393,8 +432,20 @@ public static class MultiViewScoring
         return values;
     }
 
-    static float? Fuse(ViewScores scores, FusionWeights weights)
+    /// <summary>
+    /// Fuses one row's view scores with <paramref name="weights"/>, renormalizing per row over the
+    /// views that actually have a score. A view whose weight is zero is skipped rather than allowed
+    /// to shrink the denominator, and a row with no scored view returns null.
+    /// </summary>
+    /// <remarks>
+    /// This is the single fusion arithmetic for the sample: <see cref="Rank"/> calls it, and the
+    /// #915 trainer asserts its AutoDiff representation agrees with it at initialisation.
+    /// </remarks>
+    public static float? Fuse(ViewScores scores, FusionWeights weights)
     {
+        ArgumentNullException.ThrowIfNull(scores);
+        ArgumentNullException.ThrowIfNull(weights);
+
         var total = 0f;
         var available = 0f;
         foreach (var space in s_spaces)
