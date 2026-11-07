@@ -47,6 +47,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
     const float AdamEpsilon = 1e-8f;
 
     readonly SilkRuntime runtime;
+    readonly BertConfig config;
     readonly int hiddenDim;
     readonly int intermediateDim;
     readonly int numHeads;
@@ -114,6 +115,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSeqLen);
 
         this.runtime = runtime;
+        this.config = config;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -188,6 +190,17 @@ public sealed class SilkDistilBertTrainer : IDisposable
     public int NumClasses => numClasses;
 
     /// <summary>
+    /// Builds an inference-only <see cref="SilkBertEncoderRunner"/> that shares this trainer's
+    /// live device weights (no copy), so dev-set evaluation can run on the device without an
+    /// <c>ExportCheckpoint</c>. The runner borrows the weights; this trainer remains their owner.
+    /// </summary>
+    public SilkBertEncoderRunner CreateInferenceRunner()
+    {
+        ThrowIfDisposed();
+        return new SilkBertEncoderRunner(runtime, config, weights, ownsWeights: false);
+    }
+
+    /// <summary>
     /// Runs the training forward on a batch and returns the <c>[batch, numClasses]</c> logits. The
     /// per-layer intermediates stay resident for the matching <see cref="Backward"/> call, so this is
     /// the first half of one training step rather than a pure inference entry point — use
@@ -213,7 +226,8 @@ public sealed class SilkDistilBertTrainer : IDisposable
     public IReadOnlyList<SilkTrainEpoch> Train(
         int[] tokenIds, float[] attentionMask, int[] labels,
         int batchSize, int seqLen, int epochs, float learningRate, float weightDecay, int seed,
-        Action<int, int, int, float, TimeSpan>? onBatchCompleted = null)
+        Action<int, int, int, float, TimeSpan>? onBatchCompleted = null,
+        Action<int, int, float, TimeSpan>? onEpochCompleted = null)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(tokenIds);
@@ -291,6 +305,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
             stopwatch.Stop();
             results.Add(new SilkTrainEpoch(epoch, lossBatches > 0 ? lossSum / lossBatches : 0f, stopwatch.Elapsed));
+            onEpochCompleted?.Invoke(epoch + 1, epochs, results[^1].Loss, stopwatch.Elapsed);
         }
 
         return results;

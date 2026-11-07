@@ -32,6 +32,8 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     const string Backend = "Silk";
 
     readonly SilkRuntime runtime;
+    readonly bool ownsWeights;
+    readonly SilkBertWeights weights;
     readonly int hiddenDim;
     readonly int intermediateDim;
     readonly int numHeads;
@@ -39,8 +41,6 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     readonly int numLayers;
     readonly float eps;
     readonly float scale;
-
-    readonly SilkBertWeights weights;
 
     readonly nint x;
     readonly nint qkv;
@@ -72,8 +72,19 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         BertConfig config,
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         BertGpuNaming naming)
+        : this(runtime, config, new SilkBertWeights(runtime, config, tensors, naming, trainable: false), ownsWeights: true)
+    {
+    }
+
+    internal SilkBertEncoderRunner(
+        SilkRuntime runtime,
+        BertConfig config,
+        SilkBertWeights weights,
+        bool ownsWeights)
     {
         this.runtime = runtime;
+        this.weights = weights;
+        this.ownsWeights = ownsWeights;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -83,8 +94,6 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         scale = (float)(1.0 / Math.Sqrt(headDim));
 
         runtime.EnsureAttentionLocalMemory(headDim);
-
-        weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: false);
 
         int rowsCap = MaxBatch * MaxSeqLen;
         x = Register(runtime.Allocate(rowsCap * hiddenDim));
@@ -192,7 +201,8 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         foreach (nint buffer in owned)
             runtime.Release(buffer);
         owned.Clear();
-        weights.Dispose();
+        if (ownsWeights)
+            weights.Dispose();
     }
 
     // ── launch helpers ────────────────────────────────────────────

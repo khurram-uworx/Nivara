@@ -295,6 +295,7 @@ static class Program
                 Console.WriteLine($"  (seq len clamped to device cap {maxSeqLen})");
 
             using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen);
+            using var runner = trainer.CreateInferenceRunner();
             Console.WriteLine($"  Device: {trainer.DeviceName}, classes={trainer.NumClasses}");
 
             Console.WriteLine($"Loading tokenizer from {modelPath}/vocab.txt...");
@@ -310,68 +311,66 @@ static class Program
                 trainData = trainData.Take(cli.MaxExamples).ToList();
                 Console.WriteLine($"  (limited to {cli.MaxExamples} examples by --max-examples)");
             }
-            var trainTokenized = Sst2Dataset.Tokenize(tokenizer, trainData, cli.MaxLen);
-            Console.WriteLine($"  {trainTokenized.Count} examples, seqLen={cli.MaxLen}");
+            var trainTokenized = Sst2Dataset.Tokenize(tokenizer, trainData, maxSeqLen);
+            Console.WriteLine($"  {trainTokenized.Count} examples, seqLen={maxSeqLen}");
 
             Console.WriteLine("Tokenizing dev set...");
-            var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, cli.MaxLen);
+            var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, maxSeqLen);
             Console.WriteLine($"  {devTokenized.Count} examples");
 
-            var lossFn = new CrossEntropyLoss<float>();
-
             int sampleCount = trainTokenized.Count;
-            int seqLen = Math.Min(cli.MaxLen, maxSeqLen);
-            int[] allTokens = new int[sampleCount * cli.MaxLen];
-            float[] allMask = new float[sampleCount * cli.MaxLen];
+            int seqLen = maxSeqLen;
+            int[] allTokens = new int[sampleCount * maxSeqLen];
+            float[] allMask = new float[sampleCount * maxSeqLen];
             int[] allLabels = new int[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
-                for (int j = 0; j < cli.MaxLen; j++)
+                for (int j = 0; j < maxSeqLen; j++)
                 {
-                    allTokens[i * cli.MaxLen + j] = (int)trainTokenized[i].TokenIds[j];
-                    allMask[i * cli.MaxLen + j] = trainTokenized[i].AttentionMask[j];
+                    allTokens[i * maxSeqLen + j] = (int)trainTokenized[i].TokenIds[j];
+                    allMask[i * maxSeqLen + j] = trainTokenized[i].AttentionMask[j];
                 }
                 allLabels[i] = trainTokenized[i].Label;
             }
 
-            for (int epoch = 1; epoch <= cli.Epochs; epoch++)
-            {
-                Console.WriteLine($"\n=== Epoch {epoch}/{cli.Epochs} ===");
+            int currentEpoch = 0;
+            float epochLossSum = 0f;
+            int epochBatchCount = 0;
+            var epochBatchElapsed = new List<TimeSpan>();
 
-                float epochLossSum = 0f;
-                int epochBatchCount = 0;
-                var epochBatchElapsed = new List<TimeSpan>();
-
-                var epochResults = trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, 1, cli.Lr, 0.01f, seed: epoch,
-                    onBatchCompleted: (e, b, total, loss, elapsed) =>
-                    {
-                        epochLossSum += loss;
-                        epochBatchCount++;
-                        float runningAvg = epochLossSum / epochBatchCount;
-                        epochBatchElapsed.Add(elapsed);
-                        Console.WriteLine($"  Batch {b}/{total} [{elapsed.TotalSeconds:F1}s] - loss: {runningAvg:F4}");
-                    });
-                float avgTrainLoss = epochResults.Count > 0 ? epochResults[0].Loss : 0f;
-                Console.WriteLine($"Epoch {epoch} training complete. Avg loss: {avgTrainLoss:F4}");
-                if (epochBatchElapsed.Count > 1)
+            trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, cli.Epochs, cli.Lr, 0.01f, seed: 1,
+                onBatchCompleted: (e, b, total, loss, elapsed) =>
                 {
-                    double steadySumMs = 0;
-                    for (int i = 1; i < epochBatchElapsed.Count; i++)
-                        steadySumMs += epochBatchElapsed[i].TotalMilliseconds;
-                    double steadyMs = steadySumMs / (epochBatchElapsed.Count - 1);
-                    Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
-                }
+                    if (e != currentEpoch)
+                    {
+                        currentEpoch = e;
+                        epochLossSum = 0f;
+                        epochBatchCount = 0;
+                        epochBatchElapsed.Clear();
+                        Console.WriteLine($"\n=== Epoch {e}/{cli.Epochs} ===");
+                    }
+                    epochLossSum += loss;
+                    epochBatchCount++;
+                    float runningAvg = epochLossSum / epochBatchCount;
+                    epochBatchElapsed.Add(elapsed);
+                    Console.WriteLine($"  Batch {b}/{total} [{elapsed.TotalSeconds:F1}s] - loss: {runningAvg:F4}");
+                },
+                onEpochCompleted: (e, total, avgLoss, elapsed) =>
+                {
+                    Console.WriteLine($"Epoch {e} training complete. Avg loss: {avgLoss:F4}");
+                    if (epochBatchElapsed.Count > 1)
+                    {
+                        double steadySumMs = 0;
+                        for (int i = 1; i < epochBatchElapsed.Count; i++)
+                            steadySumMs += epochBatchElapsed[i].TotalMilliseconds;
+                        double steadyMs = steadySumMs / (epochBatchElapsed.Count - 1);
+                        Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
+                    }
 
-                // Materialize the trained weights into the CPU model for dev eval.
-                var exported = trainer.ExportCheckpoint();
-                model.LoadWeights(exported);
-                model.Eval();
-
-                var (devLoss, devAcc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
-                Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
-
-                model.Train();
-            }
+                    // Dev evaluation on the device via the inference runner.
+                    var (devLoss, devAcc) = EvaluateSilk(runner, tokenizer, dataset.Dev, maxSeqLen, cli.BatchSize);
+                    Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
+                });
 
             Console.WriteLine($"\nSaving fine-tuned model to {cli.SavePath}...");
             var finalExported = trainer.ExportCheckpoint();
@@ -577,6 +576,55 @@ static class Program
         }
 
         return 0;
+    }
+
+    static (float Loss, float Accuracy) EvaluateSilk(
+        SilkBertEncoderRunner runner,
+        BertTokenizer tokenizer,
+        List<Sst2Example> devSet,
+        int maxLen,
+        int batchSize)
+    {
+        var tokenized = Sst2Dataset.Tokenize(tokenizer, devSet, maxLen);
+        var batches = Sst2Dataset.CreateBatches(tokenized, Math.Min(batchSize, 8), shuffle: false).ToList();
+
+        float totalLoss = 0f;
+        int correct = 0;
+        int total = 0;
+
+        foreach (var batch in batches)
+        {
+            var intIds = Array.ConvertAll(batch.TokenIds, x => (int)x);
+            var result = runner.Forward(intIds, batch.AttentionMask, batch.BatchSize, batch.SeqLen);
+            var logits = result.Logits ?? Array.Empty<float>();
+
+            for (int i = 0; i < batch.BatchSize; i++)
+            {
+                int predicted = logits[i * 2 + 1] > logits[i * 2] ? 1 : 0;
+                if (predicted == batch.Labels[i]) correct++;
+            }
+            total += batch.BatchSize;
+
+            float batchLoss = 0f;
+            for (int i = 0; i < batch.BatchSize; i++)
+            {
+                float l0 = logits[i * 2];
+                float l1 = logits[i * 2 + 1];
+                float maxv = MathF.Max(l0, l1);
+                float e0 = MathF.Exp(l0 - maxv);
+                float e1 = MathF.Exp(l1 - maxv);
+                float sum = e0 + e1;
+                int label = batch.Labels[i];
+                float prob = (label == 0 ? e0 : e1) / sum;
+                batchLoss += -MathF.Log(prob);
+            }
+            batchLoss /= batch.BatchSize;
+            totalLoss += batchLoss;
+        }
+
+        float loss = batches.Count > 0 ? totalLoss / batches.Count : 0f;
+        float acc = total > 0 ? (float)correct / total * 100f : 0f;
+        return (loss, acc);
     }
 
     static (float Loss, float Accuracy) Evaluate(
