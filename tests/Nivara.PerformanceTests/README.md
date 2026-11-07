@@ -814,11 +814,11 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
 | Fused chain chunked 1M x 64k rows | 240 | 248 | +3.3% | 16,005,448 | 0.34 |
 | Fused single-op TP 1M x (Salary\*1.1) | 674 | 722 | +50.7% | 8,003,026 | 0.24 |
 | Column mul-scalar 1M (wrapper) | 642 | 705 | +27.0% | 8,000,312 | 0.22 |
-| Linear forward [32x256] -> [32x256] | 1,363 | 457 | −52.4% | 68,072 | 0.00 |
-| Linear forward+backward [32x256] | 227 | 123 | −0.8% | 929,327 | 0.10 |
+| Linear forward [32x256] -> [32x256] | — | 457 | — | 68,072 | 0.00 |
+| Linear forward+backward [32x256] | — | 123 | — | 929,327 | 0.10 |
 | TransformerBlock forward [32x64, 4 heads] | 284 | 278 | +135.6% | 185,161 | 0.00 |
-| Attn per-seq forward [B16 L128 D64 H4] | 68 | 87 | −4.4% | 2,130,051 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 410 | 304 | −10.1% | 528,637 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | — | 87 | — | 2,130,051 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | — | 304 | — | 528,637 | 0.00 |
 | Attn per-seq fwd+bwd [B16 L128 D64 H4] | 29 | 25 | +0.0% | 8,992,563 | 0.58 |
 | Attn batched fwd+bwd [B16 L128 D64 H4] | 110 | 133 | +12.7% | 8,925,347 | 0.25 |
 | RowScore per-row copy+dot [10k x 128] | 140 | 146 | +28.1% | 2 | 0.00 |
@@ -902,6 +902,12 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   reading): 116.7 ops/s, **7,316,162 B/op** (~73 B/row) — the FilterByMask
   result-frame construction after the #349 fix removed per-element boxing. It
   now gates in `--compare` instead of printing NEW.
+- **Issue #990 (Linear/attention rows):** `Prev` reset to `—` on the four affected
+  rows above. The recorded baseline spans the `.NET 10.0.11 → 11.0.0` runtime
+  transition and could not be validated as a same-machine comparison, so no `Δ`
+  is reported. Allocation columns (`B/op`, `gen0/op`) are unchanged and remain the
+  reliable regression signal.
+
 - **B/op and gen0/op are allocation-driven and stable** across runs — they
   are the reliable regression signals for the `--compare` gate.
   ColumnSigmoid and the raw span chain are 0 B/op by construction (destination
