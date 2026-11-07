@@ -205,13 +205,17 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
 backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
 unavailable). For `--max-examples 25 --batch-size 2 --epochs 1 -c Release` on CPU,
-expect **~3.4 s/batch** steady-state (measured 2026-08-14, see [Performance benchmarks](#performance-benchmarks));
-a full 67K-example epoch extrapolates to ~32 hours. Keep `--max-len` at the default 128 and use
-`--max-examples` to validate the pipeline before committing to a full run.
+expect **~1.5 s/batch** steady-state (see [Performance benchmarks](#performance-benchmarks));
+a full 67K-example epoch extrapolates to ~142 hours. With `--silk` the same shape
+runs at **~0.26 s/batch** (~24 hours per epoch) on the integrated GPU. Keep
+`--max-len` at the default 128 and use `--max-examples` to validate the pipeline
+before committing to a full run.
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU). Nivara runs in Release mode
+Measured on the same machine (Intel Core Ultra 7 255H). The PyTorch and Nivara (CPU)
+columns run on the CPU; the Nivara (Silk/OpenCL) column runs on the integrated
+Intel Graphics. Nivara runs in Release mode
 with Server GC + Tiered PGO (as configured in the sample project). PyTorch uses
 MKL-optimized kernels with `torch_threads = nproc`. Both sides fine-tune
 DistilBERT-base (67M params) on the first `--max-examples` rows of SST-2 at
@@ -229,16 +233,16 @@ fine-tuned DistilBERT-base (67M params) on 100 SST-2 examples at
 
 The `Nivara (Silk/OpenCL)` column was measured on **2026-11-07** with the device
 plugged into AC power (thermal/battery throttling skews integrated-GPU results):
-**255.5 ms/batch** steady-state (first batch excluded), run on an Intel Core Ultra 7
-255H (Intel(R) Graphics OpenCL device), `--max-examples 25 --batch-size 2
+**264.4 ms/batch** steady-state (first batch excluded), run on an Intel Core Ultra 7
+255H (Intel(R) Graphics OpenCL device), `--max-examples 100 --batch-size 2
 --max-len 128`, 1 epoch. Run-to-run variance ~±10% (per
 `tests/Nivara.PerformanceTests/README.md`); record the OpenCL driver version
-alongside any re-measurement. The Silk path is **~2× faster than PyTorch CPU** at
+alongside any re-measurement. The Silk path is **~1.9× faster than PyTorch CPU** at
 this shape, while the CPU Nivara path remains **~3× slower** than PyTorch.
 
 | Config | PyTorch (CPU) | Nivara (.NET 10) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
 |--------|---------------|-------------------|----------------------|----------------|-----------------|
-| Fine-tune B=2, L=128, 100 examples | 499 ms/batch | 1540 ms/batch | 255.5 ms/batch | **~3×** | **0.5× (2× faster)** |
+| Fine-tune B=2, L=128, 100 examples | 499 ms/batch | 1540 ms/batch | 264.4 ms/batch | **~3×** | **0.53× (1.9× faster)** |
 
 The ~3× gap is consistent with prior measurements on different hardware: at batch
 size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward
@@ -264,31 +268,13 @@ ms/batch (first batch excluded, as printed by `RunTrainSilk`).
 |--------|-----------|----------------|-----------------|
 | B=2, L=128 | PyTorch (CPU) | ~46 h | ~138 h |
 | B=2, L=128 | Nivara (.NET 10) | ~142 h | ~427 h |
+| B=2, L=128 | Nivara (Silk/OpenCL) | ~24 h | ~71 h |
 | B=4, L=128 | PyTorch (CPU) | ~42 h | ~127 h |
 | B=4, L=128 | Nivara (.NET 10) | ~131 h | ~394 h |
 
 B=4 figures are not benchmarked end-to-end — they're derived from the measured
 B=2 throughput. Batch cost grows sub-linearly in B (better kernel utilization),
 so the per-epoch times above are the same order of magnitude, not exact.
-
-### Before/after (2026-08-06)
-
-| Nivara fine-tune B=2, 25 examples | Before (`e031ff0`) | After (HEAD) |
-|-----------------------------------|--------------------|--------------|
-| Steady-state wall-clock | ~1.3 s/batch | ~1.4 s/batch |
-| Per-param optimizer allocation | 268 MB/batch (`new T[n]` per param per step) | eliminated (in-place writes) |
-
-"Before" is the last commit before the PERF-66 performance work
-(`e031ff0`); "after" is current HEAD. The work — in-place SGD/Adam/AdamW
-steps (write into the parameter's backing array + version bump, no per-param
-`new T[n]`), `BatchedMultiHeadAttention` in the encoder (no block-diagonal
-mask, no wasted cross-sequence compute), grad-tracking transposed-B matmul in
-`Linear` (no per-forward weight transpose), and a tiled `Transpose` kernel —
-kept wall-clock flat (~1.3 → ~1.4 s/batch, within the ±10% run-to-run
-variance; the A/B was measured with the pre-warmup harness) while removing
-the dominant per-batch allocation. The remaining GC pressure is grad-array
-churn. Further optimizations to validate against this harness: pooled grad
-buffers and a single-pass attention row kernel.
 
 ### Re-running
 
@@ -347,11 +333,12 @@ training slice already exercises every layer, every gradient, and every
 optimizer step the full run would; what a slice cannot tell you is *accuracy*,
 which is why the harness still evaluates on the full dev set.
 
-**Where performance stands.** On this machine Nivara is ~3× slower than
-PyTorch's MKL kernels at this configuration (3.4 s vs 1.16 s per batch). The
-honest summary: *technically correct, not yet performant.* The numerics are
-right, the pipeline is complete, and the benchmark harness in the previous
-section is the tool for chasing the gap.
+**Where performance stands.** On this machine the CPU path is ~3× slower than
+PyTorch's MKL kernels at this configuration (1.54 s vs 0.50 s per batch), while
+the Silk/OpenCL path on the integrated GPU runs ~1.9× faster (0.26 s per batch).
+The honest summary: *technically correct, and now competitive on the GPU for
+this shape.* The numerics are right, the pipeline is complete, and the benchmark
+harness in the previous section is the tool for chasing the gap.
 
 ## Python reference
 
@@ -403,11 +390,11 @@ cd samples/NivaraFineTuning
 .\benchmark_timing.cmd
 ```
 
-The script runs both Nivara (Release, Server GC + Tiered PGO) and PyTorch
-(`torch_threads = nproc`) side by side and writes results to `benchmark_results.txt`.
+The script runs PyTorch (CPU), Nivara (CPU) and Nivara (Silk/OpenCL) side by
+side and writes results to `benchmark_results.txt`.
 
 **Update the Performance benchmarks table:**
 1. Apply Prev/Current/Ratio/Δ% pattern for the Nivara timings.
-2. Update the **Slowdown** column (PyTorch / Nivara ratio).
+2. Update the **Slowdown (CPU)** and **Slowdown (Silk)** columns (PyTorch / Nivara ratio).
 3. Update extrapolated full-run estimates if timings changed significantly.
-4. Update the recording line with machine info and date.
+4. Update the recording line with machine info, date, AC-power state and OpenCL driver version.
