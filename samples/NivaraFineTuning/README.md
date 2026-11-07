@@ -264,31 +264,13 @@ ms/batch (first batch excluded, as printed by `RunTrainSilk`).
 |--------|-----------|----------------|-----------------|
 | B=2, L=128 | PyTorch (CPU) | ~46 h | ~138 h |
 | B=2, L=128 | Nivara (.NET 10) | ~142 h | ~427 h |
+| B=2, L=128 | Nivara (Silk/OpenCL) | ~24 h | ~71 h |
 | B=4, L=128 | PyTorch (CPU) | ~42 h | ~127 h |
 | B=4, L=128 | Nivara (.NET 10) | ~131 h | ~394 h |
 
 B=4 figures are not benchmarked end-to-end — they're derived from the measured
 B=2 throughput. Batch cost grows sub-linearly in B (better kernel utilization),
 so the per-epoch times above are the same order of magnitude, not exact.
-
-### Before/after (2026-08-06)
-
-| Nivara fine-tune B=2, 25 examples | Before (`e031ff0`) | After (HEAD) |
-|-----------------------------------|--------------------|--------------|
-| Steady-state wall-clock | ~1.3 s/batch | ~1.4 s/batch |
-| Per-param optimizer allocation | 268 MB/batch (`new T[n]` per param per step) | eliminated (in-place writes) |
-
-"Before" is the last commit before the PERF-66 performance work
-(`e031ff0`); "after" is current HEAD. The work — in-place SGD/Adam/AdamW
-steps (write into the parameter's backing array + version bump, no per-param
-`new T[n]`), `BatchedMultiHeadAttention` in the encoder (no block-diagonal
-mask, no wasted cross-sequence compute), grad-tracking transposed-B matmul in
-`Linear` (no per-forward weight transpose), and a tiled `Transpose` kernel —
-kept wall-clock flat (~1.3 → ~1.4 s/batch, within the ±10% run-to-run
-variance; the A/B was measured with the pre-warmup harness) while removing
-the dominant per-batch allocation. The remaining GC pressure is grad-array
-churn. Further optimizations to validate against this harness: pooled grad
-buffers and a single-pass attention row kernel.
 
 ### Re-running
 
