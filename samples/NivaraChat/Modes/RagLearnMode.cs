@@ -225,55 +225,55 @@ public static class RagLearnMode
         switch (kind)
         {
             case LabelKind.Judge:
-            {
-                var path = JudgePath(repoRoot);
-                var cache = RagEvalLabels.Load(path);
-                if (cache.Count == 0)
                 {
-                    Console.WriteLine($"No judge labels at {path}. Re-run --rag-eval --ollama, or use --labels fixture.");
-                    return null;
-                }
+                    var path = JudgePath(repoRoot);
+                    var cache = RagEvalLabels.Load(path);
+                    if (cache.Count == 0)
+                    {
+                        Console.WriteLine($"No judge labels at {path}. Re-run --rag-eval --ollama, or use --labels fixture.");
+                        return null;
+                    }
 
-                var grades = cache.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
-                    entry.Key,
-                    entry.Value.ToDictionary(item => item.Key, item => item.Value.Grade, StringComparer.Ordinal)));
-                return RetrievalLabels.Resolve(LabelKind.Judge, index.Chunks, grades);
-            }
+                    var grades = cache.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
+                        entry.Key,
+                        entry.Value.ToDictionary(item => item.Key, item => item.Value.Grade, StringComparer.Ordinal)));
+                    return RetrievalLabels.Resolve(LabelKind.Judge, index.Chunks, grades);
+                }
 
             case LabelKind.Fixture:
-            {
-                var path = FixturePath(repoRoot);
-                var fixture = RetrievalLabels.LoadFixture(path);
-                if (fixture.Count == 0)
                 {
-                    Console.WriteLine($"No fixture labels at {path}.");
-                    return null;
-                }
+                    var path = FixturePath(repoRoot);
+                    var fixture = RetrievalLabels.LoadFixture(path);
+                    if (fixture.Count == 0)
+                    {
+                        Console.WriteLine($"No fixture labels at {path}.");
+                        return null;
+                    }
 
-                var grades = fixture.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
-                    entry.Key, entry.Value));
-                return RetrievalLabels.Resolve(LabelKind.Fixture, index.Chunks, grades);
-            }
+                    var grades = fixture.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
+                        entry.Key, entry.Value));
+                    return RetrievalLabels.Resolve(LabelKind.Fixture, index.Chunks, grades);
+                }
 
             default:
-            {
-                var path = QueriesPath(ctx, repoRoot);
-                var derived = EvalGroundTruth.Load(path);
-                if (derived.Count == 0)
                 {
-                    Console.WriteLine($"No auto queries at {path}.");
-                    return null;
+                    var path = QueriesPath(ctx, repoRoot);
+                    var derived = EvalGroundTruth.Load(path);
+                    if (derived.Count == 0)
+                    {
+                        Console.WriteLine($"No auto queries at {path}.");
+                        return null;
+                    }
+
+                    Console.WriteLine();
+                    Console.WriteLine("  WARNING: auto labels derive from headings and titles, so the Title and Section");
+                    Console.WriteLine("  views score their own positive near 1.0. Any gain measured here rewards relearning");
+                    Console.WriteLine("  the label generator; treat it as a leakage diagnostic, not retrieval quality.");
+
+                    var grades = derived.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
+                        entry.Query, entry.Relevant));
+                    return RetrievalLabels.Resolve(LabelKind.Auto, index.Chunks, grades);
                 }
-
-                Console.WriteLine();
-                Console.WriteLine("  WARNING: auto labels derive from headings and titles, so the Title and Section");
-                Console.WriteLine("  views score their own positive near 1.0. Any gain measured here rewards relearning");
-                Console.WriteLine("  the label generator; treat it as a leakage diagnostic, not retrieval quality.");
-
-                var grades = derived.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
-                    entry.Query, entry.Relevant));
-                return RetrievalLabels.Resolve(LabelKind.Auto, index.Chunks, grades);
-            }
         }
     }
 

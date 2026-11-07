@@ -9,7 +9,11 @@ internal static class DocsCoveragePins
     /// <summary>
     /// Count of citations found repository-wide. Pinned deliberately: see the coverage test.
     /// </summary>
-    internal const int ExpectedCitationCount = 128;
+    // +5: EMBEDDINGS.md "Learning the fusion weights" section cites five new sample symbols
+    // (RetrievalTrainer.cs::FusionModel, RetrievalTrainer.cs::RetrievalTrainer.Train(),
+    // RetrievalTrainingData.cs::CandidatePool.Select(), RetrievalTrainingData.cs::QuerySplit.Create(),
+    // RetrievalEvaluation.cs::RetrievalEvaluation.Compare()).
+    internal const int ExpectedCitationCount = 133;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
@@ -24,7 +28,8 @@ internal static class DocsCoveragePins
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
     /// </summary>
-    internal const int ExpectedCodeCitationCount = 42;
+    // +5: same five citations as ExpectedCitationCount, all in code-citation form.
+    internal const int ExpectedCodeCitationCount = 47;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.

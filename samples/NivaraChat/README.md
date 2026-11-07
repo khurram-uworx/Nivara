@@ -70,6 +70,12 @@ dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr -
 dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --explore --report multiview.md
 dotnet run --project samples/NivaraChat -- --rag-multiview --docs-dir docs/adr --text "How does a symbol citation resolve?" --weights content=0.7,section=0.3
 
+# Differentiable retrieval (#915): learn the fusion weights and a query gate via AutoDiff, then
+# compare against the fixed baseline on held-out queries (no LLM)
+dotnet run --project samples/NivaraChat -- --rag-learn --labels fixture
+dotnet run --project samples/NivaraChat -- --rag-learn --gate embed --epochs 100 --loss pairwise
+dotnet run --project samples/NivaraChat -- --rag-learn --labels judge --report learned.md --k 10
+
 # RAG evaluation (#943): LLM-as-judge paired comparison (requires Ollama)
 dotnet run --project samples/NivaraChat -- --rag-eval --ollama --model beam:cloud --queries samples/data/nivarachat/eval/queries.tsv --top-k 10
 
@@ -113,6 +119,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |
+| `--rag-learn` | — | Mode: differentiable retrieval (#915) — learn the fusion weights and a query gate with AutoDiff, compare against the fixed baseline on held-out queries (CPU training) |
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
@@ -123,9 +130,9 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
-| `--docs-dir <path>` | `docs/` | Documents directory for `--rag`, `--rag-agent` and `--rag-multiview` modes |
+| `--docs-dir <path>` | `docs/` | Documents directory for `--rag`, `--rag-agent`, `--rag-multiview` and `--rag-learn` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
-| `--silk` | — | Use Silk OpenCL backend for `--rag`/`--rag-agent`/`--rag-multiview` (MiniLM embeddings) and for `--smollm` chat/plain generation |
+| `--silk` | — | Use Silk OpenCL backend for `--rag`/`--rag-agent`/`--rag-multiview`/`--rag-learn` (MiniLM embeddings, which is the only accelerated part of `--rag-learn`; its training is CPU) and for `--smollm` chat/plain generation |
 | `--acl-group <name>` | — | ACL filter for `--rag`/`--rag-agent`/`--rag-multiview` (e.g. `adr`, `docs`, `plan`) |
 | `--roundtrip` | — | Show embedding round-trip details for `--rag` |
 | `--store <frame\|inmemory>` | `frame` | Retrieval backend for `--rag`/`--rag-agent` |
@@ -134,7 +141,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--no-cache` | — | Disable index caching |
 | `--chunk-size <int>` | `500` | Max chunk size (chars) for RAG chunking (`--rag`/`--rag-agent`/`--rag-multiview`) |
 | `--explore` | — | `--rag-multiview`: bucket every visible chunk by view disagreement, not just the top-K |
-| `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
+| `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. `--rag-learn`: write the learned-vs-fixed report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
 | `--weights <spec>` | `content=0.5,title=0.2,section=0.2,code=0.1` | `--rag-multiview`: late-fusion weights, renormalized per chunk over the views it has. Unknown names, negative values and an all-zero total are rejected |
 | `--queries <path>` | `queries.tsv` (copied to output) | `--rag-eval`: ground-truth TSV path | 
 | `--runs <n>` | `3` | `--rag-eval`: judge runs per query | 
@@ -142,6 +149,17 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--grade-all` | — | `--rag-eval`: grade every visible chunk (true recall; slower) | 
 | `--verbose` | — | `--rag-eval`: print per-query chunk movement | 
 | `--offline` | — | `--rag-eval`: use cached labels only; no judge calls |
+| `--labels <judge\|fixture\|auto>` | `judge`, else `fixture` | `--rag-learn`: label source. `judge` reads the `--rag-eval` cache, `fixture` reads the committed `relevance-fixture.tsv`, `auto` derives labels from headings/titles and is a leakage diagnostic only |
+| `--epochs <int>` | `200` | `--rag-learn`: training epochs |
+| `--lr <float>` | `0.05` | `--rag-learn`: Adam learning rate |
+| `--weight-decay <float>` | `0.01` | `--rag-learn`: Adam weight decay |
+| `--patience <int>` | `20` | `--rag-learn`: early-stopping patience on validation nDCG |
+| `--gate <stats\|embed\|none>` | `stats` | `--rag-learn`: query-gate features. `stats` is per-view mean/max (36 params), `embed` the raw MiniLM query vector, `none` skips the gated model |
+| `--loss <listwise\|pairwise>` | `listwise` | `--rag-learn`: ranking loss |
+| `--candidates <int>` | `10` | `--rag-learn`: rows each view contributes to the candidate pool, plus every labeled positive |
+| `--seed <int>` | `42` | `--rag-learn`: query-split and shuffle seed |
+| `--train-queries <int>` | all | `--rag-learn`: cap the training split |
+| `--k <int>` | `10` | `--rag-learn`: metric cut-off |
 ## Modes of use
 
 ### Training (`--train`)
@@ -302,6 +320,61 @@ Interpretation:
 Two documented limits: MiniLM truncates at 128 tokens on both backends, so a long Content or Code view loses its tail; and the mode reports retrieval signal only — it does not call an LLM.
 
 Uses: `MultiViewChunker`, `MultiViewScoring` (`BuildFrame`, `Rank`, `FusionWeights`, `MultiViewMatrices`), `MultiViewExplorer` (`Bucketize`, `Explain`), `MultiViewIndex`/`MultiViewIndexCache`, and the same `RowCosineSimilarity`/`TopKDescending` convention as `--rag`.
+
+### Differentiable retrieval (`--rag-learn`)
+
+Trains the #914 fusion weights — and optionally a query gate over them — with AutoDiff, then scores
+the result against the fixed baseline on queries neither model saw. This is the sample that closes
+the gap between the AutoDiff and retrieval stories: the corpus is the multi-view dataset, the query
+becomes a score vector, the loss is a ranking loss, and the gradient reaches four numbers that used
+to be a constant.
+
+The trainable part reranks a **weight-agnostic candidate pool**: the union of each view's own top-K
+(`--candidates`) plus every labeled positive. Drawing the pool from the fixed baseline's top-K would
+let the baseline choose its own competitors, so candidate generation stays outside the gradient path
+and every ranker in the table reranks the same pool.
+
+Two models are trained:
+
+| Model | Parameters | What it learns |
+|-------|-----------|----------------|
+| `learned-global` | 4 | Four fusion logits, `w = softmax(theta)` |
+| `learned-gated(stats)` | 36 | A gate from per-view mean/max cosine (8 dims) to the same four logits, per query |
+| `learned-gated(embed)` | 1,540 | `--gate embed`: the gate reads the raw 384-d MiniLM query vector instead |
+
+Both start numerically **equal to the fixed baseline**: `theta = ln(0.5, 0.2, 0.2, 0.1)` reproduces
+the default weights exactly (they sum to 1.0), and the gate's weight matrix starts at zero so it is
+invariant to its input. The mode prints the measured `max |learned - fixed|` at initialisation, which
+is how a drifted fusion path would show up instead of being blamed on stochastic training.
+
+The loss is listwise softmax cross-entropy against a `2^grade` target normalized per query;
+`--loss pairwise` swaps in a gather-free logistic loss over ordered pairs. Checkpoint selection uses
+validation nDCG@K with `--patience`, and the 80/10/10 split is hashed from the query string with
+`--seed`, so two processes produce the same partition.
+
+Labels decide what the numbers mean:
+
+| `--labels` | Source | Use it for |
+|-----------|--------|-----------|
+| `judge` (default when present) | `samples/data/nivarachat/eval/relevance.tsv` from `--rag-eval` | The headline comparison |
+| `fixture` | Committed `samples/NivaraChat/relevance-fixture.tsv`, keyed by document path | Offline smoke runs; survives docs edits, unlike chunk ids |
+| `auto` | `--queries` heading/title-derived rows | Leakage diagnostics only — Title and Section score their own positive near 1.0 |
+
+The mode refuses to train when fewer than half the label rows resolve against the corpus, because a
+stale label file silently shrinks the relevant set and lowers every ranker without any of them being
+worse. It also prints the decisive-query count when the held-out split is too small for the sign
+test to reach p < 0.05, which is the case for the 40-query fixture and not for the judge cache.
+
+`--report <path>` writes the metric table, the paired comparisons, the learned weights and a
+"reading this report" section as markdown under the gitignored `samples/data/nivarachat/learn/`.
+Acceptance is a fair comparison, not a guarantee: a learned model that loses on held-out queries is
+a valid outcome and the report says so. With `--silk` only the MiniLM embeddings move to OpenCL;
+training and scoring stay on CPU, and GPU training is a documented follow-up.
+
+Uses: `RetrievalTrainingData` (`CandidatePool`, `TrainingSetBuilder`, `RetrievalLabels`, `QuerySplit`),
+`RetrievalTrainer` (`FusionModel`, `GatedFusionModel`, `TrainingOptions`), `RetrievalEvaluation`
+(metrics, ranking, `PairedComparison`), and the `MultiViewScoring`/`MultiViewIndex` pipeline from
+`--rag-multiview`.
 
 ### RAG agent (`--rag-agent`)
 Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. **Ollama is optional**: without `--ollama` the mode behaves like `--rag` in list-only mode (prints `#rank score [source] "snippet..."` per query); with `--ollama` it runs the agent workflow and prints the retrieved set for each provider search. `--roundtrip` prints the frame ↔ matrix ↔ `ToGeneratedEmbeddings` diagnostics once after the index builds (not per provider search). ACL filtering (`--acl-group`) applies to the frame store only; `--store inmemory` ignores it.
@@ -576,6 +649,7 @@ NivaraChat/
 │   ├── EmbeddingMode.cs               # --embed (primitive contrast: parallel arrays + TensorPrimitives)
 │   ├── RagMode.cs                     # --rag (the #867 convention: frame + RowCosineSimilarity)
 │   ├── RagMultiViewMode.cs            # --rag-multiview (#914: four views, late fusion, disagreement)
+│   ├── RagLearnMode.cs                # --rag-learn (#915: AutoDiff fusion weights + query gate)
 │   └── RagAgentMode.cs                # --rag-agent (RAG with TextSearchProvider)
 ├── Executors/                         # Agent Framework Executor<string, string> subclasses
 │   ├── TextRouter.cs                  # Pass-through executor for fan-out routing
@@ -608,6 +682,9 @@ NivaraChat/
 │   ├── MultiViewExplorer.cs           # #914 agreement buckets and explanations
 │   ├── MultiViewIndexCache.cs         # #914 multi-view Parquet index cache
 │   ├── MultiViewIndex.cs              # #914 build pipeline (chunk, dedupe, embed, cache, filter)
+│   ├── RetrievalTrainingData.cs       # #915 candidate pool, training set builder, labels, query split
+│   ├── RetrievalTrainer.cs            # #915 masked fusion, global + gated models, Adam loop, early stop
+│   ├── RetrievalEvaluation.cs         # #915 ranking metrics, fixed-baseline path, paired comparison
 │   ├── IndexCacheFile.cs              # Shared lock / temp / atomic replace / footer read
 │   ├── FeedbackCollector.cs           # LLM fallback + feedback buffer (--online-learning)
 │   └── WriterCriticLoop.cs            # Bounded writer-critic retry loop (--critic)
@@ -639,6 +716,7 @@ NivaraChat/
 │   ├── QwenToolCallParser.cs          # <tool_call> → FunctionCallContent (strict + tolerant, name canonicalization)
 │   └── QwenSampleTools.cs             # GetWeather AIFunction for the tools-weather demo
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
+├── relevance-fixture.tsv              # #915 offline labels: query <TAB> document-path <TAB> grade
 └── README.md                          # This file
 ```
 
@@ -686,6 +764,10 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 | `Linear<T>` | All models | Fully connected layers |
 | `CrossEntropyLoss<T>` | Training | Classification loss |
 | `Adam<T>` | Training | Optimizer |
+| `GradientUtils.Grad()` | `--rag-learn` | Opt-in reverse-mode training scope |
+| `Module<T>.StateDict/LoadStateDict` | `--rag-learn` | Best-validation checkpoint restore |
+| `ReverseGradOperations.LogSoftmax/MatMul/Sum` | `--rag-learn` | Gather-free listwise and pairwise ranking losses |
+| `BCEWithLogitsLoss<T>` | `--rag-learn` | Pairwise logistic ranking loss |
 | `TrainingLoop<T>` | Training | Training orchestration |
 | `DataLoader<T>` | Training | Batched data loading |
 | `TensorDataset<T>` | Training | Frame-backed dataset |

@@ -371,7 +371,7 @@ public class RetrievalTrainerTests
     [Test]
     public void TrainingSetBuilder_RowWithNoScoredView_IsDroppedAndCounted()
     {
-        var chunks = new List<MultiViewChunk> { Chunk("docs/a.md", 0), Chunk("docs/a.md", 1), Chunk("docs/a.md", 2) };
+        var chunks = new List<MultiViewChunk> { Chunk("corpus/alpha.md", 0), Chunk("corpus/alpha.md", 1), Chunk("corpus/alpha.md", 2) };
         var scores = new[]
         {
             new ViewScores(null, null, null, null),
@@ -398,7 +398,7 @@ public class RetrievalTrainerTests
     [Test]
     public void TrainingSetBuilder_Target_WeightsGradesByPowersOfTwo()
     {
-        var chunks = new List<MultiViewChunk> { Chunk("docs/a.md", 0), Chunk("docs/a.md", 1), Chunk("docs/a.md", 2) };
+        var chunks = new List<MultiViewChunk> { Chunk("corpus/alpha.md", 0), Chunk("corpus/alpha.md", 1), Chunk("corpus/alpha.md", 2) };
         var scores = new[]
         {
             new ViewScores(0.9f, null, null, null),
@@ -459,9 +459,9 @@ public class RetrievalTrainerTests
         [
             "# comment",
             "",
-            "how do I stream\tdocs/a.md\t1",
-            "how do I stream\tdocs/a.md\t2",
-            "how do I stream\tdocs/b.md\t0",
+            "how do I stream\tcorpus/alpha.md\t1",
+            "how do I stream\tcorpus/alpha.md\t2",
+            "how do I stream\tcorpus/beta.md\t0",
             "malformed line without tabs"
         ]);
 
@@ -472,8 +472,8 @@ public class RetrievalTrainerTests
             Assert.Multiple(() =>
             {
                 Assert.That(fixture, Has.Count.EqualTo(1));
-                Assert.That(fixture["how do I stream"]["docs/a.md"], Is.EqualTo(2));
-                Assert.That(fixture["how do I stream"]["docs/b.md"], Is.EqualTo(0));
+                Assert.That(fixture["how do I stream"]["corpus/alpha.md"], Is.EqualTo(2));
+                Assert.That(fixture["how do I stream"]["corpus/beta.md"], Is.EqualTo(0));
             });
         }
         finally
@@ -487,15 +487,15 @@ public class RetrievalTrainerTests
     {
         var chunks = new List<MultiViewChunk>
         {
-            Chunk("docs/a.md", 0),
-            Chunk("docs/a.md", 1),
-            Chunk("docs/b.md", 0)
+            Chunk("corpus/alpha.md", 0),
+            Chunk("corpus/alpha.md", 1),
+            Chunk("corpus/beta.md", 0)
         };
         var labels = new[]
         {
             new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
                 "q",
-                new Dictionary<string, int> { ["docs/a.md"] = 2 })
+                new Dictionary<string, int> { ["corpus/alpha.md"] = 2 })
         };
 
         var resolved = RetrievalLabels.Resolve(LabelKind.Fixture, chunks, labels);
@@ -513,12 +513,12 @@ public class RetrievalTrainerTests
     [Test]
     public void RetrievalLabels_ResolveJudge_MatchesChunkIdsOnly()
     {
-        var chunks = new List<MultiViewChunk> { Chunk("docs/a.md", 0), Chunk("docs/a.md", 1) };
+        var chunks = new List<MultiViewChunk> { Chunk("corpus/alpha.md", 0), Chunk("corpus/alpha.md", 1) };
         var labels = new[]
         {
             new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
                 "q",
-                new Dictionary<string, int> { ["docs/a.md#1"] = 1 })
+                new Dictionary<string, int> { ["corpus/alpha.md#1"] = 1 })
         };
 
         var resolved = RetrievalLabels.Resolve(LabelKind.Judge, chunks, labels);
@@ -533,12 +533,12 @@ public class RetrievalTrainerTests
     [Test]
     public void RetrievalLabels_ResolveUnmatchedRows_ReportsReducedCoverage()
     {
-        var chunks = new List<MultiViewChunk> { Chunk("docs/a.md", 0) };
+        var chunks = new List<MultiViewChunk> { Chunk("corpus/alpha.md", 0) };
         var labels = new[]
         {
             new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
                 "q",
-                new Dictionary<string, int> { ["docs/a.md"] = 2, ["docs/gone.md"] = 1 })
+                new Dictionary<string, int> { ["corpus/alpha.md"] = 2, ["corpus/missing.md"] = 1 })
         };
 
         var resolved = RetrievalLabels.Resolve(LabelKind.Fixture, chunks, labels);
