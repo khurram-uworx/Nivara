@@ -850,8 +850,8 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
 | Qwen prefill seed [16 tok] | 2.1 | 1 | +66.7% | 860,552 | 0.00 |
 | Qwen prefill seed [64 tok] | 1.3 | 1 | — | 959,675 | 0.00 |
 | Qwen prefill seed [256 tok] | 0.4 | 0 | — | 2,443,143 | 0.17 |
-| Qwen full fwd [64 tok] | 0.6 | 0 | −100.0% | 233,942,455 | 0.17 |
-| Qwen full fwd [256 tok] | 0.2 | 0 | −100.0% | 1,494,571,089 | 0.67 |
+| Qwen full fwd [64 tok] | 0.6 | 0.4 | −35.0% | 233,942,455 | 0.17 |
+| Qwen full fwd [256 tok] | 0.2 | 0.2 | +20.0% | 1,494,571,089 | 0.67 |
 ### Notes
 
 - **Qwen decode rows added 2026-09-07 with P0-2 (single-row GEMV fast path).** Prev holds
