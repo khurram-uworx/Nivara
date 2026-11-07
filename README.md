@@ -30,7 +30,7 @@ Core library:
 dotnet add package Nivara
 ```
 
-Optional extensions and I/O integrations (install when you need file formats, Arrow interoperability, or ML integration):
+Optional extensions and I/O/GPU integrations (install when you need file formats, Arrow interoperability, ML/ONNX support, the Silk/OpenCL GPU backend, or the BERT/ModernBERT/Laya model layer):
 
 ```bash
 dotnet add package Nivara.Extensions
@@ -126,7 +126,7 @@ var adults = frame.Query<Person>()
 
 For detailed examples and tutorials, see [**GETTING-STARTED.md**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md).
 
-For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including a character-level GPT trained on Nivara AutoDiff, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, a variational autoencoder for synthetic pattern generation, a PyTorch parity benchmark suite showing <0.04% loss-curve divergence, a MiniLM inference pipeline, a DistilBERT fine-tuning pipeline for SST-2 (samples/NivaraFineTuning), a MobileNetV2/ResNet-18 inference pipeline (samples/NivaraInference), and a time-series anomaly detection sample (samples/NivaraTimeSeries).
+For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including MicroGpt and NivaraGpt (character-level transformers on Nivara AutoDiff), a word-level text classifier (NivaraClassifier, with optional ONNX export/parity), a neural chess evaluator, a hybrid Nivara+LLM agent workflow (NivaraChat), a variational autoencoder (NivaraVAE), a production incident-replay pipeline (NivaraIncident), a PyTorch parity benchmark suite (NivaraTorch, 55 functional tests), a MiniLM inference pipeline, a DistilBERT fine-tuning pipeline for SST-2 (NivaraFineTuning), a MobileNetV2/ResNet-18 inference pipeline (NivaraInference), and a time-series anomaly detection sample (NivaraTimeSeries).
 
 ---
 
@@ -158,6 +158,8 @@ Nivara currently supports:
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics (plan inspection via `ExplainPlan()`, per-operation timings)
 - **Automatic Differentiation**: Reverse-mode autodiff with inference by default, explicit manual training via `GradientUtils.Grad()`. Type constraint broadened to `IFloatingPointIeee754<T>` — `Half`/F16 and BFloat16 supported alongside `float`/`double`. Full training stack: module system (`Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d` (im2col + Dot, PyTorch-compatible layout), `Conv2d` (grouped conv, 1×1 fast path, PatchLocation, InputGrad specializations), `ConvTranspose2d`, `BatchNorm1d`/`2d` (fused span-kernel, 3D input support), `LayerNorm` (SIMD `TensorPrimitives.Dot`), `DepthwiseSeparableConv2d`, `TransformerBlock` (RMSNorm/LayerNorm + GELU), `MultiheadAttention`, `ConvVAE`, `VAE` (optional conditioning), `MaxPool2d`, `AdaptiveAvgPool2d`), NLP utilities (`TextTokenizer`, `Sampler`), activations (`GELU`), operations (`MeanPool`, `TransposeAxes`, `SparseEmbeddingBag`, `Gather` with zero-copy forward, `Softmax`, `LogSoftmax`, `Dropout`), optimizers (`SGD`, `Adam`, `AdamW`) with SIMD-accelerated kernels, training loops, data-parallel training, model serialization, and 55 PyTorch-validated functional tests
 - **BFloat16 columns**: `BFloat16` is a first-class numeric column type (mirroring `Half`) — vectorized arithmetic with null-mask preservation, window functions, sorting, aggregation (`Sum`/`Mean`/`Quantile` → `double`), and fused query expressions (`BFloat16 + int` promotes to `double`). It is also a first-class AutoDiff type; see [BFLOAT16.md](docs/BFLOAT16.md)
+- **Embeddings interop**: `Nivara.EmbeddingExtensions` map between `NivaraColumn<float[]>`, flat `E0..E{n-1}` frames and Microsoft.Extensions.AI embeddings with explicit, named null policies; see [EMBEDDINGS.md](docs/EMBEDDINGS.md)
+- **GPU backend (optional)**: the Silk (OpenCL) backend and BERT/ModernBERT/Laya model layer ship in `Nivara.Extensions` (`Nivara.Silk`, `Nivara.AI`); see [SILK.md](docs/SILK.md)
 
 ---
 
@@ -167,6 +169,10 @@ Nivara currently supports:
 - [**ARCHITECTURE**](https://github.com/khurram-uworx/nivara/blob/main/ARCHITECTURE.md) — design and internal architecture
 - [**AUTODIFF**](https://github.com/khurram-uworx/nivara/blob/main/docs/AUTODIFF.md) — automatic differentiation subsystem (operations, modules, optimizers, forward-mode AD, training)
 - [**BFLOAT16**](https://github.com/khurram-uworx/nivara/blob/main/docs/BFLOAT16.md) — BFloat16 support across the AutoDiff and column/query layers
+- [**EMBEDDINGS**](https://github.com/khurram-uworx/nivara/blob/main/docs/EMBEDDINGS.md) — the `float[]` column ↔ `E0..E{n-1}` frame convention and Microsoft.Extensions.AI glue
+- [**SAFETENSORS**](https://github.com/khurram-uworx/nivara/blob/main/docs/SAFETENSORS.md) — reading Hugging Face weights into Nivara AutoDiff models
+- [**SILK**](https://github.com/khurram-uworx/nivara/blob/main/docs/SILK.md) — the Silk (OpenCL) GPU backend and runners
+- [**ONNX**](https://github.com/khurram-uworx/nivara/blob/main/docs/ONNX.md) — ONNX export/import interop (via Nivara.Extensions)
 - [**CONTRIBUTING**](https://github.com/khurram-uworx/nivara/blob/main/CONTRIBUTING.md) — how to contribute to the project
 - [**GUIDELINES**](https://github.com/khurram-uworx/nivara/blob/main/GUIDELINES.md) — architectural rationale, lessons learned, and known gotchas
 - [**CHANGELOG**](https://github.com/khurram-uworx/nivara/blob/main/CHANGELOG.md) — Notable changes and release history

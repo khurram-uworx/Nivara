@@ -20,7 +20,7 @@ It is:
 | Math kernels (Dot, Norm, CosineSimilarity) | Lazy file I/O (CSV, JSON, Parquet, Arrow) |
 | AI abstractions | Labeling, row identity, schema validation |
 
-Each scenario shows Python (NumPy/pandas/PyTorch) and Nivara code side-by-side. All Nivara examples assume `using Nivara;`.
+Each scenario shows Python (NumPy/pandas/PyTorch) and Nivara (C#) side-by-side. Python snippets are illustrative equivalents and are not guaranteed to run verbatim; the Nivara side is the source of truth. All Nivara examples assume `using Nivara;`.
 
 ---
 
@@ -821,3 +821,6 @@ Notes:
 ## Related docs
 
 - [`docs/RETRAINING.md`](docs/RETRAINING.md) — online/incremental retraining with checkpoint resume
+- [`docs/EMBEDDINGS.md`](docs/EMBEDDINGS.md) — the `float[]` ↔ `E0..E{n-1}` convention and Microsoft.Extensions.AI glue (v1.5)
+- [`docs/SILK.md`](docs/SILK.md) — the Silk (OpenCL) GPU backend and runners (v1.5)
+- [`docs/ONNX.md`](docs/ONNX.md) — ONNX export/import interop (via Nivara.Extensions)
