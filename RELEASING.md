@@ -101,13 +101,16 @@ a Nivara improvement plus a PyTorch improvement from more cores looks like a
 regression when it is not.
 
 **Capture output for review:** when a human runs these benchmarks on behalf of
-an agent (or for later re-measurement), redirect each command's console output
-to a `%TEMP%` file and hand back the path rather than pasting it into chat.
-Example:
+an agent (or for later re-measurement), put every command in a temporary
+`release.cmd` at the repository root that redirects each command's console
+output to a `%TEMP%` file, run it, and delete the script afterwards (it is
+commit noise and must never be committed). Hand back the `%TEMP%` file paths
+rather than pasting output into chat. Example lines inside `release.cmd`:
 `dotnet run --project <proj> -c Release -- ... > %TEMP%\\<name>-vX.Y.Z.txt 2>&1`
 The core harness JSON file should also be saved under `%TEMP%` (e.g.
-`%TEMP%\\nivara-perf-vX.Y.Z.json`) so the JSON evidence can be attached to the
-PR without committing a large binary.
+`%TEMP%\\nivara-perf-vX.Y.Z.json`) so the JSON evidence can be attached to
+the PR without committing a large binary. The script may `cd` into sample
+directories, but it must end back at the repository root.
 
 ### Step 6 — Commit, PR, merge
 
