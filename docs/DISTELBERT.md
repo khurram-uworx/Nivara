@@ -117,11 +117,11 @@ See [docs/ACCELERATION.md](ACCELERATION.md) §1 for GPU benchmark tables. CPU be
 
 ## GPU path
 
-All three models run on an OpenCL iGPU. Two backends exist: **ILGPU** (`--ilgpu`, the default GPU
-path) and the hand-authored **Silk.NET** stack (`--silk`); `--silk` and `--ilgpu` are mutually
-exclusive and both are F32-only.
+All three models run on an OpenCL iGPU. Historically two backends existed: **ILGPU**
+(`--ilgpu`, removed in 1.5.0) and the hand-authored **Silk.NET** stack (`--silk`); `--ilgpu`
+is now an unsupported mode and only `--silk` is live. `--silk` is F32-only.
 
-### ILGPU (`--ilgpu`)
+### ILGPU (`--ilgpu`) — historical (backend removed in 1.5.0)
 
 ILGPU 1.5.3 on the shared `BertEncoderGpuRunner`. Measured (128 tokens, AC power):
 
