@@ -302,7 +302,7 @@ Read this part as the map for adding a model to the ILGPU path.
 
 `IlgpuRuntime` builds the context OpenCL-only (`builder.OpenCL().Optimize(OptimizationLevel.O2)`,
 `IlgpuRuntime.cs (deleted in #814)). `SelectGpu` (`:57–69`) returns the first device that is `CL_DEVICE_TYPE_GPU`
-**and** whose name contains "Intel"; if none, construction throws ("--ilgpu requires an OpenCL GPU
+**and** whose name contains "Intel"; if none, construction throws ("requires an OpenCL GPU
 device…"). It then asserts the *accelerator's* device type too (`:47–51`) — a driver that answers the
 enumeration with something else must fail loudly rather than become a CPU measurement. `XMath` from
 `ILGPU.Algorithms` is available to kernels without an explicit `EnableAlgorithms` call

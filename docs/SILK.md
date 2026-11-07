@@ -699,14 +699,10 @@ per classifier, and the CPU-layout round trip exact.
   `compare_diag`, which routes to the existing CPU/AutoDiff diagnostic path rather than to a Silk
   runner (the Silk runners expose only final outputs). SmolLM and Qwen are causal decoders (not
   encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
-- **Mutual exclusion** (`--ilgpu` + `--silk`) is checked **before** the model-scoped guards, so
-  `minilm --ilgpu --silk` names the conflict rather than one flag's model scope.
-- **The model-scope guard runs before any model-file lookup** — pinned by
-  `Silk_RejectedBeforeModelFileLookup`, whose vehicle is `minilm --silk similarity`: a mode the CPU
-  path carries and Silk does not, so a "Model file not found" would otherwise mask the real reason.
-  (`qwen --silk distill` held that role until distill became a Silk mode.)
+- **Mutual exclusion no longer applies**: the old GPU flag was removed in 1.5.0, so `--silk` is now
+  the only GPU backend and there is nothing to conflict with.
 - **F32-only**: `--silk --precision bf16|fp16` is rejected (there is no bf16/fp16 translation unit).
-- **`--gpu` is rejected, not aliased** to `--ilgpu`, so an old invocation fails loudly.
+- **`--gpu` is rejected, not aliased** to the removed backend, so an old invocation fails loudly.
 - **`OpenSilkEncoder`** implements the `OpenEncoder` delegate shared by the MiniLM/DistilBERT
   SST-2 entry points, so the CPU and Silk paths stay structurally identical.
 - **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
@@ -733,7 +729,7 @@ per classifier, and the CPU-layout round trip exact.
   Laya at 1.110E-005 = 1.1% of the 1e-3 bound with act matching to 0.0 and mask clamp PASS on both.
   The `--silk-kernels` cells are what localise a failure; the compares are what say the
   assembled forward is right. **The benchmark A/B has been run too** — ModernBERT and Laya timing
-  (back-to-back `--silk` / `--ilgpu benchmark`, AC, same session, 1 warmup + 3 timed median) is in
+  (back-to-back `--silk` runs vs the historical first backend, AC, same session, 1 warmup + 3 timed median) is in
   the cross-backend rows are now historical; the current acceleration results and Silk-only scope are in
   [docs/ACCELERATION.md](ACCELERATION.md), and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
   The compare and the benchmark remain separate verdicts.

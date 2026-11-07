@@ -289,14 +289,20 @@ opt-in, profitability-gated experiment.
 | Metric | Value | Notes |
 |--------|-------|-------|
 | Dataset generation (scale 1, scenario A) | ~12.5s | 10M records, Parquet + CSV |
-| Degradation ordering analysis | 11.9s | Filter → Sort → RollingMean → Shift |
-| Deployment correlation analysis | 18.2s | Filter → Sort → manual join |
-| Saturation ordering analysis | 0.1s | Filter → Sort → RollingMax (fixed: instances now span timeline) |
-| Regional partitioning analysis | 24.4s | Filter → Collect → typed LINQ GroupBy → rank |
-| Grouped aggregation (manual) | 8.6s | Collect → dictionary loop |
 | Replay (chunk size 100K) | ~4s | Async streaming, 1000 chunks |
 
-*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, 10M records, scenario A.*
+**Analysis timings (Nivara-only):**
+
+| Analysis | Prev (ms) | Current (ms) | Ratio (Current/Prev) | Δ% | Notes |
+|----------|-----------|--------------|----------------------|----|-------|
+| Degradation ordering | 11900 | 9291.3 | 0.78x | -21.9% | Filter → Sort → RollingMean → Shift |
+| Deployment correlation | 18200 | 14456.5 | 0.79x | -20.6% | Filter → Sort → manual join |
+| Saturation ordering | 100 | 91.8 | 0.92x | -8.2% | Filter → Sort → RollingMax (fixed: instances now span timeline) |
+| Regional partitioning | 24400 | 14725.1 | 0.60x | -39.7% | Filter → Collect → typed LINQ GroupBy → rank |
+| Grouped aggregation (manual) | 8600 | 7049.2 | 0.82x | -18.0% | Collect → dictionary loop |
+
+*Recorded 2026-11-07 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0, 6,666,665 rows, scenario A (quick single pass, `--benchmark --iterations 1`). Prev baseline recorded 2026-08-21 on the same machine.*
+
 
 ## Performance: Nivara vs Polars
 

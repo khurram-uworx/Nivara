@@ -1,6 +1,6 @@
 # Laya (convaiinnovations/laya) — decision head on ModernBERT-large
 
-Status: **Implemented and gated on both CPU and GPU.** The decision head runs on both backends, and each is gated against something stronger than itself: `laya compare` pins the CPU path to the `laya==0.3.20` wheel, and `laya --ilgpu compare` pins the GPU path to that already-pinned CPU head. Landed as two issues — #460 (CPU, 2026-09-27, `khurram/laya`) and #462 (GPU, 2026-09-29, `khurram/462`) — but read this as one implementation and one reflection, not as stages. See [GPU path](#gpu-path) for the accelerator half.
+Status: **Implemented and gated on both CPU and GPU.** The decision head runs on both backends, and each is gated against something stronger than itself: `laya compare` pins the CPU path to the `laya==0.3.20` wheel, and the historical first GPU backend (removed in 1.5.0) pins the GPU path to that already-pinned CPU head. Landed as two issues — #460 (CPU, 2026-09-27, `khurram/laya`) and #462 (GPU, 2026-09-29, `khurram/462`) — but read this as one implementation and one reflection, not as stages. See [GPU path](#gpu-path) for the accelerator half.
 
 This is a reflection of what we built and what we learned while porting Laya's typed decision head onto the ModernBERT encoder that #449 already runs. It is *not* a usage guide (that lives in [`samples/NivaraInference/README.md`](../samples/NivaraInference/README.md)) and *not* a roadmap.
 
@@ -99,7 +99,7 @@ The head, prompt builder, calibration and state-dict slice now ship from `Nivara
 | `LayaCalibration`, `LayaDecision`, `LayaTemperature` | `src/Nivara.Extensions/AI/LayaCalibration.cs` | bucket, clamp, decode. Temperature is applied here, not in the head |
 | `LayaHeadLayer<T>`, `LayaDecisionHead<T>` | `src/Nivara.Extensions/AI/LayaHeadModel.cs` | the head. Attention is the reused `BertSelfAttention<T>`, not a new module |
 | `StateDictLoader.LoadFusedLinearSlice` | `src/Nivara.Extensions/AI/StateDictLoader.cs` | additive. Reads `in_proj_weight` / `in_proj_bias` by key, not by prefix |
-| `Laya` mode | `samples/NivaraInference/Laya.cs` | default, `benchmark`, `compare`. `--ilgpu` rejected |
+| `Laya` mode | `samples/NivaraInference/Laya.cs` | default, `benchmark`, `compare`. The first GPU backend is gone (only `--silk` is live) |
 | `Python/laya_compare.py` | `samples/NivaraInference/Python/` | wheel download + `importlib` load of `common.py`. Nothing is installed |
 
 `Gpt2BpeTokenizer.ReadInlineMerges` was fixed in the same branch, before the head existed. Laya writes `model.merges` as arrays (`["Ġ", "Ġ"]`); ModernBERT and SmolLM write strings (`"Ġ Ġ"`). The reader skipped every non-string entry, so all 50,009 Laya merges were discarded and the tokenizer silently degraded to character splitting (`noul` came out as four ids instead of two). Both forms are accepted now. The symptom is a prompt that still "runs".
@@ -157,7 +157,7 @@ dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm
 dotnet run --project tests/Nivara.PerformanceTests -c Release -- --gemm
 ```
 
-**1. Memory: the binary gate passes.** Laya's checkpoint is 421,293,830 F16 parameters and `--ilgpu` is F32-only, so F32 needs 1.685 GB (1.569 GiB) of device buffers. Every GPU row in this document is 66-110M parameters (0.26-0.44 GB), so this was a 4-6× jump. The probe allocates in 64 MiB chunks (an embedding table plus ~200 per-layer tensors is the realistic shape), fills every chunk from the host and reads a sample back:
+**1. Memory: the binary gate passes.** Laya's checkpoint is 421,293,830 F16 parameters; the first GPU backend was F32-only, so F32 needs 1.685 GB (1.569 GiB) of device buffers. Every GPU row in this document is 66-110M parameters (0.26-0.44 GB), so this was a 4-6× jump. The probe allocates in 64 MiB chunks (an embedding table plus ~200 per-layer tensors is the realistic shape), fills every chunk from the host and reads a sample back:
 
 | target | buffers | alloc ms | fill GB/s | result |
 |---|---|---|---|---|
@@ -202,11 +202,11 @@ Two findings worth keeping, both negative:
 
 **Decision: GPU**, and it is the safe direction of the two. The comparison is unusually favourable because the CPU side was given its best available showing — a purpose-built register-blocked kernel — and still lost, while the GPU side was measured exactly as committed. The CPU `laya` mode is a reference for the parity gate, not a deployment path. *(This originally leaned on a "known 2-3× improvement (#440) still in hand". That improvement was measured and does not exist; the decision rests entirely on the 2.6× that was actually timed.)*
 
-Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV, all present. It is not wired. `--ilgpu` is rejected, with the supported modes named. Gate it GPU-vs-CPU against this CPU head, the same way `modernbert --ilgpu compare` gates the encoder.
+Wiring the head onto `ModernBertGpuRunner` needs no new kernel: pre-norm, *biased* LayerNorm, ReLU, fused *biased* QKV, all present. It is not wired. The first GPU backend (removed in 1.5.0) is rejected, with the supported modes named. Gate it GPU-vs-CPU against this CPU head, the same way the historical GPU gate did for the encoder.
 
 ### The head on the GPU (#462, 2026-09-29)
 
-Wired, and gated. `laya --ilgpu` runs the encoder *and* the decision head on the accelerator, and `laya --ilgpu compare` gates the pair against this CPU head. `laya --silk` is the same contract on the hand-authored backend: the encoder (prefix `"encoder"`) plus the head, F32 only, modes `default` / `benchmark` / `compare`, gated the same way against this CPU head. **The Silk compare passes (AC, 2026-10-13)** at 1.110E-005 = 1.1% of the 1e-3 bound — the same figure as the ILGPU gate — and the Silk-vs-ILGPU benchmark A/B is below (see [Measured](#silk-vs-ilgpu-benchmark-2026-10-13)). Biased norms and eps `1e-5` are the traps on both backends. Detail is [SILK.md §13a](SILK.md). The zero-new-kernel claim held on ILGPU: every op in the head had a kernel already, and the mapping is one-to-one. Silk reused those same shapes; it did not add a head-only kernel.
+Wired, and gated. The first GPU backend (removed in 1.5.0) ran the encoder *and* the decision head on the accelerator, and its compare gate checked the pair against this CPU head. `laya --silk` is the same contract on the hand-authored backend: the encoder (prefix `"encoder"`) plus the head, F32 only, modes `default` / `benchmark` / `compare`, gated the same way against this CPU head. **The Silk compare passes (AC, 2026-10-13)** at 1.110E-005 = 1.1% of the 1e-3 bound — the same figure as the earlier GPU gate — and the Silk-vs-historical benchmark A/B is below (see [Measured](#silk-vs-ilgpu-benchmark-2026-10-13)). Biased norms and eps `1e-5` are the traps on both backends. Detail is [SILK.md §13a](SILK.md). The zero-new-kernel claim held: every op in the head had a kernel already, and the mapping is one-to-one. Silk reused those same shapes; it did not add a head-only kernel.
 
 | head op | kernel |
 |---|---|
@@ -230,7 +230,7 @@ Three things in that table are traps rather than mappings:
 
 That is also why the seam between the two halves is additive and on-device. `ModernBertGpuRunner` grew `ForwardOnDevice` plus `HiddenOnDevice`/`HiddenRows`; the head consumes the trunk's own buffer as its residual stream, in place, and only the `k` marker logits and the `n_act` act logits ever cross to the host. The three existing `modernbert` call sites still call `Forward` and get the same array back, and its own gate still measures what it measured before.
 
-**What the gate is, and why not the wheel.** `laya --ilgpu compare` gates against the **in-process CPU head**, not the PyTorch fixture. `laya compare` already pinned this CPU path to `laya==0.3.20`, so pinning the GPU runner to it pins the GPU runner transitively — no second wheel run, no prompt-parity re-check, and the reference is a plain function call in the same process. The cost is that the host-side features are shared, so the gate cannot catch a feature bug; it never could have, since the features are host arithmetic in the reference too. What it does catch is every GEMM, norm, attention and gather on the device.
+**What the gate is, and why not the wheel.** The GPU compare gate checked against the **in-process CPU head**, not the PyTorch fixture. `laya compare` already pinned this CPU path to `laya==0.3.20`, so pinning the GPU runner to it pins the GPU runner transitively — no second wheel run, no prompt-parity re-check, and the reference is a plain function call in the same process. The cost is that the host-side features are shared, so the gate cannot catch a feature bug; it never could have, since the features are host arithmetic in the reference too. What it does catch is every GEMM, norm, attention and gather on the device.
 
 **The bound is 1e-3, and it passed at 1.1% of it.** Measured over the four fixture questions, the worst marker-logit residual was `|gpu − cpu| / (1 + |cpu|) = 1.110E-005` — **1.1% of the budget**, with `max |diff|` 1.657e-5 and the act probability matching to 0.0.
 
@@ -250,16 +250,15 @@ Each question is padded to the config's `max_len` so the non-finite mask-clamp c
 Reproduce with:
 
 ```
-dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu
+# Historical first-backend runs (removed in 1.5.0); live path is `laya --silk`:
 dotnet run --project samples/NivaraInference -c Release -- laya --silk benchmark
-dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
 ```
 
-`--ilgpu` remains F32-only; `--ilgpu --precision bf16|fp16` is rejected, as it is for every other model.
+The first GPU backend (removed in 1.5.0) was F32-only; precision flags were rejected.
 
 ### Measured: iGPU vs Nivara CPU vs PyTorch CPU (#462, 2026-09-29)
 
-`laya --ilgpu benchmark` against `laya benchmark`, same session, AC power, F32 all three, whole model
+historical first-backend `laya benchmark` against `laya benchmark`, same session, AC power, F32 all three, whole model
 (encoder **and** head) per pass, at `max_len` 512. 1 warmup + 3 timed, median of the three. The
 PyTorch column is `python samples/NivaraInference/Python/laya_benchmark.py` — the same wheel, the
 same four questions, the same 512-token padding and the same pass structure, run separately.
@@ -310,7 +309,8 @@ Six things this table says that a bare ratio does not.
 5. **Cold start is where Nivara wins outright, and it is the largest ratio in the table.** 5013 ms
    to build on the iGPU, 11231 ms to bind on the Nivara CPU path, 30017 ms for PyTorch — so the
    device is 6.0× cheaper to start than PyTorch and 2.24× cheaper than our own host path. For a
-   single-shot `laya --ilgpu` call this is the dominant term, and it is why the uncached `laya --ilgpu`
+   single-shot run on the first (removed) backend call this is the dominant term, and it is why the uncached
+ runs
    figures in the log below (247–631 ms) are so far under the 3 s steady state. The CPU-side number
    is dominated by weight *binding*, not by transfer, which is memcpy-class here
    ([ILGPU.md](ILGPU.md) §17 lesson 10, on the iGPU sharing DRAM). The three build paths are not identical work — PyTorch's figure includes
@@ -338,7 +338,7 @@ attention, at 57% of Laya's wall-clock, tracked as **#447**.*
 
 ### Silk vs ILGPU benchmark (2026-10-13)
 
-`laya --silk benchmark` against `laya --ilgpu benchmark`, back-to-back in the same session, AC
+`laya --silk benchmark` against the earlier backend's benchmark, back-to-back in the same session, AC
 power, F32, whole model (encoder **and** head) per pass, `max_len` 512, 1 warmup + 3 timed median —
 the same protocol as the #462 table above. The ratio is the comparable quantity; the absolute
 milliseconds are one session and are not comparable to the #462 table's.
@@ -372,7 +372,7 @@ Silk leads all four questions by 7–19% — the same direction as the ModernBER
 1. ~~**#440 — tile-32 / 2×2 GEMM.**~~ **Measured, null (2026-09-29).** No longer the leading item — it was measured and it does not work on this device. The `2–3×` on the term that is ~99.9% of the *arithmetic* never materialised: all four geometries lost on every shape (0.58–1.01×, best cell 1.01× on the one already-weak shape and inside noise). The arithmetic share was never the time share; a 2026-09-29 leg profile measures **`BatchedAttention` at 57.0% of Laya wall-clock** (1266.87 of 2221.12 ms) against 39.2% for all GEMM together. **Attention, not GEMM, is the next GPU leg — #447** — and since that kernel currently ignores its band and sweeps the full `seqLen` three times, 57% is an upper bound on its banded cost. Full numbers in [docs/ILGPU.md](ILGPU.md) §10.1.
 2. **#462 — wire the head onto `ModernBertGpuRunner`.** **Done** (2026-09-29): zero new kernels held, gated GPU-vs-CPU against this CPU head at 1e-3, passing at **1.1% of the bound**. See [The head on the GPU](#the-head-on-the-gpu-462-2026-09-29). Worth reading for the reason it came in 90× under a budget the encoder alone spends 56% of: a gate's tightness is a property of the quantity compared, not of the depth behind it.
 3. ~~**#448 — mask-as-select.**~~ **Done** (2026-09-30, `khurram/448`). The fully-masked-row `NaN` hazard is closed at the source: the CPU mask now suppresses by assigning `-inf` to a suppressed cell rather than computing `score + (-inf)`, which is what let a `NaN` score escape. The head's CPU path is fixed by the same change as the encoder's, since both go through `AttentionKernels<T>.ApplyMask`. The GPU encoder's `max == -inf → zeros` clamp (prerequisite, landed in #449) was already an assign and so was never exposed to this class of failure; it is retained as the second line of defence.
-4. **#447 — banded attention on the CPU.** The CPU path no longer builds a dense `[L, L]` mask (#476): the band and `validLength` are carried as metadata bounds, so there is no 2048 cap on the CPU path (the cap now constrains only the `ModernBertMasks.Build` reference helper). The GPU encoder carries the band inside the kernel, which is why `modernbert --ilgpu benchmark` runs at 4096.
+4. **#447 — banded attention on the CPU.** The CPU path no longer builds a dense `[L, L]` mask (#476): the band and `validLength` are carried as metadata bounds, so there is no 2048 cap on the CPU path (the cap now constrains only the `ModernBertMasks.Build` reference helper). The GPU encoder carries the band inside the kernel, which is why the encoder benchmark runs at 4096.
 5. **Structured states, multilingual, `typed-decisions`.** Out of scope, on purpose. A structured state throws `NotSupportedException` naming the decision. The English root checkpoint is near chance on `typed-decisions` zero-shot; that subfolder is a different model.
 
 ## References

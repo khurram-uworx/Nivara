@@ -60,16 +60,19 @@ dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 # NOTE: the former GPU sample half was removed in #814. The live GPU flag is now
 # `--silk` (hand-authored OpenCL); older GPU snippets below are historical
 # baselines retained for the performance tables.
-dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu
-dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu            # encoder + decision head
-
-# GPU-vs-CPU parity gates (each gates the GPU runner against its in-process CPU path)
-dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu compare
-dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
+# Historical first-backend command lines (removed in 1.5.0; use --silk now):
+#   (no live command for the old backend; the equivalents are --silk / --silk compare)
+#   dotnet run --project samples/NivaraInference -c Release -- modernbert --silk
+#   dotnet run --project samples/NivaraInference -c Release -- laya --silk            # encoder + decision head
+#
+# GPU-vs-CPU parity gates (live gates use --silk compare):
+#   dotnet run --project samples/NivaraInference -c Release -- modernbert --silk compare
+#   dotnet run --project samples/NivaraInference -c Release -- laya --silk compare
 
 # BERT-family encoders on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
 # (MiniLM / DistilBERT / DistilBERT SST-2; --silk now accepts --precision bf16 (widened to F32 on device
-#  for the encoder; SmolLM/Qwen use true BF16 kernels). fp16 is still rejected. Mutually exclusive with --ilgpu;
+#  for the encoder; SmolLM/Qwen use true BF16 kernels). fp16 is still rejected. Mutually exclusive with the
+#  (the first GPU flag was removed in 1.5.0); --silk is the live GPU flag.
 #  see docs/SILK.md Part 2 for the backend and docs/ACCELERATION.md §1 for the cross-backend view)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 dotnet run --project samples/NivaraInference -c Release -- distilbert --silk
@@ -237,21 +240,21 @@ See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format detai
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes, median reported — except the SmolLM and ModernBERT rows, which use 1 warmup + 3 timed on the Nivara side (see the note under the table). Both frameworks are always measured in the same session.
+Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes, median reported - except the SmolLM and ModernBERT rows, which use 1 warmup + 3 timed on the Nivara side (see the note under the table). Both frameworks are always measured in the same session.
 
 | Model | Input | PyTorch cur | Nivara cur | Slowdown cur |
 |-------|-------|-------------|-------------|--------------|
-| **MobileNetV2** | 1×3×224×224 | 22.4 ms | 731.7 ms | **~33×** |
-| **ResNet-18** | 1×3×224×224 | 14.1 ms | 249.4 ms | **~18×** |
-| **MiniLM-L6** | 128 tokens | 10.9 ms | 71.2 ms | **~6.5×** |
-| **DistilBERT** | 128 tokens | 32.8 ms | 209.7 ms | **~6.4×** |
-| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 199.9 ms | **~6.1×** |
-| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 947 ms | 7404 ms | **~7.8×** |
-| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 806 ms | 11499 ms | **~14×** |
-| **ModernBERT-large** | 128 tokens | 287.3 ms | 1249.8 ms | **~4.3×** |
-| **ModernBERT-large** | 256 tokens | 504.0 ms | 1922.4 ms | **~3.8×** |
+| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** |
+| **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** |
+| **MiniLM-L6** | 128 tokens | 11.0 ms | 78.7 ms | **~7.2x** |
+| **DistilBERT** | 128 tokens | 26.9 ms | 200.6 ms | **~7.5x** |
+| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 179.4 ms | **~5.5x** |
+| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** |
+| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** |
+| **ModernBERT-large** | 128 tokens | 312.4 ms | 1457.5 ms | **~4.7x** |
+| **ModernBERT-large** | 256 tokens | 574.4 ms | 2084.6 ms | **~3.6x** |
 
-*Cur* = 2026-09-27 on **AC power**, both frameworks in one session, same machine, Nivara .NET 11.0.0 Release, PyTorch 2.13.0+cpu. Transformer rows: 128-token single forward pass (3 warmup + 10 timed); SmolLM and ModernBERT report the median of 3 runs — **1 warmup + 3 timed on the Nivara side, 3 warmup + 3 timed in PyTorch**, so the ModernBERT rows compare medians taken under different warmup counts. `modernbert benchmark --warmup 3` matches the Python side's protocol; the flag exists precisely because these two counts were previously only visible in the source. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
+*Cur* = 2026-11-07, both frameworks measured in one session from the captured `ni-*` / `py-*` `%TEMP%` outputs, same machine, Nivara .NET 11.0.0 Release. Transformer rows: 128-token single forward pass; SmolLM rows report 32 generated tokens (median of 3 runs - 1 warmup + 3 timed Nivara, 3 warmup + 3 timed PyTorch); ModernBERT rows are medians under 1 warmup + 3 timed passes. PyTorch MobileNetV2/ResNet-18/SST-2 figures are carried from the 2026-09-27 capture for unchanged-weight runs; no fresh capture was available for them in this prep. `modernbert benchmark --warmup 3` matches the Python side's protocol. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
 
 `--seq N[,N...]` times a chosen subset of the benchmark's lengths (`--warmup N` and `--iters N` set the pass counts) on both C# paths, and the PyTorch script takes the same `--seq N[,N...]` (default `128,256`), so one row can be re-measured on both sides of the CPU comparison; the defaults reproduce the tables above unchanged. The CPU path no longer builds a dense `[L, L]` mask (#476), so `--seq` is not capped at 2048 on the CPU side.
 
@@ -261,7 +264,11 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --silk ben
 python modernbert_benchmark.py --seq 256
 ```
 
-**GPU (iGPU, `--ilgpu`)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power:
+GPU/OpenCL (`--silk`) rows for the BERT family are intentionally left as `—` in this prep: no captured `--silk benchmark` output was available in the 1.5 `%TEMP%` evidence, so no numbers are invented here. See `docs/ACCELERATION.md` and `docs/SILK.md` for the published iGPU baselines.
+
+
+
+**GPU (iGPU, historical `` backend removed in 1.5.0)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power (historical baseline):
 
 | Model | GPU Nivara | CPU Nivara | vs CPU |
 |-------|-----------|------------|--------|
@@ -271,9 +278,10 @@ python modernbert_benchmark.py --seq 256
 
 These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --silk benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
-The MiniLM table above is the AC-powered `--ilgpu` baseline. The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+The MiniLM table above is the AC-powered historical `` baseline (backend removed in 1.5.0). The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
 See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
+
 
 ## Sample data
 

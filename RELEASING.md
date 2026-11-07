@@ -112,13 +112,14 @@ the machine line.
 **Capture output for review:** when a human runs these benchmarks on behalf of
 an agent (or for later re-measurement), put every command in a temporary
 `release.cmd` at the repository root that redirects each command's console
-output to a `%TEMP%` file, run it, and delete the script afterwards (it is
-commit noise and must never be committed). Hand back the `%TEMP%` file paths
+output to a working file, run it, and delete the script afterwards (it is
+commit noise and must never be committed). Hand back the file paths
 rather than pasting output into chat. Example lines inside `release.cmd`:
-`dotnet run --project <proj> -c Release -- ... > %TEMP%\\<name>-vX.Y.Z.txt 2>&1`
-The core harness JSON file should also be saved under `%TEMP%` (e.g.
-`%TEMP%\\nivara-perf-vX.Y.Z.json`) so the JSON evidence can be attached to
-the PR without committing a large binary. The script may `cd` into sample
+`dotnet run --project <proj> -c Release -- ... > release\\vX.Y.Z\\<name>-vX.Y.Z.txt 2>&1`
+The core harness JSON file should be committed as canonical evidence under
+`release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy" below); a
+`%TEMP%` copy may also be kept as staging during active prep and cleaned up
+manually afterwards. The script may `cd` into sample
 directories, but it must end back at the repository root.
 
 **Regenerating benchmark tables safely (hidden-tag technique):** wrap each
@@ -132,6 +133,23 @@ and the matching copies under `samples/NivaraIncident/Python/` and
 `samples/NivaraFineTuning/Python/`) so the next release can reuse it;
 NivaraInference/Python is the canonical template and the others may diverge as
 their table schemas evolve.
+
+### Benchmark artefact policy (issue #988)
+
+Permanent evidence lives under `release/<version>/`, one folder per release version:
+
+- `release/vX.Y.Z/nivara-perf-vX.Y.Z.json` — core perf harness output.
+- `release/vX.Y.Z/<sample>-vX.Y.Z.txt` (and optional `.csv`) — per-benchmark console captures.
+
+Rules:
+- Never overwrite or repurpose a prior release folder; history stays addressable by path.
+- Committed files under `release/<version>/` are the canonical, permanent artefacts.
+- `%TEMP%` files are staging during active prep; they may remain in place while the
+  release is in progress and are cleaned up manually afterwards.
+- PR attachments are optional review snapshots and may expire; cite the committed
+  `release/<version>/` path as authoritative.
+- File names always carry the version so a path is unambiguous.
+- Machine/recording line format stays as specified in Step 4.
 
 ### Step 6 — Commit, PR, merge
 
@@ -151,6 +169,8 @@ gh pr create --repo khurram-uworx/Nivara --base main \
 The PR description must include:
 - A checklist confirming which benchmarks were actually run (with paths to saved JSON
   output where applicable).
+- Paths to the committed benchmark evidence under `release/<version>/` (canonical,
+  permanent) and, optionally, the PR attachments used for review.
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
 - The CD test results (3200+ tests passing).
 
@@ -196,6 +216,7 @@ other steps (build, test, pack, push) are identical.
   rendered on nuget.org and is independent of `CHANGELOG.md`.
 - Publish only from `main`; tags pushed from feature branches will trigger the workflow but
   should be avoided so NuGet history matches released source.
-- Benchmark output JSON should be committed alongside the release prep (or at minimum
-  referenced in the PR description) so reviewers can verify measurements were actually
-  taken, not carried forward from a different machine or codebase version.
+- Benchmark output should be committed alongside the release prep under the
+  `release/<version>/` folder (canonical, permanent artefact path) so reviewers can
+  verify measurements were actually taken, not carried forward from a different
+  machine or codebase version. PR attachments are an optional review snapshot.

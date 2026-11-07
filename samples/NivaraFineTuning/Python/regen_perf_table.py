@@ -3,16 +3,16 @@
 
 Usage (from repository root):
     python samples/NivaraInference/Python/regen_perf_table.py \
-        --json %TEMP%\\nivara-perf-vX.Y.Z.json \
+        --json release\\vX.Y.Z\\nivara-perf-vX.Y.Z.json \
         --readme tests/Nivara.PerformanceTests/README.md
 
 The target table must be bracketed by HTML comments:
 
-    <!--hidden-starting-->
+    <!--hidden-start-->
     | Scenario | Prev | Current | Delta% | B/op | gen0/op |
     |---|---|---|---|---|---|
     | ... rows ...
-    <!--hidden-ending-->
+    <!--hidden-end-->
 
 The script keeps the header/separator lines untouched conceptually by looking
 for them; it parses every row between the markers, looks the scenario name up
@@ -32,8 +32,8 @@ def normalize(name):
 
 
 def shift_table(readme_text, json_data):
-    start_token = '<!--hidden-starting-->'
-    end_token = '<!--hidden-ending-->'
+    start_token = '<!--hidden-start-->'
+    end_token = '<!--hidden-end-->'
     start = readme_text.index(start_token) + len(start_token)
     end = readme_text.index(end_token)
     old_block = readme_text[start:end]
@@ -57,11 +57,15 @@ def shift_table(readme_text, json_data):
         except ValueError:
             old_curr_num = None
         new_prev = old_curr if old_curr_num is not None else old_prev
-        new_curr = f"{round(r['opsPerSec']):,}"
+        ops_per_sec = r['opsPerSec']
+        if abs(ops_per_sec) < 1:
+            new_curr = f"{ops_per_sec:.1f}"
+        else:
+            new_curr = f"{round(ops_per_sec):,}"
         if old_curr_num is not None and old_prev not in ('—', '-', ''):
             try:
                 old_prev_num = float(old_prev.replace(',', ''))
-                delta = (float(new_curr.replace(',', '')) - old_prev_num) / old_prev_num * 100
+                delta = (ops_per_sec - old_prev_num) / old_prev_num * 100
                 delta_str = (f"+{delta:.1f}%" if delta >= 0 else f"-{abs(delta):.1f}%")
             except ValueError:
                 delta_str = '—'
@@ -90,5 +94,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-PYEOF
-echo written

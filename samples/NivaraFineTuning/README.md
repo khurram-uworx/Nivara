@@ -205,7 +205,7 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
 backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
 unavailable). For `--max-examples 25 --batch-size 2 --epochs 1 -c Release` on CPU,
-expect **~1.5 s/batch** steady-state (see [Performance benchmarks](#performance-benchmarks));
+expect **~1.2 s/batch** steady-state (see [Performance benchmarks](#performance-benchmarks));
 a full 67K-example epoch extrapolates to ~142 hours. With `--silk` the same shape
 runs at **~0.26 s/batch** (~24 hours per epoch) on the integrated GPU. Keep
 `--max-len` at the default 128 and use `--max-examples` to validate the pipeline
@@ -226,23 +226,23 @@ reproducible. Numbers vary with machine load — re-measure both sides in the
 same session when comparing (run-to-run variance ~±10% per
 `tests/Nivara.PerformanceTests/README.md`).
 
-Recorded **2026-08-21** on an Intel Core Ultra 7 255H (16 logical processors,
-Windows 11, Python 3.12.9, PyTorch 2.13.0+cpu, `torch_threads=16`). Both sides
+Recorded **2026-11-07** on an Intel Core Ultra 7 255H (16 logical processors,
+Windows 11, Python 3.12.10, PyTorch 2.13.0+cpu, `torch_threads=16`). Both sides
 fine-tuned DistilBERT-base (67M params) on 100 SST-2 examples at
 `--batch-size 2 --max-len 128`.
 
 The `Nivara (Silk/OpenCL)` column was measured on **2026-11-07** with the device
 plugged into AC power (thermal/battery throttling skews integrated-GPU results):
-**264.4 ms/batch** steady-state (first batch excluded), run on an Intel Core Ultra 7
+**251.7 ms/batch** steady-state (first batch excluded), run on an Intel Core Ultra 7
 255H (Intel(R) Graphics OpenCL device), `--max-examples 100 --batch-size 2
 --max-len 128`, 1 epoch. Run-to-run variance ~±10% (per
 `tests/Nivara.PerformanceTests/README.md`); record the OpenCL driver version
-alongside any re-measurement. The Silk path is **~1.9× faster than PyTorch CPU** at
-this shape, while the CPU Nivara path remains **~3× slower** than PyTorch.
+alongside any re-measurement. The Silk path is **~1.5x faster than PyTorch CPU** at
+this shape, while the CPU Nivara path remains **~3.2x slower** than PyTorch.
 
 | Config | PyTorch (CPU) | Nivara (.NET 10) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
 |--------|---------------|-------------------|----------------------|----------------|-----------------|
-| Fine-tune B=2, L=128, 100 examples | 499 ms/batch | 1540 ms/batch | 264.4 ms/batch | **~3×** | **0.53× (1.9× faster)** |
+| Fine-tune B=2, L=128, 100 examples | 377.4 ms/batch | 1200 ms/batch | 251.7 ms/batch | **~3.2x** | **0.67x (1.5x faster)** |
 
 The ~3× gap is consistent with prior measurements on different hardware: at batch
 size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward

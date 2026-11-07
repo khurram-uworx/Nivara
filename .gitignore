@@ -375,3 +375,13 @@ samples/data/benchmark-1m
 samples/data/perf-scale1
 samples/data/incident-lab
 samples/data/nivarachat
+
+# Tracked per-release benchmark evidence (lower-case folder; not build output)
+!/release/
+!/release/**/
+!/release/**/*.json
+!/release/**/*.txt
+!/release/**/*.csv
+!/release/**/*.md
+!/release/**/.gitkeep
+
