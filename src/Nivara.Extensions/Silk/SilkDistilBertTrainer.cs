@@ -376,8 +376,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
         long lnFcTotal = 0;
         long attnPrepTotal = 0;
-        long attnDqTotal = 0;
-        long attnDkvTotal = 0;
+        long attnDqDkvTotal = 0;
 
         // Classifier head: classifier → ReLU → pre_classifier → CLS scatter.
         var clsSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
@@ -460,22 +459,13 @@ public sealed class SilkDistilBertTrainer : IDisposable
                 attnPrepTotal += prepSw!.ElapsedMilliseconds;
             }
 
-            var dqSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
-            SilkLauncher.AttentionBackwardDq(runtime, a.Qkv, probs, delta, dAttn, dQkv,
+            var fusedSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
+            SilkLauncher.AttentionBackwardDqDkv(runtime, a.Qkv, probs, delta, dAttn, dQkv,
                 batch, seqLen, numHeads, headDim, scale);
             if (ProfilingEnabled)
             {
                 runtime.Finish();
-                attnDqTotal += dqSw!.ElapsedMilliseconds;
-            }
-
-            var dkvSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
-            SilkLauncher.AttentionBackwardDkv(runtime, a.Qkv, probs, delta, dAttn, dQkv,
-                batch, seqLen, numHeads, headDim, scale);
-            if (ProfilingEnabled)
-            {
-                runtime.Finish();
-                attnDkvTotal += dkvSw!.ElapsedMilliseconds;
+                attnDqDkvTotal += fusedSw!.ElapsedMilliseconds;
             }
 
             // LN/fc GEMM backward, part 2: qkv projection + residual add.
@@ -512,9 +502,8 @@ public sealed class SilkDistilBertTrainer : IDisposable
         if (ProfilingEnabled)
         {
             LastPhaseMs["AttnPrep"] = attnPrepTotal;
-            LastPhaseMs["AttnDq"] = attnDqTotal;
-            LastPhaseMs["AttnDkv"] = attnDkvTotal;
-            LastPhaseMs["AttentionBackward"] = attnPrepTotal + attnDqTotal + attnDkvTotal;
+            LastPhaseMs["AttnDqDkv"] = attnDqDkvTotal;
+            LastPhaseMs["AttentionBackward"] = attnPrepTotal + attnDqDkvTotal;
             LastPhaseMs["LnFcGemmBackward"] = lnFcTotal;
         }
     }
