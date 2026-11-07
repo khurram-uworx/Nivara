@@ -311,24 +311,24 @@ static class Program
                 trainData = trainData.Take(cli.MaxExamples).ToList();
                 Console.WriteLine($"  (limited to {cli.MaxExamples} examples by --max-examples)");
             }
-            var trainTokenized = Sst2Dataset.Tokenize(tokenizer, trainData, cli.MaxLen);
-            Console.WriteLine($"  {trainTokenized.Count} examples, seqLen={cli.MaxLen}");
+            var trainTokenized = Sst2Dataset.Tokenize(tokenizer, trainData, maxSeqLen);
+            Console.WriteLine($"  {trainTokenized.Count} examples, seqLen={maxSeqLen}");
 
             Console.WriteLine("Tokenizing dev set...");
-            var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, cli.MaxLen);
+            var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, maxSeqLen);
             Console.WriteLine($"  {devTokenized.Count} examples");
 
             int sampleCount = trainTokenized.Count;
-            int seqLen = Math.Min(cli.MaxLen, maxSeqLen);
-            int[] allTokens = new int[sampleCount * cli.MaxLen];
-            float[] allMask = new float[sampleCount * cli.MaxLen];
+            int seqLen = maxSeqLen;
+            int[] allTokens = new int[sampleCount * maxSeqLen];
+            float[] allMask = new float[sampleCount * maxSeqLen];
             int[] allLabels = new int[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
-                for (int j = 0; j < cli.MaxLen; j++)
+                for (int j = 0; j < maxSeqLen; j++)
                 {
-                    allTokens[i * cli.MaxLen + j] = (int)trainTokenized[i].TokenIds[j];
-                    allMask[i * cli.MaxLen + j] = trainTokenized[i].AttentionMask[j];
+                    allTokens[i * maxSeqLen + j] = (int)trainTokenized[i].TokenIds[j];
+                    allMask[i * maxSeqLen + j] = trainTokenized[i].AttentionMask[j];
                 }
                 allLabels[i] = trainTokenized[i].Label;
             }
@@ -362,7 +362,7 @@ static class Program
                 }
 
                 // Dev evaluation on the device via the inference runner (no per-epoch weight export).
-                var (devLoss, devAcc) = EvaluateSilk(runner, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
+                var (devLoss, devAcc) = EvaluateSilk(runner, tokenizer, dataset.Dev, maxSeqLen, cli.BatchSize);
                 Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
             }
 

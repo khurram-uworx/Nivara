@@ -6,7 +6,7 @@
 1. Tokenization and the `allTokens`/`allMask` buffers still use `cli.MaxLen`, so a `--max-len 256`
    run tokenizes 256-length sequences and allocates 256-wide buffers while the trainer caps at 128.
 2. `seqLen` is computed as `Math.Min(cli.MaxLen, maxSeqLen)` (redundant and only accidentally correct).
-3. Dev eval (`Evaluate`) is called with `cli.MaxLen`, not the clamped value.
+3. Dev eval (`EvaluateSilk`) is called with `cli.MaxLen`, not the clamped value.
 
 Result: training runs at 128 while tokenization/dev-eval run at 256 — a silent shape/layout mismatch.
 
