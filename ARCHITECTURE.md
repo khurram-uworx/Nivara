@@ -639,249 +639,6 @@ Many design choices exist solely to surface errors as early as possible.
 - Steeper learning curve for contributors
 - Stronger correctness guarantees
 
----
-
-## Storage Architecture
-
-### Column Storage Model
-
-`NivaraColumn<T>` is the fundamental data container with these characteristics:
-
-- Strongly typed (`T` is never erased)
-- Immutable by design
-- Backed by contiguous memory
-- Optional null mask for explicit null tracking
-
-Each column owns:
-- A data buffer (a sole-owner `T[]`)
-- A null mask (only when nulls are present — byte-wise, see [Null Representation Decision](#null-representation-decision))
-
-### Vectorization Strategy
-
-**Decision**: Apply vectorization selectively and only where semantics are trivial.
-
-**Rationale**: SIMD execution provides performance gains but complicates control flow and debugging. Premature vectorization obscured correctness issues during development.
-
-**Implementation**:
-- Vectorization is applied opportunistically
-- Automatic fallback to scalar operations when vectorization isn't safe
-- Mixed execution paths with clear boundaries
-- Easier correctness validation through separation of concerns
-
----
-
-## Query Engine Architecture
-
-### Lazy Query Construction
-
-The query engine uses a **lazy evaluation model** with explicit execution boundaries:
-
-```
-Data Source → QueryFrame (lazy) → Logical Plan → Physical Plan → Execution Kernels → Results
-```
-
-#### Planning Stages
-
-1. **Logical Plan Construction**
-   - Operation ordering and validation
-   - Predicate composition and simplification
-   - Projection pruning and column elimination
-   - Schema validation and type checking
-
-2. **Physical Plan Generation**
-   - Kernel selection (scalar vs vectorized)
-   - Vectorization decisions based on data types
-   - Null-aware execution path selection
-   - Resource allocation planning
-
-3. **Execution**
-   - Begins only when `Collect()` is invoked
-   - Applies optimizations transparently
-   - Handles errors with structured context
-
-### Query Optimization Engine
-
-The optimizer applies conservative, provably safe transformations:
-
-#### Optimization Strategies
-
-- **Predicate Pushdown**: Moves filter operations closer to data sources to reduce data movement
-- **Projection Pushdown**: Eliminates unused columns early in the pipeline to reduce memory usage  
-- **Operation Fusion**: Combines compatible operations (multiple filters, projections) to reduce overhead
-- **Column Elimination**: Removes columns that aren't needed by subsequent operations
-
-#### Safety Guarantees
-
-- **Correctness Preserved**: Optimizations never change query results
-- **Conservative Approach**: When in doubt, chooses correctness over performance
-- **Graceful Degradation**: Failed optimizations don't break queries
-- **Schema Validation**: All optimizations respect type safety and schema constraints
-
-### Execution Strategies
-
-Multiple execution strategies optimize performance for different use cases:
-
-#### Strategy Types
-
-1. **Lazy Execution (Default)**
-   - Builds query plans and optimizes before execution
-   - Optimal memory usage through deferred evaluation
-   - Best for complex queries with multiple operations
-
-2. **Eager Execution**
-   - Executes operations immediately without optimization
-   - Easier debugging with predictable execution order
-   - Good for simple, single-operation queries
-
-3. **Streaming Execution**
-   - Processes data in chunks for large datasets
-   - Controlled memory usage with configurable budgets
-   - Automatic chunk size calculation
-
-4. **Parallel Execution**
-   - Uses multiple threads for CPU-intensive operations
-   - Automatic detection of parallelizable operations
-   - Configurable degree of parallelism
-
-#### Execution Context Configuration
-
-```csharp
-var context = new Nivara.Execution.ExecutionContext
-{
-    Strategy = Nivara.Execution.ExecutionStrategy.Parallel,
-    MaxDegreeOfParallelism = Environment.ProcessorCount,
-    MemoryBudget = 1024 * 1024 * 1024, // 1GB
-    CancellationToken = cancellationToken,
-    Progress = progressReporter,
-    ExecutionDiagnostics = new ExecutionDiagnostics()
-};
-
-// After execution, inspect diagnostics
-var engine = new ExecutionEngine();
-var result = engine.Execute(plan, context);
-Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
-```
-
----
-
-## Error Handling Architecture
-
-### Structured Exception Hierarchy
-
-Nivara uses a structured exception hierarchy that provides detailed context about failures:
-
-#### Exception Types
-
-- **JoinException**: Join operation failures with key and type information
-- **QuerySchemaValidationException**: Schema mismatch details with specific error locations
-- **QueryExecutionException**: Query execution failures with plan context
-- **DataFrameOperationException**: General DataFrame operation errors
-
-#### Context Preservation
-
-Each exception includes:
-- Operation context and parameters
-- Query plan information (when applicable)
-- Schema details and type information
-- Suggested remediation steps
-
-### Performance Diagnostics
-
-#### Execution Diagnostics
-
-Track performance metrics and identify optimization opportunities:
-
-```csharp
-var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
-
-var result = Nivara.Diagnostics.DiagnosticHelper.ExecuteWithDiagnostics(
-    diagnostics,
-    "ComplexQuery",
-    () => /* operation */,
-    rowCount);
-
-Console.WriteLine(diagnostics.GenerateReport());
-```
-
-#### Diagnostic Features
-
-- **Operation-level timing** with nested scope support
-- **Memory usage tracking** with allocation patterns
-- **Automatic warning detection** for common performance issues
-- **Optimization tracking** with estimated performance improvements
-- **Comprehensive reporting** with human-readable analysis
-
----
-
-## Type System Architecture
-
-### Type Erasure Strategy
-
-**Decision**: Introduce a **non-generic execution interface** beneath generic, user-facing APIs.
-
-**Context**: Execution and planning layers must operate on collections of columns with unknown concrete types at runtime.
-
-**Implementation**:
-- Generic APIs (`NivaraColumn<T>`, `NivaraFrame`) for compile-time safety
-- Non-generic interfaces (`IColumn`, `IFrame`) for runtime operations
-- Clear separation between compile-time and runtime concerns
-- Efficient dispatch without reflection overhead
-
-### Schema Enforcement
-
-**Decision**: Make schemas **explicit, immutable, and mandatory** for all frame operations.
-
-**Benefits**:
-- Early schema validation catches many classes of errors
-- Immutability simplifies reasoning about transformations
-- Explicit validation prevents runtime surprises
-
-**Implementation**:
-- Schema validation occurs at construction time
-- All transformations produce new schemas
-- Type compatibility checked before operations
-- Clear error messages for schema violations
-
----
-
-## File I/O Architecture
-
-### Lazy Data Sources
-
-File-based data sources integrate seamlessly with the query engine:
-
-#### CSV/JSON Integration
-- Schema inference occurs lazily during query planning
-- Data is read in chunks during execution
-- Filters and projections are pushed down where possible
-- Automatic type detection with configurable overrides
-
-#### Parquet Integration (via Extensions)
-- Columnar format alignment with Nivara's architecture
-- Zero-copy operations where possible
-- Configurable compression and row group sizes
-- Streaming support for large files
-
-### Arrow Interoperability (via Extensions)
-
-#### Conversion Strategy
-- Bidirectional conversion between Nivara and Arrow formats
-- Type mapping with validation and error handling
-- Zero-copy optimization when memory layouts align
-- Proper null semantics preservation
-
----
-
-## Memory Management
-
-### Buffer Management
-
-- **Pooled allocations** for frequently used buffer sizes
-- **Automatic cleanup** with deterministic disposal patterns
-- **Memory budget enforcement** in streaming scenarios
-- **Garbage collection optimization** through object lifetime management
-
----
 
 ## Automatic Differentiation Engine
 
@@ -974,6 +731,17 @@ The `SafeTensorsLoader` (in `samples/Nivara.Samples`) reads Hugging Face `.safet
 ---
 
 ## Extension Architecture
+
+### Promoted extension pieces (v1.5)
+
+- **Silk (OpenCL GPU backend)** — `src/Nivara.Extensions/Silk/` (`namespace Nivara.Silk`): `SilkRuntime`, `SilkLauncher` (internal typed dispatch), `SilkKernels` (internal), `WeightLayout` (`Transposed`/`QkvPacked`/`Req`), the three runners and two sessions. Silk is the only shipped GPU path; ILGPU remains historical reference in `tests/Nivara.GpuProbe` and `docs/ILGPU.md`. See [SILK.md](SILK.md).
+- **AI / model layer (BERT family)** — `src/Nivara.Extensions/AI/` (`namespace Nivara.AI`): `BertModel`, `ModernBertModel`, Laya (`LayaHeadModel`, `LayaHeadScoring`, `LayaPromptBuilder`, `LayaCalibration`), `Gpt2BpeTokenizer`, `SafeTensorsLoader`, `StateDictLoader`, and the GPU seam (`GpuSeam.cs`).
+- **Embeddings convention** — `NivaraEmbeddingExtensions`: `float[]` column ↔ flat `E0..E{n-1}` frame convention, Microsoft.Extensions.AI conversion in both directions, caller-supplied null policies. See [EMBEDDINGS.md](EMBEDDINGS.md).
+- **ONNX interop** — `src/Nivara.Extensions/Onnx/`, consumed by NivaraInference/NivaraClassifier for parity checking.
+
+### Arrow boundary (ADR-007)
+
+- Opt-in zero-copy export via `ArrowConversionOptions.UseZeroCopy` aliases flat primitive column buffers; null-bearing columns rebuild the validity bitmap. Import and Parquet still copy. Buffer-level `ArrowValidityMask` helper exists and is unit-tested but is not yet wired into `ArrowInterop`.
 
 ### Modular Design
 
@@ -1075,5 +843,5 @@ This appendix summarizes key architecture decisions in concise form. See the rel
 
 ### Target Framework
 
-- **.NET 10.0** with latest C# features.
-  - Rationale: leverage latest performance improvements; `System.Numerics.Tensors` requires modern .NET.
+- **.NET 11** with latest C# features, matching the `net11.0` target of `src/Nivara/Nivara.csproj` and `src/Nivara.Extensions/Nivara.Extensions.csproj`.
+  - Rationale: leverage latest performance improvements; `System.Numerics.Tensors` 11.x requires modern .NET.
