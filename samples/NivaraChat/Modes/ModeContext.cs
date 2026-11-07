@@ -30,4 +30,15 @@ public sealed record ModeContext(
     double Temperature = 0.2,
     bool GradeAll = false,
     bool Verbose = false,
-    string? Queries = null);
+    string? Queries = null,
+    string? Labels = null,
+    int Epochs = 200,
+    float LearningRate = 0.05f,
+    float WeightDecay = 0.01f,
+    int Patience = 20,
+    string? Gate = null,
+    string? Loss = null,
+    int Candidates = 0,
+    int Seed = 42,
+    int TrainQueries = 0,
+    int? EvalK = null);
