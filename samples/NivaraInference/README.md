@@ -264,7 +264,12 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --silk ben
 python modernbert_benchmark.py --seq 256
 ```
 
-GPU/OpenCL (`--silk`) rows for the BERT family are intentionally left as `—` in this prep: no captured `--silk benchmark` output was available in the 1.5 `%TEMP%` evidence, so no numbers are invented here. See `docs/ACCELERATION.md` and `docs/SILK.md` for the published iGPU baselines.
+GPU/OpenCL (`--silk`) rows: fill the Silk column from a same-session capture of the
+commands in `## Release Benchmark` above (AC power). Do not carry forward battery
+measurements or prior one-off numbers; if no capture is available, leave the cells
+as `—` and state the reason in the PR. See `docs/ACCELERATION.md` and `docs/SILK.md`
+for published iGPU baselines. Record the OpenCL device/vendor and driver version
+alongside the machine line.
 
 
 
@@ -317,7 +322,7 @@ Run this during release prep (step 5 of `RELEASING.md`). Requires Python, PyTorc
 Run both sides in the same session for fair comparison:
 
 ```powershell
-# Nivara (C#) — one pass per model
+# Nivara (C#) — one pass per model (CPU)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
@@ -327,7 +332,16 @@ dotnet run --project samples/NivaraInference -c Release -- smollm benchmark     
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark   # native BF16
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark                      # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark                 # seq 128 + 256
+
+# Silk (OpenCL) — required in the same session as the CPU run, on AC power
+dotnet run --project samples/NivaraInference -c Release -- minilm --silk benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert --silk benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk benchmark
+dotnet run --project samples/NivaraInference -c Release -- laya --silk benchmark
 dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark             # seq 128 + 512 + 2048 + 4096; --seq selects a subset
+dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark                  # KV-cached vs full re-forward
+dotnet run --project samples/NivaraInference -c Release -- qwen --silk --plain benchmark          # plain-prompt decode path
+dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark                # F32 generation
 
 # PyTorch (Python) — run immediately after on the same machine
 cd samples/NivaraInference/Python
@@ -339,6 +353,16 @@ python smollm_generate_reference.py --dtype bfloat16
 ```
 
 Keep both dtype pairs same-dtype on CPU so the ratio and the F32-vs-BF16 memory/performance tradeoff are meaningful.
+
+**Update the tables:**
+1. CPU tables: shift existing **Current** values to **Prev**, place fresh measurements in
+   **Current**, compute **Ratio** and **Δ%**.
+2. Silk tables: use the same Prev/Current/Ratio/Δ% treatment for the Silk column, in the
+   same units as the CPU column, from the same machine and revision.
+3. Keep `—` only where no captured `--silk benchmark` output exists, with the reason in
+   the table footer.
+4. Update the machine/recording line to include AC power and the OpenCL device/vendor and
+   driver version for every Silk row.
 
 
 ## TypeSafe (in-process)
