@@ -87,7 +87,8 @@ prerequisites, and table-update instructions. Run them in order:
 |---|-----------|--------|---------------|
 | 1 | Core perf harness | `tests/Nivara.PerformanceTests/README.md` | .NET SDK only |
 | 2 | NivaraIncident | `samples/NivaraIncident/README.md` | Generated dataset (see Prerequisites) |
-| 3 | NivaraInference | `samples/NivaraInference/README.md` | Python + PyTorch + model weights |
+| 3 | NivaraInference (CPU) | `samples/NivaraInference/README.md` | Python + PyTorch + model weights |
+| 3a | NivaraInference (Silk/OpenCL) | `samples/NivaraInference/README.md` | OpenCL GPU + AC power + model weights |
 | 4 | NivaraFineTuning | `samples/NivaraFineTuning/README.md` | Python + PyTorch + model weights |
 
 For each benchmark: **open the README → follow the `## Release Benchmark` section →
@@ -100,14 +101,15 @@ machine difference in the table footer. Do not compute ratios across machines �
 a Nivara improvement plus a PyTorch improvement from more cores looks like a
 regression when it is not.
 
-**Silk backend (from the next release):** benchmarks for samples that support a
-`--silk` variant (`minilm`, `distilbert`, `distilbert_sst`, `laya`, `modernbert`
-where applicable, and the Qwen generation paths) must run **both** the CPU and the
-Silk variant in the same session and record a Silk column (ops/s or ms/op, same
-units as the CPU column) plus its ratio. CPU-only numbers are not sufficient
-once the Silk backend ships as a first-class path (see issue #984). Silk runs
-are AC-power-only and require the OpenCL device/driver to be recorded alongside
-the machine line.
+**Silk backend (required, non-skippable):** every sample that supports a `--silk`
+variant (`minilm`, `distilbert`, `distilbert_sst`, `laya`, `modernbert` where
+applicable, and the Qwen generation paths) must run **both** the CPU and the Silk
+variant in the same session and record a Silk column (ops/s or ms/op, same units
+as the CPU column) plus its ratio. CPU-only numbers are not release-grade once
+the Silk backend ships as a first-class path (see issue #984). Silk runs are
+AC-power-only and require the OpenCL device/driver to be recorded alongside the
+machine line. Do not skip this line item; if an OpenCL device is unavailable,
+record the reason in the PR.
 
 **Capture output for review:** when a human runs these benchmarks on behalf of
 an agent (or for later re-measurement), put every command in a temporary
