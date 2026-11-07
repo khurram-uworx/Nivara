@@ -32,7 +32,8 @@ The core perf harness run exceeded the shell timeout during prep, and the
 model-weight-dependent benchmarks (NivaraInference, NivaraFineTuning)
 were not runnable in this environment. Per RELEASING.md step 5 those
 numbers are left as-is and the reason is recorded here rather than being
-carried forward as fresh readings.
+carried forward as fresh readings. (Silk backend perf A/B is also deferred
+to the next release — see issue #984.)
 
 **Fix options:**
 - Split the harness into a machine-runnable quick mode, or document
