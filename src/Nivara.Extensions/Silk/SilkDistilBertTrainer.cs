@@ -428,11 +428,9 @@ public sealed class SilkDistilBertTrainer : IDisposable
             SilkLauncher.GemmTn(runtime, a.H1, dInterm, w.W1.Gradient.Handle,
                 aRows: hiddenDim, aCols: rows, bCols: intermediateDim);
             SilkLauncher.ColSum(runtime, dInterm, w.B1.Gradient.Handle, rows, intermediateDim, 1f);
-            SilkLauncher.GemmNt(runtime, dInterm, w.W1.Handle, dTmp2,
+            // Fused residual epilogue: dTmp = (dInterm @ W1) + dTmp.
+            SilkLauncher.GemmNtResidual(runtime, dInterm, w.W1.Handle, dTmp, dTmp,
                 aRows: rows, aCols: intermediateDim, bCols: hiddenDim);
-
-            // dH1 = d(preNorm2) + d(fc1 path).
-            SilkLauncher.Add(runtime, dTmp, dTmp2, dTmp, hiddenLen);
 
             // LN1: h1 = layer_norm(preNorm1), and dCur now holds dH1.
             LayerNormBackward(dTmp, a.PreNorm1, w.Ln1W, dCur, rows);
@@ -485,11 +483,9 @@ public sealed class SilkDistilBertTrainer : IDisposable
             SilkLauncher.GemmTn(runtime, hidden[i], dQkv, w.Wqkv.Gradient.Handle,
                 aRows: hiddenDim, aCols: rows, bCols: 3 * hiddenDim);
             SilkLauncher.ColSum(runtime, dQkv, w.Bqkv.Gradient.Handle, rows, 3 * hiddenDim, 1f);
-            SilkLauncher.GemmNt(runtime, dQkv, w.Wqkv.Handle, dTmp2,
+            // Fused residual epilogue: dCur = (dQkv @ Wqkv) + dCur.
+            SilkLauncher.GemmNtResidual(runtime, dQkv, w.Wqkv.Handle, dCur, dCur,
                 aRows: rows, aCols: 3 * hiddenDim, bCols: hiddenDim);
-
-            // dXIn = d(attnOut + xIn) + d(qkv path).
-            SilkLauncher.Add(runtime, dCur, dTmp2, dCur, hiddenLen);
             if (ProfilingEnabled)
             {
                 runtime.Finish();

@@ -899,6 +899,22 @@ the Adam step is memory-bandwidth bound rather than launch-overhead bound. The
 per-parameter dispatch is therefore retained; a single launch does not reach the
 20% target and would add arena/subview allocation complexity with no benefit.
 
+### LN/fc GEMM backward fusion probe (#1010)
+
+A residual-fused backward GEMM (`gemm_row4_nt_residual`) was added: the NT backward GEMM now
+adds its residual gradient into the destination as an epilogue, replacing the two
+`Add` launches in `SilkDistilBertTrainer.BackwardChain` (FC1 and QKV residual paths) with
+one launch and removing one read/write pass over the residual buffer. On `Intel(R) Graphics`,
+DistilBERT base (6 layers, hidden 768), L=128, the `LnFcGemmBackward` sub-stage stayed in the
+~200 ms (B=4) / ~843 ms (B=8) range, i.e. no measurable >=20% reduction versus the ~371 ms /
+~763 ms baseline recorded in #1001 — the residual `Add` passes are too small relative to the
+MAC-bound forward/backward kernels, and the version of the change left on the branch is kept
+only because it is parity-neutral (exact bit-identity against unfused NT + add) and removes
+launch overhead, not because of a bandwidth win. Bias-gradient fusion was investigated and
+declined: fusing `col_sum` into the transposed GEMM would require either atomic accumulation
+across tile output rows (breaks the ascending-row byte-identity contract) or a second reduction
+launch (no bandwidth benefit).
+
 ## 14. Follow-up issues (Silk fine-tuning)
 
 Open follow-ups from the #956 implementation, in priority order. All are tracked as GitHub
@@ -907,8 +923,9 @@ issues; status and discussion live there.
 | # | Priority | Title | Notes |
 |---|----------|-------|-------|
 | [#1004](https://github.com/khurram-uworx/Nivara/issues/1004) | High | perf(silk): fuse Adam per-parameter launches in SilkDistilBertTrainer | **Closed — documented conclusion.** A fused contiguous launch was attempted (70 params copied into four contiguous arenas and one `adam_update` launch): measured `AdamUpdateAll` stayed ~62 ms (B=4/B=8), no gain within run-to-run noise. The Adam step is memory-bandwidth bound, not launch-overhead bound; per-parameter dispatch is retained. |
+| [#1010](https://github.com/khurram-uworx/Nivara/issues/1010) | High | perf(silk): probe LN/fc GEMM backward fusion (bias+residual epilogues) for BERT/Laya | **Closed — documented conclusion.** A parity-neutral residual-fused NT GEMM (`gemm_row4_nt_residual`) replaced the two residual `Add` passes in the DistilBERT backward chain; `LnFcGemmBackward` stayed ~200 ms (B=4) / ~843 ms (B=8), below the 20% target, so the MAC-bound backward GEMMs remain the dominant cost. Bias-gradient fusion was declined on byte-identity grounds. |
 
-All earlier fine-tuning follow-ups (#960-#966, #1001-#1004) are closed; see their linked PRs for landed changes. The remaining headroom levers are, in order: reducing the launch count on the backward GEMMs (LN/fc GEMM backward is the larger target); the CPU-vs-Silk question is settled (Silk is 6.2-8.6x faster at B=2/4/8, L=128 even below 10% GPU util).
+All earlier fine-tuning follow-ups (#960-#966, #1001-#1004, #1010) are closed; see their linked PRs for landed changes. The remaining headroom lives in reducing MAC work in the backward GEMMs themselves; the CPU-vs-Silk question is settled (Silk is 6.2-8.6x faster at B=2/4/8, L=128 even below 10% GPU util).
 
 ---
 
