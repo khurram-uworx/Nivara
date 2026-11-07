@@ -23,7 +23,7 @@ internal static class DocsCoveragePins
     /// <summary>
     /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus other under
     /// </summary>
-    internal const int ExpectedDocumentCount = 61;
+    internal const int ExpectedDocumentCount = 60;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
