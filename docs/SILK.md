@@ -829,11 +829,11 @@ issues; status and discussion live there.
 | # | Priority | Title | Notes |
 |---|----------|-------|-------|
 | [#962](https://github.com/khurram-uworx/Nivara/issues/962) | High | test(silk): add loss-decreasing smoke test for `SilkDistilBertTrainer` | Gradient parity proves the math; this proves the AdamW wiring |
-| [#963](https://github.com/khurram-uworx/Nivara/issues/963) | High | feat(samples): add per-batch timing to `RunTrainSilk` | Unblocks #960; mirror the CPU path's `Stopwatch` pattern |
+| [#963](https://github.com/khurram-uworx/Nivara/issues/963) | High | feat(samples): add per-batch timing to `RunTrainSilk` | Landed (khurram/963); unblocks #960 |
 | [#964](https://github.com/khurram-uworx/Nivara/issues/964) | Medium | perf(samples): use `SilkBertEncoderRunner` for dev eval | Avoids per-epoch weight export (66M params × 2 conversions) |
 | [#965](https://github.com/khurram-uworx/Nivara/issues/965) | Medium | fix(samples): consistent `--max-len` clamping in `RunTrainSilk` | Training vs dev-eval shape mismatch risk |
 | [#966](https://github.com/khurram-uworx/Nivara/issues/966) | Low | refactor(samples): simplify `RunTrainSilk` training loop | Single `Train` call + per-epoch eval |
-| [#960](https://github.com/khurram-uworx/Nivara/issues/960) | Measurement | bench: add Silk column to NivaraFineTuning benchmark table | Readings must be taken on AC power |
+| [#960](https://github.com/khurram-uworx/Nivara/issues/960) | Measurement | bench: add Silk column to NivaraFineTuning benchmark table | Harness + docs landed (khurram/960); AC-power readings pending |
 | [#961](https://github.com/khurram-uworx/Nivara/issues/961) | Investigation | perf(silk): low GPU utilization during training | <10% GPU on Intel Graphics; profile first |
 
 ---

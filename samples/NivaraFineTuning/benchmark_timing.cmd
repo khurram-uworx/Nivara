@@ -35,4 +35,13 @@ echo === Nivara === >> benchmark_results.txt
 dotnet run --project ..\..\samples\NivaraFineTuning -c Release -- --mode train --epochs %EPOCHS% --batch-size %BATCH_SIZE% --max-examples %EXAMPLES% 2>&1 | tee -a benchmark_results.txt
 
 echo. >> benchmark_results.txt
+echo ======================== >> benchmark_results.txt
+echo. >> benchmark_results.txt
+
+REM --- Nivara (Silk/OpenCL) baseline ---
+echo [Nivara Silk] Starting...
+echo === Nivara (Silk/OpenCL) === >> benchmark_results.txt
+dotnet run --project ..\..\samples\NivaraFineTuning -c Release -- --mode train --silk --epochs %EPOCHS% --batch-size %BATCH_SIZE% --max-examples %EXAMPLES% 2>&1 | tee -a benchmark_results.txt
+
+echo. >> benchmark_results.txt
 echo Done. Results written to benchmark_results.txt
