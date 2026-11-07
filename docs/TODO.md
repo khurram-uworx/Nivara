@@ -46,6 +46,16 @@ sample path does not yet print a steady-state ms/batch (first batch excluded) th
 - Risk: synthetic probe must stay workload-matched to Silk probe (weights, shapes,
   optimizer hyperparameters, L=128).
 
+## Measurement results (2026-11-07, battery not AC, 48 examples, first batch excluded)
+
+| B | CPU ms/batch | Silk ms/batch | CPU/Silk |
+|---|---:|---:|---:|
+| 2 | 3140.9 | 365.8 | 8.59x |
+| 4 | 4516.8 | 636.7 | 7.09x |
+| 8 | 7720.4 | 1250.4 | 6.17x |
+
+Conclusion: CPU not within ~1.5x of integrated GPU at B<=8; Silk 6.2-8.6x faster.
+
 ## GitHub issues log
 
 - (none yet)
