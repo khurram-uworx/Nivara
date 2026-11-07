@@ -38,6 +38,7 @@ internal static class SilkDistilBertTrainingProfileProbe
         model.LoadWeights(tensors);
 
         using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch: 8, maxSeqLen: 128);
+        trainer.ProfilingEnabled = true;
         Console.WriteLine($"Device: {runtime.DeviceName}");
         Console.WriteLine($"Config: layers={bertConfig.NumHiddenLayers}, hidden={bertConfig.HiddenSize}, heads={bertConfig.NumAttentionHeads}, vocab={bertConfig.VocabSize}");
         Console.WriteLine();
@@ -95,6 +96,7 @@ internal static class SilkDistilBertTrainingProfileProbe
             var stageMs = new List<double>[stageNames.Length];
             for (int i = 0; i < stageNames.Length; i++) stageMs[i] = [];
             var totalMs = new List<double>();
+            var backwardStageMs = new Dictionary<string, List<double>>();
 
             for (int iter = 0; iter < Iters; iter++)
             {
@@ -103,6 +105,15 @@ internal static class SilkDistilBertTrainingProfileProbe
                 swTotal.Stop();
                 for (int i = 0; i < stageNames.Length; i++)
                     stageMs[i].Add(times[i]);
+                foreach (var kv in trainer.LastPhaseMs)
+                {
+                    if (!backwardStageMs.TryGetValue(kv.Key, out var list))
+                    {
+                        list = [];
+                        backwardStageMs[kv.Key] = list;
+                    }
+                    list.Add(kv.Value);
+                }
                 totalMs.Add(swTotal.Elapsed.TotalMilliseconds);
             }
 
@@ -122,6 +133,13 @@ internal static class SilkDistilBertTrainingProfileProbe
             Console.WriteLine($"{"Sum of stages",-22} {stageSum,10:F3} {(totalMedian > 0 ? 100.0 * stageSum / totalMedian : 0),12:F1}");
             Console.WriteLine($"{"Measured total",-22} {totalMedian,10:F3} {100.0,12:F1}");
             Console.WriteLine();
+            if (backwardStageMs.Count > 0)
+            {
+                Console.WriteLine("  Backward sub-stages (GPU, ms):");
+                foreach (var kv in backwardStageMs.OrderBy(k => k.Key))
+                    Console.WriteLine($"    {kv.Key,-22} {Median(kv.Value),10:F3}");
+                Console.WriteLine();
+            }
         }
 
         return 0;
