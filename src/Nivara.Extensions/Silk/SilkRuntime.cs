@@ -37,6 +37,7 @@ public sealed unsafe class SilkRuntime : IDisposable
 
     public string DeviceName { get; }
     public string Vendor { get; }
+public string DriverVersion { get; }
     public ulong MaxWorkGroupSize { get; }
     public ulong LocalMemorySize { get; }
 
@@ -65,6 +66,7 @@ public sealed unsafe class SilkRuntime : IDisposable
             device = dev;
             DeviceName = name;
             Vendor = vendor;
+            DriverVersion = DeviceInfoString(cl, dev, DeviceInfo.DriverVersion);
             MaxWorkGroupSize = maxWorkGroupSize;
             LocalMemorySize = localMemorySize;
 
@@ -94,7 +96,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     }
 
     public string Describe()
-        => $"{DeviceName} ({Vendor}) | max WG {MaxWorkGroupSize} | local {LocalMemorySize} B";
+        => $"{DeviceName} ({Vendor}) | driver {DriverVersion} | max WG {MaxWorkGroupSize} | local {LocalMemorySize} B";
 
     /// <summary>
     /// Rejects a head dimension the fused attention tile cannot hold (it mirrors
