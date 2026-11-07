@@ -226,7 +226,8 @@ public sealed class SilkDistilBertTrainer : IDisposable
     public IReadOnlyList<SilkTrainEpoch> Train(
         int[] tokenIds, float[] attentionMask, int[] labels,
         int batchSize, int seqLen, int epochs, float learningRate, float weightDecay, int seed,
-        Action<int, int, int, float, TimeSpan>? onBatchCompleted = null)
+        Action<int, int, int, float, TimeSpan>? onBatchCompleted = null,
+        Action<int, int, float, TimeSpan>? onEpochCompleted = null)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(tokenIds);
@@ -304,6 +305,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
             stopwatch.Stop();
             results.Add(new SilkTrainEpoch(epoch, lossBatches > 0 ? lossSum / lossBatches : 0f, stopwatch.Elapsed));
+            onEpochCompleted?.Invoke(epoch + 1, epochs, results[^1].Loss, stopwatch.Elapsed);
         }
 
         return results;
