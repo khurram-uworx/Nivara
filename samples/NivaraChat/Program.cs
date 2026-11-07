@@ -37,6 +37,17 @@ if (args.Length > 0)
     bool gradeAll = false;
     bool verbose = false;
     string? queries = null;
+    string? labels = null;
+    int epochs = 200;
+    float learningRate = 0.05f;
+    float weightDecay = 0.01f;
+    int patience = 20;
+    string? gate = null;
+    string? loss = null;
+    int candidates = 0;
+    int seed = 42;
+    int trainQueries = 0;
+    int? evalK = null;
     for (int i = 1; i < args.Length; i++)
     {
         if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
@@ -63,9 +74,33 @@ if (args.Length > 0)
         if (args[i] == "--grade-all") gradeAll = true;
         if (args[i] == "--verbose") verbose = true;
         if (args[i] == "--queries" && i + 1 < args.Length) queries = args[++i];
+        if (args[i] == "--labels" && i + 1 < args.Length) labels = args[++i];
+        if (args[i] == "--epochs" && i + 1 < args.Length) epochs = int.Parse(args[++i]);
+        if (args[i] == "--lr" && i + 1 < args.Length) learningRate = float.Parse(args[++i]);
+        if (args[i] == "--weight-decay" && i + 1 < args.Length) weightDecay = float.Parse(args[++i]);
+        if (args[i] == "--patience" && i + 1 < args.Length) patience = int.Parse(args[++i]);
+        if (args[i] == "--gate" && i + 1 < args.Length) gate = args[++i];
+        if (args[i] == "--loss" && i + 1 < args.Length) loss = args[++i];
+        if (args[i] == "--candidates" && i + 1 < args.Length) candidates = int.Parse(args[++i]);
+        if (args[i] == "--seed" && i + 1 < args.Length) seed = int.Parse(args[++i]);
+        if (args[i] == "--train-queries" && i + 1 < args.Length) trainQueries = int.Parse(args[++i]);
+        if (args[i] == "--k" && i + 1 < args.Length) evalK = int.Parse(args[++i]);
     }
 
-    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights, offline, runs, temperature, gradeAll, verbose, queries);
+    var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights, offline, runs, temperature, gradeAll, verbose, queries)
+    {
+        Labels = labels,
+        Epochs = epochs,
+        LearningRate = learningRate,
+        WeightDecay = weightDecay,
+        Patience = patience,
+        Gate = gate,
+        Loss = loss,
+        Candidates = candidates,
+        Seed = seed,
+        TrainQueries = trainQueries,
+        EvalK = evalK
+    };
     switch (mode)
     {
         case "--train":
@@ -103,6 +138,9 @@ if (args.Length > 0)
             break;
         case "--rag-eval":
             await RagEvalMode.Run(ctx);
+            break;
+        case "--rag-learn":
+            await RagLearnMode.Run(ctx);
             break;
         case "--intent-train":
             TrainingMode.RunIntentTrain(ctx, fromCli: true);
@@ -210,6 +248,7 @@ void PrintUsage()
     Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer (Ollama optional)");
     Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection (Ollama optional)");
     Console.WriteLine("  --rag-multiview      Multi-view retrieval (#914): four views per chunk, late fusion, disagreement report");
+    Console.WriteLine("  --rag-learn          Differentiable retrieval (#915): learn the fusion weights and a query gate, compare on held-out queries");
     Console.WriteLine("  --intent-train       Train the 5-class intent classifier");
     Console.WriteLine("  --intent             Intent routing: classify input, route to specialist executor");
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
@@ -235,6 +274,17 @@ void PrintUsage()
     Console.WriteLine("  --explore                 --rag-multiview: bucket all visible chunks by view disagreement");
     Console.WriteLine("  --report <path>           --rag-multiview: write a markdown report (relative paths land under samples/data/nivarachat)");
     Console.WriteLine("  --weights <spec>          --rag-multiview: e.g. content=0.5,title=0.2,section=0.2,code=0.1");
+    Console.WriteLine("  --labels <judge|fixture|auto>  --rag-learn: label source (default: judge, else fixture; auto is a leakage diagnostic)");
+    Console.WriteLine("  --epochs <int>            --rag-learn: training epochs (default: 200)");
+    Console.WriteLine("  --lr <float>              --rag-learn: Adam learning rate (default: 0.05)");
+    Console.WriteLine("  --weight-decay <float>    --rag-learn: Adam weight decay (default: 0.01)");
+    Console.WriteLine("  --patience <int>          --rag-learn: early-stopping patience on validation nDCG (default: 20)");
+    Console.WriteLine("  --gate <stats|embed|none> --rag-learn: query gate features (default: stats); none skips the gated model");
+    Console.WriteLine("  --loss <listwise|pairwise> --rag-learn: ranking loss (default: listwise)");
+    Console.WriteLine("  --candidates <int>        --rag-learn: rows each view contributes to the pool (default: 10)");
+    Console.WriteLine("  --seed <int>              --rag-learn: query-split and shuffle seed (default: 42)");
+    Console.WriteLine("  --train-queries <int>     --rag-learn: cap the training split (default: all)");
+    Console.WriteLine("  --k <int>                 --rag-learn: metric cut-off (default: 10)");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");

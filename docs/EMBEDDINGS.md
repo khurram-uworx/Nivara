@@ -294,6 +294,69 @@ writes metadata plus the four prefixed dimension blocks as one Parquet, and
 `samples/NivaraChat/Helpers/MultiViewIndexCache.cs::MultiViewIndexCache.IsValid()`
 rejects a cache whose footer does not hold one dimension block per view.
 
+### Learning the fusion weights
+
+Those four weights are a hand-picked default, not a fitted result, so `--rag-learn` (#915) trains
+them and compares the result against the fixed baseline on queries neither model saw. The trainable
+part reranks a candidate pool; candidate generation stays outside the gradient path, so this is a
+reranking comparison rather than three different retrieval systems.
+
+The fusion weights are parameterized as logits and pushed through a softmax, which keeps them
+strictly positive and summing to one:
+
+```
+w     = softmax(theta)                  # theta in R^4
+fused = ((S . M) @ w) / (M @ w)         # S = cosine scores [rows, 4], M = presence mask
+```
+
+That is the tensor form of the per-row renormalization the sample already does, and the denominator
+cannot be zero: softmax is strictly positive and every pooled row has at least one scored view.
+Initializing `theta = ln(0.5, 0.2, 0.2, 0.1)` makes `softmax(theta)` return the defaults exactly,
+because those four numbers sum to one, so an untrained model is numerically the #914 baseline. That
+parity is the point: it makes a measured delta attributable to learning rather than to a different
+fusion formula, and both the model and the mode assert it
+(`samples/NivaraChat/Helpers/RetrievalTrainer.cs::FusionModel`).
+
+The query gate is a mixture of the four cosine scorers. Its default feature vector is each view's
+mean and max cosine over the candidate pool, 8 features to 4 logits, 36 parameters; the gate weight
+matrix starts at zero and the bias at those same logits, so it is invariant to its input until
+training moves it. `--gate embed` swaps in a 384-to-4 linear layer over the raw query embedding for
+comparison, and 36 parameters is the size expected to survive roughly a hundred training queries.
+
+The loss is listwise softmax cross-entropy against a `2^grade` target, normalized per query, so
+grade 2 outranks 1 outranks 0 and a query contributes one graph
+(`samples/NivaraChat/Helpers/RetrievalTrainer.cs::RetrievalTrainer.Train()`). `--loss pairwise`
+selects a logistic loss over ordered pairs instead. Both are gather-free, which is a constraint
+rather than a preference: `ReverseGradOperations` has no row-gather op, so the listwise path uses
+`LogSoftmax` and the pairwise path multiplies a constant ±1 selector matrix.
+
+Candidate generation is deliberately weight-agnostic: the pool is the union of each view's own
+top-K plus every labeled positive
+(`samples/NivaraChat/Helpers/RetrievalTrainingData.cs::CandidatePool.Select()`). Drawing the pool
+from the fixed baseline's top-K would let the baseline choose its own competitors.
+
+Labels come from three sources, and the difference matters for what the numbers mean. The default is
+the LLM-judge cache written by `--rag-eval`; the fallback is a committed fixture keyed by **document
+path**, so it survives docs edits where a `path#chunk` id does not; and `--labels auto` uses
+heading-derived pseudo-queries, which are self-fulfilling because Title and Section then score their
+own positive near 1.0. Auto labels are therefore a leakage diagnostic, printed with a warning, never
+a headline. The mode refuses to train when fewer than half the label rows resolve, since a stale
+label file shrinks the relevant set and lowers every ranker without any of them being worse.
+
+Checkpoint selection uses validation nDCG@K with patience and the test split is scored once at the
+end; the split itself hashes the query string with FNV-1a because `string.GetHashCode()` is
+randomized per process and would make two reports incomparable
+(`samples/NivaraChat/Helpers/RetrievalTrainingData.cs::QuerySplit.Create()`). The paired comparison
+is the same one `--rag-eval` already reports — per-query nDCG, win/loss/tie, a sign test and Cohen's
+d — so neither a small consistent win nor a large noisy one is mistaken for the other
+(`samples/NivaraChat/Helpers/RetrievalEvaluation.cs::RetrievalEvaluation.Compare()`).
+
+Two behaviours are stated rather than implied. A learned model that loses on held-out queries is a
+valid outcome, so the mode prints the comparison and does not claim a win. And a two-sided sign test
+cannot reach p < 0.05 with fewer than six decisive queries, so the mode says so when the held-out
+split is too small to support a headline. With `--silk` the MiniLM embeddings run on the OpenCL
+backend; training and scoring stay on CPU, and GPU training is a documented follow-up.
+
 ## What this convention is not
 
 - Not a column kind. There is no `NivaraColumn<Embedding<float>>`; the convention

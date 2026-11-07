@@ -1,0 +1,141 @@
+# Offline relevance fixture for `--rag-learn`.
+#
+# Hand-authored, NOT judge output. It exists so the learning-to-rank mode has a label source
+# when the local `--rag-eval` judge cache is absent; when that cache exists it is the default,
+# because it is graded against the corpus as actually retrieved rather than against doc topics.
+#
+# Format:  query <TAB> document-path <TAB> grade   (grade 2 = answers the query, 1 = related, 0 = not relevant)
+# IDs are document paths, not `path#chunk` ids: chunk ordinals move whenever a document is edited,
+# which is exactly how the judge cache went stale, while document paths survive. Every chunk of a
+# matched document inherits its grade.
+#
+# Paths resolve against the corpus NivaraChat indexes: `<docs-dir>/**/*.md` plus
+# `samples/NivaraChat/README.md`. Lines beginning with `#` and blank lines are ignored.
+
+how do I run reverse-mode automatic differentiation	docs/AUTODIFF.md	2
+how do I run reverse-mode automatic differentiation	docs/TENSORS.md	1
+how do I run reverse-mode automatic differentiation	docs/EMBEDDINGS.md	0
+
+what is the default memory budget for a query	docs/STREAMING.md	2
+what is the default memory budget for a query	docs/STREAMING-PROPOSAL.md	1
+what is the default memory budget for a query	docs/LINQ.md	0
+
+how does the Silk OpenCL backend launch kernels	docs/SILK.md	2
+how does the Silk OpenCL backend launch kernels	docs/ACCELERATION.md	1
+how does the Silk OpenCL backend launch kernels	docs/ILGPU.md	1
+
+how do I read one row of a rank-2 tensor	docs/TENSORS.md	2
+how do I read one row of a rank-2 tensor	docs/AUTODIFF.md	1
+
+what does the fused expression engine do	docs/LINQ.md	2
+what does the fused expression engine do	docs/STREAMING.md	1
+
+how is BFloat16 represented in memory	docs/BFLOAT16.md	2
+how is BFloat16 represented in memory	docs/TENSORS.md	1
+how is BFloat16 represented in memory	docs/INTEGERS.md	0
+
+how do I load SafeTensors weights	docs/SAFETENSORS.md	2
+how do I load SafeTensors weights	docs/LAYA.md	1
+how do I load SafeTensors weights	docs/ONNX.md	0
+
+how do I serve SmolLM as an IChatClient	docs/SMOLLM.md	2
+how do I serve SmolLM as an IChatClient	docs/QWEN.md	1
+how do I serve SmolLM as an IChatClient	samples/NivaraChat/README.md	1
+
+how do I do native function calling with Qwen	docs/QWEN.md	2
+how do I do native function calling with Qwen	docs/SMOLLM.md	1
+
+what is the ModernBERT architecture	docs/MODERNBERT.md	2
+what is the ModernBERT architecture	docs/DISTELBERT.md	1
+what is the ModernBERT architecture	docs/LAYA.md	0
+
+how do I move embeddings between a frame and Microsoft.Extensions.AI	docs/EMBEDDINGS.md	2
+how do I move embeddings between a frame and Microsoft.Extensions.AI	docs/TENSORS.md	1
+
+how does DistelBERT distil a larger teacher	docs/DISTELBERT.md	2
+how does DistelBERT distil a larger teacher	docs/MODERNBERT.md	1
+
+what inputs does the Laya head model take	docs/LAYA.md	2
+what inputs does the Laya head model take	docs/MODERNBERT.md	1
+
+how do I stream a query frame	docs/STREAMING.md	2
+how do I stream a query frame	docs/LINQ.md	1
+
+which SIMD instruction sets are accelerated	docs/AVX512.md	2
+which SIMD instruction sets are accelerated	docs/ACCELERATION.md	2
+which SIMD instruction sets are accelerated	docs/BLAS-MKL.md	1
+
+how do I use BLAS or MKL for matrix multiplication	docs/BLAS-MKL.md	2
+how do I use BLAS or MKL for matrix multiplication	docs/ACCELERATION.md	1
+
+how do the vision convolution kernels work	docs/VISION.md	2
+how do the vision convolution kernels work	docs/ACCELERATION.md	1
+
+how are integers handled inside tensors	docs/INTEGERS.md	2
+how are integers handled inside tensors	docs/TENSORS.md	1
+
+how do I export a model to ONNX	docs/ONNX.md	2
+how do I export a model to ONNX	docs/SAFETENSORS.md	1
+
+what does the release readiness review check	docs/RELEASE14-REVIEW.md	2
+what does the release readiness review check	docs/ROADMAP-SUGGESTION.md	1
+
+how does the retraining loop collect feedback	docs/RETRAINING.md	2
+how does the retraining loop collect feedback	docs/DECISION-MODELS.md	1
+
+what decision models does the sample train	docs/DECISION-MODELS.md	2
+what decision models does the sample train	docs/RETRAINING.md	1
+
+how do I bound memory during a streaming scan	docs/STREAMING.md	2
+how do I bound memory during a streaming scan	docs/STREAMING-PROPOSAL.md	1
+
+what does the streaming proposal change	docs/STREAMING-PROPOSAL.md	2
+what does the streaming proposal change	docs/STREAMING.md	1
+
+how do I write a LINQ query over a frame	docs/LINQ.md	2
+how do I write a LINQ query over a frame	docs/TENSORS.md	1
+
+what are the GPU GEMM tile measurements	docs/ILGPU.md	2
+what are the GPU GEMM tile measurements	docs/SILK.md	1
+
+how do I point NivaraChat at a different Ollama endpoint	samples/NivaraChat/README.md	2
+how do I point NivaraChat at a different Ollama endpoint	docs/QWEN.md	0
+
+how does frame to tensor interop work	docs/TENSORS.md	2
+how does frame to tensor interop work	docs/LINQ.md	1
+
+how does the embedding cache decide a hit	docs/EMBEDDINGS.md	2
+how does the embedding cache decide a hit	samples/NivaraChat/README.md	1
+
+how do I reduce precision to bfloat16	docs/BFLOAT16.md	2
+how do I reduce precision to bfloat16	docs/INTEGERS.md	1
+
+what is the tensor acceleration roadmap	docs/ACCELERATION.md	2
+what is the tensor acceleration roadmap	docs/ROADMAP-SUGGESTION.md	1
+
+how do I train an intent classifier	docs/DECISION-MODELS.md	2
+how do I train an intent classifier	samples/NivaraChat/README.md	1
+
+what is the architecture decision for span-based AutoDiff boundaries	docs/adr/002-autodiff-span-boundary.md	2
+what is the architecture decision for span-based AutoDiff boundaries	docs/AUTODIFF.md	1
+
+why are documentation citations symbol-anchored instead of line-numbered	docs/adr/008-symbol-anchored-citations.md	2
+why are documentation citations symbol-anchored instead of line-numbered	docs/AGENT-CODE-EXAMPLES.md	1
+
+how does the streaming budget get exposed on the public API	docs/adr/006-streaming-memory-budget-exposure.md	2
+how does the streaming budget get exposed on the public API	docs/STREAMING.md	2
+
+why does the byte-wise null mask need a polarity inversion at the Arrow boundary	docs/adr/007-byte-wise-null-mask-fast-path.md	2
+why does the byte-wise null mask need a polarity inversion at the Arrow boundary	docs/TENSORS.md	0
+
+what are the rules for writing a gated csharp snippet in the docs	docs/adr/005-snippet-gate-authoring-contract.md	2
+what are the rules for writing a gated csharp snippet in the docs	docs/AGENT-CODE-EXAMPLES.md	1
+
+what is the fused expression engine kernel IR decision	docs/adr/004-fused-expression-engine-kernel-ir-span-backends.md	2
+what is the fused expression engine kernel IR decision	docs/LINQ.md	1
+
+why are batch fused operations preferred over rank-N primitives	docs/adr/003-batch-fused-ops-not-rank-n-primitives.md	2
+why are batch fused operations preferred over rank-N primitives	docs/AUTODIFF.md	1
+
+what are the rules for the non-nullable AutoDiff domain	docs/adr/001-autodiff-nonnullable-domain.md	2
+what are the rules for the non-nullable AutoDiff domain	docs/AUTODIFF.md	1

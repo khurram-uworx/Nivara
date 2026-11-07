@@ -59,6 +59,50 @@ public sealed class MultiViewIndex : IDisposable
     /// <summary>Whether any chunk passes the configured ACL filter.</summary>
     public bool HasVisibleChunks => chunks.Count > 0;
 
+    /// <summary>The four flat <c>[rows, dim]</c> per-view matrices the index scores against.</summary>
+    public MultiViewMatrices Matrices => matrices;
+
+    /// <summary>
+    /// The convention frame holding chunk metadata, the four <c>float[]</c> vector columns and the
+    /// Content/Title coherence. Scoring and training both need the raw rows, not just the top-K.
+    /// </summary>
+    public NivaraFrame Metadata => metadata;
+
+    /// <summary>
+    /// Embeds <paramref name="query"/>, throwing instead of returning null when the embedder fails.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Retrieve"/> swallows the failure deliberately: an interactive search with no query
+    /// vector is just an empty result. Training and evaluation cannot do that, because scoring nothing
+    /// still produces a plausible-looking metric, so they use this method and fail loudly.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The embedder threw, returned null, or returned a vector of the wrong dimension.
+    /// </exception>
+    public float[] EmbedQuery(string query)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(query);
+
+        float[]? vector;
+        try
+        {
+            vector = embedder.Embed(query);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to embed the query '{query}'.", ex);
+        }
+
+        if (vector is null || vector.Length != embedder.Dimension)
+        {
+            throw new InvalidOperationException(
+                $"Embedding the query '{query}' returned {(vector is null ? "null" : $"{vector.Length} dimensions")}; " +
+                $"expected {embedder.Dimension}.");
+        }
+
+        return vector;
+    }
+
     /// <summary>
     /// Loads MiniLM, chunks the corpus, then loads or builds the multi-view cache. Returns
     /// <see langword="null"/> after printing the reason when the model or corpus is missing.
