@@ -121,6 +121,14 @@ The core harness JSON file should also be saved under `%TEMP%` (e.g.
 the PR without committing a large binary. The script may `cd` into sample
 directories, but it must end back at the repository root.
 
+**Regenerating benchmark tables safely:** results tables that carry a
+Prev/Current/Δ% shape should be bracketed in the README with HTML comments
+`<!--hidden-starting-->` ... `<!--hidden-ending-->` and regenerated from the
+captured JSON/console output with
+`samples/NivaraInference/Python/regen_perf_table.py` (pass `--json` and
+`--readme`), which rewrites only the rows between the markers. Keep a
+`.bak` copy, review the diff, then remove the markers before committing.
+
 ### Step 6 — Commit, PR, merge
 
 Commit the release prep (docs + version bump) on a branch, open a PR, and merge to

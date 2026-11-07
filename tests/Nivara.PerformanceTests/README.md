@@ -806,53 +806,52 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
 
 | Scenario | Prev | Current | Δ% | B/op | gen0/op |
 |---|---|---|---|---|---|
-| ColumnAdd 1M x float | 1,515 | 1,684 | +11.2% | 4,000,192 | 0.24 |
-| ColumnSigmoid 1M x float | 625 | 993 | +58.9% | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 934 | 994 | +6.4% | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 324 | 323 | −0.3% | 12,000,416 | 0.34 |
-| Fused chain 1M x (Salary\*1.1)+1000-Tax | 284 | 278 | −2.1% | 16,005,408 | 0.34 |
-| Fused chain chunked 1M x 64k rows | 240 | 240 | 0.0% | 16,005,408 | 0.34 |
-| Fused single-op TP 1M x (Salary\*1.1) | 479 | 674 | +40.7% | 8,002,986 | 0.24 |
-| Column mul-scalar 1M (wrapper) | 555 | 642 | +15.7% | 8,000,272 | 0.22 |
-| Linear forward [32x256] -> [32x256] | 960 | 1,363 | +42.0% | 69,122 | 0.00 |
-| Linear forward+backward [32x256] | 124 | 227 | +83.1% | 668,974 | 0.10 |
-| TransformerBlock forward [32x64, 4 heads] | 118 | 284 | +140.7% | 186,457 | 0.00 |
-| Attn per-seq forward [B16 L128 D64 H4] | 91 | 68 | −25.3% | 2,126,467 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 338 | 410 | +21.3% | 528,637 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 25 | 29 | +16.0% | 7,935,987 | 0.42 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 118 | 110 | −6.8% | 7,875,807 | 0.42 |
-| RowScore per-row copy+dot [10k x 128] | 114 | 140 | +22.8% | 2 | 0.00 |
-| Frame RowDot [10k x 128] | 357 | 496 | +38.9% | 51,706 | 0.00 |
-| Frame Slice [10k x 128] | 14,996 | 7,091 | −52.7% | 89,942 | 0.02 |
-| RowDot kernel raw [10k x 128] | 1,161 | 1,226 | +5.6% | 1 | 0.00 |
-| RowCosineSimilarity kernel raw [10k x 128] | 246 | 429 | +74.4% | 1 | 0.00 |
-| RollingSum null-free 1M x int (w10) | 520 | 526 | +1.2% | 5,000,137 | 0.10 |
-| RollingSum nulls 1M x int (w10) | 82 | 93 | +13.4% | 22,000,233 | 0.26 |
-| RankKernel RowNumber 100k x int | 35 | 44 | +25.7% | 1,700,313 | 0.00 |
-| GroupBy 1M rows x 1000 keys (typed) | 30 | 29 | −3.3% | 8,906,940 | 0.75 |
-| GroupBy 1M rows x 100 string keys (typed) | 17 | 23 | +35.3% | 13,188,494 | 1.05 |
-| PartitionedWindow RollingSum 1M x 100 parts | 11 | 18 | +63.6% | 36,216,494 | 2.15 |
-| Row.Where nullable-element GetValue 100k | — | 117 | — | 7,316,162 | 0.35 |
+| ColumnAdd 1M x float | 1,684 | 1,562 | +3.1% | 4,000,232 | 0.24 |
+| ColumnSigmoid 1M x float | 993 | 1,186 | +89.8% | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 994 | 969 | +3.7% | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 323 | 355 | +9.6% | 12,000,536 | 0.34 |
+| Fused chain 1M x (Salary\*1.1)+1000-Tax | 278 | 294 | +3.5% | 16,005,448 | 0.34 |
+| Fused chain chunked 1M x 64k rows | 240 | 248 | +3.3% | 16,005,448 | 0.34 |
+| Fused single-op TP 1M x (Salary\*1.1) | 674 | 722 | +50.7% | 8,003,026 | 0.24 |
+| Column mul-scalar 1M (wrapper) | 642 | 705 | +27.0% | 8,000,312 | 0.22 |
+| Linear forward [32x256] -> [32x256] | 1,363 | 457 | −52.4% | 68,072 | 0.00 |
+| Linear forward+backward [32x256] | 227 | 123 | −0.8% | 929,327 | 0.10 |
+| TransformerBlock forward [32x64, 4 heads] | 284 | 278 | +135.6% | 185,161 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | 68 | 87 | −4.4% | 2,130,051 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 410 | 304 | −10.1% | 528,637 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 29 | 25 | +0.0% | 8,992,563 | 0.58 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 110 | 133 | +12.7% | 8,925,347 | 0.25 |
+| RowScore per-row copy+dot [10k x 128] | 140 | 146 | +28.1% | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 496 | 473 | +32.5% | 51,746 | 0.00 |
+| Frame Slice [10k x 128] | 7,091 | 21,535 | +43.6% | 95,056 | 0.01 |
+| RowDot kernel raw [10k x 128] | 1,226 | 1,212 | +4.4% | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 429 | 418 | +69.9% | 1 | 0.00 |
+| RollingSum null-free 1M x int (w10) | 526 | 606 | +16.5% | 5,000,177 | 0.04 |
+| RollingSum nulls 1M x int (w10) | 93 | 92 | +12.2% | 22,000,273 | 0.22 |
+| RankKernel RowNumber 100k x int | 44 | 50 | +42.9% | 1,700,516 | 0.04 |
+| GroupBy 1M rows x 1000 keys (typed) | 29 | 33 | +10.0% | 8,906,940 | 0.70 |
+| GroupBy 1M rows x 100 string keys (typed) | 23 | 27 | +58.8% | 13,188,494 | 1.05 |
+| PartitionedWindow RollingSum 1M x 100 parts | 18 | 20 | +81.8% | 36,224,256 | 2.25 |
+| Row.Where nullable-element GetValue 100k | 117 | 100 | — | 9,335,906 | 0.50 |
 | Streaming cancel mid-stream 200k x 10k chunk | 2,871 | 6,152 | +114.3% | 5,587 | 0.07 |
-| AutoDiff Pow(2.5) fwd+bwd 1M x float | 68 | 92 | +35.3% | 8,001,874 | 0.10 |
-| AutoDiff Pow(2.5) scalar baseline 1M x float | 24 | 38 | +58.3% | 2 | 0.00 |
-| AutoDiff RMSNorm fwd+bwd 1M x float | 360 | 405 | +12.5% | 8,002,194 | 0.15 |
-| AutoDiff RMSNorm scalar baseline 1M x float | 466 | 764 | +63.9% | 2 | 0.00 |
-| Qwen LM head matmul [1x896 @ 151936x896] | 5 | 36 | +620.0% | 5 | 0.00 |
-| Qwen FFN gate/up/down x3 | 61 | 529 | +767.2% | 1 | 0.00 |
-| Qwen attn Q/K/V/O proj | 640 | 6,658 | +940.3% | 1 | 0.00 |
-| Qwen Linear fwd [1x896 -> 2688] | 362 | 5,088 | +1305.5% | 22,769 | 0.00 |
-| Qwen LM head fwd [1x896 -> 151936] | 5 | 42 | +740.0% | 608,469 | 0.00 |
-| Qwen decode-attn fwd [1x896 @ kvLen=64] | 1,226 | 1,992 | +62.5% | 26,313 | 0.00 |
-| Qwen decode-attn fwd [1x896 @ kvLen=128] | 827 | 1,967 | +138.0% | 26,313 | 0.00 |
-| Qwen decode-attn fwd [1x896 @ kvLen=256] | 560 | 1,552 | +177.0% | 26,314 | 0.00 |
-| Qwen prefill seed [8 tok] | 1.3 | 2.4 | +79.5% | 25,364,843 | 0.83 |
-| Qwen prefill seed [16 tok] | 0.6 | 2.1 | +270.6% | 49,691,035 | 1.67 |
-| Qwen prefill seed [64 tok] | — | 1.3 | — | 195,780,248 | 0.33 |
-| Qwen prefill seed [256 tok] | — | 0.4 | — | 785,702,840 | 0.33 |
-| Qwen full fwd [64 tok] | 0.6 | 0.6 | +7.8% | 234,069,039 | 0.50 |
-| Qwen full fwd [256 tok] | 0.2 | 0.2 | +0.4% | 1,120,578,724 | 0.67 |
-
+| AutoDiff Pow(2.5) fwd+bwd 1M x float | 92 | 89 | +30.9% | 8,001,930 | 0.10 |
+| AutoDiff Pow(2.5) scalar baseline 1M x float | 38 | 38 | +58.3% | 2 | 0.00 |
+| AutoDiff RMSNorm fwd+bwd 1M x float | 405 | 429 | +19.2% | 8,002,250 | 0.20 |
+| AutoDiff RMSNorm scalar baseline 1M x float | 764 | 728 | +56.2% | 2 | 0.00 |
+| Qwen LM head matmul [1x896 @ 151936x896] | 36 | 36 | +620.0% | 5 | 0.00 |
+| Qwen FFN gate/up/down x3 | 529 | 513 | +741.0% | 1 | 0.00 |
+| Qwen attn Q/K/V/O proj | 6,658 | 5,264 | +722.5% | 1 | 0.00 |
+| Qwen Linear fwd [1x896 -> 2688] | 5,088 | 4,730 | +1206.6% | 22,433 | 0.00 |
+| Qwen LM head fwd [1x896 -> 151936] | 42 | 44 | +780.0% | 608,189 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=64] | 1,992 | 5,552 | +352.9% | 25,385 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=128] | 1,967 | 2,694 | +225.8% | 25,385 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=256] | 1,552 | 3,454 | +516.8% | 25,386 | 0.00 |
+| Qwen prefill seed [8 tok] | 2.4 | 2 | +53.8% | 860,535 | 0.00 |
+| Qwen prefill seed [16 tok] | 2.1 | 1 | +66.7% | 860,552 | 0.00 |
+| Qwen prefill seed [64 tok] | 1.3 | 1 | — | 959,675 | 0.00 |
+| Qwen prefill seed [256 tok] | 0.4 | 0 | — | 2,443,143 | 0.17 |
+| Qwen full fwd [64 tok] | 0.6 | 0 | −100.0% | 233,942,455 | 0.17 |
+| Qwen full fwd [256 tok] | 0.2 | 0 | −100.0% | 1,494,571,089 | 0.67 |
 ### Notes
 
 - **Qwen decode rows added 2026-09-07 with P0-2 (single-row GEMV fast path).** Prev holds
