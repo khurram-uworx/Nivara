@@ -384,6 +384,24 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.LinearGlobal(total)],
             [(nuint)SilkKernels.LinearGroupSize]);
 
+    public static void SoftmaxCrossEntropyBackward(
+        SilkRuntime runtime, nint logits, nint labels, nint dLogits,
+        int n, int numClasses, float scale)
+    {
+        if (n <= 0) throw new ArgumentOutOfRangeException(nameof(n));
+        if (numClasses <= 0) throw new ArgumentOutOfRangeException(nameof(numClasses));
+        runtime.SetBuffer(SilkKernels.SoftmaxCrossEntropyBackward, 0, logits);
+        runtime.SetBuffer(SilkKernels.SoftmaxCrossEntropyBackward, 1, labels);
+        runtime.SetBuffer(SilkKernels.SoftmaxCrossEntropyBackward, 2, dLogits);
+        runtime.SetUInt32(SilkKernels.SoftmaxCrossEntropyBackward, 3, (uint)n);
+        runtime.SetUInt32(SilkKernels.SoftmaxCrossEntropyBackward, 4, (uint)numClasses);
+        runtime.SetFloat32(SilkKernels.SoftmaxCrossEntropyBackward, 5, scale);
+        runtime.Run(
+            SilkKernels.SoftmaxCrossEntropyBackward,
+            [(nuint)SilkKernels.LinearGlobal(n)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     static void GemmGrid(SilkRuntime runtime, string kernel, int aRows, int bCols)
         => runtime.Run(
             kernel,

@@ -154,6 +154,7 @@ internal static class SilkKernels
     public const string Conv2dBackwardInput = "conv2d_backward_input";
     public const string Conv2dBackwardBias = "conv2d_backward_bias";
     public const string AdamUpdate = "adam_update";
+    public const string SoftmaxCrossEntropyBackward = "softmax_cross_entropy_backward";
 
     // Rag-learn fused late-fusion helpers (#915 follow-up).
     public const string FusionForward = "fusion_forward";
@@ -182,6 +183,7 @@ internal static class SilkKernels
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
         GemmNt, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
+        SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         FusionForward, FusionWgrad,
         AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
@@ -1679,6 +1681,35 @@ internal static class SilkKernels
             uint idx = get_global_id(0);
             if (idx >= n) return;
             y[idx] = value;
+        }
+
+        /* Softmax cross-entropy input gradient: dZ[i,c] = (p[i,c] - onehot[i,c]) * scale,
+           with the row maximum subtracted before exponentiation (matches SilkLoss.InputGradient
+           and CrossEntropyLoss's mean reduction). One work item per sample row. */
+        __kernel void softmax_cross_entropy_backward(
+            __global const float* logits,
+            __global const int* labels,
+            __global float* dZ,
+            const uint n,
+            const uint numClasses,
+            const float scale)
+        {
+            uint i = get_global_id(0);
+            if (i >= n) return;
+            uint base = i * numClasses;
+            float mx = logits[base];
+            for (uint c = 1u; c < numClasses; ++c)
+                mx = fmax(mx, logits[base + c]);
+            float sum = 0.0f;
+            for (uint c = 0u; c < numClasses; ++c)
+                sum += exp(logits[base + c] - mx);
+            int label = labels[i];
+            for (uint c = 0u; c < numClasses; ++c)
+            {
+                float p = exp(logits[base + c] - mx) / sum;
+                float onehot = (c == (uint)label) ? 1.0f : 0.0f;
+                dZ[base + c] = (p - onehot) * scale;
+            }
         }
 
         /* dW[oc, ic, kh, kw] = sum over (n, oh, ow) of dA[n, oc, oh, ow] * X[n, ic, ih, iw],
