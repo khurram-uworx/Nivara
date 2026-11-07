@@ -60,18 +60,19 @@ dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 # NOTE: the former GPU sample half was removed in #814. The live GPU flag is now
 # `--silk` (hand-authored OpenCL); older GPU snippets below are historical
 # baselines retained for the performance tables.
-# Historical (ILGPU backend removed in 1.5.0; use --silk for the live path):
-#   dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu
-#   dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu            # encoder + decision head
+# Historical first-backend command lines (removed in 1.5.0; use --silk now):
+#   (no live command for the old backend; the equivalents are --silk / --silk compare)
+#   dotnet run --project samples/NivaraInference -c Release -- modernbert --silk
+#   dotnet run --project samples/NivaraInference -c Release -- laya --silk            # encoder + decision head
 #
-# GPU-vs-CPU parity gates (historical ILGPU backend removed in 1.5.0; live gates use --silk compare):
-#   dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu compare
-#   dotnet run --project samples/NivaraInference -c Release -- laya --ilgpu compare
+# GPU-vs-CPU parity gates (live gates use --silk compare):
+#   dotnet run --project samples/NivaraInference -c Release -- modernbert --silk compare
+#   dotnet run --project samples/NivaraInference -c Release -- laya --silk compare
 
 # BERT-family encoders on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
 # (MiniLM / DistilBERT / DistilBERT SST-2; --silk now accepts --precision bf16 (widened to F32 on device
 #  for the encoder; SmolLM/Qwen use true BF16 kernels). fp16 is still rejected. Mutually exclusive with the
-#  historical --ilgpu flag, which 1.5.0 removed; --silk is the live GPU flag.
+#  (the first GPU flag was removed in 1.5.0); --silk is the live GPU flag.
 #  see docs/SILK.md Part 2 for the backend and docs/ACCELERATION.md §1 for the cross-backend view)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 dotnet run --project samples/NivaraInference -c Release -- distilbert --silk
@@ -267,7 +268,7 @@ GPU/OpenCL (`--silk`) rows for the BERT family are intentionally left as `—` i
 
 
 
-**GPU (iGPU, historical `--ilgpu` backend removed in 1.5.0)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power (historical baseline):
+**GPU (iGPU, historical `` backend removed in 1.5.0)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power (historical baseline):
 
 | Model | GPU Nivara | CPU Nivara | vs CPU |
 |-------|-----------|------------|--------|
@@ -277,7 +278,7 @@ GPU/OpenCL (`--silk`) rows for the BERT family are intentionally left as `—` i
 
 These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --silk benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
-The MiniLM table above is the AC-powered historical `--ilgpu` baseline (backend removed in 1.5.0). The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+The MiniLM table above is the AC-powered historical `` baseline (backend removed in 1.5.0). The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
 See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
 

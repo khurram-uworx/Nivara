@@ -229,7 +229,7 @@ public static class Laya
         return 0;
     }
 
-    /// <summary><c>laya --silk</c> (the ILGPU <c>laya --ilgpu</c> spelling was removed in 1.5.0). Both halves of the model on the accelerator.</summary>
+    /// <summary><c>laya --silk</c>. Both halves of the model on the accelerator.</summary>
     public static int RunGpu(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string modelDir,

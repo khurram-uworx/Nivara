@@ -556,7 +556,7 @@ public static class ModernBert
     }
 
     /// <summary>
-    /// Default <c>modernbert --silk</c> mode (the ILGPU <c>--ilgpu</c> spelling was removed in 1.5.0): the sample-sentence table on the accelerator. The
+    /// Default <c>modernbert --silk</c> mode: the sample-sentence table on the accelerator. The
     /// GPU path is F32 only — the runner's kernels are <c>ArrayView&lt;float&gt;</c> — so unlike the
     /// CPU modes there is no <c>--fp16</c>/<c>--bf16</c> variant, and the CLI rejects those flags
     /// up front rather than silently ignoring them.
