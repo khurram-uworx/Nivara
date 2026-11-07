@@ -333,38 +333,44 @@ static class Program
                 allLabels[i] = trainTokenized[i].Label;
             }
 
-            for (int epoch = 1; epoch <= cli.Epochs; epoch++)
-            {
-                Console.WriteLine($"\n=== Epoch {epoch}/{cli.Epochs} ===");
+            int currentEpoch = 0;
+            float epochLossSum = 0f;
+            int epochBatchCount = 0;
+            var epochBatchElapsed = new List<TimeSpan>();
 
-                float epochLossSum = 0f;
-                int epochBatchCount = 0;
-                var epochBatchElapsed = new List<TimeSpan>();
-
-                var epochResults = trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, 1, cli.Lr, 0.01f, seed: epoch,
-                    onBatchCompleted: (e, b, total, loss, elapsed) =>
-                    {
-                        epochLossSum += loss;
-                        epochBatchCount++;
-                        float runningAvg = epochLossSum / epochBatchCount;
-                        epochBatchElapsed.Add(elapsed);
-                        Console.WriteLine($"  Batch {b}/{total} [{elapsed.TotalSeconds:F1}s] - loss: {runningAvg:F4}");
-                    });
-                float avgTrainLoss = epochResults.Count > 0 ? epochResults[0].Loss : 0f;
-                Console.WriteLine($"Epoch {epoch} training complete. Avg loss: {avgTrainLoss:F4}");
-                if (epochBatchElapsed.Count > 1)
+            trainer.Train(allTokens, allMask, allLabels, maxBatch, seqLen, cli.Epochs, cli.Lr, 0.01f, seed: 1,
+                onBatchCompleted: (e, b, total, loss, elapsed) =>
                 {
-                    double steadySumMs = 0;
-                    for (int i = 1; i < epochBatchElapsed.Count; i++)
-                        steadySumMs += epochBatchElapsed[i].TotalMilliseconds;
-                    double steadyMs = steadySumMs / (epochBatchElapsed.Count - 1);
-                    Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
-                }
+                    if (e != currentEpoch)
+                    {
+                        currentEpoch = e;
+                        epochLossSum = 0f;
+                        epochBatchCount = 0;
+                        epochBatchElapsed.Clear();
+                        Console.WriteLine($"\n=== Epoch {e}/{cli.Epochs} ===");
+                    }
+                    epochLossSum += loss;
+                    epochBatchCount++;
+                    float runningAvg = epochLossSum / epochBatchCount;
+                    epochBatchElapsed.Add(elapsed);
+                    Console.WriteLine($"  Batch {b}/{total} [{elapsed.TotalSeconds:F1}s] - loss: {runningAvg:F4}");
+                },
+                onEpochCompleted: (e, total, avgLoss, elapsed) =>
+                {
+                    Console.WriteLine($"Epoch {e} training complete. Avg loss: {avgLoss:F4}");
+                    if (epochBatchElapsed.Count > 1)
+                    {
+                        double steadySumMs = 0;
+                        for (int i = 1; i < epochBatchElapsed.Count; i++)
+                            steadySumMs += epochBatchElapsed[i].TotalMilliseconds;
+                        double steadyMs = steadySumMs / (epochBatchElapsed.Count - 1);
+                        Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
+                    }
 
-                // Dev evaluation on the device via the inference runner (no per-epoch weight export).
-                var (devLoss, devAcc) = EvaluateSilk(runner, tokenizer, dataset.Dev, maxSeqLen, cli.BatchSize);
-                Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
-            }
+                    // Dev evaluation on the device via the inference runner.
+                    var (devLoss, devAcc) = EvaluateSilk(runner, tokenizer, dataset.Dev, maxSeqLen, cli.BatchSize);
+                    Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
+                });
 
             Console.WriteLine($"\nSaving fine-tuned model to {cli.SavePath}...");
             var finalExported = trainer.ExportCheckpoint();
