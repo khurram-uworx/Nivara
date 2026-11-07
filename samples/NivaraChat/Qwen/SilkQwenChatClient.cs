@@ -1,10 +1,8 @@
 using Microsoft.Extensions.AI;
-using Nivara;
 using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Silk;
 using NivaraChat.Shared;
-using System.Text;
 
 namespace NivaraChat.Qwen;
 

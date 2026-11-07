@@ -3,7 +3,6 @@ using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Silk;
 using NivaraChat.Shared;
-using NivaraChat.SmolLM;
 using System.Text;
 
 namespace NivaraChat.SmolLM;

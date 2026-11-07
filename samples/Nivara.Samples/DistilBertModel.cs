@@ -2,7 +2,6 @@ using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
-using System.Linq;
 using System.Numerics;
 
 namespace Nivara.Samples;
