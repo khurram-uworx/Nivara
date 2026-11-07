@@ -92,7 +92,8 @@ public static class RagLearnMode
         IFusionRanker fusion;
         double parity;
         TrainingReport fusionReport;
-        if (ctx.UseSilk)
+        var trainingBackend = "CPU";
+        if (ctx.UseSilk && options.Loss == LossKind.Listwise)
         {
             try
             {
@@ -100,6 +101,7 @@ public static class RagLearnMode
                 fusion = new SilkFusionRanker(silkGlobal);
                 parity = InitialParity(fusion, test, topK);
                 fusionReport = silkGlobal.Train(train, validation, options, topK);
+                trainingBackend = $"Silk/OpenCL ({silkGlobal.DeviceName})";
                 Console.WriteLine($"  Fusion training: Silk/OpenCL ({silkGlobal.DeviceName}), listwise per-query");
             }
             catch (Exception ex)
@@ -109,14 +111,18 @@ public static class RagLearnMode
                 fusion = cpuFusion;
                 parity = InitialParity(fusion, test, topK);
                 fusionReport = RetrievalTrainer.Train(cpuFusion, train, validation, options, topK);
+                trainingBackend = "CPU (Silk unavailable)";
             }
         }
         else
         {
+            if (ctx.UseSilk && options.Loss != LossKind.Listwise)
+                Console.WriteLine("  (pairwise loss trains on CPU; the Silk fusion trainer is listwise-only)");
             var cpuFusion = new FusionModel();
             fusion = cpuFusion;
             parity = InitialParity(fusion, test, topK);
             fusionReport = RetrievalTrainer.Train(cpuFusion, train, validation, options, topK);
+            trainingBackend = ctx.UseSilk ? "CPU (pairwise loss on Silk deferred)" : "CPU";
         }
 
 
@@ -132,7 +138,7 @@ public static class RagLearnMode
         }
         else
         {
-            if (ctx.UseSilk)
+            if (ctx.UseSilk && options.Loss == LossKind.Listwise)
             {
                 try
                 {
@@ -204,7 +210,7 @@ public static class RagLearnMode
         }
 
         var reportPath = ResolveReportPath(ctx.ReportPath, repoRoot);
-        WriteReport(reportPath, labels, options, topK, candidates, split, train.Count, parity, results, comparisons, learnedWeights, gated, test, gateKind);
+        WriteReport(reportPath, labels, options, topK, candidates, split, train.Count, parity, trainingBackend, results, comparisons, learnedWeights, gated, test, gateKind);
         Console.WriteLine();
         Console.WriteLine($"  Report written to {reportPath}");
 
@@ -520,6 +526,7 @@ public static class RagLearnMode
         QuerySplit split,
         int trainCount,
         double parity,
+        string trainingBackend,
         IReadOnlyList<RankerResult> results,
         IReadOnlyList<PairedComparison> comparisons,
         IReadOnlyList<float> learnedWeights,
@@ -540,6 +547,7 @@ public static class RagLearnMode
         content.AppendLine($"- Candidate pool: union of each view's top-{candidates} plus every labeled positive");
         content.AppendLine($"- Loss: {options.Loss}; lr {options.LearningRate}; epochs {options.Epochs}; weight decay {options.WeightDecay}");
         content.AppendLine($"- Init parity: max |learned - fixed| = {parity.ToString("0.0000000", CultureInfo.InvariantCulture)} (tolerance {ParityTolerance.ToString("0.0E+0", CultureInfo.InvariantCulture)})");
+        content.AppendLine($"- Training backend: {trainingBackend}");
         content.AppendLine();
         content.AppendLine($"## Held-out test metrics (K = {topK})");
         content.AppendLine();

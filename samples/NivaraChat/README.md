@@ -119,7 +119,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |
-| `--rag-learn` | — | Mode: differentiable retrieval (#915) — learn the fusion weights and a query gate with AutoDiff, compare against the fixed baseline on held-out queries (CPU training) |
+| `--rag-learn` | — | Mode: differentiable retrieval (#915) — learn the fusion weights and a query gate with AutoDiff, compare against the fixed baseline on held-out queries (`--silk` runs fusion training on the device for listwise loss) |
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |

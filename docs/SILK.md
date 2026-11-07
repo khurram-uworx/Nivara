@@ -405,7 +405,8 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
  GemmNt, GemmTn, ReluBackward, ColSum, Fill,
  Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
  AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv, Gelu,
- EmbeddingBackwardRows, ScatterRows]
+ EmbeddingBackwardRows, ScatterRows,
+FusionForward, FusionWgrad]
 ```
 
 i.e. the families by origin: the original eight BERT encoder kernels (`embed_sum`, `gather_rows`,
@@ -767,6 +768,26 @@ Parity is pinned in `tests/Nivara.Tests/Gpu/SilkDistilBertTrainerTests.cs`: forw
 2e-4 and every parameter gradient within 5e-4 against `DistilBertForSequenceClassification<float>`
 driven through `CrossEntropyLoss`, on a 2-layer / hidden-32 / 4-head / vocab-64 / seqLen-8 model.
 
+## 13f. Retrieval fusion (`RagLearnMode`, #915)
+
+`SilkRetrievalTrainer` (`samples/NivaraChat/Helpers/SilkRetrievalTrainer.cs`) trains the
+#915 late-fusion weights (and the stats/embed query gate) on the device when `--rag-learn --silk`
+is requested, reusing the existing kernels rather than a new model runner:
+
+- **Forward** launches `fusion_forward` over the per-query candidate pool (`[rows, 4]` scores
+  plus presence mask, weights `w`): `f[i] = (Σ_k p[i,k] s[i,k] w[k]) / (Σ_k p[i,k] w[k])`.
+  The denominator is never substituted; a zero divisor throws, preserving the CPU path's parity.
+- **Gradient** runs `fusion_wgrad` to reduce `dθ[k] = Σ_i g[i]·p[i,k]·(s[i,k] − f[i]) / d[i]`
+  and then reweights by `w[k]·(contrib − Σ_v w[v]·contrib)` to match `ReverseGradOperations`'s
+  softmax Jacobian (the weights are `w = softmax(theta)`).
+- **Optimizer** is the fused `adam_update` kernel over the 4 (global) / 4 (gate bias) plus gate
+  weights, with the host bias corrections precomputed. Momentum/v buffers are zeroed per run.
+- **Gate** combines a CPU feature vector (8 stats features or the 384-dim MiniLM embedding) with
+  a hand-written GEMM and reuses the same fusion path.
+- **Parity** is the mode's printed `Init parity: max |learned − fixed|` (target ~1e-7) and the
+  held-out comparison; `--loss pairwise` deliberately falls back to the CPU `FusionModel` because
+  the Silk trainer is listwise-only.
+
 ## 13d. Wiring coverage (user-facing entry points)
 
 Silk (`--silk`) is honoured by the following user-facing entry points as of this release:
@@ -776,6 +797,8 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
   - `--intent --silk` — intent router's factual-retrieval MiniLM generator.
   - `--rag* --silk`, `--rag-multiview --silk` — RAG ingestion/search embeddings
     (already wired via `MiniLMEmbedder.Create`).
+  - `--rag-learn --silk` — differentiable retrieval fusion training via
+    `SilkRetrievalTrainer` (listwise loss; pairwise falls back to CPU).
   - `--smollm --silk` (and `--smollm --precision bf16 --silk`) — SmolLM chat/plain
     generation on `SilkSmolLMChatClient`.
   - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.
