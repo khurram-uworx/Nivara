@@ -100,6 +100,15 @@ machine difference in the table footer. Do not compute ratios across machines â€
 a Nivara improvement plus a PyTorch improvement from more cores looks like a
 regression when it is not.
 
+**Silk backend (from the next release):** benchmarks for samples that support a
+`--silk` variant (`minilm`, `distilbert`, `distilbert_sst`, `laya`, `modernbert`
+where applicable, and the Qwen generation paths) must run **both** the CPU and the
+Silk variant in the same session and record a Silk column (ops/s or ms/op, same
+units as the CPU column) plus its ratio. CPU-only numbers are not sufficient
+once the Silk backend ships as a first-class path (see issue #984). Silk runs
+are AC-power-only and require the OpenCL device/driver to be recorded alongside
+the machine line.
+
 **Capture output for review:** when a human runs these benchmarks on behalf of
 an agent (or for later re-measurement), put every command in a temporary
 `release.cmd` at the repository root that redirects each command's console
