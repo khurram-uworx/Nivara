@@ -186,6 +186,12 @@ public sealed class SilkDistilBertTrainer : IDisposable
     /// <summary>The OpenCL device the whole training loop runs on.</summary>
     public string DeviceName => runtime.DeviceName;
 
+    /// <summary>Exposes the device logits buffer for diagnostic/profiling probes.</summary>
+    internal nint LogitsBuffer => logits;
+
+    /// <summary>Exposes the device logits-gradient buffer for diagnostic/profiling probes.</summary>
+    internal nint DLogitsBuffer => dLogits;
+
     /// <summary>The classifier head's output width, taken from <c>classifier.weight</c>'s first dimension.</summary>
     public int NumClasses => numClasses;
 
@@ -331,7 +337,16 @@ public sealed class SilkDistilBertTrainer : IDisposable
         int hiddenLen = rows * hiddenDim;
         int intermLen = rows * intermediateDim;
 
-        runtime.Upload(dLogits, dLogitsSpan);
+        if (dLogitsSpan.Length > 0)
+            runtime.Upload(dLogits, dLogitsSpan);
+        BackwardChain(batch, seqLen);
+    }
+
+    private void BackwardChain(int batch, int seqLen)
+    {
+        int rows = batch * seqLen;
+        int hiddenLen = rows * hiddenDim;
+        int intermLen = rows * intermediateDim;
 
         // Classifier head: classifier → ReLU → pre_classifier → CLS scatter.
         SilkLauncher.ColSum(runtime, dLogits, weights.ClsB.Gradient.Handle, batch, numClasses, 1f);
@@ -462,7 +477,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
     void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 
-    void UploadBatch(ReadOnlySpan<int> tokenIds, ReadOnlySpan<float> attentionMask, int batch, int seqLen)
+    internal void UploadBatch(ReadOnlySpan<int> tokenIds, ReadOnlySpan<float> attentionMask, int batch, int seqLen)
     {
         if (batch <= 0 || batch > maxBatch)
             throw new ArgumentOutOfRangeException(nameof(batch), batch, $"Expected 1..{maxBatch}.");
@@ -488,7 +503,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
         }
     }
 
-    void ForwardCore(int batch, int seqLen)
+    internal void ForwardCore(int batch, int seqLen)
     {
         int rows = batch * seqLen;
         int hiddenLen = rows * hiddenDim;
@@ -542,7 +557,13 @@ public sealed class SilkDistilBertTrainer : IDisposable
     void LayerNormBackward(nint d, nint x, SilkParam gamma, nint dx, int rows)
         => SilkLauncher.LayerNormBackward(runtime, d, x, gamma.Handle, dx, dLnA, dLnB, rows, hiddenDim, eps);
 
-    void ZeroMoments()
+    /// <summary>Runs the backward chain assuming <c>dLogits</c> is already populated on the device.</summary>
+    internal void Backward(int batch, int seqLen)
+    {
+        BackwardChain(batch, seqLen);
+    }
+
+    internal void ZeroMoments()
     {
         foreach (var p in weights.Parameters)
         {
