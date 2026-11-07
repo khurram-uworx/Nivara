@@ -764,6 +764,24 @@ Parity is pinned in `tests/Nivara.Tests/Gpu/SilkDistilBertTrainerTests.cs`: forw
 2e-4 and every parameter gradient within 5e-4 against `DistilBertForSequenceClassification<float>`
 driven through `CrossEntropyLoss`, on a 2-layer / hidden-32 / 4-head / vocab-64 / seqLen-8 model.
 
+### Paired CPU vs Silk baseline (#1003)
+
+Paired measurements (same Intel Core Ultra 7 255H laptop, **battery, not AC**;
+Release; first batch excluded):
+
+| B | L | CPU (ms/batch) | Silk/OpenCL (ms/batch) | CPU / Silk |
+|---|---|---:|---:|---:|
+| 2 | 128 | 3140.9 | 365.8 | 8.59x |
+| 4 | 128 | 4516.8 | 636.7 | 7.09x |
+| 8 | 128 | 7720.4 | 1250.4 | 6.17x |
+
+Conclusion: the CPU reverse-mode path is **not** within ~1.5x of the integrated GPU at
+B<=8, so the "CPU is the better fit at B<=8" fork (#961 item 6) is **not** supported; Silk
+is 6.2-8.6x faster at these shapes. The heavy backward chain (especially attention
+backward / DKV, ~72-80% of Silk batch time) is the remaining optimisation target, not the
+CPU fallback. A 48-example run is small, so re-run on AC power before quoting an official
+number. See `samples/NivaraFineTuning/README.md` "Paired CPU vs Silk".
+
 ### Backward sub-profile (#1001)
 
 The training batch profile (`--silk-distilbert-train-profile`) now splits the device backward
