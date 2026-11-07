@@ -906,7 +906,7 @@ issues; status and discussion live there.
 
 | # | Priority | Title | Notes |
 |---|----------|-------|-------|
-| [#1004](https://github.com/khurram-uworx/Nivara/issues/1004) | High | perf(silk): fuse Adam per-parameter launches in SilkDistilBertTrainer | **Closed — documented conclusion.** A fused contiguous launch was attempted (70 params copied into four contiguous arenas and one `adam_update` launch): measured `AdamUpdateAll` stayed ~62 ms (B=4/B=8), no gain within run-to-run noise. The Adam step is memory-bandwidth bound, not launch-overhead bound; per-parameter dispatch is retained. |
+| [#1004](https://github.com/khurram-uworx/Nivara/issues/1004) | High | perf(silk): fuse Adam per-parameter launches in SilkDistilBertTrainer | **Closed â€” documented conclusion.** A fused contiguous launch was attempted (70 params copied into four contiguous arenas and one `adam_update` launch): measured `AdamUpdateAll` stayed ~62 ms (B=4/B=8), no gain within run-to-run noise. The Adam step is memory-bandwidth bound, not launch-overhead bound; per-parameter dispatch is retained. |
 
 All earlier fine-tuning follow-ups (#960-#966, #1001-#1004) are closed; see their linked PRs for landed changes. The remaining headroom levers are, in order: reducing the launch count on the backward GEMMs (LN/fc GEMM backward is the larger target); the CPU-vs-Silk question is settled (Silk is 6.2-8.6x faster at B=2/4/8, L=128 even below 10% GPU util).
 
