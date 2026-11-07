@@ -51,7 +51,7 @@ dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark  # seq 128 + 256; 1 warmup + 3 timed; --seq 256 times one length
-dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu benchmark  # seq 128 + 512 + 2048 + 4096
+dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark    # seq 128 + 512 + 2048 + 4096
 
 # MiniLM on the OpenCL iGPU (Silk only -- hand-authored OpenCL kernels; F32-only)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
@@ -257,7 +257,7 @@ Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 log
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark --seq 512
-dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu benchmark --seq 2048,4096 --iters 10 --warmup 3
+dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark --seq 2048,4096 --iters 10 --warmup 3
 python modernbert_benchmark.py --seq 256
 ```
 
@@ -269,7 +269,7 @@ python modernbert_benchmark.py --seq 256
 | **DistilBERT** | 63.3 ms | 209.7 ms | **~3.3× faster** |
 | **DistilBERT SST-2** | 63.8 ms | 199.9 ms | **~3.1× faster** |
 
-These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --ilgpu benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --silk benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
 The MiniLM table above is the AC-powered `--ilgpu` baseline. The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
@@ -319,7 +319,7 @@ dotnet run --project samples/NivaraInference -c Release -- smollm benchmark     
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark   # native BF16
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark                      # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark                 # seq 128 + 256
-dotnet run --project samples/NivaraInference -c Release -- modernbert --ilgpu benchmark            # seq 128 + 512 + 2048 + 4096; --seq selects a subset
+dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark             # seq 128 + 512 + 2048 + 4096; --seq selects a subset
 
 # PyTorch (Python) — run immediately after on the same machine
 cd samples/NivaraInference/Python

@@ -606,7 +606,7 @@ public static class ModernBert
     }
 
     /// <summary>
-    /// <c>modernbert --ilgpu benchmark</c>. Sequence lengths go past the CPU path's
+    /// <c>modernbert --silk benchmark</c>. Sequence lengths go past the CPU path's
     /// <see cref="ModernBertMasks.MaxDenseLength"/> of 2048 on purpose: that cap exists because
     /// the CPU materialises a dense <c>[L, L]</c> mask, and the GPU carries the band inside the
     /// attention kernel, so there is no such allocation to run out of. The 4096 row is the evidence.
