@@ -1,6 +1,4 @@
-using Nivara.AutoDiff;
 using Nivara.Silk;
-using System.Text;
 
 namespace NivaraChat.Helpers;
 

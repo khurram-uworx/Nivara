@@ -1,6 +1,5 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using NivaraChat.Helpers;
 
 namespace NivaraChat.Helpers;
 
