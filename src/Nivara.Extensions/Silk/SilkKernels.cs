@@ -144,6 +144,7 @@ internal static class SilkKernels
     // Text-classifier backward kernels (#900): transposed-operand GEMMs, elementwise backward,
     // reductions, and the fused Adam step.
     public const string GemmNt = "gemm_row4_nt";
+    public const string GemmNtResidual = "gemm_row4_nt_residual";
     public const string GemmTn = "gemm_row4_tn";
     public const string ReluBackward = "relu_backward";
     public const string GeluBackward = "gelu_backward";
@@ -182,7 +183,7 @@ internal static class SilkKernels
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial,
-        GemmNt, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
+        GemmNt, GemmNtResidual, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         FusionForward, FusionWgrad,
@@ -1347,6 +1348,28 @@ internal static class SilkKernels
                 if (c1 < bCols) c[rowBase + 1] = a1;
                 if (c2 < bCols) c[rowBase + 2] = a2;
                 if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        /* gemm_row4_nt with residual epilogue: like gemm_row4_nt but each output cell adds
+           the matching residual value before storing. Exact under FP_CONTRACT OFF. */
+        __kernel void gemm_row4_nt_residual(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            __global const float* residual,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_NT_ACCUMULATE
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) { float r = residual[rowBase + 0]; c[rowBase + 0] = a0 + r; }
+                if (c1 < bCols) { float r = residual[rowBase + 1]; c[rowBase + 1] = a1 + r; }
+                if (c2 < bCols) { float r = residual[rowBase + 2]; c[rowBase + 2] = a2 + r; }
+                if (c3 < bCols) { float r = residual[rowBase + 3]; c[rowBase + 3] = a3 + r; }
             }
         }
 

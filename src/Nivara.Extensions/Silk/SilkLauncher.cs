@@ -787,6 +787,20 @@ internal static class SilkLauncher
         GemmGrid(runtime, SilkKernels.GemmNt, aRows, bCols);
     }
 
+    /// <summary><c>C[M,N] = A·Bᵀ + residual</c> — the NT backward GEMM with a residual epilogue,
+    /// replacing a separate <c>add</c> pass. <paramref name="c"/> may alias <paramref name="residual"/>.</summary>
+    public static void GemmNtResidual(SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmNtResidual, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmNtResidual, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmNtResidual, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmNtResidual, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmNtResidual, 4, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmNtResidual, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmNtResidual, 6, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmNtResidual, aRows, bCols);
+    }
+
     /// <summary><c>C[M,N] = Aᵀ·B</c> where A is stored row-major <c>[K,M]</c> — the transposed-A
     /// backward GEMM (<c>dW2 = hᵀ·dZ</c>, <c>dW1 = pooledᵀ·dH</c>).</summary>
     public static void GemmTn(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
