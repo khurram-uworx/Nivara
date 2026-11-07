@@ -67,6 +67,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
     readonly nint idsBuf;
     readonly nint posIdsBuf;
     readonly nint maskBuf;
+    readonly nint labelsBuf;
     readonly nint clsIdsBuf;
 
     readonly nint[] hidden;      // [numLayers + 1] layer inputs and the final hidden state
@@ -139,6 +140,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
         idsBuf = Alloc(rowsCap);
         posIdsBuf = Alloc(rowsCap);
         maskBuf = Alloc(rowsCap);
+        labelsBuf = Alloc(maxBatch);
         clsIdsBuf = Alloc(maxBatch);
         posScratch = new int[rowsCap];
 
@@ -261,7 +263,6 @@ public sealed class SilkDistilBertTrainer : IDisposable
         var batchTokens = new int[batchSize * seqLen];
         var batchMask = new float[batchSize * seqLen];
         var batchLabels = new int[batchSize];
-        var batchGradient = new float[batchSize * numClasses];
 
         var results = new List<SilkTrainEpoch>(epochs);
         int batchesPerEpoch = (sampleCount + batchSize - 1) / batchSize;
@@ -297,13 +298,19 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
                 UploadBatch(batchTokens.AsSpan(0, n * seqLen), batchMask.AsSpan(0, n * seqLen), n, seqLen);
                 ForwardCore(n, seqLen);
+
+                // Labels live on the device so the softmax input-gradient kernel can run without
+                // a host round-trip; this also lets the backward chain queue ahead of the blocking
+                // logits download used below for the loss metric.
+                runtime.Upload(labelsBuf, batchLabels.AsSpan(0, n));
+                SilkLauncher.SoftmaxCrossEntropyBackward(runtime, logits, labelsBuf, dLogits, n, numClasses, 1f / n);
+                Backward(n, seqLen);
+                AdamUpdateAll(learningRate, weightDecay);
+
                 var batchLogits = runtime.Download(logits, n * numClasses);
                 float batchLoss = SilkLoss.CrossEntropy(batchLogits, batchLabels, n, numClasses);
                 lossSum += batchLoss;
 
-                SilkLoss.InputGradient(batchLogits, batchLabels, n, numClasses, 1f / n, batchGradient);
-                Backward(n, seqLen, batchGradient.AsSpan(0, n * numClasses));
-                AdamUpdateAll(learningRate, weightDecay);
                 lossBatches++;
                 batchSw.Stop();
                 onBatchCompleted?.Invoke(epoch + 1, b + 1, batchesPerEpoch, batchLoss, batchSw.Elapsed);
