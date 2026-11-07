@@ -376,6 +376,8 @@ Uses: `RetrievalTrainingData` (`CandidatePool`, `TrainingSetBuilder`, `Retrieval
 (metrics, ranking, `PairedComparison`), and the `MultiViewScoring`/`MultiViewIndex` pipeline from
 `--rag-multiview`.
 
+Full design note: [`./915.md`](./915.md).
+
 ### RAG agent (`--rag-agent`)
 Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. **Ollama is optional**: without `--ollama` the mode behaves like `--rag` in list-only mode (prints `#rank score [source] "snippet..."` per query); with `--ollama` it runs the agent workflow and prints the retrieved set for each provider search. `--roundtrip` prints the frame ↔ matrix ↔ `ToGeneratedEmbeddings` diagnostics once after the index builds (not per provider search). ACL filtering (`--acl-group`) applies to the frame store only; `--store inmemory` ignores it.
 
