@@ -206,7 +206,7 @@ Verification	docs/DISTELBERT.md#19	auto: heading
 Narrow-precision inference (BFloat16 / Half)	docs/DISTELBERT.md#20,docs/DISTELBERT.md#21,docs/DISTELBERT.md#22,docs/DISTELBERT.md#23,docs/DISTELBERT.md#24,docs/DISTELBERT.md#25,docs/DISTELBERT.md#26	auto: heading
 Performance	docs/DISTELBERT.md#27	auto: heading
 GPU path	docs/DISTELBERT.md#28	auto: heading
-ILGPU (`--ilgpu`)	docs/DISTELBERT.md#29,docs/DISTELBERT.md#30	auto: heading
+ILGPU — historical (backend removed in 1.5.0)	docs/DISTELBERT.md#29,docs/DISTELBERT.md#30	auto: heading
 `--silk` (Silk.NET, hand-authored OpenCL C)	docs/DISTELBERT.md#31,docs/DISTELBERT.md#32,docs/DISTELBERT.md#33,docs/DISTELBERT.md#34,docs/DISTELBERT.md#35,docs/DISTELBERT.md#36	auto: heading
 Embeddings in Nivara	docs/EMBEDDINGS.md#0,docs/EMBEDDINGS.md#1	auto: heading
 The two forms	docs/EMBEDDINGS.md#2,docs/EMBEDDINGS.md#3,docs/EMBEDDINGS.md#4,docs/EMBEDDINGS.md#5	auto: heading
