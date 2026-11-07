@@ -155,6 +155,10 @@ internal static class SilkKernels
     public const string Conv2dBackwardBias = "conv2d_backward_bias";
     public const string AdamUpdate = "adam_update";
 
+    // Rag-learn fused late-fusion helpers (#915 follow-up).
+    public const string FusionForward = "fusion_forward";
+    public const string FusionWgrad = "fusion_wgrad";
+
     // Transformer-training backward kernels (#956): the multi-head attention gradient, split into
     // three deterministic launches so each output element has one writer and an ascending loop.
     public const string AttentionBackwardPrep = "attention_backward_prep";
@@ -179,6 +183,7 @@ internal static class SilkKernels
         GroupedHashReducePartial,
         GemmNt, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
+        FusionForward, FusionWgrad,
         AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
@@ -3004,6 +3009,57 @@ internal static class SilkKernels
             if (e >= embedDim) return;
             for (uint b = 0; b < batchSize; ++b)
                 dX[(b * seqLen) * embedDim + e] = dCls[b * embedDim + e];
+        }
+
+
+        __kernel void fusion_forward(
+            __global const float* S,
+            __global const float* P,
+            __global const float* W,
+            __global float* F,
+            __global float* D,
+            const uint rows)
+        {
+            uint i = get_global_id(0);
+            if (i >= rows) return;
+            float num = 0.0f;
+            float den = 0.0f;
+            for (int k = 0; k < 4; k++) {
+                float p = P[i * 4 + k];
+                if (p == 0.0f) continue;
+                float s = S[i * 4 + k];
+                float w = W[k];
+                num += p * s * w;
+                den += p * w;
+            }
+            if (den == 0.0f) {
+                F[i] = 0.0f;
+                D[i] = 0.0f;
+                return;
+            }
+            F[i] = num / den;
+            D[i] = den;
+        }
+
+        __kernel void fusion_wgrad(
+            __global const float* S,
+            __global const float* P,
+            __global const float* G,
+            __global const float* F,
+            __global const float* D,
+            __global float* dW,
+            const uint rows)
+        {
+            uint k = get_global_id(0);
+            if (k >= 4) return;
+            float acc = 0.0f;
+            for (uint i = 0; i < rows; i++) {
+                float p = P[i * 4 + k];
+                if (p == 0.0f) continue;
+                float s = S[i * 4 + k];
+                acc += G[i] * p * (s - F[i]) / D[i];
+            }
+            dW[k] = acc;
         }
 
         """;
