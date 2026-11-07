@@ -194,6 +194,9 @@ public sealed class SilkDistilBertTrainer : IDisposable
     /// <summary>Exposes the device logits-gradient buffer for diagnostic/profiling probes.</summary>
     internal nint DLogitsBuffer => dLogits;
 
+    /// <summary>Exposes the device labels buffer for diagnostic/profiling probes.</summary>
+    internal nint LabelsBuffer => labelsBuf;
+
     /// <summary>The classifier head's output width, taken from <c>classifier.weight</c>'s first dimension.</summary>
     public int NumClasses => numClasses;
 

@@ -58,12 +58,11 @@ internal static class SilkDistilBertTrainingProfileProbe
         [
             "UploadBatch",
             "ForwardCore",
-            "Download(logits)",
-            "CrossEntropy (host)",
-            "InputGradient (host)",
-            "Upload(dLogits)",
+            "SoftmaxCEBackward (device)",
             "Backward chain",
             "AdamUpdateAll",
+            "Download(logits)",
+            "CrossEntropy (host)",
         ];
 
         foreach (int batch in new[] { 2, 4, 8 })
@@ -133,7 +132,7 @@ internal static class SilkDistilBertTrainingProfileProbe
         int[] batchTokens, float[] batchMask, int[] batchLabels,
         int batch, int seqLen, float[] gradient, int numClasses)
     {
-        var times = new double[8];
+        var times = new double[7];
         var sw = new Stopwatch();
 
         sw.Restart();
@@ -147,38 +146,37 @@ internal static class SilkDistilBertTrainingProfileProbe
         sw.Stop();
         times[1] = sw.Elapsed.TotalMilliseconds;
 
+        // Labels on device for the softmax CE backward kernel.
+        runtime.Upload(trainer.LabelsBuffer, batchLabels.AsSpan(0, batch));
+
         sw.Restart();
-        var logits = runtime.Download(trainer.LogitsBuffer, batch * numClasses);
+        SilkLauncher.SoftmaxCrossEntropyBackward(runtime, trainer.LogitsBuffer, trainer.LabelsBuffer, trainer.DLogitsBuffer, batch, numClasses, 1f / batch);
+        runtime.Finish();
         sw.Stop();
         times[2] = sw.Elapsed.TotalMilliseconds;
-
-        sw.Restart();
-        float loss = SilkLoss.CrossEntropy(logits, batchLabels, batch, numClasses);
-        sw.Stop();
-        times[3] = sw.Elapsed.TotalMilliseconds;
-        _ = loss;
-
-        sw.Restart();
-        SilkLoss.InputGradient(logits, batchLabels, batch, numClasses, 1f / batch, gradient);
-        sw.Stop();
-        times[4] = sw.Elapsed.TotalMilliseconds;
-
-        sw.Restart();
-        runtime.Upload(trainer.DLogitsBuffer, gradient);
-        sw.Stop();
-        times[5] = sw.Elapsed.TotalMilliseconds;
 
         sw.Restart();
         trainer.Backward(batch, seqLen);
         runtime.Finish();
         sw.Stop();
-        times[6] = sw.Elapsed.TotalMilliseconds;
+        times[3] = sw.Elapsed.TotalMilliseconds;
 
         sw.Restart();
         trainer.AdamUpdateAll(LearningRate, WeightDecay);
         runtime.Finish();
         sw.Stop();
-        times[7] = sw.Elapsed.TotalMilliseconds;
+        times[4] = sw.Elapsed.TotalMilliseconds;
+
+        sw.Restart();
+        var logits = runtime.Download(trainer.LogitsBuffer, batch * numClasses);
+        sw.Stop();
+        times[5] = sw.Elapsed.TotalMilliseconds;
+
+        sw.Restart();
+        float loss = SilkLoss.CrossEntropy(logits, batchLabels, batch, numClasses);
+        sw.Stop();
+        times[6] = sw.Elapsed.TotalMilliseconds;
+        _ = loss;
 
         return times;
     }
