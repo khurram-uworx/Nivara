@@ -166,6 +166,7 @@ internal static class SilkKernels
     public const string AttentionBackwardPrep = "attention_backward_prep";
     public const string AttentionBackwardDq = "attention_backward_dq";
     public const string AttentionBackwardDkv = "attention_backward_dkv";
+    public const string AttentionBackwardDqDkv = "attention_backward_dq_dkv";
 
     // Training glue (#956): the split GELU (keeps the pre-activation), the row-major embedding
     // scatter, and the gather_rows backward.
@@ -187,7 +188,7 @@ internal static class SilkKernels
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         FusionForward, FusionWgrad,
-        AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
+        AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv, AttentionBackwardDqDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
@@ -1466,14 +1467,32 @@ internal static class SilkKernels
             uint qBase = qRow * D + dOffset;
             uint dAttnBase = qRow * D + dOffset;
 
+            float qrow[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                qrow[d] = qkv[qBase + d];
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
             int qp = (int)qPos;
             int sl = (int)seqLen;
 
             float mx = -INFINITY;
             for (int j = 0; j < sl; ++j)
                 if (attn_keep(mask, maskBase, qp, j, band))
-                    mx = fmax(mx, attn_backward_score(
-                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale));
+                {
+                    uint kBase = kOff + (b * seqLen + (uint)j) * D + dOffset;
+                    prefetch(qkv + kBase, (size_t)headDim);
+                    float score = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        score += qrow[d] * qkv[kBase + d];
+                    score *= scale;
+                    probs[probsBase + (uint)j] = score;
+                    mx = fmax(mx, score);
+                }
+                else
+                    probs[probsBase + (uint)j] = -INFINITY;
 
             if (mx == -INFINITY)
             {
@@ -1484,20 +1503,27 @@ internal static class SilkKernels
 
             float sum = 0.0f;
             for (int j = 0; j < sl; ++j)
-                if (attn_keep(mask, maskBase, qp, j, band))
-                    sum += exp(attn_backward_score(
-                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale) - mx);
+                if (probs[probsBase + (uint)j] != -INFINITY)
+                    sum += exp(probs[probsBase + (uint)j] - mx);
 
             float acc = 0.0f;
             for (int j = 0; j < sl; ++j)
             {
-                float p = attn_keep(mask, maskBase, qp, j, band)
-                    ? exp(attn_backward_score(
-                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale) - mx) / sum
-                    : 0.0f;
+                float p;
+                if (probs[probsBase + (uint)j] != -INFINITY)
+                    p = exp(probs[probsBase + (uint)j] - mx) / sum;
+                else
+                    p = 0.0f;
                 probs[probsBase + (uint)j] = p;
-                acc += p * attn_backward_dotv(
-                    qkv, dAttn, vOff + (b * seqLen + (uint)j) * D + dOffset, dAttnBase, headDim);
+                if (p != 0.0f)
+                {
+                    uint vBase = vOff + (b * seqLen + (uint)j) * D + dOffset;
+                    prefetch(qkv + vBase, (size_t)headDim);
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * qkv[vBase + d];
+                    acc += p * dotv;
+                }
             }
             delta[idx] = acc;
         }
@@ -1533,18 +1559,22 @@ internal static class SilkKernels
             uint qOutBase = qRow * (3u * D) + dOffset;
             uint dAttnBase = qRow * D + dOffset;
 
-            /* Ascending j per accumulated component: dS_ij is one scalar per (query, key), so it is
-               derived once and fanned out to the headDim accumulators rather than recomputing the
-               V contraction per component. */
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+                drow[d] = dAttn[dAttnBase + d];
+
             float dq[MAXHEADDIM];
             for (uint d = 0; d < headDim; ++d) dq[d] = 0.0f;
 
             float dl = delta[idx];
             for (uint j = 0; j < seqLen; ++j)
             {
-                float ds = probs[probsBase + j]
-                    * (attn_backward_dotv(qkv, dAttn, vOff + (b * seqLen + j) * D + dOffset, dAttnBase, headDim)
-                        - dl);
+                float p = probs[probsBase + j];
+                uint vBase = vOff + (b * seqLen + j) * D + dOffset;
+                float dotv = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    dotv += drow[d] * qkv[vBase + d];
+                float ds = p * (dotv - dl);
                 if (ds == 0.0f) continue;
                 uint kBase = kOff + (b * seqLen + j) * D + dOffset;
                 for (uint d = 0; d < headDim; ++d)
@@ -1584,6 +1614,10 @@ internal static class SilkKernels
             uint kOutBase = jRow * (3u * D) + D + dOffset;
             uint vOutBase = jRow * (3u * D) + 2u * D + dOffset;
 
+            float vrow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+                vrow[d] = qkv[vOff + jRow * D + dOffset + d];
+
             float dk[MAXHEADDIM];
             float dv[MAXHEADDIM];
             for (uint d = 0; d < headDim; ++d) { dk[d] = 0.0f; dv[d] = 0.0f; }
@@ -1594,11 +1628,17 @@ internal static class SilkKernels
                 uint dAttnBase = (b * seqLen + i) * D + dOffset;
                 float p = probs[rowIdx * seqLen + jPos];
                 if (p == 0.0f) continue;
-                float ds = p * (attn_backward_dotv(qkv, dAttn, vOff + jRow * D + dOffset, dAttnBase, headDim) - delta[rowIdx]);
+                float drow[MAXHEADDIM];
+                for (uint d = 0; d < headDim; ++d)
+                    drow[d] = dAttn[dAttnBase + d];
+                float dotv = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    dotv += drow[d] * vrow[d];
+                float ds = p * (dotv - delta[rowIdx]);
                 uint qBase = (b * seqLen + i) * D + dOffset;
                 for (uint d = 0; d < headDim; ++d)
                 {
-                    dv[d] += p * dAttn[dAttnBase + d];
+                    dv[d] += p * drow[d];
                     dk[d] += ds * qkv[qBase + d];
                 }
             }
@@ -1607,6 +1647,111 @@ internal static class SilkKernels
             {
                 dQkv[kOutBase + d] = dk[d] * scale;
                 dQkv[vOutBase + d] = dv[d];
+            }
+        }
+
+
+        __kernel void attention_backward_dq_dkv(
+            __global const float* qkv,
+            __global const float* probs,
+            __global const float* delta,
+            __global const float* dAttn,
+            __global float* dQkv,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint pos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint rows = batch * seqLen;
+            uint kOff = rows * D;
+            uint vOff = 2u * rows * D;
+            uint dOffset = h * headDim;
+
+            /* Role A: dQ for query (b,h,pos). */
+            {
+                uint qPos = pos;
+                uint qRow = b * seqLen + qPos;
+                uint probsBase = ((b * numHeads + h) * seqLen + qPos) * seqLen;
+                uint qOutBase = qRow * (3u * D) + dOffset;
+                uint dAttnBase = qRow * D + dOffset;
+
+                float drow[MAXHEADDIM];
+                for (uint d = 0; d < headDim; ++d)
+                    drow[d] = dAttn[dAttnBase + d];
+
+                float dq[MAXHEADDIM];
+                for (uint d = 0; d < headDim; ++d) dq[d] = 0.0f;
+
+                float dl = delta[(b * numHeads + h) * seqLen + qPos];
+                for (uint j = 0; j < seqLen; ++j)
+                {
+                    float p = probs[probsBase + j];
+                    uint vBase = vOff + (b * seqLen + j) * D + dOffset;
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * qkv[vBase + d];
+                    float ds = p * (dotv - dl);
+                    if (ds == 0.0f) continue;
+                    uint kBase = kOff + (b * seqLen + j) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        dq[d] += ds * qkv[kBase + d];
+                }
+                for (uint d = 0; d < headDim; ++d)
+                    dQkv[qOutBase + d] = dq[d] * scale;
+            }
+
+            /* Role B: dK/dV for key (b,h,pos). */
+            {
+                uint jPos = pos;
+                uint jRow = b * seqLen + jPos;
+                uint vbase = vOff + jRow * D + dOffset;
+                float vrow[MAXHEADDIM];
+                for (uint d = 0; d < headDim; ++d)
+                    vrow[d] = qkv[vbase + d];
+
+                float dk[MAXHEADDIM];
+                float dv[MAXHEADDIM];
+                for (uint d = 0; d < headDim; ++d) { dk[d] = 0.0f; dv[d] = 0.0f; }
+
+                for (uint i = 0; i < seqLen; ++i)
+                {
+                    uint rowIdx = (b * numHeads + h) * seqLen + i;
+                    uint dAttnBase = (b * seqLen + i) * D + dOffset;
+                    float p = probs[rowIdx * seqLen + jPos];
+                    if (p == 0.0f) continue;
+                    float drow[MAXHEADDIM];
+                    for (uint d = 0; d < headDim; ++d)
+                        drow[d] = dAttn[dAttnBase + d];
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * vrow[d];
+                    float ds = p * (dotv - delta[rowIdx]);
+                    uint qBase = (b * seqLen + i) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                    {
+                        dv[d] += p * drow[d];
+                        dk[d] += ds * qkv[qBase + d];
+                    }
+                }
+
+                uint kOutBase = jRow * (3u * D) + D + dOffset;
+                uint vOutBase = jRow * (3u * D) + 2u * D + dOffset;
+                for (uint d = 0; d < headDim; ++d)
+                {
+                    dQkv[kOutBase + d] = dk[d] * scale;
+                    dQkv[vOutBase + d] = dv[d];
+                }
             }
         }
 

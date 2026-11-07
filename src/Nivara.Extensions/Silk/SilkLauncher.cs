@@ -173,6 +173,26 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.AttentionGroupSize]);
     }
 
+    public static void AttentionBackwardDqDkv(
+        SilkRuntime runtime, nint qkv, nint probs, nint delta, nint dAttn, nint dQkv,
+        int batch, int seqLen, int numHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.AttentionBackwardDqDkv, 0, qkv);
+        runtime.SetBuffer(SilkKernels.AttentionBackwardDqDkv, 1, probs);
+        runtime.SetBuffer(SilkKernels.AttentionBackwardDqDkv, 2, delta);
+        runtime.SetBuffer(SilkKernels.AttentionBackwardDqDkv, 3, dAttn);
+        runtime.SetBuffer(SilkKernels.AttentionBackwardDqDkv, 4, dQkv);
+        runtime.SetUInt32(SilkKernels.AttentionBackwardDqDkv, 5, (uint)batch);
+        runtime.SetUInt32(SilkKernels.AttentionBackwardDqDkv, 6, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.AttentionBackwardDqDkv, 7, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.AttentionBackwardDqDkv, 8, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.AttentionBackwardDqDkv, 9, scale);
+        runtime.Run(
+            SilkKernels.AttentionBackwardDqDkv,
+            [(nuint)SilkKernels.AttentionGlobal(batch * numHeads * seqLen)],
+            [(nuint)SilkKernels.AttentionGroupSize]);
+    }
+
     public static void Add(SilkRuntime runtime, nint a, nint b, nint y, int n)
     {
         runtime.SetBuffer(SilkKernels.Add, 0, a);
