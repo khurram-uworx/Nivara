@@ -593,8 +593,47 @@ public sealed class SilkBackwardKernelTests
         silk.Release(sdX); silk.Release(sdCls);
     }
 
+    [Test]
+    public void GemmNtResidual_MatchesNtPlusAdd_BitForBit()
+    {
+        (int m, int k, int n)[] shapes = [(17, 33, 9), (16, 32, 64), (1, 1, 1), (5, 2, 2)];
+        using var silk = Device();
+        foreach (var (m, k, n) in shapes)
+        {
+            float[] a = Randoms(m * k, 0x900001D1);
+            float[] b = Randoms(n * k, 0x900001D2);
+            float[] residual = Randoms(m * n, 0x900001D3);
+            nint sa = silk.Allocate(a.Length);
+            nint sb = silk.Allocate(b.Length);
+            nint sc = silk.Allocate(m * n);
+            nint sr = silk.Allocate(residual.Length);
+            silk.Upload(sa, a);
+            silk.Upload(sb, b);
+            silk.Upload(sr, residual);
+
+            SilkLauncher.GemmNtResidual(silk, sa, sb, sc, sr, m, k, n);
+            silk.Finish();
+            float[] got = silk.Download(sc, m * n);
+
+            var want = new float[m * n];
+            for (int i = 0; i < m; i++)
+                for (int j = 0; j < n; j++)
+                {
+                    float acc = 0f;
+                    for (int kk = 0; kk < k; kk++)
+                        acc += a[i * k + kk] * b[j * k + kk];
+                    want[i * n + j] = acc + residual[i * n + j];
+                }
+
+            AssertBits(got, want, $"gemm_row4_nt_residual m={m} k={k} n={n}");
+            silk.Release(sa); silk.Release(sb); silk.Release(sc); silk.Release(sr);
+        }
+    }
+
     /// <summary>
     /// Replays the three attention-backward kernels on the host in the same accumulation order:
+    /// ascending keys for the softmax pass, ascending keys per output component for dQ, and
+    /// ascending queries per key for dK/dV. qkv is block-major [Q][K][V], each <c>rows x D</c>.
     /// ascending keys for the softmax pass, ascending keys per output component for dQ, and
     /// ascending queries per key for dK/dV. qkv is block-major [Q][K][V], each <c>rows x D</c>.
     /// </summary>
