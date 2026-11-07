@@ -37,7 +37,7 @@ public sealed unsafe class SilkRuntime : IDisposable
 
     public string DeviceName { get; }
     public string Vendor { get; }
-public string DriverVersion { get; }
+    public string DriverVersion { get; }
     public ulong MaxWorkGroupSize { get; }
     public ulong LocalMemorySize { get; }
 
