@@ -100,6 +100,15 @@ machine difference in the table footer. Do not compute ratios across machines â€
 a Nivara improvement plus a PyTorch improvement from more cores looks like a
 regression when it is not.
 
+**Capture output for review:** when a human runs these benchmarks on behalf of
+an agent (or for later re-measurement), redirect each command's console output
+to a `%TEMP%` file and hand back the path rather than pasting it into chat.
+Example:
+`dotnet run --project <proj> -c Release -- ... > %TEMP%\\<name>-vX.Y.Z.txt 2>&1`
+The core harness JSON file should also be saved under `%TEMP%` (e.g.
+`%TEMP%\\nivara-perf-vX.Y.Z.json`) so the JSON evidence can be attached to the
+PR without committing a large binary.
+
 ### Step 6 â€” Commit, PR, merge
 
 Commit the release prep (docs + version bump) on a branch, open a PR, and merge to
