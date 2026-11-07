@@ -1466,14 +1466,32 @@ internal static class SilkKernels
             uint qBase = qRow * D + dOffset;
             uint dAttnBase = qRow * D + dOffset;
 
+            float qrow[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                qrow[d] = qkv[qBase + d];
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
             int qp = (int)qPos;
             int sl = (int)seqLen;
 
             float mx = -INFINITY;
             for (int j = 0; j < sl; ++j)
                 if (attn_keep(mask, maskBase, qp, j, band))
-                    mx = fmax(mx, attn_backward_score(
-                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale));
+                {
+                    uint kBase = kOff + (b * seqLen + (uint)j) * D + dOffset;
+                    prefetch(qkv + kBase, (size_t)headDim);
+                    float score = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        score += qrow[d] * qkv[kBase + d];
+                    score *= scale;
+                    probs[probsBase + (uint)j] = score;
+                    mx = fmax(mx, score);
+                }
+                else
+                    probs[probsBase + (uint)j] = -INFINITY;
 
             if (mx == -INFINITY)
             {
@@ -1484,20 +1502,27 @@ internal static class SilkKernels
 
             float sum = 0.0f;
             for (int j = 0; j < sl; ++j)
-                if (attn_keep(mask, maskBase, qp, j, band))
-                    sum += exp(attn_backward_score(
-                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale) - mx);
+                if (probs[probsBase + (uint)j] != -INFINITY)
+                    sum += exp(probs[probsBase + (uint)j] - mx);
 
             float acc = 0.0f;
             for (int j = 0; j < sl; ++j)
             {
-                float p = attn_keep(mask, maskBase, qp, j, band)
-                    ? exp(attn_backward_score(
-                        qkv, qBase, kOff + (b * seqLen + (uint)j) * D + dOffset, headDim, scale) - mx) / sum
-                    : 0.0f;
+                float p;
+                if (probs[probsBase + (uint)j] != -INFINITY)
+                    p = exp(probs[probsBase + (uint)j] - mx) / sum;
+                else
+                    p = 0.0f;
                 probs[probsBase + (uint)j] = p;
-                acc += p * attn_backward_dotv(
-                    qkv, dAttn, vOff + (b * seqLen + (uint)j) * D + dOffset, dAttnBase, headDim);
+                if (p != 0.0f)
+                {
+                    uint vBase = vOff + (b * seqLen + (uint)j) * D + dOffset;
+                    prefetch(qkv + vBase, (size_t)headDim);
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * qkv[vBase + d];
+                    acc += p * dotv;
+                }
             }
             delta[idx] = acc;
         }
