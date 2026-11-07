@@ -8,11 +8,11 @@ Usage (from repository root):
 
 The target table must be bracketed by HTML comments:
 
-    <!--hidden-starting-->
+    <!--hidden-start-->
     | Scenario | Prev | Current | Delta% | B/op | gen0/op |
     |---|---|---|---|---|---|
     | ... rows ...
-    <!--hidden-ending-->
+    <!--hidden-end-->
 
 The script keeps the header/separator lines untouched conceptually by looking
 for them; it parses every row between the markers, looks the scenario name up
@@ -32,8 +32,8 @@ def normalize(name):
 
 
 def shift_table(readme_text, json_data):
-    start_token = '<!--hidden-starting-->'
-    end_token = '<!--hidden-ending-->'
+    start_token = '<!--hidden-start-->'
+    end_token = '<!--hidden-end-->'
     start = readme_text.index(start_token) + len(start_token)
     end = readme_text.index(end_token)
     old_block = readme_text[start:end]
