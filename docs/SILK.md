@@ -889,6 +889,16 @@ Deliberately out of scope (no Silk seam exists yet):
 
 ---
 
+### Fused Adam launch (#1004)
+
+An attempt was made to fuse the ~70 per-parameter `adam_update` launches into one
+launch by copying every trained parameter into four contiguous arenas and running a
+single `adam_update` kernel over the total (~66M) element count. Measured
+`AdamUpdateAll` stayed ~62 ms on both B=4 and B=8 (within run-to-run noise), so
+the Adam step is memory-bandwidth bound rather than launch-overhead bound. The
+per-parameter dispatch is therefore retained; a single launch does not reach the
+20% target and would add arena/subview allocation complexity with no benefit.
+
 ## 14. Follow-up issues (Silk fine-tuning)
 
 Open follow-ups from the #956 implementation, in priority order. All are tracked as GitHub
@@ -896,9 +906,9 @@ issues; status and discussion live there.
 
 | # | Priority | Title | Notes |
 |---|----------|-------|-------|
-| [#1004](https://github.com/khurram-uworx/Nivara/issues/1004) | High | perf(silk): fuse Adam per-parameter launches in SilkDistilBertTrainer | AdamW is 59-61 ms/batch (~3-11% of a batch) on 70 separate `adam_update` launches; batch them offset-based. Next target after the attention backward / DKV optimisation (#1002) and the paired baseline (#1003, resolved in favour of Silk at B<=8). |
+| [#1004](https://github.com/khurram-uworx/Nivara/issues/1004) | High | perf(silk): fuse Adam per-parameter launches in SilkDistilBertTrainer | **Closed — documented conclusion.** A fused contiguous launch was attempted (70 params copied into four contiguous arenas and one `adam_update` launch): measured `AdamUpdateAll` stayed ~62 ms (B=4/B=8), no gain within run-to-run noise. The Adam step is memory-bandwidth bound, not launch-overhead bound; per-parameter dispatch is retained. |
 
-All earlier fine-tuning follow-ups (#960-#966, #1001-#1003) are closed; see their linked PRs for landed changes. The remaining headroom levers are, in order: fused Adam (#1004) and reducing the launch count on the backward GEMMs; the CPU-vs-Silk question is settled (Silk is 6.2-8.6x faster at B=2/4/8, L=128 even below 10% GPU util).
+All earlier fine-tuning follow-ups (#960-#966, #1001-#1004) are closed; see their linked PRs for landed changes. The remaining headroom levers are, in order: reducing the launch count on the backward GEMMs (LN/fc GEMM backward is the larger target); the CPU-vs-Silk question is settled (Silk is 6.2-8.6x faster at B=2/4/8, L=128 even below 10% GPU util).
 
 ---
 
