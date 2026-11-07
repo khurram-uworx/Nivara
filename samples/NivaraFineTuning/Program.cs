@@ -295,6 +295,7 @@ static class Program
                 Console.WriteLine($"  (seq len clamped to device cap {maxSeqLen})");
 
             using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen);
+            using var runner = trainer.CreateInferenceRunner();
             Console.WriteLine($"  Device: {trainer.DeviceName}, classes={trainer.NumClasses}");
 
             Console.WriteLine($"Loading tokenizer from {modelPath}/vocab.txt...");
@@ -316,8 +317,6 @@ static class Program
             Console.WriteLine("Tokenizing dev set...");
             var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, cli.MaxLen);
             Console.WriteLine($"  {devTokenized.Count} examples");
-
-            var lossFn = new CrossEntropyLoss<float>();
 
             int sampleCount = trainTokenized.Count;
             int seqLen = Math.Min(cli.MaxLen, maxSeqLen);
@@ -362,15 +361,9 @@ static class Program
                     Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
                 }
 
-                // Materialize the trained weights into the CPU model for dev eval.
-                var exported = trainer.ExportCheckpoint();
-                model.LoadWeights(exported);
-                model.Eval();
-
-                var (devLoss, devAcc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
+                // Dev evaluation on the device via the inference runner (no per-epoch weight export).
+                var (devLoss, devAcc) = EvaluateSilk(runner, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
                 Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
-
-                model.Train();
             }
 
             Console.WriteLine($"\nSaving fine-tuned model to {cli.SavePath}...");
@@ -577,6 +570,55 @@ static class Program
         }
 
         return 0;
+    }
+
+    static (float Loss, float Accuracy) EvaluateSilk(
+        SilkBertEncoderRunner runner,
+        BertTokenizer tokenizer,
+        List<Sst2Example> devSet,
+        int maxLen,
+        int batchSize)
+    {
+        var tokenized = Sst2Dataset.Tokenize(tokenizer, devSet, maxLen);
+        var batches = Sst2Dataset.CreateBatches(tokenized, Math.Min(batchSize, 8), shuffle: false).ToList();
+
+        float totalLoss = 0f;
+        int correct = 0;
+        int total = 0;
+
+        foreach (var batch in batches)
+        {
+            var intIds = Array.ConvertAll(batch.TokenIds, x => (int)x);
+            var result = runner.Forward(intIds, batch.AttentionMask, batch.BatchSize, batch.SeqLen);
+            var logits = result.Logits ?? Array.Empty<float>();
+
+            for (int i = 0; i < batch.BatchSize; i++)
+            {
+                int predicted = logits[i * 2 + 1] > logits[i * 2] ? 1 : 0;
+                if (predicted == batch.Labels[i]) correct++;
+            }
+            total += batch.BatchSize;
+
+            float batchLoss = 0f;
+            for (int i = 0; i < batch.BatchSize; i++)
+            {
+                float l0 = logits[i * 2];
+                float l1 = logits[i * 2 + 1];
+                float maxv = MathF.Max(l0, l1);
+                float e0 = MathF.Exp(l0 - maxv);
+                float e1 = MathF.Exp(l1 - maxv);
+                float sum = e0 + e1;
+                int label = batch.Labels[i];
+                float prob = (label == 0 ? e0 : e1) / sum;
+                batchLoss += -MathF.Log(prob);
+            }
+            batchLoss /= batch.BatchSize;
+            totalLoss += batchLoss;
+        }
+
+        float loss = batches.Count > 0 ? totalLoss / batches.Count : 0f;
+        float acc = total > 0 ? (float)correct / total * 100f : 0f;
+        return (loss, acc);
     }
 
     static (float Loss, float Accuracy) Evaluate(
