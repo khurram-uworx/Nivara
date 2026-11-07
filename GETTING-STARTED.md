@@ -436,6 +436,16 @@ using var jsonQuery = Json.ScanQuery<User>("data.json")
 using var jsonResult = jsonQuery.Collect();
 ```
 
+### Streaming and reachable memory budget (v1.5)
+
+Chunked, memory-bounded execution is reachable on the public API through the context-taking overload, so a caller can actually exercise the memory budget instead of relying on the internal default: `queryFrame.AsStream(context)` (the context is cloned inside; the caller's instance is not mutated).
+
+- `AsStream()` keeps its 10,000-row default.
+- When `ChunkSize` is `null`, the chunk size is derived as `clamp(MemoryBudget/10 ÷ 100 bytes/row, 1000, 100000)`.
+- Parquet row-group alignment applies. Non-streamable boundaries (Sort, GroupBy, Join, windows) fall back to a single merged frame identical to `CollectAsync()`.
+
+> `Csv` ships in `Nivara.Extensions`; `Json` ships in core. Both extension methods resolve under `using Nivara.IO;` once the package is referenced.
+
 ### Schema Inference
 
 Data sources automatically infer schemas:
@@ -1181,6 +1191,13 @@ After ingestion, use Nivara for filtering, joining, grouping, and schema validat
 
 ---
 
+## Embeddings and Microsoft.Extensions.AI
+
+Nivara does not compete with `Microsoft.Extensions.AI` for embeddings abstractions. It owns the tabular side: the **`Nivara.EmbeddingExtensions`** convention maps a `NivaraColumn<float[]>` (or labeled rows) to a flat `E0..E{n-1}` frame and back, and converts to/from `Microsoft.Extensions.AI` embeddings in both directions. Null policies are explicit and named by the caller. See [EMBEDDINGS.md](docs/EMBEDDINGS.md).
+
+- Store vectors as a label column + `E0..E{n-1}` columns (or as `float[]` cells in a single column) and use Nivara for filtering, joining, grouping, and schema validation.
+- Extract spans/tensors with `ToTensor<float>()`, then call `TensorPrimitives` (Dot, Norm, CosineSimilarity) for the numeric work.
+
 ## Automatic Differentiation
 
 Nivara provides automatic differentiation (AutoDiff) on DataFrames, enabling gradient-based optimization and machine learning workflows directly on your data.
@@ -1188,6 +1205,8 @@ Nivara provides automatic differentiation (AutoDiff) on DataFrames, enabling gra
 Inference is the default. A normal `model.Forward(input)` or tensor operation computes values without building a training graph. When you are writing a manual training step, wrap the forward/loss/backward/update code in `using (GradientUtils.Grad())`. Built-in training loops enter that scope for you.
 
 Supported numeric types are constrained to `IFloatingPointIeee754<T>` — `float`, `double`, `Half`, and `BFloat16`. AutoDiff is a non-nullable domain per [ADR-001](docs/adr/001-autodiff-nonnullable-domain.md): convert nullable columns with `FillNull`/`DropNulls` before crossing the AutoDiff boundary. For a full BFloat16 capability matrix (AutoDiff domain **and** the column/query layer), see [BFLOAT16.md](docs/BFLOAT16.md).
+
+Initializers and modules are seedable: every initializer gained `seed`/`Random` constructors, and `Conv*`/`VAE` layers accept custom initializer overrides for reproducible experiments. State can be saved/restored with `StateDict()` / `LoadStateDict()` and serialized via `ModelSerializer`.
 
 ### Converting to Gradient Tensors
 
@@ -1544,6 +1563,8 @@ var arrowOptions = new ArrowConversionOptions
 var customArrowTable = frame.ToArrowTable(arrowOptions);
 ```
 
+Export-side zero-copy (v1.5): set `UseZeroCopy = true` on `ArrowConversionOptions` to alias the flat primitive column buffers instead of copying. Null-bearing columns still rebuild the validity bitmap; unsupported types throw `UnsupportedTypeException`. Import and Parquet continue to copy. (ADR-007 — validity packing stays at the Arrow boundary.)
+
 ### Parquet File I/O
 
 ```csharp
@@ -1613,6 +1634,10 @@ var result = query.Collect();
 ```
 
 ---
+
+### ONNX interop
+
+`Nivara.Extensions` also ships `Nivara.Extensions/Onnx` for exporting/importing models and parity-checking against ONNX Runtime. See `samples/NivaraClassifier` (train, `--export-onnx`, `--onnx-compare`, `--load-onnx`) for the end-to-end flow.
 
 ## Best Practices
 
