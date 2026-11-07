@@ -764,6 +764,30 @@ Parity is pinned in `tests/Nivara.Tests/Gpu/SilkDistilBertTrainerTests.cs`: forw
 2e-4 and every parameter gradient within 5e-4 against `DistilBertForSequenceClassification<float>`
 driven through `CrossEntropyLoss`, on a 2-layer / hidden-32 / 4-head / vocab-64 / seqLen-8 model.
 
+### Backward sub-profile (#1001)
+
+The training batch profile (`--silk-distilbert-train-profile`) now splits the device backward
+chain into stages, each closed by a `runtime.Finish()` boundary, so the per-kernel cost inside
+the 0.4-1.5 s backward pass is visible. Representative medians on `Intel(R) Graphics`,
+DistilBERT base (6 layers, hidden 768, 12 heads), L=128, 5 iterations:
+
+| Stage | B=2 (ms) | B=4 (ms) | B=8 (ms) |
+|---|---:|---:|---:|
+| Classifier head | 0.0 | 0.0 | 0.0 |
+| Attention backward — prep | 37.0 | 56.0 | 147.0 |
+| Attention backward — Dq | 42.0 | 90.0 | 175.0 |
+| Attention backward — Dkv | 109.0 | 190.0 | 424.0 |
+| Attention backward (total) | 188.0 | 335.0 | 748.0 |
+| LN/fc GEMM backward | 197.0 | 371.0 | 763.0 |
+| Embedding scatter | 9.0 | 13.0 | 23.0 |
+| Backward chain (total) | 411.2 | 740.4 | 1551.6 |
+
+Reading (B=8): the backward chain is 1551.6 ms (80.4% of a 1930.3 ms batch). `attention_backward_dkv`
+is 424 ms (~27% of backward) and confirms the serial `seqLen * headDim` (128 * 64 = 8192) loop
+per work item as the leading attention contributor (issue #1002), but LN/fc GEMM backward (763 ms)
+and the attention backward as a whole (748 ms) dominate even more. The forward pass (316.6 ms)
+and AdamW (60.6 ms) are the next targets; softmax-cross-entropy input gradient on device is ~0.05 ms.
+
 ## 13f. Retrieval fusion (`RagLearnMode`, #915)
 
 `SilkRetrievalTrainer` (`samples/NivaraChat/Helpers/SilkRetrievalTrainer.cs`) trains the

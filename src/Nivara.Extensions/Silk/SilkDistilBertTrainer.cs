@@ -1,4 +1,5 @@
 using Nivara.AI;
+using System.Diagnostics;
 
 namespace Nivara.Silk;
 
@@ -201,6 +202,19 @@ public sealed class SilkDistilBertTrainer : IDisposable
     public int NumClasses => numClasses;
 
     /// <summary>
+    /// When true, <see cref="BackwardChain"/> records per-stage elapsed milliseconds (with
+    /// <c>runtime.Finish()</c> boundaries) in <see cref="LastPhaseMs"/>. Defaults to false so
+    /// normal training keeps its async command-queue scheduling.
+    /// </summary>
+    public bool ProfilingEnabled { get; set; }
+
+    /// <summary>Per-stage milliseconds captured by the last <see cref="BackwardChain"/> call.</summary>
+    public readonly Dictionary<string, long> LastPhaseMs = new();
+
+    /// <summary>Alias for <see cref="LastPhaseMs"/> used by the Silk training sub-profile.</summary>
+    public Dictionary<string, long> BackwardPhaseMs => LastPhaseMs;
+
+    /// <summary>
     /// Builds an inference-only <see cref="SilkBertEncoderRunner"/> that shares this trainer's
     /// live device weights (no copy), so dev-set evaluation can run on the device without an
     /// <c>ExportCheckpoint</c>. The runner borrows the weights; this trainer remains their owner.
@@ -358,7 +372,15 @@ public sealed class SilkDistilBertTrainer : IDisposable
         int hiddenLen = rows * hiddenDim;
         int intermLen = rows * intermediateDim;
 
+        LastPhaseMs.Clear();
+
+        long lnFcTotal = 0;
+        long attnPrepTotal = 0;
+        long attnDqTotal = 0;
+        long attnDkvTotal = 0;
+
         // Classifier head: classifier → ReLU → pre_classifier → CLS scatter.
+        var clsSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
         SilkLauncher.ColSum(runtime, dLogits, weights.ClsB.Gradient.Handle, batch, numClasses, 1f);
         SilkLauncher.GemmTn(runtime, reluH, dLogits, weights.ClsW.Gradient.Handle,
             aRows: hiddenDim, aCols: batch, bCols: numClasses);
@@ -375,11 +397,19 @@ public sealed class SilkDistilBertTrainer : IDisposable
         // and zeros elsewhere.
         SilkLauncher.Fill(runtime, dCur, 0f, hiddenLen);
         SilkLauncher.ScatterRows(runtime, dClsIn, dCur, batch, seqLen, hiddenDim);
+        if (ProfilingEnabled)
+        {
+            runtime.Finish();
+            LastPhaseMs["ClassifierHead"] = clsSw!.ElapsedMilliseconds;
+        }
 
         for (int i = numLayers - 1; i >= 0; i--)
         {
             var w = weights.Layers[i];
             var a = activations[i];
+
+            // LN/fc GEMM backward, part 1: layer norm + FFN + output projection.
+            var preSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
 
             // LN2: the layer output is layer_norm(preNorm2), so dCur is its gradient on entry.
             LayerNormBackward(dCur, a.PreNorm2, w.Ln2W, dTmp, rows);
@@ -416,13 +446,42 @@ public sealed class SilkDistilBertTrainer : IDisposable
             SilkLauncher.GemmNt(runtime, dCur, w.O.Handle, dAttn,
                 aRows: rows, aCols: hiddenDim, bCols: hiddenDim);
 
+            if (ProfilingEnabled)
+            {
+                runtime.Finish();
+                lnFcTotal += preSw!.ElapsedMilliseconds;
+            }
+
+            // Attention backward: prep + Dq + Dkv (each with its own Finish boundary).
+            var prepSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
             SilkLauncher.AttentionBackwardPrep(runtime, a.Qkv, maskBuf, dAttn, probs, delta,
                 batch, seqLen, numHeads, headDim, SilkKernels.GlobalAttentionBand, scale);
+            if (ProfilingEnabled)
+            {
+                runtime.Finish();
+                attnPrepTotal += prepSw!.ElapsedMilliseconds;
+            }
+
+            var dqSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
             SilkLauncher.AttentionBackwardDq(runtime, a.Qkv, probs, delta, dAttn, dQkv,
                 batch, seqLen, numHeads, headDim, scale);
+            if (ProfilingEnabled)
+            {
+                runtime.Finish();
+                attnDqTotal += dqSw!.ElapsedMilliseconds;
+            }
+
+            var dkvSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
             SilkLauncher.AttentionBackwardDkv(runtime, a.Qkv, probs, delta, dAttn, dQkv,
                 batch, seqLen, numHeads, headDim, scale);
+            if (ProfilingEnabled)
+            {
+                runtime.Finish();
+                attnDkvTotal += dkvSw!.ElapsedMilliseconds;
+            }
 
+            // LN/fc GEMM backward, part 2: qkv projection + residual add.
+            var postSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
             SilkLauncher.GemmTn(runtime, hidden[i], dQkv, w.Wqkv.Gradient.Handle,
                 aRows: hiddenDim, aCols: rows, bCols: 3 * hiddenDim);
             SilkLauncher.ColSum(runtime, dQkv, w.Bqkv.Gradient.Handle, rows, 3 * hiddenDim, 1f);
@@ -431,9 +490,15 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
             // dXIn = d(attnOut + xIn) + d(qkv path).
             SilkLauncher.Add(runtime, dCur, dTmp2, dCur, hiddenLen);
+            if (ProfilingEnabled)
+            {
+                runtime.Finish();
+                lnFcTotal += postSw!.ElapsedMilliseconds;
+            }
         }
 
         // Embedding LayerNorm, then the word and position embedding scatters.
+        var embSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
         LayerNormBackward(dCur, embPreNorm, weights.EmbLnW, dTmp, rows);
         SilkLauncher.ColSum(runtime, dLnA, weights.EmbLnW.Gradient.Handle, rows, hiddenDim, 1f);
         SilkLauncher.ColSum(runtime, dLnB, weights.EmbLnB.Gradient.Handle, rows, hiddenDim, 1f);
@@ -442,6 +507,20 @@ public sealed class SilkDistilBertTrainer : IDisposable
         SilkLauncher.EmbeddingBackwardRows(runtime, idsBuf, dTmp, weights.WordEmb.Gradient.Handle, rows, hiddenDim);
         SilkLauncher.Fill(runtime, weights.PosEmb.Gradient.Handle, 0f, weights.PosEmb.Count);
         SilkLauncher.EmbeddingBackwardRows(runtime, posIdsBuf, dTmp, weights.PosEmb.Gradient.Handle, rows, hiddenDim);
+        if (ProfilingEnabled)
+        {
+            runtime.Finish();
+            LastPhaseMs["EmbeddingScatter"] = embSw!.ElapsedMilliseconds;
+        }
+
+        if (ProfilingEnabled)
+        {
+            LastPhaseMs["AttnPrep"] = attnPrepTotal;
+            LastPhaseMs["AttnDq"] = attnDqTotal;
+            LastPhaseMs["AttnDkv"] = attnDkvTotal;
+            LastPhaseMs["AttentionBackward"] = attnPrepTotal + attnDqTotal + attnDkvTotal;
+            LastPhaseMs["LnFcGemmBackward"] = lnFcTotal;
+        }
     }
 
     /// <summary>One AdamW step over every parameter, with the caller's weight decay and the shared
