@@ -1,32 +1,42 @@
-# Plan: refactor(samples): simplify RunTrainSilk training loop (issue #966)
+# Plan: perf(samples): use SilkBertEncoderRunner for dev eval in RunTrainSilk (issue #964)
 
 ## Problem
-`RunTrainSilk` calls `trainer.Train(..., epochs: 1)` inside an outer `for (epoch...)` loop, while
-`SilkDistilBertTrainer.Train` supports multi-epoch internally. Loss reporting and shuffle seeding
-are split awkwardly between trainer and CLI.
+`RunTrainSilk` exports the trained weights to the CPU model (`model.LoadWeights(exported)`)
+every epoch to run dev evaluation. That's 66M params × 2 conversions (device→HF→CPU) per
+epoch on top of the already-slow training loop. The inference runner `SilkBertEncoderRunner`
+already exists and runs on the device.
 
 ## Goal
-Pass `cli.Epochs` to a single `trainer.Train(..., epochs: cli.Epochs, ...)` call, and have the CLI
-handle dev eval + model materialization per epoch via a per-epoch hook.
+Use `SilkBertEncoderRunner` for dev-set evaluation instead of exporting to the CPU model
+each epoch. Speeds up training and exercises the inference path during training.
 
 ## Proposed changes
 
 ### 1. `src/Nivara.Extensions/Silk/SilkDistilBertTrainer.cs`
-Add optional `onEpochCompleted` callback to `Train`:
-`Action<int, int, float, TimeSpan>? onEpochCompleted = null`
-Invoke after each epoch's result is recorded: `onEpochCompleted?.Invoke(epoch + 1, epochs, results[^1].Loss, stopwatch.Elapsed);`
+- Store the `BertConfig` passed to the constructor (`readonly BertConfig config;`).
+- Add public `CreateInferenceRunner()` returning a `SilkBertEncoderRunner` that shares
+  the trainer's live device weights (no copy).
 
-### 2. `samples/NivaraFineTuning/Program.cs` (`RunTrainSilk`)
-Replace outer loop with single call. Move per-epoch bookkeeping into callbacks:
-- `onBatchCompleted`: detect epoch change, reset accumulators, print epoch header, accumulate, print batch line.
-- `onEpochCompleted`: print training complete + steady-state ms/batch, materialize weights, Eval, Evaluate, print dev, Train().
+### 2. `src/Nivara.Extensions/Silk/SilkBertEncoderRunner.cs`
+- Add `readonly bool ownsWeights;`.
+- Add internal constructor
+  `SilkBertEncoderRunner(SilkRuntime runtime, BertConfig config, SilkBertWeights weights, bool ownsWeights)`
+  that performs the existing workspace allocation but borrows the supplied weights.
+- Public tensor constructor chains into the internal one (creates its own weights, ownsWeights=true).
+- `Dispose` releases workspace buffers always; disposes weights only when `ownsWeights`.
 
-Seed: use `1` (see decisions). Moments persist across epochs (trainer internal).
+### 3. `samples/NivaraFineTuning/Program.cs` (`RunTrainSilk`)
+- Create runner once: `using var runner = trainer.CreateInferenceRunner();`.
+- Replace per-epoch `ExportCheckpoint` + `LoadWeights` + `Evaluate` with device eval via
+  `EvaluateSilk(runner, ...)`.
+- Add `EvaluateSilk` helper (mirrors `RunEvalSilk`).
+- Keep final save using `ExportCheckpoint` + `ModelSerializer.Save`.
 
 ## Blast radius
-- Trainer Train signature gains optional trailing param (backward compatible).
-- Sample only consumer of multi-epoch Silk training in CLI.
-- Tests: `SilkDistilBertTrainerTests` uses Train with epochs=8, onBatchCompleted not used; unaffected.
+- SilkDistilBertTrainer: new public method + stored field; backward compatible.
+- SilkBertEncoderRunner: new internal constructor + field; public API unchanged.
+- Sample only consumer affected.
+- Tests: SilkDistilBertTrainerTests, SilkBertEncoderRunner usage unaffected (public API stable).
 
 ## Verification
 - `dotnet build Nivara.slnx`
@@ -34,14 +44,15 @@ Seed: use `1` (see decisions). Moments persist across epochs (trainer internal).
 - `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`
 
 ## Planned commits
-1. docs: plan #966 in TODO.md
-2. feat(silk): add onEpochCompleted hook to SilkDistilBertTrainer.Train
-3. refactor(samples): simplify RunTrainSilk to single Train call
+1. docs: plan #964 in TODO.md
+2. feat(silk): shared-weight inference runner support
+3. refactor(samples): device-side dev eval in RunTrainSilk
 4. docs: remove TODO.md — plan executed
 
 ## GitHub issues log
 - None yet.
 
 ## Decisions for human (G1)
-1. Seed handling: current uses `seed: epoch` per call (different RNG each epoch). Single call uses one Random. Propose `seed: 1`. Confirm or adjust.
-2. Optimizer moments: current resets per epoch (because Train resets at start). Single call persists. Propose persist (more correct). Confirm.
+- Sharing live device weights requires the runner to not dispose them (trainer owns).
+  Confirmed by design above.
+- Dev eval seqLen/batchSize clamping follows existing RunEvalSilk conventions.
