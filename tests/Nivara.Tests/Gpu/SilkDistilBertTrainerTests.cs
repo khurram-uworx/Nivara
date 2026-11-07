@@ -164,4 +164,41 @@ public sealed class SilkDistilBertTrainerTests
         grad?.CopyTo(arr, 0.0f);
         return arr;
     }
+
+    [Test]
+    public void Train_LossDecreases()
+    {
+        var (runtime, trainer, _) = Make();
+        using (runtime)
+        using (trainer)
+        {
+            const int samples = 32;
+            var rng = new Random(37);
+            var tokens = new int[samples * SeqLen];
+            var mask = new float[samples * SeqLen];
+            var labels = new int[samples];
+            for (int i = 0; i < samples; i++)
+            {
+                labels[i] = i % 2;
+                tokens[i * SeqLen] = labels[i] == 0 ? 2 : 5;
+                for (int s = 1; s < SeqLen; s++)
+                    tokens[i * SeqLen + s] = rng.Next(1, Vocab);
+                for (int s = 0; s < SeqLen; s++)
+                    mask[i * SeqLen + s] = 1f;
+            }
+
+            var epochs = trainer.Train(tokens, mask, labels,
+                batchSize: 4, seqLen: SeqLen, epochs: 4,
+                learningRate: 0.05f, weightDecay: 0.01f, seed: 41);
+
+            Assert.That(epochs.Count, Is.EqualTo(4));
+            for (int i = 0; i < epochs.Count; i++)
+            {
+                Assert.That(epochs[i].Epoch, Is.EqualTo(i));
+                Assert.That(float.IsFinite(epochs[i].Loss), Is.True, $"epoch {i} loss not finite");
+            }
+            Assert.That(epochs[^1].Loss, Is.LessThan(0.5f * epochs[0].Loss),
+                $"loss did not halve: {epochs[0].Loss} -> {epochs[^1].Loss}");
+        }
+    }
 }
