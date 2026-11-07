@@ -3,13 +3,14 @@
   <Folder Name="/.github/workflows/">
     <File Path=".github/workflows/cd.yml" />
     <File Path=".github/workflows/ci.yml" />
+    <File Path=".github/workflows/release-readiness.yml" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MicroGpt/MicroGpt.csproj" />
+    <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
     <Project Path="samples/Nivara.Samples/Nivara.Samples.csproj" />
     <Project Path="samples/NivaraChat/NivaraChat.csproj" />
     <Project Path="samples/NivaraChess/NivaraChess.csproj" />
-    <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
     <Project Path="samples/NivaraClassifier/NivaraClassifier.csproj" />
     <Project Path="samples/NivaraFineTuning/NivaraFineTuning.csproj" />
     <Project Path="samples/NivaraGpt/NivaraGpt.csproj" />
@@ -34,10 +35,10 @@
     <File Path="README.md" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Nivara.Tests/Nivara.Tests.csproj" />
+    <Project Path="tests/Nivara.GpuProbe/Nivara.GpuProbe.csproj" />
     <Project Path="tests/Nivara.PerformanceTests/Nivara.PerformanceTests.csproj" />
     <Project Path="tests/Nivara.SimdProbe/Nivara.SimdProbe.csproj" />
-    <Project Path="tests/Nivara.GpuProbe/Nivara.GpuProbe.csproj" />
+    <Project Path="tests/Nivara.Tests/Nivara.Tests.csproj" />
   </Folder>
   <Project Path="src/Nivara.Extensions/Nivara.Extensions.csproj" />
   <Project Path="src/Nivara/Nivara.csproj" />

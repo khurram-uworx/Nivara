@@ -47,12 +47,18 @@ jobs:
     - name: Pack Nivara.Extensions
       run: dotnet pack src/Nivara.Extensions/Nivara.Extensions.csproj --no-build --configuration Release -p:PackageVersion=${{ env.VERSION }}
 
+    - name: NuGet login (OIDC → temp API key)
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: ${{ secrets.NUGET_USER }}
+
     - name: Push Nivara to NuGet
       run: |
-        dotnet nuget push src/Nivara/bin/Release/Nivara.${{ env.VERSION }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
-        dotnet nuget push src/Nivara/bin/Release/Nivara.${{ env.VERSION }}.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara/bin/Release/Nivara.${{ env.VERSION }}.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara/bin/Release/Nivara.${{ env.VERSION }}.snupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
     - name: Push Nivara.Extensions to NuGet
       run: |
-        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.${{ env.VERSION }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
-        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.${{ env.VERSION }}.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.${{ env.VERSION }}.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.${{ env.VERSION }}.snupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
