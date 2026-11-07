@@ -7,11 +7,12 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara</PackageId>
-    <PackageVersion>2.0.0-preview</PackageVersion>
+    <PackageVersion>1.5.0</PackageVersion>
     <Description>High-performance columnar DataFrame library for .NET</Description>
-    <PackageReleaseNotes>v1.4.0: Public streaming API (QueryFrame.AsStream, NivaraQuery&lt;T&gt;.AsStream, ScanAsQueryFrame factories for CSV/JSON/Parquet) with chunked async processing; Over()/WindowSpec builder for SQL-style partitioned window functions (rolling/cumulative/shift/lead/rank); fused expression engine kernel IR with TensorPrimitives SIMD and span/chunked backends; genuinely async CollectAsync/ToListAsync (no Task.Run); conditional expressions (ternary ?:) in the LINQ DSL; Quantile/Median/StdDev/Variance built-in aggregations; public API promotions (QueryPlan, ExecutionEngine, IExecutionStrategy, NivaraExecutionContext, ExecutionProgress, QueryPlanAnalyzer, QueryDiagnostics, QueryFrame.ToQueryPlan); Parquet row-group predicate pushdown; streaming budget tracker and window overlap buffer for chunked streaming; window-bearing operations run whole-column in streaming/parallel; int-family window accumulator overflow protection; various streaming/execution bug fixes. Core columnar engine: LINQ-like query engine, tensor-accelerated arithmetic and comparisons, lazy/eager/streaming/parallel execution strategies, explicit null mask semantics, schema-aware query planning with predicate pushdown and operation fusion, performance diagnostics, buffer pooling.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.0: Promoted Silk (OpenCL) backend and BERT-family model layer into Nivara.Extensions; added embeddings frame convention and Microsoft.Extensions.AI glue (NivaraEmbeddingExtensions); real opt-in zero-copy Arrow export for flat primitive columns with validity-bitmap rebuild for null-bearing columns; mask-based nullable column storage (ElementType is now the underlying type); reachable streaming memory budget via AsStream(NivaraExecutionContext); modernbert benchmark selectable lengths/pass counts; qwen distillation on Silk and fused per-token decoder with batched prefill; seedable AutoDiff initializers and constructor-level initializer overrides across conv/VAE/linear modules; documentation citation and snippet gates plus ADR index gate. Core columnar engine unchanged: LINQ-like query engine, tensor-accelerated kernels, lazy/eager/streaming/parallel execution, explicit null masks. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU5104</WarningsNotAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

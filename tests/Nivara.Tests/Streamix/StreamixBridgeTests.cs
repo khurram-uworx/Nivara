@@ -248,11 +248,9 @@ public class StreamixBridgeTests
     [Test]
     public async Task Backpressure_FailMode_BridgePath_PropagatesException()
     {
-        // The producer must flood without pacing delays: Task.Delay-based producer
-        // pacing quantizes to roughly the consumer's cadence on Windows (~15.6ms
-        // timer granularity), so the capacity-1 boundary never fills and Fail mode
-        // never fires — mirroring Streamix's own PipeThroughChannel_Fail_ThrowsWhenBoundaryIsFull_FromEnumerable.
-        var flux = Flux.From(FloodFrames(100))
+        // Flood without pacing: a completed-task await keeps production synchronous
+        // so the capacity-1 boundary overflows regardless of scheduler timing.
+        var flux = Flux.From(FloodFrames(1000))
             .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
 
         int count = 0;
@@ -299,7 +297,7 @@ public class StreamixBridgeTests
         var y = new string[] { "a" };
         for (int i = 0; i < count; i++)
         {
-            await Task.Yield();
+            await Task.CompletedTask;
             yield return NivaraFrame.Create(
                 ("X", NivaraColumn<int>.Create(x)),
                 ("Y", NivaraColumn<string>.Create(y)));

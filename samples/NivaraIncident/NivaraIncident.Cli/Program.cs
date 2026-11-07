@@ -27,6 +27,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--iterations" && i + 1 < args.Length) iterations = int.Parse(args[++i]);
     else if (args[i] == "--stream") stream = true;
     else if (args[i] == "--benchmark") benchmark = true;
+    else if (args[i] == "--quick") { benchmark = true; iterations = 1; }
     else if (args[i] == "--gpu") gpu = true;
     else if (args[i] == "--gpu-force") gpuForce = true;
 }
@@ -553,8 +554,7 @@ void PrintUsage()
     Console.WriteLine();
     Console.WriteLine("Usage:");
     Console.WriteLine("  NivaraIncident.Cli generate      --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
-    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>] [--gpu] [--gpu-force]");
-    Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
+    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--quick] [--iterations <N>] [--gpu] [--gpu-force]"); Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-gpu     --dataset <path> --scenario <A|B|C|D|all> [--iterations <N>]");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");

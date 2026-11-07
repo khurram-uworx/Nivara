@@ -94,6 +94,12 @@ For each benchmark: **open the README → follow the `## Release Benchmark` sect
 run the commands → update the tables with fresh Prev/Current numbers.** Do not skip
 any benchmark — if one cannot be run, say so in the PR with the reason.
 
+**Cross-machine rule:** if the Prev reading was on a different machine (or a
+codebase version that changed the measurement), set **Prev to `—`** and note the
+machine difference in the table footer. Do not compute ratios across machines —
+a Nivara improvement plus a PyTorch improvement from more cores looks like a
+regression when it is not.
+
 ### Step 6 — Commit, PR, merge
 
 Commit the release prep (docs + version bump) on a branch, open a PR, and merge to
@@ -114,6 +120,10 @@ The PR description must include:
   output where applicable).
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
 - The CD test results (3200+ tests passing).
+
+The PR must show a green CI check before merging. Do not merge with `--admin`
+until CI passes, and do not merge a docs-only PR without confirming `dotnet build
+Nivara.slnx` and the targeted test suite are green locally.
 
 ### Step 7 — Verify the build before tagging
 
