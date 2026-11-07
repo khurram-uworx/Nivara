@@ -57,11 +57,15 @@ def shift_table(readme_text, json_data):
         except ValueError:
             old_curr_num = None
         new_prev = old_curr if old_curr_num is not None else old_prev
-        new_curr = f"{round(r['opsPerSec']):,}"
+        ops_per_sec = r['opsPerSec']
+        if abs(ops_per_sec) < 1:
+            new_curr = f"{ops_per_sec:.1f}"
+        else:
+            new_curr = f"{round(ops_per_sec):,}"
         if old_curr_num is not None and old_prev not in ('—', '-', ''):
             try:
                 old_prev_num = float(old_prev.replace(',', ''))
-                delta = (float(new_curr.replace(',', '')) - old_prev_num) / old_prev_num * 100
+                delta = (ops_per_sec - old_prev_num) / old_prev_num * 100
                 delta_str = (f"+{delta:.1f}%" if delta >= 0 else f"-{abs(delta):.1f}%")
             except ValueError:
                 delta_str = '—'
@@ -90,5 +94,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-PYEOF
-echo written
