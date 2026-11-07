@@ -283,7 +283,7 @@ public class InferenceCliArgumentTests
     /// <summary>
     /// The Silk phase: <c>--silk</c> is a second GPU backend whose model scope (the hand-authored
     /// kernels cover the BERT-family encoders, MiniLM and DistilBERT, and DistilBERT's classifier
-    /// head) and mode scope are narrower than <c>--ilgpu</c>'s, and it is F32-only. Each
+    /// head) and mode scope are narrower than <c></c>'s, and it is F32-only. Each
     /// rejection is pinned by message for the same reason the ILGPU scopes are: a removed guard would
     /// fall through to a different exit-1 path and the exit code alone would still be <c>1</c>.
     /// </summary>
