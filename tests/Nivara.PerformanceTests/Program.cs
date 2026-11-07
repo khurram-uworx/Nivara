@@ -33,7 +33,7 @@ static class Program
         if (args.Any(a => a.Equals("--qwen-decode-attn", StringComparison.OrdinalIgnoreCase)))
             return QwenDecodeAttentionProbe.Run();
 
-        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, silkGemm) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, cpuDistilBertTrainProfile, silkGemm) = ParseArgs(args);
 
         if (datasetTest)
         {
@@ -73,6 +73,9 @@ static class Program
 
         if (silkDistilBertTrainProfile)
             return SilkDistilBertTrainingProfileProbe.Run();
+
+        if (cpuDistilBertTrainProfile)
+            return CpuDistilBertTrainingProfileProbe.Run();
 
         if (runs > 1)
         {
@@ -1024,7 +1027,7 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool CpuGemm, bool Mask, bool SilkKernels, bool LayaForward, bool SilkLayaForward, bool SilkLayaHeadProfile, bool SilkEncoderProfile, bool SilkDistilBertTrainProfile, bool SilkGemm) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap, bool CpuGemm, bool Mask, bool SilkKernels, bool LayaForward, bool SilkLayaForward, bool SilkLayaHeadProfile, bool SilkEncoderProfile, bool SilkDistilBertTrainProfile, bool CpuDistilBertTrainProfile, bool SilkGemm) ParseArgs(string[] args)
     {
         string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
@@ -1039,6 +1042,7 @@ static class Program
         bool silkLayaHeadProfile = false;
         bool silkEncoderProfile = false;
         bool silkDistilBertTrainProfile = false;
+        bool cpuDistilBertTrainProfile = false;
         bool silkGemm = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -1075,6 +1079,9 @@ static class Program
                 case "--silk-distilbert-train-profile":
                     silkDistilBertTrainProfile = true;
                     break;
+                case "--cpu-distilbert-train-profile":
+                    cpuDistilBertTrainProfile = true;
+                    break;
                 case "--silk-gemm":
                 case "--silk-gemm-baseline":
                 case "--silk-gemm-compare":
@@ -1103,7 +1110,7 @@ static class Program
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, silkGemm);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, cpuDistilBertTrainProfile, silkGemm);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)

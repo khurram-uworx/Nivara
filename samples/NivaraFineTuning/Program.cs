@@ -208,6 +208,7 @@ static class Program
             float epochLoss = 0f;
             int batchCount = 0;
             var batchSw = System.Diagnostics.Stopwatch.StartNew();
+            var epochBatchElapsed = new List<TimeSpan>();
 
             var trainBatches = Sst2Dataset.CreateBatches(trainTokenized, cli.BatchSize, shuffle: true).ToList();
             int totalTrainBatches = trainBatches.Count;
@@ -229,12 +230,21 @@ static class Program
                 }
 
                 batchCount++;
+                epochBatchElapsed.Add(batchSw.Elapsed);
                 Console.WriteLine($"  Batch {batchCount}/{totalTrainBatches} [{batchSw.Elapsed.TotalSeconds:F1}s] - loss: {epochLoss / batchCount:F4}");
                 batchSw.Restart();
             }
 
             float avgTrainLoss = epochLoss / batchCount;
             Console.WriteLine($"Epoch {epoch} training complete. Avg loss: {avgTrainLoss:F4}");
+            if (epochBatchElapsed.Count > 1)
+            {
+                double steadySumMs = 0;
+                for (int i = 1; i < epochBatchElapsed.Count; i++)
+                    steadySumMs += epochBatchElapsed[i].TotalMilliseconds;
+                double steadyMs = steadySumMs / (epochBatchElapsed.Count - 1);
+                Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
+            }
 
             var (devLoss, devAcc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
             Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");

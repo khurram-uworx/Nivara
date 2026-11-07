@@ -240,6 +240,29 @@ plugged into AC power (thermal/battery throttling skews integrated-GPU results):
 alongside any re-measurement. The Silk path is **~1.5x faster than PyTorch CPU** at
 this shape, while the CPU Nivara path remains **~3.2x slower** than PyTorch.
 
+### Paired CPU vs Silk (issue #1003)
+
+Measured on the same machine (Intel Core Ultra 7 255H, Windows 11, .NET 10,
+Release, Server GC + Tiered PGO) with `--mode train --epochs 1 --max-len 128
+--max-examples 48 --batch-size B`; first batch excluded as steady-state. Silk run
+on **battery power (not AC)**, so integrated-GPU figures are conservative — treat
+them as an upper bound on Silk ms/batch.
+
+| B | L | Nivara CPU (ms/batch) | Nivara Silk/OpenCL (ms/batch) | CPU / Silk |
+|---|---|---:|---:|---:|
+| 2 | 128 | 3140.9 | 365.8 | 8.59x |
+| 4 | 128 | 4516.8 | 636.7 | 7.09x |
+| 8 | 128 | 7720.4 | 1250.4 | 6.17x |
+
+Conclusion (per #961 item 6): on this laptop the CPU reverse-mode path is **not**
+within ~1.5x of the integrated GPU at B<=8 — Silk is 6.2-8.6x faster at these
+shapes, so the "CPU is the better fit at B<=8" fork is **not** supported and the
+fine-tuning value of Silk starts at B>=2. The earlier concern about <10% GPU
+utilization is real but does not erase the device advantage; optimisation work
+should focus on the backward chain (especially attention backward / DKV, ~72-80%
+of Silk batch time) rather than reverting to the CPU path. A 48-example run is small,
+so the absolute figures vary ~±10% run-to-run (per `tests/Nivara.PerformanceTests/README.md`);   re-run on AC power before quoting an official number.
+
 | Config | PyTorch (CPU) | Nivara (.NET 10) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
 |--------|---------------|-------------------|----------------------|----------------|-----------------|
 | Fine-tune B=2, L=128, 100 examples | 377.4 ms/batch | 1200 ms/batch | 251.7 ms/batch | **~3.2x** | **0.67x (1.5x faster)** |

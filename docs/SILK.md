@@ -368,6 +368,13 @@ Qwen, MobileNetV2, and ResNet-18**, F32 only. Qwen and the vision models expose 
 sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`. F32 only (no
 bf16/fp16 translation unit).
 
+**Bottom line for fine-tuning (issue #1003):** on the integrated Intel Graphics the Silk path is
+**6.2-8.6x faster than the CPU reverse-mode path** at B=2/4/8, L=128, even at the
+<10% GPU utilization reported in #961, so the "CPU is the better fit at B<=8" fork is **not**
+supported and Silk's value starts at B>=2. Optimisation should target the backward chain
+(attention backward/DKV ~27% of backward time; LN/fc GEMM backward is even larger), not a CPU
+fallback. See §13e "Paired CPU vs Silk baseline".
+
 | file | role |
 |---|---|
 | `SilkKernels.cs` | the OpenCL C translation unit (`Source`) and all geometry, as pure data so it can be unit-checked without a device; `KernelNames` is the build order. `internal` |
@@ -764,6 +771,24 @@ Parity is pinned in `tests/Nivara.Tests/Gpu/SilkDistilBertTrainerTests.cs`: forw
 2e-4 and every parameter gradient within 5e-4 against `DistilBertForSequenceClassification<float>`
 driven through `CrossEntropyLoss`, on a 2-layer / hidden-32 / 4-head / vocab-64 / seqLen-8 model.
 
+### Paired CPU vs Silk baseline (#1003)
+
+Paired measurements (same Intel Core Ultra 7 255H laptop, **battery, not AC**;
+Release; first batch excluded):
+
+| B | L | CPU (ms/batch) | Silk/OpenCL (ms/batch) | CPU / Silk |
+|---|---|---:|---:|---:|
+| 2 | 128 | 3140.9 | 365.8 | 8.59x |
+| 4 | 128 | 4516.8 | 636.7 | 7.09x |
+| 8 | 128 | 7720.4 | 1250.4 | 6.17x |
+
+Conclusion: the CPU reverse-mode path is **not** within ~1.5x of the integrated GPU at
+B<=8, so the "CPU is the better fit at B<=8" fork (#961 item 6) is **not** supported; Silk
+is 6.2-8.6x faster at these shapes. The heavy backward chain (especially attention
+backward / DKV, ~72-80% of Silk batch time) is the remaining optimisation target, not the
+CPU fallback. A 48-example run is small, so re-run on AC power before quoting an official
+number. See `samples/NivaraFineTuning/README.md` "Paired CPU vs Silk".
+
 ### Backward sub-profile (#1001)
 
 The training batch profile (`--silk-distilbert-train-profile`) now splits the device backward
@@ -864,6 +889,16 @@ Deliberately out of scope (no Silk seam exists yet):
 
 ---
 
+### Fused Adam launch (#1004)
+
+An attempt was made to fuse the ~70 per-parameter `adam_update` launches into one
+launch by copying every trained parameter into four contiguous arenas and running a
+single `adam_update` kernel over the total (~66M) element count. Measured
+`AdamUpdateAll` stayed ~62 ms on both B=4 and B=8 (within run-to-run noise), so
+the Adam step is memory-bandwidth bound rather than launch-overhead bound. The
+per-parameter dispatch is therefore retained; a single launch does not reach the
+20% target and would add arena/subview allocation complexity with no benefit.
+
 ## 14. Follow-up issues (Silk fine-tuning)
 
 Open follow-ups from the #956 implementation, in priority order. All are tracked as GitHub
@@ -871,13 +906,9 @@ issues; status and discussion live there.
 
 | # | Priority | Title | Notes |
 |---|----------|-------|-------|
-| [#962](https://github.com/khurram-uworx/Nivara/issues/962) | High | test(silk): add loss-decreasing smoke test for `SilkDistilBertTrainer` | Gradient parity proves the math; this proves the AdamW wiring |
-| [#963](https://github.com/khurram-uworx/Nivara/issues/963) | High | feat(samples): add per-batch timing to `RunTrainSilk` | Landed (khurram/963); unblocks #960 |
-| [#964](https://github.com/khurram-uworx/Nivara/issues/964) | Medium | perf(samples): use `SilkBertEncoderRunner` for dev eval | Avoids per-epoch weight export (66M params × 2 conversions) |
-| [#965](https://github.com/khurram-uworx/Nivara/issues/965) | Medium | fix(samples): consistent `--max-len` clamping in `RunTrainSilk` | Training vs dev-eval shape mismatch risk |
-| [#966](https://github.com/khurram-uworx/Nivara/issues/966) | Low | refactor(samples): simplify `RunTrainSilk` training loop | Single `Train` call + per-epoch eval |
-| [#960](https://github.com/khurram-uworx/Nivara/issues/960) | Measurement | bench: add Silk column to NivaraFineTuning benchmark table | Harness + docs landed (khurram/960); AC-power readings pending |
-| [#961](https://github.com/khurram-uworx/Nivara/issues/961) | Investigation | perf(silk): low GPU utilization during training | <10% GPU on Intel Graphics; profile first |
+| [#1004](https://github.com/khurram-uworx/Nivara/issues/1004) | High | perf(silk): fuse Adam per-parameter launches in SilkDistilBertTrainer | **Closed — documented conclusion.** A fused contiguous launch was attempted (70 params copied into four contiguous arenas and one `adam_update` launch): measured `AdamUpdateAll` stayed ~62 ms (B=4/B=8), no gain within run-to-run noise. The Adam step is memory-bandwidth bound, not launch-overhead bound; per-parameter dispatch is retained. |
+
+All earlier fine-tuning follow-ups (#960-#966, #1001-#1004) are closed; see their linked PRs for landed changes. The remaining headroom levers are, in order: reducing the launch count on the backward GEMMs (LN/fc GEMM backward is the larger target); the CPU-vs-Silk question is settled (Silk is 6.2-8.6x faster at B=2/4/8, L=128 even below 10% GPU util).
 
 ---
 
