@@ -166,7 +166,6 @@ internal static class SilkKernels
     public const string AttentionBackwardPrep = "attention_backward_prep";
     public const string AttentionBackwardDq = "attention_backward_dq";
     public const string AttentionBackwardDkv = "attention_backward_dkv";
-    public const string AttentionBackwardDqDkv = "attention_backward_dq_dkv";
 
     // Training glue (#956): the split GELU (keeps the pre-activation), the row-major embedding
     // scatter, and the gather_rows backward.
@@ -188,7 +187,7 @@ internal static class SilkKernels
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         FusionForward, FusionWgrad,
-        AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv, AttentionBackwardDqDkv,
+        AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
@@ -1559,22 +1558,18 @@ internal static class SilkKernels
             uint qOutBase = qRow * (3u * D) + dOffset;
             uint dAttnBase = qRow * D + dOffset;
 
-            float drow[MAXHEADDIM];
-            for (uint d = 0; d < headDim; ++d)
-                drow[d] = dAttn[dAttnBase + d];
-
+            /* Ascending j per accumulated component: dS_ij is one scalar per (query, key), so it is
+               derived once and fanned out to the headDim accumulators rather than recomputing the
+               V contraction per component. */
             float dq[MAXHEADDIM];
             for (uint d = 0; d < headDim; ++d) dq[d] = 0.0f;
 
             float dl = delta[idx];
             for (uint j = 0; j < seqLen; ++j)
             {
-                float p = probs[probsBase + j];
-                uint vBase = vOff + (b * seqLen + j) * D + dOffset;
-                float dotv = 0.0f;
-                for (uint d = 0; d < headDim; ++d)
-                    dotv += drow[d] * qkv[vBase + d];
-                float ds = p * (dotv - dl);
+                float ds = probs[probsBase + j]
+                    * (attn_backward_dotv(qkv, dAttn, vOff + (b * seqLen + j) * D + dOffset, dAttnBase, headDim)
+                        - dl);
                 if (ds == 0.0f) continue;
                 uint kBase = kOff + (b * seqLen + j) * D + dOffset;
                 for (uint d = 0; d < headDim; ++d)
@@ -1614,10 +1609,6 @@ internal static class SilkKernels
             uint kOutBase = jRow * (3u * D) + D + dOffset;
             uint vOutBase = jRow * (3u * D) + 2u * D + dOffset;
 
-            float vrow[MAXHEADDIM];
-            for (uint d = 0; d < headDim; ++d)
-                vrow[d] = qkv[vOff + jRow * D + dOffset + d];
-
             float dk[MAXHEADDIM];
             float dv[MAXHEADDIM];
             for (uint d = 0; d < headDim; ++d) { dk[d] = 0.0f; dv[d] = 0.0f; }
@@ -1628,17 +1619,11 @@ internal static class SilkKernels
                 uint dAttnBase = (b * seqLen + i) * D + dOffset;
                 float p = probs[rowIdx * seqLen + jPos];
                 if (p == 0.0f) continue;
-                float drow[MAXHEADDIM];
-                for (uint d = 0; d < headDim; ++d)
-                    drow[d] = dAttn[dAttnBase + d];
-                float dotv = 0.0f;
-                for (uint d = 0; d < headDim; ++d)
-                    dotv += drow[d] * vrow[d];
-                float ds = p * (dotv - delta[rowIdx]);
+                float ds = p * (attn_backward_dotv(qkv, dAttn, vOff + jRow * D + dOffset, dAttnBase, headDim) - delta[rowIdx]);
                 uint qBase = (b * seqLen + i) * D + dOffset;
                 for (uint d = 0; d < headDim; ++d)
                 {
-                    dv[d] += p * drow[d];
+                    dv[d] += p * dAttn[dAttnBase + d];
                     dk[d] += ds * qkv[qBase + d];
                 }
             }
@@ -1647,111 +1632,6 @@ internal static class SilkKernels
             {
                 dQkv[kOutBase + d] = dk[d] * scale;
                 dQkv[vOutBase + d] = dv[d];
-            }
-        }
-
-
-        __kernel void attention_backward_dq_dkv(
-            __global const float* qkv,
-            __global const float* probs,
-            __global const float* delta,
-            __global const float* dAttn,
-            __global float* dQkv,
-            const uint batch,
-            const uint seqLen,
-            const uint numHeads,
-            const uint headDim,
-            const float scale)
-        {
-            uint total = batch * numHeads * seqLen;
-            uint idx = get_global_id(0);
-            if (idx >= total) return;
-
-            uint b = idx / (numHeads * seqLen);
-            uint rem = idx - b * (numHeads * seqLen);
-            uint h = rem / seqLen;
-            uint pos = rem - h * seqLen;
-
-            uint D = numHeads * headDim;
-            uint rows = batch * seqLen;
-            uint kOff = rows * D;
-            uint vOff = 2u * rows * D;
-            uint dOffset = h * headDim;
-
-            /* Role A: dQ for query (b,h,pos). */
-            {
-                uint qPos = pos;
-                uint qRow = b * seqLen + qPos;
-                uint probsBase = ((b * numHeads + h) * seqLen + qPos) * seqLen;
-                uint qOutBase = qRow * (3u * D) + dOffset;
-                uint dAttnBase = qRow * D + dOffset;
-
-                float drow[MAXHEADDIM];
-                for (uint d = 0; d < headDim; ++d)
-                    drow[d] = dAttn[dAttnBase + d];
-
-                float dq[MAXHEADDIM];
-                for (uint d = 0; d < headDim; ++d) dq[d] = 0.0f;
-
-                float dl = delta[(b * numHeads + h) * seqLen + qPos];
-                for (uint j = 0; j < seqLen; ++j)
-                {
-                    float p = probs[probsBase + j];
-                    uint vBase = vOff + (b * seqLen + j) * D + dOffset;
-                    float dotv = 0.0f;
-                    for (uint d = 0; d < headDim; ++d)
-                        dotv += drow[d] * qkv[vBase + d];
-                    float ds = p * (dotv - dl);
-                    if (ds == 0.0f) continue;
-                    uint kBase = kOff + (b * seqLen + j) * D + dOffset;
-                    for (uint d = 0; d < headDim; ++d)
-                        dq[d] += ds * qkv[kBase + d];
-                }
-                for (uint d = 0; d < headDim; ++d)
-                    dQkv[qOutBase + d] = dq[d] * scale;
-            }
-
-            /* Role B: dK/dV for key (b,h,pos). */
-            {
-                uint jPos = pos;
-                uint jRow = b * seqLen + jPos;
-                uint vbase = vOff + jRow * D + dOffset;
-                float vrow[MAXHEADDIM];
-                for (uint d = 0; d < headDim; ++d)
-                    vrow[d] = qkv[vbase + d];
-
-                float dk[MAXHEADDIM];
-                float dv[MAXHEADDIM];
-                for (uint d = 0; d < headDim; ++d) { dk[d] = 0.0f; dv[d] = 0.0f; }
-
-                for (uint i = 0; i < seqLen; ++i)
-                {
-                    uint rowIdx = (b * numHeads + h) * seqLen + i;
-                    uint dAttnBase = (b * seqLen + i) * D + dOffset;
-                    float p = probs[rowIdx * seqLen + jPos];
-                    if (p == 0.0f) continue;
-                    float drow[MAXHEADDIM];
-                    for (uint d = 0; d < headDim; ++d)
-                        drow[d] = dAttn[dAttnBase + d];
-                    float dotv = 0.0f;
-                    for (uint d = 0; d < headDim; ++d)
-                        dotv += drow[d] * vrow[d];
-                    float ds = p * (dotv - delta[rowIdx]);
-                    uint qBase = (b * seqLen + i) * D + dOffset;
-                    for (uint d = 0; d < headDim; ++d)
-                    {
-                        dv[d] += p * drow[d];
-                        dk[d] += ds * qkv[qBase + d];
-                    }
-                }
-
-                uint kOutBase = jRow * (3u * D) + D + dOffset;
-                uint vOutBase = jRow * (3u * D) + 2u * D + dOffset;
-                for (uint d = 0; d < headDim; ++d)
-                {
-                    dQkv[kOutBase + d] = dk[d] * scale;
-                    dQkv[vOutBase + d] = dv[d];
-                }
             }
         }
 
