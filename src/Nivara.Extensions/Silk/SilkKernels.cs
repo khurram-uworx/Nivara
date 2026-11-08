@@ -196,10 +196,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-        EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
-        Gemm, GemmBias, GemmBiasBf16, GemmBiasF16, GemmRelu, GemmReluBf16, GemmReluF16, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
-        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
-        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+        EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,        Gemm, GemmBf16, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmRelu, GemmReluBf16, GemmReluF16, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
