@@ -123,7 +123,6 @@ class Program
         };
         string precision = "f32";
         string mode = "";
-        bool simdWiden = false;
         bool noKvCache = false;
         bool force = false;
         bool syntheticWeights = false;
@@ -180,8 +179,6 @@ class Program
             {
                 precision = "fp16";
             }
-            else if (args[i] == "--simd-widen")
-                simdWiden = true;
             else if (args[i] == "--no-kv-cache")
                 noKvCache = true;
             else if (args[i] == "--force")
@@ -373,10 +370,8 @@ class Program
             Console.WriteLine("                     rejected where the run is F32-only: the vision models and laya/modernbert 'compare')");
             Console.WriteLine();
             Console.WriteLine("SIMD (narrow-float models: minilm / distilbert / distilbert_sst / modernbert / laya):");
-            Console.WriteLine("  --simd-widen      Enable widen-compute-narrow SIMD kernels for the BFloat16/Half run");
-            Console.WriteLine("                    (NivaraPrimitives.UseWidenSimd). Rejected where the run does not read");
-            Console.WriteLine("                    the toggle: an F32 run, 'compare', the vision models, and smollm/qwen");
-            Console.WriteLine("                    (their narrow runners already enable it). A/B: 'smollm ab'.");
+            Console.WriteLine("  Narrow runs (bf16/fp16) are auto-widened to F32 SIMD; no toggle required.");
+            Console.WriteLine("  A/B evidence: 'smollm ab' (compares the hidden opt-out vs. default).");
             return 1;
         }
 
@@ -591,15 +586,7 @@ class Program
             return 1;
         }
 
-        // #591: --simd-widen is an A/B lever only where the run reads the toggle. smollm and qwen enable
-        // widen for their narrow runs themselves (so the flag is inert there), an F32 run is unchanged,
-        // and the vision models have no narrow path at all.
-        if (simdWiden && !(precision != "f32" && ConsumesWiden(modelType, mode)))
-        {
-            Console.Error.WriteLine($"--simd-widen only changes minilm / distilbert / distilbert_sst / modernbert / laya at --precision bf16|fp16 outside 'compare'; '{got}' does not read the widen kernels. Drop the flag.");
-            return 1;
-        }
-
+        // Narrow runs are auto-widened by default; --simd-widen is no longer accepted.
         // The TypeSafe demo has no checkpoint: it calls a decision-model engine over HTTP, so it
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
         // warmup/iterations default to the same 1 + 3 the benchmark used before #676, so an
@@ -662,9 +649,6 @@ class Program
             Console.WriteLine($"  SafeTensors parse (Half): {loadSwFp16.ElapsedMilliseconds} ms ({tensorsHalf.Count} tensors)");
             Console.WriteLine();
         }
-
-        if (simdWiden)
-            NivaraPrimitives.UseWidenSimd = true;
 
         switch (modelType)
         {
@@ -783,9 +767,9 @@ class Program
                     if (fp16) return SmolLMAb(tensorsHalf);
                     return SmolLMAb(tensors);
                 }
-                if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16, simdWiden) : RunSmolLM(tensorsBf16, simdWiden);
-                if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, simdWiden) : RunSmolLM(tensorsHalf, simdWiden);
-                return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
+                if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16, false) : RunSmolLM(tensorsBf16, false);
+                if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, false) : RunSmolLM(tensorsHalf, false);
+                return benchmark ? BenchmarkSmolLM(tensors, false) : RunSmolLM(tensors, false);
             case "qwen":
                 if (useSilk)
                 {
@@ -2892,16 +2876,14 @@ class Program
         // setting it off explicitly (scalar A/B) is done by the 'ab' mode. Save and
         // restore the prior global value so other model modes are unaffected.
         bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
-        bool priorWiden = NivaraPrimitives.UseWidenSimd;
-        if (simdWiden || narrow)
-            NivaraPrimitives.UseWidenSimd = true;
+        bool priorDisable = NivaraPrimitives.DisableWidenSimd;
         try
         {
             RunSmolLMGenerate(tensors, precisionName);
         }
         finally
         {
-            NivaraPrimitives.UseWidenSimd = priorWiden;
+            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", priorDisable);
         }
         return 0;
     }
@@ -2913,8 +2895,7 @@ class Program
     static int RunSmolLMSyntheticBenchmark<T>() where T : struct, IFloatingPointIeee754<T>
     {
         bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
-        bool priorWiden = NivaraPrimitives.UseWidenSimd;
-        if (narrow) NivaraPrimitives.UseWidenSimd = true;
+        bool priorDisable = NivaraPrimitives.DisableWidenSimd;
         try
         {
             string precisionName = PrecisionName(typeof(T));
@@ -2959,7 +2940,7 @@ class Program
         }
         finally
         {
-            NivaraPrimitives.UseWidenSimd = priorWiden;
+            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", priorDisable);
         }
     }
 
@@ -2996,28 +2977,28 @@ class Program
         {
             Console.WriteLine("Note: Half (fp16) is unsupported for SmolLM generation (NaN logits).");
             Console.WriteLine();
-            NivaraPrimitives.UseWidenSimd = true;
+            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", false);
             var fallback = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
             Console.WriteLine($"Generated {fallback.Generated} tokens in {fallback.Milliseconds} ms " +
                               $"({fallback.Generated * 1000.0 / Math.Max(1, fallback.Milliseconds):F2} tok/s)");
-            NivaraPrimitives.UseWidenSimd = false;
+            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
             return 0;
         }
 
         // Warmup.
-        NivaraPrimitives.UseWidenSimd = false;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
         RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
 
-        NivaraPrimitives.UseWidenSimd = false;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
         var scalar = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
         Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
                           $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s)");
 
-        NivaraPrimitives.UseWidenSimd = true;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", false);
         var widened = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
         Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
                           $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s)");
-        NivaraPrimitives.UseWidenSimd = false;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
 
         Console.WriteLine();
         double ratio = scalar.Milliseconds > 0 ? (double)scalar.Milliseconds / widened.Milliseconds : 0;
@@ -3257,16 +3238,14 @@ class Program
         where T : struct, IFloatingPointIeee754<T>
     {
         bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
-        bool priorWiden = NivaraPrimitives.UseWidenSimd;
-        if (simdWiden || narrow)
-            NivaraPrimitives.UseWidenSimd = true;
+        bool priorDisable = NivaraPrimitives.DisableWidenSimd;
         try
         {
             return BenchmarkSmolLMCore(tensors);
         }
         finally
         {
-            NivaraPrimitives.UseWidenSimd = priorWiden;
+            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", priorDisable);
         }
     }
 
@@ -3276,7 +3255,7 @@ class Program
         string precisionName = PrecisionName(typeof(T));
         Console.WriteLine($"=== SmolLM-135M Benchmark ({precisionName}) ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}" +
-                          $"  SIMD-widen: {(NivaraPrimitives.UseWidenSimd ? "on" : "off")}");
+                          $"  SIMD-widen: {(NivaraPrimitives.DisableWidenSimd ? "off" : "on")}");
         Console.WriteLine();
 
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
@@ -3372,7 +3351,7 @@ class Program
             Console.WriteLine("logits — see README numerical caveats). The A/B comparison is");
             Console.WriteLine("only meaningful for BF16; running a single timed run instead.");
             Console.WriteLine();
-            NivaraPrimitives.UseWidenSimd = true; // narrow auto-enable
+            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", false); // narrow auto-enable
             var fallback = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
             Console.WriteLine($"Generated {fallback.Generated} tokens in {fallback.Milliseconds} ms " +
                               $"({fallback.Generated * 1000.0 / Math.Max(1, fallback.Milliseconds):F2} tok/s)");
@@ -3380,21 +3359,21 @@ class Program
         }
 
         // Warmup pass (discarded — JIT + cache warming).
-        NivaraPrimitives.UseWidenSimd = false;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
         RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
 
         // Side A: scalar (UseWidenSimd = false).
-        NivaraPrimitives.UseWidenSimd = false;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
         var scalar = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
         Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
                           $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s)");
 
         // Side B: widen (UseWidenSimd = true).
-        NivaraPrimitives.UseWidenSimd = true;
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", false);
         var widened = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
         Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
                           $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s)");
-        NivaraPrimitives.UseWidenSimd = false; // restore safe default
+        AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true); // restore safe default
 
         // Summary.
         Console.WriteLine();
