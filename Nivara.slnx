@@ -14,13 +14,10 @@
     <Project Path="samples/NivaraClassifier/NivaraClassifier.csproj" />
     <Project Path="samples/NivaraFineTuning/NivaraFineTuning.csproj" />
     <Project Path="samples/NivaraGpt/NivaraGpt.csproj" />
+    <Project Path="samples/NivaraIncident/NivaraIncident.csproj" />
     <Project Path="samples/NivaraInference/NivaraInference.csproj" />
     <Project Path="samples/NivaraTimeSeries/NivaraTimeSeries.csproj" />
     <Project Path="samples/NivaraVAE/NivaraVAE.csproj" />
-  </Folder>
-  <Folder Name="/samples/NivaraIncident/">
-    <File Path="samples/NivaraIncident/README.md" />
-    <Project Path="samples/NivaraIncident/NivaraIncident.Cli/NivaraIncident.Cli.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
