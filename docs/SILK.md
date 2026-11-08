@@ -364,9 +364,11 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 `--silk` runs encoders, causal decoders, and vision convolution through hand-authored OpenCL C
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
 real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
-Qwen, MobileNetV2, and ResNet-18**, F32 only. Qwen and the vision models expose their own mode
-sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`. F32 only (no
-bf16/fp16 translation unit).
+Qwen, MobileNetV2, and ResNet-18**. F32 is the default. Narrow precision on the silk path:
+`--precision bf16` stores selected weights (tokEmb/tied LM head for SmolLM/Qwen; the QKV, FFN and
+tokEmb matrices for ModernBERT and Laya) as BF16 and widens in-register; activations stay f32.
+MiniLM/DistilBERT/DistilBERT+SST-2 still widen BF16 to f32 before upload. `--precision fp16` is
+rejected at the sample CLI (measured 0.97–1.07× vs f32): use bf16 or drop `--silk`.
 
 **Bottom line for fine-tuning (issue #1003):** on the integrated Intel Graphics the Silk path is
 **6.2-8.6x faster than the CPU reverse-mode path** at B=2/4/8, L=128, even at the
@@ -662,7 +664,7 @@ Qwen exposes `benchmark`, plain, tools, and KV-cache modes through `SilkQwenSess
 `relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side
 geometry helpers, and are the kernels listed in `KernelNames` under the vision family.
 
-As with the encoders, these are F32 only.
+As with the encoders, f32 is the default; bf16 routes keep selected weights (tokEmb/tied heads or QKV/FFN) in bf16.
 
 ## 13c. Text classifiers (NivaraClassifier sample)
 
@@ -708,7 +710,11 @@ per classifier, and the CPU-layout round trip exact.
   encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion no longer applies**: the old GPU flag was removed in 1.5.0, so `--silk` is now
   the only GPU backend and there is nothing to conflict with.
-- **Precision**: `--silk --precision bf16` is supported (weights widen on device); `--silk --precision fp16` is rejected — bf16 is preferred, there is no measured speedup at current shapes (0.97–1.07× vs f32); use bf16 or drop --silk. F32 remains the default.
+- **Precision**: `--silk --precision bf16` is supported. Selected weights stay bf16 on device
+  (tokEmb/tied LM head for SmolLM and Qwen; QKV/FFN/tokEmb matrices for ModernBERT and Laya) with
+  in-register widening and f32 activations; MiniLM/DistilBERT/DistilBERT+SST-2 widen bf16 to f32
+  before upload. `--silk --precision fp16` is rejected — bf16 is preferred, there is no measured
+  speedup at current shapes (0.97–1.07× vs f32); use bf16 or drop --silk. F32 remains the default.
 - **`--gpu` is rejected, not aliased** to the removed backend, so an old invocation fails loudly.
 - **`OpenSilkEncoder`** implements the `OpenEncoder` delegate shared by the MiniLM/DistilBERT
   SST-2 entry points, so the CPU and Silk paths stay structurally identical.
