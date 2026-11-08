@@ -171,8 +171,8 @@ public class DocumentationSnippetTests
                 "expected 72 GETTING-STARTED.md + 22 EXAMPLES.md + 9 docs/STREAMING.md "
                 + "+ 3 docs/AGENT-CODE-EXAMPLES.md + 5 docs/EMBEDDINGS.md blocks");
             Assert.That(excludedCount, Is.EqualTo(2));
-            Assert.That(ungatedCount, Is.EqualTo(144));
-            Assert.That(all.Length, Is.EqualTo(257),
+            Assert.That(ungatedCount, Is.EqualTo(146));
+            Assert.That(all.Length, Is.EqualTo(259),
                 "the repository-wide snippet count moved; update this number deliberately. The gate "
                 + "compiles 110 of these blocks, so the remaining 144 are unverified and a drop here is "
                 + "reduced coverage, not a neutral event");
