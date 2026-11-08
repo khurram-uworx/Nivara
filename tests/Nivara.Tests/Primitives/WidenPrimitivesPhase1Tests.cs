@@ -1,5 +1,6 @@
 using Nivara.Helpers;
 using Nivara.Primitives;
+using System;
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Numerics;
@@ -10,18 +11,12 @@ namespace Nivara.Tests.Primitives;
 [TestFixture]
 public class WidenPrimitivesPhase1Tests
 {
+    const string HiddenOptOut = "Nivara.Primitives.DisableWidenSimd";
+
     static bool WidenEnabled
     {
-        get
-        {
-            var p = typeof(NivaraPrimitives).GetProperty(nameof(NivaraPrimitives.UseWidenSimd))!;
-            return (bool)p.GetValue(null)!;
-        }
-        set
-        {
-            var p = typeof(NivaraPrimitives).GetProperty(nameof(NivaraPrimitives.UseWidenSimd))!;
-            p.SetValue(null, value);
-        }
+        get => !NivaraPrimitives.DisableWidenSimd;
+        set => AppContext.SetSwitch(HiddenOptOut, !value);
     }
 
     static void WithWidenEnabled(Action test)

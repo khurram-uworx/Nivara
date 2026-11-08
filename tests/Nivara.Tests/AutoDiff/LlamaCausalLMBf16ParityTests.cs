@@ -107,10 +107,6 @@ public class LlamaCausalLMBf16ParityTests
     [Test]
     public void Bf16_ForwardLastRow_ArgmaxAndLogits_MatchF32()
     {
-        bool prior = NivaraPrimitives.UseWidenSimd;
-        NivaraPrimitives.UseWidenSimd = true;
-        try
-        {
             using var f32 = Model<float>();
             using var bf16 = Model<BFloat16>();
             SeedIdenticalBf16Pool(f32, bf16);
@@ -122,20 +118,11 @@ public class LlamaCausalLMBf16ParityTests
                 "BF16 last-row logits diverge from F32 beyond the documented tolerance.");
             Assert.That(ArgMaxLastRow(bf16Logits), Is.EqualTo(ArgMaxLastRow(f32Logits)),
                 "BF16 greedy argmax diverged from F32 on the prompt.");
-        }
-        finally
-        {
-            NivaraPrimitives.UseWidenSimd = prior;
-        }
     }
 
     [Test]
     public void Bf16_PrefillThenDecode_ArgmaxSequenceAndLogits_MatchF32()
     {
-        bool prior = NivaraPrimitives.UseWidenSimd;
-        NivaraPrimitives.UseWidenSimd = true;
-        try
-        {
             using var f32 = Model<float>();
             using var bf16 = Model<BFloat16>();
             SeedIdenticalBf16Pool(f32, bf16);
@@ -170,10 +157,5 @@ public class LlamaCausalLMBf16ParityTests
             }
 
             Assert.That(f32Seq, Is.EqualTo(bf16Seq), "Greedy decode sequences diverged.");
-        }
-        finally
-        {
-            NivaraPrimitives.UseWidenSimd = prior;
-        }
     }
 }
