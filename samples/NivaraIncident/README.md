@@ -45,10 +45,10 @@ dotnet run --project samples/NivaraIncident.Cli -- bench-stream --dataset ./samp
 dotnet run --project samples/NivaraIncident.Cli -- bench-kernels --dataset ./samples/data/incident-lab --scenario A
 
 # GPU-vs-CPU grouped aggregation benchmark
-dotnet run --project samples/NivaraIncident.Cli -c Release -- bench-gpu --dataset ./samples/data/incident-lab --scenario A --iterations 5
+dotnet run --project samples/NivaraIncident.Cli -c Release -- bench-silk --dataset ./samples/data/incident-lab --scenario A --iterations 5
 
 # Analyze with profitability-gated GPU offload
-dotnet run --project samples/NivaraIncident.Cli -c Release -- analyze --dataset ./samples/data/incident-lab --scenario A --gpu
+dotnet run --project samples/NivaraIncident.Cli -c Release -- analyze --dataset ./samples/data/incident-lab --scenario A --silk
 
 # Run analyses with chunked streaming output
 dotnet run --project samples/NivaraIncident.Cli -- analyze --dataset ./samples/data/incident-lab --scenario A --stream --chunk-size 50000
@@ -76,10 +76,9 @@ dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./samples/
 | `--benchmark` | — | Time each analysis individually (analyze only) |
 | `--quick` | — | Shorthand for `--benchmark --iterations 1` (single pass; use for release prep on large datasets) || `bench-stream` | - | Streaming vs eager memory/elapsed sweep (standalone mode) |
 | `bench-kernels` | - | Kernel vectorization visibility report (standalone mode) |
-| `bench-gpu` | - | GPU-vs-CPU grouped aggregation benchmark (availability-guarded) |
+| `bench-silk` | - | CPU-vs-Silk grouped aggregation benchmark (fails loudly if no OpenCL device) |
 | `streamix` | - | Run Streamix streaming scenarios (fault-tolerant, windowed, AutoDiff) |
-| `--gpu` | - | Enable profitability-gated GPU offload (pilot: Grouped Aggregation only) |
-| `--gpu-force` | - | Force the GPU path even when the profitability gate says no (measurement only) |
+| `--silk` | - | Run Grouped Aggregation on Silk/OpenCL (F32; fails loudly if no OpenCL device) |
 
 ## What it exercises
 
@@ -240,14 +239,14 @@ Commands (run on AC power):
 
 ```bash
 # Generate datasets at the sizes used for the curves below
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 10000   --dataset samples/data/bench-gpu-10k  --scenario A
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 100000  --dataset samples/data/bench-gpu-100k --scenario A
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 1000000 --dataset samples/data/bench-gpu-1m   --scenario A
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 10000   --dataset samples/data/bench-silk-10k  --scenario A
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 100000  --dataset samples/data/bench-silk-100k --scenario A
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- generate --records 1000000 --dataset samples/data/bench-silk-1m   --scenario A
 
 # Measure each size
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-gpu --dataset samples/data/bench-gpu-10k  --scenario A --iterations 5
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-gpu --dataset samples/data/bench-gpu-100k --scenario A --iterations 5
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-gpu --dataset samples/data/bench-gpu-1m   --scenario A --iterations 5
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-silk --dataset samples/data/bench-silk-10k  --scenario A --iterations 5
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-silk --dataset samples/data/bench-silk-100k --scenario A --iterations 5
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release -- bench-silk --dataset samples/data/bench-silk-1m   --scenario A --iterations 5
 ```
 
 Results (fill in from a human run on AC power):
@@ -258,7 +257,7 @@ Results (fill in from a human run on AC power):
 | 100,000  | 236.3 | 247.9 | 1.05  | not profitable | Intel Graphics |
 | 1,000,000 | 1533.2 | 1474.6 | 0.96 | not profitable | Intel Graphics |
 
-`--gpu-force` runs the GPU path even when the gate declines, which is how the GPU-forced
+`--silk` runs the GPU path even when the gate declines, which is how the GPU-forced
 column above is produced.
 
 ### Phase 5 — not being pursued now (revisit criteria)
@@ -281,8 +280,24 @@ Revisit Phase 5 only after all of the following hold:
 3. A new kernel (rolling window, filter vector, or sort/join) is prototyped and
    shown profitable on its own before being wired into an analysis.
 
-Until then, grouped aggregation stays on CPU by default and `--gpu` remains an
+Until then, grouped aggregation stays on CPU by default and `--silk` remains an
 opt-in, profitability-gated experiment.
+
+## Silk profitability (experimental, not wired up)
+
+`samples/Nivara.Samples/Incident/SilkProfitability.cs` (formerly `GpuProfitability`) contains a
+pre-flight cost estimator for the grouped-aggregation Silk offload: it times a 100k-row CPU
+sample, extrapolates the full CPU cost, estimates the GPU cost from a first-pass
+fixed/transfer/per-row model, and offloads only when the estimate is below 90% of the CPU estimate.
+
+**Status:** this is **not** invoked by `--silk` or any current CLI path. `--silk` always runs the
+kernel on Silk/OpenCL and fails loudly (non-zero exit, `SilkRuntime` exception) when no OpenCL
+device is available. The profitability gate is retained as a starting point for future evaluation
+of an automatic/conditional offload mode; its constants are placeholder-ish (shared-DRAM iGPU,
+~4% win at 1M rows, and a per-row estimate of 0.0003 ms) and must be recalibrated against
+measured Silk timings before it is wired up.
+
+---
 
 ## Performance
 

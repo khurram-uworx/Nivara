@@ -854,7 +854,7 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
     `mobilenet_v2`, `resnet18 {default, benchmark, compare, compare_diag}`.
 - **NivaraClassifier** — `train/predict/benchmark` for the conv and linear text classifiers
   (`GpuTextConvClassifier` / `GpuTextLinearClassifier`).
-- **NivaraIncident.Cli** — `--gpu` grouped-aggregation path (`grouped_hash_reduce_partial`).
+- **NivaraIncident** — `--silk` grouped-aggregation path (`grouped_hash_reduce_partial`).
 - **NivaraFineTuning** — `--mode {train,eval,predict} --silk`: training (forward, backward, AdamW)
   runs on the device via `SilkDistilBertTrainer`; eval and predict use `SilkBertEncoderRunner`.
   F32-only; exits 1 when OpenCL is unavailable (no CPU fallback).
