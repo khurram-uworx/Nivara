@@ -205,7 +205,7 @@ mutual exclusion, model scope before model-file lookup, F32-only, and no `--gpu`
 - Vision convolution kernels and the Nivara-CPU deficit: #457, #458.
 - Driver-bump hygiene: rerun the probe gate and all model compares after an Intel driver update.
 - bf16 selected-weight storage on the GPU is shipped for ModernBERT/Laya (QKV, FFN, tokEmb) and
-  Qwen/SmolLM (tokEmb/tied heads); fp16 remains rejected at the sample CLI (no measured speedup).
+  Qwen/SmolLM (tokEmb/tied heads); fp16 remains rejected at the sample CLI (Half range/precision insufficient for Qwen2.5-0.5B; use f32 or bf16).
 - Streaming budget enforcement and Phase 2 spill: #325.
 - Promotion of the Nivara GPU path into `src/Nivara.Gpu`: pending, and nothing in core changes until that decision.
 
