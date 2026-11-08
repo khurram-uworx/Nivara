@@ -366,7 +366,8 @@ class Program
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
-            Console.WriteLine("                    (rejected for qwen fp16 and for qwen bf16 outside 'benchmark' / --synthetic-weights;");
+            Console.WriteLine("                    (rejected for qwen fp16 - Half range/precision insufficient for Qwen2.5-0.5B;");
+            Console.WriteLine("                     rejected for qwen bf16 outside 'benchmark' / --synthetic-weights;");
             Console.WriteLine("                     rejected where the run is F32-only: the vision models and laya/modernbert 'compare')");
             Console.WriteLine();
             Console.WriteLine("SIMD (narrow-float models: minilm / distilbert / distilbert_sst / modernbert / laya):");
@@ -565,7 +566,7 @@ class Program
 
         if (isQwen && fp16)
         {
-            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode. Use --precision f32 (BF16-on-disk, widened to F32 at load) or --precision bf16 (native BFloat16).");
+            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode - Half's range/precision (5-bit exponent) is insufficient for the Qwen2.5-0.5B activations/RoPE/logits, and no fp16 parity path exists. Use --precision f32 (default; BF16-on-disk widened to F32 at load) or --precision bf16 (native BFloat16; benchmark/--synthetic-weights only).");
             return 1;
         }
 

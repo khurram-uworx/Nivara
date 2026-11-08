@@ -225,7 +225,7 @@ dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp
 ```
 
 - Vision models (MobileNetV2/ResNet-18) have no fp16 path.
-- Qwen does not support fp16 (use `f32` or `bf16`).
+- Qwen does not support fp16 (Half's range/precision is insufficient for Qwen2.5-0.5B; use `f32` or `bf16`).
 - `modernbert compare` / `laya compare` are F32-only.
 - `--simd-widen` is an A/B lever for narrow runs (minilm/distilbert/sst/
   modernbert/laya; smollm/qwen manage their own).
