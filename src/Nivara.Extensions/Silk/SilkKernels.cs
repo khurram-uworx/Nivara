@@ -259,6 +259,7 @@ internal static class SilkKernels
         #define GEMVLANES 32
         #define GEMVCOLS 128
         #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
+        #define F16_TO_F32(x) (float)as_half((ushort)(x))
 
         inline float gelu_exact(float v)
         {
@@ -1076,30 +1077,6 @@ internal static class SilkKernels
             }
         }
 
-        inline bool attn_keep(__global const float* mask, uint maskBase, int qPos, int j, int band)
-        {
-            return mask[maskBase + (uint)j] >= 0.5f && (band < 0 || abs(qPos - j) <= band);
-        }
-
-        inline float attn_score(
-            __global const float* q,
-            __global const float* k,
-            uint qRow,
-            uint jRow,
-            uint dOffset,
-            uint D,
-            uint headDim,
-            float scale)
-        {
-            uint qBase = qRow * D + dOffset;
-            uint kBase = jRow * D + dOffset;
-            float acc = 0.0f;
-            for (uint d = 0; d < headDim; ++d)
-                acc += q[qBase + d] * k[kBase + d];
-            return acc * scale;
-        }
-
-
         __kernel void gemm_row4_qkv_bf16(
             __global const float* a,
             __global const ushort* b,
@@ -1122,29 +1099,6 @@ internal static class SilkKernels
                 if (c2 < bCols) c[qkv_dest(c2, outRow, aRows, blockWidth)] = a2 + b2;
                 if (c3 < bCols) c[qkv_dest(c3, outRow, aRows, blockWidth)] = a3 + b3;
             }
-        }
-
-        inline bool attn_keep(__global const float* mask, uint maskBase, int qPos, int j, int band)
-        {
-            return mask[maskBase + (uint)j] >= 0.5f && (band < 0 || abs(qPos - j) <= band);
-        }
-
-        inline float attn_score(
-            __global const float* q,
-            __global const float* k,
-            uint qRow,
-            uint jRow,
-            uint dOffset,
-            uint D,
-            uint headDim,
-            float scale)
-        {
-            uint qBase = qRow * D + dOffset;
-            uint kBase = jRow * D + dOffset;
-            float acc = 0.0f;
-            for (uint d = 0; d < headDim; ++d)
-                acc += q[qBase + d] * k[kBase + d];
-            return acc * scale;
         }
 
 
