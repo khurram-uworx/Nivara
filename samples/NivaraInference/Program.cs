@@ -566,7 +566,7 @@ class Program
 
         if (isQwen && fp16)
         {
-            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode — Half's range/precision (5-bit exponent) is insufficient for the Qwen2.5-0.5B activations/RoPE/logits, and no fp16 parity path exists. Use --precision f32 (default; BF16-on-disk widened to F32 at load) or --precision bf16 (native BFloat16; benchmark/--synthetic-weights only).");
+            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode - Half's range/precision (5-bit exponent) is insufficient for the Qwen2.5-0.5B activations/RoPE/logits, and no fp16 parity path exists. Use --precision f32 (default; BF16-on-disk widened to F32 at load) or --precision bf16 (native BFloat16; benchmark/--synthetic-weights only).");
             return 1;
         }
 
