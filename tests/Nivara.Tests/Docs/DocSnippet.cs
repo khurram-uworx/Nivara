@@ -156,11 +156,14 @@ static partial class DocSnippetExtractor
     /// The scope predicate over an explicit exclusion list. The second parameter exists so a test can
     /// ask the counterfactual — would this path be scanned without that entry — which is the only way
     /// to tell a working exclusion from one that is merely declared.
-    /// Plan documents under <c>docs/plans/</c> are never scanned: they are working plans, not
-    /// reader-facing documentation, and must not move the document count.
+    /// Plan documents under <c>docs/plan/</c> and <c>docs/plans/</c> are never scanned: they are
+    /// working plans and roadmaps, not reader-facing documentation, and must not move the document
+    /// count. <c>docs/plans/</c> is retained alongside <c>docs/plan/</c> so a plan written under the
+    /// older spelling cannot silently start moving the pins.
     /// </summary>
     internal static bool IsScanned(string repoRelativePath, IReadOnlyList<string> exclusions) =>
-        !repoRelativePath.StartsWith("docs/plans/", StringComparison.Ordinal)
+        !repoRelativePath.StartsWith("docs/plan/", StringComparison.Ordinal)
+        && !repoRelativePath.StartsWith("docs/plans/", StringComparison.Ordinal)
         && !exclusions.Contains(repoRelativePath, StringComparer.Ordinal);
 
     /// <summary>Absolute path of the transient plan document.</summary>

@@ -1,5 +1,4 @@
 using Nivara.Primitives;
-using System;
 using NUnit.Framework;
 using System.Numerics;
 

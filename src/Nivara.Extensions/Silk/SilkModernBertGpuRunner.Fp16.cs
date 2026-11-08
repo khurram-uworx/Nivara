@@ -1,5 +1,4 @@
 using Nivara.AI;
-using System.Numerics;
 
 namespace Nivara.Silk;
 

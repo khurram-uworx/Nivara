@@ -2,7 +2,6 @@ using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Silk;
 using System.Diagnostics;
-using System.Text.Json;
 
 namespace Nivara.PerformanceTests;
 

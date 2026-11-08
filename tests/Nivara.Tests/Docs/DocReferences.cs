@@ -28,8 +28,12 @@ static partial class DocReferenceExtractor
     /// <c>README.md</c> inside one. The scan walks the filesystem, so reading that tree would make the
     /// pinned file count depend on whether the machine happens to have downloaded a model - exactly how
     /// this gate first failed in CI (686 there, 687 on a machine that had run Laya).
+    /// <c>tests/Nivara.Tests/Samples/DocCorpusTests.cs</c> is excluded because it contains fixture
+    /// paths (<c>docs/GUIDE.md</c>, <c>docs/blog/post.md</c>, <c>docs/plan/ROADMAP.md</c>,
+    /// <c>docs/plans/EVAL.md</c>) that are not real document references; counting them would inflate
+    /// the pin with strings that never resolve.
     /// </summary>
-    static readonly string[] ExcludedPathPrefixes = ["tests/Nivara.Tests/Docs/", "samples/data/"];
+    static readonly string[] ExcludedPathPrefixes = ["tests/Nivara.Tests/Docs/", "tests/Nivara.Tests/Samples/DocCorpusTests.cs", "samples/data/"];
 
     /// <summary>Documents excluded by exact path rather than by directory prefix.</summary>
     static readonly string[] ExcludedDocuments = ["docs/TODO.md"];
