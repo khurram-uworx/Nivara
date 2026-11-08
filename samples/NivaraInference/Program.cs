@@ -572,7 +572,7 @@ class Program
         bool silkNarrowModel = modelType is "modernbert" or "laya";
         if (useSilk && fp16)
         {
-            Console.Error.WriteLine("--silk --precision fp16 is not supported: measured on Intel Arc 140T the fp16 kernels tie f32 (0.97–1.07×), so they show no speedup at current shapes; use --precision bf16 or drop --silk.");
+            Console.Error.WriteLine("--silk is F32-only: fp16 shows no measured speedup at current shapes (0.97–1.07×), so bf16 is preferred; use --precision bf16 or drop --silk.");
             return 1;
         }
 
