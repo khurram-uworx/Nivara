@@ -277,7 +277,7 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("qwen", "--precision", "bf16"),
             "bf16 supports only the 'benchmark' and '--synthetic-weights' modes");
         AssertRejected(Run("qwen", "--precision", "fp16"),
-            "fp16 is not supported for the qwen mode");
+            "fp16 is not supported for the qwen mode — Half's range/precision");
     }
 
     /// <summary>
