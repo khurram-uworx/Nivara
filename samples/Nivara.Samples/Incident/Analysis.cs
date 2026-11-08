@@ -207,7 +207,7 @@ public static class Analysis
             .Collect();
     }
 
-    public static NivaraFrame AnalyzeGroupedAggregation(string datasetPath, IncidentScenario scenario, bool useGpu = false, bool gpuForce = false)
+    public static NivaraFrame AnalyzeGroupedAggregation(string datasetPath, IncidentScenario scenario, bool useSilk = false)
     {
         using var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
         var incidentStart = scenario.IncidentStart.Ticks;
@@ -263,64 +263,30 @@ public static class Analysis
         long transferBytes = (long)rowCount * (sizeof(int) + sizeof(int) + sizeof(float));
         Dictionary<string, (int Errors, int Total, double TotalDuration)> services;
 
-        if (!useGpu && !gpuForce)
+        if (!useSilk)
         {
             (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
-            reason = "gpu not requested";
+            reason = "silk not requested";
         }
         else
         {
-            int sampleSize = Math.Min(rowCount, GpuProfitability.SampleSize);
-            double sampleCpuMs = GpuProfitability.CalibrateCpuMs(
-                serviceIds, statusCodes, durations, groupCount, sampleSize);
-            double estimatedCpuMs = GpuProfitability.EstimateCpuMs(sampleCpuMs, sampleSize, rowCount);
-            double estimatedGpuMs = GpuProfitability.EstimateGpuMs(rowCount, transferBytes);
+            services = [];
+            var swGpu = System.Diagnostics.Stopwatch.StartNew();
+            using var runtime = new SilkRuntime();
+            var (counts, errors, sums) = SilkAnalytics.GroupedHashReduce(
+                runtime, serviceIds, statusCodes, durations, groupCount);
 
-            var (offload, decisionReason, estimatedCpu, _) = GpuProfitability.Decide(
-                useGpu, gpuForce, estimatedCpuMs, estimatedGpuMs);
-            reason = decisionReason;
-            // When the GPU path runs, cpuMs is the CPU cost the gate predicted for it, not a
-            // measured value; the alternative would be to run the CPU work we just decided to skip.
-            cpuMs = estimatedCpu;
+            var idToService = new string[groupCount];
+            foreach (var kvp in serviceToId)
+                idToService[kvp.Value] = kvp.Key;
 
-            if (!offload)
-            {
-                // Not profitable: run the CPU reduction.
-                (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
-            }
-            else
-            {
-                services = [];
-                var swGpu = System.Diagnostics.Stopwatch.StartNew();
-                SilkRuntime? runtime = null;
-                try
-                {
-                    runtime = new SilkRuntime();
-                    var (counts, errors, sums) = SilkAnalytics.GroupedHashReduce(
-                        runtime, serviceIds, statusCodes, durations, groupCount);
+            for (int g = 0; g < groupCount; g++)
+                services[idToService[g]] = (errors[g], counts[g], sums[g]);
 
-                    var idToService = new string[groupCount];
-                    foreach (var kvp in serviceToId)
-                        idToService[kvp.Value] = kvp.Key;
-
-                    for (int g = 0; g < groupCount; g++)
-                        services[idToService[g]] = (errors[g], counts[g], sums[g]);
-
-                    usedGpu = true;
-                    gpuMs = swGpu.Elapsed.TotalMilliseconds;
-                }
-                catch (Exception ex)
-                {
-                    reason = "gpu unavailable: " + ex.Message;
-
-                    // CPU fallback: the GPU path never produced a result.
-                    (services, cpuMs) = AggregateOnCpu(serviceNames, statusCodes, durationCol, rowCount);
-                }
-                finally
-                {
-                    runtime?.Dispose();
-                }
-            }
+            usedGpu = true;
+            gpuMs = swGpu.Elapsed.TotalMilliseconds;
+            reason = "silk (--silk)";
+            cpuMs = 0;
         }
 
         LastGpuOffloadDecision = new GpuOffloadDecision(
