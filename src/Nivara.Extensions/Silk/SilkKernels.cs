@@ -136,6 +136,9 @@ internal static class SilkKernels
     // Analytics (incident) kernels, phase B.
     public const string RollingMean = "rolling_mean";
 
+    // Analytics (incident) kernels, phase C.
+    public const string RollingMax = "rolling_max";
+
     // Vision (conv) kernels.
     public const string Conv2d = "conv2d";
     public const string BatchNormEval = "batchnorm_eval";
@@ -185,7 +188,7 @@ internal static class SilkKernels
         GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
-        GroupedHashReducePartial, RollingMean,
+        GroupedHashReducePartial, RollingMean, RollingMax,
         GemmNt, GemmNtResidual, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
@@ -2577,6 +2580,44 @@ internal static class SilkKernels
             }
         }
 
+        __kernel void rolling_max(
+            __global const float* input,
+            __global float* output,
+            __global int* valid,
+            const int n,
+            const int windowSize,
+            const int minPeriods)
+        {
+            int globalSize = get_global_size(0);
+            for (int i = get_global_id(0); i < n; i += globalSize)
+            {
+                int start = i - windowSize + 1;
+                if (start < 0)
+                    start = 0;
+
+                float maxValue = input[start];
+                int count = 0;
+                for (int j = start; j <= i; ++j)
+                {
+                    if (j == start)
+                        maxValue = input[j];
+                    else if (input[j] > maxValue)
+                        maxValue = input[j];
+                    ++count;
+                }
+
+                if (count >= minPeriods)
+                {
+                    output[i] = maxValue;
+                    valid[i] = 1;
+                }
+                else
+                {
+                    output[i] = 0.0f;
+                    valid[i] = 0;
+                }
+            }
+        }
         __kernel void rolling_mean(
             __global const float* input,
             __global float* output,
