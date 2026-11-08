@@ -132,9 +132,14 @@ internal static class SilkKernels
 
     // Analytics (incident) kernels.
     public const string GroupedHashReducePartial = "grouped_hash_reduce_partial";
+    public const string GroupedMultiStatReducePartial = "grouped_multistat_reduce_partial";
 
     // Analytics (incident) kernels, phase B.
     public const string RollingMean = "rolling_mean";
+
+    // Analytics (incident) kernels, phase C.
+    public const string RollingMax = "rolling_max";
+    public const string RollingMin = "rolling_min";
 
     // Vision (conv) kernels.
     public const string Conv2d = "conv2d";
@@ -185,7 +190,7 @@ internal static class SilkKernels
         GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
-        GroupedHashReducePartial, RollingMean,
+        GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
         GemmNt, GemmNtResidual, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
@@ -2577,6 +2582,140 @@ internal static class SilkKernels
             }
         }
 
+        __kernel void rolling_min(
+            __global const float* input,
+            __global float* output,
+            __global int* valid,
+            const int n,
+            const int windowSize,
+            const int minPeriods)
+        {
+            int globalSize = get_global_size(0);
+            for (int i = get_global_id(0); i < n; i += globalSize)
+            {
+                int start = i - windowSize + 1;
+                if (start < 0)
+                    start = 0;
+
+                float minValue = input[start];
+                int count = 0;
+                for (int j = start; j <= i; ++j)
+                {
+                    if (j == start)
+                        minValue = input[j];
+                    else if (input[j] < minValue)
+                        minValue = input[j];
+                    ++count;
+                }
+
+                if (count >= minPeriods)
+                {
+                    output[i] = minValue;
+                    valid[i] = 1;
+                }
+                else
+                {
+                    output[i] = 0.0f;
+                    valid[i] = 0;
+                }
+            }
+        }
+        __kernel void rolling_max(
+            __global const float* input,
+            __global float* output,
+            __global int* valid,
+            const int n,
+            const int windowSize,
+            const int minPeriods)
+        {
+            int globalSize = get_global_size(0);
+            for (int i = get_global_id(0); i < n; i += globalSize)
+            {
+                int start = i - windowSize + 1;
+                if (start < 0)
+                    start = 0;
+
+                float maxValue = input[start];
+                int count = 0;
+                for (int j = start; j <= i; ++j)
+                {
+                    if (j == start)
+                        maxValue = input[j];
+                    else if (input[j] > maxValue)
+                        maxValue = input[j];
+                    ++count;
+                }
+
+                if (count >= minPeriods)
+                {
+                    output[i] = maxValue;
+                    valid[i] = 1;
+                }
+                else
+                {
+                    output[i] = 0.0f;
+                    valid[i] = 0;
+                }
+            }
+        }
+
+        __kernel void grouped_multistat_reduce_partial(
+            __global const int* serviceIds,
+            __global const int* statusCodes,
+            __global const float* durations,
+            __global int* partialCounts,
+            __global int* partialErrors,
+            __global float* partialSums,
+            __global float* partialSumsq,
+            __global float* partialMins,
+            __global float* partialMaxs,
+            const uint n,
+            const uint groupCount)
+        {
+            uint gid = get_global_id(0);
+            uint globalSize = get_global_size(0);
+            uint wg = get_group_id(0);
+
+            int localCounts[64];
+            int localErrors[64];
+            float localSums[64];
+            float localSumsq[64];
+            float localMins[64];
+            float localMaxs[64];
+            for (uint g = 0; g < groupCount; ++g)
+            {
+                localCounts[g] = 0;
+                localErrors[g] = 0;
+                localSums[g] = 0.0f;
+                localSumsq[g] = 0.0f;
+                localMins[g] = 3.40282346638528860e+38f;
+                localMaxs[g] = -3.40282346638528860e+38f;
+            }
+
+            for (uint i = gid; i < n; i += globalSize)
+            {
+                uint g = (uint)serviceIds[i];
+                localCounts[g]++;
+                if (statusCodes[i] >= 500)
+                    localErrors[g]++;
+                float d = durations[i];
+                localSums[g] += d;
+                localSumsq[g] += d * d;
+                if (d < localMins[g]) localMins[g] = d;
+                if (d > localMaxs[g]) localMaxs[g] = d;
+            }
+
+            uint baseOffset = wg * groupCount;
+            for (uint g = 0; g < groupCount; ++g)
+            {
+                partialCounts[baseOffset + g] = localCounts[g];
+                partialErrors[baseOffset + g] = localErrors[g];
+                partialSums[baseOffset + g] = localSums[g];
+                partialSumsq[baseOffset + g] = localSumsq[g];
+                partialMins[baseOffset + g] = localMins[g];
+                partialMaxs[baseOffset + g] = localMaxs[g];
+            }
+        }
         __kernel void rolling_mean(
             __global const float* input,
             __global float* output,
