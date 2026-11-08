@@ -98,4 +98,62 @@ public static class SilkAnalytics
             runtime.Release(partialSums);
         }
     }
+
+    public static (float[] Means, bool[] Valid) RollingMean(
+        SilkRuntime runtime,
+        ReadOnlySpan<float> values,
+        int windowSize,
+        int minPeriods = 0)
+    {
+        if (runtime is null)
+            throw new ArgumentNullException(nameof(runtime));
+        if (windowSize < 1)
+            throw new ArgumentOutOfRangeException(nameof(windowSize));
+        if (values.Length == 0)
+            return (Array.Empty<float>(), Array.Empty<bool>());
+
+        if (minPeriods <= 0)
+            minPeriods = windowSize;
+
+        int n = values.Length;
+        nint inBuf = runtime.Allocate(n);
+        nint outBuf = runtime.Allocate(n);
+        nint validBuf = runtime.Allocate(n);
+
+        try
+        {
+            runtime.Upload(inBuf, values);
+
+            var zeros = new int[n];
+            runtime.Upload(validBuf, zeros.AsSpan());
+
+            var ones = new float[n];
+            Array.Fill(ones, 999f);
+            runtime.Upload(outBuf, ones.AsSpan());
+
+            runtime.SetBuffer(SilkKernels.RollingMean, 0, inBuf);
+            runtime.SetBuffer(SilkKernels.RollingMean, 1, outBuf);
+            runtime.SetBuffer(SilkKernels.RollingMean, 2, validBuf);
+            runtime.SetUInt32(SilkKernels.RollingMean, 3, (uint)n);
+            runtime.SetUInt32(SilkKernels.RollingMean, 4, (uint)windowSize);
+            runtime.SetUInt32(SilkKernels.RollingMean, 5, (uint)minPeriods);
+
+            runtime.Run(SilkKernels.RollingMean, new nuint[] { 64 }, new nuint[] { 1 });
+            runtime.Finish();
+
+            float[] means = runtime.Download(outBuf, n);
+            int[] validInts = runtime.DownloadInt(validBuf, n);
+            var valid = new bool[n];
+            for (int i = 0; i < n; i++)
+                valid[i] = validInts[i] != 0;
+
+            return (means, valid);
+        }
+        finally
+        {
+            runtime.Release(inBuf);
+            runtime.Release(outBuf);
+            runtime.Release(validBuf);
+        }
+    }
 }
