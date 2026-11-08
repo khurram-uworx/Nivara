@@ -708,7 +708,7 @@ per classifier, and the CPU-layout round trip exact.
   encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion no longer applies**: the old GPU flag was removed in 1.5.0, so `--silk` is now
   the only GPU backend and there is nothing to conflict with.
-- **F32-only**: `--silk --precision bf16|fp16` is rejected (there is no bf16/fp16 translation unit).
+- **Precision**: `--silk --precision bf16` is supported (weights widen on device); `--silk --precision fp16` is rejected — bf16 is preferred, there is no measured speedup at current shapes (0.97–1.07× vs f32); use bf16 or drop --silk. F32 remains the default.
 - **`--gpu` is rejected, not aliased** to the removed backend, so an old invocation fails loudly.
 - **`OpenSilkEncoder`** implements the `OpenEncoder` delegate shared by the MiniLM/DistilBERT
   SST-2 entry points, so the CPU and Silk paths stay structurally identical.

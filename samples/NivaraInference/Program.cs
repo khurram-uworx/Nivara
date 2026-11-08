@@ -570,16 +570,16 @@ class Program
         }
 
         bool silkNarrowModel = modelType is "modernbert" or "laya";
-        if (useSilk && fp16 && !silkNarrowModel)
+        if (useSilk && fp16)
         {
-            Console.Error.WriteLine("--silk is F32-only: the hand-authored Silk kernel stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
+            Console.Error.WriteLine("--silk is F32-only: fp16 shows no measured speedup at current shapes (0.97–1.07×), so bf16 is preferred; use --precision bf16 or drop --silk.");
             return 1;
         }
 
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
-        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && (bf16 || fp16)) && !ConsumesNarrow(modelType, mode, syntheticWeights))
+        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
         {
             Console.Error.WriteLine(isQwen
                 ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32."
@@ -724,12 +724,6 @@ class Program
                         if (compare) return Laya.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.Silk.SilkLayaSession.Open);
                         return Laya.RunGpu(tensorsBf16, modelDir);
                     }
-                    if (fp16)
-                    {
-                        if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, Nivara.Silk.SilkLayaSession.Open);
-                        if (compare) return Laya.CompareGpu(tensors, modelDir, Nivara.Silk.SilkLayaSession.Open);
-                        return Laya.RunGpu(tensorsHalf, modelDir);
-                    }
                     Nivara.AI.OpenLayaSession open = Nivara.Silk.SilkLayaSession.Open;
                     if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
                     if (compare) return Laya.CompareGpu(tensors, modelDir, open);
@@ -748,13 +742,6 @@ class Program
                         if (compare) return ModernBert.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, SilkModernBertSession.Open);
                         if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                         return ModernBert.RunGpu(tensorsBf16, modelDir);
-                    }
-                    if (fp16)
-                    {
-                        if (benchmark) return ModernBert.BenchmarkGpu(tensors, modelDir, seqLengths, warmup, iterations, SilkModernBertSession.Open);
-                        if (compare) return ModernBert.CompareGpu(tensors, modelDir, SilkModernBertSession.Open);
-                        if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
-                        return ModernBert.RunGpu(tensorsHalf, modelDir);
                     }
                     OpenModernBertSession open = SilkModernBertSession.Open;
                     var mbSilkTensors = tensors;
