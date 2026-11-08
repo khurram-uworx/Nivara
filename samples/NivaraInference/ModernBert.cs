@@ -16,7 +16,7 @@ namespace NivaraInference;
 /// rather than a meaningful value (Nivara masks with <c>-inf</c> and returns zeros; HuggingFace masks
 /// with <c>finfo.min</c> and returns a uniform distribution).
 /// </summary>
-public static class ModernBert
+public static partial class ModernBert
 {
     /// <summary>Parity bound: |csharp - reference| &lt;= GateRelTol * (1 + |reference|).</summary>
     const double GateRelTol = 1e-3;

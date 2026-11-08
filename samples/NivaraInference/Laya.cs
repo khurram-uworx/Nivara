@@ -22,7 +22,7 @@ namespace NivaraInference;
 /// a sample's console output is the wrong place for them.
 /// </para>
 /// </remarks>
-public static class Laya
+public static partial class Laya
 {
     const string ModelTypeName = "Laya";
 
