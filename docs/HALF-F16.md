@@ -229,7 +229,7 @@ dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp
 - `modernbert compare` / `laya compare` are F32-only.
 - `--simd-widen` is an A/B lever for narrow runs (minilm/distilbert/sst/
   modernbert/laya; smollm/qwen manage their own).
-- Silk/OpenCL (`--silk`) is F32-only: fp16 is rejected.
+- Silk/OpenCL (`--silk`) supports `--precision bf16` (widened on device); `--precision fp16` is rejected — measured on Intel Arc 140T the fp16 kernels tie f32 (0.97–1.07×), so they show no speedup at current shapes. Use bf16 instead.
 
 ---
 
