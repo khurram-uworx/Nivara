@@ -44,8 +44,8 @@ public class GpuIncidentTests
         {
             var scenario = Scenarios.A;
 
-            using var cpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useGpu: false);
-            using var gpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useGpu: true, gpuForce: true);
+            using var cpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useSilk: false);
+            using var gpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useSilk: true);
 
             var decision = Analysis.LastGpuOffloadDecision;
             Assert.That(decision, Is.Not.Null);
@@ -105,8 +105,8 @@ public class GpuIncidentTests
             using (runtime)
             {
                 var scenario = Scenarios.A;
-                using var cpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useGpu: false);
-                using var gpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useGpu: true, gpuForce: true);
+                using var cpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useSilk: false);
+                using var gpu = Analysis.AnalyzeGroupedAggregation(tempDir, scenario, useSilk: true);
 
                 var decision = Analysis.LastGpuOffloadDecision;
                 Assert.That(decision, Is.Not.Null);

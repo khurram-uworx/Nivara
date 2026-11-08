@@ -42,7 +42,7 @@ public class GpuOffloadDecisionTests
         }
         using (runtime)
         {
-            using var frame = Analysis.AnalyzeGroupedAggregation(tempDir, Scenarios.A, useGpu: true, gpuForce: true);
+            using var frame = Analysis.AnalyzeGroupedAggregation(tempDir, Scenarios.A, useSilk: true);
             var decision = Analysis.LastGpuOffloadDecision;
             Assert.That(decision, Is.Not.Null);
             Assert.That(decision!.Offloaded, Is.True);
@@ -68,11 +68,11 @@ public class GpuOffloadDecisionTests
         }
         using (runtime)
         {
-            using var frame = Analysis.AnalyzeGroupedAggregation(tempDir, Scenarios.A, useGpu: true, gpuForce: false);
+            using var frame = Analysis.AnalyzeGroupedAggregation(tempDir, Scenarios.A, useSilk: false);
             var decision = Analysis.LastGpuOffloadDecision;
             Assert.That(decision, Is.Not.Null);
             Assert.That(decision!.Reason, Does.Contain("profitable").Or.Contain("not profitable")
-                .Or.Contain("gpu not requested").Or.Contain("forced"));
+                .Or.Contain("silk not requested").Or.Contain("silk (--silk)"));
         }
     }
 }
