@@ -245,7 +245,8 @@ dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp
   is `false` at every width. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only
   `float`/`double` to SIMD row-dot kernels; by default `Half` uses the widen path
   above its length gate (and the scalar `MultiplyRowScalar` path when the gate
-  is missed or widen is disabled) (~26× slower in the disabled case, verified via
+  is missed or widen is disabled — that scalar path is ~26× slower in the disabled
+  case, verified via
   `NivaraInference` benchmark). **Auto-widened SIMD path (default on):**
   `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels`
   that convert `ushort` lanes to `float`, run in `Vector128<float>`, and narrow
