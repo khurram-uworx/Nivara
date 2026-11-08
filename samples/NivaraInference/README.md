@@ -196,11 +196,11 @@ running something else. In particular:
   `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing
   image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through
   to the model's default runner.
-- `--precision bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner
+- `--precision f32|bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner
   (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya` — but not `compare`;
-  `qwen` for `benchmark`/`--synthetic-weights`). The vision models and `laya compare` /
-  `modernbert compare` reject it: they have no narrow path, so the flag used to load half-memory
-  weights and then run F32.
+  `qwen` for `benchmark`/`--synthetic-weights`). `f32` is always accepted. The vision models and
+  `laya compare` / `modernbert compare` reject bf16/fp16: they have no narrow path. Even where a
+  bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16.
 - `--simd-widen` is an A/B lever for those narrow runs only. `smollm` and `qwen` enable widen for
   their narrow runs themselves (use `smollm ab`), and an F32 run is unchanged, so the flag is
   rejected there.
