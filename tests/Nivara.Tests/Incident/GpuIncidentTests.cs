@@ -62,6 +62,7 @@ public class GpuIncidentTests
                 Assert.That(gpuByService, Does.ContainKey(service));
                 Assert.That(gpuByService[service].Total, Is.EqualTo(cpuTotal.Total));
                 Assert.That(gpuByService[service].Avg, Is.EqualTo(cpuTotal.Avg).Within(1e-4));
+                Assert.That(gpuByService[service].ErrorRate, Is.EqualTo(cpuTotal.ErrorRate).Within(1e-4));
             }
         }
     }
@@ -133,15 +134,17 @@ public class GpuIncidentTests
         }
     }
 
-    static Dictionary<string, (int Total, double Avg)> IndexByService(NivaraFrame frame)
+    static Dictionary<string, (int Total, double Avg, double ErrorRate)> IndexByService(NivaraFrame frame)
     {
         var serviceCol = frame.GetColumn<string>("Service");
         var totalCol = frame.GetColumn<int>("TotalRequests");
         var avgCol = frame.GetColumn<double>("AvgDurationMs");
-        var result = new Dictionary<string, (int Total, double Avg)>();
+        var rateCol = frame.GetColumn<double>("ErrorRate");
+        var result = new Dictionary<string, (int Total, double Avg, double ErrorRate)>();
         for (int i = 0; i < frame.RowCount; i++)
         {
-            result[(string)serviceCol.GetValue(i)!] = ((int)totalCol.GetValue(i)!, (double)avgCol.GetValue(i)!);
+            result[(string)serviceCol.GetValue(i)!] = ((int)totalCol.GetValue(i)!,
+                (double)avgCol.GetValue(i)!, (double)rateCol.GetValue(i)!);
         }
         return result;
     }
