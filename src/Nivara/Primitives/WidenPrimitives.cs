@@ -39,7 +39,7 @@ public static class WidenPrimitives
     /// without a <c>struct</c>/<c>INumber</c> constraint.
     /// </summary>
     public static bool ShouldWiden(Type type, int length)
-        => NivaraPrimitives.UseWidenSimd
+        => !NivaraPrimitives.DisableWidenSimd
            && Vector.IsHardwareAccelerated
            && IsNarrowFloat(type)
            && length >= Vector<byte>.Count * 4;

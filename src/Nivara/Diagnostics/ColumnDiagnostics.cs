@@ -175,7 +175,7 @@ public enum KernelType
 
     /// <summary>
     /// Narrow float (Half/BFloat16) widened to float, computed with float SIMD,
-    /// then narrowed back. Selected only when <see cref="Nivara.Primitives.NivaraPrimitives.UseWidenSimd"/>
+    /// then narrowed back. Selected only when <see cref="Nivara.Primitives.NivaraPrimitives.DisableWidenSimd"/>
     /// is enabled (off by default).
     /// </summary>
     WidenToFloatSimd
