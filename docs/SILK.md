@@ -364,7 +364,8 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 `--silk` runs encoders, causal decoders, and vision convolution through hand-authored OpenCL C
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
 real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
-Qwen, MobileNetV2, and ResNet-18**. F32 is the default. Narrow precision on the silk path:
+Qwen, MobileNetV2, and ResNet-18**. F32 is the default. Qwen and the vision models expose their own mode
+sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`. Narrow precision on the silk path:
 `--precision bf16` stores selected weights (tokEmb/tied LM head for SmolLM/Qwen; the QKV, FFN and
 tokEmb matrices for ModernBERT and Laya) as BF16 and widens in-register; activations stay f32.
 MiniLM/DistilBERT/DistilBERT+SST-2 still widen BF16 to f32 before upload. `--precision fp16` is
