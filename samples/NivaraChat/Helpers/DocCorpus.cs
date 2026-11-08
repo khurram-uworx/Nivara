@@ -10,7 +10,7 @@ namespace NivaraChat.Helpers;
 public static class DocCorpus
 {
     /// <summary>Directory names under the docs root that hold plan documents.</summary>
-    static readonly string[] PlanDirectories = ["plan"];
+    static readonly string[] PlanDirectories = ["plan", "plans"];
 
     /// <summary>
     /// Markdown files under <paramref name="docsDir"/>, plus the sample README, minus plan documents.
