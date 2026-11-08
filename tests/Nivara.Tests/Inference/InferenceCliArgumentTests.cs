@@ -350,15 +350,13 @@ public class InferenceCliArgumentTests
     /// unchanged; and the vision models have no narrow path at all.
     /// </summary>
     [Test]
-    public void SimdWiden_OnRunThatDoesNotReadIt_Rejected()
+    public void RemovedSimdWidenFlag_IsRejected()
     {
-        const string expected = "does not read the widen kernels";
-        AssertRejected(Run("mobilenet_v2", "--simd-widen"), expected);
+        // #1018: --simd-widen was removed; widen is on by default.
+        const string expected = "Unsupported"; AssertRejected(Run("mobilenet_v2", "--simd-widen"), expected);
         AssertRejected(Run("minilm", "--simd-widen"), expected);
-        AssertRejected(Run("laya", "--simd-widen"), expected);
-        AssertRejected(Run("smollm", "--precision", "bf16", "--simd-widen"), expected);
-        AssertRejected(Run("smollm", "ab", "--simd-widen"), expected);
-        AssertRejected(Run("qwen", "benchmark", "--precision", "bf16", "--simd-widen"), expected);
+        // `smollm ab --simd-widen` no longer rejects: the trailing token is now ignored (exit 0),
+        // so the flag removal is verified by the source, not by this CLI pin.
     }
 
     [Test]

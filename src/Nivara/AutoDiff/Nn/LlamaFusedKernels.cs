@@ -6,7 +6,7 @@ namespace Nivara.AutoDiff.Nn;
 
 /// <summary>
 /// Runtime toggles for the inference-only fused Llama kernels plus the zero-allocation fused
-/// kernel helpers they rely on. Mirroring <see cref="Nivara.Primitives.NivaraPrimitives.UseWidenSimd"/>,
+/// kernel helpers they rely on. Mirroring <see cref="Nivara.Primitives.NivaraPrimitives.DisableWidenSimd"/>,
 /// the default is on so cached inference outside a <see cref="Utilities.GradientUtils.Grad"/> scope
 /// routes through the fused per-token decoder-block path; parity tests flip it to <c>false</c> to
 /// force the byte-compatible per-op chain for A/B comparisons. Grad-enabled training is unaffected

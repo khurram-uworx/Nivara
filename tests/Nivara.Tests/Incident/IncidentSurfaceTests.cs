@@ -430,18 +430,18 @@ public class IncidentSurfaceTests
                 return Task.CompletedTask;
             },
 
-            // --- GpuProfitability --------------------------------------------------
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.CalibrateCpuMs))] = _ =>
+            // --- SilkProfitability --------------------------------------------------
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.CalibrateCpuMs))] = _ =>
             {
-                var ms = GpuProfitability.CalibrateCpuMs(
+                var ms = SilkProfitability.CalibrateCpuMs(
                     new[] { 0, 1, 0 }, new[] { 200, 500, 200 }, new[] { 1f, 2f, 3f }, 2, 3);
                 Assert.That(ms, Is.GreaterThanOrEqualTo(0));
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.Decide))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.Decide))] = _ =>
             {
-                var (offload, reason, cpu, gpu) = GpuProfitability.Decide(false, false, 10, 5);
+                var (offload, reason, cpu, gpu) = SilkProfitability.Decide(false, false, 10, 5);
                 Assert.Multiple(() =>
                 {
                     Assert.That(offload, Is.False);
@@ -450,48 +450,48 @@ public class IncidentSurfaceTests
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimateCpuMs))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.EstimateCpuMs))] = _ =>
             {
-                Assert.That(GpuProfitability.EstimateCpuMs(10, 100, 1000), Is.EqualTo(100).Within(1e-9));
+                Assert.That(SilkProfitability.EstimateCpuMs(10, 100, 1000), Is.EqualTo(100).Within(1e-9));
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimateGpuMs))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.EstimateGpuMs))] = _ =>
             {
-                var ms = GpuProfitability.EstimateGpuMs(1000, 12_000);
+                var ms = SilkProfitability.EstimateGpuMs(1000, 12_000);
                 Assert.That(ms, Is.GreaterThan(0));
                 return Task.CompletedTask;
             },
 
             // The cost-model constants are part of the published heuristic, so each is asserted
             // against its own invariant rather than skipped as an inert field.
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.Margin))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.Margin))] = _ =>
             {
-                Assert.That(GpuProfitability.Margin, Is.InRange(0.0, 1.0));
+                Assert.That(SilkProfitability.Margin, Is.InRange(0.0, 1.0));
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.SampleSize))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.SampleSize))] = _ =>
             {
-                Assert.That(GpuProfitability.SampleSize, Is.GreaterThan(0));
+                Assert.That(SilkProfitability.SampleSize, Is.GreaterThan(0));
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimatedGpuFixedMs))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.EstimatedGpuFixedMs))] = _ =>
             {
-                Assert.That(GpuProfitability.EstimatedGpuFixedMs, Is.GreaterThanOrEqualTo(0.0));
+                Assert.That(SilkProfitability.EstimatedGpuFixedMs, Is.GreaterThanOrEqualTo(0.0));
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimatedGpuBytesPerMs))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.EstimatedGpuBytesPerMs))] = _ =>
             {
-                Assert.That(GpuProfitability.EstimatedGpuBytesPerMs, Is.GreaterThan(0.0));
+                Assert.That(SilkProfitability.EstimatedGpuBytesPerMs, Is.GreaterThan(0.0));
                 return Task.CompletedTask;
             },
 
-            [Key(nameof(GpuProfitability), nameof(GpuProfitability.EstimatedGpuMsPerRow))] = _ =>
+            [Key(nameof(SilkProfitability), nameof(SilkProfitability.EstimatedGpuMsPerRow))] = _ =>
             {
-                Assert.That(GpuProfitability.EstimatedGpuMsPerRow, Is.GreaterThanOrEqualTo(0.0));
+                Assert.That(SilkProfitability.EstimatedGpuMsPerRow, Is.GreaterThanOrEqualTo(0.0));
                 return Task.CompletedTask;
             },
 

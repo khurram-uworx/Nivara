@@ -8,29 +8,12 @@ namespace Nivara.Primitives;
 /// </summary>
 public static class NivaraPrimitives
 {
-    static readonly bool appContextWidenSimd = AppContext.TryGetSwitch("Nivara.Primitives.WidenSimd", out var enabled)
-        && enabled;
-
-    static bool useWidenSimd;
-
     /// <summary>
-    /// Enables or disables the widen-compute-narrow SIMD path for
-    /// <c>Half</c>/<c>BFloat16</c>.
+    /// Hidden diagnostic opt-out for the widen-compute-narrow SIMD path. Defaults to
+    /// <c>false</c> (widen enabled). Flip it via
+    /// <c>AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true)</c> (or the
+    /// environment) to force the scalar fallback for diagnostics and A/B comparison.
     /// </summary>
-    /// <remarks>
-    /// Defaults to <c>false</c>. When <c>true</c>, the widen path only takes
-    /// effect for types the hardware supports and over the length threshold —
-    /// see <see cref="WidenPrimitives.ShouldWiden{T}(int)"/>. Off by default so
-    /// existing behavior is bit-identical.
-    /// </remarks>
-    public static bool UseWidenSimd
-    {
-        get => appContextWidenSimd || useWidenSimd;
-        set
-        {
-            if (value && !Vector.IsHardwareAccelerated)
-                return;
-            useWidenSimd = value;
-        }
-    }
+    public static bool DisableWidenSimd
+        => AppContext.TryGetSwitch("Nivara.Primitives.DisableWidenSimd", out var disabled) && disabled;
 }

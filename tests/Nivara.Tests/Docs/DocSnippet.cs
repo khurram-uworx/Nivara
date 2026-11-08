@@ -68,6 +68,7 @@ static partial class DocSnippetExtractor
         "README.md",
         "docs/AUTODIFF.md",
         "docs/BFLOAT16.md",
+        "docs/HALF-F16.md",
         "docs/ILGPU.md",
         "docs/INTEGERS.md",
         "docs/LINQ.md",

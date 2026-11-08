@@ -926,12 +926,8 @@ public static class Qwen
     static int NarrowWidenScope<T>(Func<int> body)
         where T : struct
     {
-        if (typeof(T) != typeof(BFloat16) && typeof(T) != typeof(Half))
-            return body();
-        bool prior = NivaraPrimitives.UseWidenSimd;
-        NivaraPrimitives.UseWidenSimd = true;
-        try { return body(); }
-        finally { NivaraPrimitives.UseWidenSimd = prior; }
+        // Narrow types are auto-widened by default; no toggle needed.
+        return body();
     }
 
     // ----------------------------------------------------------------------------------

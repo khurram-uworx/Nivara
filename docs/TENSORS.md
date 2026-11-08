@@ -215,7 +215,8 @@ natively satisfies the constraint and is admitted at runtime in `TypeValidator` 
 `SafeTensorsLoader` still performs BF16→F32 widening as the default for float/double pipelines;
 `ConvertBF16<BFloat16>` is available for native BFloat16 reads (BF16→F32→BF16 is lossless).
 BFloat16 matmul runs through the BCL `TensorPrimitives.Dot` path (no hand-rolled SIMD), so it is
-correct but not hardware-accelerated.
+correct but not hardware-accelerated. The corresponding `Half`/f16 matrix is documented in
+[`HALF-F16.md`](HALF-F16.md).
 
 ### Data-prep numeric surface
 

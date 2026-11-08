@@ -23,7 +23,8 @@ internal static class DocsCoveragePins
     /// <summary>
     /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus other under
     /// </summary>
-    internal const int ExpectedDocumentCount = 61;
+    // +1: docs/HALF-F16.md added for issue #1017.
+    internal const int ExpectedDocumentCount = 62;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -38,5 +39,6 @@ internal static class DocsCoveragePins
 // +2: #991 inference release note now cites docs/SILK.md alongside docs/ACCELERATION.md.
     // +14: top-level doc refresh (README, GETTING-STARTED, EXAMPLES, ARCHITECTURE, AGENTS) added
     // markdown links to the promoted docs (EMBEDDINGS, SAFETENSORS, SILK, ONNX, etc.).
-    internal const int ExpectedDocumentReferenceCount = 235;
+    // +3: new docs/HALF-F16.md cross-references (issue #1017).
+    internal const int ExpectedDocumentReferenceCount = 238;
 }

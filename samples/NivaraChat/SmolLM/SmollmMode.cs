@@ -174,7 +174,7 @@ public static class SmollmMode
         }
         finally
         {
-            if (widenSimd) NivaraPrimitives.UseWidenSimd = false;
+            // widen is on by default now.
         }
     }
 
@@ -185,10 +185,8 @@ public static class SmollmMode
     static bool EnableWidenSimdIfNarrow<T>()
         where T : struct
     {
-        if (typeof(T) != typeof(BFloat16) && typeof(T) != typeof(Half))
-            return false; // caller must not restore
-        NivaraPrimitives.UseWidenSimd = true;
-        return true; // caller restores to false
+        // widen is on by default now.
+        return false;
     }
 
     static async Task RunSingleTurn(IChatClient client, string text)
