@@ -133,6 +133,9 @@ internal static class SilkKernels
     // Analytics (incident) kernels.
     public const string GroupedHashReducePartial = "grouped_hash_reduce_partial";
 
+    // Analytics (incident) kernels, phase B.
+    public const string RollingMean = "rolling_mean";
+
     // Vision (conv) kernels.
     public const string Conv2d = "conv2d";
     public const string BatchNormEval = "batchnorm_eval";
@@ -182,7 +185,7 @@ internal static class SilkKernels
         GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
-        GroupedHashReducePartial,
+        GroupedHashReducePartial, RollingMean,
         GemmNt, GemmNtResidual, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
@@ -2571,6 +2574,42 @@ internal static class SilkKernels
                 partialCounts[baseOffset + g] = localCounts[g];
                 partialErrors[baseOffset + g] = localErrors[g];
                 partialSums[baseOffset + g] = localSums[g];
+            }
+        }
+
+        __kernel void rolling_mean(
+            __global const float* input,
+            __global float* output,
+            __global int* valid,
+            const int n,
+            const int windowSize,
+            const int minPeriods)
+        {
+            int globalSize = get_global_size(0);
+            for (int i = get_global_id(0); i < n; i += globalSize)
+            {
+            int start = i - windowSize + 1;
+            if (start < 0)
+                start = 0;
+
+            float sum = 0.0f;
+            int count = 0;
+            for (int j = start; j <= i; ++j)
+            {
+                sum += input[j];
+                ++count;
+            }
+
+            if (count >= minPeriods)
+            {
+                output[i] = sum / (float)count;
+                valid[i] = 1;
+            }
+            else
+            {
+                output[i] = 0.0f;
+                valid[i] = 0;
+            }
             }
         }
         __kernel void gemm_row4_bf16(
