@@ -122,9 +122,8 @@ var added  = col.Add(otherColumn);        // column-on-column
 
 Null masks propagate (`resultNullMask = leftNullMask OR rightNullMask`). There is
 no separate specialized fast path beyond the generic `TensorPrimitives<Half>` loop;
-`Vector<Half>` is unsupported on .NET 11, so dispatch is scalar. Opt-in widened
-Widen is on by default; opt out via `NivaraPrimitives.DisableWidenSimd` (see
-[Precision & limitations](#precision--limitations)) — Half's path is more
+`Vector<Half>` is unsupported on .NET 11, so dispatch is scalar. Element-wise kernels auto-widen for large buffers (on by default; opt out via `NivaraPrimitives.DisableWidenSimd`) — see
+[Precision & limitations](#precision--limitations) — Half's path is more
 expensive than BF16's because of the cross-format conversion.
 
 ### Window / cumulative / aggregation
@@ -186,8 +185,10 @@ AutoDiff is a non-nullable domain (ADR-001): convert nullable columns with
 
 ## Math helpers (`TensorsHelper`, `ModuleHelpers`)
 
-- `MatMul`/`Dot` for `Half` runs through `TensorPrimitives.Dot<Half>` (scalar)
-  by default; with `UseWidenSimd` it lifts to the widen-compute-narrow kernel.
+- `MatMul`/`Dot` for `Half` runs through `TensorPrimitives.Dot<Half>` (`Dot<Half>`
+  itself is the BCL scalar path, but Nivara's `TensorsHelper.MultiplyCore<T>` lifts
+  those row dots to widen-compute-narrow above the length gate by default; opt
+  out via `NivaraPrimitives.DisableWidenSimd`).
 - Normalization/standardization: `Half` uses the in-place SIMD path via
   `TensorsHelper.TryNormalizeInPlace` (generic, scalar fallback for Half where
   vectorized).
@@ -242,18 +243,22 @@ dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp
   activations span a wide dynamic range.
 - **SIMD / Vector Lane Support (empirical, .NET 11)**: `Vector<Half>.IsSupported`
   is `false` at every width. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only
-  `float`/`double` to SIMD row-dot kernels; by default `Half` falls back to the
-  scalar `MultiplyRowScalar` path (~26× slower, verified via
-  `NivaraInference` benchmark). **Opt-in widened SIMD path**:
+  `float`/`double` to SIMD row-dot kernels; by default `Half` uses the widen path
+  above its length gate (and the scalar `MultiplyRowScalar` path when the gate
+  is missed or widen is disabled — that scalar path is ~26× slower in the disabled
+  case, verified via
+  `NivaraInference` benchmark). **Auto-widened SIMD path (default on):**
   `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels`
   that convert `ushort` lanes to `float`, run in `Vector128<float>`, and narrow
   back, for element-wise `Add/Sub/Mul/Div` (`NumericTensorKernels`) and matmul
-  row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Gated behind
-  `NivaraPrimitives.DisableWidenSimd` opt-out (default off = widen enabled); `ShouldWiden<T>` also
-  applies a length gate + `Vector128.IsHardwareAccelerated` check (per-op, no
-  temp `float` buffer — fused per-vector). Half's conversion is portable
-  per-element (no F16C batch intrinsic in .NET 11), so its widen gain is smaller
-  than BF16's (~10× is BF16's measured). Correctness unchanged by the toggle
+  row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Enabled by default;
+  opt out via the hidden AppContext switch `Nivara.Primitives.DisableWidenSimd`
+  (or `NivaraPrimitives.DisableWidenSimd`). `ShouldWiden<T>` also
+  applies a length gate (`Vector<byte>.Count * 4`) +
+  `Vector.IsHardwareAccelerated` check (per-op, no temp `float` buffer —
+  fused per-vector). Half's conversion is portable per-element
+  (no F16C batch intrinsic in .NET 11), so its widen gain is smaller than
+  BF16's (~10× is BF16's measured). Correctness unchanged by the toggle
   (Half/BF16 parity gates).
 
 ---

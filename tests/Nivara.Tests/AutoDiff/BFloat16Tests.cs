@@ -142,6 +142,24 @@ public class BFloat16Tests
     }
 
     [Test]
+    public void Attention_MultiHeadForward_ParityWithFloatReference()
+    {
+        float[] aData = [1f, 0f, 0f, 1f, 1f, 1f, 0f, 0f];
+
+        var fQ = ReverseGradTensor<float>.FromMatrix(aData, 2, 4, requiresGrad: false);
+        var fK = ReverseGradTensor<float>.FromMatrix(aData, 2, 4, requiresGrad: false);
+        var fV = ReverseGradTensor<float>.FromMatrix(aData, 2, 4, requiresGrad: false);
+        var bQ = Matrix(aData, 2, 4);
+        var bK = Matrix(aData, 2, 4);
+        var bV = Matrix(aData, 2, 4);
+
+        var fResult = ToFloats(ReverseGradOperations.MultiHeadAttention(fQ, fK, fV, 2, (float)(1.0 / Math.Sqrt(2.0))));
+        var bResult = ToFloats(ReverseGradOperations.MultiHeadAttention(bQ, bK, bV, 2, BFloat16.CreateChecked((float)(1.0 / Math.Sqrt(2.0)))));
+
+        AssertParity(fResult, bResult, "MultiHeadAttention");
+    }
+
+    [Test]
     public void LinearModule_BFloat16SgdTraining_LossDecreases()
     {
         using var model = new Linear<BFloat16>(1, 1, weightInitializer: new DeterministicInit<BFloat16>());

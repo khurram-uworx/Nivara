@@ -143,7 +143,7 @@ Semantics:
 | `LlamaCausalAttention<T>.ForwardCore` + `AttentionKernels<T>.BatchedAttention` | **core** `src/Nivara/AutoDiff/Nn/LlamaCausalAttention.cs` + `Operations/AttentionKernels.cs` | #403; shared core with per-KV-head K/V capture; fused GQA-aware batched prefill attention (no repeat expansion, no mask alloc) |
 | `LlamaForCausalLM<T>.ForwardPrefill(int[] ids, LlamaKVCache<T> cache)` | **sample** `samples/Nivara.Samples/` | P0-1; batched `[L, hidden]` prompt prefill with K/V capture — one weight read for the whole prompt instead of L full-model walks |
 | `ForwardCachedFused` / `ForwardPrefillFused` + `LlamaFusedKernels.DecoderBlockFused` | **sample** `samples/Nivara.Samples/` | #404; whole per-token block over span/scratch buffers, zero steady-state allocs; public opt-out toggle, default `true` |
-| bf16 benchmark/synthetic (`--precision bf16`, `SafeTensorsLoader.Read<BFloat16>`, `NivaraPrimitives.UseWidenSimd`) | **sample** `samples/Nivara.Samples/` + `samples/NivaraChat/` | #407; weights stay `BFloat16` and widen in-register per dot (F32 FMA math); benchmark/synthetic modes only — tools/distill stay float |
+| bf16 benchmark/synthetic (`--precision bf16`, `SafeTensorsLoader.Read<BFloat16>`, widen on by default via `NivaraPrimitives.DisableWidenSimd`) | **sample** `samples/Nivara.Samples/` + `samples/NivaraChat/` | #407; weights stay `BFloat16` and widen in-register per dot (F32 FMA math); benchmark/synthetic modes only — tools/distill stay float |
 
 ### What was not reusable from Phase B (and why)
 
