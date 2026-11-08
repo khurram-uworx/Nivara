@@ -157,6 +157,60 @@ public static class SilkAnalytics
         }
     }
 
+    public static (float[] Values, bool[] Valid) RollingMin(
+        SilkRuntime runtime,
+        ReadOnlySpan<float> values,
+        int windowSize,
+        int minPeriods = 0)
+    {
+        if (runtime is null)
+            throw new ArgumentNullException(nameof(runtime));
+        if (windowSize < 1)
+            throw new ArgumentOutOfRangeException(nameof(windowSize));
+        if (values.Length == 0)
+            return (Array.Empty<float>(), Array.Empty<bool>());
+
+        if (minPeriods <= 0)
+            minPeriods = windowSize;
+
+        int n = values.Length;
+        nint inBuf = runtime.Allocate(n);
+        nint outBuf = runtime.Allocate(n);
+        nint validBuf = runtime.Allocate(n);
+
+        try
+        {
+            runtime.Upload(inBuf, values);
+
+            var zeros = new int[n];
+            runtime.Upload(validBuf, zeros.AsSpan());
+
+            runtime.SetBuffer(SilkKernels.RollingMin, 0, inBuf);
+            runtime.SetBuffer(SilkKernels.RollingMin, 1, outBuf);
+            runtime.SetBuffer(SilkKernels.RollingMin, 2, validBuf);
+            runtime.SetUInt32(SilkKernels.RollingMin, 3, (uint)n);
+            runtime.SetUInt32(SilkKernels.RollingMin, 4, (uint)windowSize);
+            runtime.SetUInt32(SilkKernels.RollingMin, 5, (uint)minPeriods);
+
+            runtime.Run(SilkKernels.RollingMin, new nuint[] { 64 }, new nuint[] { 1 });
+            runtime.Finish();
+
+            float[] valuesOut = runtime.Download(outBuf, n);
+            int[] validInts = runtime.DownloadInt(validBuf, n);
+            var valid = new bool[n];
+            for (int i = 0; i < n; i++)
+                valid[i] = validInts[i] != 0;
+
+            return (valuesOut, valid);
+        }
+        finally
+        {
+            runtime.Release(inBuf);
+            runtime.Release(outBuf);
+            runtime.Release(validBuf);
+        }
+    }
+
     public static (float[] Values, bool[] Valid) RollingMax(
         SilkRuntime runtime,
         ReadOnlySpan<float> values,
