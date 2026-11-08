@@ -224,93 +224,38 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 | **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. Filed as [#307](https://github.com/khurram-uworx/Nivara/issues/307). |
 | **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Measured in Phase 4 bench-stream: peak memory reflects full-frame materialization, not chunk-bounded streaming. Filed as [#308](https://github.com/khurram-uworx/Nivara/issues/308). |
 
-## GPU Offloading
+## Silk (OpenCL) acceleration
 
-The pilot offloads only **Grouped Aggregation** through the Silk (OpenCL) backend. Other
-analyses stay on CPU in this phase.
+`--silk` is opt-in and fail-loud: it runs the available Silk (OpenCL) kernels and exits
+non-zero (with a `SilkRuntime` exception) when no OpenCL device is present. Other analyses
+stay on CPU unless a kernel has been individually prototyped and shown profitable.
 
-Profitability rule: the GPU path is chosen only when the estimated GPU cost
-(`EstimatedGpuFixedMs + transfer / EstimatedGpuBytesPerMs + rows * EstimatedGpuMsPerRow`)
-is less than `0.9 * estimated CPU cost`. The decision and its numbers are printed for
-every run.
+### Availability and status
 
-Commands (run on AC power):
+| Kernel / capability | Wired into `--silk`? | Measured CPU vs Silk | Notes |
+|---|---:|---|---|
+| `grouped_hash_reduce_partial` | Yes — Grouped Aggregation | 10k: 32.5 vs 38.4 ms (1.18x, slower); 100k: 236.3 vs 247.9 ms (1.05x, slower); 1M: 1533.2 vs 1474.6 ms (0.96x, ~4% faster) | Wired at all scales; remains an opt-in experiment |
+| `grouped_multistat_reduce_partial` | No (staged) | 100k: 0.28 vs 1.19 ms (4.258x, slower) | Count/errors/sum/squares/min/max in one pass |
+| `rolling_mean` | No (staged) | 100k: 0.47 vs 7.75 ms (16.426x, slower) | Strided sliding-window mean |
+| `rolling_max` | No (staged) | 100k: 0.65 vs 6.00 ms (9.268x, slower) | Strided sliding-window max |
+| `rolling_min` | No (staged) | 100k: 0.40 vs 5.39 ms (13.457x, slower) | Strided sliding-window min |
 
-```bash
-# Generate datasets at the sizes used for the curves below
-dotnet run --project samples/NivaraIncident -c Release -- generate --records 10000   --dataset samples/data/bench-silk-10k  --scenario A
-dotnet run --project samples/NivaraIncident -c Release -- generate --records 100000  --dataset samples/data/bench-silk-100k --scenario A
-dotnet run --project samples/NivaraIncident -c Release -- generate --records 1000000 --dataset samples/data/bench-silk-1m   --scenario A
+Policy: `--silk` is the user's choice. If requested, the wired kernel runs even when
+CPU is faster. Slower kernels remain implemented and parity-tested for future reuse, but
+are **not wired** because they do not clear Nivara's Phase 5 revisit bar (clear speedup
+on the target hardware, plus a kernel-specific proof before integration).
 
-# Measure each size
-dotnet run --project samples/NivaraIncident -c Release -- analyze --benchmark --silk --dataset samples/data/bench-silk-10k  --scenario A --iterations 5
-dotnet run --project samples/NivaraIncident -c Release -- analyze --benchmark --silk --dataset samples/data/bench-silk-100k --scenario A --iterations 5
-dotnet run --project samples/NivaraIncident -c Release -- analyze --benchmark --silk --dataset samples/data/bench-silk-1m   --scenario A --iterations 5
-```
+### Silk profitability (experimental, not wired up)
 
-Results (fill in from a human run on AC power):
+`samples/Nivara.Samples/Incident/SilkProfitability.cs` (formerly `GpuProfitability`)
+contains a pre-flight cost estimator for the grouped-aggregation Silk offload: 100k-row CPU
+sample, extrapolated CPU cost, first-pass GPU cost model, offload only under 90% margin.
 
-| Rows | CPU forced (ms) | GPU forced (ms) | GPU/CPU | Decision | Device |
-|------|-----------------|-----------------|---------|----------|--------|
-| 10,000   | 32.5  | 38.4  | 1.18  | not profitable | Intel Graphics |
-| 100,000  | 236.3 | 247.9 | 1.05  | not profitable | Intel Graphics |
-| 1,000,000 | 1533.2 | 1474.6 | 0.96 | not profitable | Intel Graphics |
-
-`--silk` runs the GPU path even when the gate declines, which is how the GPU-forced
-column above is produced.
-
-### Phase 5 — not being pursued now (revisit criteria)
-
-The original plan (issue #443) proposed extending GPU offload to rolling windows,
-multi-column filter vectors, and radix sort / hash-join keys. **That is not being done
-at this time**, based on the measurements above:
-
-- The only kernel implemented so far (grouped hash-reduction) shows at most a ~4%
-  end-to-end win at 1M rows on the shared-DRAM iGPU, and is slower below that.
-- The profitability gate reports "not profitable" at all three tested sizes.
-- Shared-DRAM iGPUs are memory-bandwidth-bound for these workloads; a discrete GPU
-  is expected to do better, but that has not been measured.
-
-Revisit Phase 5 only after all of the following hold:
-
-1. `EstimatedGpuMsPerRow` in `GpuProfitability` is recalibrated against measured
-   reduction timings (the current constant is a first-pass placeholder).
-2. A clear, reproducible speedup is demonstrated on discrete-GPU hardware.
-3. A new kernel (rolling window, filter vector, or sort/join) is prototyped and
-   shown profitable on its own before being wired into an analysis.
-
-Until then, grouped aggregation stays on CPU by default and `--silk` remains an
-opt-in, profitability-gated experiment.
-
-## Silk profitability (experimental, not wired up)
-
-`samples/Nivara.Samples/Incident/SilkProfitability.cs` (formerly `GpuProfitability`) contains a
-pre-flight cost estimator for the grouped-aggregation Silk offload: it times a 100k-row CPU
-sample, extrapolates the full CPU cost, estimates the GPU cost from a first-pass
-fixed/transfer/per-row model, and offloads only when the estimate is below 90% of the CPU estimate.
-
-**Status:** this is **not** invoked by `--silk` or any current CLI path. `--silk` always runs the
-kernel on Silk/OpenCL and fails loudly (non-zero exit, `SilkRuntime` exception) when no OpenCL
-device is available. The profitability gate is retained as a starting point for future evaluation
-of an automatic/conditional offload mode; its constants are placeholder-ish (shared-DRAM iGPU,
-~4% win at 1M rows, and a per-row estimate of 0.0003 ms) and must be recalibrated against
-measured Silk timings before it is wired up.
+**Status:** not invoked by `--silk` or any current CLI path. It is retained for future
+evaluation of an automatic/conditional offload mode; constants are first-pass placeholders
+and must be recalibrated against measured Silk timings before use.
 
 ---
-
-## Silk profitability (experimental, not wired up)
-
-`samples/Nivara.Samples/Incident/SilkProfitability.cs` (formerly `GpuProfitability`) contains a
-pre-flight cost estimator for the grouped-aggregation Silk offload. It times a 100k-row CPU
-sample, extrapolates the full CPU cost, estimates the GPU cost from a first-pass
-fixed/transfer/per-row model, and offloads only when the estimate is below 90% of the CPU estimate.
-
-**Status:** this is **not** invoked by `--silk` or any current CLI path. `--silk` always runs the
-kernel on Silk/OpenCL and fails loudly (non-zero exit, `SilkRuntime` exception) when no OpenCL
-device is available. The profitability gate is retained as a starting point for future evaluation
-of an automatic/conditional offload mode; its constants are first-pass (shared-DRAM iGPU, ~4%
-win at 1M rows) and must be recalibrated against measured Silk timings before it is wired up.
-
 
 ## Performance
 
