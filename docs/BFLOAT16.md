@@ -116,7 +116,7 @@ var ncol = NivaraColumnFactory.CreateFromNullable(new BFloat16?[] { (BFloat16)1.
 ### Element-wise arithmetic (null-mask preserved)
 
 ```csharp
-var scaled = col.Multiply((BFloat16)2.0f);   // [3.0, 5.0, 7.0] via the generic TensorPrimitives path (scalar for BF16)
+var scaled = col.Multiply((BFloat16)2.0f);   // [3.0, 5.0, 7.0] via generic TensorPrimitives path (auto-widened for large buffers)
 var ratio  = col.Divide((BFloat16)2.0f);      // [0.75, 1.25, 1.75]
 var added  = col.Add(otherColumn);            // column-on-column
 ```
@@ -194,10 +194,11 @@ series works as well.
 exactly like `float`/`double`/`Half` across the autograd engine:
 
 - **All operations** — element-wise, `MatMul` (runs through the BCL
-  `TensorPrimitives.Dot` row dot-product; the old hand-rolled `Vector<T>` SIMD
-  branch that threw `NotSupportedException` for `BFloat16` was removed — note this
-  `Dot` is the **scalar** BCL path for `BFloat16`/`Half`, since `Vector<BFloat16>`
-  is unsupported), reductions, normalization, activations, attention, convolutions, VAE/Transformer
+  `TensorPrimitives.Dot` row dot-product — `TensorPrimitives.Dot<BFloat16>` itself
+  is the scalar BCL path for `BFloat16`/`Half`, but Nivara's
+  `TensorsHelper.MultiplyCore<T>` lifts those row dots through widen-compute-narrow
+  above its length gate. The old hand-rolled `Vector<T>` SIMD branch that threw
+  `NotSupportedException` for `BFloat16` was removed), reductions, normalization, activations, attention, convolutions, VAE/Transformer
   modules.
 - **Optimizers** — `SGD<BFloat16>`, `Adam<BFloat16>`, `AdamW<BFloat16>` with
   their `TensorPrimitives`-based state buffers.
@@ -351,6 +352,6 @@ inference-default graph guard.
 - **Non-nullable at the AutoDiff boundary (ADR-001).** Resolve nulls
   (`FillNull` / `DropNulls`) before converting a `BFloat16` column to a gradient
   tensor.
-- **SIMD / Vector Lane Support (empirical, .NET 11, net11 `System.Numerics.Tensors` 11.0.0-preview.7)**: `BFloat16` and `Half` are scalar-first-class but SIMD-second-class. `Vector<BFloat16>`.IsSupported = false (all widths 64/128/256); `Vector.Create<BFloat16>` throws `NotSupportedException`. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only `float`/`double` to SIMD row-dot kernels; by default `BFloat16`/`Half` fall to scalar `MultiplyRowScalar` (~26× slower, verified via `NivaraInference` benchmark). **Auto-widened SIMD path (Phase 1, branch `khurram/smollm-1`):** `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels` that bit-reinterpret `ushort` lanes, widen to `float`, run in `float`, and narrow back for element-wise `Add/Sub/Mul/Div` (`NumericTensorKernels`) and matmul row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Now on by default (as of the next release); the opt-out is the hidden AppContext switch `Nivara.Primitives.DisableWidenSimd`. `ShouldWiden<T>` also applies a length gate + `Vector128.IsHardwareAccelerated` check (per-op, no temp `float` buffer — fused per-vector). **Phase 3 A/B (SmolLM-135M, 32 greedy tokens, `samples/NivaraInference smollm ab`):** BF16 scalar ~225 s vs BF16 widen **median 22.6 s** (~10× faster) and vs F32 native ~10.7 s — so BF16+widen is roughly 1.5–2× slower than F32 native (widen does F32 compute plus widen/narrow conversion; the exact ratio varies with machine load), making BF16 a memory-halving convenience rather than a compute win on this workload. The toggle is transparent to F32 (identical token streams). Correctness unchanged: SmolLM BF16 22/32 greedy argmax vs BF16 PyTorch, and ~1.0 cosine on the dtype-matched reference sequence (max abs 0.625); `distilbert_sst --precision bf16` argmax 8/8 with and without `--simd-widen`.
+- **SIMD / Vector Lane Support (empirical, .NET 11, net11 `System.Numerics.Tensors` 11.0.0-preview.7)**: `BFloat16` and `Half` are scalar-first-class but SIMD-second-class. `Vector<BFloat16>`.IsSupported = false (all widths 64/128/256); `Vector.Create<BFloat16>` throws `NotSupportedException`. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only `float`/`double` to SIMD row-dot kernels; by default `BFloat16`/`Half` use the widen path above its length gate (and the scalar `MultiplyRowScalar` path when the gate is missed or widen is disabled), (~26× slower in the disabled case, verified via `NivaraInference` benchmark). **Auto-widened SIMD path (shipped, default on):** `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels` that bit-reinterpret `ushort` lanes, widen to `float`, run in `float`, and narrow back for element-wise `Add/Sub/Mul/Div` (`NumericTensorKernels`) and matmul row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Now on by default in current builds; the opt-out is the hidden AppContext switch `Nivara.Primitives.DisableWidenSimd`. `ShouldWiden<T>` also applies a length gate (`Vector<byte>.Count * 4`) + `Vector.IsHardwareAccelerated` check (per-op, no temp `float` buffer — fused per-vector). **Phase 3 A/B (SmolLM-135M, 32 greedy tokens, `samples/NivaraInference smollm ab`):** BF16 scalar ~225 s vs BF16 widen **median 22.6 s** (~10× faster) and vs F32 native ~10.7 s — so BF16+widen is roughly 1.5–2× slower than F32 native (widen does F32 compute plus widen/narrow conversion; the exact ratio varies with machine load), making BF16 a memory-halving convenience rather than a compute win on this workload. The toggle is transparent to F32 (identical token streams). Correctness unchanged: SmolLM BF16 22/32 greedy argmax vs BF16 PyTorch, and ~1.0 cosine on the dtype-matched reference sequence (max abs 0.625); `distilbert_sst --precision bf16` argmax 8/8 with and without `--simd-widen`.
 
 ---
