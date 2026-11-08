@@ -289,7 +289,7 @@ public class InferenceCliArgumentTests
     /// </summary>
     [Test]
     public void SilkSmolLM_Precision_Rejected() =>
-        AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk is F32-only");
+        AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
@@ -302,7 +302,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SilkPrecisionCombination_Rejected() =>
-        AssertRejected(Run("minilm", "--silk", "--precision", "fp16"), "--silk is F32-only");
+        AssertRejected(Run("minilm", "--silk", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
 
     [Test]
     public void SilkUnsupportedMode_Rejected() =>
@@ -319,7 +319,26 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("laya", "--silk", "compare_diag"),
             "Unsupported mode 'compare_diag' for 'laya'");
 
-    // Removed: laya/modernbert now support --silk --precision fp16 (run mode).
+    [Test]
+    public void SilkModernBert_Fp16_Rejected() =>
+        AssertRejected(Run("modernbert", "--silk", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
+    [Test]
+    public void SilkModernBert_Fp16_Benchmark_Rejected() =>
+        AssertRejected(Run("modernbert", "--silk", "benchmark", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
+    [Test]
+    public void SilkModernBert_Fp16_Compare_Rejected() =>
+        AssertRejected(Run("modernbert", "--silk", "compare", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
+
+    [Test]
+    public void SilkLaya_Fp16_Rejected() =>
+        AssertRejected(Run("laya", "--silk", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
+    [Test]
+    public void SilkLaya_Fp16_Benchmark_Rejected() =>
+        AssertRejected(Run("laya", "--silk", "benchmark", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
+    [Test]
+    public void SilkLaya_Fp16_Compare_Rejected() =>
+        AssertRejected(Run("laya", "--silk", "compare", "--precision", "fp16"), "--silk --precision fp16 is not supported:");
+
     /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
     /// enable widen for their narrow runs themselves, so the flag is inert there; an F32 run is
