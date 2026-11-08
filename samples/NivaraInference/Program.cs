@@ -337,7 +337,7 @@ class Program
             Console.WriteLine("                     stack (src/Nivara.Extensions/Silk/SilkKernels.cs). 'minilm' /");
             Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
             Console.WriteLine("                     default/benchmark/compare modes; 'qwen' adds tools/distill. Competing");
-            Console.WriteLine("                     F32 only -- there is no bf16/fp16 Silk translation unit.");
+            Console.WriteLine("                     BF16 weights on ModernBERT; fp16 supported there too. (Issue #1019)");
             Console.WriteLine();
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
