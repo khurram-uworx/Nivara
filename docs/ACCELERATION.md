@@ -20,17 +20,22 @@ verdicts stay in [ILGPU.md](ILGPU.md) as history. The shipped streaming contract
 [STREAMING.md](STREAMING.md); the backend case studies are in
 [`tests/Nivara.GpuProbe/`](../tests/Nivara.GpuProbe/README.md).
 
-Scope today: the measured paths in this index, MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, and Laya, are F32
-only, with `default`, `benchmark`, and `compare` modes. The same Silk backend also runs SmolLM, Qwen,
+Scope today: the measured paths in this index, MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, and
+Laya, are F32 by default, with `--precision bf16` available on ModernBERT/Laya (QKV, FFN, tokEmb
+weights stay bf16, activations f32) and on Qwen/SmolLM (tokEmb/tied LM head); MiniLM/DistilBERT widen
+bf16 to f32 at load. The same Silk backend also runs SmolLM, Qwen,
 MobileNetV2, and ResNet-18, with the Qwen and vision modes described in SILK.md. Silk is distributed as
-Silk.NET.OpenCL 2.23.0 and compiles OpenCL C in-process on the Intel OpenCL ICD.
+Silk.NET.OpenCL 2.23.0 and compiles OpenCL C in-process on the Intel OpenCL ICD. `--precision fp16` is
+rejected at the sample CLI (measured 0.97–1.07× vs f32, no speedup).
 
 ## Why this route
 
 We settled on one backend: raw OpenCL C, written by hand and compiled by the driver through Silk.NET. It is the fastest
 hand-authored leg on the kernels that matter, it gives a vendor-neutral path that does not depend on a high-level
 runtime abstraction, and it shares one host model with the work that preceded it (`Transposed`, `QkvPacked`, `Req`), so
-the maths never forked. It is also deliberately F32-only: neither lower precision pays off at the shapes we measured.
+the maths never forked. F32 is the default; selected-weight BF16 storage is available on the
+Silk path (ModernBERT/Laya QKV, FFN and tokEmb; Qwen and SmolLM tokEmb/tied heads) with f32
+activations. Neither FP16 route currently pays off at the shapes we measured (0.97–1.07× vs f32).
 The honesty of the bar is that "fast" is shape-specific, and the numbers below are read accordingly.
 
 ## 1. Acceleration results
@@ -99,8 +104,10 @@ Cross-host medians on the Arc 140T are dot16 7.0 µs, silu 6.7 µs, gemv 100.6 �
 | Arithmetic | no | yes |
 | Faster at these shapes | not reachable | no — tie, 0.97–1.07× |
 
-BF16 has conversion only; FP16 has native arithmetic but no speed win at the measured shapes. That is why the production
-backend stays F32. Detail: [SILK.md §5](SILK.md).
+BF16 conversion only and FP16 arithmetic are device-side facts from SILK.md §5; on the production route F32 stays
+the default, `--precision bf16` stores selected weights as BF16 (ModernBERT/Laya QKV, FFN and tokEmb; Qwen
+and SmolLM tokEmb/tied heads) with f32 activations, and `--precision fp16` is rejected at the sample CLI
+(0.97–1.07× vs f32, no measured benefit). Detail: [SILK.md §5](SILK.md) and [SILK.md §13](SILK.md).
 
 ## 2. Correctness
 
@@ -197,7 +204,8 @@ mutual exclusion, model scope before model-file lookup, F32-only, and no `--gpu`
 - LayerNorm one-work-item-per-row: #467.
 - Vision convolution kernels and the Nivara-CPU deficit: #457, #458.
 - Driver-bump hygiene: rerun the probe gate and all model compares after an Intel driver update.
-- bf16/fp16 on the GPU: a promotion-phase item; raw OpenCL has BF16 conversion but no BF16 multiply.
+- bf16 selected-weight storage on the GPU is shipped for ModernBERT/Laya (QKV, FFN, tokEmb) and
+  Qwen/SmolLM (tokEmb/tied heads); fp16 remains rejected at the sample CLI (no measured speedup).
 - Streaming budget enforcement and Phase 2 spill: #325.
 - Promotion of the Nivara GPU path into `src/Nivara.Gpu`: pending, and nothing in core changes until that decision.
 
