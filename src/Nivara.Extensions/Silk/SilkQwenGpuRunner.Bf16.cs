@@ -45,17 +45,17 @@ public sealed partial class SilkQwenGpuRunner
         {
             int h = hiddenDim;
             var tok = WeightLayout.Req(tensors, "model.embed_tokens.weight", "Silk");
-            var tokF = Widen(tok.Data);
-            tokEmb = runtime.Allocate(tokF.Length);
-            runtime.Upload(tokEmb, tokF);
+            var tokUs = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(tok.Data.AsSpan()).ToArray();
+            tokEmb = runtime.AllocateBytes((ulong)tokUs.Length * sizeof(ushort));
+            runtime.Upload(tokEmb, tokUs.AsSpan());
 
             int vocab = config.VocabSize;
-            var tokTF = new float[vocab * h];
+            var tokTF = new ushort[vocab * h];
             for (int r = 0; r < vocab; r++)
                 for (int c = 0; c < h; c++)
-                    tokTF[c * vocab + r] = tokF[r * h + c];
-            tokEmbTransposed = runtime.Allocate(tokTF.Length);
-            runtime.Upload(tokEmbTransposed, tokTF);
+                    tokTF[c * vocab + r] = tokUs[r * h + c];
+            tokEmbTransposed = runtime.AllocateBytes((ulong)tokTF.Length * sizeof(ushort));
+            runtime.Upload(tokEmbTransposed, tokTF.AsSpan());
 
             var fn = WeightLayout.Req(tensors, "model.norm.weight", "Silk");
             finalNormW = runtime.Allocate(fn.Data.Length);

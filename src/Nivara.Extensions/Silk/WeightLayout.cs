@@ -41,6 +41,37 @@ public static class WeightLayout
     /// blocks, so every backend takes it from here: a private copy per runner could drift, and the
     /// drift would be a silently wrong attention rather than a crash.
     /// </remarks>
+    public static (ushort[] W, float[] Bias) QkvPackedNarrow(
+        Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
+        string qKey, string kKey, string vKey,
+        Func<ushort, float> widen,
+        string backend)
+    {
+        var weights = new[]
+        {
+            Req(tensors, $"{qKey}.weight", backend),
+            Req(tensors, $"{kKey}.weight", backend),
+            Req(tensors, $"{vKey}.weight", backend)
+        };
+        int outDim = weights[0].Shape[0];
+        int inDim = weights[0].Shape[1];
+        int concat = 3 * outDim;
+        var w = new ushort[inDim * concat];
+        for (int block = 0; block < 3; block++)
+            for (int r = 0; r < outDim; r++)
+                for (int c = 0; c < inDim; c++)
+                    w[c * concat + block * outDim + r] = weights[block].Data[r * inDim + c];
+
+        var qBias = Req(tensors, $"{qKey}.bias", backend).Data;
+        var kBias = Req(tensors, $"{kKey}.bias", backend).Data;
+        var vBias = Req(tensors, $"{vKey}.bias", backend).Data;
+        var bias = new float[concat];
+        for (int i = 0; i < outDim; i++) bias[i] = widen(qBias[i]);
+        for (int i = 0; i < outDim; i++) bias[outDim + i] = widen(kBias[i]);
+        for (int i = 0; i < outDim; i++) bias[2 * outDim + i] = widen(vBias[i]);
+        return (w, bias);
+    }
+
     public static (float[] W, float[] Bias) QkvPacked(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         string qKey, string kKey, string vKey,

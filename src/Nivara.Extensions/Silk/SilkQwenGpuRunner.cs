@@ -142,7 +142,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         // gather embedding -> x
         runtime.SetBuffer(SilkKernels.GatherRows, 0, tokEmb);
         // reuse gather: table=tokEmb, ids=idsBuf, y=x
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+        GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -233,7 +233,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         runtime.Upload(idsBuf.Handle, tokenIds.AsSpan(0, seqLen));
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
 
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+        GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -269,7 +269,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
         nint lastRowView = runtime.CreateSubview(x.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormLmHead(runtime, lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
+        RmsNormLmHead(lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -293,7 +293,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         runtime.Upload(idsBuf.Handle, tokenIds.AsSpan(0, seqLen));
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
 
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+        GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -332,7 +332,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
         nint lastRowView = runtime.CreateSubview(x.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormLmHead(runtime, lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
+        RmsNormLmHead(lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -355,7 +355,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         runtime.Upload(idsBuf.Handle, new int[] { tokenId });
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
 
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
+        GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -430,7 +430,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
 
         // gather embedding -> x
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+        GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -471,7 +471,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         // fused final norm + tied LM head on the last row
         nint lastRowView = runtime.CreateSubview(x.Handle, (seqLen - 1) * hiddenDim, hiddenDim);
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormLmHead(runtime, lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
+        RmsNormLmHead(lastRowView, finalNormW, tokEmbTransposed, logitsBuf, 1, hiddenDim, vocabSize, eps);
         var logits = runtime.Download(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
         runtime.Release(lastRowView);
@@ -496,7 +496,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
 
         // gather embedding -> x (single row)
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
+        GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -586,6 +586,17 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         else SilkLauncher.Gemm(runtime, a, b, c, aRows, aCols, bCols);
     }
 
+    void GatherTokEmb(nint table, nint ids, nint y, int n, int hidden)
+    {
+        if (bf16Weights) SilkLauncher.GatherBf16(runtime, table, ids, y, n, hidden);
+        else SilkLauncher.Gather(runtime, table, ids, y, n, hidden);
+    }
+
+    void RmsNormLmHead(nint x, nint gamma, nint weight, nint logits, int aRows, int aCols, int bCols, float eps)
+    {
+        if (bf16Weights) SilkLauncher.RmsNormLmHeadBf16(runtime, x, gamma, weight, logits, aRows, aCols, bCols, eps);
+        else SilkLauncher.RmsNormLmHead(runtime, x, gamma, weight, logits, aRows, aCols, bCols, eps);
+    }
     void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, bool hasBias, int aRows, int aCols, float eps)
     {
         if (bf16Weights) SilkLauncher.RmsNormGemvBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);

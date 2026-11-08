@@ -34,10 +34,25 @@ public sealed class SilkLayaSession : ILayaGpuSession
         catch { runtime.Dispose(); throw; }
     }
 
+    public SilkLayaSession(ModernBertConfig config, Dictionary<string, (Half[] Data, int[] Shape)> tensors, int headLayerCount)
+    {
+        runtime = new SilkRuntime();
+        try
+        {
+            encoder = new SilkModernBertGpuRunner(runtime, config, tensors, prefix: "encoder");
+            try { head = new SilkLayaHeadGpuRunner(runtime, tensors, headLayerCount); }
+            catch { encoder.Dispose(); throw; }
+        }
+        catch { runtime.Dispose(); throw; }
+    }
+
     public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int headLayerCount)
         => new SilkLayaSession(config, tensors, headLayerCount);
 
     public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, int headLayerCount)
+        => new SilkLayaSession(config, tensors, headLayerCount);
+
+    public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (Half[] Data, int[] Shape)> tensors, int headLayerCount)
         => new SilkLayaSession(config, tensors, headLayerCount);
 
     public long LastEncodeMilliseconds { get; private set; }

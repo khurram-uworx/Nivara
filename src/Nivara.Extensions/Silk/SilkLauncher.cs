@@ -23,6 +23,26 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.GatherRows, n);
     }
 
+    public static void GatherBf16(SilkRuntime runtime, nint table, nint ids, nint y, int n, int hidden)
+    {
+        runtime.SetBuffer(SilkKernels.GatherRowsBf16, 0, table);
+        runtime.SetBuffer(SilkKernels.GatherRowsBf16, 1, ids);
+        runtime.SetBuffer(SilkKernels.GatherRowsBf16, 2, y);
+        runtime.SetUInt32(SilkKernels.GatherRowsBf16, 3, (uint)n);
+        runtime.SetUInt32(SilkKernels.GatherRowsBf16, 4, (uint)hidden);
+        Linear(runtime, SilkKernels.GatherRowsBf16, n);
+    }
+
+    public static void GatherF16(SilkRuntime runtime, nint table, nint ids, nint y, int n, int hidden)
+    {
+        runtime.SetBuffer(SilkKernels.GatherRowsF16, 0, table);
+        runtime.SetBuffer(SilkKernels.GatherRowsF16, 1, ids);
+        runtime.SetBuffer(SilkKernels.GatherRowsF16, 2, y);
+        runtime.SetUInt32(SilkKernels.GatherRowsF16, 3, (uint)n);
+        runtime.SetUInt32(SilkKernels.GatherRowsF16, 4, (uint)hidden);
+        Linear(runtime, SilkKernels.GatherRowsF16, n);
+    }
+
     public static void LayerNorm(
         SilkRuntime runtime, nint src, nint gamma, nint beta, nint y, int rows, int cols, float eps)
     {
@@ -444,6 +464,42 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
     }
 
+
+    public static void RmsNormLmHeadBf16(
+        SilkRuntime runtime, nint x, nint gamma, nint weight, nint logits,
+        int aRows, int aCols, int bCols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadBf16, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadBf16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadBf16, 2, weight);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadBf16, 3, logits);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadBf16, 4, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadBf16, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadBf16, 6, (uint)bCols);
+        runtime.SetFloat32(SilkKernels.RmsNormLmHeadBf16, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormLmHeadBf16,
+            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
+
+    public static void RmsNormLmHeadF16(
+        SilkRuntime runtime, nint x, nint gamma, nint weight, nint logits,
+        int aRows, int aCols, int bCols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadF16, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadF16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadF16, 2, weight);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadF16, 3, logits);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadF16, 4, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadF16, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadF16, 6, (uint)bCols);
+        runtime.SetFloat32(SilkKernels.RmsNormLmHeadF16, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormLmHeadF16,
+            [(nuint)SilkKernels.GemmGlobalRows(aRows), (nuint)SilkKernels.GemmGlobalCols(bCols)],
+            [(nuint)SilkKernels.GemmTileSize, (nuint)SilkKernels.GemmTileSize]);
+    }
     public static void GemmAdd(
         SilkRuntime runtime, nint a, nint b, nint c, nint residual,
         int aRows, int aCols, int bCols)
@@ -681,6 +737,17 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.GemmBf16, 4, (uint)aCols);
         runtime.SetUInt32(SilkKernels.GemmBf16, 5, (uint)bCols);
         GemmGrid(runtime, SilkKernels.GemmBf16, aRows, bCols);
+    }
+
+    public static void GemmF16(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmF16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmF16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmF16, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmF16, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmF16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmF16, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmF16, aRows, bCols);
     }
 
     public static void GemmGemvAddBf16(

@@ -117,7 +117,7 @@ See [docs/ACCELERATION.md](ACCELERATION.md) §1 for GPU benchmark tables. CPU be
 
 ## GPU path
 
-All three models run on an OpenCL iGPU. Historically a first GPU backend existed (removed in 1.5.0) alongside the hand-authored **Silk.NET** stack (`--silk`); only `--silk` is live now, and the old spelling is an unsupported mode. `--silk` is F32-only.
+All three models run on an OpenCL iGPU. Historically a first GPU backend existed (removed in 1.5.0) alongside the hand-authored **Silk.NET** stack (`--silk`); only `--silk` is live now, and the old spelling is an unsupported mode. `--silk` is F32 by default; `--precision bf16` is supported via on-device widening, while `--precision fp16` is rejected (bf16 preferred: no measured speedup at current shapes).
 
 ### ILGPU — historical (backend removed in 1.5.0)
 

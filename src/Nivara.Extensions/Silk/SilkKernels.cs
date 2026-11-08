@@ -80,6 +80,8 @@ internal static class SilkKernels
 
     public const string EmbedSum = "embed_sum";
     public const string GatherRows = "gather_rows";
+    public const string GatherRowsBf16 = "gather_rows_bf16";
+    public const string GatherRowsF16 = "gather_rows_f16";
     public const string EmbeddingGatherPool = "embedding_gather_pool";
     public const string EmbeddingGatherInput = "embedding_gather_input";
     public const string EmbeddingBackwardPool = "embedding_backward_pool";
@@ -91,11 +93,19 @@ internal static class SilkKernels
     public const string SplitColumns = "split_columns";
     public const string Rotary = "rotary";
     public const string GeGlu = "geglu";
-    public const string Gemm = "gemm_row4"; public const string GemmBf16 = "gemm_row4_bf16";
+    public const string Gemm = "gemm_row4"; public const string GemmBf16 = "gemm_row4_bf16"; public const string GemmF16 = "gemm_row4_f16";
     public const string GemmBias = "gemm_row4_bias";
     public const string GemmRelu = "gemm_row4_relu";
     public const string GemmGelu = "gemm_row4_gelu";
     public const string GemmQkv = "gemm_row4_qkv";
+    public const string GemmBiasBf16 = "gemm_row4_bias_bf16";
+    public const string GemmBiasF16 = "gemm_row4_bias_f16";
+    public const string GemmReluBf16 = "gemm_row4_relu_bf16";
+    public const string GemmReluF16 = "gemm_row4_relu_f16";
+    public const string GemmGeluBf16 = "gemm_row4_gelu_bf16";
+    public const string GemmGeluF16 = "gemm_row4_gelu_f16";
+    public const string GemmQkvBf16 = "gemm_row4_qkv_bf16";
+    public const string GemmQkvF16 = "gemm_row4_qkv_f16";
 
     // Measured candidate geometries (issue #784) — not routed by any runner yet.
     public const string GemmReg2x4 = "gemm_reg2x4";
@@ -106,6 +116,8 @@ internal static class SilkKernels
     // SmolLM (Llama-family causal LM) kernels.
     public const string RmsNorm = "rms_norm";
     public const string RmsNormLmHead = "rms_norm_lm_head";
+    public const string RmsNormLmHeadBf16 = "rms_norm_lm_head_bf16";
+    public const string RmsNormLmHeadF16 = "rms_norm_lm_head_f16";
     public const string RmsNormGemv = "rms_norm_gemv";
     public const string RmsNormGemvBf16 = "rms_norm_gemv_bf16";
     public const string Silu = "silu";
@@ -184,10 +196,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-        EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
-        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
-        RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
-        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+        EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmRelu, GemmReluBf16, GemmReluF16, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
@@ -236,6 +245,7 @@ internal static class SilkKernels
 
     public const string Source = """
         #pragma OPENCL FP_CONTRACT OFF
+        #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
         #define TILE 16
         #define BLOCK 4
@@ -246,6 +256,7 @@ internal static class SilkKernels
         #define GEMVLANES 32
         #define GEMVCOLS 128
         #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
+        #define F16_TO_F32(x) (float)as_half((ushort)(x))
 
         inline float gelu_exact(float v)
         {
@@ -295,6 +306,34 @@ internal static class SilkKernels
             uint row = idx / hidden;
             uint col = idx - row * hidden;
             y[idx] = table[(uint)ids[row] * hidden + col];
+        }
+
+        __kernel void gather_rows_bf16(
+            __global const ushort* table,
+            __global const int* ids,
+            __global float* y,
+            const uint n,
+            const uint hidden)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            uint row = idx / hidden;
+            uint col = idx - row * hidden;
+            y[idx] = BF16_TO_F32(table[(uint)ids[row] * hidden + col]);
+        }
+
+        __kernel void gather_rows_f16(
+            __global const ushort* table,
+            __global const int* ids,
+            __global float* y,
+            const uint n,
+            const uint hidden)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            uint row = idx / hidden;
+            uint col = idx - row * hidden;
+            y[idx] = F16_TO_F32(table[(uint)ids[row] * hidden + col]);
         }
 
         __kernel void layer_norm_residual(
@@ -575,6 +614,50 @@ internal static class SilkKernels
                 } \
             GEMM_ACCUMULATE_CORE
 
+        #define GEMM_ROW4_ACCUMULATE_F16 \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
+                } \
+                uint bRow = k0 + x; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols) { \
+                        ushort4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = F16_TO_F32(bv.s0); \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = F16_TO_F32(bv.s1); \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = F16_TO_F32(bv.s2); \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = F16_TO_F32(bv.s3); \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? F16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                        } \
+                    } \
+                } \
+            GEMM_ACCUMULATE_CORE
+
         /* Backward GEMM variants. Same `GEMM_ACCUMULATE_CORE` accumulation as the forward
            Row4 GEMMs (ascending-K mul + add, no contraction), so a host replay of the same
            order is byte-identical; only the tile LOADS change. gemm_row4_nt takes B stored row-major [bCols, aCols] and
@@ -705,6 +788,56 @@ internal static class SilkKernels
             }
         }
 
+        __kernel void gemm_row4_bias_f16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_F16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0 + b0;
+                if (c1 < bCols) c[rowBase + 1] = a1 + b1;
+                if (c2 < bCols) c[rowBase + 2] = a2 + b2;
+                if (c3 < bCols) c[rowBase + 3] = a3 + b3;
+            }
+        }
+
+
+        __kernel void gemm_row4_bias_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0 + b0;
+                if (c1 < bCols) c[rowBase + 1] = a1 + b1;
+                if (c2 < bCols) c[rowBase + 2] = a2 + b2;
+                if (c3 < bCols) c[rowBase + 3] = a3 + b3;
+            }
+        }
+
+
         __kernel void gemm_row4_gelu(
             __global const float* a,
             __global const float* b,
@@ -728,6 +861,56 @@ internal static class SilkKernels
                 if (c3 < bCols) c[rowBase + 3] = gelu_exact(a3 + b3);
             }
         }
+
+        __kernel void gemm_row4_gelu_f16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_F16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = gelu_exact(a0 + b0);
+                if (c1 < bCols) c[rowBase + 1] = gelu_exact(a1 + b1);
+                if (c2 < bCols) c[rowBase + 2] = gelu_exact(a2 + b2);
+                if (c3 < bCols) c[rowBase + 3] = gelu_exact(a3 + b3);
+            }
+        }
+
+
+        __kernel void gemm_row4_gelu_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = gelu_exact(a0 + b0);
+                if (c1 < bCols) c[rowBase + 1] = gelu_exact(a1 + b1);
+                if (c2 < bCols) c[rowBase + 2] = gelu_exact(a2 + b2);
+                if (c3 < bCols) c[rowBase + 3] = gelu_exact(a3 + b3);
+            }
+        }
+
 
         /* As gemm_row4_bias with a fused ReLU epilogue — the DistilBERT classifier head's
            pre_classifier projection. The clamp is written as the same conditional ILGPU's Row4
@@ -761,6 +944,64 @@ internal static class SilkKernels
                 if (c3 < bCols) c[rowBase + 3] = r3;
             }
         }
+
+        __kernel void gemm_row4_relu_f16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_F16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                float r0 = a0 + b0; if (r0 < 0.0f) r0 = 0.0f;
+                float r1 = a1 + b1; if (r1 < 0.0f) r1 = 0.0f;
+                float r2 = a2 + b2; if (r2 < 0.0f) r2 = 0.0f;
+                float r3 = a3 + b3; if (r3 < 0.0f) r3 = 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = r0;
+                if (c1 < bCols) c[rowBase + 1] = r1;
+                if (c2 < bCols) c[rowBase + 2] = r2;
+                if (c3 < bCols) c[rowBase + 3] = r3;
+            }
+        }
+
+
+        __kernel void gemm_row4_relu_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                float r0 = a0 + b0; if (r0 < 0.0f) r0 = 0.0f;
+                float r1 = a1 + b1; if (r1 < 0.0f) r1 = 0.0f;
+                float r2 = a2 + b2; if (r2 < 0.0f) r2 = 0.0f;
+                float r3 = a3 + b3; if (r3 < 0.0f) r3 = 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = r0;
+                if (c1 < bCols) c[rowBase + 1] = r1;
+                if (c2 < bCols) c[rowBase + 2] = r2;
+                if (c3 < bCols) c[rowBase + 3] = r3;
+            }
+        }
+
 
         __kernel void gemm_row4_qkv(
             __global const float* a,
@@ -808,6 +1049,55 @@ internal static class SilkKernels
                 acc += q[qBase + d] * k[kBase + d];
             return acc * scale;
         }
+
+        __kernel void gemm_row4_qkv_f16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols,
+            const uint blockWidth)
+        {
+            GEMM_ROW4_ACCUMULATE_F16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                if (c0 < bCols) c[qkv_dest(c0, outRow, aRows, blockWidth)] = a0 + b0;
+                if (c1 < bCols) c[qkv_dest(c1, outRow, aRows, blockWidth)] = a1 + b1;
+                if (c2 < bCols) c[qkv_dest(c2, outRow, aRows, blockWidth)] = a2 + b2;
+                if (c3 < bCols) c[qkv_dest(c3, outRow, aRows, blockWidth)] = a3 + b3;
+            }
+        }
+
+        __kernel void gemm_row4_qkv_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols,
+            const uint blockWidth)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                if (c0 < bCols) c[qkv_dest(c0, outRow, aRows, blockWidth)] = a0 + b0;
+                if (c1 < bCols) c[qkv_dest(c1, outRow, aRows, blockWidth)] = a1 + b1;
+                if (c2 < bCols) c[qkv_dest(c2, outRow, aRows, blockWidth)] = a2 + b2;
+                if (c3 < bCols) c[qkv_dest(c3, outRow, aRows, blockWidth)] = a3 + b3;
+            }
+        }
+
 
         __kernel void batched_attention(
             __global const float* q,
@@ -2087,7 +2377,7 @@ internal static class SilkKernels
         /* Fused RMSNorm + tied LM head: computes the normalized activation in-place
            into the Row4 GEMV against tokEmbTransposed, using the same RMSNorm
            reduction order as rms_norm and the same Row4 accumulation as gemm_row4. */
-        __kernel void rms_norm_lm_head(
+                __kernel void rms_norm_lm_head(
             __global const float* x,
             __global const float* gamma,
             __global const float* b,
@@ -2168,6 +2458,171 @@ internal static class SilkKernels
         }
 
         /* Fused GEMM + residual add: row4 GEMM store adds the residual row in place. */
+
+        __kernel void rms_norm_lm_head_bf16(
+            __global const float* x,
+            __global const float* gamma,
+            __global const ushort* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols,
+            const float eps)
+        {
+            uint lid0 = get_local_id(0);
+            uint lid1 = get_local_id(1);
+            uint outRow = get_global_id(0);
+            uint colBase = get_group_id(1) * TILECOLS;
+
+            float normScale = 0.0f;
+            if (outRow < aRows)
+            {
+                uint rbase = outRow * aCols;
+                float ssq = 0.0f;
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float v = x[rbase + k];
+                    ssq += v * v;
+                }
+                normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+            }
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            __local float smem[TILE * ROWSTRIDE];
+            for (uint k0 = 0; k0 < aCols; k0 += TILE)
+            {
+                uint aCol = k0 + lid1;
+                uint bRow = k0 + lid0;
+                smem[lid0 + lid1 * TILE] =
+                    (outRow < aRows && aCol < aCols)
+                    ? (x[outRow * aCols + aCol] * normScale * gamma[aCol])
+                    : 0.0f;
+                for (uint w = 0; w < BLOCK; ++w)
+                {
+                    uint outCol = colBase + lid1 * BLOCK + w;
+                    smem[lid0 + (TILE + lid1 * BLOCK + w) * TILE] =
+                        (bRow < aCols && outCol < bCols)
+                        ? BF16_TO_F32(b[bRow * bCols + outCol])
+                        : 0.0f;
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+                { float av = smem[lid0 + 0 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 1 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[1 + (bBase + 0) * TILE]; a1 += av * smem[1 + (bBase + 1) * TILE]; a2 += av * smem[1 + (bBase + 2) * TILE]; a3 += av * smem[1 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 2 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[2 + (bBase + 0) * TILE]; a1 += av * smem[2 + (bBase + 1) * TILE]; a2 += av * smem[2 + (bBase + 2) * TILE]; a3 += av * smem[2 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 3 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[3 + (bBase + 0) * TILE]; a1 += av * smem[3 + (bBase + 1) * TILE]; a2 += av * smem[3 + (bBase + 2) * TILE]; a3 += av * smem[3 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 4 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[4 + (bBase + 0) * TILE]; a1 += av * smem[4 + (bBase + 1) * TILE]; a2 += av * smem[4 + (bBase + 2) * TILE]; a3 += av * smem[4 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 5 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[5 + (bBase + 0) * TILE]; a1 += av * smem[5 + (bBase + 1) * TILE]; a2 += av * smem[5 + (bBase + 2) * TILE]; a3 += av * smem[5 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 6 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[6 + (bBase + 0) * TILE]; a1 += av * smem[6 + (bBase + 1) * TILE]; a2 += av * smem[6 + (bBase + 2) * TILE]; a3 += av * smem[6 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 7 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[7 + (bBase + 0) * TILE]; a1 += av * smem[7 + (bBase + 1) * TILE]; a2 += av * smem[7 + (bBase + 2) * TILE]; a3 += av * smem[7 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 8 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[8 + (bBase + 0) * TILE]; a1 += av * smem[8 + (bBase + 1) * TILE]; a2 += av * smem[8 + (bBase + 2) * TILE]; a3 += av * smem[8 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 9 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[9 + (bBase + 0) * TILE]; a1 += av * smem[9 + (bBase + 1) * TILE]; a2 += av * smem[9 + (bBase + 2) * TILE]; a3 += av * smem[9 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 10 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[10 + (bBase + 0) * TILE]; a1 += av * smem[10 + (bBase + 1) * TILE]; a2 += av * smem[10 + (bBase + 2) * TILE]; a3 += av * smem[10 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 11 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[11 + (bBase + 0) * TILE]; a1 += av * smem[11 + (bBase + 1) * TILE]; a2 += av * smem[11 + (bBase + 2) * TILE]; a3 += av * smem[11 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 12 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[12 + (bBase + 0) * TILE]; a1 += av * smem[12 + (bBase + 1) * TILE]; a2 += av * smem[12 + (bBase + 2) * TILE]; a3 += av * smem[12 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 13 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[13 + (bBase + 0) * TILE]; a1 += av * smem[13 + (bBase + 1) * TILE]; a2 += av * smem[13 + (bBase + 2) * TILE]; a3 += av * smem[13 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 14 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[14 + (bBase + 0) * TILE]; a1 += av * smem[14 + (bBase + 1) * TILE]; a2 += av * smem[14 + (bBase + 2) * TILE]; a3 += av * smem[14 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 15 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[15 + (bBase + 0) * TILE]; a1 += av * smem[15 + (bBase + 1) * TILE]; a2 += av * smem[15 + (bBase + 2) * TILE]; a3 += av * smem[15 + (bBase + 3) * TILE]; }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            uint c0 = colBase + lid1 * BLOCK + 0;
+            uint c1 = colBase + lid1 * BLOCK + 1;
+            uint c2 = colBase + lid1 * BLOCK + 2;
+            uint c3 = colBase + lid1 * BLOCK + 3;
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + lid1 * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        /* Fused GEMM + residual add: row4 GEMM store adds the residual row in place. */
+
+        __kernel void rms_norm_lm_head_f16(
+            __global const float* x,
+            __global const float* gamma,
+            __global const ushort* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols,
+            const float eps)
+        {
+            uint lid0 = get_local_id(0);
+            uint lid1 = get_local_id(1);
+            uint outRow = get_global_id(0);
+            uint colBase = get_group_id(1) * TILECOLS;
+
+            float normScale = 0.0f;
+            if (outRow < aRows)
+            {
+                uint rbase = outRow * aCols;
+                float ssq = 0.0f;
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float v = x[rbase + k];
+                    ssq += v * v;
+                }
+                normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+            }
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            __local float smem[TILE * ROWSTRIDE];
+            for (uint k0 = 0; k0 < aCols; k0 += TILE)
+            {
+                uint aCol = k0 + lid1;
+                uint bRow = k0 + lid0;
+                smem[lid0 + lid1 * TILE] =
+                    (outRow < aRows && aCol < aCols)
+                    ? (x[outRow * aCols + aCol] * normScale * gamma[aCol])
+                    : 0.0f;
+                for (uint w = 0; w < BLOCK; ++w)
+                {
+                    uint outCol = colBase + lid1 * BLOCK + w;
+                    smem[lid0 + (TILE + lid1 * BLOCK + w) * TILE] =
+                        (bRow < aCols && outCol < bCols)
+                        ? F16_TO_F32(b[bRow * bCols + outCol])
+                        : 0.0f;
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+                { float av = smem[lid0 + 0 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[0 + (bBase + 0) * TILE]; a1 += av * smem[0 + (bBase + 1) * TILE]; a2 += av * smem[0 + (bBase + 2) * TILE]; a3 += av * smem[0 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 1 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[1 + (bBase + 0) * TILE]; a1 += av * smem[1 + (bBase + 1) * TILE]; a2 += av * smem[1 + (bBase + 2) * TILE]; a3 += av * smem[1 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 2 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[2 + (bBase + 0) * TILE]; a1 += av * smem[2 + (bBase + 1) * TILE]; a2 += av * smem[2 + (bBase + 2) * TILE]; a3 += av * smem[2 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 3 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[3 + (bBase + 0) * TILE]; a1 += av * smem[3 + (bBase + 1) * TILE]; a2 += av * smem[3 + (bBase + 2) * TILE]; a3 += av * smem[3 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 4 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[4 + (bBase + 0) * TILE]; a1 += av * smem[4 + (bBase + 1) * TILE]; a2 += av * smem[4 + (bBase + 2) * TILE]; a3 += av * smem[4 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 5 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[5 + (bBase + 0) * TILE]; a1 += av * smem[5 + (bBase + 1) * TILE]; a2 += av * smem[5 + (bBase + 2) * TILE]; a3 += av * smem[5 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 6 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[6 + (bBase + 0) * TILE]; a1 += av * smem[6 + (bBase + 1) * TILE]; a2 += av * smem[6 + (bBase + 2) * TILE]; a3 += av * smem[6 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 7 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[7 + (bBase + 0) * TILE]; a1 += av * smem[7 + (bBase + 1) * TILE]; a2 += av * smem[7 + (bBase + 2) * TILE]; a3 += av * smem[7 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 8 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[8 + (bBase + 0) * TILE]; a1 += av * smem[8 + (bBase + 1) * TILE]; a2 += av * smem[8 + (bBase + 2) * TILE]; a3 += av * smem[8 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 9 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[9 + (bBase + 0) * TILE]; a1 += av * smem[9 + (bBase + 1) * TILE]; a2 += av * smem[9 + (bBase + 2) * TILE]; a3 += av * smem[9 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 10 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[10 + (bBase + 0) * TILE]; a1 += av * smem[10 + (bBase + 1) * TILE]; a2 += av * smem[10 + (bBase + 2) * TILE]; a3 += av * smem[10 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 11 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[11 + (bBase + 0) * TILE]; a1 += av * smem[11 + (bBase + 1) * TILE]; a2 += av * smem[11 + (bBase + 2) * TILE]; a3 += av * smem[11 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 12 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[12 + (bBase + 0) * TILE]; a1 += av * smem[12 + (bBase + 1) * TILE]; a2 += av * smem[12 + (bBase + 2) * TILE]; a3 += av * smem[12 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 13 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[13 + (bBase + 0) * TILE]; a1 += av * smem[13 + (bBase + 1) * TILE]; a2 += av * smem[13 + (bBase + 2) * TILE]; a3 += av * smem[13 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 14 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[14 + (bBase + 0) * TILE]; a1 += av * smem[14 + (bBase + 1) * TILE]; a2 += av * smem[14 + (bBase + 2) * TILE]; a3 += av * smem[14 + (bBase + 3) * TILE]; }
+                { float av = smem[lid0 + 15 * TILE]; uint bBase = TILE + lid1 * BLOCK; a0 += av * smem[15 + (bBase + 0) * TILE]; a1 += av * smem[15 + (bBase + 1) * TILE]; a2 += av * smem[15 + (bBase + 2) * TILE]; a3 += av * smem[15 + (bBase + 3) * TILE]; }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            uint c0 = colBase + lid1 * BLOCK + 0;
+            uint c1 = colBase + lid1 * BLOCK + 1;
+            uint c2 = colBase + lid1 * BLOCK + 2;
+            uint c3 = colBase + lid1 * BLOCK + 3;
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + lid1 * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        /* Fused GEMM + residual add: row4 GEMM store adds the residual row in place. */
+
         __kernel void gemm_row4_add(
             __global const float* a,
             __global const float* b,
@@ -2760,6 +3215,25 @@ internal static class SilkKernels
                     const uint bCols)
                 {
                     GEMM_ROW4_ACCUMULATE_BF16
+                    if (outRow < aRows)
+                    {
+                        uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                        if (c0 < bCols) c[rowBase + 0] = a0;
+                        if (c1 < bCols) c[rowBase + 1] = a1;
+                        if (c2 < bCols) c[rowBase + 2] = a2;
+                        if (c3 < bCols) c[rowBase + 3] = a3;
+                    }
+                }
+
+        __kernel void gemm_row4_f16(
+                    __global const float* a,
+                    __global const ushort* b,
+                    __global float* c,
+                    const uint aRows,
+                    const uint aCols,
+                    const uint bCols)
+                {
+                    GEMM_ROW4_ACCUMULATE_F16
                     if (outRow < aRows)
                     {
                         uint rowBase = outRow * bCols + colBase + y * BLOCK;
