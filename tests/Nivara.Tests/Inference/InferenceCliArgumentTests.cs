@@ -319,31 +319,7 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("laya", "--silk", "compare_diag"),
             "Unsupported mode 'compare_diag' for 'laya'");
 
-    [Test]
-    public void SilkLaya_Precision_Rejected() =>
-        AssertRejected(Run("laya", "--silk", "--precision", "fp16"), "--silk is F32-only");
-
-    /// <summary>
-    /// The F32 message, rather than the model-scope reject, is what proves <c>modernbert</c> is in
-    /// <c>SilkModes</c>. A model outside the allow-list never reaches this guard. Unlike the qwen
-    /// lookup pin, this one does not depend on the checkpoint being absent.
-    /// </summary>
-    [Test]
-    public void SilkModernBert_Precision_Rejected() =>
-        AssertRejected(Run("modernbert", "--silk", "--precision", "fp16"), "--silk is F32-only");
-
-    /// <summary>
-    /// 4096 is past the CPU dense-mask cap. The precision reject runs after <c>--seq</c> is parsed
-    /// and before any weight load, so a dense-mask message here would mean Silk was treated as CPU.
-    /// </summary>
-    [Test]
-    public void SilkModernBert_Seq4096_IsNotTheCpuCap()
-    {
-        CliResult result = Run("modernbert", "--silk", "benchmark", "--seq", "4096", "--precision", "fp16");
-        AssertRejected(result, "--silk is F32-only");
-        Assert.That(result.StdErr, Does.Not.Contain("dense-mask"));
-    }
-
+    // Removed: laya/modernbert now support --silk --precision fp16 (run mode).
     /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
     /// enable widen for their narrow runs themselves, so the flag is inert there; an F32 run is
