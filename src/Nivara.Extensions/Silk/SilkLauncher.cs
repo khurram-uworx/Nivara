@@ -739,6 +739,17 @@ internal static class SilkLauncher
         GemmGrid(runtime, SilkKernels.GemmBf16, aRows, bCols);
     }
 
+    public static void GemmF16(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmF16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmF16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmF16, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmF16, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmF16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmF16, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmF16, aRows, bCols);
+    }
+
     public static void GemmGemvAddBf16(
         SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aCols, int bCols)
     {

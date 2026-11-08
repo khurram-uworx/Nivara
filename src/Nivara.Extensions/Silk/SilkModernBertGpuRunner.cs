@@ -21,6 +21,8 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
     readonly float scale;
     readonly int seqCap;
 
+    readonly bool narrowBf16;
+    readonly bool narrowF16;
     readonly nint tokEmb;
     readonly nint embedNormW;
     readonly nint finalNormW;
@@ -98,6 +100,75 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
             Dispose();
             throw;
         }
+    }
+
+    public SilkModernBertGpuRunner(
+        SilkRuntime runtime,
+        ModernBertConfig config,
+        Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
+        string prefix = "model",
+        bool isBf16 = false,
+        bool isFp16 = false)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(tensors);
+
+        this.runtime = runtime;
+        this.narrowBf16 = isBf16;
+        this.narrowF16 = isFp16;
+        hiddenDim = config.HiddenSize;
+        intermediateDim = config.IntermediateSize;
+        numHeads = config.NumAttentionHeads;
+        headDim = config.HeadDim;
+        halfDim = headDim / 2;
+        eps = config.NormEps;
+        scale = 1f / MathF.Sqrt(headDim);
+        seqCap = config.MaxPositionEmbeddings;
+        runtime.EnsureAttentionLocalMemory(headDim);
+
+        Func<ushort, float> widen = isBf16
+            ? (u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+            : (u => (float)BitConverter.Int16BitsToHalf((short)u));
+
+        try
+        {
+            tokEmb = UploadUshort(tensors, $"{prefix}.embeddings.tok_embeddings.weight");
+            embedNormW = UploadUshortAsFloat(tensors, $"{prefix}.embeddings.norm.weight", widen);
+            finalNormW = UploadUshortAsFloat(tensors, $"{prefix}.final_norm.weight", widen);
+            zeroBeta = Upload(new float[hiddenDim]);
+
+            layers = new LayerWeights[config.NumHiddenLayers];
+            for (int i = 0; i < layers.Length; i++)
+                layers[i] = new LayerWeights(this, tensors, config, prefix, i, isBf16, isFp16);
+
+            ropeFull = new RotaryEmbedding<float>(headDim, config.MaxPositionEmbeddings, config.RopeThetaFull);
+            ropeSliding = new RotaryEmbedding<float>(headDim, config.MaxPositionEmbeddings, config.RopeThetaSliding);
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+    }
+
+    // Helpers for narrow weights
+    nint UploadUshort(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key)
+    {
+        var t = WeightLayout.Req(tensors, key, "Silk");
+        nint buf = runtime.AllocateBytes((ulong)t.Data.Length * sizeof(ushort));
+        runtime.Upload(buf, t.Data.AsSpan());
+        return buf;
+    }
+
+    nint UploadUshortAsFloat(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key, Func<ushort, float> widen)
+    {
+        var t = WeightLayout.Req(tensors, key, "Silk");
+        var f = new float[t.Data.Length];
+        for (int i = 0; i < f.Length; i++) f[i] = widen(t.Data[i]);
+        nint buf = runtime.Allocate(f.Length);
+        runtime.Upload(buf, f);
+        return buf;
     }
 
     /// <summary>The final-normed hidden state of the last forward, still on device. The buffer is the runner's.</summary>
@@ -266,13 +337,21 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
     }
 
     void LaunchGather(nint table, nint ids, nint y, int n)
-        => SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
+    {
+        if (narrowBf16) SilkLauncher.GatherBf16(runtime, table, ids, y, n, hiddenDim);
+        else if (narrowF16) SilkLauncher.GatherF16(runtime, table, ids, y, n, hiddenDim);
+        else SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
+    }
 
     void LaunchLayerNorm(nint src, nint gamma, nint beta, nint y, int rows)
         => SilkLauncher.LayerNorm(runtime, src, gamma, beta, y, rows, hiddenDim, eps);
 
     void LaunchGemm(nint a, nint b, nint c, int aRows, int aCols, int bCols)
-        => SilkLauncher.Gemm(runtime, a, b, c, aRows, aCols, bCols);
+    {
+        if (narrowBf16) SilkLauncher.GemmBf16(runtime, a, b, c, aRows, aCols, bCols);
+        else if (narrowF16) SilkLauncher.GemmF16(runtime, a, b, c, aRows, aCols, bCols);
+        else SilkLauncher.Gemm(runtime, a, b, c, aRows, aCols, bCols);
+    }
 
     void LaunchSplit(nint src, nint dst, int rows, int part)
         => SilkLauncher.Split(runtime, src, dst, rows, hiddenDim, 3, part);
@@ -294,6 +373,14 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
 
     nint UploadTransposed(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
         => Upload(WeightLayout.Transposed(tensors, key, "Silk"));
+
+    nint UploadTransposedUshort(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key)
+    {
+        var data = WeightLayout.Transposed(tensors, key, "Silk");
+        nint buf = runtime.AllocateBytes((ulong)data.Length * sizeof(ushort));
+        runtime.Upload(buf, data.AsSpan());
+        return buf;
+    }
 
     nint Upload(float[] data) => SilkLauncher.Upload(runtime, data);
 
@@ -362,6 +449,38 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
                 WoMlp = owner.UploadTransposed(tensors, $"{layerPrefix}.mlp.Wo.weight");
                 MlpNormW = owner.UploadPlain(tensors, $"{layerPrefix}.mlp_norm.weight");
                 AttnNormW = index == 0 ? 0 : owner.UploadPlain(tensors, $"{layerPrefix}.attn_norm.weight");
+                Band = config.Band(index);
+                Full = config.IsFullAttention(index);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public LayerWeights(
+            SilkModernBertGpuRunner owner,
+            Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
+            ModernBertConfig config,
+            string prefix,
+            int index,
+            bool isBf16,
+            bool isFp16)
+        {
+            runtime = owner.runtime;
+            Func<ushort, float> widen = isBf16
+                ? new Func<ushort, float>(u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+                : new Func<ushort, float>(u => (float)BitConverter.Int16BitsToHalf((short)u));
+            try
+            {
+                string layerPrefix = $"{prefix}.layers.{index}";
+                Wqkv = owner.UploadTransposedUshort(tensors, $"{layerPrefix}.attn.Wqkv.weight");
+                Wo = owner.UploadTransposedUshort(tensors, $"{layerPrefix}.attn.Wo.weight");
+                Wi = owner.UploadTransposedUshort(tensors, $"{layerPrefix}.mlp.Wi.weight");
+                WoMlp = owner.UploadTransposedUshort(tensors, $"{layerPrefix}.mlp.Wo.weight");
+                MlpNormW = owner.UploadUshortAsFloat(tensors, $"{layerPrefix}.mlp_norm.weight", widen);
+                AttnNormW = index == 0 ? 0 : owner.UploadUshortAsFloat(tensors, $"{layerPrefix}.attn_norm.weight", widen);
                 Band = config.Band(index);
                 Full = config.IsFullAttention(index);
             }
