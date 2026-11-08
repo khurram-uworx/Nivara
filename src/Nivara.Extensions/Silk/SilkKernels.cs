@@ -197,7 +197,7 @@ internal static class SilkKernels
     public static readonly string[] KernelNames =
     [
         EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
-        Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
+        Gemm, GemmBias, GemmBiasBf16, GemmBiasF16, GemmRelu, GemmReluBf16, GemmReluF16, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
         RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
         GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
