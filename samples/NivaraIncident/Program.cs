@@ -52,10 +52,6 @@ switch (mode)
         foreach (var sid in scenarioIds)
             BenchKernels(datasetPath, Scenarios.Get(sid));
         break;
-    case "bench-silk":
-        foreach (var sid in scenarioIds)
-            BenchSilk(datasetPath, Scenarios.Get(sid), iterations);
-        break;
     case "replay":
         foreach (var sid in scenarioIds)
             await Replay(datasetPath, Scenarios.Get(sid), chunkSize);
@@ -149,9 +145,12 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
         RunBenchmarkIteration("Typed LINQ Grouped Agg", iters, warmup,
             () => Analysis.AnalyzeGroupedAggregationWithTypedLinq(dsPath, sc));
 
-        var benchDecision = Analysis.LastGpuOffloadDecision;
-        if (benchDecision != null)
-            Console.WriteLine($"  Silk decision: offloaded={benchDecision.Offloaded} reason={benchDecision.Reason} cpu={benchDecision.CpuMs:F1}ms silk={benchDecision.GpuMs:F1}ms transfer={benchDecision.TransferBytes} bytes");
+        if (silk)
+        {
+            var benchDecision = Analysis.LastGpuOffloadDecision;
+            if (benchDecision != null)
+                Console.WriteLine($"  Silk decision: offloaded={benchDecision.Offloaded} reason={benchDecision.Reason} cpu={benchDecision.CpuMs:F1}ms silk={benchDecision.GpuMs:F1}ms transfer={benchDecision.TransferBytes} bytes");
+        }
 
         return;
     }
@@ -347,62 +346,6 @@ void BenchKernels(string dsPath, IncidentScenario sc)
     Console.WriteLine("  (Analyses B, E) run outside Nivara kernels and are not measured here.");
 }
 
-void BenchSilk(string dsPath, IncidentScenario sc, int iters)
-{
-    Console.WriteLine($"=== Silk Offload Benchmark: {sc.Id} - {sc.Name} ===");
-    Console.WriteLine($"Dataset: {dsPath}");
-    Console.WriteLine($"Iterations: {iters}");
-    Console.WriteLine();
-
-    using var runtime = new SilkRuntime();
-    Console.WriteLine($"  Device: {runtime.DeviceName}");
-    Console.WriteLine();
-
-    int warmup = 1;
-    int totalRuns = warmup + iters;
-
-    long rows = 0;
-    var cpuTimes = new double[iters];
-    for (int run = 0; run < totalRuns; run++)
-    {
-        GC.Collect(2, GCCollectionMode.Forced, true);
-        var sw = Stopwatch.StartNew();
-        using var frame = Analysis.AnalyzeGroupedAggregation(dsPath, sc, false);
-        sw.Stop();
-        rows = frame.RowCount;
-        if (run >= warmup)
-            cpuTimes[run - warmup] = sw.Elapsed.TotalMilliseconds;
-    }
-
-    var silkTimes = new double[iters];
-    for (int run = 0; run < totalRuns; run++)
-    {
-        GC.Collect(2, GCCollectionMode.Forced, true);
-        var sw = Stopwatch.StartNew();
-        using var frame = Analysis.AnalyzeGroupedAggregation(dsPath, sc, true);
-        sw.Stop();
-        if (run >= warmup)
-            silkTimes[run - warmup] = sw.Elapsed.TotalMilliseconds;
-    }
-
-    double cpuMedian = Median(cpuTimes);
-    double silkMedian = Median(silkTimes);
-    double ratio = cpuMedian > 0 ? silkMedian / cpuMedian : 0;
-
-    Console.WriteLine($"  Rows: {rows:N0}");
-    Console.WriteLine($"  CPU median: {cpuMedian:F1} ms");
-    Console.WriteLine($"  Silk median: {silkMedian:F1} ms");
-    Console.WriteLine($"  Silk/CPU ratio: {ratio:F3}");
-    Console.WriteLine();
-
-    using (Analysis.AnalyzeGroupedAggregation(dsPath, sc, true)) { }
-    var decision = Analysis.LastGpuOffloadDecision;
-    if (decision != null)
-    {
-        Console.WriteLine($"  Decision: offloaded={decision.Offloaded} reason={decision.Reason} cpu={decision.CpuMs:F1}ms silk={decision.GpuMs:F1}ms transfer={decision.TransferBytes} bytes");
-    }
-}
-
 void PrintTopOps(OperationSummary summary)
 {
     if (summary.KernelTypes.Count > 0)
@@ -528,7 +471,6 @@ void PrintUsage()
     Console.WriteLine("  NivaraIncident.Cli generate      --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
     Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--quick] [--iterations <N>] [--silk]"); Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
-    Console.WriteLine("  NivaraIncident.Cli bench-silk    --dataset <path> --scenario <A|B|C|D|all> [--iterations <N>]");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
     Console.WriteLine("  NivaraIncident.Cli streamix      --dataset <path> --scenario <A|B|C|D|all> [--chunk-size <N>]");
 }
