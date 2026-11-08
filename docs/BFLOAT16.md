@@ -72,7 +72,8 @@ Nivara supports `BFloat16` in **two layers**:
 This document covers both. Related references:
 [`AUTODIFF.md`](AUTODIFF.md),
 [`TENSORS.md`](TENSORS.md) (type-support note),
-[`INTEGERS.md`](INTEGERS.md)
+[`INTEGERS.md`](INTEGERS.md),
+[`HALF-F16.md`](HALF-F16.md) (Half/f16 matrix)
 
 ---
 

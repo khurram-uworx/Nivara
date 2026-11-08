@@ -169,6 +169,7 @@ Nivara currently supports:
 - [**ARCHITECTURE**](https://github.com/khurram-uworx/nivara/blob/main/ARCHITECTURE.md) — design and internal architecture
 - [**AUTODIFF**](https://github.com/khurram-uworx/nivara/blob/main/docs/AUTODIFF.md) — automatic differentiation subsystem (operations, modules, optimizers, forward-mode AD, training)
 - [**BFLOAT16**](https://github.com/khurram-uworx/nivara/blob/main/docs/BFLOAT16.md) — BFloat16 support across the AutoDiff and column/query layers
+- [**HALF-F16**](https://github.com/khurram-uworx/nivara/blob/main/docs/HALF-F16.md) — Half/f16 support across the AutoDiff and column/query layers
 - [**EMBEDDINGS**](https://github.com/khurram-uworx/nivara/blob/main/docs/EMBEDDINGS.md) — the `float[]` column ↔ `E0..E{n-1}` frame convention and Microsoft.Extensions.AI glue
 - [**SAFETENSORS**](https://github.com/khurram-uworx/nivara/blob/main/docs/SAFETENSORS.md) — reading Hugging Face weights into Nivara AutoDiff models
 - [**SILK**](https://github.com/khurram-uworx/nivara/blob/main/docs/SILK.md) — the Silk (OpenCL) GPU backend and runners
