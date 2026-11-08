@@ -353,7 +353,7 @@ public class InferenceCliArgumentTests
     public void RemovedSimdWidenFlag_IsRejected()
     {
         // #1018: --simd-widen was removed; widen is on by default.
-        const string expected = "Unsupported";        AssertRejected(Run("mobilenet_v2", "--simd-widen"), expected);
+        const string expected = "Unsupported"; AssertRejected(Run("mobilenet_v2", "--simd-widen"), expected);
         AssertRejected(Run("minilm", "--simd-widen"), expected);
         // `smollm ab --simd-widen` no longer rejects: the trailing token is now ignored (exit 0),
         // so the flag removal is verified by the source, not by this CLI pin.

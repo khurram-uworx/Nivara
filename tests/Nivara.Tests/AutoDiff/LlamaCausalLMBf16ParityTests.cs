@@ -107,55 +107,55 @@ public class LlamaCausalLMBf16ParityTests
     [Test]
     public void Bf16_ForwardLastRow_ArgmaxAndLogits_MatchF32()
     {
-            using var f32 = Model<float>();
-            using var bf16 = Model<BFloat16>();
-            SeedIdenticalBf16Pool(f32, bf16);
+        using var f32 = Model<float>();
+        using var bf16 = Model<BFloat16>();
+        SeedIdenticalBf16Pool(f32, bf16);
 
-            var f32Logits = f32.Forward(Prompt);
-            var bf16Logits = bf16.Forward(Prompt);
+        var f32Logits = f32.Forward(Prompt);
+        var bf16Logits = bf16.Forward(Prompt);
 
-            Assert.That(LogitsClose(f32Logits, bf16Logits, relTol: 0.05f), Is.True,
-                "BF16 last-row logits diverge from F32 beyond the documented tolerance.");
-            Assert.That(ArgMaxLastRow(bf16Logits), Is.EqualTo(ArgMaxLastRow(f32Logits)),
-                "BF16 greedy argmax diverged from F32 on the prompt.");
+        Assert.That(LogitsClose(f32Logits, bf16Logits, relTol: 0.05f), Is.True,
+            "BF16 last-row logits diverge from F32 beyond the documented tolerance.");
+        Assert.That(ArgMaxLastRow(bf16Logits), Is.EqualTo(ArgMaxLastRow(f32Logits)),
+            "BF16 greedy argmax diverged from F32 on the prompt.");
     }
 
     [Test]
     public void Bf16_PrefillThenDecode_ArgmaxSequenceAndLogits_MatchF32()
     {
-            using var f32 = Model<float>();
-            using var bf16 = Model<BFloat16>();
-            SeedIdenticalBf16Pool(f32, bf16);
+        using var f32 = Model<float>();
+        using var bf16 = Model<BFloat16>();
+        SeedIdenticalBf16Pool(f32, bf16);
 
-            using var f32Cache = new LlamaKVCache<float>(Layers, KvWidth);
-            using var bf16Cache = new LlamaKVCache<BFloat16>(Layers, KvWidth);
+        using var f32Cache = new LlamaKVCache<float>(Layers, KvWidth);
+        using var bf16Cache = new LlamaKVCache<BFloat16>(Layers, KvWidth);
 
-            var f32Logits = f32.ForwardPrefill(Prompt, f32Cache);
-            var bf16Logits = bf16.ForwardPrefill(Prompt, bf16Cache);
+        var f32Logits = f32.ForwardPrefill(Prompt, f32Cache);
+        var bf16Logits = bf16.ForwardPrefill(Prompt, bf16Cache);
+
+        Assert.That(LogitsClose(f32Logits, bf16Logits, relTol: 0.002f), Is.True,
+            "Prefill last-row logits diverge beyond the documented tolerance.");
+        Assert.That(ArgMaxLastRow(bf16Logits), Is.EqualTo(ArgMaxLastRow(f32Logits)),
+            "Prefill argmax diverged.");
+
+        int position = Prompt.Length;
+        var f32Seq = new List<int>();
+        var bf16Seq = new List<int>();
+        for (int t = 0; t < DecodeSteps; t++)
+        {
+            int next32 = ArgMaxLastRow(f32Logits);
+            int nextBf = ArgMaxLastRow(bf16Logits);
+            Assert.That(nextBf, Is.EqualTo(next32), $"Decode step {t}: argmax diverged.");
+            f32Seq.Add(next32);
+            bf16Seq.Add(nextBf);
+
+            f32Logits = f32.ForwardCached(next32, position++, f32Cache);
+            bf16Logits = bf16.ForwardCached(nextBf, position++, bf16Cache);
 
             Assert.That(LogitsClose(f32Logits, bf16Logits, relTol: 0.002f), Is.True,
-                "Prefill last-row logits diverge beyond the documented tolerance.");
-            Assert.That(ArgMaxLastRow(bf16Logits), Is.EqualTo(ArgMaxLastRow(f32Logits)),
-                "Prefill argmax diverged.");
+                $"Decode step {t}: logits diverge beyond the documented tolerance.");
+        }
 
-            int position = Prompt.Length;
-            var f32Seq = new List<int>();
-            var bf16Seq = new List<int>();
-            for (int t = 0; t < DecodeSteps; t++)
-            {
-                int next32 = ArgMaxLastRow(f32Logits);
-                int nextBf = ArgMaxLastRow(bf16Logits);
-                Assert.That(nextBf, Is.EqualTo(next32), $"Decode step {t}: argmax diverged.");
-                f32Seq.Add(next32);
-                bf16Seq.Add(nextBf);
-
-                f32Logits = f32.ForwardCached(next32, position++, f32Cache);
-                bf16Logits = bf16.ForwardCached(nextBf, position++, bf16Cache);
-
-                Assert.That(LogitsClose(f32Logits, bf16Logits, relTol: 0.002f), Is.True,
-                    $"Decode step {t}: logits diverge beyond the documented tolerance.");
-            }
-
-            Assert.That(f32Seq, Is.EqualTo(bf16Seq), "Greedy decode sequences diverged.");
+        Assert.That(f32Seq, Is.EqualTo(bf16Seq), "Greedy decode sequences diverged.");
     }
 }
