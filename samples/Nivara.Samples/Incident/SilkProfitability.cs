@@ -7,7 +7,7 @@ namespace Nivara.Samples.Incident;
 /// before paying for the GPU transfer, using a CPU sample to estimate the CPU cost and a
 /// simple cost model for the GPU cost.
 /// </summary>
-public static class GpuProfitability
+public static class SilkProfitability
 {
     /// <summary>GPU must be at most this fraction of the estimated CPU time to win.</summary>
     public const double Margin = 0.9;
