@@ -251,6 +251,22 @@ public sealed unsafe class SilkRuntime : IDisposable
         return values;
     }
 
+    /// <summary>Blocking read of <paramref name="count"/> ushorts (narrow bf16/fp16 weights).</summary>
+    public ushort[] DownloadUshort(nint buffer, int count)
+    {
+        var values = new ushort[count];
+        unsafe
+        {
+            fixed (ushort* p = values)
+            {
+                int err = cl.EnqueueReadBuffer(queue, buffer, true, 0, (nuint)(count * sizeof(ushort)), p, 0, null, null);
+                if (err != 0)
+                    throw new InvalidOperationException($"Silk readback of {count} ushorts failed ({err}).");
+            }
+        }
+        return values;
+    }
+
     /// <summary>Blocking read of <paramref name="count"/> ints.</summary>
     public int[] DownloadInt(nint buffer, int count)
     {

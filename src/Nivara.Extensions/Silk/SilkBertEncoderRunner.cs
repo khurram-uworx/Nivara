@@ -42,6 +42,9 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     readonly float eps;
     readonly float scale;
 
+    readonly bool narrowBf16;
+    readonly bool narrowFp16;
+
     readonly nint x;
     readonly nint qkv;
     readonly nint attn;
@@ -76,6 +79,17 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     {
     }
 
+    public SilkBertEncoderRunner(
+        SilkRuntime runtime,
+        BertConfig config,
+        Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
+        BertGpuNaming naming,
+        bool isBf16 = false,
+        bool isFp16 = false)
+        : this(runtime, config, new SilkBertWeights(runtime, config, tensors, naming, trainable: false, isBf16, isFp16), ownsWeights: true)
+    {
+    }
+
     internal SilkBertEncoderRunner(
         SilkRuntime runtime,
         BertConfig config,
@@ -85,6 +99,8 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
         this.runtime = runtime;
         this.weights = weights;
         this.ownsWeights = ownsWeights;
+        this.narrowBf16 = weights.IsNarrowBf16;
+        this.narrowFp16 = weights.IsNarrowFp16;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -222,7 +238,16 @@ public sealed partial class SilkBertEncoderRunner : IBertEncoderRunner
     /// it is <c>null</c> for <c>gemm_row4_bias</c> and <c>gemm_row4_gelu</c>, which take six.
     /// </summary>
     void LaunchGemm(string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, int? qkvBlockWidth = null)
-        => SilkLauncher.GemmEpilogue(runtime, kernel, a, b, c, bias, aRows, aCols, bCols, qkvBlockWidth);
+        => SilkLauncher.GemmEpilogue(runtime, ChooseKernel(kernel), a, b, c, bias, aRows, aCols, bCols, qkvBlockWidth);
+
+    string ChooseKernel(string kernel) => kernel switch
+    {
+        SilkKernels.GemmQkv => narrowBf16 ? SilkKernels.GemmQkvBf16 : narrowFp16 ? SilkKernels.GemmQkvF16 : kernel,
+        SilkKernels.GemmBias => narrowBf16 ? SilkKernels.GemmBiasBf16 : narrowFp16 ? SilkKernels.GemmBiasF16 : kernel,
+        SilkKernels.GemmGelu => narrowBf16 ? SilkKernels.GemmGeluBf16 : narrowFp16 ? SilkKernels.GemmGeluF16 : kernel,
+        SilkKernels.GemmRelu => narrowBf16 ? SilkKernels.GemmReluBf16 : narrowFp16 ? SilkKernels.GemmReluF16 : kernel,
+        _ => kernel,
+    };
 
     void LaunchAttention(nint q, nint k, nint v, nint mask, nint output, int batch, int seqLen)
         => SilkLauncher.Attention(
