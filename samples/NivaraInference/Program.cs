@@ -569,11 +569,10 @@ class Program
             return 1;
         }
 
-        bool silkNarrowModel = modelType is "smollm" or "qwen" or "modernbert" or "laya"
-            or "minilm" or "distilbert" or "distilbert_sst";
+        bool silkNarrowModel = modelType is "modernbert" or "laya";
         if (useSilk && fp16 && !silkNarrowModel)
         {
-            Console.Error.WriteLine("--silk: this model has no fp16 path on the Silk backend. Drop --precision fp16 (or --silk) and rerun.");
+            Console.Error.WriteLine("--silk is F32-only: the hand-authored Silk kernel stack is f32 throughout, there is no bf16/fp16 translation unit. Drop --precision bf16|fp16 (or --silk) and rerun.");
             return 1;
         }
 
