@@ -167,7 +167,7 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict --sil
 ```
 
 `--silk` defaults to F32; `--precision bf16` is supported via on-device widening, while
-`--precision fp16` is rejected (measured tie with f32 at current shapes). A device is required in every mode; the run exits with status 1 when
+`--precision fp16` is rejected (bf16 preferred: no measured speedup at current shapes). A device is required in every mode; the run exits with status 1 when
 OpenCL is unavailable (no CPU fallback). Use the same command without `--silk` for the CPU path.
 
 ### Custom options
