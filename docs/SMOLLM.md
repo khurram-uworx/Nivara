@@ -28,7 +28,7 @@ Adding a causal-LM path surfaced capabilities the Nivara core library did not ye
 - **New core module — `LlamaCausalAttention<T>`** (`src/Nivara/AutoDiff/Nn/LlamaCausalAttention.cs`): **GQA** (9 Q / 3 KV heads) via KV-repeat — `ReverseGradOperations.GqaRepeatKV` (VJP with `GradKernels.HeadRepeat`/`HeadRepeatBackward`) and `ForwardGradOperations.GqaRepeatKV` (JVP) — feeding a fused, causal-masked per-head attention loop.
 - **New core module — `LlamaDecoderBlock<T>`** (`src/Nivara/AutoDiff/Nn/LlamaDecoderBlock.cs`): pre-norm self-attention + residual, then pre-norm **gated SiLU FFN** (`down(silu(gate)⊙up)`) + residual.
 
-**Sample-scoped additions** (not core library — `samples/Nivara.Samples` / `Program.cs`): `LlamaForCausalLM<T>` (embed → 30 blocks → final RMSNorm → tied-embedding LM head), `LlamaConfig : LLamaConfigLike`, `LlamaLoader.Load<TModel,TWeight>`, the `StateDictLoader.LoadRMSNorm/LoadLinear` binding helpers, the `Gpt2BpeTokenizer` byte-level BPE reader (see the tokenizer-correction note above), and enabling `UseWidenSimd` for the BF16/Half narrow runs so generation is practical (see the BF16 section above).
+**Sample-scoped additions** (not core library — `samples/Nivara.Samples` / `Program.cs`): `LlamaForCausalLM<T>` (embed → 30 blocks → final RMSNorm → tied-embedding LM head), `LlamaConfig : LLamaConfigLike`, `LlamaLoader.Load<TModel,TWeight>`, the `StateDictLoader.LoadRMSNorm/LoadLinear` binding helpers, the `Gpt2BpeTokenizer` byte-level BPE reader (see the tokenizer-correction note above), and the widen path is on by default for the BF16/Half narrow runs (see the BF16 section above).
 
 ## Library features used
 
@@ -41,7 +41,7 @@ Adding a causal-LM path surfaced capabilities the Nivara core library did not ye
 | `LlamaDecoderBlock<T>` | Pre-norm attention + gated SiLU FFN + residuals |
 | `LlamaForCausalLM<T>` + tied LM head | Embed → blocks → final norm → `hidden @ embed^T` |
 | `Gpt2BpeTokenizer` | Sample-local GPT-2 byte-level BPE tokenization |
-| `NivaraPrimitives.UseWidenSimd` | SIMD widen-compute-narrow BF16 matmul (native path) |
+| `NivaraPrimitives.DisableWidenSimd` | SIMD widen-compute-narrow BF16 matmul (default on; switch disables) |
 | Greedy generation (inference-default) | 32-token decode, no `GradientUtils.Grad()` scope |
 | `smollm ab` A/B + `smollm benchmark` | Scalar-vs-widen comparison; median-of-3 generation timing |
 
@@ -72,8 +72,8 @@ BF16 halves the weight memory (256.6 MB vs 513.1 MB), but on CPU it is **not** f
 
 | Mode | ms/token prev | ms/token cur | Full gen prev | Full gen cur | vs (cur) |
 |---|---|---|---|---|---|
-| BF16 scalar fallback (`UseWidenSimd = off`) | 7,032 | 2,667 | 225,037 ms | 85,368 ms | — |
-| BF16 widen (`UseWidenSimd = on`, default for narrow) | 705 | 374 | 22,591 ms | 11,972 ms | **7.13× faster** |
+| BF16 scalar fallback (`DisableWidenSimd = on`) | 7,032 | 2,667 | 225,037 ms | 85,368 ms | — |
+| BF16 widen (`DisableWidenSimd = off`, default for narrow) | 705 | 374 | 22,591 ms | 11,972 ms | **7.13× faster** |
 | F32 native (control) | 333 | 231 | 10,660–10,926 ms | 7,404 ms | widen transparent |
 
 The `smollm` BF16/Half runs enable the widen path automatically (without it, BF16 matmul falls back to the scalar dot), so `--simd-widen` is rejected for `smollm` — use `smollm --precision bf16 ab`, which runs scalar and widen side by side, to measure the lever. The F32 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading the table together with the memory-vs-performance table above: BF16 **widen** is 7.1× faster than BF16 **scalar** and ~1.6× slower than F32 native.
@@ -122,7 +122,7 @@ The BF16 compute path is ready. The blocker is the access-chain ICE (Q1).
 #### Q3 — If BF16 is not natively usable, what are the options?
 Produce a documented recommendation (in this file):
 - **(a) Driver update + re-probe** — IGC fix is upstream (IGCIT #1144 class); `run` bisects the whole surface in seconds, so re-validation is cheap.
-- **(b) BF16-emulated on GPU** — store BF16 weights on device, widen in-register per dot (the CPU `UseWidenSimd` pattern); viable only once indexed access works (Q1) since it needs real GEMV kernels.
+- **(b) BF16-emulated on GPU** — store BF16 weights on device, widen in-register per dot (the CPU default-on widen-compute-narrow pattern; disable via `NivaraPrimitives.DisableWidenSimd`); viable only once indexed access works (Q1) since it needs real GEMV kernels.
 - **(c) F32 GPU path only** — weights widened to F32 at upload (2× memory, 513 MB for SmolLM); BF16 stays CPU-only. Simplest, works where kernels can run at all.
 - **(d) DX12 / ComputeSharp** — Intel's **DX12 driver is a separate path** from the IGC OpenCL frontend; the probe's driver bugs don't apply there, and a managed backend would run real GEMM/attention kernels today. Cost: a NuGet dependency in a new project (core stays dependency-free). This is the likely landing spot if Q1 comes back "still broken" and a driver bump is not available/practical.
 
