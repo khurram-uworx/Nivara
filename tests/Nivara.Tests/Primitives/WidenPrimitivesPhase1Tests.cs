@@ -1,6 +1,5 @@
 using Nivara.Helpers;
 using Nivara.Primitives;
-using System;
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Numerics;

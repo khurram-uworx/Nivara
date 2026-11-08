@@ -9,36 +9,40 @@ internal static class DocsCoveragePins
     /// <summary>
     /// Count of citations found repository-wide. Pinned deliberately: see the coverage test.
     /// </summary>
-    // +5: EMBEDDINGS.md "Learning the fusion weights" section cites five new sample symbols
-    // (RetrievalTrainer.cs::FusionModel, RetrievalTrainer.cs::RetrievalTrainer.Train(),
-    // RetrievalTrainingData.cs::CandidatePool.Select(), RetrievalTrainingData.cs::QuerySplit.Create(),
-    // RetrievalEvaluation.cs::RetrievalEvaluation.Compare()).
-    internal const int ExpectedCitationCount = 148;
+    /// <remarks>
+    /// The scan scope excludes <c>docs/plan/</c> and <c>docs/plans/</c>: plan documents are working
+    /// notes, not reader-facing documentation. Those documents carried 35 citations, which are now
+    /// unchecked. That is a deliberate scope decision, not a neutral edit; restoring plan documents
+    /// to the scope means restoring the count with them.
+    /// </remarks>
+    internal const int ExpectedCitationCount = 113;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
     /// </summary>
-    internal const int ExpectedCitedDocumentCount = 22;
+    /// <remarks>The five <c>docs/plan/</c> documents that carried citations left the scope with it.</remarks>
+    internal const int ExpectedCitedDocumentCount = 17;
 
     /// <summary>
-    /// Documents in scope: the 9 <c>*.md</c> files at the repository root plus other under
+    /// Documents in scope: the <c>*.md</c> files at the repository root plus the reader-facing
+    /// documents under <c>docs/</c>.
     /// </summary>
-    // +1: docs/HALF-F16.md added for issue #1017.
-    internal const int ExpectedDocumentCount = 62;
+    /// <remarks>
+    /// <c>docs/plan/</c> and <c>docs/plans/</c> are excluded by <c>DocSnippetExtractor.IsScanned</c>.
+    /// Eight plan documents are out of scope as a result (six AISTACK/ARROW/POLARS review/roadmap
+    /// documents, <c>RAG-LLM-EVAL.md</c> and <c>CRAZY-ROADMAP.md</c> moved into <c>docs/plan/</c>,
+    /// plus the new <c>NIVARACHAT-EVALS.md</c>).
+    /// </remarks>
+    internal const int ExpectedDocumentCount = 55;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
     /// </summary>
-    // +5: same five citations as ExpectedCitationCount, all in code-citation form.
     internal const int ExpectedCodeCitationCount = 50;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-// +2: #991 inference release note now cites docs/SILK.md alongside docs/ACCELERATION.md.
-    // +14: top-level doc refresh (README, GETTING-STARTED, EXAMPLES, ARCHITECTURE, AGENTS) added
-    // markdown links to the promoted docs (EMBEDDINGS, SAFETENSORS, SILK, ONNX, etc.).
-    // +3: new docs/HALF-F16.md cross-references (issue #1017).
     internal const int ExpectedDocumentReferenceCount = 238;
 }

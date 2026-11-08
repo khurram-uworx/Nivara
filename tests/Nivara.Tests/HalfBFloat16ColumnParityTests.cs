@@ -1,7 +1,4 @@
-using Nivara;
 using Nivara.Expressions;
-using Nivara.Operations;
-using Nivara.Query;
 using NUnit.Framework;
 using System.Numerics;
 

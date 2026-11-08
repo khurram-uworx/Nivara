@@ -127,12 +127,7 @@ public sealed class MultiViewIndex : IDisposable
 
         var repoRoot = ModeHelpers.GetRepoRoot();
         var resolvedDocsDir = ctx.DocsDir ?? Path.Combine(repoRoot, "docs");
-        var mdFiles = Directory.Exists(resolvedDocsDir)
-            ? Directory.GetFiles(resolvedDocsDir, "*.md", SearchOption.AllDirectories)
-            : [];
-        var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
-        if (File.Exists(readmePath))
-            mdFiles = [.. mdFiles, readmePath];
+        var mdFiles = DocCorpus.EnumerateMarkdownFiles(resolvedDocsDir, repoRoot).ToArray();
 
         if (mdFiles.Length == 0)
         {

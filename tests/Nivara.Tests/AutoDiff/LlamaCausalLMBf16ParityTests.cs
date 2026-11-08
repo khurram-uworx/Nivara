@@ -1,6 +1,5 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Primitives;
 using Nivara.Samples;
 using NUnit.Framework;
 using System.Numerics;

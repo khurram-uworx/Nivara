@@ -2,7 +2,6 @@ using Nivara;
 using Nivara.Diagnostics;
 using Nivara.Expressions;
 using Nivara.Samples.Incident;
-using Nivara.Silk;
 using System.Diagnostics;
 
 var mode = args.Length > 0 ? args[0] : "";

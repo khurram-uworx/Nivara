@@ -1,7 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Primitives;
 using NUnit.Framework;
-using System;
 using System.Numerics;
 
 namespace Nivara;
