@@ -130,4 +130,16 @@ public class ConfusionMatrixFrameTests
         Assert.Throws<ArgumentNullException>(() => NivaraMetrics.ConfusionMatrixFrame(null!, actual));
         Assert.Throws<ArgumentNullException>(() => NivaraMetrics.ConfusionMatrixFrame(actual, null!));
     }
+
+    [Test]
+    public void ConfusionMatrixFrame_DoubleNaNLabel_BecomesActualNaNClass()
+    {
+        var predicted = NivaraColumn<double>.Create(new[] { double.NaN, 1.0 });
+        var actual = NivaraColumn<double>.Create(new[] { double.NaN, 1.0 });
+
+        var frame = NivaraMetrics.ConfusionMatrixFrame(predicted, actual);
+
+        Assert.That(frame.ColumnNames, Does.Contain("Actual:NaN"));
+        Assert.That(frame.GetColumn<double>("Predicted")[0], Is.EqualTo(double.NaN));
+    }
 }

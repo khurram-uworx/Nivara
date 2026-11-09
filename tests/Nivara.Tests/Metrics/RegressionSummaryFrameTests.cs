@@ -133,6 +133,62 @@ public class RegressionSummaryFrameTests
     }
 
     [Test]
+    public void RegressionSummaryFrame_NonFinitePredicted_Throws()
+    {
+        var predicted = NivaraColumn<double>.Create(new[] { 1.0, double.NaN, 3.0 });
+        var actual = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => NivaraMetrics.RegressionSummaryFrame(predicted, actual));
+
+        Assert.That(exception!.Message, Does.Contain("finite"));
+        Assert.That(exception.Message, Does.Contain("row 1"));
+        Assert.That(exception.Message, Does.Contain("predicted"));
+    }
+
+    [Test]
+    public void RegressionSummaryFrame_NonFiniteActual_Throws()
+    {
+        var predicted = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });
+        var actual = NivaraColumn<double>.Create(new[] { 1.0, double.PositiveInfinity, 3.0 });
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => NivaraMetrics.RegressionSummaryFrame(predicted, actual));
+
+        Assert.That(exception!.Message, Does.Contain("finite"));
+        Assert.That(exception.Message, Does.Contain("row 1"));
+        Assert.That(exception.Message, Does.Contain("actual"));
+    }
+
+    [Test]
+    public void RegressionSummaryFrame_NonFiniteInBoth_Throws()
+    {
+        var predicted = NivaraColumn<double>.Create(new[] { double.NaN, 2.0 });
+        var actual = NivaraColumn<double>.Create(new[] { 1.0, double.NegativeInfinity });
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => NivaraMetrics.RegressionSummaryFrame(predicted, actual));
+
+        Assert.That(exception!.Message, Does.Contain("finite"));
+        Assert.That(exception.Message, Does.Contain("row 0"));
+        Assert.That(exception.Message, Does.Contain("predicted"));
+    }
+
+    [Test]
+    public void RegressionSummaryFrame_ConvertedNonFinite_Throws()
+    {
+        var predicted = NivaraColumn<float>.Create(new[] { 1.0f, float.NaN });
+        var actual = NivaraColumn<int>.Create(new[] { 1, 2 });
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => NivaraMetrics.RegressionSummaryFrame(predicted, actual));
+
+        Assert.That(exception!.Message, Does.Contain("finite"));
+        Assert.That(exception.Message, Does.Contain("row 1"));
+        Assert.That(exception.Message, Does.Contain("predicted"));
+    }
+
+    [Test]
     public void RegressionSummaryFrame_LengthMismatch_Throws()
     {
         var predicted = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });

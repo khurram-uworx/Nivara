@@ -140,7 +140,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 >
 > Acceptance (revised): confusion-matrix frame and per-class/regression summary frames match hand-computed references on known fixtures (including null rows); vectorized for large frames (per `OperationDiagnostics`).
 >
-> **Status (2026-11-09, #868):** delivered in `src/Nivara/Metrics/` — `NivaraMetrics.ConfusionMatrixFrame`, `PerClassAccuracyFrame` and `RegressionSummaryFrame`, documented in `docs/METRICS.md`. Acceptance is met with one honest qualifier: regression is `TensorPrimitives` over `double` and records the kernel selector's verdict, while classification is a single typed hash pass and records `KernelType.Scalar` — there is no SIMD class-counting primitive, and the diagnostics say so. The original "loss-curve telemetry hook" line is stale: `TrainingLoop.OnEpochEnd` was already `protected virtual`, so no source change was needed and loss curves stay a training concern, not a metrics subsystem.
+> **Status (2026-11-09, #868):** delivered in `src/Nivara/Metrics/` — `NivaraMetrics.ConfusionMatrixFrame`, `PerClassMetricsFrame` and `RegressionSummaryFrame`, documented in `docs/METRICS.md`. Acceptance is met with one honest qualifier: regression is `TensorPrimitives` over `double` and records the kernel selector's verdict, while classification is a single typed hash pass and records `KernelType.Scalar` — there is no SIMD class-counting primitive, and the diagnostics say so. The original "loss-curve telemetry hook" line is stale: `TrainingLoop.OnEpochEnd` was already `protected virtual`, so no source change was needed and loss curves stay a training concern, not a metrics subsystem.
 >
 > **Original plan retained for archeology** (below):
 >

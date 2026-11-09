@@ -33,6 +33,9 @@ static class Program
         if (args.Any(a => a.Equals("--qwen-decode-attn", StringComparison.OrdinalIgnoreCase)))
             return QwenDecodeAttentionProbe.Run();
 
+        if (args.Any(a => a.Equals("--metrics", StringComparison.OrdinalIgnoreCase)))
+            return MetricsProbe.Run();
+
         var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, cpuDistilBertTrainProfile, silkGemm) = ParseArgs(args);
 
         if (datasetTest)

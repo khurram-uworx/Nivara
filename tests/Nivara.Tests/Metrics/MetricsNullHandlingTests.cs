@@ -48,12 +48,12 @@ public class MetricsNullHandlingTests
     }
 
     [Test]
-    public void PerClassAccuracyFrame_NullCells_KeepCountsConsistentWithValidPairs()
+    public void PerClassMetricsFrame_NullCells_KeepCountsConsistentWithValidPairs()
     {
         var predicted = NivaraColumnFactory.CreateFromNullable(predictedValues);
         var actual = NivaraColumnFactory.CreateFromNullable(actualValues);
 
-        var frame = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+        var frame = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
         long truePositives = 0;
         long falsePositives = 0;
@@ -71,13 +71,13 @@ public class MetricsNullHandlingTests
     }
 
     [Test]
-    public void PerClassAccuracyFrame_AllPairsNull_Throws()
+    public void PerClassMetricsFrame_AllPairsNull_Throws()
     {
         var predicted = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null });
         var actual = NivaraColumnFactory.CreateFromNullable(new double?[] { null, null });
 
         var exception = Assert.Throws<ArgumentException>(
-            () => NivaraMetrics.PerClassAccuracyFrame(predicted, actual));
+            () => NivaraMetrics.PerClassMetricsFrame(predicted, actual));
 
         Assert.That(exception!.Message, Does.Contain("at least one non-null pair"));
     }

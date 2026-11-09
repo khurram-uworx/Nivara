@@ -15,7 +15,7 @@ library; it reuses the column kernels and `TensorPrimitives`.
 | Method | Returns | Rows |
 | --- | --- | --- |
 | `NivaraMetrics.ConfusionMatrixFrame(IColumn predicted, IColumn actual)` | `Predicted`, one `Actual:{label}` per class, `Correct`, `Support` | one per class |
-| `NivaraMetrics.PerClassAccuracyFrame(IColumn predicted, IColumn actual)` | `Class`, `Tp`, `Fp`, `Fn`, `Precision`, `Recall`, `F1` | one per class |
+| `NivaraMetrics.PerClassMetricsFrame(IColumn predicted, IColumn actual)` | `Class`, `Tp`, `Fp`, `Fn`, `Precision`, `Recall`, `F1` | one per class |
 | `NivaraMetrics.RegressionSummaryFrame(IColumn predicted, IColumn actual)` | `Count`, `Mae`, `Mse`, `Rmse`, `R2` | exactly one |
 
 Classification requires both columns to have the same `ElementType` and a comparable label
@@ -33,9 +33,15 @@ class. The rule follows the storage layer's null-mask contract: storage stays nu
 each consumer decides what a null means, so AutoDiff throws at its domain boundary
 (`docs/adr/001-autodiff-nonnullable-domain.md`) while metrics excludes the pair.
 
-Zero valid pairs throws `ArgumentException`; a metric is never quietly `NaN`. An undefined
-*per-class* metric is null instead of zero, because zero is a real value and would be read
-as a failed class:
+Zero valid pairs throws `ArgumentException`. Regression also rejects a non-finite value
+(`NaN`, `+∞` or `-∞`) in a non-null cell up front, throwing `ArgumentException` that names
+the offending row and column, so a summary frame is never quietly `NaN`. Classification
+keeps labels opaque: a `double.NaN` label hashes equal to itself and becomes the class
+`Actual:NaN`, and the default comparer orders it before every other label, which is the
+standard .NET ordering.
+
+An undefined *per-class* metric is null instead of zero, because zero is a real value and
+would be read as a failed class:
 
 | Situation | Result |
 | --- | --- |
@@ -44,6 +50,8 @@ as a failed class:
 | `Precision` or `Recall` null, or both are `0` | `F1` null |
 | Constant target, every residual `0` | `R2 = 1.0` |
 | Constant target, any non-zero residual | `R2 = 0.0` |
+| Non-finite regression input (`NaN`, `+∞`, `-∞`) in a non-null cell | `ArgumentException` naming the row and column |
+| `double.NaN` classification label | class named `Actual:NaN`, ordered before every other label |
 
 ## Reading the confusion matrix
 
@@ -72,12 +80,21 @@ actual column. `Precision = Tp / (Tp + Fp)`, `Recall = Tp / (Tp + Fn)`, and
 `F1 = 2PR / (P + R)`, each null under the table above. All three are `double?`, so an
 undefined value survives the null mask rather than collapsing to `0`.
 
+Per-class accuracy is `Recall` (`Tp / (Tp + Fn)`): a class's share of its actual support that
+was predicted correctly. There is no separate `Accuracy` column in the per-class frame, because
+that would duplicate `Recall`. Classifier (global) accuracy is a scalar over the whole
+population and is available from the confusion matrix frame as
+`Sum(Correct) / Sum(Support)`; it is not a per-class quantity.
+
 ## Regression
 
 `Mae = mean |predicted − actual|`, `Mse = mean (predicted − actual)²`, `Rmse = √Mse`, and
 `R2 = 1 − SS_res / SS_tot` with `SS_tot = Σ(actual − mean(actual))²`. Because `R2` uses
 sums of squares, a prediction that is genuinely worse than the mean is negative — that is
 the definition, not a bug, and it is reported as-is.
+
+Every input value must be finite: a `NaN`, `+∞` or `-∞` in a non-null cell raises
+`ArgumentException` instead of flowing into `Mae`, `Mse`, `Rmse` or `R2`.
 
 Accumulation is in `double` regardless of the input element type: summing thousands of
 `float` residuals loses precision against a hand-computed reference, and the frame has one
@@ -93,7 +110,7 @@ Each call records one operation when `Nivara.Diagnostics.DiagnosticsTracker` is 
 | Operation | Kernel recorded | Why |
 | --- | --- | --- |
 | `Metrics.ConfusionMatrix` | `Scalar` | one typed hash pass over the valid pairs; there is no SIMD histogram primitive to hand this to |
-| `Metrics.PerClassAccuracy` | `Scalar` | same pass, same reason |
+| `Metrics.PerClassMetrics` | `Scalar` | same pass, same reason |
 | `Metrics.RegressionSummary` | `KernelSelector.DetermineKernelType<double>(validPairs)` | the calculation really is `TensorPrimitives` over `double` |
 
 Classification is **not** vectorized and the diagnostics say so. Class counting is a hash
@@ -108,7 +125,7 @@ var predicted = NivaraColumn<string>.Create(new[] { "spam", "ham", "spam", "spam
 var actual = NivaraColumn<string>.Create(new[] { "spam", "spam", "spam", "ham" });
 
 NivaraFrame matrix = NivaraMetrics.ConfusionMatrixFrame(predicted, actual);
-NivaraFrame perClass = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+NivaraFrame perClass = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
 Console.WriteLine(string.Join(", ", matrix.ColumnNames));
 Console.WriteLine(string.Join(", ", perClass.ColumnNames));

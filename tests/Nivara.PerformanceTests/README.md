@@ -61,6 +61,10 @@ a throwaway harness:
   managed-heap high-water (`GC.GetTotalMemory`), and retained-after-GC over 3 alternating
   rounds. Defaults to `samples/data/qwen2.5-0.5b-instruct/model.safetensors` when no path
   is given.
+- `--metrics` — throughput and allocation picture for the frame-scoped metrics
+  operations (`RegressionSummaryFrame`, `ConfusionMatrixFrame`, `PerClassMetricsFrame`) at
+  n = 1e4/1e5/1e6 and k = 10/100/1000, plus a class-count curve that makes the O(k²)
+  confusion-matrix frame growth in `docs/METRICS.md` concrete. Human-run only.
 - `--gemm` — tiled-GEMM regression gate (#435): the lasting promotion of the deleted
   `%TEMP%\opencode\gemm-measure\` harness. Loads all ten ILGPU GEMM kernels
   (`samples/Nivara.Samples/Gpu/GemmKernels.cs` — `OneToOne`, `Row4`, the M2 fused

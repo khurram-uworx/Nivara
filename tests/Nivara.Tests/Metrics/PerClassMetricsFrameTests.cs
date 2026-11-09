@@ -4,15 +4,15 @@ using NUnit.Framework;
 namespace Nivara.Tests.Metrics;
 
 [TestFixture]
-public class PerClassAccuracyFrameTests
+public class PerClassMetricsFrameTests
 {
     [Test]
-    public void PerClassAccuracyFrame_ThreeClasses_ComputesCountsAndDerivedMetrics()
+    public void PerClassMetricsFrame_ThreeClasses_ComputesCountsAndDerivedMetrics()
     {
         var predicted = NivaraColumn<string>.Create(new[] { "a", "a", "b", "b", "c" });
         var actual = NivaraColumn<string>.Create(new[] { "a", "b", "a", "c", "c" });
 
-        var frame = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+        var frame = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
         Assert.That(frame.ColumnNames, Is.EqualTo(new[]
         {
@@ -57,12 +57,12 @@ public class PerClassAccuracyFrameTests
     }
 
     [Test]
-    public void PerClassAccuracyFrame_ClassNeverPredicted_HasNullPrecisionAndF1ButZeroRecall()
+    public void PerClassMetricsFrame_ClassNeverPredicted_HasNullPrecisionAndF1ButZeroRecall()
     {
         var predicted = NivaraColumn<string>.Create(new[] { "a", "a", "a" });
         var actual = NivaraColumn<string>.Create(new[] { "a", "a", "b" });
 
-        var frame = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+        var frame = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
         var classes = frame.GetColumn<string>("Class");
         var precision = frame.GetColumn<double>("Precision");
@@ -79,12 +79,12 @@ public class PerClassAccuracyFrameTests
     }
 
     [Test]
-    public void PerClassAccuracyFrame_ClassNeverActual_HasNullRecallAndF1ButZeroPrecision()
+    public void PerClassMetricsFrame_ClassNeverActual_HasNullRecallAndF1ButZeroPrecision()
     {
         var predicted = NivaraColumn<string>.Create(new[] { "a", "b", "a" });
         var actual = NivaraColumn<string>.Create(new[] { "a", "a", "a" });
 
-        var frame = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+        var frame = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
         var classes = frame.GetColumn<string>("Class");
         var precision = frame.GetColumn<double>("Precision");
@@ -101,13 +101,13 @@ public class PerClassAccuracyFrameTests
     }
 
     [Test]
-    public void PerClassAccuracyFrame_CountsAgreeWithConfusionMatrix()
+    public void PerClassMetricsFrame_CountsAgreeWithConfusionMatrix()
     {
         var predicted = NivaraColumn<int>.Create(new[] { 0, 1, 2, 2, 1, 0, 1 });
         var actual = NivaraColumn<int>.Create(new[] { 0, 1, 2, 1, 1, 2, 0 });
 
         var matrix = NivaraMetrics.ConfusionMatrixFrame(predicted, actual);
-        var perClass = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+        var perClass = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
         var support = matrix.GetColumn<long>("Support");
         var correct = matrix.GetColumn<long>("Correct");
