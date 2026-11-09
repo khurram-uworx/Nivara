@@ -44,13 +44,13 @@ class Program
     // whose dispatch gains or loses a path must be updated here, or the gate fails.
     static readonly Dictionary<string, string[]> SupportedModes = new()
     {
-        ["mobilenet_v2"] = ["", "benchmark", "compare", "compare_diag"],
-        ["resnet18"] = ["", "benchmark", "compare", "compare_diag"],
-        ["minilm"] = ["", "benchmark", "compare", "similarity"],
-        ["distilbert"] = ["", "benchmark", "compare"],
-        ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
-        ["laya"] = ["", "benchmark", "compare"],
-        ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
+        ["mobilenet_v2"] = ["", "benchmark"],
+        ["resnet18"] = ["", "benchmark"],
+        ["minilm"] = ["", "benchmark", "similarity"],
+        ["distilbert"] = ["", "benchmark"],
+        ["distilbert_sst"] = ["", "benchmark", "predict"],
+        ["laya"] = ["", "benchmark"],
+        ["modernbert"] = ["", "benchmark"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
         // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
@@ -63,15 +63,15 @@ class Program
     // trunk. Kept separate from GpuModes because --silk's model scope is still narrower.
     static readonly Dictionary<string, string[]> SilkModes = new()
     {
-        ["minilm"] = ["", "benchmark", "compare", "similarity"],
-        ["distilbert"] = ["", "benchmark", "compare"],
-        ["distilbert_sst"] = ["", "benchmark", "compare", "predict"],
-        ["modernbert"] = ["", "benchmark", "compare", "compare_diag"],
-        ["laya"] = ["", "benchmark", "compare"],
+        ["minilm"] = ["", "benchmark", "similarity"],
+        ["distilbert"] = ["", "benchmark"],
+        ["distilbert_sst"] = ["", "benchmark", "predict"],
+        ["modernbert"] = ["", "benchmark"],
+        ["laya"] = ["", "benchmark"],
         ["smollm"] = ["", "benchmark", "generate"],
         ["qwen"] = ["", "benchmark", "tools", "distill"],
-        ["mobilenet_v2"] = ["", "benchmark", "compare", "compare_diag"],
-        ["resnet18"] = ["", "benchmark", "compare", "compare_diag"],
+        ["mobilenet_v2"] = ["", "benchmark"],
+        ["resnet18"] = ["", "benchmark"],
     };
 
     const string NarrowFloatModels = "minilm, distilbert, distilbert_sst, modernbert, laya, smollm, qwen";
@@ -125,7 +125,6 @@ class Program
         string mode = "";
         bool noKvCache = false;
         bool force = false;
-        bool syntheticWeights = false;
         bool plain = false;
         bool useSilk = false;
         string engine = TypeSafe.DefaultEngine;
@@ -206,8 +205,6 @@ class Program
                 else { seed = parsed; seedSet = true; }
                 i++;
             }
-            else if (args[i] == "--synthetic-weights")
-                syntheticWeights = true;
             else if (args[i] == "--plain")
                 plain = true;
             else if (args[i] == "--silk")
@@ -474,7 +471,7 @@ class Program
         // --text and --no-kv-cache ride the qwen prompt paths: RunPlain / RunTools are reached for
         // 'qwen', 'qwen tools' and any other mode that is not 'distill' / 'benchmark'; RunTools is
         // the only consumer of the KV-cache switch.
-        bool qwenPromptPath = isQwen && !syntheticWeights && mode is not ("distill" or "benchmark");
+        bool qwenPromptPath = isQwen && mode is not ("distill" or "benchmark");
 
         if (textSet && !qwenPromptPath)
         {
@@ -540,24 +537,6 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && !isQwen && !isSmolLM)
-        {
-            Console.Error.WriteLine("--synthetic-weights is only supported for the qwen and smollm benchmark modes.");
-            return 1;
-        }
-
-        if (syntheticWeights && isQwen && mode.Length > 0 && mode != "benchmark")
-        {
-            Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
-            return 1;
-        }
-
-        if (syntheticWeights && isSmolLM && mode.Length > 0 && mode is not ("benchmark" or "ab"))
-        {
-            Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' and 'ab' modes for smollm.");
-            return 1;
-        }
-
         bool benchmark = mode == "benchmark";
         bool compare = mode == "compare";
         bool compareDiag = mode == "compare_diag";
@@ -580,7 +559,7 @@ class Program
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
-        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, syntheticWeights))
+        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, synthetic: false))
         {
             Console.Error.WriteLine(isQwen
                 ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32."
@@ -612,24 +591,15 @@ class Program
 
         if (!File.Exists(modelPath))
         {
-            if (syntheticWeights && (isQwen || isSmolLM))
-            {
-                Console.WriteLine("--synthetic-weights: no model file required; fabricating synthetic weights.");
-                Console.WriteLine();
-            }
-            else
-            {
-                Console.Error.WriteLine($"Model file not found: {modelPath}");
-                return 1;
-            }
+            Console.Error.WriteLine($"Model file not found: {modelPath}");
+            return 1;
         }
 
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
         var loadSw = Stopwatch.StartNew();
-        var tensors = syntheticWeights ? null! : SafeTensorsLoader.Read(modelPath);
+        var tensors = SafeTensorsLoader.Read(modelPath);
         loadSw.Stop();
-        if (!syntheticWeights)
-            Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
+        Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
         Console.WriteLine();
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
@@ -759,7 +729,6 @@ class Program
             case "smollm":
                 if (useSilk)
                 {
-                    if (syntheticWeights) return RunSmolLMSyntheticBenchmarkSilk();
                     if (bf16)
                     {
                         if (benchmark) return BenchmarkSmolLMSilk(tensorsBf16);
@@ -768,12 +737,6 @@ class Program
                     if (benchmark) return BenchmarkSmolLMSilk(tensors);
                     return RunSmolLMSilk(tensors);
                 }
-                if (syntheticWeights)
-                    return bf16
-                        ? (mode == "ab" ? RunSmolLMSyntheticAb<BFloat16>() : RunSmolLMSyntheticBenchmark<BFloat16>())
-                        : (fp16
-                            ? (mode == "ab" ? RunSmolLMSyntheticAb<Half>() : RunSmolLMSyntheticBenchmark<Half>())
-                            : (mode == "ab" ? RunSmolLMSyntheticAb<float>() : RunSmolLMSyntheticBenchmark<float>()));
                 if (mode == "ab")
                 {
                     if (bf16) return SmolLMAb(tensorsBf16);
@@ -786,7 +749,6 @@ class Program
             case "qwen":
                 if (useSilk)
                 {
-                    if (syntheticWeights) return Qwen.RunSyntheticBenchmarkSilk(plain);
                     if (bf16)
                     {
                         if (mode == "distill") return Qwen.RunDistillSilk(tensorsBf16, modelDir, teacherExamples, force, seed);
@@ -799,10 +761,6 @@ class Program
                     if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
                     return Qwen.RunToolsSilk(tensors, modelDir, useKvCache: !noKvCache, text);
                 }
-                if (syntheticWeights)
-                    return bf16
-                        ? (plain ? Qwen.RunSyntheticBenchmark<BFloat16>(plain: true) : Qwen.RunSyntheticBenchmark<BFloat16>())
-                        : (plain ? Qwen.RunSyntheticBenchmark<float>(plain: true) : Qwen.RunSyntheticBenchmark<float>());
                 if (mode == "distill")
                     return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")
