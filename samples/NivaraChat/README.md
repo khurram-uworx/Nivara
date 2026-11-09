@@ -143,6 +143,9 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--chunk-size <int>` | `500` | Max chunk size (chars) for RAG chunking (`--rag`/`--rag-agent`/`--rag-multiview`) |
 | `--explore` | — | `--rag-multiview`: bucket every visible chunk by view disagreement, not just the top-K |
 | `--report <path>` | — | `--rag-multiview`: write the retrieval report as markdown. `--rag-learn`: write the learned-vs-fixed report as markdown. Relative paths land under the gitignored `samples/data/nivarachat/` |
+| `--baseline <path>` | — | `--rag-learn`: write the structured fixed-vs-baseline JSON (default `samples/data/nivarachat/eval/baseline-{kind}-s{seed}-k{k}.json`) |
+| `--regenerate <queries\|judge\|all>` | — | Rebuild a label artifact deterministically (`queries` = `queries.tsv`, `judge` = `relevance.tsv`, `all` = both + manifest). Use `--force` to overwrite. |
+| `--force` | — | Allow `--regenerate` to overwrite an existing artifact |
 | `--weights <spec>` | `content=0.5,title=0.2,section=0.2,code=0.1` | `--rag-multiview`: late-fusion weights, renormalized per chunk over the views it has. Unknown names, negative values and an all-zero total are rejected |
 | `--queries <path>` | `queries.tsv` (copied to output) | `--rag-eval`: ground-truth TSV path | 
 | `--runs <n>` | `3` | `--rag-eval`: judge runs per query | 
@@ -358,13 +361,17 @@ Labels decide what the numbers mean:
 | `--labels` | Source | Use it for |
 |-----------|--------|-----------|
 | `judge` (default when present) | `samples/data/nivarachat/eval/relevance.tsv` from `--rag-eval` | The headline comparison |
-| `fixture` | `samples/data/nivarachat/eval/relevance-fixture.tsv` (generated, gitignored), keyed by document path | Offline smoke runs; survives docs edits, unlike chunk ids; regenerate with `--regenerate fixture` |
 | `auto` | `--queries` heading/title-derived rows | Leakage diagnostics only — Title and Section score their own positive near 1.0 |
 
 The mode refuses to train when fewer than half the label rows resolve against the corpus, because a
 stale label file silently shrinks the relevant set and lowers every ranker without any of them being
 worse. It also prints the decisive-query count when the held-out split is too small for the sign
-test to reach p < 0.05, which is the case for the 40-query fixture and not for the judge cache.
+test to reach p < 0.05.
+
+Reproducibility: chunk ids, the query split and the fixed-vs-baseline metrics are reproducible from
+the same corpus + seed. The mode writes a structured, byte-stable baseline JSON (see `--baseline`)
+and prints a `REFUSED:` marker with exit code 2 when coverage is below 50%. Regenerate the label
+artifacts with `--regenerate <queries|judge|all>` (see [`./916-A.md`](./916-A.md)).
 
 `--report <path>` writes the metric table, the paired comparisons, the learned weights and a
 "reading this report" section as markdown under the gitignored `samples/data/nivarachat/learn/`.
@@ -374,7 +381,7 @@ training loop and Adam step run on the device via `SilkRetrievalTrainer`; the
 query gate trains on the device too. `--loss pairwise` still trains on CPU,
 because the Silk trainer is listwise-only.
 
-Uses: `RetrievalTrainingData` (`CandidatePool`, `TrainingSetBuilder`, `RetrievalLabels`, `QuerySplit`),
+Uses: `RetrievalTrainingData` (`CandidatePool`, `TrainingSetBuilder`, `QuerySplit`), `RetrievalLabels` (`LabelKind`, `ResolvedLabels`, `SelectSource`, `Accepts`),
 `RetrievalTrainer` (`FusionModel`, `GatedFusionModel`, `TrainingOptions`), `RetrievalEvaluation`
 (metrics, ranking, `PairedComparison`), and the `MultiViewScoring`/`MultiViewIndex` pipeline from
 `--rag-multiview`.
