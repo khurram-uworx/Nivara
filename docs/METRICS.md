@@ -15,7 +15,7 @@ library; it reuses the column kernels and `TensorPrimitives`.
 | Method | Returns | Rows |
 | --- | --- | --- |
 | `NivaraMetrics.ConfusionMatrixFrame(IColumn predicted, IColumn actual)` | `Predicted`, one `Actual:{label}` per class, `Correct`, `Support` | one per class |
-| `NivaraMetrics.PerClassAccuracyFrame(IColumn predicted, IColumn actual)` | `Class`, `Tp`, `Fp`, `Fn`, `Precision`, `Recall`, `F1` | one per class |
+| `NivaraMetrics.PerClassMetricsFrame(IColumn predicted, IColumn actual)` | `Class`, `Tp`, `Fp`, `Fn`, `Precision`, `Recall`, `F1` | one per class |
 | `NivaraMetrics.RegressionSummaryFrame(IColumn predicted, IColumn actual)` | `Count`, `Mae`, `Mse`, `Rmse`, `R2` | exactly one |
 
 Classification requires both columns to have the same `ElementType` and a comparable label
@@ -72,6 +72,12 @@ actual column. `Precision = Tp / (Tp + Fp)`, `Recall = Tp / (Tp + Fn)`, and
 `F1 = 2PR / (P + R)`, each null under the table above. All three are `double?`, so an
 undefined value survives the null mask rather than collapsing to `0`.
 
+Per-class accuracy is `Recall` (`Tp / (Tp + Fn)`): a class's share of its actual support that
+was predicted correctly. There is no separate `Accuracy` column in the per-class frame, because
+that would duplicate `Recall`. Classifier (global) accuracy is a scalar over the whole
+population and is available from the confusion matrix frame as
+`Sum(Correct) / Sum(Support)`; it is not a per-class quantity.
+
 ## Regression
 
 `Mae = mean |predicted − actual|`, `Mse = mean (predicted − actual)²`, `Rmse = √Mse`, and
@@ -93,7 +99,7 @@ Each call records one operation when `Nivara.Diagnostics.DiagnosticsTracker` is 
 | Operation | Kernel recorded | Why |
 | --- | --- | --- |
 | `Metrics.ConfusionMatrix` | `Scalar` | one typed hash pass over the valid pairs; there is no SIMD histogram primitive to hand this to |
-| `Metrics.PerClassAccuracy` | `Scalar` | same pass, same reason |
+| `Metrics.PerClassMetrics` | `Scalar` | same pass, same reason |
 | `Metrics.RegressionSummary` | `KernelSelector.DetermineKernelType<double>(validPairs)` | the calculation really is `TensorPrimitives` over `double` |
 
 Classification is **not** vectorized and the diagnostics say so. Class counting is a hash
@@ -108,7 +114,7 @@ var predicted = NivaraColumn<string>.Create(new[] { "spam", "ham", "spam", "spam
 var actual = NivaraColumn<string>.Create(new[] { "spam", "spam", "spam", "ham" });
 
 NivaraFrame matrix = NivaraMetrics.ConfusionMatrixFrame(predicted, actual);
-NivaraFrame perClass = NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+NivaraFrame perClass = NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
 Console.WriteLine(string.Join(", ", matrix.ColumnNames));
 Console.WriteLine(string.Join(", ", perClass.ColumnNames));

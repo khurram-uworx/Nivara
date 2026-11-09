@@ -40,15 +40,15 @@ public class MetricsDiagnosticsTests
     }
 
     [Test]
-    public void PerClassAccuracyFrame_RecordsScalarKernelAndUsedPairs()
+    public void PerClassMetricsFrame_RecordsScalarKernelAndUsedPairs()
     {
         var predicted = NivaraColumn<string>.Create(new[] { "a", "b", "a" });
         var actual = NivaraColumn<string>.Create(new[] { "a", "a", "b" });
 
-        NivaraMetrics.PerClassAccuracyFrame(predicted, actual);
+        NivaraMetrics.PerClassMetricsFrame(predicted, actual);
 
         var operation = single();
-        Assert.That(operation.OperationType, Is.EqualTo("Metrics.PerClassAccuracy"));
+        Assert.That(operation.OperationType, Is.EqualTo("Metrics.PerClassMetrics"));
         Assert.That(operation.KernelUsed, Is.EqualTo(KernelType.Scalar));
         Assert.That(operation.Notes, Is.EqualTo("3 of 3 pairs used"));
     }

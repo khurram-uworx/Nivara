@@ -65,14 +65,14 @@ public static class NivaraMetrics
     /// <exception cref="ArgumentException">The columns have different lengths, different
     /// element types, are not <see cref="NivaraColumn{T}"/>-backed, or the label type is not
     /// comparable.</exception>
-    public static NivaraFrame PerClassAccuracyFrame(IColumn predicted, IColumn actual)
+    public static NivaraFrame PerClassMetricsFrame(IColumn predicted, IColumn actual)
     {
         validatePair(predicted, actual, requireSameElementType: true);
 
         var measurement = DiagnosticsTracker.StartMeasurement();
         var (frame, validPairs) = ClassificationMetrics.BuildPerClass(predicted, actual);
         measurement.Record(
-            "Metrics.PerClassAccuracy",
+            "Metrics.PerClassMetrics",
             KernelType.Scalar,
             predicted.Length,
             predicted.ElementType,

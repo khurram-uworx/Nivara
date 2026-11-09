@@ -7,7 +7,7 @@ using System.Runtime.ExceptionServices;
 namespace Nivara.Metrics;
 
 /// <summary>
-/// Confusion-matrix and per-class accuracy frames. Counting is a single typed hash pass, so the
+/// Confusion-matrix and per-class metrics frames. Counting is a single typed hash pass, so the
 /// result is reported as the scalar kernel rather than pretending SIMD applies to class counting.
 /// </summary>
 internal static class ClassificationMetrics
