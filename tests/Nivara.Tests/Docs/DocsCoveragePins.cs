@@ -16,8 +16,11 @@ internal static class DocsCoveragePins
     /// to the scope means restoring the count with them. #868 adds two: one in
     /// <c>docs/METRICS.md</c> (<c>TrainingLoop.cs::OnEpochEnd</c>) and one in
     /// <c>docs/TENSORS.md</c> (<c>NivaraMetrics.cs::ConfusionMatrixFrame</c>) — 113 + 2 = 115.
+    /// Issue #1066 adds one in <c>docs/METRICS.md</c>
+    /// (<c>MLNetMetricsCrossCheckTests.cs::ConfusionMatrix_MatchesMLNetEvaluation_Exactly</c>):
+    /// 115 + 1 = 116.
     /// </remarks>
-    internal const int ExpectedCitationCount = 115;
+    internal const int ExpectedCitationCount = 116;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
@@ -49,8 +52,9 @@ internal static class DocsCoveragePins
     /// <remarks>
     /// The widened scope adds every <c>.cs</c> file; #868's two new citations (see
     /// <see cref="ExpectedCitationCount"/>) both land here too: 50 + 2 = 52.
+    /// Issue #1066's test citation also lands here: 52 + 1 = 53.
     /// </remarks>
-    internal const int ExpectedCodeCitationCount = 52;
+    internal const int ExpectedCodeCitationCount = 53;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
