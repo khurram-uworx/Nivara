@@ -846,6 +846,14 @@ keep encoder-derived features outside the gradient path (`requiresGrad: false` w
 applicable). Nivara does not currently ship a Silk Laya trainer; the same top-down
 freeze policy is intended to reuse for a future Laya head-training path.
 
+Measured reduction (DistilBERT base, L=128, AC power not verified; medians of 5 iterations):
+
+| Batch | all-layers backward (ms) | head-only backward (ms) | reduction |
+|---:|---:|---:|---:|
+| 2 | 452.7 | 0.7 | ~99.8% |
+| 4 | 910.0 | 0.7 | ~99.9% |
+| 8 | 1880.4 | 0.7 | ~99.9% |
+
 ## 13f. Retrieval fusion (`RagLearnMode`, #915)
 
 `SilkRetrievalTrainer` (`samples/NivaraChat/Helpers/SilkRetrievalTrainer.cs`) trains the
