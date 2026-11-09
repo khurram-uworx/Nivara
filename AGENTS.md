@@ -27,6 +27,7 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 ## Where to look (implementation map)
 
 - **Storage:** `src/Nivara/Storage/ColumnStorage.cs` (single unified storage: sole-owner `T[]` + optional `bool[]` null mask; zero-copy Slice; lazy `AsTensor()`), `ColumnStorageFactory.cs` (`IsVectorizable<T>()`, `Create<T>()`)
+- **Chunk layer:** `src/Nivara/Storage/Chunk.cs` (readonly struct over one sliced `ColumnStorage<T>`), `ChunkedColumn.cs` (`IColumnStorage<T>` with ≥2 chunks; lazy contiguous materialisation; structure survives `Slice`/concat and the opt-in Arrow path)
 - **Column kernels:** `src/Nivara/NivaraColumn.cs` (arithmetic, comparison, mask propagation, `TensorPrimitives` for float/double)
 - **Tensor helpers:** `src/Nivara/Tensors/TensorInteropExtensions.cs`, `TensorsHelper.cs` (MatMul, SoftMax, Sigmoid, Tanh, Transpose)
 - **Kernel selection:** `src/Nivara/KernelSelector.cs` (`DetermineKernelType()`)
