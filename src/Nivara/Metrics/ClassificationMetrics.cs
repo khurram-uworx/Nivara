@@ -114,13 +114,22 @@ internal static class ClassificationMetrics
         }
 
         values = new ColumnBuffers<T>(predictedValues, predictedMask, actualValues, actualMask, length);
-        return count(predictedValues, predictedMask, actualValues, actualMask, length);
+        try
+        {
+            return count(predictedValues, predictedMask, actualValues, actualMask, length);
+        }
+        catch
+        {
+            values.Release();
+            throw;
+        }
     }
 
     static T[] readValues<T>(NivaraColumn<T> column, int length, out bool[]? nullMask)
     {
+        bool hasNulls = column.HasNulls;
         var values = length > PoolThreshold ? ArrayPool<T>.Shared.Rent(length) : new T[length];
-        if (column.HasNulls)
+        if (hasNulls)
         {
             nullMask = length > PoolThreshold ? ArrayPool<bool>.Shared.Rent(length) : new bool[length];
             column.CopyTo(values.AsSpan(0, length), default!, nullMask.AsSpan(0, length));
