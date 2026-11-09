@@ -44,5 +44,5 @@ internal static class DocsCoveragePins
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 238;
+    internal const int ExpectedDocumentReferenceCount = 237;
 }
