@@ -9,6 +9,7 @@ using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
 using Nivara.Onnx;
 using Nivara.Samples;
+using Nivara.Metrics;
 using Nivara.Silk;
 using NivaraClassifier;
 using System.Globalization;
@@ -132,14 +133,22 @@ void RunTraining(Options opt)
                 layout.Embedding, layout.Conv1W, layout.Conv1B, layout.Conv2W, layout.Conv2B,
                 layout.Conv3W, layout.Conv3B, layout.Fc1W, layout.Fc1B, layout.Fc2W, layout.Fc2B);
 
-            int convCorrect = 0;
+            var convPredicted = new int[testLabels.Length];
+            var convActual = new int[testLabels.Length];
             for (int i = 0; i < testLabels.Length; i++)
             {
                 var encoded2 = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
                 var preds2 = cpuModel.Predict(encoded2);
-                if (preds2[0] == testLabels[i]) convCorrect++;
+                convPredicted[i] = preds2[0];
+                convActual[i] = testLabels[i];
             }
-            double convAccuracy = (double)convCorrect / testLabels.Length;
+            var convMatrix = NivaraMetrics.ConfusionMatrixFrame(
+                NivaraColumn<int>.Create(convPredicted),
+                NivaraColumn<int>.Create(convActual));
+            long convCorrect = 0;
+            for (int r = 0; r < convMatrix.RowCount; r++)
+                convCorrect += convMatrix.GetColumn<long>("Correct")[r];
+            double convAccuracy = testLabels.Length > 0 ? (double)convCorrect / testLabels.Length : 0.0;
             Console.WriteLine($"Silk-trained (conv) test accuracy: {convAccuracy:P1} ({convCorrect}/{testLabels.Length})");
 
             if (!string.IsNullOrWhiteSpace(opt.SavePath))
@@ -183,14 +192,22 @@ void RunTraining(Options opt)
             var cpuModel = new TextClassifierModel<float>(tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, 2, opt.MaxSeqLen);
             cpuModel.SetWeights(layout.Embedding, layout.Fc1W, layout.Fc1B, layout.Fc2W, layout.Fc2B);
 
-            int gpuCorrect = 0;
+            var gpuPredicted = new int[testLabels.Length];
+            var gpuActual = new int[testLabels.Length];
             for (int i = 0; i < testLabels.Length; i++)
             {
                 var encoded = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
                 var preds = cpuModel.Predict(encoded);
-                if (preds[0] == testLabels[i]) gpuCorrect++;
+                gpuPredicted[i] = preds[0];
+                gpuActual[i] = testLabels[i];
             }
-            double gpuAccuracyValue = (double)gpuCorrect / testLabels.Length;
+            var gpuMatrix = NivaraMetrics.ConfusionMatrixFrame(
+                NivaraColumn<int>.Create(gpuPredicted),
+                NivaraColumn<int>.Create(gpuActual));
+            long gpuCorrect = 0;
+            for (int r = 0; r < gpuMatrix.RowCount; r++)
+                gpuCorrect += gpuMatrix.GetColumn<long>("Correct")[r];
+            double gpuAccuracyValue = testLabels.Length > 0 ? (double)gpuCorrect / testLabels.Length : 0.0;
             Console.WriteLine($"Silk-trained test accuracy: {gpuAccuracyValue:P1} ({gpuCorrect}/{testLabels.Length})");
 
             if (!string.IsNullOrWhiteSpace(opt.SavePath))
@@ -255,15 +272,24 @@ void RunTraining(Options opt)
     var result = trainLoop.Run();
     result.PrintSummary();
 
-    int correct = 0;
+    var predictedLabels = new int[testLabels.Length];
+    var actualLabels = new int[testLabels.Length];
     for (int i = 0; i < testLabels.Length; i++)
     {
         var encoded = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
         var preds = predict(encoded);
-        if (preds[0] == testLabels[i]) correct++;
+        predictedLabels[i] = preds[0];
+        actualLabels[i] = testLabels[i];
     }
 
-    double accuracy = (double)correct / testLabels.Length;
+    var accuracyMatrix = NivaraMetrics.ConfusionMatrixFrame(
+        NivaraColumn<int>.Create(predictedLabels),
+        NivaraColumn<int>.Create(actualLabels));
+    long correct = 0;
+    for (int r = 0; r < accuracyMatrix.RowCount; r++)
+        correct += accuracyMatrix.GetColumn<long>("Correct")[r];
+
+    double accuracy = testLabels.Length > 0 ? (double)correct / testLabels.Length : 0.0;
     Console.WriteLine($"\nTest accuracy: {accuracy:P1} ({correct}/{testLabels.Length})");
 
     if (!string.IsNullOrWhiteSpace(opt.SavePath))
