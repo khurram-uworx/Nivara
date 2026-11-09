@@ -141,7 +141,14 @@ No hook is needed. `TrainingLoop.OnEpochEnd` is already `protected virtual`
 calls these methods on predictions it collects itself; `NivaraMetrics` holds no state and is
 safe to call per epoch. Loss curves stay a training concern and are not part of this module.
 
-## Related documents
+## Cross-check against ML.NET
+
+Nivara's confusion matrix (predicted classes in rows, actual classes in columns) and its
+`MicroAccuracy = Sum(Correct) / Sum(Support)` agree with ML.NET's
+`MulticlassClassificationMetrics` on a deterministic, deliberately asymmetric
+three-class fixture:
+`tests/Nivara.Tests/MLNet/MLNetMetricsCrossCheckTests.cs::ConfusionMatrix_MatchesMLNetEvaluation_Exactly`.
+">
 
 - [docs/TENSORS.md](TENSORS.md) — the Nivara-versus-platform positioning this module follows
 - [docs/AUTODIFF.md](AUTODIFF.md) — the training stack that produces the predictions
