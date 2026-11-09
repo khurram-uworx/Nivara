@@ -191,6 +191,7 @@ See `docs/adr/` for recorded decisions:
 - **ADR-007** (`docs/adr/007-byte-wise-null-mask-fast-path.md`): The byte-wise `ReadOnlySpan<bool>` null mask is the canonical validity representation in core; bit-packed validity, and the polarity inversion it needs, exist only at the Arrow boundary. A span-first `ArrowValidityMask` helper exists and is unit-tested, but the boundary conversion is still element-wise until `ArrowInterop` calls it.
 - **ADR-008** (`docs/adr/008-symbol-anchored-citations.md`): Documentation citations anchor to source symbols (e.g. `src/Nivara/Storage/ColumnStorage.cs::AsSpan()`) instead of line numbers. The gate resolves symbols with Roslyn (cached per file); signatures are appended only to disambiguate overloads. Line-number form retired after migration.
 - **ADR-009** (`docs/adr/009-metrics-mergeable-accumulator.md`): Metrics gain public mergeable accumulators (`ConfusionMatrixAccumulator<TLabel>`, `RegressionAccumulator`) for streaming, partitioned and cross-epoch use; reduction is by ascending chunk index, regression accepts a stated one-pass precision bound, and diagnostics record once per finalisation rather than per chunk.
+- **ADR-010** (`docs/adr/010-chunk-count-growth-policy-on-concat.md`): Concat coalesces adjacent chunks whose combined length is at or below 10,000 rows (`ColumnFilterHelper.ConcatCoalesceMaxChunkRows`); Arrow import/export is exempt because it uses `FromChunkStorages` and must preserve per-column chunk counts.
 
 ## Agent Framework Workflow Patterns
 

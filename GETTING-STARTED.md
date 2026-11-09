@@ -443,6 +443,7 @@ Chunked, memory-bounded execution is reachable on the public API through the con
 - `AsStream()` keeps its 10,000-row default.
 - When `ChunkSize` is `null`, the chunk size is derived as `clamp(MemoryBudget/10 ÷ 100 bytes/row, 1000, 100000)`.
 - Parquet row-group alignment applies. Non-streamable boundaries (Sort, GroupBy, Join, windows) fall back to a single merged frame identical to `CollectAsync()`.
+- Concatenation coalesces adjacent chunks at or below 10,000 rows to keep repeated accumulation bounded; Arrow import/export preserves chunk counts and is exempt (ADR-010).
 
 > `Csv` ships in `Nivara.Extensions`; `Json` ships in core. Both extension methods resolve under `using Nivara.IO;` once the package is referenced.
 

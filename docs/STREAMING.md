@@ -99,6 +99,14 @@ so any boundary needing the whole dataset defeats chunking.
   overload always supplies 10,000, so the budget-derived value is used only when a context
   is passed with `NivaraExecutionContext.ChunkSize` left null — see §"Memory budget → chunk size".
 
+## Chunk-count growth policy on concat
+
+Concatenation (`ConcatenateColumns`) coalesces adjacent chunks whose combined length is at or below
+`ColumnFilterHelper.ConcatCoalesceMaxChunkRows` (10,000 rows, matching the `AsStream` default). This
+prevents streaming-window accumulation from growing one chunk per window. The policy applies to
+concat only; Arrow import/export preserves per-column chunk counts via `FromChunkStorages`
+and is intentionally exempt (see ADR-010).
+
 ## Memory budget → chunk size
 
 When no explicit chunk size is set anywhere, the streaming strategy derives one from the
