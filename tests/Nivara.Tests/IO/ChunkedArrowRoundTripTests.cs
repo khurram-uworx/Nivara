@@ -156,4 +156,120 @@ public class ChunkedArrowRoundTripTests
         var chunk = (Int32Array)table.Column(0).Data.Array(0);
         Assert.That(chunk.Values.Slice(0, 2).ToArray(), Is.EqualTo(new[] { 99, 20 }));
     }
+
+    static ColumnStorage<int> NullChunk(int[] values, int nullAt)
+    {
+        if (nullAt < 0)
+            return new ColumnStorage<int>(values);
+
+        var mask = new bool[values.Length];
+        mask[nullAt] = true;
+        return new ColumnStorage<int>(values, new ReadOnlyMemory<bool>(mask));
+    }
+
+    static NivaraColumn<int> ChunkedColumn(params (int[] Values, int NullAt)[] chunks)
+    {
+        var storages = chunks.Select(c => NullChunk(c.Values, c.NullAt)).ToArray();
+        return new NivaraColumn<int>(new ChunkedColumn<int>(storages));
+    }
+
+    static NivaraColumn<int> FlatColumn(int[] values, int nullAt = -1)
+    {
+        if (nullAt < 0)
+            return new NivaraColumn<int>(new ColumnStorage<int>(values));
+
+        var mask = new bool[values.Length];
+        mask[nullAt] = true;
+        return new NivaraColumn<int>(new ColumnStorage<int>(values, new ReadOnlyMemory<bool>(mask)));
+    }
+
+    [Test]
+    public void ToArrowTable_Preserve_MixedChunkGrid_KeepsPerColumnChunkCounts()
+    {
+        // a: 2 chunks (lengths 2 + 4), b: 3 chunks (lengths 2 + 2 + 2), c: flat (length 6).
+        var a = ChunkedColumn((new[] { 0, 1 }, -1), (new[] { 2, 3, 4, 5 }, 2));
+        var b = ChunkedColumn((new[] { 10, 11 }, -1), (new[] { 12, 13 }, -1), (new[] { 14, 15 }, 0));
+        var c = FlatColumn(new[] { 20, 21, 22, 23, 24, 25 }, 5);
+
+        var frame = NivaraFrame.Create(("a", a), ("b", b), ("c", c));
+
+        var table = ArrowInterop.ToArrowTable(frame, Preserve);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(table.Column(0).Data.ArrayCount, Is.EqualTo(2));
+            Assert.That(table.Column(1).Data.ArrayCount, Is.EqualTo(3));
+            Assert.That(table.Column(2).Data.ArrayCount, Is.EqualTo(1));
+            Assert.That(table.RowCount, Is.EqualTo(6));
+        });
+
+        // a values and null survive intact (chunk lengths 2 + 4).
+        var a0 = (Int32Array)table.Column(0).Data.Array(0);
+        var a1 = (Int32Array)table.Column(0).Data.Array(1);
+        Assert.Multiple(() =>
+        {
+            Assert.That(a0.GetValue(0), Is.EqualTo(0));
+            Assert.That(a0.GetValue(1), Is.EqualTo(1));
+            Assert.That(a1.GetValue(0), Is.EqualTo(2));
+            Assert.That(a1.GetValue(1), Is.EqualTo(3));
+            Assert.That(a1.IsNull(2), Is.True);
+            Assert.That(a1.GetValue(3), Is.EqualTo(5));
+        });
+
+        // b values and null survive intact (3 chunks of 2).
+        var b0 = (Int32Array)table.Column(1).Data.Array(0);
+        var b1 = (Int32Array)table.Column(1).Data.Array(1);
+        var b2 = (Int32Array)table.Column(1).Data.Array(2);
+        Assert.Multiple(() =>
+        {
+            Assert.That(b0.GetValue(0), Is.EqualTo(10));
+            Assert.That(b0.GetValue(1), Is.EqualTo(11));
+            Assert.That(b1.GetValue(0), Is.EqualTo(12));
+            Assert.That(b1.GetValue(1), Is.EqualTo(13));
+            Assert.That(b2.IsNull(0), Is.True);
+            Assert.That(b2.GetValue(1), Is.EqualTo(15));
+        });
+
+        // c flat survives as a single array with a trailing null.
+        var c0 = (Int32Array)table.Column(2).Data.Array(0);
+        Assert.Multiple(() =>
+        {
+            Assert.That(c0.Length, Is.EqualTo(6));
+            Assert.That(c0.GetValue(0), Is.EqualTo(20));
+            Assert.That(c0.GetValue(4), Is.EqualTo(24));
+            Assert.That(c0.IsNull(5), Is.True);
+        });
+    }
+
+    [Test]
+    public void ToArrowTable_Preserve_AllFlatFallback_MatchesDefaultRoute()
+    {
+        var flatFrame = NivaraFrame.Create(
+            ("a", FlatColumn(new[] { 0, 1, 2, 3, 4, 5 }, 2)),
+            ("b", FlatColumn(new[] { 10, 11, 12, 13, 14, 15 }, -1)),
+            ("c", FlatColumn(new[] { 20, 21, 22, 23, 24, 25 }, 5)));
+
+        var preserved = ArrowInterop.ToArrowTable(flatFrame, Preserve);
+        var defaulted = ArrowInterop.ToArrowTable(flatFrame, null);
+
+        Assert.Multiple(() =>
+        {
+            for (int i = 0; i < flatFrame.ColumnCount; i++)
+                Assert.That(preserved.Column(i).Data.ArrayCount, Is.EqualTo(1));
+        });
+
+        Assert.That(preserved.RowCount, Is.EqualTo(defaulted.RowCount));
+        for (int col = 0; col < flatFrame.ColumnCount; col++)
+        {
+            var pa = (Int32Array)preserved.Column(col).Data.Array(0);
+            var da = (Int32Array)defaulted.Column(col).Data.Array(0);
+            Assert.That(pa.Length, Is.EqualTo(da.Length));
+            for (int i = 0; i < pa.Length; i++)
+            {
+                Assert.That(pa.IsNull(i), Is.EqualTo(da.IsNull(i)));
+                if (!pa.IsNull(i))
+                    Assert.That(pa.GetValue(i), Is.EqualTo(da.GetValue(i)));
+            }
+        }
+    }
 }
