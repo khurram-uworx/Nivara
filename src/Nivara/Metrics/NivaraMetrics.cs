@@ -96,7 +96,7 @@ public static class NivaraMetrics
     /// <paramref name="actual"/> is null.</exception>
     /// <exception cref="ArgumentException">The columns have different lengths, are not
     /// <see cref="NivaraColumn{T}"/>-backed, an element type is not numeric, or no row has a
-    /// value in both columns.</exception>
+    /// value in both columns, or a value in either column is not finite.</exception>
     public static NivaraFrame RegressionSummaryFrame(IColumn predicted, IColumn actual)
     {
         validatePair(predicted, actual, requireSameElementType: false);
