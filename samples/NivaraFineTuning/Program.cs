@@ -23,6 +23,7 @@ sealed record CliArgs
     public string ModelDir { get; init; } = "";
     public string SavePath { get; init; } = "";
     public int MaxExamples { get; init; }
+    public int TrainableLayers { get; init; } = -1;
     public bool Silk { get; init; }
 
     public static CliArgs Parse(string[] args)
@@ -37,6 +38,7 @@ sealed record CliArgs
         int batchSize = 4;
         int maxLen = 128;
         int maxExamples = 0;
+        int trainableLayers = -1;
         bool silk = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -60,6 +62,9 @@ sealed record CliArgs
                     break;
                 case "--max-examples" when i + 1 < args.Length:
                     maxExamples = int.Parse(args[++i]);
+                    break;
+                case "--trainable-layers" when i + 1 < args.Length:
+                    trainableLayers = int.Parse(args[++i]);
                     break;
                 case "--data-dir" when i + 1 < args.Length:
                     dataDir = args[++i];
@@ -93,6 +98,7 @@ sealed record CliArgs
             BatchSize = batchSize,
             MaxLen = maxLen,
             MaxExamples = maxExamples,
+            TrainableLayers = trainableLayers,
             DataDir = dataDir,
             ModelDir = modelDir,
             SavePath = savePath,
@@ -115,6 +121,7 @@ Options:
   --batch-size    Batch size for training/eval (default: 4)
   --max-len       Maximum sequence length (default: 128)
   --max-examples  Limit training to first N examples (default: 0 = all)
+  --trainable-layers  Number of top transformer layers to train (-1/all default; 0 head only; N top N)
   --data-dir      Path to SST-2 data directory
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
@@ -306,9 +313,11 @@ static class Program
             if (maxSeqLen != cli.MaxLen)
                 Console.WriteLine($"  (seq len clamped to device cap {maxSeqLen})");
 
-            using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen);
+            using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen, trainableLayerCount: cli.TrainableLayers);
             using var runner = trainer.CreateInferenceRunner();
             Console.WriteLine($"  Device: {trainer.DeviceName}, classes={trainer.NumClasses}");
+            if (cli.TrainableLayers >= 0)
+                Console.WriteLine($"  Trainable layers: {Math.Clamp(cli.TrainableLayers, 0, bertConfig.NumHiddenLayers)} (head always trainable)");
 
             Console.WriteLine($"Loading tokenizer from {modelPath}/vocab.txt...");
             var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelPath, "vocab.txt"));
