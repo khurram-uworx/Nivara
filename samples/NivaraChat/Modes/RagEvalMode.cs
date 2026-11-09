@@ -28,6 +28,35 @@ public static class RagEvalMode
         if (index is null)
             return;
 
+        if (string.Equals(ctx.Regenerate, "queries", StringComparison.OrdinalIgnoreCase))
+        {
+            var derived = EvalGroundTruth.DeriveFromChunks(index.Chunks).ToList();
+            if (File.Exists(queriesPath) && !ctx.Force)
+            {
+                Console.WriteLine($"Refusing to overwrite existing {queriesPath} without --force.");
+                return;
+            }
+            EvalGroundTruth.Save(queriesPath, derived);
+            Console.WriteLine($"Wrote {derived.Count} queries to {queriesPath}");
+            Console.WriteLine($"Corpus content hash: {index.CorpusIdentity.ContentHash}");
+            return;
+        }
+
+        if (string.Equals(ctx.Regenerate, "judge", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(ctx.Regenerate, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!ctx.UseOllama)
+            {
+                Console.WriteLine("--regenerate judge requires --ollama --model <model>.");
+                return;
+            }
+            if (File.Exists(labelsPath) && !ctx.Force)
+            {
+                Console.WriteLine($"Refusing to overwrite existing {labelsPath} without --force.");
+                return;
+            }
+        }
+
         var queriesFileExisted = File.Exists(queriesPath);
         if (!queriesFileExisted)
             Console.WriteLine($"queries.tsv not found at {queriesPath}; deriving from corpus chunks (use --regenerate queries to write it explicitly).");
@@ -140,7 +169,8 @@ public static class RagEvalMode
                         var graded = await RagEvalJudge.GradeChunksAsync(client, q.Query, passages, runs, ctx.Temperature);
                         foreach (var (id, res) in graded)
                             labelMap[id] = res;
-                        RagEvalLabels.Save(labelsPath, labels);
+                        var header = $"# corpus={index.CorpusIdentity.ContentHash} chunker={index.CorpusIdentity.ChunkerVersion} chunkSize={index.CorpusIdentity.ChunkSize} backend={index.CorpusIdentity.Backend} dimension={index.CorpusIdentity.Dimension}";
+                        RagEvalLabels.Save(labelsPath, labels, header);
                     }
                 }
             }

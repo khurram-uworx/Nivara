@@ -210,6 +210,49 @@ public static class RagLearnMode
                 $"below {MinimumSignificantQueries}. Widen the label set for a headline comparison.");
         }
 
+        // Fixed baselines over both scopes (full usable set + held-out test split).
+        var fullSetFixed = new List<RankerResult>
+        {
+            RetrievalEvaluation.EvaluateFixed("fixed(default)", FusionWeights.Default, queries, topK),
+            RetrievalEvaluation.EvaluateFixed("fixed(content-only)", new FusionWeights(1f, 0f, 0f, 0f), queries, topK)
+        };
+        var fixedFullSet = fullSetFixed.ToDictionary(r => r.Name, r => r.Mean);
+        var fixedTestSplit = results.Where(r => r.Name.StartsWith("fixed", StringComparison.Ordinal))
+            .ToDictionary(r => r.Name, r => r.Mean);
+
+        var baselinePath = ctx.BaselinePath;
+        if (string.IsNullOrWhiteSpace(baselinePath))
+        {
+            var dir = Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval");
+            Directory.CreateDirectory(dir);
+            baselinePath = Path.Combine(dir, $"baseline-{ctx.Labels ?? "judge"}-s{ctx.Seed}-k{topK}.json");
+        }
+        else if (!Path.IsPathRooted(baselinePath))
+        {
+            baselinePath = Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", baselinePath);
+        }
+
+        var baseline = RetrievalBaseline.Create(
+            index.CorpusIdentity,
+            labels,
+            JudgePath(repoRoot),
+            ctx.Seed,
+            topK,
+            candidates,
+            split,
+            train.Count,
+            fixedFullSet,
+            fixedTestSplit);
+        try
+        {
+            RetrievalBaseline.Write(baselinePath, baseline);
+            Console.WriteLine($"  Baseline written to {baselinePath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  Baseline write failed: {ex.Message}");
+        }
+
         var reportPath = ResolveReportPath(ctx.ReportPath, repoRoot);
         WriteReport(reportPath, labels, options, topK, candidates, split, train.Count, parity, trainingBackend, results, comparisons, learnedWeights, gated, test, gateKind);
         Console.WriteLine();
