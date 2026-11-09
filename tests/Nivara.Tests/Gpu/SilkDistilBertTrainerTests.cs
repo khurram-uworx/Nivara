@@ -47,14 +47,14 @@ public sealed class SilkDistilBertTrainerTests
 
     static BertConfig TinyBertConfig() => TinyDistilConfig().ToBertConfig();
 
-    static (SilkRuntime runtime, SilkDistilBertTrainer trainer, DistilBertForSequenceClassification<float> model) Make()
+    static (SilkRuntime runtime, SilkDistilBertTrainer trainer, DistilBertForSequenceClassification<float> model) Make(int trainableLayerCount = -1)
     {
         var runtime = Device();
         var distilConfig = TinyDistilConfig();
         var config = distilConfig.ToBertConfig();
         var model = new DistilBertForSequenceClassification<float>(config, numClasses: 2);
         var tensors = model.ToSilkTensors();
-        var trainer = new SilkDistilBertTrainer(runtime, config, tensors, BertGpuNaming.DistilBert, maxBatch: 4, maxSeqLen: 16);
+        var trainer = new SilkDistilBertTrainer(runtime, config, tensors, BertGpuNaming.DistilBert, maxBatch: 4, maxSeqLen: 16, trainableLayerCount: trainableLayerCount);
         return (runtime, trainer, model);
     }
 
@@ -162,6 +162,127 @@ public sealed class SilkDistilBertTrainerTests
         var arr = new float[grad?.Length ?? 0];
         grad?.CopyTo(arr, 0.0f);
         return arr;
+    }
+
+    [Test]
+    public void Gradients_HeadOnly_MatchTrainableSubsetAndFrozenRemainZero()
+    {
+        var (runtime, trainer, model) = Make(0);
+        using (runtime)
+        using (trainer)
+        {
+            var rng = new Random(11);
+            int batch = 2;
+            int[] tokens = new int[batch * SeqLen];
+            float[] mask = new float[batch * SeqLen];
+            int[] labels = new int[batch];
+            for (int i = 0; i < tokens.Length; i++) { tokens[i] = rng.Next(Vocab); mask[i] = 1f; }
+            for (int i = 0; i < batch; i++) labels[i] = rng.Next(2);
+
+            var batchGradient = new float[batch * 2];
+            var deviceLogits = trainer.Forward(tokens, mask, batch, SeqLen);
+            SilkLoss.InputGradient(deviceLogits, labels, batch, 2, 1f / batch, batchGradient);
+            trainer.Backward(batch, SeqLen, batchGradient);
+            var deviceGrads = trainer.ExportGradients();
+
+            // CPU full reverse pass keeps every parameter trainable; compare only the head subset.
+            var tensors = model.ToSilkTensors();
+            var keys = new List<string>(tensors.Keys);
+            var cpuGrads = new Dictionary<string, float[]>(StringComparer.Ordinal);
+            using (var scope = GradientUtils.Grad())
+            {
+                var maskTensor = ReverseGradTensor<float>.FromArray(mask, requiresGrad: false);
+                var logits = model.Forward(tokens, maskTensor, batch, SeqLen);
+                var lossFn = new CrossEntropyLoss<float>();
+                var lossTensor = lossFn.Forward(logits, labels);
+                lossTensor.Backward();
+                var ps = model.GetParameters().Values.ToArray();
+                for (int i = 0; i < keys.Count; i++) cpuGrads[keys[i]] = GradOf(ps[i]);
+            }
+
+            foreach (var key in keys)
+            {
+                if (!deviceGrads.ContainsKey(key)) continue;
+                var dev = deviceGrads[key].Data;
+                var cpu = cpuGrads[key];
+                if (key.Contains("pre_classifier", StringComparison.Ordinal)
+                    || key.Contains("classifier", StringComparison.Ordinal))
+                {
+                    float localWorst = 0f;
+                    for (int i = 0; i < cpu.Length; i++)
+                        localWorst = Math.Max(localWorst, Math.Abs(dev[i] - cpu[i]));
+                    Assert.That(localWorst, Is.LessThan(GradEps), $"{key}: {localWorst}");
+                }
+                else
+                {
+                    float max = 0f;
+                    for (int i = 0; i < dev.Length; i++) max = Math.Max(max, Math.Abs(dev[i]));
+                    Assert.That(max, Is.LessThan(1e-12f), $"frozen param {key} has nonzero gradient {max}");
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void Gradients_TopOneLayer_MatchTrainableSubsetAndLowerLayersFrozen()
+    {
+        const int trainableLayerCount = 1;
+        var (runtime, trainer, model) = Make(trainableLayerCount);
+        using (runtime)
+        using (trainer)
+        {
+            var rng = new Random(11);
+            int batch = 2;
+            int[] tokens = new int[batch * SeqLen];
+            float[] mask = new float[batch * SeqLen];
+            int[] labels = new int[batch];
+            for (int i = 0; i < tokens.Length; i++) { tokens[i] = rng.Next(Vocab); mask[i] = 1f; }
+            for (int i = 0; i < batch; i++) labels[i] = rng.Next(2);
+
+            var batchGradient = new float[batch * 2];
+            var deviceLogits = trainer.Forward(tokens, mask, batch, SeqLen);
+            SilkLoss.InputGradient(deviceLogits, labels, batch, 2, 1f / batch, batchGradient);
+            trainer.Backward(batch, SeqLen, batchGradient);
+            var deviceGrads = trainer.ExportGradients();
+
+            var tensors = model.ToSilkTensors();
+            var keys = new List<string>(tensors.Keys);
+            var cpuGrads = new Dictionary<string, float[]>(StringComparer.Ordinal);
+            using (var scope = GradientUtils.Grad())
+            {
+                var maskTensor = ReverseGradTensor<float>.FromArray(mask, requiresGrad: false);
+                var logits = model.Forward(tokens, maskTensor, batch, SeqLen);
+                var lossFn = new CrossEntropyLoss<float>();
+                var lossTensor = lossFn.Forward(logits, labels);
+                lossTensor.Backward();
+                var ps = model.GetParameters().Values.ToArray();
+                for (int i = 0; i < keys.Count; i++) cpuGrads[keys[i]] = GradOf(ps[i]);
+            }
+
+            int trainableLayerIndex = Layers - 1;
+            foreach (var key in keys)
+            {
+                if (!deviceGrads.ContainsKey(key)) continue;
+                var dev = deviceGrads[key].Data;
+                var cpu = cpuGrads[key];
+                bool trainable = key.Contains("pre_classifier", StringComparison.Ordinal)
+                    || key.Contains("classifier", StringComparison.Ordinal)
+                    || key.Contains($"transformer.layer.{trainableLayerIndex}.", StringComparison.Ordinal);
+                if (trainable)
+                {
+                    float localWorst = 0f;
+                    for (int i = 0; i < cpu.Length; i++)
+                        localWorst = Math.Max(localWorst, Math.Abs(dev[i] - cpu[i]));
+                    Assert.That(localWorst, Is.LessThan(GradEps), $"{key}: {localWorst}");
+                }
+                else
+                {
+                    float max = 0f;
+                    for (int i = 0; i < dev.Length; i++) max = Math.Max(max, Math.Abs(dev[i]));
+                    Assert.That(max, Is.LessThan(1e-12f), $"frozen param {key} has nonzero gradient {max}");
+                }
+            }
+        }
     }
 
     [Test]
