@@ -14,7 +14,7 @@ public class SilkQwenParityTests
         try { using var probe = new SilkRuntime(); }
         catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
 
-        var (tensors, config) = SilkQwenTestWeights.Synthesize();
+        var (tensors, config) = QwenTestWeights.Synthesize();
         var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
 
         int[] prompt = [1, 2, 3, 4];
@@ -27,7 +27,7 @@ public class SilkQwenParityTests
         int cpuArgmax = ArgMax(cpuLast);
 
         using var session = SilkQwenSession.Open(
-            SilkQwenTestWeights.ToSilkConfig(config, 16), tensors);
+            QwenTestWeights.ToSilkConfig(config, 16), tensors);
         var silkLast = session.ForwardPrefill(prompt);
         int silkArgmax = ArgMax(silkLast);
 
@@ -51,7 +51,7 @@ public class SilkQwenParityTests
         try { using var probe = new SilkRuntime(); }
         catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
 
-        var (tensors, config) = SilkQwenTestWeights.Synthesize();
+        var (tensors, config) = QwenTestWeights.Synthesize();
         var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
 
         int[] prompt = [1, 2, 3, 4];
@@ -70,7 +70,7 @@ public class SilkQwenParityTests
             cpuStepLast[i] = cpuStep.Data[i];
 
         using var session = SilkQwenSession.Open(
-            SilkQwenTestWeights.ToSilkConfig(config, 16), tensors);
+            QwenTestWeights.ToSilkConfig(config, 16), tensors);
         var silkPrefill = session.ForwardPrefill(prompt);
         Assert.That(ArgMax(silkPrefill), Is.EqualTo(next),
             "prefill argmax must agree before the cached step can be compared");
