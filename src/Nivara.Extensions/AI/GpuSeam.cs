@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara.AI;
 
 /// <summary>
@@ -52,7 +54,25 @@ public delegate IModernBertGpuSession OpenModernBertSession(
     ModernBertConfig config,
     Dictionary<string, (float[] Data, int[] Shape)> tensors);
 
+public delegate IModernBertGpuSession OpenModernBertSessionBf16(
+    ModernBertConfig config,
+    Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors);
+
+public delegate IModernBertGpuSession OpenModernBertSessionFp16(
+    ModernBertConfig config,
+    Dictionary<string, (Half[] Data, int[] Shape)> tensors);
+
 public delegate ILayaGpuSession OpenLayaSession(
     ModernBertConfig config,
     Dictionary<string, (float[] Data, int[] Shape)> tensors,
+    int headLayerCount);
+
+public delegate ILayaGpuSession OpenLayaSessionBf16(
+    ModernBertConfig config,
+    Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
+    int headLayerCount);
+
+public delegate ILayaGpuSession OpenLayaSessionFp16(
+    ModernBertConfig config,
+    Dictionary<string, (Half[] Data, int[] Shape)> tensors,
     int headLayerCount);
