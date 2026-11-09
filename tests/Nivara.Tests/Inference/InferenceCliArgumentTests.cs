@@ -479,9 +479,9 @@ public class InferenceCliArgumentTests
     [
         (["mobilenet_v2", "--precision", "bf16"], "--precision bf16 is not supported for 'mobilenet_v2'"),
         (["mobilenet_v2", "--precision", "fp16", "benchmark"], "--precision fp16 is not supported for 'mobilenet_v2 benchmark'"),
-        
-        
-        
+
+
+
     ];
 
     static readonly string[][] AcceptedQwenCases =
