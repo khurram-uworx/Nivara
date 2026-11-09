@@ -31,6 +31,7 @@ dotnet run -c Release --project tests/Nivara.SimdProbe -- scalar       # Qwen de
 dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose    # #136 transpose A/B: tiled kernel vs BCL view+flatten
 dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api   # reading one row of a rank-2 Tensor<T> (docs fixes, #528)
 dotnet run -c Release --project tests/Nivara.SimdProbe -- chunked-arrow # per-column Arrow chunk counts (issue #862)
+dotnet run -c Release --project tests/Nivara.SimdProbe -- metrics       # classification counting: hash vs dense/marginal (issue #1067)
 dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
