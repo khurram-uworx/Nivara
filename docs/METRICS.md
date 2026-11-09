@@ -20,9 +20,13 @@ library; it reuses the column kernels and `TensorPrimitives`.
 
 Classification requires both columns to have the same `ElementType` and a comparable label
 type. Regression accepts two different numeric element types and converts both to `double`.
-Every method requires an `IColumn` that realises as `NivaraColumn<T>` — the only in-repo
-implementation, and what `Slice` returns — because the kernels work from the column's stored
-values and null mask rather than from the `IColumn` surface.
+Every method requires an `IColumn` that realises as `NivaraColumn<T>` - the only in-repo
+implementation, and what `Slice` returns - because the kernels work from the column's stored
+values and null mask rather than from the `IColumn` surface. The element type `T` must itself
+be non-nullable (`NivaraColumn<int>`, `NivaraColumn<double>`, and so on); null positions are
+carried in the separate null mask produced by `NivaraColumnFactory.CreateFromNullable<T>(...)`.
+A `NivaraColumn<T?>` whose nulls live inside its values is rejected with `ArgumentException`
+naming the parameter and `CreateFromNullable`.
 
 ## The null rule
 
