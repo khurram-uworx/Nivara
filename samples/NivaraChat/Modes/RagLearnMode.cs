@@ -13,7 +13,7 @@ namespace NivaraChat.Modes;
 public static class RagLearnMode
 {
     /// <summary>Below this share of resolved label rows the grade file no longer describes this corpus.</summary>
-    public const double MinimumLabelCoverage = 0.5;
+    public const double MinimumLabelCoverage = RetrievalLabels.MinimumCoverage;
 
     /// <summary>Two fusion implementations that disagree by more than this are not the same formula.</summary>
     public const double ParityTolerance = 1e-5;
@@ -46,11 +46,12 @@ public static class RagLearnMode
             return;
 
         PrintLabels(labels, index.Chunks.Count);
-        if (labels.Coverage < MinimumLabelCoverage)
+        if (!RetrievalLabels.Accepts(labels))
         {
             Console.WriteLine();
-            Console.WriteLine($"Refusing to train: only {labels.Coverage:P1} of label rows resolve against this corpus");
-            Console.WriteLine($"(minimum {MinimumLabelCoverage:P0}). Re-run the judge, or use --labels fixture.");
+            Console.WriteLine($"REFUSED: only {labels.Coverage:P1} of label rows resolve against this corpus");
+            Console.WriteLine($"(minimum {MinimumLabelCoverage:P0}). Re-run the judge, or use --labels auto.");
+            Environment.ExitCode = 2;
             return;
         }
 
@@ -209,6 +210,49 @@ public static class RagLearnMode
                 $"below {MinimumSignificantQueries}. Widen the label set for a headline comparison.");
         }
 
+        // Fixed baselines over both scopes (full usable set + held-out test split).
+        var fullSetFixed = new List<RankerResult>
+        {
+            RetrievalEvaluation.EvaluateFixed("fixed(default)", FusionWeights.Default, queries, topK),
+            RetrievalEvaluation.EvaluateFixed("fixed(content-only)", new FusionWeights(1f, 0f, 0f, 0f), queries, topK)
+        };
+        var fixedFullSet = fullSetFixed.ToDictionary(r => r.Name, r => r.Mean);
+        var fixedTestSplit = results.Where(r => r.Name.StartsWith("fixed", StringComparison.Ordinal))
+            .ToDictionary(r => r.Name, r => r.Mean);
+
+        var baselinePath = ctx.BaselinePath;
+        if (string.IsNullOrWhiteSpace(baselinePath))
+        {
+            var dir = Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval");
+            Directory.CreateDirectory(dir);
+            baselinePath = Path.Combine(dir, $"baseline-{ctx.Labels ?? "judge"}-s{ctx.Seed}-k{topK}.json");
+        }
+        else if (!Path.IsPathRooted(baselinePath))
+        {
+            baselinePath = Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", baselinePath);
+        }
+
+        var baseline = RetrievalBaseline.Create(
+            index.CorpusIdentity,
+            labels,
+            JudgePath(repoRoot),
+            ctx.Seed,
+            topK,
+            candidates,
+            split,
+            train.Count,
+            fixedFullSet,
+            fixedTestSplit);
+        try
+        {
+            RetrievalBaseline.Write(baselinePath, baseline);
+            Console.WriteLine($"  Baseline written to {baselinePath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  Baseline write failed: {ex.Message}");
+        }
+
         var reportPath = ResolveReportPath(ctx.ReportPath, repoRoot);
         WriteReport(reportPath, labels, options, topK, candidates, split, train.Count, parity, trainingBackend, results, comparisons, learnedWeights, gated, test, gateKind);
         Console.WriteLine();
@@ -280,7 +324,25 @@ public static class RagLearnMode
 
     static ResolvedLabels? LoadLabels(ModeContext ctx, string repoRoot, MultiViewIndex index)
     {
-        var kind = ParseLabelKind(ctx.Labels, repoRoot);
+        bool judgeExists;
+        try { judgeExists = File.Exists(JudgePath(repoRoot)); }
+        catch { judgeExists = false; }
+
+        LabelKind kind;
+        try
+        {
+            kind = RetrievalLabels.SelectSource(ctx.Labels, judgeExists);
+        }
+        catch (ArgumentException ex)
+        {
+            Console.WriteLine(ex.Message);
+            if (!judgeExists)
+            {
+                Console.WriteLine("Generate them with:");
+                Console.WriteLine("  dotnet run --project samples/NivaraChat -c Release -- --rag-eval --ollama --model <model>");
+            }
+            return null;
+        }
 
         switch (kind)
         {
@@ -290,7 +352,10 @@ public static class RagLearnMode
                     var cache = RagEvalLabels.Load(path);
                     if (cache.Count == 0)
                     {
-                        Console.WriteLine($"No judge labels at {path}. Re-run --rag-eval --ollama, or use --labels fixture.");
+                        Console.WriteLine($"No judge labels at {path}.");
+                        Console.WriteLine("Generate them with:");
+                        Console.WriteLine("  dotnet run --project samples/NivaraChat -c Release -- --rag-eval --ollama --model <model>");
+                        Console.WriteLine("or pass --labels auto for a leakage diagnostic.");
                         return null;
                     }
 
@@ -298,21 +363,6 @@ public static class RagLearnMode
                         entry.Key,
                         entry.Value.ToDictionary(item => item.Key, item => item.Value.Grade, StringComparer.Ordinal)));
                     return RetrievalLabels.Resolve(LabelKind.Judge, index.Chunks, grades);
-                }
-
-            case LabelKind.Fixture:
-                {
-                    var path = FixturePath(repoRoot);
-                    var fixture = RetrievalLabels.LoadFixture(path);
-                    if (fixture.Count == 0)
-                    {
-                        Console.WriteLine($"No fixture labels at {path}.");
-                        return null;
-                    }
-
-                    var grades = fixture.Select(entry => new KeyValuePair<string, IReadOnlyDictionary<string, int>>(
-                        entry.Key, entry.Value));
-                    return RetrievalLabels.Resolve(LabelKind.Fixture, index.Chunks, grades);
                 }
 
             default:
@@ -443,18 +493,7 @@ public static class RagLearnMode
             .Select(view => $"{(ViewSpace)view}={weights[view]:0.000}"));
 
     static LabelKind ParseLabelKind(string? value, string repoRoot)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return File.Exists(JudgePath(repoRoot)) ? LabelKind.Judge : LabelKind.Fixture;
-
-        return value.Trim().ToLowerInvariant() switch
-        {
-            "judge" => LabelKind.Judge,
-            "fixture" => LabelKind.Fixture,
-            "auto" => LabelKind.Auto,
-            _ => throw new ArgumentException($"Unknown --labels value '{value}'. Expected judge, fixture or auto.")
-        };
-    }
+        => RetrievalLabels.SelectSource(value, File.Exists(JudgePath(repoRoot)));
 
     static GateFeatureKind? ParseGate(string? value)
     {
@@ -490,7 +529,7 @@ public static class RagLearnMode
         Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "relevance.tsv");
 
     static string FixturePath(string repoRoot) =>
-        Path.Combine(repoRoot, "samples", "NivaraChat", "relevance-fixture.tsv");
+        Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "relevance-fixture.tsv");
 
     static string QueriesPath(ModeContext ctx, string repoRoot)
     {
@@ -500,6 +539,7 @@ public static class RagLearnMode
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "queries.tsv"),
+            Path.Combine(repoRoot, "samples", "data", "nivarachat", "queries.tsv"),
             Path.Combine(repoRoot, "samples", "NivaraChat", "queries.tsv")
         };
 

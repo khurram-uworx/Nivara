@@ -14,6 +14,8 @@
 
 This environment has GNU coreutils at `C:\Program Files\coreutils\bin\` on PATH. Most Linux commands work directly (`grep`, `find`, `touch`, `sort`, `head`, `tail`, `wc`, `cat`, `ls`, `rm`, `mv`, `cp`). PowerShell aliases map `rm`/`mv`/`cp`/`cat`/`ls` to their PowerShell cmdlet equivalents, which behave similarly for basic file operations. Use normal command syntax — avoid verbose PowerShell idioms like `Remove-Item -LiteralPath`.
 
+**Do not redirect output to `/dev/null`.** There is no `/dev/null` on Windows; `> /dev/null` (and `2>/dev/null`) either creates a literal file named `nul`/`dev` or fails. To discard output, use `Out-Null` (PowerShell) or omit the redirection entirely; GNU coreutils commands usually print nothing unless asked. Prefer the tool's own quiet flags (e.g. `--quiet`) over shell redirection.
+
 **GitHub CLI body gotcha:** Always write issue/PR bodies to a temp file and use `--body-file` instead of inline `--body`. PowerShell interprets backslash sequences in double-quoted strings (e.g., `\t` → tab, `\n` → newline), and special characters (backticks, quotes, backslashes) silently break or truncate `gh` inline bodies. This applies to `gh issue create`, `gh issue comment`, `gh pr create`, and `gh pr edit`. Pattern:
 ```
 write the body to a temp file → gh issue comment N --repo ... --body-file /path/to/file.md

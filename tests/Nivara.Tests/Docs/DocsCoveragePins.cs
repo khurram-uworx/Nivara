@@ -33,7 +33,7 @@ internal static class DocsCoveragePins
     /// documents, <c>RAG-LLM-EVAL.md</c> and <c>CRAZY-ROADMAP.md</c> moved into <c>docs/plan/</c>,
     /// plus the new <c>NIVARACHAT-EVALS.md</c>).
     /// </remarks>
-    internal const int ExpectedDocumentCount = 55;
+    internal const int ExpectedDocumentCount = 56;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -44,5 +44,5 @@ internal static class DocsCoveragePins
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 238;
+    internal const int ExpectedDocumentReferenceCount = 241;
 }

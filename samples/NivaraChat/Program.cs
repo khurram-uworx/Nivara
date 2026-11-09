@@ -48,6 +48,9 @@ if (args.Length > 0)
     int seed = 42;
     int trainQueries = 0;
     int? evalK = null;
+    string? baselinePath = null;
+    string? regenerate = null;
+    bool force = false;
     for (int i = 1; i < args.Length; i++)
     {
         if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
@@ -85,6 +88,9 @@ if (args.Length > 0)
         if (args[i] == "--seed" && i + 1 < args.Length) seed = int.Parse(args[++i]);
         if (args[i] == "--train-queries" && i + 1 < args.Length) trainQueries = int.Parse(args[++i]);
         if (args[i] == "--k" && i + 1 < args.Length) evalK = int.Parse(args[++i]);
+        if (args[i] == "--baseline" && i + 1 < args.Length) baselinePath = args[++i];
+        if (args[i] == "--regenerate" && i + 1 < args.Length) regenerate = args[++i];
+        if (args[i] == "--force") force = true;
     }
 
     var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights, offline, runs, temperature, gradeAll, verbose, queries)
@@ -99,7 +105,10 @@ if (args.Length > 0)
         Candidates = candidates,
         Seed = seed,
         TrainQueries = trainQueries,
-        EvalK = evalK
+        EvalK = evalK,
+        BaselinePath = baselinePath,
+        Regenerate = regenerate,
+        Force = force
     };
     switch (mode)
     {

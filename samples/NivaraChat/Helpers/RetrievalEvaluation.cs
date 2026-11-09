@@ -224,6 +224,77 @@ public static class RetrievalEvaluation
     }
 }
 
+/// <summary>Structured, byte-stable record of a fixed-vs-baseline evaluation run.</summary>
+public sealed record RetrievalBaseline(
+    int SchemaVersion,
+    CorpusIdentity Corpus,
+    string LabelKind,
+    string LabelDescription,
+    string SourcePath,
+    int MatchedLabelRows,
+    int TotalLabelRows,
+    double Coverage,
+    bool IsComplete,
+    int Seed,
+    int K,
+    int Candidates,
+    int TrainCount,
+    int ValidationCount,
+    int TestCount,
+    IReadOnlyDictionary<string, RankerMetrics> FixedFullSet,
+    IReadOnlyDictionary<string, RankerMetrics> FixedTestSplit)
+{
+    public const int CurrentSchemaVersion = 1;
+
+    public static RetrievalBaseline Create(
+        CorpusIdentity corpus,
+        ResolvedLabels labels,
+        string sourcePath,
+        int seed,
+        int k,
+        int candidates,
+        QuerySplit split,
+        int trainCount,
+        IReadOnlyDictionary<string, RankerMetrics> fixedFullSet,
+        IReadOnlyDictionary<string, RankerMetrics> fixedTestSplit)
+        => new(
+            CurrentSchemaVersion,
+            corpus,
+            labels.Kind.ToString().ToLowerInvariant(),
+            labels.Description,
+            sourcePath,
+            labels.MatchedLabelRows,
+            labels.TotalLabelRows,
+            labels.Coverage,
+            labels.IsComplete,
+            seed,
+            k,
+            candidates,
+            trainCount,
+            split.Validation.Count,
+            split.Test.Count,
+            fixedFullSet,
+            fixedTestSplit);
+
+    public static void Write(string path, RetrievalBaseline baseline)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(baseline);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+        var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+        File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(baseline, options));
+    }
+
+    public static RetrievalBaseline Read(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        var json = File.ReadAllText(path);
+        return System.Text.Json.JsonSerializer.Deserialize<RetrievalBaseline>(json)!;
+    }
+}
+
 /// <summary>
 /// Challenger vs baseline on paired NDCG. The sign test answers "is the direction consistent" and
 /// Cohen's d answers "how large", so neither a tiny consistent win nor a large noisy one is mistaken

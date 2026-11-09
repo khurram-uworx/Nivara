@@ -141,7 +141,8 @@ public sealed class RagIndex : IDisposable
 
         var repoRoot = ModeHelpers.GetRepoRoot();
         var resolvedDocsDir = ctx.DocsDir ?? Path.Combine(repoRoot, "docs");
-        var mdFiles = DocCorpus.EnumerateMarkdownFiles(resolvedDocsDir, repoRoot).ToArray();
+        var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
+        var mdFiles = MultiViewIndex.DiscoverCorpusFiles(resolvedDocsDir, readmePath).ToArray();
 
         if (mdFiles.Length == 0)
         {

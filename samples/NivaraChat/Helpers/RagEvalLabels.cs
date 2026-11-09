@@ -46,13 +46,16 @@ public static class RagEvalLabels
         return result;
     }
 
-    public static void Save(string path, IReadOnlyDictionary<string, Dictionary<string, LabelResult>> labels)
+    public static void Save(string path, IReadOnlyDictionary<string, Dictionary<string, LabelResult>> labels, string? provenanceHeader = null)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
         var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(provenanceHeader))
+            lines.Add(provenanceHeader.TrimStart().StartsWith("#") ? provenanceHeader : "# " + provenanceHeader);
+
         foreach (var query in labels.Keys.OrderBy(q => q, StringComparer.Ordinal))
         {
             foreach (var chunk in labels[query].Keys.OrderBy(c => c, StringComparer.Ordinal))
@@ -67,6 +70,6 @@ public static class RagEvalLabels
             }
         }
 
-        File.WriteAllLines(path, lines);
+        File.WriteAllText(path, string.Join("\n", lines) + (lines.Count > 0 ? "\n" : string.Empty), new System.Text.UTF8Encoding(false));
     }
 }

@@ -41,4 +41,7 @@ public sealed record ModeContext(
     int Candidates = 0,
     int Seed = 42,
     int TrainQueries = 0,
-    int? EvalK = null);
+    int? EvalK = null,
+    string? BaselinePath = null,
+    string? Regenerate = null,
+    bool Force = false);

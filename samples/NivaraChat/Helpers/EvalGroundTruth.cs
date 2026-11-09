@@ -98,9 +98,17 @@ public static class EvalGroundTruth
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        var lines = queries.Select(q =>
+        var ordered = queries
+            .OrderBy(q => q.Query, StringComparer.Ordinal)
+            .Select(q => new EvalQuery(
+                q.Query,
+                q.Relevant.OrderBy(r => r.Key, StringComparer.Ordinal).ToDictionary(r => r.Key, r => r.Value, StringComparer.Ordinal),
+                q.Notes))
+            .ToList();
+
+        var lines = ordered.Select(q =>
             q.Query + "\t" + string.Join(",", q.Relevant.Select(r => r.Value == 1 ? r.Key : $"{r.Key}:{r.Value}")) + "\t" + q.Notes);
 
-        File.WriteAllLines(path, lines);
+        File.WriteAllText(path, string.Join("\n", lines) + (lines.Any() ? "\n" : string.Empty), new System.Text.UTF8Encoding(false));
     }
 }
