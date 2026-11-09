@@ -47,8 +47,8 @@ Out of scope (deferred, tracked issues):
 
 ## GitHub issues log
 
-- [ ] (to be created) #? - defer activation-level BF16 Laya head kernels
-- [ ] (to be created) #? - defer BF16 Silk training lane (optimizer moments in FP32)
+- [x] #1102 - defer activation-level BF16 Laya head kernels
+- [x] #1103 - defer BF16 Silk training lane (optimizer moments in FP32)
 
 ## Blast radius
 
