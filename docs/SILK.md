@@ -822,6 +822,30 @@ per work item as the leading attention contributor (issue #1002), but LN/fc GEMM
 and the attention backward as a whole (748 ms) dominate even more. The forward pass (316.6 ms)
 and AdamW (60.6 ms) are the next targets; softmax-cross-entropy input gradient on device is ~0.05 ms.
 
+### Partial/frozen training (#1012)
+
+`SilkDistilBertTrainer` supports opt-in partial/frozen training via `trainableLayerCount`
+(default `-1`, meaning all layers):
+
+- `0` trains only the classifier/pre-classifier head.
+- `N` trains the top `N` transformer layers plus the head.
+- values are clamped to `[0, NumHiddenLayers]`.
+
+The constructor also accepts `freezeEncoder: true`, equivalent to
+`trainableLayerCount: 0`. The CLI sample exposes this as `--trainable-layers`.
+
+Frozen layers (and frozen embeddings in any partial mode) keep their checkpoint value
+buffers, but backward accumulation and the AdamW step skip them:
+`AdamUpdateAll` and `ZeroMoments` iterate only `SilkParam.Trainable` values. When only
+a top-N suffix is trainable, embedding and lower-layer backpropagation are skipped as
+well. Head gradients are compared against a CPU reverse-mode pass for head-only and
+top-one-layer cases in `SilkDistilBertTrainerTests`.
+
+For Laya, which trains its decision head with AutoDiff on frozen ModernBERT features,
+keep encoder-derived features outside the gradient path (`requiresGrad: false` where
+applicable). Nivara does not currently ship a Silk Laya trainer; the same top-down
+freeze policy is intended to reuse for a future Laya head-training path.
+
 ## 13f. Retrieval fusion (`RagLearnMode`, #915)
 
 `SilkRetrievalTrainer` (`samples/NivaraChat/Helpers/SilkRetrievalTrainer.cs`) trains the
