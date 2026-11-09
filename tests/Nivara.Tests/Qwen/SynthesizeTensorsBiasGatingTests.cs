@@ -11,6 +11,7 @@ namespace Nivara.Tests.Qwen;
 /// <see cref="LlamaLoader"/> with the matching <c>qkvBias</c>.
 /// </summary>
 [TestFixture]
+[Category("CliEndToEnd")]
 public class SynthesizeTensorsBiasGatingTests
 {
     static LlamaConfig SmolLMConfig() => new()
