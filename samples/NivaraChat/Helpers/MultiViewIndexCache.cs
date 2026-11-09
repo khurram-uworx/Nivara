@@ -109,7 +109,7 @@ public static class MultiViewIndexCache
             if (manifestChunkSize != chunkSize) return false;
             var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
             if (m.DocsMaxMtime != maxMtime) return false;
-            var contentHash = RagIndexCache.ComputeContentHash(mdFiles);
+            var contentHash = RagIndexCache.ComputeContentHash(mdFiles, Directory.GetParent(docsDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))?.FullName);
             if (!string.Equals(m.ContentHash, contentHash, StringComparison.Ordinal)) return false;
 
             // The manifest must agree with the persisted footer in both directions: the row count,

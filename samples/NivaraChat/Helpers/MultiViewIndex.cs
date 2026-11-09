@@ -28,18 +28,24 @@ public sealed class MultiViewIndex : IDisposable
     readonly MultiViewMatrices matrices;
     readonly int[] viewCounts;
 
+    public CorpusIdentity CorpusIdentity { get; }
+
     MultiViewIndex(
         MiniLMEmbedder.Handle embedder,
         List<MultiViewChunk> chunks,
         NivaraFrame metadata,
-        MultiViewMatrices matrices)
+        MultiViewMatrices matrices,
+        CorpusIdentity corpusIdentity)
     {
         this.embedder = embedder;
         this.chunks = chunks;
         this.metadata = metadata;
         this.matrices = matrices;
         viewCounts = s_views.Select(view => CountPresent(metadata, view.Column)).ToArray();
+        CorpusIdentity = corpusIdentity;
     }
+
+    public CorpusIdentity Identity => CorpusIdentity;
 
     /// <summary>Embedding dimension of the loaded model.</summary>
     public int Dimension => embedder.Dimension;
@@ -127,7 +133,8 @@ public sealed class MultiViewIndex : IDisposable
 
         var repoRoot = ModeHelpers.GetRepoRoot();
         var resolvedDocsDir = ctx.DocsDir ?? Path.Combine(repoRoot, "docs");
-        var mdFiles = DocCorpus.EnumerateMarkdownFiles(resolvedDocsDir, repoRoot).ToArray();
+        var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
+        var mdFiles = MultiViewIndex.DiscoverCorpusFiles(resolvedDocsDir, readmePath).ToArray();
 
         if (mdFiles.Length == 0)
         {
@@ -231,7 +238,24 @@ public sealed class MultiViewIndex : IDisposable
                 matrices = MultiViewMatrices.Create(metadata, embedder.Dimension);
             }
 
-            return new MultiViewIndex(embedder, chunks, metadata, matrices);
+            var contentHash = RagIndexCache.ComputeContentHash(mdFiles, repoRoot);
+            var docsDirRelative = resolvedDocsDir.StartsWith(repoRoot, StringComparison.OrdinalIgnoreCase)
+                ? Path.GetRelativePath(repoRoot, resolvedDocsDir)
+                : resolvedDocsDir;
+            var identity = new CorpusIdentity(
+                contentHash,
+                mdFiles.Length,
+                chunks.Count,
+                MultiViewIndexCache.ChunkerVersion,
+                ctx.ChunkSize,
+                docsDirRelative,
+                ctx.UseSilk ? "silk" : "cpu",
+                embedder.Dimension);
+
+            Console.WriteLine($"  Corpus:      {identity.FileCount} files, {identity.ChunkCount} chunks, chunker {identity.ChunkerVersion}, chunk size {identity.ChunkSize}");
+            Console.WriteLine($"  Content hash: {identity.ContentHash}  backend: {identity.Backend}  dimension: {identity.Dimension}");
+
+            return new MultiViewIndex(embedder, chunks, metadata, matrices, identity);
         }
         catch
         {
@@ -322,6 +346,23 @@ public sealed class MultiViewIndex : IDisposable
         return true;
     }
 
+    public static IReadOnlyList<string> DiscoverCorpusFiles(string docsDir, string readmePath)
+    {
+        var files = new List<string>();
+        if (Directory.Exists(docsDir))
+        {
+            files.AddRange(Directory
+                .GetFiles(docsDir, "*.md", SearchOption.AllDirectories)
+                .Where(path => !DocCorpus.IsPlanDocument(docsDir, path)));
+        }
+
+        if (File.Exists(readmePath))
+            files.Add(readmePath);
+
+        files.Sort(StringComparer.Ordinal);
+        return files;
+    }
+
     public void Dispose() => embedder.Dispose();
 
     static int IndexOf(List<string> texts, Dictionary<string, int> lookup, string? text)
@@ -397,3 +438,14 @@ public sealed class MultiViewIndex : IDisposable
         return present;
     }
 }
+
+/// <summary>Stable identity of a built corpus + chunker + backend.</summary>
+public sealed record CorpusIdentity(
+    string ContentHash,
+    int FileCount,
+    int ChunkCount,
+    string ChunkerVersion,
+    int ChunkSize,
+    string DocsDir,
+    string Backend,
+    int Dimension);

@@ -30,17 +30,41 @@ public static class RagIndexCache
         return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
     }
 
-    public static string ComputeContentHash(IEnumerable<string> mdFiles)
+    public static string ComputeContentHash(IEnumerable<string> mdFiles, string? repoRoot = null)
     {
         using var sha = SHA256.Create();
-        foreach (var f in mdFiles ?? [])
+        var root = repoRoot ?? string.Empty;
+        var ordered = (mdFiles ?? []).OrderBy(f => RelativePath(f, root), StringComparer.Ordinal).ToList();
+        foreach (var f in ordered)
         {
+            var relative = RelativePath(f, root);
+            var relativeBytes = Encoding.UTF8.GetBytes(relative);
+            if (relativeBytes.Length > 0)
+                sha.TransformBlock(relativeBytes, 0, relativeBytes.Length, null, 0);
+            var separator = new byte[] { 0 };
+            sha.TransformBlock(separator, 0, separator.Length, null, 0);
+
             var bytes = File.ReadAllBytes(f);
             if (bytes.Length > 0)
                 sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
+            sha.TransformBlock(separator, 0, separator.Length, null, 0);
         }
         sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
+    }
+
+    static string RelativePath(string file, string repoRoot)
+    {
+        if (string.IsNullOrEmpty(repoRoot))
+            return Path.GetFileName(file);
+        try
+        {
+            return Path.GetRelativePath(repoRoot, file);
+        }
+        catch
+        {
+            return file;
+        }
     }
 
     public static string DefaultPath(string docsDir, bool useSilk, int chunkSize = 500)
@@ -57,7 +81,7 @@ public static class RagIndexCache
         return DefaultPath(docsDir, ctx.UseSilk, ctx.ChunkSize);
     }
 
-    public static bool IsValid(string indexPath, string docsDir, List<string> mdFiles, bool useSilk, int chunkSize = 500)
+    public static bool IsValid(string indexPath, string docsDir, List<string> mdFiles, bool useSilk, int chunkSize = 500, string? repoRoot = null)
     {
         if (!File.Exists(indexPath)) return false;
         var manifestPath = indexPath + ".manifest.json";
@@ -77,7 +101,7 @@ public static class RagIndexCache
             if (manifestChunkSize != chunkSize) return false;
             var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
             if (m.DocsMaxMtime != maxMtime) return false;
-            var contentHash = ComputeContentHash(mdFiles);
+            var contentHash = ComputeContentHash(mdFiles, repoRoot ?? Path.GetDirectoryName(docsDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
             if (!string.Equals(m.ContentHash, contentHash, StringComparison.Ordinal)) return false;
             // chunk-count + dimension check: the manifest must agree with the persisted
             // Parquet footer (row count and number of E* dimension columns). Reading only
@@ -99,9 +123,9 @@ public static class RagIndexCache
         }
     }
 
-    public static void Save(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension, int chunkSize = 500)
-        => TrySave(indexPath, vectorFrame, docsDir, mdFiles, useSilk, dimension, chunkSize);
-    public static bool TrySave(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension, int chunkSize = 500)
+    public static void Save(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension, int chunkSize = 500, string? repoRoot = null)
+        => TrySave(indexPath, vectorFrame, docsDir, mdFiles, useSilk, dimension, chunkSize, repoRoot);
+    public static bool TrySave(string indexPath, NivaraFrame vectorFrame, string docsDir, List<string> mdFiles, bool useSilk, int dimension, int chunkSize = 500, string? repoRoot = null)
     {
         var matrix = vectorFrame.ToEmbeddingMatrix("Embedding");
         var cols = new List<(string Name, IColumn)>();
@@ -119,7 +143,7 @@ public static class RagIndexCache
         }
         var saveFrame = NivaraFrame.Create(cols.ToArray());
         var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
-        var contentHash = ComputeContentHash(mdFiles);
+        var contentHash = ComputeContentHash(mdFiles, repoRoot ?? Path.GetDirectoryName(docsDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
         var manifest = new Manifest(useSilk ? "silk" : "cpu", dimension, vectorFrame.RowCount, maxMtime, docsDir, contentHash, SchemaVersion, chunkSize);
         var directory = Path.GetDirectoryName(indexPath);
         if (!string.IsNullOrEmpty(directory))
