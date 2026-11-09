@@ -56,10 +56,12 @@ internal static class DocsCoveragePins
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
     /// <remarks>
-    /// #868 adds twelve markdown references — five in <c>docs/METRICS.md</c>, two in
+    /// #868 adds twelve markdown references - five in <c>docs/METRICS.md</c>, two in
     /// <c>docs/TENSORS.md</c>, two in <c>README.md</c> (the capability bullet and the documentation
-    /// index), two in <c>AGENTS.md</c> (link text and target) — plus one in a source comment
+    /// index), two in <c>AGENTS.md</c> (link text and target) - plus one in a source comment
     /// (<c>NivaraMetrics.cs</c> names <c>docs/METRICS.md</c>): 241 + 12 = 253.
+    /// Issue #1060 adds one more in <c>tests/Nivara.PerformanceTests/README.md</c> (the new
+    /// <c>--metrics</c> mode documents the O(k²) warning in <c>docs/METRICS.md</c>): 253 + 1 = 254.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 253;
+    internal const int ExpectedDocumentReferenceCount = 254;
 }
