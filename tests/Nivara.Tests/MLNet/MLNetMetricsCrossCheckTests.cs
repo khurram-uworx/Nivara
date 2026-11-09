@@ -23,12 +23,12 @@ public class MLNetMetricsCrossCheckTests
         var predictedList = new List<int>();
         var actualList = new List<int>();
         for (int p = 0; p < 3; p++)
-        for (int a = 0; a < 3; a++)
-        for (int k = 0; k < confusion[p, a]; k++)
-        {
-            predictedList.Add(p);
-            actualList.Add(a);
-        }
+            for (int a = 0; a < 3; a++)
+                for (int k = 0; k < confusion[p, a]; k++)
+                {
+                    predictedList.Add(p);
+                    actualList.Add(a);
+                }
 
         var predicted = NivaraColumn<int>.Create(predictedList.ToArray());
         var actual = NivaraColumn<int>.Create(actualList.ToArray());
@@ -54,12 +54,12 @@ public class MLNetMetricsCrossCheckTests
         // Nivara stores predicted in rows, actual in columns.
         // ML.NET ConfusionMatrix.Counts stores actual in rows, predicted in columns.
         for (int p = 0; p < classes; p++)
-        for (int a = 0; a < classes; a++)
-        {
-            long nivaraCell = frame.GetColumn<long>($"Actual:{a}")[p];
-            long mlCell = (long)ml.ConfusionMatrix.Counts[a][p];
-            Assert.That(mlCell, Is.EqualTo(nivaraCell));
-        }
+            for (int a = 0; a < classes; a++)
+            {
+                long nivaraCell = frame.GetColumn<long>($"Actual:{a}")[p];
+                long mlCell = (long)ml.ConfusionMatrix.Counts[a][p];
+                Assert.That(mlCell, Is.EqualTo(nivaraCell));
+            }
 
         long totalCorrect = 0;
         long totalSupport = 0;
