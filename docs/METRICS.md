@@ -33,9 +33,15 @@ class. The rule follows the storage layer's null-mask contract: storage stays nu
 each consumer decides what a null means, so AutoDiff throws at its domain boundary
 (`docs/adr/001-autodiff-nonnullable-domain.md`) while metrics excludes the pair.
 
-Zero valid pairs throws `ArgumentException`; a metric is never quietly `NaN`. An undefined
-*per-class* metric is null instead of zero, because zero is a real value and would be read
-as a failed class:
+Zero valid pairs throws `ArgumentException`. Regression also rejects a non-finite value
+(`NaN`, `+∞` or `-∞`) in a non-null cell up front, throwing `ArgumentException` that names
+the offending row and column, so a summary frame is never quietly `NaN`. Classification
+keeps labels opaque: a `double.NaN` label hashes equal to itself and becomes the class
+`Actual:NaN`, and the default comparer orders it before every other label, which is the
+standard .NET ordering.
+
+An undefined *per-class* metric is null instead of zero, because zero is a real value and
+would be read as a failed class:
 
 | Situation | Result |
 | --- | --- |
@@ -44,6 +50,8 @@ as a failed class:
 | `Precision` or `Recall` null, or both are `0` | `F1` null |
 | Constant target, every residual `0` | `R2 = 1.0` |
 | Constant target, any non-zero residual | `R2 = 0.0` |
+| Non-finite regression input (`NaN`, `+∞`, `-∞`) in a non-null cell | `ArgumentException` naming the row and column |
+| `double.NaN` classification label | class named `Actual:NaN`, ordered before every other label |
 
 ## Reading the confusion matrix
 
@@ -84,6 +92,9 @@ population and is available from the confusion matrix frame as
 `R2 = 1 − SS_res / SS_tot` with `SS_tot = Σ(actual − mean(actual))²`. Because `R2` uses
 sums of squares, a prediction that is genuinely worse than the mean is negative — that is
 the definition, not a bug, and it is reported as-is.
+
+Every input value must be finite: a `NaN`, `+∞` or `-∞` in a non-null cell raises
+`ArgumentException` instead of flowing into `Mae`, `Mse`, `Rmse` or `R2`.
 
 Accumulation is in `double` regardless of the input element type: summing thousands of
 `float` residuals loses precision against a hand-computed reference, and the frame has one
