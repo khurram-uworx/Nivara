@@ -7,8 +7,10 @@ using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
+using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Storage;
+using NivaraInference;
 using Nivara.Tensors;
 using System.Diagnostics;
 using System.Numerics.Tensors;
@@ -30,6 +32,10 @@ static class Program
 
     static int Main(string[] args)
     {
+        if (args.Any(a => a.Equals("--inference-compare", StringComparison.OrdinalIgnoreCase) ||
+                           a.Equals("--inference-compare-diag", StringComparison.OrdinalIgnoreCase)))
+            return InferenceCompareProbe.Run(args);
+
         if (args.Any(a => a.Equals("--qwen-decode-attn", StringComparison.OrdinalIgnoreCase)))
             return QwenDecodeAttentionProbe.Run();
 

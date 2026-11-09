@@ -707,7 +707,9 @@ per classifier, and the CPU-layout round trip exact.
   `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
   `benchmark`, `tools`, `distill`); `mobilenet_v2`, `resnet18`, and `modernbert` also carry
   `compare_diag`, which routes to the existing CPU/AutoDiff diagnostic path rather than to a Silk
-  runner (the Silk runners expose only final outputs). SmolLM and Qwen are causal decoders (not
+  runner (the Silk runners expose only final outputs). The visitor-facing sample CLI no longer
+  exposes `compare`/`compare_diag`; run them through the performance harness
+  (`--inference-compare` / `--inference-compare-diag`, issue #1097). SmolLM and Qwen are causal decoders (not
   encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
 - **Mutual exclusion no longer applies**: the old GPU flag was removed in 1.5.0, so `--silk` is now
   the only GPU backend and there is nothing to conflict with.

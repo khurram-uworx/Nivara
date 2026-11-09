@@ -627,11 +627,11 @@ class Program
                     var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
                     if (benchmark) return RunMobileNetV2SilkBenchmark(mobSilkTensors);
                     if (compare) return RunMobileNetV2SilkCompare(mobSilkTensors);
-                    if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
+                    if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "mobilenet_v2");
                     return RunMobileNetV2SilkInference(mobSilkTensors, mode);
                 }
-                if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
-                if (compare) return RunCompare(tensors, "mobilenet_v2");
+                if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "mobilenet_v2");
+                if (compare) return InferenceCompare.VisionCompare(tensors, "mobilenet_v2");
                 return benchmark ? RunMobileNetV2Benchmark(tensors) : RunMobileNetV2Inference(tensors, mode);
             case "resnet18":
                 if (useSilk)
@@ -639,11 +639,11 @@ class Program
                     var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
                     if (benchmark) return RunResNet18SilkBenchmark(resSilkTensors);
                     if (compare) return RunResNet18SilkCompare(resSilkTensors);
-                    if (compareDiag) return RunCompareDiag(tensors, "resnet18");
+                    if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "resnet18");
                     return RunResNet18SilkInference(resSilkTensors, mode);
                 }
-                if (compareDiag) return RunCompareDiag(tensors, "resnet18");
-                if (compare) return RunCompare(tensors, "resnet18");
+                if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "resnet18");
+                if (compare) return InferenceCompare.VisionCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             case "minilm":
                 if (useSilk)
@@ -1033,7 +1033,7 @@ class Program
         return 0;
     }
 
-    static int RunMobileNetV2SilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunMobileNetV2SilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         string inputPath = Path.Combine("samples", "data", "compare_input.bin");
         if (!File.Exists(inputPath))
@@ -1132,7 +1132,7 @@ class Program
         return 0;
     }
 
-    static int RunResNet18SilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunResNet18SilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         string inputPath = Path.Combine("samples", "data", "compare_input.bin");
         if (!File.Exists(inputPath))
@@ -1261,101 +1261,6 @@ class Program
         return input;
     }
 
-    static int RunCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelType)
-    {
-        string inputPath = Path.Combine("samples", "data", "compare_input.bin");
-        if (!File.Exists(inputPath))
-        {
-            Console.Error.WriteLine($"Input file not found: {inputPath}");
-            Console.Error.WriteLine("Run: python samples/NivaraInference/Python/generate_input.py");
-            return 1;
-        }
-
-        Console.WriteLine($"Reading input from {inputPath}...");
-        var rawBytes = File.ReadAllBytes(inputPath);
-        float[] inputData = new float[rawBytes.Length / 4];
-        Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
-        Console.WriteLine($"  {inputData.Length} floats, mean={TensorPrimitives.Average(inputData.AsSpan()):F6}");
-
-        var input = ReverseGradTensor<float>.FromMatrix(inputData, 1, 3 * 224 * 224);
-        input.Reshape(1, 3, 224, 224);
-
-        Module<float> model = modelType switch
-        {
-            "mobilenet_v2" => MobileNetV2.LoadWeights(tensors),
-            "resnet18" => ResNet18.LoadWeights(tensors),
-            _ => throw new ArgumentException($"Unknown model: {modelType}")
-        };
-
-        Console.WriteLine("Running forward pass...");
-        var sw = Stopwatch.StartNew();
-        var output = model.Forward(input);
-        sw.Stop();
-        Console.WriteLine($"Forward pass: {sw.ElapsedMilliseconds} ms");
-        Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
-
-        int numClasses = output.Shape[^1];
-        var logits = new float[numClasses];
-        output.Data.TryGetSpan(out var outSpan);
-        if (!outSpan.IsEmpty)
-            outSpan.CopyTo(logits);
-
-        Console.WriteLine($"Raw logits (first 10):");
-        Console.Write("  [");
-        for (int i = 0; i < Math.Min(10, numClasses); i++)
-        {
-            Console.Write($"{logits[i]:F6}");
-            if (i < 9) Console.Write(", ");
-        }
-        Console.WriteLine("]");
-
-        Console.WriteLine($"Logits stats: min={TensorPrimitives.Min(logits.AsSpan()):F6}, max={TensorPrimitives.Max(logits.AsSpan()):F6}, mean={TensorPrimitives.Average(logits.AsSpan()):F6}");
-
-        PrintTopK(output);
-
-        var logitsPath = Path.Combine("samples", "data", "compare_logits_cs.bin");
-        using (var fs = File.Create(logitsPath))
-            fs.Write(MemoryMarshal.AsBytes(logits.AsSpan()));
-        Console.WriteLine($"Saved logits to {logitsPath}");
-
-        return 0;
-    }
-
-    static int RunCompareDiag(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelType)
-    {
-        string inputPath = Path.Combine("samples", "data", "compare_input.bin");
-        if (!File.Exists(inputPath))
-        {
-            Console.Error.WriteLine($"Input file not found: {inputPath}");
-            return 1;
-        }
-
-        string diagDir = Path.Combine("samples", "data", "diag");
-        Directory.CreateDirectory(diagDir);
-
-        Console.WriteLine($"Reading input from {inputPath}...");
-        var rawBytes = File.ReadAllBytes(inputPath);
-        float[] inputData = new float[rawBytes.Length / 4];
-        Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
-        Console.WriteLine($"  {inputData.Length} floats, mean={TensorPrimitives.Average(inputData.AsSpan()):F6}");
-
-        var input = ReverseGradTensor<float>.FromMatrix(inputData, 1, 3 * 224 * 224);
-        input.Reshape(1, 3, 224, 224);
-
-        if (modelType == "resnet18")
-            RunResNet18Diag(tensors, input, diagDir);
-        else if (modelType == "mobilenet_v2")
-            RunMobileNetV2Diag(tensors, input, diagDir);
-        else
-        {
-            Console.Error.WriteLine($"Unknown model type: {modelType}");
-            return 1;
-        }
-
-        Console.WriteLine($"Saved diagnostics to {diagDir}/");
-        return 0;
-    }
-
     static void SaveDiag(string diagDir, string name, ReverseGradTensor<float> tensor)
     {
         int total = tensor.Length;
@@ -1383,7 +1288,7 @@ class Program
         Console.WriteLine("]");
     }
 
-    static void RunResNet18Diag(
+    internal static void RunResNet18Diag(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         ReverseGradTensor<float> input,
         string diagDir)
@@ -1541,7 +1446,7 @@ class Program
         SaveDiag(diagDir, "cs_step10_logits", x);
     }
 
-    static void RunMobileNetV2Diag(
+    internal static void RunMobileNetV2Diag(
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         ReverseGradTensor<float> input,
         string diagDir)
@@ -1554,7 +1459,7 @@ class Program
         SaveDiag(diagDir, "cs_final_logits", x);
     }
 
-    static void PrintTopK(Nivara.AutoDiff.ReverseGradTensor<float> output, int k = 5)
+    internal static void PrintTopK(Nivara.AutoDiff.ReverseGradTensor<float> output, int k = 5)
     {
         int numClasses = output.Shape[^1];
         k = Math.Min(k, numClasses);
@@ -1630,7 +1535,7 @@ class Program
         return 0;
     }
 
-    static int RunMiniLMCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunMiniLMCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         Console.WriteLine("=== MiniLM Compare ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
@@ -1968,7 +1873,7 @@ class Program
         return 0;
     }
 
-    static int RunMiniLmSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunMiniLmSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunMiniLmCompare("Silk", OpenSilkEncoder, tensors);
 
     static int RunMiniLmCompare(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
@@ -2248,7 +2153,7 @@ class Program
         return Math.Sqrt(sumSq / data.Length);
     }
 
-    static int RunDistilBertCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunDistilBertCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         string refPath = Path.Combine("samples", "data", "distilbert", "last_hidden_state_py.bin");
         if (!File.Exists(refPath))
@@ -2581,7 +2486,7 @@ class Program
     }
 
 
-    static int RunDistilBertSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunDistilBertSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertBackendCompare("Silk", OpenSilkEncoder, tensors);
 
     static int RunDistilBertBackendCompare(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
@@ -2639,7 +2544,7 @@ class Program
     }
 
 
-    static int RunDistilBertSstSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunDistilBertSstSilkCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
         => RunDistilBertSstBackendCompare("Silk", OpenSilkEncoder, tensors);
 
     static int RunDistilBertSstBackendCompare(string backend, OpenEncoder open, Dictionary<string, (float[] Data, int[] Shape)> tensors)
@@ -2798,7 +2703,7 @@ class Program
         return 0;
     }
 
-    static int RunDistilBertSstCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    internal static int RunDistilBertSstCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         Console.WriteLine("=== DistilBERT SST-2 Compare ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
