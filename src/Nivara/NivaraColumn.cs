@@ -1273,6 +1273,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (index < 0 || index >= Length)
             throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}");
 
+        if (storage is ChunkedColumn<T> chunked)
+            return chunked.IsNull(index);
+
         var nullMask = storage.NullMask;
         if (nullMask.Length > 0)
             return nullMask[index];
