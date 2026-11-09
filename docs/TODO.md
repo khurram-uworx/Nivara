@@ -49,7 +49,7 @@ Make `ChunkStorages` throw `ObjectDisposedException` like every other member (fa
 
 ## GitHub issues log
 
-- (create at deferral time if item 3 follow-up is opened) — chunked-vs-flat `Slice` pooling follow-up (backlog revisit after baseline measurements).
+- [x] #1093 — chunked-vs-flat `Slice` pooling follow-up (backlog revisit after baseline measurements) (created while deferring item 3)
 
 ## Blast radius
 
