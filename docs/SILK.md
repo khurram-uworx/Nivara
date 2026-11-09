@@ -986,3 +986,17 @@ Device-dependent (OpenCL/Silk) tests are categorized [Category("Gpu")] and are e
   dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "Category=Gpu"
   ``n- On CI (no GPU) these tests are excluded by Category!=Gpu and skip via Assert.Ignore when run manually.
 
+## Narrow-precision BF16 inference lane (issue #1013, Phase 1)
+
+Silk BERT-family inference is opt-in narrow precision, never the default:
+
+- ModernBERT: SilkModernBertSession.Open(config, bf16Tensors) (and the F16 overload) runs on-device;
+  --precision bf16 wires it up in NivaraInference.
+- Laya: SilkLayaSession.Open(config, bf16Tensors, headLayerCount) runs the encoder and the head
+  on-device. Matmul weights stay in BF16/Half; LayerNorm weights, biases and token embeddings are
+  materialized in F32 (existing elementwise kernels are F32), and activations remain F32.
+- Parity against the F32 runner on synthetic fixtures: SilkBertNarrowParityTests,
+  SilkModernBertNarrowParityTests, SilkLayaNarrowParityTests. Documented tolerance follows
+  the BERT encoder's maxAbs <= 1e-2 * (1+|reference|).
+- Training (moments in FP32) and full activation-traffic halving in the Laya head are deferred to
+  issues #1103 and #1102 respectively.
