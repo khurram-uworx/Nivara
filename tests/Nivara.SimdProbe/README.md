@@ -30,6 +30,7 @@ dotnet run -c Release --project tests/Nivara.SimdProbe -- benchmark     # timed 
 dotnet run -c Release --project tests/Nivara.SimdProbe -- scalar       # Qwen decode scalar hot-path: RoPE + attention V-phase (AVX-512 probe)
 dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose    # #136 transpose A/B: tiled kernel vs BCL view+flatten
 dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api   # reading one row of a rank-2 Tensor<T> (docs fixes, #528)
+dotnet run -c Release --project tests/Nivara.SimdProbe -- chunked-arrow # per-column Arrow chunk counts (issue #862)
 dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
@@ -334,6 +335,32 @@ re-verified on every invocation. Likewise the `CS0121` / `CS9174` diagnostics qu
    claims. The numpy values are printed alongside for a human to compare — they are
    not asserted, because a float tolerance would let a real bug hide behind it.
 
+## Apache.Arrow chunk-grid construction (`chunked-arrow` mode) — issue #862
+
+```bash
+dotnet run -c Release --project tests/Nivara.SimdProbe -- chunked-arrow
+```
+
+A correctness probe for the opt-in chunk-preserving Arrow export. It answers one
+question before any IO code is written: **can two columns keep different chunk counts
+through a table?**
+
+| Route | Per-column chunk counts |
+|---|---|
+| `Table.TableFromRecordBatches(schema, batches)` | no — one grid shared by every column |
+| `new Table(schema, columns)` with each `new Column(field, arrays)` | **yes** |
+
+Case 1 asserts the batched route collapses to the batch count on every column. Case 2
+builds a two-chunk column beside a three-chunk column and asserts both survive, `RowCount`
+is the summed length, and the constructor does not throw. Case 3 round-trips a two-chunk
+`Column`; case 4 checks a bare `ChunkedArray`'s `ArrayCount`/`Length`. If case 2 ever
+fails, the export design falls back to the batched grid and the decision must be re-raised
+rather than silently flattening.
+
+Unlike the SIMD modes this is not a timing probe, so it has no optimization requirement.
+It references `Apache.Arrow` directly because the members under test are the package's own
+constructors.
+
 ## `Tensor.Create` aliases its input
 
 Found while building this mode, and it is a trap for any zero-copy reasoning: passing a
@@ -416,5 +443,8 @@ ADR-001 span-ified design) are `TensorsHelper` (matmul) and `RMSNormKernel`
   form that *can* compile against the flat row-major slice and against the `EXAMPLES.md`
   ranking. A correctness probe for doc fixes, not a benchmark — run it before
   implementing any filed issue that names a `Tensor<T>` member.
+- `ChunkedArrowProbe.cs` (`chunked-arrow` mode) — asserts which Apache.Arrow table
+  construction route preserves per-column chunk counts; the gate for the opt-in
+  chunk-preserving export (#862).
 - `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `scalar` /
-  `transpose` / `tensor-api` / `all`).
+  `transpose` / `tensor-api` / `chunked-arrow` / `all`).

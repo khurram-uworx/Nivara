@@ -12,6 +12,8 @@ namespace Nivara.SimdProbe;
 ///   <c>Tensor&lt;T&gt;</c>, and which plausible-looking forms are traps? It prints the real
 ///   API surface instead of asking the reader to infer it. Off by default, since it is a
 ///   correctness probe and not part of the BFloat16/Half investigation.</item>
+///   <item><c>chunked-arrow</c> — which Apache.Arrow construction route preserves per-column
+///   chunk counts (issue #862)? It is the gate for the opt-in chunk-preserving export path.</item>
 /// </list>
 /// </summary>
 internal class Program
@@ -22,6 +24,9 @@ internal class Program
         // before the banner that describes the BFloat16 question would be misleading for it.
         if (args.Length > 0 && args[0] == "tensor-api")
             return TensorApiProbe.Run();
+
+        if (args.Length > 0 && args[0] == "chunked-arrow")
+            return ChunkedArrowProbe.Run();
 
         Console.WriteLine("=== BFloat16 / Half SIMD Probe ===");
         Console.WriteLine($"Runtime: {Environment.Version}  Platform: {RuntimeInformation.OSArchitecture}");
