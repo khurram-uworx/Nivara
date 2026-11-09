@@ -334,8 +334,9 @@ FodyWeavers.xsd
 .codememory/
 .codememory.json
 
-samples/data/sentiment_data.csv
 samples/data/classifier.model*
+/samples/data/classifier.vocab.json
+samples/data/sentiment_data.csv
 
 samples/data/compare_logits.bin
 samples/data/compare_logits_cs.bin
@@ -384,4 +385,3 @@ samples/data/nivarachat
 !/release/**/*.csv
 !/release/**/*.md
 !/release/**/.gitkeep
-
