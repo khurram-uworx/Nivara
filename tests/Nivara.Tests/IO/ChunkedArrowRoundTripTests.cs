@@ -272,4 +272,99 @@ public class ChunkedArrowRoundTripTests
             }
         }
     }
+
+    static readonly Field FieldS = new("s", StringType.Default, nullable: true);
+
+    static Table TwoChunkStringTable()
+    {
+        var schema = new Apache.Arrow.Schema(new[] { FieldS }, null);
+
+        var firstBuilder = new StringArray.Builder();
+        firstBuilder.Append("a0");
+        firstBuilder.Append("a1");
+        firstBuilder.AppendNull();
+        firstBuilder.Append("a3");
+
+        var secondBuilder = new StringArray.Builder();
+        secondBuilder.Append("b0");
+        secondBuilder.AppendNull();
+        secondBuilder.Append("b2");
+        secondBuilder.Append("b3");
+
+        var batches = new List<RecordBatch>
+        {
+            new RecordBatch(schema, new IArrowArray[] { firstBuilder.Build() }, 4),
+            new RecordBatch(schema, new IArrowArray[] { secondBuilder.Build() }, 4),
+        };
+        return Table.TableFromRecordBatches(schema, batches);
+    }
+
+    [Test]
+    public void FromArrowTable_PreserveOption_String_KeepsChunksAndNulls()
+    {
+        var frame = ArrowInterop.FromArrowTable(TwoChunkStringTable(), Preserve);
+
+        var column = (NivaraColumn<string>)frame.GetColumn("s");
+
+        Assert.That(column.Storage, Is.InstanceOf<ChunkedColumn<string>>());
+        var chunked = (ChunkedColumn<string>)column.Storage;
+        Assert.That(chunked.ChunkStorages.Length, Is.EqualTo(2));
+        Assert.That(column.Length, Is.EqualTo(8));
+
+        Assert.That(column.HasNulls, Is.True);
+        Assert.That(column.NullCount, Is.EqualTo(2));
+        Assert.That(column.IsNull(2), Is.True);
+        Assert.That(column.IsNull(5), Is.True);
+
+        Assert.That(column[0], Is.EqualTo("a0"));
+        Assert.That(column[1], Is.EqualTo("a1"));
+        Assert.That(column[3], Is.EqualTo("a3"));
+        Assert.That(column[4], Is.EqualTo("b0"));
+        Assert.That(column[6], Is.EqualTo("b2"));
+        Assert.That(column[7], Is.EqualTo("b3"));
+    }
+
+    [Test]
+    public void ArrowRoundTrip_PreserveOption_String_KeepsChunksValuesAndNulls()
+    {
+        var roundTrip = ArrowInterop.ToArrowTable(
+            ArrowInterop.FromArrowTable(TwoChunkStringTable(), Preserve), Preserve);
+
+        Assert.That(roundTrip.Column(0).Data.ArrayCount, Is.EqualTo(2));
+
+        var a = (StringArray)roundTrip.Column(0).Data.Array(0);
+        var b = (StringArray)roundTrip.Column(0).Data.Array(1);
+        Assert.Multiple(() =>
+        {
+            Assert.That(a.IsNull(2), Is.True);
+            Assert.That(b.IsNull(1), Is.True);
+            Assert.That(a.GetString(0), Is.EqualTo("a0"));
+            Assert.That(a.GetString(1), Is.EqualTo("a1"));
+            Assert.That(a.GetString(3), Is.EqualTo("a3"));
+            Assert.That(b.GetString(0), Is.EqualTo("b0"));
+            Assert.That(b.GetString(2), Is.EqualTo("b2"));
+            Assert.That(b.GetString(3), Is.EqualTo("b3"));
+        });
+    }
+
+    [Test]
+    public void FromArrowTable_DefaultAndPreserve_String_AgreeOnNullSemantics()
+    {
+        var table = TwoChunkStringTable();
+
+        var flat = (NivaraColumn<string>)ArrowInterop.FromArrowTable(table).GetColumn("s");
+        var chunked = (NivaraColumn<string>)ArrowInterop.FromArrowTable(table, Preserve).GetColumn("s");
+
+        Assert.That(flat.Storage, Is.InstanceOf<ColumnStorage<string>>());
+        Assert.That(flat.HasNulls, Is.EqualTo(chunked.HasNulls));
+        Assert.That(flat.NullCount, Is.EqualTo(chunked.NullCount));
+        Assert.That(flat.Length, Is.EqualTo(chunked.Length));
+
+        for (int i = 0; i < flat.Length; i++)
+        {
+            Assert.That(flat.IsNull(i), Is.EqualTo(chunked.IsNull(i)), $"IsNull mismatch at {i}");
+            if (!flat.IsNull(i))
+                Assert.That(flat[i], Is.EqualTo(chunked[i]), $"value mismatch at {i}");
+        }
+    }
 }

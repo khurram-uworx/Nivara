@@ -85,6 +85,17 @@ public class ChunkedColumnTests
     }
 
     [Test]
+    public void IsNull_AcrossChunkBoundaries_ReturnsNullStatus()
+    {
+        var storage = Chunked(Flat(1, 2), Masked([3, 4], [true, false]));
+
+        Assert.That(storage.IsNull(0), Is.False);
+        Assert.That(storage.IsNull(1), Is.False);
+        Assert.That(storage.IsNull(2), Is.True);
+        Assert.That(storage.IsNull(3), Is.False);
+    }
+
+    [Test]
     public void Data_FirstAccessMaterializes_SecondAccessReturnsSameArray()
     {
         var storage = Chunked(Flat(1, 2), Flat(3, 4));
@@ -204,7 +215,7 @@ public class ChunkedColumnTests
 
         Assert.That(left[0], Is.EqualTo(1));
         Assert.That(right[1], Is.EqualTo(4));
-        Assert.That(storage.ChunkStorages.ToArray(), Is.All.Null);
+        Assert.Throws<ObjectDisposedException>(() => _ = storage.ChunkStorages);
         Assert.Throws<ObjectDisposedException>(() => _ = storage.Length);
     }
 

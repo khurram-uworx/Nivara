@@ -53,9 +53,31 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
     }
 
     /// <summary>
+    /// Gets a value indicating whether the element at the specified index is null.
+    /// Resolved per chunk without materialising the contiguous mask.
+    /// </summary>
+    internal bool IsNull(int index)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (index < 0 || index >= length)
+            throw new IndexOutOfRangeException($"Index {index} is out of range for chunked storage of length {length}");
+
+        int chunkIndex = FindChunk(index);
+        return chunks[chunkIndex].IsNull(index - starts[chunkIndex]);
+    }
+
+    /// <summary>
     /// Gets the chunks that make up this column, in order.
     /// </summary>
-    internal ReadOnlySpan<ColumnStorage<T>> ChunkStorages => chunkStorages;
+    internal ReadOnlySpan<ColumnStorage<T>> ChunkStorages
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return chunkStorages;
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether the contiguous copy has been materialised.
