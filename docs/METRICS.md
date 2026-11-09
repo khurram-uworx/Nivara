@@ -145,6 +145,19 @@ No hook is needed. `TrainingLoop.OnEpochEnd` is already `protected virtual`
 calls these methods on predictions it collects itself; `NivaraMetrics` holds no state and is
 safe to call per epoch. Loss curves stay a training concern and are not part of this module.
 
+## Ranked retrieval and pipeline evaluation (out of scope)
+
+The module stops at the table level: one frame per predicted/actual column pair.
+Ranked-retrieval metrics do not fit that shape. `PrecisionAtK`, `RecallAtK`, `Mrr`,
+`NdcgAtK` and the sign-test p-value over paired runs score ordered per-query id lists,
+not a predicted/actual pair, so ranked-retrieval metrics are demonstrated in
+`samples/NivaraChat` and are not part of this module (`samples/NivaraChat/Helpers/RagEvalMetrics.cs`,
+`samples/NivaraChat/Modes/RagEvalMode.cs`). Turning them into frame-producing metrics would
+require a frame convention of its own (a retrieved-ids column of `string[]`, then
+mean/median/quantile over the per-query frame) and is deferred until a second consumer
+wants it; until then ML.NET's ranking evaluators remain the right tool for an ML.NET
+pipeline.
+
 ## Cross-check against ML.NET
 
 Nivara's confusion matrix (predicted classes in rows, actual classes in columns) and its
