@@ -1,4 +1,5 @@
 using Nivara;
+using Nivara.Metrics;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
@@ -57,13 +58,22 @@ public static class AgentsValidatorTrainer
 
         var result = trainLoop.Run();
 
-        int correct = 0;
+        var predictedLabels = new int[testLabels.Length];
+        var actualLabels = (int[])testLabels.Clone();
         for (int i = 0; i < testLabels.Length; i++)
         {
             var encoded = tokenizer.Encode(testInputs[i], fixedLength: maxSeqLen);
             var preds = model.Predict(encoded);
-            if (preds[0] == testLabels[i]) correct++;
+            predictedLabels[i] = preds[0];
         }
+
+        var accuracyMatrix = NivaraMetrics.ConfusionMatrixFrame(
+            NivaraColumn<int>.Create(predictedLabels),
+            NivaraColumn<int>.Create(actualLabels));
+        long correct = 0;
+        for (int r = 0; r < accuracyMatrix.RowCount; r++)
+            correct += accuracyMatrix.GetColumn<long>("Correct")[r];
+
         Console.WriteLine($"  Test accuracy: {(double)correct / testLabels.Length:P1}");
 
         Directory.CreateDirectory(saveDir);

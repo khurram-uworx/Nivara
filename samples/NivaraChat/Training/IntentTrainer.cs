@@ -1,4 +1,5 @@
 using Nivara;
+using Nivara.Metrics;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
@@ -57,26 +58,45 @@ public static class IntentTrainer
 
         var result = trainLoop.Run();
 
-        int correct = 0;
-        var classCorrect = new int[5];
-        var classTotal = new int[5];
+        var predictedLabels = new int[testLabels.Length];
+        var actualLabels = (int[])testLabels.Clone();
         for (int i = 0; i < testLabels.Length; i++)
         {
             var encoded = tokenizer.Encode(testTexts[i], fixedLength: maxSeqLen);
             var preds = model.Predict(encoded);
-            classTotal[testLabels[i]]++;
-            if (preds[0] == testLabels[i])
-            {
-                correct++;
-                classCorrect[testLabels[i]]++;
-            }
+            predictedLabels[i] = preds[0];
         }
+
+        var perClassFrame = NivaraMetrics.PerClassMetricsFrame(
+            NivaraColumn<int>.Create(predictedLabels),
+            NivaraColumn<int>.Create(actualLabels));
+
+        long correct = 0;
+        for (int r = 0; r < perClassFrame.RowCount; r++)
+            correct += perClassFrame.GetColumn<long>("Tp")[r];
+
+        var classRowByLabel = new Dictionary<int, int>(perClassFrame.RowCount);
+        var classLabels = perClassFrame.GetColumn<int>("Class");
+        var tpColumn = perClassFrame.GetColumn<long>("Tp");
+        var fnColumn = perClassFrame.GetColumn<long>("Fn");
+        for (int r = 0; r < perClassFrame.RowCount; r++)
+            classRowByLabel[classLabels[r]] = r;
+
         Console.WriteLine($"  Test accuracy: {(double)correct / testLabels.Length:P1}");
         for (int c = 0; c < 5; c++)
         {
             string intent = c switch { 0 => "factual", 1 => "question", 2 => "command", 3 => "complaint", _ => "chitchat" };
-            double acc = classTotal[c] > 0 ? (double)classCorrect[c] / classTotal[c] : 0;
-            Console.WriteLine($"    {intent}: {acc:P1} ({classCorrect[c]}/{classTotal[c]})");
+            if (classRowByLabel.TryGetValue(c, out int row))
+            {
+                long classCorrect = tpColumn[row];
+                long classTotal = tpColumn[row] + fnColumn[row];
+                double acc = classTotal > 0 ? (double)classCorrect / classTotal : 0;
+                Console.WriteLine($"    {intent}: {acc:P1} ({classCorrect}/{classTotal})");
+            }
+            else
+            {
+                Console.WriteLine($"    {intent}: {0.0:P1} (0/0)");
+            }
         }
 
         Directory.CreateDirectory(saveDir);
