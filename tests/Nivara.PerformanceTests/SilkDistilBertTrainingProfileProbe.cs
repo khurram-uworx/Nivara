@@ -22,6 +22,10 @@ internal static class SilkDistilBertTrainingProfileProbe
     public static int Run()
     {
         Console.WriteLine("=== Silk DistilBERT training batch profile (GPU/OpenCL) ===");
+        int trainableLayerCount = -1;
+        string? envTrainable = Environment.GetEnvironmentVariable("SILK_TRAINABLE_LAYERS");
+        if (!string.IsNullOrWhiteSpace(envTrainable) && int.TryParse(envTrainable, out int parsed))
+            trainableLayerCount = parsed;
         if (!TryResolveModel(out string modelDir))
         {
             Console.WriteLine("DistilBERT checkpoint absent; place samples/data/distilbert.");
@@ -36,10 +40,11 @@ internal static class SilkDistilBertTrainingProfileProbe
         using var model = new DistilBertForSequenceClassification<float>(bertConfig, numClasses: 2);
         model.LoadWeights(tensors);
 
-        using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch: 8, maxSeqLen: 128);
+        using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch: 8, maxSeqLen: 128, trainableLayerCount: trainableLayerCount);
         trainer.ProfilingEnabled = true;
         Console.WriteLine($"Device: {runtime.DeviceName}");
         Console.WriteLine($"Config: layers={bertConfig.NumHiddenLayers}, hidden={bertConfig.HiddenSize}, heads={bertConfig.NumAttentionHeads}, vocab={bertConfig.VocabSize}");
+        Console.WriteLine($"Trainable layers: {trainer.TrainableLayerCount} (of {bertConfig.NumHiddenLayers})");
         Console.WriteLine();
 
         int numClasses = trainer.NumClasses;
