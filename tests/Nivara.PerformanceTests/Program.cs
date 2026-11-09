@@ -36,6 +36,12 @@ static class Program
         if (args.Any(a => a.Equals("--metrics", StringComparison.OrdinalIgnoreCase)))
             return MetricsProbe.Run();
 
+        if (args.Any(a =>
+            a.Equals("--chunked", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--chunked-baseline", StringComparison.OrdinalIgnoreCase) ||
+            a.Equals("--chunked-vs-flat", StringComparison.OrdinalIgnoreCase)))
+            return ChunkedColumnProbe.Run();
+
         var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, cpuDistilBertTrainProfile, silkGemm) = ParseArgs(args);
 
         if (datasetTest)

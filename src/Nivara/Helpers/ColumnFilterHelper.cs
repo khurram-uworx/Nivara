@@ -5,6 +5,7 @@ namespace Nivara.Helpers;
 
 static class ColumnFilterHelper
 {
+    internal const int ConcatCoalesceMaxChunkRows = 10_000;
     static readonly MethodInfo s_createFilteredColumnTyped = getMethod(nameof(createFilteredColumnTyped));
     static readonly MethodInfo s_reorderColumnTyped = getMethod(nameof(reorderColumnTyped));
     static readonly MethodInfo s_createEmptyColumnTyped = getMethod(nameof(createEmptyColumnTyped));
@@ -285,6 +286,62 @@ static class ColumnFilterHelper
         return NivaraColumn<T>.CreateForReferenceType(Array.Empty<T>());
     }
 
+    static List<ColumnStorage<T>> CoalesceConcatChunks<T>(List<ColumnStorage<T>> chunks)
+    {
+        var coalesced = new List<ColumnStorage<T>>();
+        int i = 0;
+        while (i < chunks.Count)
+        {
+            int groupStart = i;
+            int groupLength = chunks[i].Length;
+            i++;
+
+            while (i < chunks.Count && chunks[i].Length > 0
+                   && groupLength + chunks[i].Length <= ConcatCoalesceMaxChunkRows)
+            {
+                groupLength += chunks[i].Length;
+                i++;
+            }
+
+            if (groupStart == i - 1)
+            {
+                // Single chunk (or empty) — keep as-is; FromChunkStorages drops empties.
+                coalesced.Add(chunks[groupStart]);
+                continue;
+            }
+
+            // Merge groupStart..i-1 into one ColumnStorage.
+            bool hasNulls = false;
+            for (int k = groupStart; k < i; k++)
+                hasNulls |= chunks[k].HasNulls;
+
+            var values = new T[groupLength];
+            bool[]? mask = hasNulls ? new bool[groupLength] : null;
+            int offset = 0;
+            for (int k = groupStart; k < i; k++)
+            {
+                var storage = chunks[k];
+                storage.Data.Span.CopyTo(values.AsSpan(offset));
+
+                if (mask is not null)
+                {
+                    var chunkMask = storage.NullMask;
+                    if (chunkMask.Length > 0)
+                        chunkMask.CopyTo(mask.AsSpan(offset));
+                }
+
+                offset += storage.Length;
+            }
+
+            var merged = mask is null
+                ? new ColumnStorage<T>(values)
+                : new ColumnStorage<T>(values, new ReadOnlyMemory<bool>(mask));
+            coalesced.Add(merged);
+        }
+
+        return coalesced;
+    }
+
     static IColumn concatenateColumnsTyped<T>(List<IColumn> columns)
     {
         if (columns.Count == 1)
@@ -301,10 +358,24 @@ static class ColumnFilterHelper
                 anyChunked |= storage is ChunkedColumn<T>;
             }
 
-            // Preserve existing chunk boundaries only when the input already carries them;
-            // flat + flat keeps the copy path below byte-for-byte.
+            // Preserve chunk boundaries only when the input already carries them, but coalesce
+            // adjacent *small* chunks so repeated concat of an accumulator does not grow one
+            // chunk per call (see ADR-010). Arrow import/export do not run through this path,
+            // so their per-column chunk counts stay untouched.
             if (anyChunked)
-                return new NivaraColumn<T>(ChunkedColumn<T>.Create(storages));
+            {
+                var flattened = new List<ColumnStorage<T>>();
+                foreach (var storage in storages)
+                {
+                    if (storage is ChunkedColumn<T> chunked)
+                        flattened.AddRange(chunked.ChunkStorages);
+                    else if (storage is ColumnStorage<T> flat)
+                        flattened.Add(flat);
+                }
+
+                var coalesced = CoalesceConcatChunks<T>(flattened);
+                return new NivaraColumn<T>(ChunkedColumn<T>.FromChunkStorages(coalesced));
+            }
         }
 
         var totalLength = columns.Sum(c => c.Length);

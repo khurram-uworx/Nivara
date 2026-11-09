@@ -65,6 +65,12 @@ a throwaway harness:
   operations (`RegressionSummaryFrame`, `ConfusionMatrixFrame`, `PerClassMetricsFrame`) at
   n = 1e4/1e5/1e6 and k = 10/100/1000, plus a class-count curve that makes the O(k²)
   confusion-matrix frame growth in `docs/METRICS.md` concrete. Human-run only.
+- `--chunked-baseline` (aliases `--chunked`, `--chunked-vs-flat`) — establishes the
+  one-copy cost baseline for chunked-vs-flat column operations (#1076). Prints
+  interleaved A/B distributions for flat vs. 2 / 8 / 64 chunks for scalar add,
+  column add, equality, greater-than, less-than (scalar and column variants),
+  null-bearing operands (mask copy path), the materialised (cached) second call,
+  and slice-then-op (no materialisation yet). Human-run only.
 - `--gemm` — tiled-GEMM regression gate (#435): the lasting promotion of the deleted
   `%TEMP%\opencode\gemm-measure\` harness. Loads all ten ILGPU GEMM kernels
   (`samples/Nivara.Samples/Gpu/GemmKernels.cs` — `OneToOne`, `Row4`, the M2 fused
