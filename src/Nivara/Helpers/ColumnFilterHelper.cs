@@ -1,4 +1,5 @@
 using System.Reflection;
+using Nivara.Storage;
 
 namespace Nivara.Helpers;
 
@@ -288,6 +289,23 @@ static class ColumnFilterHelper
     {
         if (columns.Count == 1)
             return columns[0];
+
+        if (columns.All(c => c is NivaraColumn<T>))
+        {
+            var storages = new IColumnStorage<T>[columns.Count];
+            bool anyChunked = false;
+            for (int i = 0; i < columns.Count; i++)
+            {
+                var storage = ((NivaraColumn<T>)columns[i]).Storage;
+                storages[i] = storage;
+                anyChunked |= storage is ChunkedColumn<T>;
+            }
+
+            // Preserve existing chunk boundaries only when the input already carries them;
+            // flat + flat keeps the copy path below byte-for-byte.
+            if (anyChunked)
+                return new NivaraColumn<T>(ChunkedColumn<T>.Create(storages));
+        }
 
         var totalLength = columns.Sum(c => c.Length);
 
