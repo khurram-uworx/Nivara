@@ -14,15 +14,15 @@ without changing the public `NivaraColumn<T>` / `NivaraFrame` surface.
 
 ## Proposed changes (from the plan)
 
-| Step | Commit | Files |
-|---|---|---|
-| 0 | `test(probe)` — `chunked-arrow` probe | `tests/Nivara.SimdProbe/ChunkedArrowProbe.cs`, `Program.cs`, `README.md`, csproj (Apache.Arrow ref) |
-| 1 | `feat(storage)` — chunk layer | `src/Nivara/Storage/Chunk.cs`, `ChunkedColumn.cs`, `tests/Nivara.Tests/Storage/ChunkedColumnTests.cs` |
-| 2 | `refactor(column)` — retire ten guards, `AsTensorView` throw | `src/Nivara/NivaraColumn.cs` |
-| 3 | `feat(helpers)` — chunk-preserving concat | `src/Nivara/Helpers/ColumnFilterHelper.cs`, concat tests |
-| 4 | `feat(io)` — opt-in Arrow chunk preservation | `ArrowConversionOptions.cs`, `ArrowInterop.cs`, `tests/Nivara.Tests/IO/ChunkedArrowRoundTripTests.cs` |
-| 5 | `test(perf)` — structural guard | `tests/Nivara.Tests/...` (`[Category("Performance")]`) |
-| 6 | `docs(arrow)` — roadmap | `docs/plan/ARROW-ROADMAP.md` |
+| Step | Commit | Files | Status |
+|---|---|---|---|
+| 0 | `test(probe)` — `chunked-arrow` probe | `tests/Nivara.SimdProbe/ChunkedArrowProbe.cs`, `Program.cs`, `README.md`, csproj (Apache.Arrow ref) | done |
+| 1 | `feat(storage)` — chunk layer | `src/Nivara/Storage/Chunk.cs`, `ChunkedColumn.cs`, `tests/Nivara.Tests/Storage/ChunkedColumnTests.cs` | done |
+| 2 | `refactor(column)` — retire ten guards, `AsTensorView` throw | `src/Nivara/NivaraColumn.cs`, `ChunkedColumnOperationTests.cs` | done |
+| 3 | `feat(helpers)` — chunk-preserving concat | `src/Nivara/Helpers/ColumnFilterHelper.cs`, `ChunkedConcatTests.cs` | done |
+| 4 | `feat(io)` — opt-in Arrow chunk preservation | `ArrowConversionOptions.cs`, `ArrowInterop.cs`, `tests/Nivara.Tests/IO/ChunkedArrowRoundTripTests.cs` | done |
+| 5 | `test(perf)` — structural guard | `tests/Nivara.Tests/Storage/ChunkedColumnPerformanceTests.cs` (`[Category("Performance")]`) | done |
+| 6 | `docs(arrow)` — roadmap | `docs/plan/ARROW-ROADMAP.md` | done |
 
 Design invariants (plan §5): `Chunk<T>` is a readonly struct over one already-sliced
 `ColumnStorage<T>`; `ChunkedColumn<T>` implements `IColumnStorage<T>` with **≥2 chunks** (one chunk
@@ -58,6 +58,16 @@ collapses to `ColumnStorage<T>`); cached prefix offsets give O(log n) indexing; 
 - `dotnet run -c Release --project tests/Nivara.SimdProbe -- chunked-arrow` (Step 0 gate)
 
 No full-suite run without explicit approval.
+
+## Progress log
+
+- Step 0 probe: `dotnet run -c Release --project tests/Nivara.SimdProbe -- chunked-arrow` — 4/4 checks pass.
+- Step 1: `dotnet test ... --filter "FullyQualifiedName~Storage"` — 115 passed at the time.
+- Step 2: `dotnet test ... --filter "FullyQualifiedName~Storage"` — 126 passed.
+- Step 3: `dotnet test ... --filter "FullyQualifiedName~Storage"` — 131 passed; `~Helpers` — 38 passed.
+- Step 4: `dotnet test ... --filter "FullyQualifiedName~IO.Arrow"` — 142 passed.
+- Step 5: `dotnet test ... --filter "FullyQualifiedName~ChunkedColumnPerformance"` — 3 passed (Release).
+- Pre-PR verification (format, Docs, IO.Arrow, Storage, probe) recorded in the PR description.
 
 ## GitHub issues log
 
