@@ -217,6 +217,9 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
         }
 
         // Chunks are views over buffers owned elsewhere; dropping the references is all this type owns.
+        // Both arrays hold the same ColumnStorage<T> references, so clear both or the struct array
+        // would keep every chunk reachable.
+        Array.Clear(chunks);
         Array.Clear(chunkStorages);
     }
 
