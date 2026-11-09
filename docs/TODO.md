@@ -144,13 +144,14 @@ The Docs namespace run is required because `docs/` changes. No full suite, no be
 ## Planned commits
 
 1. `docs: plan frame-scoped metrics (#868) in TODO.md`
-2. `feat(metrics): add confusion-matrix and per-class accuracy frames`
-3. `feat(metrics): add regression summary frame`
-4. `test(metrics): pin null handling and diagnostics for frames`
-5. `docs(metrics): add METRICS.md and the ML.NET evaluation boundary`
-6. `docs: register the metrics module in README, AGENTS and roadmap`
-7. `docs: update documentation coverage pins for METRICS.md`
-8. `docs: remove TODO.md — plan executed`
+2. `feat(metrics): add the frame-scoped metrics module` — one commit, not two: the public
+   `NivaraMetrics` surface names all three entry points, so splitting classification from
+   regression would leave a commit that does not compile.
+3. `test(metrics): pin classification, regression, null handling and diagnostics`
+4. `docs(metrics): add METRICS.md and the ML.NET evaluation boundary`
+5. `docs: register the metrics module in README, AGENTS and roadmap`
+6. `docs: update documentation coverage pins for METRICS.md`
+7. `docs: remove TODO.md — plan executed`
 
 ## GitHub issues log
 
