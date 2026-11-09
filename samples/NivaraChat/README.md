@@ -371,7 +371,7 @@ test to reach p < 0.05.
 Reproducibility: chunk ids, the query split and the fixed-vs-baseline metrics are reproducible from
 the same corpus + seed. The mode writes a structured, byte-stable baseline JSON (see `--baseline`)
 and prints a `REFUSED:` marker with exit code 2 when coverage is below 50%. Regenerate the label
-artifacts with `--regenerate <queries|judge|all>` (see [`./916-A.md`](./916-A.md)).
+artifacts with `--regenerate <queries|judge|all>` (see [`./RAG.md`](./RAG.md)).
 
 `--report <path>` writes the metric table, the paired comparisons, the learned weights and a
 "reading this report" section as markdown under the gitignored `samples/data/nivarachat/learn/`.
@@ -386,7 +386,7 @@ Uses: `RetrievalTrainingData` (`CandidatePool`, `TrainingSetBuilder`, `QuerySpli
 (metrics, ranking, `PairedComparison`), and the `MultiViewScoring`/`MultiViewIndex` pipeline from
 `--rag-multiview`.
 
-Full design note: [`./915.md`](./915.md).
+Full design note: [`./RAG.md`](./RAG.md).
 
 ### RAG agent (`--rag-agent`)
 Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. **Ollama is optional**: without `--ollama` the mode behaves like `--rag` in list-only mode (prints `#rank score [source] "snippet..."` per query); with `--ollama` it runs the agent workflow and prints the retrieved set for each provider search. `--roundtrip` prints the frame ↔ matrix ↔ `ToGeneratedEmbeddings` diagnostics once after the index builds (not per provider search). ACL filtering (`--acl-group`) applies to the frame store only; `--store inmemory` ignores it.
