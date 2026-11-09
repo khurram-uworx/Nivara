@@ -28,6 +28,9 @@ internal class Program
         if (args.Length > 0 && args[0] == "chunked-arrow")
             return ChunkedArrowProbe.Run();
 
+        if (args.Length > 0 && args[0] == "metrics")
+            return ClassificationCountingProbe.Run();
+
         Console.WriteLine("=== BFloat16 / Half SIMD Probe ===");
         Console.WriteLine($"Runtime: {Environment.Version}  Platform: {RuntimeInformation.OSArchitecture}");
         Console.WriteLine($"Vector128.IsHardwareAccelerated: {Vector128.IsHardwareAccelerated}");

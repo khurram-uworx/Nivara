@@ -1,6 +1,8 @@
 using Microsoft.ML.Tokenizers;
+using Nivara;
 using Nivara.AI;
 using Nivara.AutoDiff;
+using Nivara.Metrics;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
@@ -451,8 +453,9 @@ static class Program
         var batches = Sst2Dataset.CreateBatches(tokenized, cli.BatchSize, shuffle: false).ToList();
 
         float totalLoss = 0f;
-        int correct = 0;
         int total = 0;
+        var predictedLabels = new List<int>();
+        var actualLabels = new List<int>();
 
         foreach (var batch in batches)
         {
@@ -464,7 +467,8 @@ static class Program
             for (int i = 0; i < batch.BatchSize; i++)
             {
                 int predicted = logits[i * 2 + 1] > logits[i * 2] ? 1 : 0;
-                if (predicted == batch.Labels[i]) correct++;
+                predictedLabels.Add(predicted);
+                actualLabels.Add(batch.Labels[i]);
             }
             total += batch.BatchSize;
 
@@ -486,8 +490,18 @@ static class Program
             totalLoss += batchLoss;
         }
 
+        long correct = 0;
+        if (predictedLabels.Count > 0)
+        {
+            var accuracyMatrix = NivaraMetrics.ConfusionMatrixFrame(
+                NivaraColumn<int>.Create(predictedLabels.ToArray()),
+                NivaraColumn<int>.Create(actualLabels.ToArray()));
+            for (int r = 0; r < accuracyMatrix.RowCount; r++)
+                correct += accuracyMatrix.GetColumn<long>("Correct")[r];
+        }
+
         float loss = totalLoss / batches.Count;
-        float acc = (float)correct / total * 100f;
+        float acc = total > 0 ? (float)correct / total * 100f : 0f;
         Console.WriteLine($"\nResults (Silk) - loss: {loss:F4}, accuracy: {acc:F2}%");
         return 0;
     }
@@ -599,8 +613,9 @@ static class Program
         var batches = Sst2Dataset.CreateBatches(tokenized, Math.Min(batchSize, 8), shuffle: false).ToList();
 
         float totalLoss = 0f;
-        int correct = 0;
         int total = 0;
+        var predictedLabels = new List<int>();
+        var actualLabels = new List<int>();
 
         foreach (var batch in batches)
         {
@@ -611,7 +626,8 @@ static class Program
             for (int i = 0; i < batch.BatchSize; i++)
             {
                 int predicted = logits[i * 2 + 1] > logits[i * 2] ? 1 : 0;
-                if (predicted == batch.Labels[i]) correct++;
+                predictedLabels.Add(predicted);
+                actualLabels.Add(batch.Labels[i]);
             }
             total += batch.BatchSize;
 
@@ -632,6 +648,16 @@ static class Program
             totalLoss += batchLoss;
         }
 
+        long correct = 0;
+        if (predictedLabels.Count > 0)
+        {
+            var accuracyMatrix = NivaraMetrics.ConfusionMatrixFrame(
+                NivaraColumn<int>.Create(predictedLabels.ToArray()),
+                NivaraColumn<int>.Create(actualLabels.ToArray()));
+            for (int r = 0; r < accuracyMatrix.RowCount; r++)
+                correct += accuracyMatrix.GetColumn<long>("Correct")[r];
+        }
+
         float loss = batches.Count > 0 ? totalLoss / batches.Count : 0f;
         float acc = total > 0 ? (float)correct / total * 100f : 0f;
         return (loss, acc);
@@ -650,8 +676,9 @@ static class Program
         var batches = Sst2Dataset.CreateBatches(tokenized, batchSize, shuffle: false).ToList();
 
         float totalLoss = 0;
-        int correct = 0;
         int total = 0;
+        var predictedLabels = new List<int>();
+        var actualLabels = new List<int>();
 
         foreach (var batch in batches)
         {
@@ -666,13 +693,23 @@ static class Program
             for (int i = 0; i < batch.BatchSize; i++)
             {
                 int predicted = ArgMax(logits, i, model.NumClasses);
-                if (predicted == batch.Labels[i])
-                    correct++;
+                predictedLabels.Add(predicted);
+                actualLabels.Add(batch.Labels[i]);
             }
             total += batch.BatchSize;
         }
 
-        return (totalLoss / batches.Count, (float)correct / total * 100);
+        long correct = 0;
+        if (predictedLabels.Count > 0)
+        {
+            var accuracyMatrix = NivaraMetrics.ConfusionMatrixFrame(
+                NivaraColumn<int>.Create(predictedLabels.ToArray()),
+                NivaraColumn<int>.Create(actualLabels.ToArray()));
+            for (int r = 0; r < accuracyMatrix.RowCount; r++)
+                correct += accuracyMatrix.GetColumn<long>("Correct")[r];
+        }
+
+        return (totalLoss / batches.Count, total > 0 ? (float)correct / total * 100 : 0f);
     }
 
     static int ArgMax(ReverseGradTensor<float> logits, int row, int numClasses)
