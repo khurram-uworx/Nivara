@@ -29,4 +29,4 @@ appropriate harness (`tests/Nivara.PerformanceTests` / `tests/Nivara.SimdProbe` 
 9. `docs: remove TODO.md - plan executed`
 
 ## GitHub issues log
-(none yet)
+- #1097 — follow-up: expose removed compare/parity commands in performance harness (created while simplifying sample CLI)
