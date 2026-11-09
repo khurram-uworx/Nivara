@@ -59,6 +59,7 @@ static class DocSnippetCompiler
         "using Nivara.Helpers;",
         "using Nivara.IO;",
         "using Nivara.Linq;",
+        "using Nivara.Metrics;",
         "using Nivara.Operations;",
         "using Nivara.Optimization;",
         "using Nivara.Primitives;",

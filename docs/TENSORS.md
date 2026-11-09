@@ -78,6 +78,13 @@ var ranked = Enumerable.Range(0, products.RowCount)
 That is the deliberate shape: Nivara owns the table, the BCL owns the math. We do not
 pretend dataframe columns are tensor axes.
 
+Evaluation follows the same split. Nivara's `Nivara.Metrics` produces confusion-matrix,
+per-class and regression-summary *frames*
+(`src/Nivara/Metrics/NivaraMetrics.cs::ConfusionMatrixFrame`), because the result is tabular
+data you filter, join and export. Pipeline-level evaluation — cross-validation, feature
+importance, model selection, metric logging — stays ML.NET's first-party surface, and
+Nivara adds no numeric library to reach it. See [docs/METRICS.md](METRICS.md).
+
 The principle:
 
 ```text
@@ -268,7 +275,9 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 - ONNX export (train in Nivara, deploy via ML.NET/ONNX Runtime) — import/inference is first-party (ML.NET); see `docs/plan/AISTACK-ROADMAP.md` Phase 1
 - Embeddings as a flat `[rows, dim]` convention — a `float[]` column plus derived dimension columns, **not** a new column kind; see [docs/EMBEDDINGS.md](EMBEDDINGS.md)
 - Dataset & data-loader layer
-- Evaluation & metrics module
+- Evaluation & metrics module — **delivered** as frame-scoped metric operations
+  (confusion-matrix, per-class and regression-summary frames) in `Nivara.Metrics`; see
+  [docs/METRICS.md](METRICS.md)
 - Safe read-only tensor views — **already delivered** via public `AsTensorView()` (#107)
 
 ### Scoped tensor ambitions (GitHub issues)

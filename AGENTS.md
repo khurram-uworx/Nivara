@@ -40,6 +40,7 @@ Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 - **Model layer (BERT family, ModernBERT, Laya):** `src/Nivara.Extensions/AI/` (`namespace Nivara.AI`) — `BertModel`, `ModernBertModel`, `LayaHeadModel`, `LayaHeadScoring`, `LayaPromptBuilder`, `LayaCalibration`, `Gpt2BpeTokenizer`, `SafeTensorsLoader`, `StateDictLoader`, and the GPU seam (`GpuSeam.cs`: `IBertEncoderRunner`, the session interfaces, the open delegates).
 - **Embeddings:** `src/Nivara.Extensions/AI/NivaraEmbeddingExtensions.cs` — the `float[]` column ↔ flat `E0..E{n-1}` frame convention, Microsoft.Extensions.AI conversion in both directions, and the caller-supplied null policies. See [docs/EMBEDDINGS.md](docs/EMBEDDINGS.md).
 - **Factory:** `src/Nivara/Storage/ColumnStorageFactory.cs`, `src/Nivara/Tensors/NivaraTensorExtensions.cs`
+- **Frame-scoped metrics:** `src/Nivara/Metrics/` (`namespace Nivara.Metrics`) — `NivaraMetrics.ConfusionMatrixFrame`, `PerClassAccuracyFrame`, `RegressionSummaryFrame` over an `IColumn` predicted/actual pair. Column-pair null exclusion, null (not zero) for undefined per-class metrics, `ArgumentException` on zero valid pairs, classification counting recorded as `KernelType.Scalar`. See [docs/METRICS.md](docs/METRICS.md).
 
 ## Key rules for AI Agents
 

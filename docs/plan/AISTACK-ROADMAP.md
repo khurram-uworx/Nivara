@@ -21,14 +21,14 @@ Concretely, when this roadmap is done:
 - **Phase 1 (ONNX):** **export only** — train in Nivara, deploy via ML.NET/ONNX Runtime. ONNX import/inference is a **non-goal** (ML.NET's `Microsoft.ML.OnnxTransformer`/ONNX Runtime already own it, first-party); Nivara competes on the data layer, not the runtime (see `docs/TENSORS.md`).
 - **Phase 2 (embeddings):** **flat `[rows, dim]` frame convention**, not a new column kind — a column of `float[]` plus existing `RowCosineSimilarity`/`TopKDescending` kernels and MEAI `IEmbeddingGenerator` glue (`NivaraEmbeddingGenerator`). A new embedding column type is a non-goal; ARROW Phase B dependency removed.
 - **Phase 3 (dataset):** unchanged in intent; `TensorDataset`/`DataLoader` already landed at the training-API level, frame-level split/shuffle/batch still pending.
-- **Phase 4 (metrics):** **minimal frame-scoped module only** — frame-producing metric operations (confusion-matrix frame, per-class accuracy frame, regression summary frame). Pipeline-level evaluation (ML.NET metrics) is a non-goal, deferred to ML.NET's first-party surface.
+- **Phase 4 (metrics):** **delivered** — frame-producing metric operations (confusion-matrix frame, per-class accuracy frame, regression summary frame) in `src/Nivara/Metrics/`. Pipeline-level evaluation (ML.NET metrics) remains a non-goal, deferred to ML.NET's first-party surface.
 - **Phase 5:** already delivered via `AsTensorView()` (#107); unchanged.
 
 > Each revised phase below states the revised plan first, followed by the **original plan retained for archeology** (labelled "Original plan").
 
 ### Where we are today
 
-The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Nivara/AutoDiff/`); ML.NET interop is first-class (`src/Nivara.Extensions/MLNet/`); MEAI embedding integration is proven in samples (`samples/NivaraChess/ChessEmbeddingGenerator.cs`, `samples/NivaraChat/` uses MEAI + Agents + OllamaSharp); PyTorch-validated kernels bridge the weight ecosystem (the grown NivaraTorch suite: Llama decoder blocks, banded/batched attention, RMSNorm, rotary embeddings, …, in `tests/Nivara.Tests/NivaraTorch/`). Several pieces now landed beyond the original assumptions: dtype-aware SafeTensors import + model layer, MEAI `NivaraEmbeddingGenerator`, `RowCosineSimilarity`/`TopKDescending`, and `TensorDataset<T>` + `DataLoader`, plus a lazy zero-copy view via `AsTensorView()`. The gaps are the last mile (re-scoped 2026-11-03): no **ONNX export** (import/inference deferred to ML.NET/ONNX Runtime, first-party), no **flat embedding convention/AI glue** (embeddings stay raw `float[]` columns), no **frame-level split/shuffle/batch ops or frame-scoped metrics module** (`TensorDataset`/`DataLoader` landed at training-API level only), and other tensor conversions remain element-copy (deliberately, for immutability — `src/Nivara/Tensors/TensorInteropExtensions.cs::ToTensorSpan`; zero-copy reads available via `AsTensorView()`).
+The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Nivara/AutoDiff/`); ML.NET interop is first-class (`src/Nivara.Extensions/MLNet/`); MEAI embedding integration is proven in samples (`samples/NivaraChess/ChessEmbeddingGenerator.cs`, `samples/NivaraChat/` uses MEAI + Agents + OllamaSharp); PyTorch-validated kernels bridge the weight ecosystem (the grown NivaraTorch suite: Llama decoder blocks, banded/batched attention, RMSNorm, rotary embeddings, …, in `tests/Nivara.Tests/NivaraTorch/`). Several pieces now landed beyond the original assumptions: dtype-aware SafeTensors import + model layer, MEAI `NivaraEmbeddingGenerator`, `RowCosineSimilarity`/`TopKDescending`, and `TensorDataset<T>` + `DataLoader`, plus a lazy zero-copy view via `AsTensorView()`. The gaps are the last mile (re-scoped 2026-11-03): no **ONNX export** (import/inference deferred to ML.NET/ONNX Runtime, first-party), no **flat embedding convention/AI glue** (embeddings stay raw `float[]` columns), no **frame-level split/shuffle/batch ops** (`TensorDataset`/`DataLoader` landed at training-API level only; the frame-scoped metrics module landed separately in `src/Nivara/Metrics/`), and other tensor conversions remain element-copy (deliberately, for immutability — `src/Nivara/Tensors/TensorInteropExtensions.cs::ToTensorSpan`; zero-copy reads available via `AsTensorView()`).
 ### Non-goals (explicit)
 
 - **No Azure/cloud.** No Azure OpenAI, Azure ML, AI Foundry, or cloud vector stores — this roadmap stays fully local.
@@ -140,6 +140,8 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 >
 > Acceptance (revised): confusion-matrix frame and per-class/regression summary frames match hand-computed references on known fixtures (including null rows); vectorized for large frames (per `OperationDiagnostics`).
 >
+> **Status (2026-11-09, #868):** delivered in `src/Nivara/Metrics/` — `NivaraMetrics.ConfusionMatrixFrame`, `PerClassAccuracyFrame` and `RegressionSummaryFrame`, documented in `docs/METRICS.md`. Acceptance is met with one honest qualifier: regression is `TensorPrimitives` over `double` and records the kernel selector's verdict, while classification is a single typed hash pass and records `KernelType.Scalar` — there is no SIMD class-counting primitive, and the diagnostics say so. The original "loss-curve telemetry hook" line is stale: `TrainingLoop.OnEpochEnd` was already `protected virtual`, so no source change was needed and loss curves stay a training concern, not a metrics subsystem.
+>
 > **Original plan retained for archeology** (below):
 >
 > ### Phase 4 (original) — Evaluation & metrics module
@@ -152,7 +154,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 - Null-aware semantics (predicted/target null pairs excluded, per ADR-001).
 - Vectorized on existing `TensorPrimitives` kernels.
 
-**Key files:** new `src/Nivara/Metrics/` (metrics module), `src/Nivara/AutoDiff/Training/TrainingLoop.cs` (loss-curve telemetry hook).
+**Key files:** new `src/Nivara/Metrics/` (metrics module). ~~`src/Nivara/AutoDiff/Training/TrainingLoop.cs` (loss-curve telemetry hook)~~ — stale: `OnEpochEnd` is already `protected virtual`, so a subclass can compute frame-scoped metrics per epoch without a hook, and loss curves stayed in-place.
 
 **Dependencies:** POLARS-ROADMAP Phase 2 (fused kernels) for single-pass metric computation; otherwise standalone on column kernels.
 
