@@ -29,8 +29,9 @@ values and null mask rather than from the `IColumn` surface.
 A row is a **valid pair** only when neither column is null there. A null in *either* column
 excludes the row from every numerator, every denominator and every count, and the excluded
 rows are not counted in any class. A label that appears only in excluded rows is not a
-class. The rule is the column null-mask contract, not a special case: see
-[docs/adr/001-autodiff-nonnullable-domain.md](adr/001-autodiff-nonnullable-domain.md).
+class. The rule follows the storage layer's null-mask contract: storage stays nullable and
+each consumer decides what a null means, so AutoDiff throws at its domain boundary
+(`docs/adr/001-autodiff-nonnullable-domain.md`) while metrics excludes the pair.
 
 Zero valid pairs throws `ArgumentException`; a metric is never quietly `NaN`. An undefined
 *per-class* metric is null instead of zero, because zero is a real value and would be read
