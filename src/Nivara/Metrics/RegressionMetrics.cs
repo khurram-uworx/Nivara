@@ -69,7 +69,11 @@ internal static class RegressionMetrics
             && actualColumn is NivaraColumn<double> actualDoubles
             && predictedDoubles.TryGetSpan(out var predictedSpan)
             && actualDoubles.TryGetSpan(out var actualSpan))
+        {
+            ensureFinite(predictedSpan, "predicted");
+            ensureFinite(actualSpan, "actual");
             return summarize(predictedSpan, actualSpan);
+        }
 
         int length = predictedColumn.Length;
         bool predictedHasNulls = predictedColumn.HasNulls;
@@ -87,8 +91,20 @@ internal static class RegressionMetrics
                 if (actualHasNulls && actualColumn.IsNull(i))
                     continue;
 
-                predictedValues[validPairs] = double.CreateChecked(predictedColumn[i]);
-                actualValues[validPairs] = double.CreateChecked(actualColumn[i]);
+                double predictedValue = double.CreateChecked(predictedColumn[i]);
+                if (!double.IsFinite(predictedValue))
+                    throw new ArgumentException(
+                        $"Regression requires finite values; non-finite value at row {i}, column predicted.",
+                        "predicted");
+
+                double actualValue = double.CreateChecked(actualColumn[i]);
+                if (!double.IsFinite(actualValue))
+                    throw new ArgumentException(
+                        $"Regression requires finite values; non-finite value at row {i}, column actual.",
+                        "actual");
+
+                predictedValues[validPairs] = predictedValue;
+                actualValues[validPairs] = actualValue;
                 validPairs++;
             }
 
@@ -141,6 +157,20 @@ internal static class RegressionMetrics
         finally
         {
             returnBuffer(residual, validPairs);
+        }
+    }
+
+    static void ensureFinite(ReadOnlySpan<double> values, string column)
+    {
+        if (TensorPrimitives.IsFiniteAll<double>(values))
+            return;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (!double.IsFinite(values[i]))
+                throw new ArgumentException(
+                    $"Regression requires finite values; non-finite value at row {i}, column {column}.",
+                    column);
         }
     }
 
