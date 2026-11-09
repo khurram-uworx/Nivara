@@ -20,6 +20,9 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
     readonly float eps;
     readonly float scale;
 
+    readonly bool narrowBf16;
+    readonly bool narrowF16;
+
     readonly nint typeEmb;
     readonly nint scorerNormW;
     readonly nint scorerNormB;
@@ -91,6 +94,8 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         actHidden = LayaDecisionHead<float>.ActHeadHidden;
         eps = 1e-5f;
         scale = 1f / MathF.Sqrt(headDim);
+        this.narrowBf16 = false;
+        this.narrowF16 = false;
         runtime.EnsureAttentionLocalMemory(headDim);
 
         try
@@ -110,6 +115,80 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
             layers = new LayerWeights[headLayerCount];
             for (int i = 0; i < layers.Length; i++)
                 layers[i] = new LayerWeights(this, tensors, i);
+
+            pooledIds = runtime.Allocate(1);
+            runtime.Upload(pooledIds, new[] { 0 });
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+    }
+
+    public SilkLayaHeadGpuRunner(
+        SilkRuntime runtime,
+        Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
+        int headLayerCount = 2,
+        int actClassCount = 2,
+        bool isBf16 = false,
+        bool isFp16 = false)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(tensors);
+        if (headLayerCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(headLayerCount), headLayerCount, "headLayerCount cannot be negative");
+        if (actClassCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(actClassCount), actClassCount, "actClassCount must be positive");
+
+        this.runtime = runtime;
+        this.actClassCount = actClassCount;
+        this.narrowBf16 = isBf16;
+        this.narrowF16 = isFp16;
+
+        if (!tensors.TryGetValue("type_emb.weight", out var typeWeight))
+            throw new KeyNotFoundException(
+                "Missing tensor: type_emb.weight. A stock encoder checkpoint is not a Laya decision " +
+                "model; the head is what makes it one.");
+        hiddenDim = typeWeight.Shape[1];
+        if (typeWeight.Shape[0] != LayaDecisionHead<float>.QuestionTypeCount)
+            throw new ArgumentException(
+                $"type_emb.weight has {typeWeight.Shape[0]} rows, expected " +
+                $"{LayaDecisionHead<float>.QuestionTypeCount} question types.", nameof(tensors));
+
+        numHeads = Math.Max(1, hiddenDim / LayaDecisionHead<float>.HeadDimTarget);
+        if (hiddenDim % numHeads != 0)
+            throw new ArgumentException(
+                $"hiddenSize {hiddenDim} does not divide into {numHeads} heads at " +
+                $"{LayaDecisionHead<float>.HeadDimTarget} wide.", nameof(tensors));
+        headDim = hiddenDim / numHeads;
+        intermediateDim = 4 * hiddenDim;
+        actHidden = LayaDecisionHead<float>.ActHeadHidden;
+        eps = 1e-5f;
+        scale = 1f / MathF.Sqrt(headDim);
+        runtime.EnsureAttentionLocalMemory(headDim);
+
+        Func<ushort, float> widen = isBf16
+            ? new Func<ushort, float>(u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+            : new Func<ushort, float>(u => (float)BitConverter.Int16BitsToHalf((short)u));
+
+        try
+        {
+            typeEmb = UploadUshortAsFloat(tensors, "type_emb.weight", widen);
+            scorerNormW = UploadUshortAsFloat(tensors, "scorer.0.weight", widen);
+            scorerNormB = UploadUshortAsFloat(tensors, "scorer.0.bias", widen);
+            scorerHiddenW = UploadTransposedUshort(tensors, "scorer.1.weight");
+            scorerHiddenB = UploadUshortAsFloat(tensors, "scorer.1.bias", widen);
+            scorerOutW = UploadTransposedUshort(tensors, "scorer.3.weight");
+            scorerOutB = UploadUshortAsFloat(tensors, "scorer.3.bias", widen);
+            actInW = UploadTransposedUshort(tensors, "act_head.0.weight");
+            actInB = UploadUshortAsFloat(tensors, "act_head.0.bias", widen);
+            actOutW = UploadTransposedUshort(tensors, "act_head.2.weight");
+            actOutB = UploadUshortAsFloat(tensors, "act_head.2.bias", widen);
+
+            layers = new LayerWeights[headLayerCount];
+            for (int i = 0; i < layers.Length; i++)
+                layers[i] = new LayerWeights(this, tensors, i, isBf16, isFp16);
 
             pooledIds = runtime.Allocate(1);
             runtime.Upload(pooledIds, new[] { 0 });
@@ -280,7 +359,28 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         => SilkLauncher.LayerNorm(runtime, src, gamma, beta, y, rows, hiddenDim, eps);
 
     void LaunchGemm(string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, int? blockWidth = null)
-        => SilkLauncher.GemmEpilogue(runtime, kernel, a, b, c, bias, aRows, aCols, bCols, blockWidth);
+    {
+        string mapped = kernel;
+        if (narrowBf16)
+            mapped = kernel switch
+            {
+                SilkKernels.GemmQkv => SilkKernels.GemmQkvBf16,
+                SilkKernels.GemmGelu => SilkKernels.GemmGeluBf16,
+                SilkKernels.GemmRelu => SilkKernels.GemmReluBf16,
+                SilkKernels.GemmBias => SilkKernels.GemmBiasBf16,
+                _ => kernel
+            };
+        else if (narrowF16)
+            mapped = kernel switch
+            {
+                SilkKernels.GemmQkv => SilkKernels.GemmQkvF16,
+                SilkKernels.GemmGelu => SilkKernels.GemmGeluF16,
+                SilkKernels.GemmRelu => SilkKernels.GemmReluF16,
+                SilkKernels.GemmBias => SilkKernels.GemmBiasF16,
+                _ => kernel
+            };
+        SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
+    }
 
     void LaunchAttention(nint q, nint k, nint v, nint mask, nint output, int seqLen)
         => SilkLauncher.Attention(
@@ -291,6 +391,24 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 
     void LaunchGather(nint table, nint ids, nint y, int n)
         => SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
+
+    nint UploadTransposedUshort(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key)
+    {
+        var data = WeightLayout.Transposed(tensors, key, "Silk");
+        nint buf = runtime.AllocateBytes((ulong)data.Length * sizeof(ushort));
+        runtime.Upload(buf, data.AsSpan());
+        return buf;
+    }
+
+    nint UploadUshortAsFloat(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key, Func<ushort, float> widen)
+    {
+        var t = WeightLayout.Req(tensors, key, "Silk");
+        var f = new float[t.Data.Length];
+        for (int i = 0; i < f.Length; i++) f[i] = widen(t.Data[i]);
+        nint buf = runtime.Allocate(f.Length);
+        runtime.Upload(buf, f);
+        return buf;
+    }
 
     nint UploadPlain(Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
         => Upload(WeightLayout.Req(tensors, key, "Silk").Data);
@@ -376,6 +494,41 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
                 B1 = owner.UploadPlain(tensors, $"{prefix}.linear1.bias");
                 W2 = owner.UploadTransposed(tensors, $"{prefix}.linear2.weight");
                 B2 = owner.UploadPlain(tensors, $"{prefix}.linear2.bias");
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public LayerWeights(
+            SilkLayaHeadGpuRunner owner,
+            Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
+            int index,
+            bool isBf16,
+            bool isFp16)
+        {
+            runtime = owner.runtime;
+            Func<ushort, float> widen = isBf16
+                ? new Func<ushort, float>(u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+                : new Func<ushort, float>(u => (float)BitConverter.Int16BitsToHalf((short)u));
+            try
+            {
+                string prefix = $"head.layers.{index}";
+                string attn = $"{prefix}.self_attn";
+                Norm1W = owner.UploadUshortAsFloat(tensors, $"{prefix}.norm1.weight", widen);
+                Norm1B = owner.UploadUshortAsFloat(tensors, $"{prefix}.norm1.bias", widen);
+                Wqkv = owner.UploadTransposedUshort(tensors, $"{attn}.in_proj_weight");
+                Bqkv = owner.UploadUshortAsFloat(tensors, $"{attn}.in_proj_bias", widen);
+                Wo = owner.UploadTransposedUshort(tensors, $"{attn}.out_proj.weight");
+                Bo = owner.UploadUshortAsFloat(tensors, $"{attn}.out_proj.bias", widen);
+                Norm2W = owner.UploadUshortAsFloat(tensors, $"{prefix}.norm2.weight", widen);
+                Norm2B = owner.UploadUshortAsFloat(tensors, $"{prefix}.norm2.bias", widen);
+                W1 = owner.UploadTransposedUshort(tensors, $"{prefix}.linear1.weight");
+                B1 = owner.UploadUshortAsFloat(tensors, $"{prefix}.linear1.bias", widen);
+                W2 = owner.UploadTransposedUshort(tensors, $"{prefix}.linear2.weight");
+                B2 = owner.UploadUshortAsFloat(tensors, $"{prefix}.linear2.bias", widen);
             }
             catch
             {

@@ -61,6 +61,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
     readonly int rowsCap;
     readonly int numClasses;
 
+    int trainableLayerCount;
     readonly SilkBertWeights weights;
     readonly LayerActivations[] activations;
     readonly List<nint> owned = [];
@@ -108,7 +109,8 @@ public sealed class SilkDistilBertTrainer : IDisposable
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         BertGpuNaming naming,
         int maxBatch,
-        int maxSeqLen)
+        int maxSeqLen,
+        int trainableLayerCount = -1)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
@@ -128,7 +130,11 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: true);
+        int normalizedTrainable = trainableLayerCount < 0 ? config.NumHiddenLayers
+            : Math.Clamp(trainableLayerCount, 0, config.NumHiddenLayers);
+        this.trainableLayerCount = normalizedTrainable;
+
+        weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: true, trainableLayerCount: normalizedTrainable);
         if (!weights.HasHead)
             throw new InvalidOperationException(
                 "SilkDistilBertTrainer needs the classifier head keys 'pre_classifier.*' and 'classifier.*' in the checkpoint.");
@@ -186,6 +192,19 @@ public sealed class SilkDistilBertTrainer : IDisposable
         dClsIn = Alloc(headCap);
     }
 
+    /// <summary>Convenience constructor that freezes the whole encoder (trains only the classifier head).</summary>
+    public SilkDistilBertTrainer(
+        SilkRuntime runtime,
+        BertConfig config,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        BertGpuNaming naming,
+        int maxBatch,
+        int maxSeqLen,
+        bool freezeEncoder)
+        : this(runtime, config, tensors, naming, maxBatch, maxSeqLen, freezeEncoder ? 0 : -1)
+    {
+    }
+
     /// <summary>The OpenCL device the whole training loop runs on.</summary>
     public string DeviceName => runtime.DeviceName;
 
@@ -200,6 +219,72 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
     /// <summary>The classifier head's output width, taken from <c>classifier.weight</c>'s first dimension.</summary>
     public int NumClasses => numClasses;
+
+    /// <summary>
+    /// How many of the top transformer layers participate in backward accumulation and AdamW.
+    /// <c>0</c> trains only the classifier head; <c>NumHiddenLayers</c> trains everything (default).
+    /// Setting it after construction (before training) re-marks every parameter accordingly.
+    /// </summary>
+    public int TrainableLayerCount
+    {
+        get => trainableLayerCount;
+        set
+        {
+            int normalized = value < 0 ? numLayers : Math.Clamp(value, 0, numLayers);
+            trainableLayerCount = normalized;
+            if (weights is not null)
+            {
+                int firstTrainable = numLayers - normalized;
+                bool embeddingsTrainable = normalized == numLayers;
+                weights.WordEmb.Trainable = embeddingsTrainable;
+                weights.PosEmb.Trainable = embeddingsTrainable;
+                weights.EmbLnW.Trainable = embeddingsTrainable;
+                weights.EmbLnB.Trainable = embeddingsTrainable;
+                for (int i = 0; i < numLayers; i++)
+                {
+                    bool layerTrainable = i >= firstTrainable;
+                    var layer = weights.Layers[i];
+                    layer.Wqkv.Trainable = layerTrainable;
+                    layer.Bqkv.Trainable = layerTrainable;
+                    layer.O.Trainable = layerTrainable;
+                    layer.W1.Trainable = layerTrainable;
+                    layer.W2.Trainable = layerTrainable;
+                    layer.Bo.Trainable = layerTrainable;
+                    layer.B1.Trainable = layerTrainable;
+                    layer.B2.Trainable = layerTrainable;
+                    layer.Ln1W.Trainable = layerTrainable;
+                    layer.Ln1B.Trainable = layerTrainable;
+                    layer.Ln2W.Trainable = layerTrainable;
+                    layer.Ln2B.Trainable = layerTrainable;
+                }
+                if (weights.HasHead)
+                {
+                    weights.PreW.Trainable = true;
+                    weights.PreB.Trainable = true;
+                    weights.ClsW.Trainable = true;
+                    weights.ClsB.Trainable = true;
+                }
+            }
+        }
+    }
+
+    /// <summary>Alias for <see cref="TrainableLayerCount"/>.</summary>
+    public int NumTrainableLayers => TrainableLayerCount;
+
+    /// <summary>Alias for <see cref="TrainableLayerCount"/> used by callers that prefer a plural noun.</summary>
+    public int TrainableLayers => TrainableLayerCount;
+
+    /// <summary>Freezes the entire encoder (trains only the classifier head).</summary>
+    public void FreezeEncoder() => TrainableLayerCount = 0;
+
+    /// <summary>Alias for setting the trainable top-layer count.</summary>
+    public void SetTrainableLayers(int count) => TrainableLayerCount = count;
+
+    /// <summary>Alias that freezes <paramref name="count"/> bottom layers (head and top remainder stay trainable).</summary>
+    public void FreezeLayers(int count = 0) => TrainableLayerCount = Math.Max(0, numLayers - Math.Clamp(count, 0, numLayers));
+
+    /// <summary>Alias for freezing the whole encoder.</summary>
+    public void Freeze() => FreezeEncoder();
 
     /// <summary>
     /// When true, <see cref="BackwardChain"/> records per-stage elapsed milliseconds (with
@@ -403,7 +488,9 @@ public sealed class SilkDistilBertTrainer : IDisposable
             LastPhaseMs["ClassifierHead"] = clsSw!.ElapsedMilliseconds;
         }
 
-        for (int i = numLayers - 1; i >= 0; i--)
+        int firstTrainableLayer = numLayers - trainableLayerCount;
+
+        for (int i = numLayers - 1; i >= firstTrainableLayer; i--)
         {
             var w = weights.Layers[i];
             var a = activations[i];
@@ -493,20 +580,28 @@ public sealed class SilkDistilBertTrainer : IDisposable
             }
         }
 
-        // Embedding LayerNorm, then the word and position embedding scatters.
-        var embSw = ProfilingEnabled ? Stopwatch.StartNew() : null;
-        LayerNormBackward(dCur, embPreNorm, weights.EmbLnW, dTmp, rows);
-        SilkLauncher.ColSum(runtime, dLnA, weights.EmbLnW.Gradient.Handle, rows, hiddenDim, 1f);
-        SilkLauncher.ColSum(runtime, dLnB, weights.EmbLnB.Gradient.Handle, rows, hiddenDim, 1f);
-
-        SilkLauncher.Fill(runtime, weights.WordEmb.Gradient.Handle, 0f, weights.WordEmb.Count);
-        SilkLauncher.EmbeddingBackwardRows(runtime, idsBuf, dTmp, weights.WordEmb.Gradient.Handle, rows, hiddenDim);
-        SilkLauncher.Fill(runtime, weights.PosEmb.Gradient.Handle, 0f, weights.PosEmb.Count);
-        SilkLauncher.EmbeddingBackwardRows(runtime, posIdsBuf, dTmp, weights.PosEmb.Gradient.Handle, rows, hiddenDim);
-        if (ProfilingEnabled)
+        // Embedding LayerNorm, then the word and position embedding scatters. Skipped when the
+        // embedding table is frozen, since nothing below the trainable layers needs a gradient.
+        var embSw = (firstTrainableLayer == 0 && ProfilingEnabled) ? Stopwatch.StartNew() : null;
+        if (firstTrainableLayer == 0)
         {
-            runtime.Finish();
-            LastPhaseMs["EmbeddingScatter"] = embSw!.ElapsedMilliseconds;
+            LayerNormBackward(dCur, embPreNorm, weights.EmbLnW, dTmp, rows);
+            SilkLauncher.ColSum(runtime, dLnA, weights.EmbLnW.Gradient.Handle, rows, hiddenDim, 1f);
+            SilkLauncher.ColSum(runtime, dLnB, weights.EmbLnB.Gradient.Handle, rows, hiddenDim, 1f);
+
+            SilkLauncher.Fill(runtime, weights.WordEmb.Gradient.Handle, 0f, weights.WordEmb.Count);
+            SilkLauncher.EmbeddingBackwardRows(runtime, idsBuf, dTmp, weights.WordEmb.Gradient.Handle, rows, hiddenDim);
+            SilkLauncher.Fill(runtime, weights.PosEmb.Gradient.Handle, 0f, weights.PosEmb.Count);
+            SilkLauncher.EmbeddingBackwardRows(runtime, posIdsBuf, dTmp, weights.PosEmb.Gradient.Handle, rows, hiddenDim);
+            if (ProfilingEnabled)
+            {
+                runtime.Finish();
+                LastPhaseMs["EmbeddingScatter"] = embSw!.ElapsedMilliseconds;
+            }
+        }
+        else if (ProfilingEnabled)
+        {
+            LastPhaseMs["EmbeddingScatter"] = 0;
         }
 
         if (ProfilingEnabled)
@@ -528,7 +623,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
         float correction1 = 1f - MathF.Pow(Beta1, adamStep);
         float correction2 = 1f - MathF.Pow(Beta2, adamStep);
 
-        foreach (var p in weights.Parameters)
+        foreach (var p in weights.Parameters.Where(p => p.Trainable))
         {
             SilkLauncher.AdamUpdate(runtime, p.Weight.Handle, p.Gradient.Handle,
                 p.FirstMoment.Handle, p.SecondMoment.Handle,
@@ -650,7 +745,7 @@ public sealed class SilkDistilBertTrainer : IDisposable
 
     internal void ZeroMoments()
     {
-        foreach (var p in weights.Parameters)
+        foreach (var p in weights.Parameters.Where(p => p.Trainable))
         {
             SilkLauncher.Fill(runtime, p.FirstMoment.Handle, 0f, p.Count);
             SilkLauncher.Fill(runtime, p.SecondMoment.Handle, 0f, p.Count);

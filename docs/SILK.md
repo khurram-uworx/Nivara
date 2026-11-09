@@ -822,6 +822,38 @@ per work item as the leading attention contributor (issue #1002), but LN/fc GEMM
 and the attention backward as a whole (748 ms) dominate even more. The forward pass (316.6 ms)
 and AdamW (60.6 ms) are the next targets; softmax-cross-entropy input gradient on device is ~0.05 ms.
 
+### Partial/frozen training (#1012)
+
+`SilkDistilBertTrainer` supports opt-in partial/frozen training via `trainableLayerCount`
+(default `-1`, meaning all layers):
+
+- `0` trains only the classifier/pre-classifier head.
+- `N` trains the top `N` transformer layers plus the head.
+- values are clamped to `[0, NumHiddenLayers]`.
+
+The constructor also accepts `freezeEncoder: true`, equivalent to
+`trainableLayerCount: 0`. The CLI sample exposes this as `--trainable-layers`.
+
+Frozen layers (and frozen embeddings in any partial mode) keep their checkpoint value
+buffers, but backward accumulation and the AdamW step skip them:
+`AdamUpdateAll` and `ZeroMoments` iterate only `SilkParam.Trainable` values. When only
+a top-N suffix is trainable, embedding and lower-layer backpropagation are skipped as
+well. Head gradients are compared against a CPU reverse-mode pass for head-only and
+top-one-layer cases in `SilkDistilBertTrainerTests`.
+
+For Laya, which trains its decision head with AutoDiff on frozen ModernBERT features,
+keep encoder-derived features outside the gradient path (`requiresGrad: false` where
+applicable). Nivara does not currently ship a Silk Laya trainer; the same top-down
+freeze policy is intended to reuse for a future Laya head-training path.
+
+Measured reduction (DistilBERT base, L=128, AC power not verified; medians of 5 iterations):
+
+| Batch | all-layers backward (ms) | head-only backward (ms) | reduction |
+|---:|---:|---:|---:|
+| 2 | 452.7 | 0.7 | ~99.8% |
+| 4 | 910.0 | 0.7 | ~99.9% |
+| 8 | 1880.4 | 0.7 | ~99.9% |
+
 ## 13f. Retrieval fusion (`RagLearnMode`, #915)
 
 `SilkRetrievalTrainer` (`samples/NivaraChat/Helpers/SilkRetrievalTrainer.cs`) trains the
@@ -954,3 +986,17 @@ Device-dependent (OpenCL/Silk) tests are categorized [Category("Gpu")] and are e
   dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "Category=Gpu"
   ``n- On CI (no GPU) these tests are excluded by Category!=Gpu and skip via Assert.Ignore when run manually.
 
+## Narrow-precision BF16 inference lane (issue #1013, Phase 1)
+
+Silk BERT-family inference is opt-in narrow precision, never the default:
+
+- ModernBERT: SilkModernBertSession.Open(config, bf16Tensors) (and the F16 overload) runs on-device;
+  --precision bf16 wires it up in NivaraInference.
+- Laya: SilkLayaSession.Open(config, bf16Tensors, headLayerCount) runs the encoder and the head
+  on-device. Matmul weights stay in BF16/Half; LayerNorm weights, biases and token embeddings are
+  materialized in F32 (existing elementwise kernels are F32), and activations remain F32.
+- Parity against the F32 runner on synthetic fixtures: SilkBertNarrowParityTests,
+  SilkModernBertNarrowParityTests, SilkLayaNarrowParityTests. Documented tolerance follows
+  the BERT encoder's maxAbs <= 1e-2 * (1+|reference|).
+- Training (moments in FP32) and full activation-traffic halving in the Laya head are deferred to
+  issues #1103 and #1102 respectively.
