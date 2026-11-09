@@ -50,6 +50,9 @@ public static class ArrowInterop
 
             var fields = new List<Field>();
             var arrowArrays = new List<IArrowArray>();
+            List<IList<IArrowArray>>? perColumnArrays =
+                options.PreserveChunkStructure ? new List<IList<IArrowArray>>() : null;
+            bool anyChunked = false;
             Dictionary<string, string>? clrTypeMetadata = null;
 
             foreach (var columnName in frame.ColumnNames)
@@ -78,9 +81,18 @@ public static class ArrowInterop
                     var field = new Field(columnName, arrowType, nullable: true);
                     fields.Add(field);
 
-                    // Convert column to Arrow array
-                    var arrowArray = ConvertColumnToArrowArray(column, options, columnName);
-                    arrowArrays.Add(arrowArray);
+                    if (perColumnArrays is null)
+                    {
+                        // Convert column to Arrow array
+                        var arrowArray = ConvertColumnToArrowArray(column, options, columnName);
+                        arrowArrays.Add(arrowArray);
+                    }
+                    else
+                    {
+                        var arrays = ConvertColumnToArrowArrays(column, options, columnName);
+                        perColumnArrays.Add(arrays);
+                        anyChunked |= arrays.Count > 1;
+                    }
                 }
                 catch (Exception ex) when (ex is not UnsupportedTypeException)
                 {
@@ -94,6 +106,24 @@ public static class ArrowInterop
             }
 
             var schema = new Apache.Arrow.Schema(fields, clrTypeMetadata);
+
+            // Per-column chunk counts are only expressible through new Table(schema, columns);
+            // the batched route gives every column the same chunk grid.
+            if (anyChunked)
+            {
+                var columns = new Column[fields.Count];
+                for (int i = 0; i < fields.Count; i++)
+                    columns[i] = new Column(fields[i], perColumnArrays![i]);
+
+                return new Table(schema, columns);
+            }
+
+            if (perColumnArrays is not null)
+            {
+                foreach (var arrays in perColumnArrays)
+                    arrowArrays.Add(arrays[0]);
+            }
+
             var recordBatch = new RecordBatch(schema, arrowArrays, frame.RowCount);
 
             return Table.TableFromRecordBatches(schema, new[] { recordBatch });
@@ -197,6 +227,13 @@ public static class ArrowInterop
         ArgumentNullException.ThrowIfNull(series);
 
         options ??= new ArrowConversionOptions();
+
+        if (options.PreserveChunkStructure && series.Values.Storage is not ColumnStorage<T>)
+        {
+            throw new NotSupportedException(
+                $"{nameof(ToArrowArray)} returns a single IArrowArray and cannot preserve chunk structure. " +
+                $"Use {nameof(ToArrowTable)} instead.");
+        }
 
         try
         {
@@ -364,6 +401,61 @@ public static class ArrowInterop
             Type t when t == typeof(TimeSpan) => ConvertColumnToArrowArrayTyped<TimeSpan>(column, options, columnName),
             _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
+    }
+
+    /// <summary>
+    /// Converts a column to one Arrow array per chunk using dynamic dispatch. A flat column
+    /// yields a single-element list.
+    /// </summary>
+    private static IList<IArrowArray> ConvertColumnToArrowArrays(IColumn column, ArrowConversionOptions options, string? columnName)
+    {
+        var elementType = column.ElementType;
+
+        return elementType switch
+        {
+            Type t when t == typeof(bool) => ConvertColumnToArrowArraysTyped<bool>(column, options, columnName),
+            Type t when t == typeof(int) => ConvertColumnToArrowArraysTyped<int>(column, options, columnName),
+            Type t when t == typeof(long) => ConvertColumnToArrowArraysTyped<long>(column, options, columnName),
+            Type t when t == typeof(float) => ConvertColumnToArrowArraysTyped<float>(column, options, columnName),
+            Type t when t == typeof(double) => ConvertColumnToArrowArraysTyped<double>(column, options, columnName),
+            Type t when t == typeof(string) => ConvertColumnToArrowArraysTyped<string>(column, options, columnName),
+            Type t when t == typeof(DateTime) => ConvertColumnToArrowArraysTyped<DateTime>(column, options, columnName),
+            Type t when t == typeof(byte) => ConvertColumnToArrowArraysTyped<byte>(column, options, columnName),
+            Type t when t == typeof(short) => ConvertColumnToArrowArraysTyped<short>(column, options, columnName),
+            Type t when t == typeof(uint) => ConvertColumnToArrowArraysTyped<uint>(column, options, columnName),
+            Type t when t == typeof(ulong) => ConvertColumnToArrowArraysTyped<ulong>(column, options, columnName),
+            Type t when t == typeof(ushort) => ConvertColumnToArrowArraysTyped<ushort>(column, options, columnName),
+            Type t when t == typeof(sbyte) => ConvertColumnToArrowArraysTyped<sbyte>(column, options, columnName),
+            Type t when t == typeof(Half) => ConvertColumnToArrowArraysTyped<Half>(column, options, columnName),
+            Type t when t == typeof(nint) => ConvertColumnToArrowArraysTyped<nint>(column, options, columnName),
+            Type t when t == typeof(nuint) => ConvertColumnToArrowArraysTyped<nuint>(column, options, columnName),
+            Type t when t == typeof(char) => ConvertColumnToArrowArraysTyped<char>(column, options, columnName),
+            Type t when t == typeof(DateOnly) => ConvertColumnToArrowArraysTyped<DateOnly>(column, options, columnName),
+            Type t when t == typeof(TimeOnly) => ConvertColumnToArrowArraysTyped<TimeOnly>(column, options, columnName),
+            Type t when t == typeof(Guid) => ConvertColumnToArrowArraysTyped<Guid>(column, options, columnName),
+            Type t when t == typeof(DateTimeOffset) => ConvertColumnToArrowArraysTyped<DateTimeOffset>(column, options, columnName),
+            Type t when t == typeof(TimeSpan) => ConvertColumnToArrowArraysTyped<TimeSpan>(column, options, columnName),
+            _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
+        };
+    }
+
+    /// <summary>
+    /// Converts a typed column to one Arrow array per chunk, or a single array when the backing
+    /// storage is flat.
+    /// </summary>
+    private static IList<IArrowArray> ConvertColumnToArrowArraysTyped<T>(IColumn column, ArrowConversionOptions options, string? columnName)
+    {
+        if (column is not NivaraColumn<T> typedColumn || typedColumn.Storage is not ChunkedColumn<T> chunked)
+            return [ConvertColumnToArrowArray(column, options, columnName)];
+
+        var arrays = new IArrowArray[chunked.ChunkStorages.Length];
+        for (int i = 0; i < arrays.Length; i++)
+        {
+            var chunkColumn = new NivaraColumn<T>(chunked.ChunkStorages[i]);
+            arrays[i] = ConvertColumnToArrowArrayTyped<T>(chunkColumn, options, columnName);
+        }
+
+        return arrays;
     }
 
     /// <summary>
@@ -1161,6 +1253,44 @@ public static class ArrowInterop
         if (chunkCount == 0)
         {
             return NivaraColumn<T>.Create(System.Array.Empty<T>());
+        }
+
+        if (options.PreserveChunkStructure && chunkCount > 1)
+        {
+            var chunkStorages = new List<ColumnStorage<T>>(chunkCount);
+            for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+            {
+                var chunk = chunkedArray.Array(chunkIndex);
+                int chunkLength = (int)chunk.Length;
+                if (chunkLength == 0)
+                    continue;
+
+                var chunkValues = new T[chunkLength];
+                var chunkNullMask = new bool[chunkLength];
+                bool anyNull = false;
+
+                var validityBytes = (chunk.Data.Buffers.Length > 0)
+                    ? chunk.Data.Buffers[0].Span
+                    : ReadOnlySpan<byte>.Empty;
+                ArrowValidityMask.ToNullMask(validityBytes, (int)chunk.Offset, chunkNullMask.AsSpan());
+
+                for (int i = 0; i < chunkLength; i++)
+                {
+                    if (chunkNullMask[i])
+                    {
+                        anyNull = true;
+                        continue;
+                    }
+
+                    chunkValues[i] = ExtractValueFromArrowArray<T>(chunk, i, options);
+                }
+
+                chunkStorages.Add(anyNull
+                    ? new ColumnStorage<T>(new ReadOnlyMemory<T>(chunkValues), new ReadOnlyMemory<bool>(chunkNullMask))
+                    : new ColumnStorage<T>(chunkValues));
+            }
+
+            return new NivaraColumn<T>(ChunkedColumn<T>.FromChunkStorages(chunkStorages));
         }
 
         var nullMask = new bool[totalLength];
