@@ -52,6 +52,7 @@ static partial class DocSnippetExtractor
     [
         "docs/AGENT-CODE-EXAMPLES.md",
         "docs/EMBEDDINGS.md",
+        "docs/METRICS.md",
         "docs/STREAMING.md",
         "EXAMPLES.md",
         "GETTING-STARTED.md",
