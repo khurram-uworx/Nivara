@@ -9,22 +9,20 @@ public sealed partial class SilkLayaHeadGpuRunner
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
         int headLayerCount = 2,
         int actClassCount = 2)
-        : this(runtime, ToFloat(tensors), headLayerCount, actClassCount)
+        : this(runtime, ToUshort(tensors), headLayerCount, actClassCount, isBf16: true, isFp16: false)
     {
     }
 
-    static Dictionary<string, (float[] Data, int[] Shape)> ToFloat(
+    internal static Dictionary<string, (ushort[] Data, int[] Shape)> ToUshort(
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
     {
-        var result = new Dictionary<string, (float[] Data, int[] Shape)>(tensors.Count);
+        var result = new Dictionary<string, (ushort[] Data, int[] Shape)>(tensors.Count);
         foreach (var kv in tensors)
         {
             var src = kv.Value.Data;
-            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<BFloat16, ushort>(src.AsSpan());
-            var dst = new float[src.Length];
-            for (int i = 0; i < src.Length; i++)
-                dst[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
-            result[kv.Key] = (dst, kv.Value.Shape);
+            var arr = new ushort[src.Length];
+            System.Runtime.InteropServices.MemoryMarshal.Cast<BFloat16, ushort>(src.AsSpan()).CopyTo(arr.AsSpan());
+            result[kv.Key] = (arr, kv.Value.Shape);
         }
         return result;
     }
