@@ -20,7 +20,7 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs::CreateZeroCopyArrowArray`), while **import** and Parquet conversion still copy; and there is no chunked-column model in core (Phase A not started; Arrow chunked arrays are flattened on import, `ArrowInterop.cs::ConvertArrowColumnToNivaraColumnInt`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are partly there: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`); Arrow **export** shares the values buffer of a flat primitive column through the opt-in `UseZeroCopy` option (`ArrowInterop.cs::CreateZeroCopyArrowArray`), while Parquet conversion still copies. The internal chunk layer now exists: `Chunk<T>`/`ChunkedColumn<T>` sit behind the unchanged `NivaraColumn<T>` facade (`src/Nivara/Storage/ChunkedColumn.cs`), `Slice`/`Concat` keep chunk boundaries without copying, and the opt-in `PreserveChunkStructure` option preserves per-column chunk counts through an Arrow table round-trip. Chunk-wise compute kernels are still open, so arithmetic on a chunked column pays one cached contiguous copy per operand. Internal column→tensor access is a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
 
 ### Non-goals (explicit)
 
@@ -33,7 +33,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ## 1. The roadmap
 
-### Phase A — Chunked column model in core *(structural foundation; Phase A not started)*
+### Phase A — Chunked column model in core *(internal layer landed; chunk-wise compute open)*
 
 **Motivation:** Every Arrow shape collapses at the boundary today because the frame model is single-contiguous-array. Chunked columns are the one structural change everything else hangs off: append/concat, streaming, record-batch boundaries, and zero-copy interop all become natural.
 
@@ -47,13 +47,13 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 **Dependencies:** none (foundation for B–F).
 
-**Status:** Phase A not started — no `Chunk`/`ChunkedColumn` types exist in core yet; Arrow chunked arrays are still flattened on import (verified 2026-11-03).
+**Status:** Internal layer landed (#862). `Chunk<T>`/`ChunkedColumn<T>` exist behind the unchanged `NivaraColumn<T>` facade, `Slice`/`Concat` preserve chunk boundaries, and the opt-in `ArrowConversionOptions.PreserveChunkStructure` keeps per-column chunk counts through an Arrow table round-trip. Chunk-wise compute kernels and zero-copy Arrow *import* remain open.
 
 **Acceptance criteria:**
-- Phase A not started today — until it lands, D-import, Phase F, and chunk-aware handling stay blocked.
-- Arrow `Table` round-trips with chunk structure preserved (chunk counts match; no forced flatten).
-- `Concat` of aligned-chunk inputs does not copy the shared chunks.
-- Existing frame/column behavior unchanged at the API level; `dotnet test` green.
+- Arrow `Table` round-trips with chunk structure preserved when `PreserveChunkStructure` is enabled (per-column chunk counts match; no forced flatten). Landed.
+- `Concat` of chunked inputs does not copy the existing chunks. Landed.
+- Existing frame/column behavior unchanged at the API level; `dotnet test` green. Landed.
+- Chunk-wise compute kernels remain a follow-up; until they land, arithmetic on a chunked column pays one cached contiguous copy per operand.
 
 **Risks:** behavioral churn across a large public surface (`NivaraColumn.cs` is ~3k lines); mitigation: keep the facade, land chunking as an internal storage concern first (matches AGENTS.md "storage is an internal concern").
 

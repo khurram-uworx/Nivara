@@ -31,6 +31,27 @@ public class ArrowConversionOptions
     public bool UseZeroCopy { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets whether to preserve per-column chunk structure across an Arrow table round-trip
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When enabled, <c>ArrowInterop.FromArrowTable</c> keeps one chunk per Arrow array in a
+    /// <c>ChunkedArray</c> instead of flattening into a single buffer, and
+    /// <c>ArrowInterop.ToArrowTable</c> emits one Arrow array per chunk so the chunk counts survive.
+    /// Only chunk counts change; values and nulls are identical either way.
+    /// </para>
+    /// <para>
+    /// This option does not apply to <c>ArrowInterop.ToArrowArray</c>, which returns a single
+    /// <c>IArrowArray</c> and cannot express a multi-chunk column; it throws instead of silently
+    /// flattening. Use <c>ArrowInterop.ToArrowTable</c> for chunk-preserving export.
+    /// </para>
+    /// <para>
+    /// Default is false, which keeps today's flattening behaviour.
+    /// </para>
+    /// </remarks>
+    public bool PreserveChunkStructure { get; set; } = false;
+
+    /// <summary>
     /// Gets or sets the timezone for timestamp conversions
     /// </summary>
     /// <remarks>

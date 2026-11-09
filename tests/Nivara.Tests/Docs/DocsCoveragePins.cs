@@ -16,8 +16,11 @@ internal static class DocsCoveragePins
     /// to the scope means restoring the count with them. #868 adds two: one in
     /// <c>docs/METRICS.md</c> (<c>TrainingLoop.cs::OnEpochEnd</c>) and one in
     /// <c>docs/TENSORS.md</c> (<c>NivaraMetrics.cs::ConfusionMatrixFrame</c>) — 113 + 2 = 115.
+    /// Issue #1066 adds one in <c>docs/METRICS.md</c>
+    /// (<c>MLNetMetricsCrossCheckTests.cs::ConfusionMatrix_MatchesMLNetEvaluation_Exactly</c>):
+    /// 115 + 1 = 116.
     /// </remarks>
-    internal const int ExpectedCitationCount = 115;
+    internal const int ExpectedCitationCount = 116;
 
     /// <summary>
     /// Count of documents carrying at least one citation. Pinned deliberately.
@@ -39,8 +42,9 @@ internal static class DocsCoveragePins
     /// Eight plan documents are out of scope as a result (six AISTACK/ARROW/POLARS review/roadmap
     /// documents, <c>RAG-LLM-EVAL.md</c> and <c>CRAZY-ROADMAP.md</c> moved into <c>docs/plan/</c>,
     /// plus the new <c>NIVARACHAT-EVALS.md</c>). #868 adds <c>docs/METRICS.md</c>: 56 + 1 = 57.
+    /// #1064 adds <c>docs/adr/009-metrics-mergeable-accumulator.md</c>: 57 + 1 = 58.
     /// </remarks>
-    internal const int ExpectedDocumentCount = 57;
+    internal const int ExpectedDocumentCount = 58;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -48,8 +52,9 @@ internal static class DocsCoveragePins
     /// <remarks>
     /// The widened scope adds every <c>.cs</c> file; #868's two new citations (see
     /// <see cref="ExpectedCitationCount"/>) both land here too: 50 + 2 = 52.
+    /// Issue #1066's test citation also lands here: 52 + 1 = 53.
     /// </remarks>
-    internal const int ExpectedCodeCitationCount = 52;
+    internal const int ExpectedCodeCitationCount = 53;
 
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
@@ -62,6 +67,7 @@ internal static class DocsCoveragePins
     /// (<c>NivaraMetrics.cs</c> names <c>docs/METRICS.md</c>): 241 + 12 = 253.
     /// Issue #1060 adds one more in <c>tests/Nivara.PerformanceTests/README.md</c> (the new
     /// <c>--metrics</c> mode documents the O(k²) warning in <c>docs/METRICS.md</c>): 253 + 1 = 254.
+    /// Issue #1064 adds one from the ADR-009 index line in <c>AGENTS.md</c>: 254 + 1 = 255.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 254;
+    internal const int ExpectedDocumentReferenceCount = 255;
 }
