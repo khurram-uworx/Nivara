@@ -290,7 +290,10 @@ public static class RagLearnMode
                     var cache = RagEvalLabels.Load(path);
                     if (cache.Count == 0)
                     {
-                        Console.WriteLine($"No judge labels at {path}. Re-run --rag-eval --ollama, or use --labels fixture.");
+                        Console.WriteLine($"No judge labels at {path}.");
+                        Console.WriteLine("Generate them with:");
+                        Console.WriteLine("  dotnet run --project samples/NivaraChat -c Release -- --rag-eval --ollama --model <model>");
+                        Console.WriteLine("or pass --labels auto for a leakage diagnostic.");
                         return null;
                     }
 
@@ -490,7 +493,7 @@ public static class RagLearnMode
         Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "relevance.tsv");
 
     static string FixturePath(string repoRoot) =>
-        Path.Combine(repoRoot, "samples", "NivaraChat", "relevance-fixture.tsv");
+        Path.Combine(repoRoot, "samples", "data", "nivarachat", "eval", "relevance-fixture.tsv");
 
     static string QueriesPath(ModeContext ctx, string repoRoot)
     {
@@ -500,6 +503,7 @@ public static class RagLearnMode
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "queries.tsv"),
+            Path.Combine(repoRoot, "samples", "data", "nivarachat", "queries.tsv"),
             Path.Combine(repoRoot, "samples", "NivaraChat", "queries.tsv")
         };
 

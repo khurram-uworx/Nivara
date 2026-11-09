@@ -409,8 +409,8 @@ internal sealed class SilkRetrievalTrainer : IDisposable
             logits[k] = acc;
         }
         var w = MaskedFusion.Weights(logits.AsSpan());
-        // Copy into theta scratch so fusion_forward has W to read.
-        runtime.Upload(thetaBuf, w.AsSpan()); // use theta buffer as scratch
+        // fusion_forward reads W from Wbuf.
+        runtime.Upload(Wbuf, w.AsSpan());
 
         runtime.Upload(Sbuf, query.Scores.AsSpan());
         runtime.Upload(Pbuf, FloatMask(query.Present).AsSpan());

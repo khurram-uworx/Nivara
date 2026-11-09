@@ -15,6 +15,7 @@ public static class RagEvalMode
         var queriesCandidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "queries.tsv"),
+            Path.Combine(repoRoot, "samples", "data", "nivarachat", "queries.tsv"),
             Path.Combine(repoRoot, "samples", "NivaraChat", "queries.tsv")
         };
         var queriesPath = ctx.Queries ?? queriesCandidates.FirstOrDefault(File.Exists) ?? queriesCandidates[0];
@@ -26,6 +27,10 @@ public static class RagEvalMode
         buildSw.Stop();
         if (index is null)
             return;
+
+        var queriesFileExisted = File.Exists(queriesPath);
+        if (!queriesFileExisted)
+            Console.WriteLine($"queries.tsv not found at {queriesPath}; deriving from corpus chunks (use --regenerate queries to write it explicitly).");
 
         List<EvalQuery> queries;
         try
