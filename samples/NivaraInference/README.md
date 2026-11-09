@@ -35,10 +35,7 @@ dotnet run --project samples/NivaraInference -c Release -- qwen distill --teache
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk distill --teacher-examples 12  # same, teacher on the OpenCL GPU
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark        # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert            # ModernBERT-large forward (28-layer hybrid)
-dotnet run --project samples/NivaraInference -c Release -- modernbert compare    # last_hidden_state parity gate vs PyTorch
-dotnet run --project samples/NivaraInference -c Release -- modernbert compare_diag  # per-stage embeddings→layer 27→final norm
 dotnet run --project samples/NivaraInference -c Release -- laya                 # decision head over the fixture questions (CPU reference)
-dotnet run --project samples/NivaraInference -c Release -- laya compare         # prompt + logit + decision gate vs the laya 0.3.20 wheel
 
 # TypeSafe decision-model demo — no weights; calls a decision-model engine over HTTP
 dotnet run --project samples/NivaraInference -c Release -- typesafe             # Ollaya (laya:en)
@@ -158,8 +155,6 @@ are in **[docs/DECISION-MODELS.md](../../docs/DECISION-MODELS.md)**.
 dotnet run --project samples/NivaraInference -- mobilenet_v2
 dotnet run --project samples/NivaraInference -- resnet18
 dotnet run --project samples/NivaraInference -- mobilenet_v2 benchmark
-dotnet run --project samples/NivaraInference -- mobilenet_v2 compare
-dotnet run --project samples/NivaraInference -- mobilenet_v2 compare_diag
 dotnet run --project samples/NivaraInference -- mobilenet_v2 path/to/image.jpg
 ```
 
@@ -171,18 +166,14 @@ dotnet run --project samples/NivaraInference -- minilm similarity
 dotnet run --project samples/NivaraInference -- distilbert
 dotnet run --project samples/NivaraInference -- distilbert benchmark
 dotnet run --project samples/NivaraInference -- distilbert_sst
-dotnet run --project samples/NivaraInference -- distilbert_sst compare
 dotnet run --project samples/NivaraInference -- smollm
 dotnet run --project samples/NivaraInference -- smollm --precision bf16
 dotnet run --project samples/NivaraInference -- qwen tools
 dotnet run --project samples/NivaraInference -- qwen distill --teacher-examples 12
 dotnet run --project samples/NivaraInference -- qwen benchmark
 dotnet run --project samples/NivaraInference -- modernbert
-dotnet run --project samples/NivaraInference -- modernbert compare
-dotnet run --project samples/NivaraInference -- modernbert compare_diag
 dotnet run --project samples/NivaraInference -- modernbert benchmark
 dotnet run --project samples/NivaraInference -- laya
-dotnet run --project samples/NivaraInference -- laya compare
 ```
 
 ### Argument validation
@@ -192,15 +183,8 @@ flag whose consuming path is not selected, or a narrow `--precision` / `--simd-w
 selected run does not read exits `1` with a message naming the requirement instead of silently
 running something else. In particular:
 
-- Each model accepts a fixed mode set — `minilm` `benchmark`/`compare`/`similarity`, `qwen`
-  `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing
-  image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through
-  to the model's default runner.
-- `--precision f32|bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner
-  (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya` — but not `compare`;
-  `qwen` for `benchmark`/`--synthetic-weights`). `f32` is always accepted. The vision models and
-  `laya compare` / `modernbert compare` reject bf16/fp16: they have no narrow path. Even where a
-  bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16.
+- Each model accepts a fixed mode set — `minilm` `benchmark`/`similarity`, `qwen` `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through to the model's default runner.
+- `--precision f32|bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya`; `qwen` for `benchmark`). `f32` is always accepted. The vision models reject bf16/fp16: they have no narrow path. Even where a bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16.
 - `--simd-widen` is an A/B lever for those narrow runs only. `smollm` and `qwen` enable widen for
   their narrow runs themselves (use `smollm ab`), and an F32 run is unchanged, so the flag is
   rejected there.
