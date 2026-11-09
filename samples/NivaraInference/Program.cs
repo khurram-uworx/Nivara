@@ -302,8 +302,6 @@ class Program
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed passes and report median timing");
-            Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
-            Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
             Console.WriteLine("  generate          Greedy causal-LM generation (smollm)");
             Console.WriteLine("  ab                A/B scalar vs widen comparison (smollm only)");
@@ -350,8 +348,7 @@ class Program
             Console.WriteLine("  --text \"...\"      Override the default user prompt (tools or plain mode; default: Paris weather)");
             Console.WriteLine("  --plain           Plain (no-tools) prompt surface. With 'benchmark': run the plain-prompt");
             Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
-            Console.WriteLine("  --synthetic-weights  qwen benchmark: fabricate Qwen2.5-0.5B-shaped weights (no model");
-            Console.WriteLine("                    file needed). Timing is shape-driven; correctness requires real weights.");
+
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
@@ -533,7 +530,7 @@ class Program
 
         if (useSilk && !SilkModes[modelType].Contains(mode))
         {
-            Console.Error.WriteLine($"--silk does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (Silk modes: default, benchmark, compare).");
+            Console.Error.WriteLine($"--silk does not support mode '{(mode.Length > 0 ? mode : "default")}' for '{modelType}' (Silk modes: default, benchmark).");
             return 1;
         }
 
@@ -562,7 +559,7 @@ class Program
         if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, synthetic: false))
         {
             Console.Error.WriteLine(isQwen
-                ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32."
+                ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' mode; tools/distill run F32."
                 : $"--precision {precision} is not supported for '{got}': the selected run is F32-only. Narrow-float models: {NarrowFloatModels} ('modernbert' / 'laya' compare are F32-only).");
             return 1;
         }
