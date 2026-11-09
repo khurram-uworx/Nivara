@@ -168,7 +168,7 @@ public static class MultiViewIndexCache
 
         var saveFrame = NivaraFrame.Create(columns.ToArray());
         var maxMtime = mdFiles.Count > 0 ? mdFiles.Max(f => File.GetLastWriteTimeUtc(f)) : DateTime.MinValue;
-        var contentHash = RagIndexCache.ComputeContentHash(mdFiles);
+        var contentHash = RagIndexCache.ComputeContentHash(mdFiles, Directory.GetParent(docsDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))?.FullName);
         var manifest = new Manifest(
             useSilk ? "silk" : "cpu",
             dimension,
