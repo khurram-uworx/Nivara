@@ -275,7 +275,7 @@ public class InferenceCliArgumentTests
     public void QwenPrecision_Rejected()
     {
         AssertRejected(Run("qwen", "--precision", "bf16"),
-            "bf16 supports only the 'benchmark' and '--synthetic-weights' modes");
+            "bf16 supports only the 'benchmark' mode");
         AssertRejected(Run("qwen", "--precision", "fp16"),
             "fp16 is not supported for the qwen mode - Half's range/precision");
     }
@@ -325,9 +325,6 @@ public class InferenceCliArgumentTests
     [Test]
     public void SilkModernBert_Fp16_Benchmark_Rejected() =>
         AssertRejected(Run("modernbert", "--silk", "benchmark", "--precision", "fp16"), "--silk is F32-only");
-    [Test]
-    public void SilkModernBert_Fp16_Compare_Rejected() =>
-        AssertRejected(Run("modernbert", "--silk", "compare", "--precision", "fp16"), "--silk is F32-only");
 
     [Test]
     public void SilkLaya_Fp16_Rejected() =>
@@ -335,9 +332,6 @@ public class InferenceCliArgumentTests
     [Test]
     public void SilkLaya_Fp16_Benchmark_Rejected() =>
         AssertRejected(Run("laya", "--silk", "benchmark", "--precision", "fp16"), "--silk is F32-only");
-    [Test]
-    public void SilkLaya_Fp16_Compare_Rejected() =>
-        AssertRejected(Run("laya", "--silk", "compare", "--precision", "fp16"), "--silk is F32-only");
 
     /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen
@@ -354,14 +348,6 @@ public class InferenceCliArgumentTests
         // so the flag removal is verified by the source, not by this CLI pin.
     }
 
-    [Test]
-    public void SyntheticWeights_OutsideScope_Rejected()
-    {
-        AssertRejected(Run("minilm", "--synthetic-weights"),
-            "is only supported for the qwen and smollm benchmark modes");
-        AssertRejected(Run("qwen", "distill", "--synthetic-weights"),
-            "supports only the 'benchmark' mode");
-    }
 
     /// <summary>
     /// The TypeSafe demo is a model key whose run is an HTTP client, not a checkpoint, so its
@@ -493,9 +479,9 @@ public class InferenceCliArgumentTests
     [
         (["mobilenet_v2", "--precision", "bf16"], "--precision bf16 is not supported for 'mobilenet_v2'"),
         (["mobilenet_v2", "--precision", "fp16", "benchmark"], "--precision fp16 is not supported for 'mobilenet_v2 benchmark'"),
-        (["resnet18", "--precision", "bf16", "compare"], "--precision bf16 is not supported for 'resnet18 compare'"),
-        (["laya", "compare", "--precision", "bf16"], "--precision bf16 is not supported for 'laya compare'"),
-        (["modernbert", "compare", "--precision", "fp16"], "--precision fp16 is not supported for 'modernbert compare'"),
+        
+        
+        
     ];
 
     static readonly string[][] AcceptedQwenCases =
