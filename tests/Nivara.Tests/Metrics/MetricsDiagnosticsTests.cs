@@ -1,7 +1,7 @@
-using System.Numerics;
 using Nivara.Diagnostics;
 using Nivara.Metrics;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.Metrics;
 

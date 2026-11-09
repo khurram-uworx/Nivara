@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using Nivara.Storage;
 using NUnit.Framework;
+using System.Diagnostics;
 
 namespace Nivara.Tests.Storage;
 

@@ -1,10 +1,10 @@
 using Nivara;
-using Nivara.Metrics;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using Nivara.Metrics;
 using Nivara.Samples;
 using NivaraChat.Data;
 

@@ -2,11 +2,11 @@ using Microsoft.ML.Tokenizers;
 using Nivara;
 using Nivara.AI;
 using Nivara.AutoDiff;
-using Nivara.Metrics;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Metrics;
 using Nivara.Samples;
 using Nivara.Silk;
 

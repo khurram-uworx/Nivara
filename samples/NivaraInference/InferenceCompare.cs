@@ -1,12 +1,6 @@
-using System.Buffers.Binary;
-using System.Globalization;
-using System.Numerics;
+using System.Diagnostics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
-using System.Text.Json;
-using System.Diagnostics;
 
 namespace NivaraInference;
 

@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace NivaraChat.Helpers;
 
 /// <summary>Which labeling process produced the grades the headline metric is computed on.</summary>

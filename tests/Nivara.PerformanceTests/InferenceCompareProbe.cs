@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Nivara.AI;
 using NivaraInference;
 
