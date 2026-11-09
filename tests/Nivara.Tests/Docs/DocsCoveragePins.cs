@@ -68,6 +68,8 @@ internal static class DocsCoveragePins
     /// Issue #1060 adds one more in <c>tests/Nivara.PerformanceTests/README.md</c> (the new
     /// <c>--metrics</c> mode documents the O(k²) warning in <c>docs/METRICS.md</c>): 253 + 1 = 254.
     /// Issue #1064 adds one from the ADR-009 index line in <c>AGENTS.md</c>: 254 + 1 = 255.
+    /// Issue #1068 adds one from the ranked-retrieval boundary note in
+    /// <c>samples/NivaraChat/README.md</c> (<c>docs/METRICS.md</c>): 255 + 1 = 256.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 255;
+    internal const int ExpectedDocumentReferenceCount = 256;
 }

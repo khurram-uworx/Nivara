@@ -323,6 +323,8 @@ Interpretation:
 
 Two documented limits: MiniLM truncates at 128 tokens on both backends, so a long Content or Code view loses its tail; and the mode reports retrieval signal only — it does not call an LLM.
 
+Ranked-retrieval metrics (`RagEvalMetrics`: `PrecisionAtK`, `RecallAtK`, `Mrr`, `NdcgAtK`, sign-test p-value) are sample-local: ranked-retrieval metrics are demonstrated in `samples/NivaraChat` and are not part of the `Nivara.Metrics` module (see `docs/METRICS.md`).
+
 Uses: `MultiViewChunker`, `MultiViewScoring` (`BuildFrame`, `Rank`, `FusionWeights`, `MultiViewMatrices`), `MultiViewExplorer` (`Bucketize`, `Explain`), `MultiViewIndex`/`MultiViewIndexCache`, and the same `RowCosineSimilarity`/`TopKDescending` convention as `--rag`.
 
 ### Differentiable retrieval (`--rag-learn`)
