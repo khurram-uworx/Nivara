@@ -14,22 +14,16 @@ public class SilkQwenBf16ParityTests
         try { using var probe = new SilkRuntime(); }
         catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
 
-        var (tensors, config) = SilkQwenTestWeights.Synthesize();
+        var (tensors, config) = QwenTestWeights.Synthesize();
 
-        var bf16Tensors = new Dictionary<string, (BFloat16[] Data, int[] Shape)>();
-        foreach (var kv in tensors)
-        {
-            var d = new BFloat16[kv.Value.Data.Length];
-            for (int i = 0; i < d.Length; i++) d[i] = (BFloat16)kv.Value.Data[i];
-            bf16Tensors[kv.Key] = (d, kv.Value.Shape);
-        }
+        var bf16Tensors = QwenTestWeights.ToBFloat16(tensors);
 
         int[] prompt = [1, 2, 3, 4];
 
         using var f32Session = SilkQwenSession.Open(
-            SilkQwenTestWeights.ToSilkConfig(config, 16), tensors);
+            QwenTestWeights.ToSilkConfig(config, 16), tensors);
         using var bf16Session = SilkQwenSession.Open(
-            SilkQwenTestWeights.ToSilkConfig(config, 16), bf16Tensors);
+            QwenTestWeights.ToSilkConfig(config, 16), bf16Tensors);
 
         var f32Logits = f32Session.ForwardPrefill(prompt);
         var bf16Logits = bf16Session.ForwardPrefill(prompt);
