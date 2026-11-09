@@ -65,13 +65,18 @@ internal static class RegressionMetrics
         var predictedColumn = (NivaraColumn<TPredicted>)predicted;
         var actualColumn = (NivaraColumn<TActual>)actual;
 
+        if (predictedColumn is NivaraColumn<double> predictedDoubles
+            && actualColumn is NivaraColumn<double> actualDoubles
+            && predictedDoubles.TryGetSpan(out var predictedSpan)
+            && actualDoubles.TryGetSpan(out var actualSpan))
+            return summarize(predictedSpan, actualSpan);
+
         int length = predictedColumn.Length;
         bool predictedHasNulls = predictedColumn.HasNulls;
         bool actualHasNulls = actualColumn.HasNulls;
 
         var predictedValues = rent(length);
         var actualValues = rent(length);
-        var residual = rent(length);
         try
         {
             int validPairs = 0;
@@ -87,24 +92,38 @@ internal static class RegressionMetrics
                 validPairs++;
             }
 
-            if (validPairs == 0)
-                throw new ArgumentException(
-                    "No row has a value in both predicted and actual; regression metrics need at least "
-                    + "one non-null pair.",
-                    nameof(predicted));
+            return summarize(
+                predictedValues.AsSpan(0, validPairs),
+                actualValues.AsSpan(0, validPairs));
+        }
+        finally
+        {
+            returnBuffer(predictedValues, length);
+            returnBuffer(actualValues, length);
+        }
+    }
 
-            var predictedSpan = predictedValues.AsSpan(0, validPairs);
-            var actualSpan = actualValues.AsSpan(0, validPairs);
+    static MetricsResult summarize(ReadOnlySpan<double> predicted, ReadOnlySpan<double> actual)
+    {
+        int validPairs = predicted.Length;
+        if (validPairs == 0)
+            throw new ArgumentException(
+                "No row has a value in both predicted and actual; regression metrics need at least "
+                + "one non-null pair.",
+                nameof(predicted));
+
+        var residual = rent(validPairs);
+        try
+        {
             var residualSpan = residual.AsSpan(0, validPairs);
-
-            TensorPrimitives.Subtract(predictedSpan, actualSpan, residualSpan);
+            TensorPrimitives.Subtract(predicted, actual, residualSpan);
             var residualSumOfSquares = TensorPrimitives.SumOfSquares<double>(residualSpan);
             double mae = TensorPrimitives.SumOfMagnitudes<double>(residualSpan) / validPairs;
             double mse = residualSumOfSquares / validPairs;
             double rmse = Math.Sqrt(mse);
 
-            double mean = TensorPrimitives.Average<double>(actualSpan);
-            TensorPrimitives.Subtract(actualSpan, mean, residualSpan);
+            double mean = TensorPrimitives.Average<double>(actual);
+            TensorPrimitives.Subtract(actual, mean, residualSpan);
             double totalSumOfSquares = TensorPrimitives.SumOfSquares<double>(residualSpan);
             double r2 = totalSumOfSquares == 0
                 ? (residualSumOfSquares == 0 ? 1.0 : 0.0)
@@ -121,9 +140,7 @@ internal static class RegressionMetrics
         }
         finally
         {
-            returnBuffer(predictedValues, length);
-            returnBuffer(actualValues, length);
-            returnBuffer(residual, length);
+            returnBuffer(residual, validPairs);
         }
     }
 

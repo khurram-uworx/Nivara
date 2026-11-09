@@ -80,7 +80,9 @@ the definition, not a bug, and it is reported as-is.
 
 Accumulation is in `double` regardless of the input element type: summing thousands of
 `float` residuals loses precision against a hand-computed reference, and the frame has one
-row, so the extra width costs nothing. `Count` is the number of valid pairs, so it also
+row, so the extra width costs nothing. A `double` column pair with no nulls is read in place
+through `TryGetSpan`; any other pairing is converted once into pooled buffers, and null
+exclusion happens during that conversion. `Count` is the number of valid pairs, so it also
 tells you how much of the input the row was computed from.
 
 ## What the diagnostics record

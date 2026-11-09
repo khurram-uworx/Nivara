@@ -87,6 +87,28 @@ public class RegressionSummaryFrameTests
     }
 
     [Test]
+    public void RegressionSummaryFrame_DoubleAndFloatColumns_AgreeAcrossReadPaths()
+    {
+        var predicted = new[] { 1.5, 2.25, -3.0, 4.75, 0.0, 11.5 };
+        var actual = new[] { 1.25, 2.5, -2.0, 5.0, 0.5, 10.0 };
+
+        var readInPlace = NivaraMetrics.RegressionSummaryFrame(
+            NivaraColumn<double>.Create(predicted),
+            NivaraColumn<double>.Create(actual));
+
+        var converted = NivaraMetrics.RegressionSummaryFrame(
+            NivaraColumn<float>.Create([1.5f, 2.25f, -3.0f, 4.75f, 0.0f, 11.5f]),
+            NivaraColumn<float>.Create([1.25f, 2.5f, -2.0f, 5.0f, 0.5f, 10.0f]));
+
+        Assert.That(readInPlace.GetColumn<long>("Count")[0], Is.EqualTo(converted.GetColumn<long>("Count")[0]));
+        foreach (var name in new[] { "Mae", "Mse", "Rmse", "R2" })
+            Assert.That(
+                readInPlace.GetColumn<double>(name)[0],
+                Is.EqualTo(converted.GetColumn<double>(name)[0]).Within(1e-12),
+                name);
+    }
+
+    [Test]
     public void RegressionSummaryFrame_NoValidPairs_Throws()
     {
         var predicted = NivaraColumnFactory.CreateFromNullable<double>(new double?[] { null, 1.0 });
