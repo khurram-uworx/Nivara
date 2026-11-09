@@ -40,9 +40,7 @@ public class ChunkedConcatTests
 
         var result = (NivaraColumn<int>)ColumnFilterHelper.ConcatenateColumns([left, right]);
 
-        Assert.That(result.Storage, Is.InstanceOf<ChunkedColumn<int>>());
-        var chunked = (ChunkedColumn<int>)result.Storage;
-        Assert.That(chunked.ChunkStorages.Length, Is.EqualTo(3));
+        Assert.That(result.Storage, Is.InstanceOf<ColumnStorage<int>>());
         Assert.That(result.ToArray(), Is.EqualTo(new[] { 1, 2, 3, 4, 5, 6 }));
     }
 
@@ -54,8 +52,7 @@ public class ChunkedConcatTests
 
         var result = (NivaraColumn<int>)ColumnFilterHelper.ConcatenateColumns([left, right]);
 
-        var chunked = (ChunkedColumn<int>)result.Storage;
-        Assert.That(chunked.ChunkStorages.Length, Is.EqualTo(4));
+        Assert.That(result.Storage, Is.InstanceOf<ColumnStorage<int>>());
         Assert.That(result.ToArray(), Is.EqualTo(new[] { 1, 2, 3, 4, 5, 6 }));
     }
 
@@ -88,8 +85,7 @@ public class ChunkedConcatTests
 
         var result = (NivaraColumn<int>)ColumnFilterHelper.ConcatenateColumns([left, empty]);
 
-        var chunked = (ChunkedColumn<int>)result.Storage;
-        Assert.That(chunked.ChunkStorages.Length, Is.EqualTo(2));
+        var chunked = (ColumnStorage<int>)result.Storage;
         Assert.That(result.ToArray(), Is.EqualTo(new[] { 1, 2, 3, 4 }));
     }
 }

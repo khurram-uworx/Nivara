@@ -43,8 +43,9 @@ internal static class DocsCoveragePins
     /// documents, <c>RAG-LLM-EVAL.md</c> and <c>CRAZY-ROADMAP.md</c> moved into <c>docs/plan/</c>,
     /// plus the new <c>NIVARACHAT-EVALS.md</c>). #868 adds <c>docs/METRICS.md</c>: 56 + 1 = 57.
     /// #1064 adds <c>docs/adr/009-metrics-mergeable-accumulator.md</c>: 57 + 1 = 58.
+    /// #1077 adds <c>docs/adr/010-chunk-count-growth-policy-on-concat.md</c>: 58 + 1 = 59.
     /// </remarks>
-    internal const int ExpectedDocumentCount = 58;
+    internal const int ExpectedDocumentCount = 59;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -70,6 +71,7 @@ internal static class DocsCoveragePins
     /// Issue #1064 adds one from the ADR-009 index line in <c>AGENTS.md</c>: 254 + 1 = 255.
     /// Issue #1068 adds one from the ranked-retrieval boundary note in
     /// <c>samples/NivaraChat/README.md</c> (<c>docs/METRICS.md</c>): 255 + 1 = 256.
+    /// Issue #1077 adds one from the ADR-010 index line in <c>AGENTS.md</c>: 256 + 1 = 257.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 256;
+    internal const int ExpectedDocumentReferenceCount = 257;
 }
