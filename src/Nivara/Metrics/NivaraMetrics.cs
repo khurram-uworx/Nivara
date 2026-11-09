@@ -128,6 +128,9 @@ public static class NivaraMetrics
         ArgumentNullException.ThrowIfNull(predicted);
         ArgumentNullException.ThrowIfNull(actual);
 
+        ensureNonNullableElementType(predicted, nameof(predicted));
+        ensureNonNullableElementType(actual, nameof(actual));
+
         requireNivaraColumn(predicted, nameof(predicted));
         requireNivaraColumn(actual, nameof(actual));
 
@@ -151,6 +154,34 @@ public static class NivaraMetrics
                 $"Expected a {expected.Name} instance; metadata requires column-backed data, but got "
                 + $"'{column.GetType().Name}'.",
                 parameterName);
+    }
+
+    static void ensureNonNullableElementType(IColumn column, string parameterName)
+    {
+        Type? nullableUnderlying = null;
+        Type? elementType = null;
+
+        var genericArguments = column.GetType().GetGenericArguments();
+        if (genericArguments.Length == 1)
+        {
+            nullableUnderlying = Nullable.GetUnderlyingType(genericArguments[0]);
+            elementType = genericArguments[0];
+        }
+
+        if (nullableUnderlying is null)
+        {
+            nullableUnderlying = Nullable.GetUnderlyingType(column.ElementType);
+            elementType = column.ElementType;
+        }
+
+        if (nullableUnderlying is null)
+            return;
+
+        throw new ArgumentException(
+            $"Metrics require a NivaraColumn<T> with a non-nullable element type, but "
+            + $"'{elementType}' is Nullable. Use NivaraColumnFactory.CreateFromNullable<{nullableUnderlying.Name}>(...) "
+            + $"to build a NivaraColumn<{nullableUnderlying.Name}> with a null mask.",
+            parameterName);
     }
 
     static bool hasNulls(IColumn predicted, IColumn actual) => predicted.HasNulls || actual.HasNulls;
