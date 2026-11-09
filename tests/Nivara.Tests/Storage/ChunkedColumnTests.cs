@@ -215,7 +215,7 @@ public class ChunkedColumnTests
 
         Assert.That(left[0], Is.EqualTo(1));
         Assert.That(right[1], Is.EqualTo(4));
-        Assert.That(storage.ChunkStorages.ToArray(), Is.All.Null);
+        Assert.Throws<ObjectDisposedException>(() => _ = storage.ChunkStorages);
         Assert.Throws<ObjectDisposedException>(() => _ = storage.Length);
     }
 

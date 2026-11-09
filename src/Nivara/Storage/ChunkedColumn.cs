@@ -70,7 +70,14 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
     /// <summary>
     /// Gets the chunks that make up this column, in order.
     /// </summary>
-    internal ReadOnlySpan<ColumnStorage<T>> ChunkStorages => chunkStorages;
+    internal ReadOnlySpan<ColumnStorage<T>> ChunkStorages
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return chunkStorages;
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether the contiguous copy has been materialised.
