@@ -221,9 +221,11 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
     public int NumClasses => numClasses;
 
     /// <summary>
-    /// How many of the top transformer layers participate in backward accumulation and AdamW.
-    /// <c>0</c> trains only the classifier head; <c>NumHiddenLayers</c> trains everything (default).
-    /// Setting it after construction (before training) re-marks every parameter accordingly.
+    /// Canonical entry point for partial/frozen training: how many of the top transformer layers
+    /// participate in backward accumulation and AdamW. <c>0</c> trains only the classifier head;
+    /// <c>NumHiddenLayers</c> trains everything (default). Setting it after construction (before
+    /// training) re-marks every parameter accordingly. Values are clamped to
+    /// <c>[0, NumHiddenLayers]</c>; negative values clamp to <c>0</c>.
     /// </summary>
     public int TrainableLayerCount
     {
@@ -268,24 +270,6 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         }
     }
 
-    /// <summary>Alias for <see cref="TrainableLayerCount"/>.</summary>
-    public int NumTrainableLayers => TrainableLayerCount;
-
-    /// <summary>Alias for <see cref="TrainableLayerCount"/> used by callers that prefer a plural noun.</summary>
-    public int TrainableLayers => TrainableLayerCount;
-
-    /// <summary>Freezes the entire encoder (trains only the classifier head).</summary>
-    public void FreezeEncoder() => TrainableLayerCount = 0;
-
-    /// <summary>Alias for setting the trainable top-layer count.</summary>
-    public void SetTrainableLayers(int count) => TrainableLayerCount = count;
-
-    /// <summary>Alias that freezes <paramref name="count"/> bottom layers (head and top remainder stay trainable).</summary>
-    public void FreezeLayers(int count = 0) => TrainableLayerCount = Math.Max(0, numLayers - Math.Clamp(count, 0, numLayers));
-
-    /// <summary>Alias for freezing the whole encoder.</summary>
-    public void Freeze() => FreezeEncoder();
-
     /// <summary>
     /// When true, <see cref="BackwardChain"/> records per-stage elapsed milliseconds (with
     /// <c>runtime.Finish()</c> boundaries) in <see cref="LastPhaseMs"/>. Defaults to false so
@@ -295,9 +279,6 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
     /// <summary>Per-stage milliseconds captured by the last <see cref="BackwardChain"/> call.</summary>
     public readonly Dictionary<string, long> LastPhaseMs = new();
-
-    /// <summary>Alias for <see cref="LastPhaseMs"/> used by the Silk training sub-profile.</summary>
-    public Dictionary<string, long> BackwardPhaseMs => LastPhaseMs;
 
     /// <summary>
     /// Builds an inference-only <see cref="SilkBertEncoderRunner"/> that shares this trainer's
