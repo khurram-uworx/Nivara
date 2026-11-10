@@ -26,8 +26,13 @@ public sealed class SilkDistilBertTrainerBf16SmokeTests
 
     static DistilBertConfig TinyDistilConfig() => new()
     {
-        Dim = Hidden, NLayers = Layers, NHeads = Heads, HiddenDim = Intermediate,
-        MaxPosition = MaxPos, Eps = 1e-4f, VocabSize = Vocab,
+        Dim = Hidden,
+        NLayers = Layers,
+        NHeads = Heads,
+        HiddenDim = Intermediate,
+        MaxPosition = MaxPos,
+        Eps = 1e-4f,
+        VocabSize = Vocab,
     };
 
     static Dictionary<string, (BFloat16[] Data, int[] Shape)> ToBf16(
