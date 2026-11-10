@@ -24,7 +24,9 @@ internal static class SilkPartialTrainingPolicy
     {
         if (!trainable) return 0;
         if (numLayers < 0) throw new ArgumentOutOfRangeException(nameof(numLayers), numLayers, "numLayers cannot be negative.");
-        return requested < 0 ? numLayers : Math.Clamp(requested, 0, numLayers);
+        // Negative inputs are clamped to 0 (property semantics). The -1 "all layers" sentinel is
+        // handled by callers (constructors) before reaching this helper.
+        return Math.Clamp(requested, 0, numLayers);
     }
 
     /// <summary>Whether the embedding/input-norm parameters are trainable.</summary>

@@ -130,7 +130,9 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        int normalizedTrainable = SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable: true);
+        int normalizedTrainable = trainableLayerCount < 0
+            ? config.NumHiddenLayers
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable: true);
         this.trainableLayerCount = normalizedTrainable;
 
         weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: true, trainableLayerCount: normalizedTrainable);

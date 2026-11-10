@@ -11,7 +11,7 @@ public sealed class SilkPartialTrainingPolicyTests
     [Test]
     public void Normalize_ClampsNegativeAndOversized()
     {
-        Assert.That(SilkPartialTrainingPolicy.Normalize(-1, 2, true), Is.EqualTo(2));
+        Assert.That(SilkPartialTrainingPolicy.Normalize(-1, 2, true), Is.EqualTo(0));
         Assert.That(SilkPartialTrainingPolicy.Normalize(-100, 2, true), Is.EqualTo(0));
         Assert.That(SilkPartialTrainingPolicy.Normalize(0, 2, true), Is.EqualTo(0));
         Assert.That(SilkPartialTrainingPolicy.Normalize(5, 2, true), Is.EqualTo(2));

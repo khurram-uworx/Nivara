@@ -120,7 +120,9 @@ internal sealed class SilkBertWeights : IDisposable
         this.narrowFp16 = false;
         tracked = new List<SilkParam>(capacity: 4 + 12 * config.NumHiddenLayers + 4);
 
-        int normalizedTrainable = SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
+        int normalizedTrainable = trainableLayerCount < 0
+            ? (trainable ? config.NumHiddenLayers : 0)
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
         this.trainableLayerCount = normalizedTrainable;
 
         string emb = BertGpuKeys.Embeddings(naming);
@@ -194,7 +196,9 @@ internal sealed class SilkBertWeights : IDisposable
         this.narrowFp16 = isFp16;
         this.tensors = null!;
 
-        this.trainableLayerCount = SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
+        this.trainableLayerCount = trainableLayerCount < 0
+            ? (trainable ? config.NumHiddenLayers : 0)
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
         tracked = new List<SilkParam>(capacity: 4 + 12 * config.NumHiddenLayers + 4);
 
         Func<ushort, float> widen = isBf16
