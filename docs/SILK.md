@@ -846,13 +846,45 @@ keep encoder-derived features outside the gradient path (`requiresGrad: false` w
 applicable). Nivara does not currently ship a Silk Laya trainer; the same top-down
 freeze policy is intended to reuse for a future Laya head-training path.
 
-Measured reduction (DistilBERT base, L=128, AC power not verified; medians of 5 iterations):
+Measured backward chain (DistilBERT base, L=128, AC power not verified; medians of 5
+iterations) by number of trainable top layers (`SILK_TRAINABLE_LAYERS`):
 
-| Batch | all-layers backward (ms) | head-only backward (ms) | reduction |
-|---:|---:|---:|---:|
-| 2 | 452.7 | 0.7 | ~99.8% |
-| 4 | 910.0 | 0.7 | ~99.9% |
-| 8 | 1880.4 | 0.7 | ~99.9% |
+| Batch | all (6) | 4 layers | 2 layers | 1 layer | head-only (0) |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 383.2 | 258.1 | 127.4 | 67.6 | 0.7 |
+| 4 | 734.8 | 478.9 | 231.5 | 109.9 | 0.9 |
+| 8 | 1495.0 | 984.7 | 461.6 | 214.0 | 0.9 |
+
+Reduction vs all-layers:
+
+| Batch | 4 layers | 2 layers | 1 layer | head-only (0) |
+|---:|---:|---:|---:|---:|
+| 2 | ~33% | ~67% | ~82% | ~99.8% |
+| 4 | ~35% | ~68% | ~85% | ~99.9% |
+| 8 | ~34% | ~69% | ~86% | ~99.9% |
+
+Profile command examples (run from the repository root; the env var selects the trainable
+layer count, default `-1` = all layers):
+
+```pwsh
+$env:SILK_TRAINABLE_LAYERS = "0"   # head only
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-distilbert-train-profile
+
+$env:SILK_TRAINABLE_LAYERS = "1"   # top 1 transformer layer + head
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-distilbert-train-profile
+
+$env:SILK_TRAINABLE_LAYERS = "2"   # top 2 transformer layers + head
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-distilbert-train-profile
+
+$env:SILK_TRAINABLE_LAYERS = "4"   # top 4 transformer layers + head
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-distilbert-train-profile
+
+$env:SILK_TRAINABLE_LAYERS = "-1"  # all layers (default)
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-distilbert-train-profile
+```
+
+Each run prints a `Backward chain` median per batch (B=2/4/8); the tables above are those
+medians. The CPU counterpart is `--cpu-distilbert-train-profile` (all layers only).
 
 ## 13f. Retrieval fusion (`RagLearnMode`, #915)
 
