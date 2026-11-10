@@ -824,15 +824,19 @@ and AdamW (60.6 ms) are the next targets; softmax-cross-entropy input gradient o
 
 ### Partial/frozen training (#1012)
 
-`SilkDistilBertTrainer` supports opt-in partial/frozen training via `trainableLayerCount`
-(default `-1`, meaning all layers):
+`SilkDistilBertTrainer` supports opt-in partial/frozen training via the canonical
+`TrainableLayerCount` property (default `-1` at construction, meaning all layers):
 
 - `0` trains only the classifier/pre-classifier head.
 - `N` trains the top `N` transformer layers plus the head.
-- values are clamped to `[0, NumHiddenLayers]`.
+- values are clamped to `[0, NumHiddenLayers]` (negative values clamp to `0`).
 
-The constructor also accepts `freezeEncoder: true`, equivalent to
-`trainableLayerCount: 0`. The CLI sample exposes this as `--trainable-layers`.
+`TrainableLayerCount` is the single public entry point for this: the former aliases
+(`NumTrainableLayers`, `TrainableLayers`) and helper methods (`FreezeEncoder`,
+`SetTrainableLayers`, `FreezeLayers`, `Freeze`) have been removed; use the property
+directly (e.g. `trainer.TrainableLayerCount = 0` to freeze the encoder). The constructor
+also accepts `freezeEncoder: true`, equivalent to `trainableLayerCount: 0`. The CLI sample
+exposes this as `--trainable-layers`.
 
 Frozen layers (and frozen embeddings in any partial mode) keep their checkpoint value
 buffers, but backward accumulation and the AdamW step skip them:
@@ -840,6 +844,13 @@ buffers, but backward accumulation and the AdamW step skip them:
 a top-N suffix is trainable, embedding and lower-layer backpropagation are skipped as
 well. Head gradients are compared against a CPU reverse-mode pass for head-only and
 top-one-layer cases in `SilkDistilBertTrainerTests`.
+
+The rule itself lives in `SilkPartialTrainingPolicy` (`src/Nivara.Extensions/Silk/
+SilkPartialTrainingPolicy.cs`): `Normalize`, `EmbeddingsTrainable`, `LayerTrainable`,
+`HeadTrainable`. Both `SilkDistilBertTrainer` and `SilkBertWeights` call it, so any
+future Silk trainer (Laya/ModernBERT) must call the same helper with its own layer count
+and head parameters rather than reimplementing a second freeze policy. The Laya decision
+head's own layer count is independent of the encoder's `NumHiddenLayers`.
 
 For Laya, which trains its decision head with AutoDiff on frozen ModernBERT features,
 keep encoder-derived features outside the gradient path (`requiresGrad: false` where

@@ -321,4 +321,62 @@ public sealed class SilkDistilBertTrainerTests
                 $"loss did not decrease: {epochs[0].Loss} -> {epochs[^1].Loss}");
         }
     }
+
+    [Test]
+    public void TrainableLayerCount_ClampsNegativeAndOversized()
+    {
+        var (runtime, trainer, _) = Make();
+        using (runtime)
+        using (trainer)
+        {
+            trainer.TrainableLayerCount = -1;
+            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
+
+            trainer.TrainableLayerCount = -100;
+            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
+
+            trainer.TrainableLayerCount = Layers + 5;
+            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers));
+
+            trainer.TrainableLayerCount = int.MaxValue;
+            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers));
+        }
+    }
+
+    [Test]
+    public void Head_RemainsTrainableInAllModes()
+    {
+        foreach (int trainable in new[] { 0, 1, Layers })
+        {
+            var (runtime, trainer, model) = Make(trainable);
+            using (runtime)
+            using (trainer)
+            {
+                var rng = new Random(11);
+                int batch = 2;
+                int[] tokens = new int[batch * SeqLen];
+                float[] mask = new float[batch * SeqLen];
+                int[] labels = new int[batch];
+                for (int i = 0; i < tokens.Length; i++) { tokens[i] = rng.Next(Vocab); mask[i] = 1f; }
+                for (int i = 0; i < batch; i++) labels[i] = rng.Next(2);
+
+                var batchGradient = new float[batch * 2];
+                var deviceLogits = trainer.Forward(tokens, mask, batch, SeqLen);
+                SilkLoss.InputGradient(deviceLogits, labels, batch, 2, 1f / batch, batchGradient);
+                trainer.Backward(batch, SeqLen, batchGradient);
+                var deviceGrads = trainer.ExportGradients();
+
+                foreach (var key in deviceGrads.Keys)
+                {
+                    if (key.Contains("pre_classifier", StringComparison.Ordinal)
+                        || key.Contains("classifier", StringComparison.Ordinal))
+                    {
+                        float max = 0f;
+                        foreach (var v in deviceGrads[key].Data) max = Math.Max(max, Math.Abs(v));
+                        Assert.That(max, Is.GreaterThan(0f), $"head param {key} should be trainable in mode {trainable}");
+                    }
+                }
+            }
+        }
+    }
 }

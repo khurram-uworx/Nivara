@@ -120,8 +120,9 @@ internal sealed class SilkBertWeights : IDisposable
         this.narrowFp16 = false;
         tracked = new List<SilkParam>(capacity: 4 + 12 * config.NumHiddenLayers + 4);
 
-        int normalizedTrainable = trainableLayerCount < 0 ? config.NumHiddenLayers
-            : Math.Clamp(trainableLayerCount, 0, config.NumHiddenLayers);
+        int normalizedTrainable = trainableLayerCount < 0
+            ? (trainable ? config.NumHiddenLayers : 0)
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
         this.trainableLayerCount = normalizedTrainable;
 
         string emb = BertGpuKeys.Embeddings(naming);
@@ -142,8 +143,7 @@ internal sealed class SilkBertWeights : IDisposable
         for (int i = 0; i < Layers.Length; i++)
         {
             Layers[i] = UploadLayer(i, naming);
-            int firstTrainable = config.NumHiddenLayers - trainableLayerCount;
-            bool layerTrainable = trainable && i >= firstTrainable;
+            bool layerTrainable = SilkPartialTrainingPolicy.LayerTrainable(i, config.NumHiddenLayers, normalizedTrainable, trainable);
             Layers[i].Wqkv.Trainable = layerTrainable;
             Layers[i].Bqkv.Trainable = layerTrainable;
             Layers[i].O.Trainable = layerTrainable;
@@ -158,10 +158,11 @@ internal sealed class SilkBertWeights : IDisposable
             Layers[i].Ln2B.Trainable = layerTrainable;
         }
 
-        WordEmb.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
-        PosEmb.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
-        EmbLnW.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
-        EmbLnB.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
+        bool embeddingsTrainable = SilkPartialTrainingPolicy.EmbeddingsTrainable(normalizedTrainable, config.NumHiddenLayers, trainable);
+        WordEmb.Trainable = embeddingsTrainable;
+        PosEmb.Trainable = embeddingsTrainable;
+        EmbLnW.Trainable = embeddingsTrainable;
+        EmbLnB.Trainable = embeddingsTrainable;
 
         HasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
         NumClasses = HasHead ? WeightLayout.Req(tensors, ClsWKey, Backend).Shape[0] : 0;
@@ -171,10 +172,11 @@ internal sealed class SilkBertWeights : IDisposable
         ClsB = Plain("clsB", ClsBKey, required: HasHead);
         if (HasHead)
         {
-            PreW.Trainable = trainable;
-            PreB.Trainable = trainable;
-            ClsW.Trainable = trainable;
-            ClsB.Trainable = trainable;
+            bool headTrainable = SilkPartialTrainingPolicy.HeadTrainable(trainable);
+            PreW.Trainable = headTrainable;
+            PreB.Trainable = headTrainable;
+            ClsW.Trainable = headTrainable;
+            ClsB.Trainable = headTrainable;
         }
     }
 
@@ -194,8 +196,9 @@ internal sealed class SilkBertWeights : IDisposable
         this.narrowFp16 = isFp16;
         this.tensors = null!;
 
-        this.trainableLayerCount = trainableLayerCount < 0 ? config.NumHiddenLayers
-            : Math.Clamp(trainableLayerCount, 0, config.NumHiddenLayers);
+        this.trainableLayerCount = trainableLayerCount < 0
+            ? (trainable ? config.NumHiddenLayers : 0)
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
         tracked = new List<SilkParam>(capacity: 4 + 12 * config.NumHiddenLayers + 4);
 
         Func<ushort, float> widen = isBf16
@@ -222,8 +225,7 @@ internal sealed class SilkBertWeights : IDisposable
         for (int i = 0; i < Layers.Length; i++)
         {
             Layers[i] = UploadLayerNarrow(i, naming, isBf16, isFp16, widen, tensors);
-            int firstTrainable = config.NumHiddenLayers - trainableLayerCount;
-            bool layerTrainable = trainable && i >= firstTrainable;
+            bool layerTrainable = SilkPartialTrainingPolicy.LayerTrainable(i, config.NumHiddenLayers, this.trainableLayerCount, trainable);
             Layers[i].Wqkv.Trainable = layerTrainable;
             Layers[i].Bqkv.Trainable = layerTrainable;
             Layers[i].O.Trainable = layerTrainable;
@@ -238,10 +240,11 @@ internal sealed class SilkBertWeights : IDisposable
             Layers[i].Ln2B.Trainable = layerTrainable;
         }
 
-        WordEmb.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
-        PosEmb.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
-        EmbLnW.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
-        EmbLnB.Trainable = trainable && trainableLayerCount == config.NumHiddenLayers;
+        bool embeddingsTrainable2 = SilkPartialTrainingPolicy.EmbeddingsTrainable(this.trainableLayerCount, config.NumHiddenLayers, trainable);
+        WordEmb.Trainable = embeddingsTrainable2;
+        PosEmb.Trainable = embeddingsTrainable2;
+        EmbLnW.Trainable = embeddingsTrainable2;
+        EmbLnB.Trainable = embeddingsTrainable2;
 
         HasHead = tensors.ContainsKey(PreWKey) && tensors.ContainsKey(ClsWKey);
         NumClasses = HasHead ? WeightLayout.Req(tensors, ClsWKey, Backend).Shape[0] : 0;
@@ -255,10 +258,11 @@ internal sealed class SilkBertWeights : IDisposable
         ClsB = PlainUshort("clsB", ClsBKey, widen, tensors, required: HasHead);
         if (HasHead)
         {
-            PreW.Trainable = trainable;
-            PreB.Trainable = trainable;
-            ClsW.Trainable = trainable;
-            ClsB.Trainable = trainable;
+            bool headTrainable = SilkPartialTrainingPolicy.HeadTrainable(trainable);
+            PreW.Trainable = headTrainable;
+            PreB.Trainable = headTrainable;
+            ClsW.Trainable = headTrainable;
+            ClsB.Trainable = headTrainable;
         }
     }
 

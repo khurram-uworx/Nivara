@@ -130,8 +130,9 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        int normalizedTrainable = trainableLayerCount < 0 ? config.NumHiddenLayers
-            : Math.Clamp(trainableLayerCount, 0, config.NumHiddenLayers);
+        int normalizedTrainable = trainableLayerCount < 0
+            ? config.NumHiddenLayers
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable: true);
         this.trainableLayerCount = normalizedTrainable;
 
         weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: true, trainableLayerCount: normalizedTrainable);
@@ -221,28 +222,29 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
     public int NumClasses => numClasses;
 
     /// <summary>
-    /// How many of the top transformer layers participate in backward accumulation and AdamW.
-    /// <c>0</c> trains only the classifier head; <c>NumHiddenLayers</c> trains everything (default).
-    /// Setting it after construction (before training) re-marks every parameter accordingly.
+    /// Canonical entry point for partial/frozen training: how many of the top transformer layers
+    /// participate in backward accumulation and AdamW. <c>0</c> trains only the classifier head;
+    /// <c>NumHiddenLayers</c> trains everything (default). Setting it after construction (before
+    /// training) re-marks every parameter accordingly. Values are clamped to
+    /// <c>[0, NumHiddenLayers]</c>; negative values clamp to <c>0</c>.
     /// </summary>
     public int TrainableLayerCount
     {
         get => trainableLayerCount;
         set
         {
-            int normalized = value < 0 ? numLayers : Math.Clamp(value, 0, numLayers);
+            int normalized = SilkPartialTrainingPolicy.Normalize(value, numLayers, trainable: true);
             trainableLayerCount = normalized;
             if (weights is not null)
             {
-                int firstTrainable = numLayers - normalized;
-                bool embeddingsTrainable = normalized == numLayers;
+                bool embeddingsTrainable = SilkPartialTrainingPolicy.EmbeddingsTrainable(normalized, numLayers, trainable: true);
                 weights.WordEmb.Trainable = embeddingsTrainable;
                 weights.PosEmb.Trainable = embeddingsTrainable;
                 weights.EmbLnW.Trainable = embeddingsTrainable;
                 weights.EmbLnB.Trainable = embeddingsTrainable;
                 for (int i = 0; i < numLayers; i++)
                 {
-                    bool layerTrainable = i >= firstTrainable;
+                    bool layerTrainable = SilkPartialTrainingPolicy.LayerTrainable(i, numLayers, normalized, trainable: true);
                     var layer = weights.Layers[i];
                     layer.Wqkv.Trainable = layerTrainable;
                     layer.Bqkv.Trainable = layerTrainable;
@@ -259,32 +261,15 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
                 }
                 if (weights.HasHead)
                 {
-                    weights.PreW.Trainable = true;
-                    weights.PreB.Trainable = true;
-                    weights.ClsW.Trainable = true;
-                    weights.ClsB.Trainable = true;
+                    bool headTrainable = SilkPartialTrainingPolicy.HeadTrainable(trainable: true);
+                    weights.PreW.Trainable = headTrainable;
+                    weights.PreB.Trainable = headTrainable;
+                    weights.ClsW.Trainable = headTrainable;
+                    weights.ClsB.Trainable = headTrainable;
                 }
             }
         }
     }
-
-    /// <summary>Alias for <see cref="TrainableLayerCount"/>.</summary>
-    public int NumTrainableLayers => TrainableLayerCount;
-
-    /// <summary>Alias for <see cref="TrainableLayerCount"/> used by callers that prefer a plural noun.</summary>
-    public int TrainableLayers => TrainableLayerCount;
-
-    /// <summary>Freezes the entire encoder (trains only the classifier head).</summary>
-    public void FreezeEncoder() => TrainableLayerCount = 0;
-
-    /// <summary>Alias for setting the trainable top-layer count.</summary>
-    public void SetTrainableLayers(int count) => TrainableLayerCount = count;
-
-    /// <summary>Alias that freezes <paramref name="count"/> bottom layers (head and top remainder stay trainable).</summary>
-    public void FreezeLayers(int count = 0) => TrainableLayerCount = Math.Max(0, numLayers - Math.Clamp(count, 0, numLayers));
-
-    /// <summary>Alias for freezing the whole encoder.</summary>
-    public void Freeze() => FreezeEncoder();
 
     /// <summary>
     /// When true, <see cref="BackwardChain"/> records per-stage elapsed milliseconds (with
@@ -295,9 +280,6 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
     /// <summary>Per-stage milliseconds captured by the last <see cref="BackwardChain"/> call.</summary>
     public readonly Dictionary<string, long> LastPhaseMs = new();
-
-    /// <summary>Alias for <see cref="LastPhaseMs"/> used by the Silk training sub-profile.</summary>
-    public Dictionary<string, long> BackwardPhaseMs => LastPhaseMs;
 
     /// <summary>
     /// Builds an inference-only <see cref="SilkBertEncoderRunner"/> that shares this trainer's
