@@ -385,8 +385,8 @@ nothing is restored:
 
 ```bash
 dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
-  -p:OpenBlasDll=/path/to/libopenblas.dll -- --cpu-gemm
-# OPENBLAS_DLL=<path> works too: MSBuild imports environment variables as properties
+  -p:OpenBlasDll=lib/libopenblas.dll -- --cpu-gemm
+# OPENBLAS_DLL=lib/libopenblas.dll works too: MSBuild imports environment variables as properties
 ```
 
 `-p:BlasProbe=true` defines `BLAS_PROBE`, enables `AllowUnsafeBlocks` (the `LibraryImport`
@@ -401,10 +401,18 @@ dimensions and an ILP64 library would silently misread every one of them.
 
 **Where to get the DLL.** Official OpenBLAS release
 [`v0.3.34`](https://github.com/xianyi/OpenBLAS/releases/tag/v0.3.34), asset
-`OpenBLAS-0.3.34-x64.zip` (39 MB). Extract `libopenblas.dll` (49 MB) anywhere; point the
-probe at it with `-p:OpenBlasDll=<path>` or `OPENBLAS_DLL=<path>`. Nothing is committed and
-nothing is restored. This probe does not measure MKL and does not claim to; MKL is 481 MB on
-disk and ships no official NuGet, so OpenBLAS is the lean candidate and the one measured.
+`OpenBLAS-0.3.34-x64.zip` (39 MB). Extract `libopenblas.dll` to `lib/libopenblas.dll` at the
+repository root (that directory is gitignored), then run:
+
+```bash
+dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
+  -p:OpenBlasDll=lib/libopenblas.dll -- --cpu-gemm
+# or: OPENBLAS_DLL=lib/libopenblas.dll dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
+```
+
+Nothing is committed to the repository and nothing is restored. This probe does not measure MKL
+and does not claim to; MKL is 481 MB on disk and ships no official NuGet, so OpenBLAS is the
+lean candidate and the one measured.
 
 **AVX2 control.** Set `OPENBLAS_CORETYPE=Haswell` to force the AVX2 kernel, and read
 `corename: Haswell` in the header before consuming the numbers. Set it as a real process

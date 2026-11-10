@@ -196,8 +196,11 @@ changed: see §5.1.
   49 MB and its import table is `KERNEL32.dll` + `msvcrt.dll` only (no gcc/gfortran/quadmath/
   winpthread). Both answer the same question; the lean one is the candidate. This probe does
   not measure MKL and does not claim to.
-- **How to get it.** Download the zip, extract `libopenblas.dll` anywhere, and point the probe
-  at it. Nothing is committed to the repository and nothing is restored.
+- **How to get it.** Download the zip, extract `libopenblas.dll` to `lib/libopenblas.dll`
+  at the repository root (that directory is gitignored), and point the probe at it:
+  `dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true
+  -p:OpenBlasDll=lib/libopenblas.dll -- --cpu-gemm`, or set `OPENBLAS_DLL=lib/libopenblas.dll`.
+  Nothing is committed to the repository and nothing is restored.
 - **Recommendation (acquisition).** If the seam lands, ship the DLL as an opt-in native asset in
   `Nivara.Extensions` (RID-specific, default off), never in core. Core stays dependency-free.
 
