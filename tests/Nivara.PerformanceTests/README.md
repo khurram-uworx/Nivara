@@ -384,16 +384,13 @@ become a dependency. There is no official OpenBLAS NuGet, so the DLL is supplied
 nothing is restored:
 
 ```bash
-dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
-  -p:OpenBlasDll=../../lib/libopenblas.dll -- --cpu-gemm
-# OPENBLAS_DLL=../../lib/libopenblas.dll works too: MSBuild imports environment variables as properties
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
 ```
 
-`-p:BlasProbe=true` defines `BLAS_PROBE`, enables `AllowUnsafeBlocks` (the `LibraryImport`
-source generator emits unsafe code) and copies the DLL next to the executable. The default build
-defines nothing, restores nothing, and prints `BLAS : legs not available` - so every run states
-which configuration produced it. If the property is set without a path, the build fails with a
-message naming both ways to supply one.
+No build flags are required. The probe checks `lib/libopenblas.dll` (relative to the
+repository root, i.e. `../../lib/libopenblas.dll` next to the executable) at runtime; if it
+is missing the BLAS legs are skipped and the run prints the full path it looked for,
+including the download URL.
 
 Each run prints `openblas_get_config()` and `openblas_get_corename()`, and initialisation
 **refuses an ILP64 build** (it looks for `USE64BITINT`), because the binding declares `int`
@@ -405,9 +402,7 @@ dimensions and an ILP64 library would silently misread every one of them.
 repository root (that directory is gitignored), then run:
 
 ```bash
-dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
-  -p:OpenBlasDll=../../lib/libopenblas.dll -- --cpu-gemm
-# or: OPENBLAS_DLL=../../lib/libopenblas.dll dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
 ```
 
 Nothing is committed to the repository and nothing is restored. This probe does not measure MKL

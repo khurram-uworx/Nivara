@@ -108,11 +108,7 @@ internal static class CpuGemmProbe
         Console.WriteLine("CPU GEMM ceiling probe: in-tree path vs a register-blocked reference");
         Console.WriteLine();
 
-        bool blasAvailable = false;
-        string blasDetail = "not built with -p:BlasProbe=true (see tests/Nivara.PerformanceTests/README.md)";
-#if BLAS_PROBE
-        blasAvailable = OpenBlasInterop.TryInitialize(out blasDetail);
-#endif
+        bool blasAvailable = OpenBlasInterop.TryInitialize(out string blasDetail);
 
         Console.WriteLine($"  Legs     : {Leg.AutoDiff} (GradKernels.MatMulTransposedB), {Leg.BTranspose} (GradKernels.MatMul), {Leg.Blocked} (Parallel.For + register accumulators)");
         Console.WriteLine($"  Gate     : maxAbs(leg - dp-truth) <= {GateMaxAbs}");
@@ -121,14 +117,12 @@ internal static class CpuGemmProbe
         Console.WriteLine($"             and transposes per call, MatMulTransposedB takes [N x K] ready-made.");
         Console.WriteLine($"             Both compute A[M x K] · B[K x N]. Blocked reads the same [N x K].");
         Console.WriteLine($"  BLAS     : {(blasAvailable ? $"OpenBLAS legs enabled (hybrid = Parallel.For rows x 1-thread gemm, {BlasThreads} rows-chunks)" : "legs not available — " + blasDetail)}");
-#if BLAS_PROBE
         if (blasAvailable)
         {
             Console.WriteLine($"             {blasDetail}");
             Console.WriteLine($"             corename: {OpenBlasInterop.CoreName}");
             Console.WriteLine($"             min is the kernel's capability; median is what an intermittent caller sees.");
         }
-#endif
         Console.WriteLine();
 
         Console.WriteLine($"{"shape",-16} {"M",-5} {"K",-5} {"N",-6} {"leg",-14} {"maxAbs",-10} {"gate",-6} {"median ms",-10} {"min ms",-8} {"GMAC/s",-8} {"x vs MatMul",-12}");
@@ -138,7 +132,6 @@ internal static class CpuGemmProbe
         // The roll-up deliberately excludes NoRentCopy (it is an in-tree variant, not a
         // candidate), and includes the BLAS legs only when they were measured.
         var projectionLegs = new List<Leg> { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked };
-#if BLAS_PROBE
         if (blasAvailable)
         {
             projectionLegs.Add(Leg.BlasSt);
@@ -146,7 +139,6 @@ internal static class CpuGemmProbe
             projectionLegs.Add(Leg.BlasNt);
             projectionLegs.Add(Leg.BlasHybrid);
         }
-#endif
 
         foreach (var shape in GemmBenchmark.s_shapes)
         {
@@ -181,7 +173,6 @@ internal static class CpuGemmProbe
             };
             var results = new List<float[]> { resultAuto, resultBTrans, resultBlocked, resultNoRent };
 
-#if BLAS_PROBE
             if (blasAvailable)
             {
                 var resultBlasSt = new float[m * n];
@@ -223,7 +214,6 @@ internal static class CpuGemmProbe
                 runs.Add(() => HybridGemm(a, bt, resultBlasHybrid, m, k, n));
                 results.Add(resultBlasHybrid);
             }
-#endif
 
             int legCount = order.Count;
             var legMs = new double[legCount];
@@ -325,7 +315,6 @@ internal static class CpuGemmProbe
         _ => leg.ToString(),
     };
 
-#if BLAS_PROBE
     /// <summary>
     /// The integration candidate, as it would actually be wired: Nivara owns the row
     /// parallelism and OpenBLAS is called single-threaded from each chunk. Avoids the
@@ -348,7 +337,6 @@ internal static class CpuGemmProbe
                 0f, ref result[rowStart * bCols], bCols);
         });
     }
-#endif
 
     /// <summary>
     /// Rolls the per-shape numbers up into a projected Laya forward pass, GEMM only.

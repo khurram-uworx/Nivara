@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,24 +25,5 @@
   <ItemGroup>
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.3.26522.148" />
   </ItemGroup>
-
-  <!-- OpenBLAS leg of the cpu-gemm probe (docs/BLAS-MKL.md §6). Opt-in: there is no
-       official OpenBLAS NuGet, so the DLL is supplied by path rather than restored, which
-       also keeps the default build and CI at zero extra bytes. MSBuild imports environment
-       variables as properties, so OPENBLAS_DLL works without passing -p:OpenBlasDll. -->
-  <PropertyGroup Condition="'$(BlasProbe)' == 'true'">
-    <DefineConstants>$(DefineConstants);BLAS_PROBE</DefineConstants>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <OpenBlasDll Condition="'$(OpenBlasDll)' == ''">$(OPENBLAS_DLL)</OpenBlasDll>
-  </PropertyGroup>
-
-  <ItemGroup Condition="'$(BlasProbe)' == 'true'">
-    <None Include="$(OpenBlasDll)" Link="libopenblas.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
-  </ItemGroup>
-
-  <Target Name="ValidateBlasProbe" BeforeTargets="PrepareForBuild"
-          Condition="'$(BlasProbe)' == 'true' and '$(OpenBlasDll)' == ''">
-    <Error Text="BlasProbe=true needs -p:OpenBlasDll=&lt;path to libopenblas.dll&gt; or the OPENBLAS_DLL environment variable." />
-  </Target>
 
 </Project>

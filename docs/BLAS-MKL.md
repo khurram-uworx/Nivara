@@ -197,10 +197,8 @@ changed: see §5.1.
   winpthread). Both answer the same question; the lean one is the candidate. This probe does
   not measure MKL and does not claim to.
 - **How to get it.** Download the zip, extract `libopenblas.dll` to `lib/libopenblas.dll`
-  at the repository root (that directory is gitignored), and point the probe at it:
-  `dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true
-  -p:OpenBlasDll=../../lib/libopenblas.dll -- --cpu-gemm`, or set `OPENBLAS_DLL=../../lib/libopenblas.dll`.
-  Nothing is committed to the repository and nothing is restored.
+  at the repository root (that directory is gitignored). That is the only location the probe
+  looks in. Nothing is committed to the repository and nothing is restored.
 - **Recommendation (acquisition).** If the seam lands, ship the DLL as an opt-in native asset in
   `Nivara.Extensions` (RID-specific, default off), never in core. Core stays dependency-free.
 
@@ -236,10 +234,9 @@ the stable quantity (6.0-6.8x); the absolute GMAC/s figures are not.
    the same question — "how fast is a tuned native BLAS here" — and the lean one is the
    candidate. The write-up therefore cannot claim "MKL measured on this box"; it says so.
 2. **No package reference at all.** §5.2's `MKL.NET.win-x64` / `MathNet.Numerics.MKL.Win-*`
-   assumption is replaced by a build property: `-p:BlasProbe=true` gates `BLAS_PROBE`,
-   `AllowUnsafeBlocks` (the `LibraryImport` generator emits unsafe code) and a copy of
-   `$(OpenBlasDll)` next to the executable; `OPENBLAS_DLL` works as an environment variable
-   because MSBuild imports env vars as properties. Default builds and CI restore nothing.
+   assumption is gone. The DLL is resolved at runtime from `lib/libopenblas.dll`; there is no
+   build-time gating, no environment variable, no copy step. Default builds restore and
+   define nothing extra.
 3. **OpenBLAS needs no preload dance.** `openblas_set_num_threads(1)` works before any GEMM
    (unlike MKL, whose `mkl_set_num_threads` / `mkl_set_threading_layer` crash before init).
    Setting the thread count through the CRT (`putenv`) is silently ignored; a real process
@@ -306,8 +303,8 @@ The plan as written assumed MKL as the vehicle and a single `Blas` leg. The prob
 actually ran is documented in §5.1 and `tests/Nivara.PerformanceTests/README.md`. Deviations
 from the plan below:
 
-- **Vehicle.** OpenBLAS 0.3.34, not MKL. No package reference; the DLL arrives through
-  `-p:OpenBlasDll=<path>` / `OPENBLAS_DLL`. See §5.1 point 1-2.
+- **Vehicle.** OpenBLAS 0.3.34, not MKL. No package reference; the DLL is resolved at
+  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See �5.1.
 - **Legs.** Four BLAS legs, not one: `Blas 1t`, `Blas 1t-NT`, `Blas Nt`, `Blas hybrid`.
   See `CpuGemmProbe.cs` and the README leg table.
 - **Protocol.** The probe already used 1 untimed warmup and 20 interleaved rounds (the README's
