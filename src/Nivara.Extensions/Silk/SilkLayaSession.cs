@@ -22,13 +22,13 @@ public sealed class SilkLayaSession : ILayaGpuSession
         catch { runtime.Dispose(); throw; }
     }
 
-    public SilkLayaSession(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, int headLayerCount)
+    public SilkLayaSession(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, int headLayerCount, bool activationBf16 = false)
     {
         runtime = new SilkRuntime();
         try
         {
             encoder = new SilkModernBertGpuRunner(runtime, config, tensors, prefix: "encoder");
-            try { head = new SilkLayaHeadGpuRunner(runtime, tensors, headLayerCount); }
+            try { head = new SilkLayaHeadGpuRunner(runtime, tensors, headLayerCount, activationBf16: activationBf16); }
             catch { encoder.Dispose(); throw; }
         }
         catch { runtime.Dispose(); throw; }
@@ -51,6 +51,9 @@ public sealed class SilkLayaSession : ILayaGpuSession
 
     public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, int headLayerCount)
         => new SilkLayaSession(config, tensors, headLayerCount);
+
+    public static SilkLayaSession OpenActivationBf16(ModernBertConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, int headLayerCount)
+        => new SilkLayaSession(config, tensors, headLayerCount, activationBf16: true);
 
     public static SilkLayaSession Open(ModernBertConfig config, Dictionary<string, (Half[] Data, int[] Shape)> tensors, int headLayerCount)
         => new SilkLayaSession(config, tensors, headLayerCount);

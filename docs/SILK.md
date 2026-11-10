@@ -999,4 +999,4 @@ Silk BERT-family inference is opt-in narrow precision, never the default:
   SilkModernBertNarrowParityTests, SilkLayaNarrowParityTests. Documented tolerance follows
   the BERT encoder's maxAbs <= 1e-2 * (1+|reference|).
 - Training (moments in FP32) and full activation-traffic halving in the Laya head are deferred to
-  issues #1103 and #1102 respectively.
+   issue #1103 (training moments) remains; #1102 (activation-level BF16 in the Laya head) is now available as an opt-in.

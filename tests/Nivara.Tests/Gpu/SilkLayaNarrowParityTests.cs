@@ -208,6 +208,46 @@ public class SilkLayaNarrowParityTests
         Assert.That(maxAbs, Is.LessThanOrEqualTo(1e-2f * scale));
     }
 
+
+    [Test]
+    public void Forward_ActivationBf16_SilkMatchesF32ArgmaxAndBounded()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+
+        var config = TinyConfig;
+        var tensors = Combine(BuildEncoderStateDict("encoder"), BuildHeadTensors());
+
+        var bf16Tensors = new Dictionary<string, (BFloat16[] Data, int[] Shape)>();
+        foreach (var kv in tensors)
+        {
+            var d = new BFloat16[kv.Value.Data.Length];
+            for (int i = 0; i < d.Length; i++) d[i] = (BFloat16)kv.Value.Data[i];
+            bf16Tensors[kv.Key] = (d, kv.Value.Shape);
+        }
+
+        int[] ids = [0, 1, 2, 3];
+        int valid = 4;
+        int[] markers = [0];
+
+        using var f32Session = SilkLayaSession.Open(config, tensors, HeadLayers);
+        using var actBf16Session = SilkLayaSession.OpenActivationBf16(config, bf16Tensors, HeadLayers);
+
+        var f32Out = f32Session.Forward(ids, valid, LayaQuestionType.Choice, markers);
+        var actBf16Out = actBf16Session.Forward(ids, valid, LayaQuestionType.Choice, markers);
+
+        Assert.That(ArgMax(actBf16Out.Logits), Is.EqualTo(ArgMax(f32Out.Logits)));
+
+        float maxAbs = 0f;
+        float scale = 1f;
+        for (int i = 0; i < f32Out.Logits.Length; i++)
+        {
+            maxAbs = MathF.Max(maxAbs, MathF.Abs(f32Out.Logits[i] - actBf16Out.Logits[i]));
+            scale = MathF.Max(scale, 1f + MathF.Abs(f32Out.Logits[i]));
+        }
+        Assert.That(maxAbs, Is.LessThanOrEqualTo(1e-2f * scale));
+    }
+
     static int ArgMax(float[] values)
     {
         int best = 0;

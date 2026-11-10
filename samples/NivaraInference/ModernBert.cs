@@ -574,7 +574,7 @@ public static partial class ModernBert
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
+        using var session = Nivara.AI.GpuSeamFactories.ModernBert(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -630,7 +630,7 @@ public static partial class ModernBert
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
+        using var session = Nivara.AI.GpuSeamFactories.ModernBert(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision F32");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -786,7 +786,7 @@ public static partial class ModernBert
         Console.WriteLine($"CPU reference forward: {cpuSw.ElapsedMilliseconds} ms");
 
         var buildSw = Stopwatch.StartNew();
-        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
+        using var session = Nivara.AI.GpuSeamFactories.ModernBert(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");

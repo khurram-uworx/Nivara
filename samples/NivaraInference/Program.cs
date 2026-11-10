@@ -688,11 +688,11 @@ class Program
                 {
                     if (bf16)
                     {
-                        if (benchmark) return Laya.RunBenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.Silk.SilkLayaSession.Open);
-                        if (compare) return Laya.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.Silk.SilkLayaSession.Open);
+                        if (benchmark) return Laya.RunBenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.Laya);
+                        if (compare) return Laya.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.Laya);
                         return Laya.RunGpu(tensorsBf16, modelDir);
                     }
-                    Nivara.AI.OpenLayaSession open = Nivara.Silk.SilkLayaSession.Open;
+                    Nivara.AI.OpenLayaSession open = Nivara.AI.GpuSeamFactories.Laya;
                     if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
                     if (compare) return Laya.CompareGpu(tensors, modelDir, open);
                     return Laya.RunGpu(tensors, modelDir, open);
@@ -706,12 +706,12 @@ class Program
                 {
                     if (bf16)
                     {
-                        if (benchmark) return ModernBert.BenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, seqLengths, warmup, iterations, SilkModernBertSession.Open);
-                        if (compare) return ModernBert.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, SilkModernBertSession.Open);
+                        if (benchmark) return ModernBert.BenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, seqLengths, warmup, iterations, Nivara.AI.GpuSeamFactories.ModernBert);
+                        if (compare) return ModernBert.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.ModernBert);
                         if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
                         return ModernBert.RunGpu(tensorsBf16, modelDir);
                     }
-                    OpenModernBertSession open = SilkModernBertSession.Open;
+                    OpenModernBertSession open = Nivara.AI.GpuSeamFactories.ModernBert;
                     var mbSilkTensors = tensors;
                     if (benchmark) return ModernBert.BenchmarkGpu(mbSilkTensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(mbSilkTensors, modelDir, open);

@@ -22,6 +22,8 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 
     readonly bool narrowBf16;
     readonly bool narrowF16;
+    readonly bool activationBf16;
+    readonly bool activationF16;
 
     readonly nint typeEmb;
     readonly nint scorerNormW;
@@ -132,7 +134,9 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         int headLayerCount = 2,
         int actClassCount = 2,
         bool isBf16 = false,
-        bool isFp16 = false)
+        bool isFp16 = false,
+        bool activationBf16 = false,
+        bool activationF16 = false)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(tensors);
@@ -145,6 +149,8 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         this.actClassCount = actClassCount;
         this.narrowBf16 = isBf16;
         this.narrowF16 = isFp16;
+        this.activationBf16 = activationBf16;
+        this.activationF16 = activationF16;
 
         if (!tensors.TryGetValue("type_emb.weight", out var typeWeight))
             throw new KeyNotFoundException(
@@ -223,6 +229,14 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 
         int k = markerPositions.Count;
         EnsureWorkspace(rows, k);
+        if (activationBf16)
+        {
+            float[] __h = runtime.Download(hidden, rows * hiddenDim);
+            var __u = new ushort[__h.Length];
+            for (int __i = 0; __i < __h.Length; __i++) __u[__i] = (ushort)(BitConverter.SingleToInt32Bits(__h[__i]) >> 16);
+            hidden = runtime.AllocateUshort(__u.Length);
+            runtime.Upload(hidden, __u);
+        }
         if (ProfilingEnabled) { var _es = Stopwatch.StartNew(); runtime.Finish(); LastPhaseMs["EncodeDrain"] = _es.ElapsedMilliseconds; }
 
         int typeOffset = (int)type * hiddenDim;
@@ -241,9 +255,19 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         if (layers.Length > 0)
         {
             runtime.Upload(maskBuf.Handle, LayaHeadScoring.PrefixMask(rows, validLength));
-            nint q = runtime.CreateSubview(qkv.Handle, 0, rows * hiddenDim);
-            nint kv = runtime.CreateSubview(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
-            nint v = runtime.CreateSubview(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            nint q, kv, v;
+            if (activationBf16)
+            {
+                q = runtime.CreateSubviewUshort(qkv.Handle, 0, rows * hiddenDim);
+                kv = runtime.CreateSubviewUshort(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
+                v = runtime.CreateSubviewUshort(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            }
+            else
+            {
+                q = runtime.CreateSubview(qkv.Handle, 0, rows * hiddenDim);
+                kv = runtime.CreateSubview(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
+                v = runtime.CreateSubview(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            }
             try
             {
                 long _norm = 0, _gemm = 0, _attn = 0, _add = 0;
@@ -302,7 +326,14 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         else LaunchGemm(SilkKernels.GemmGelu, markerScored.Handle, scorerHiddenW, markerScoredOut.Handle, scorerHiddenB, k, hiddenDim, hiddenDim);
         if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmBias, markerScoredOut.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1); runtime.Finish(); _markerMs += s.ElapsedMilliseconds; }
         else LaunchGemm(SilkKernels.GemmBias, markerScoredOut.Handle, scorerOutW, logits.Handle, scorerOutB, k, hiddenDim, 1);
-        float[] logitsHost = runtime.Download(logits.Handle, k);
+        float[] logitsHost;
+        if (activationBf16)
+        {
+            ushort[] __l = runtime.DownloadUshort(logits.Handle, k);
+            logitsHost = new float[__l.Length];
+            for (int __i = 0; __i < __l.Length; __i++) logitsHost[__i] = BitConverter.Int32BitsToSingle(__l[__i] << 16);
+        }
+        else logitsHost = runtime.Download(logits.Handle, k);
         if (ProfilingEnabled) LastPhaseMs["MarkerHead"] = _markerMs;
 
         double[] probabilities = LayaHeadScoring.Softmax(logitsHost);
@@ -311,17 +342,41 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         long _actMs = 0;
         if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGather(hidden, pooledIds, actRow.Handle, hiddenDim); runtime.Finish(); _actMs += s.ElapsedMilliseconds; }
         else LaunchGather(hidden, pooledIds, actRow.Handle, hiddenDim);
-        float[] actRowHost = runtime.Download(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
+        float[] actRowHost;
+        if (activationBf16)
+        {
+            ushort[] __a = runtime.DownloadUshort(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
+            actRowHost = new float[__a.Length];
+            for (int __i = 0; __i < __a.Length; __i++) actRowHost[__i] = BitConverter.Int32BitsToSingle(__a[__i] << 16);
+        }
+        else actRowHost = runtime.Download(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
         for (int i = 0; i < features.Length; i++)
             actRowHost[hiddenDim + i] = (float)features[i];
-        runtime.Upload(actRow.Handle, actRowHost);
+        if (activationBf16)
+        {
+            var __u = new ushort[actRowHost.Length];
+            for (int __i = 0; __i < actRowHost.Length; __i++) __u[__i] = (ushort)(BitConverter.SingleToInt32Bits(actRowHost[__i]) >> 16);
+            runtime.Upload(actRow.Handle, __u);
+        }
+        else runtime.Upload(actRow.Handle, actRowHost);
 
         if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmGelu, actRow.Handle, actInW, actHiddenBuf.Handle, actInB, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden); runtime.Finish(); _actMs += s.ElapsedMilliseconds; }
         else LaunchGemm(SilkKernels.GemmGelu, actRow.Handle, actInW, actHiddenBuf.Handle, actInB, 1, hiddenDim + LayaHeadOutput.FeatureCount, actHidden);
         if (ProfilingEnabled) { var s = Stopwatch.StartNew(); LaunchGemm(SilkKernels.GemmBias, actHiddenBuf.Handle, actOutW, actLogits.Handle, actOutB, 1, actHidden, actClassCount); runtime.Finish(); _actMs += s.ElapsedMilliseconds; }
         else LaunchGemm(SilkKernels.GemmBias, actHiddenBuf.Handle, actOutW, actLogits.Handle, actOutB, 1, actHidden, actClassCount);
-        float[] actHost = runtime.Download(actLogits.Handle, actClassCount);
+        float[] actHost;
+        if (activationBf16)
+        {
+            ushort[] __a = runtime.DownloadUshort(actLogits.Handle, actClassCount);
+            actHost = new float[__a.Length];
+            for (int __i = 0; __i < __a.Length; __i++) actHost[__i] = BitConverter.Int32BitsToSingle(__a[__i] << 16);
+        }
+        else actHost = runtime.Download(actLogits.Handle, actClassCount);
         if (ProfilingEnabled) LastPhaseMs["ActHead"] = _actMs;
+
+        if (activationBf16) runtime.Release(hidden);
+
+        if (activationBf16) runtime.Release(hidden);
 
         return new LayaHeadOutput
         {
@@ -335,33 +390,70 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 
     void EnsureWorkspace(int rows, int markers)
     {
-        normed = runtime.Ensure(normed, rows * hiddenDim);
-        qkv = runtime.Ensure(qkv, rows * 3 * hiddenDim);
-        context = runtime.Ensure(context, rows * hiddenDim);
-        projected = runtime.Ensure(projected, rows * hiddenDim);
-        ffnIn = runtime.Ensure(ffnIn, rows * intermediateDim);
-        ffnOut = runtime.Ensure(ffnOut, rows * hiddenDim);
-        markerRows = runtime.Ensure(markerRows, markers * hiddenDim);
-        markerScored = runtime.Ensure(markerScored, markers * hiddenDim);
-        markerScoredOut = runtime.Ensure(markerScoredOut, markers * hiddenDim);
-        logits = runtime.Ensure(logits, markers);
-        actRow = runtime.Ensure(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
-        actHiddenBuf = runtime.Ensure(actHiddenBuf, actHidden);
-        actLogits = runtime.Ensure(actLogits, actClassCount);
+        if (activationBf16)
+        {
+            normed = runtime.EnsureUshort(normed, rows * hiddenDim);
+            qkv = runtime.EnsureUshort(qkv, rows * 3 * hiddenDim);
+            context = runtime.EnsureUshort(context, rows * hiddenDim);
+            projected = runtime.EnsureUshort(projected, rows * hiddenDim);
+            ffnIn = runtime.EnsureUshort(ffnIn, rows * intermediateDim);
+            ffnOut = runtime.EnsureUshort(ffnOut, rows * hiddenDim);
+            markerRows = runtime.EnsureUshort(markerRows, markers * hiddenDim);
+            markerScored = runtime.EnsureUshort(markerScored, markers * hiddenDim);
+            markerScoredOut = runtime.EnsureUshort(markerScoredOut, markers * hiddenDim);
+            logits = runtime.EnsureUshort(logits, markers);
+            actRow = runtime.EnsureUshort(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
+            actHiddenBuf = runtime.EnsureUshort(actHiddenBuf, actHidden);
+            actLogits = runtime.EnsureUshort(actLogits, actClassCount);
+        }
+        else
+        {
+            normed = runtime.Ensure(normed, rows * hiddenDim);
+            qkv = runtime.Ensure(qkv, rows * 3 * hiddenDim);
+            context = runtime.Ensure(context, rows * hiddenDim);
+            projected = runtime.Ensure(projected, rows * hiddenDim);
+            ffnIn = runtime.Ensure(ffnIn, rows * intermediateDim);
+            ffnOut = runtime.Ensure(ffnOut, rows * hiddenDim);
+            markerRows = runtime.Ensure(markerRows, markers * hiddenDim);
+            markerScored = runtime.Ensure(markerScored, markers * hiddenDim);
+            markerScoredOut = runtime.Ensure(markerScoredOut, markers * hiddenDim);
+            logits = runtime.Ensure(logits, markers);
+            actRow = runtime.Ensure(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
+            actHiddenBuf = runtime.Ensure(actHiddenBuf, actHidden);
+            actLogits = runtime.Ensure(actLogits, actClassCount);
+        }
         maskBuf = runtime.Ensure(maskBuf, rows);
         markerIds = runtime.Ensure(markerIds, markers);
     }
-
     void LaunchAddBias(nint x, nint bias, nint y, int rows, int cols)
-        => SilkLauncher.AddBias(runtime, x, bias, y, rows, cols);
+    {
+        if (activationBf16)
+            SilkLauncher.AddBiasBf16Act(runtime, x, bias, y, rows, cols);
+        else
+            SilkLauncher.AddBias(runtime, x, bias, y, rows, cols);
+    }
 
     void LaunchLayerNorm(nint src, nint gamma, nint beta, nint y, int rows)
-        => SilkLauncher.LayerNorm(runtime, src, gamma, beta, y, rows, hiddenDim, eps);
+    {
+        if (activationBf16)
+            SilkLauncher.LayerNormBf16Act(runtime, src, gamma, beta, y, rows, hiddenDim, eps);
+        else
+            SilkLauncher.LayerNorm(runtime, src, gamma, beta, y, rows, hiddenDim, eps);
+    }
 
     void LaunchGemm(string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, int? blockWidth = null)
     {
         string mapped = kernel;
-        if (narrowBf16)
+        if (activationBf16)
+            mapped = kernel switch
+            {
+                SilkKernels.GemmQkv => SilkKernels.GemmQkvBf16Act,
+                SilkKernels.GemmGelu => SilkKernels.GemmGeluBf16Act,
+                SilkKernels.GemmRelu => SilkKernels.GemmReluBf16Act,
+                SilkKernels.GemmBias => SilkKernels.GemmBiasBf16Act,
+                _ => kernel
+            };
+        else if (narrowBf16)
             mapped = kernel switch
             {
                 SilkKernels.GemmQkv => SilkKernels.GemmQkvBf16,
@@ -379,18 +471,35 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
                 SilkKernels.GemmBias => SilkKernels.GemmBiasF16,
                 _ => kernel
             };
-        SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
+        if (activationBf16)
+            SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
+        else
+            SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
     }
 
     void LaunchAttention(nint q, nint k, nint v, nint mask, nint output, int seqLen)
-        => SilkLauncher.Attention(
-            runtime, q, k, v, mask, output, 1, seqLen, numHeads, headDim, SilkKernels.GlobalAttentionBand, scale);
+    {
+        if (activationBf16)
+            SilkLauncher.AttentionBf16Act(runtime, q, k, v, mask, output, 1, seqLen, numHeads, headDim, scale);
+        else
+            SilkLauncher.Attention(runtime, q, k, v, mask, output, 1, seqLen, numHeads, headDim, SilkKernels.GlobalAttentionBand, scale);
+    }
 
     void LaunchAdd(nint a, nint b, nint y, int n)
-        => SilkLauncher.Add(runtime, a, b, y, n);
+    {
+        if (activationBf16)
+            SilkLauncher.AddBf16Act(runtime, a, b, y, n);
+        else
+            SilkLauncher.Add(runtime, a, b, y, n);
+    }
 
     void LaunchGather(nint table, nint ids, nint y, int n)
-        => SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
+    {
+        if (activationBf16)
+            SilkLauncher.GatherBf16Act(runtime, table, ids, y, n, hiddenDim);
+        else
+            SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
+    }
 
     nint UploadTransposedUshort(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key)
     {
