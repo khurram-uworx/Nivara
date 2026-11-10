@@ -1,3 +1,4 @@
+using Nivara.Silk;
 using System.Numerics;
 
 namespace Nivara.AI;
@@ -76,3 +77,32 @@ public delegate ILayaGpuSession OpenLayaSessionFp16(
     ModernBertConfig config,
     Dictionary<string, (Half[] Data, int[] Shape)> tensors,
     int headLayerCount);
+
+/// <summary>
+/// Seam-level static factory instances for the Silk BERT-family GPU sessions. Samples and other
+/// callers select narrow precision through these delegates instead of naming
+/// <c>SilkModernBertSession</c>/<c>SilkLayaSession</c> directly, so the backend stays behind the
+/// <see cref="IModernBertGpuSession"/>/<see cref="ILayaGpuSession"/> seam.
+/// </summary>
+public static class GpuSeamFactories
+{
+    public static readonly OpenModernBertSession ModernBert = SilkModernBertSession.Open;
+    public static readonly OpenModernBertSession ModernBertF32 = SilkModernBertSession.Open;
+    public static readonly OpenModernBertSession OpenModernBert = SilkModernBertSession.Open;
+
+    public static readonly OpenModernBertSessionBf16 ModernBertBf16 = SilkModernBertSession.Open;
+    public static readonly OpenModernBertSessionBf16 OpenModernBertBf16 = SilkModernBertSession.Open;
+
+    public static readonly OpenModernBertSessionFp16 ModernBertFp16 = SilkModernBertSession.Open;
+    public static readonly OpenModernBertSessionFp16 OpenModernBertFp16 = SilkModernBertSession.Open;
+
+    public static readonly OpenLayaSession Laya = SilkLayaSession.Open;
+    public static readonly OpenLayaSession LayaF32 = SilkLayaSession.Open;
+    public static readonly OpenLayaSession OpenLaya = SilkLayaSession.Open;
+
+    public static readonly OpenLayaSessionBf16 LayaBf16 = SilkLayaSession.Open;
+    public static readonly OpenLayaSessionBf16 OpenLayaBf16 = SilkLayaSession.Open;
+
+    public static readonly OpenLayaSessionFp16 LayaFp16 = SilkLayaSession.Open;
+    public static readonly OpenLayaSessionFp16 OpenLayaFp16 = SilkLayaSession.Open;
+}
