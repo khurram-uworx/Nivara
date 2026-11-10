@@ -8,8 +8,9 @@ public sealed partial class SilkLayaHeadGpuRunner
         SilkRuntime runtime,
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
         int headLayerCount = 2,
-        int actClassCount = 2)
-        : this(runtime, ToUshort(tensors), headLayerCount, actClassCount, isBf16: true, isFp16: false)
+        int actClassCount = 2,
+        bool activationBf16 = false)
+        : this(runtime, ToUshort(tensors), headLayerCount, actClassCount, isBf16: true, isFp16: false, activationBf16: activationBf16)
     {
     }
 
