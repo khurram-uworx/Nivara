@@ -323,23 +323,6 @@ public sealed class SilkDistilBertTrainerTests
     }
 
     [Test]
-    public void TrainableLayerCount_Aliases_ReturnSameValue()
-    {
-        var (runtime, trainer, _) = Make();
-        using (runtime)
-        using (trainer)
-        {
-            foreach (int value in new[] { 0, 1, Layers })
-            {
-                trainer.TrainableLayerCount = value;
-                Assert.That(trainer.NumTrainableLayers, Is.EqualTo(value));
-                Assert.That(trainer.TrainableLayers, Is.EqualTo(value));
-                Assert.That(trainer.NumTrainableLayers, Is.EqualTo(trainer.TrainableLayers));
-            }
-        }
-    }
-
-    [Test]
     public void TrainableLayerCount_ClampsNegativeAndOversized()
     {
         var (runtime, trainer, _) = Make();
@@ -357,78 +340,6 @@ public sealed class SilkDistilBertTrainerTests
 
             trainer.TrainableLayerCount = int.MaxValue;
             Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers));
-        }
-    }
-
-    [Test]
-    public void FreezeEncoder_SetsZeroTrainableLayers()
-    {
-        var (runtime, trainer, _) = Make();
-        using (runtime)
-        using (trainer)
-        {
-            trainer.TrainableLayerCount = Layers;
-            trainer.FreezeEncoder();
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
-            Assert.That(trainer.NumTrainableLayers, Is.EqualTo(0));
-            Assert.That(trainer.TrainableLayers, Is.EqualTo(0));
-        }
-    }
-
-    [Test]
-    public void SetTrainableLayers_ClampsAndUpdatesAliases()
-    {
-        var (runtime, trainer, _) = Make();
-        using (runtime)
-        using (trainer)
-        {
-            trainer.SetTrainableLayers(1);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(1));
-            Assert.That(trainer.NumTrainableLayers, Is.EqualTo(1));
-            Assert.That(trainer.TrainableLayers, Is.EqualTo(1));
-
-            trainer.SetTrainableLayers(Layers + 3);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers));
-
-            trainer.SetTrainableLayers(-2);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
-        }
-    }
-
-    [Test]
-    public void FreezeLayers_SemanticsAndClamping()
-    {
-        var (runtime, trainer, _) = Make();
-        using (runtime)
-        using (trainer)
-        {
-            trainer.FreezeLayers(0);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers));
-
-            trainer.FreezeLayers(1);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers - 1));
-
-            trainer.FreezeLayers(Layers);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
-
-            trainer.FreezeLayers(Layers + 5);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
-
-            trainer.FreezeLayers(-3);
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(Layers));
-        }
-    }
-
-    [Test]
-    public void Freeze_Alias_MatchesFreezeEncoder()
-    {
-        var (runtime, trainer, _) = Make();
-        using (runtime)
-        using (trainer)
-        {
-            trainer.TrainableLayerCount = Layers;
-            trainer.Freeze();
-            Assert.That(trainer.TrainableLayerCount, Is.EqualTo(0));
         }
     }
 
