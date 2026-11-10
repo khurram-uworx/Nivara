@@ -72,6 +72,13 @@ internal static class DocsCoveragePins
     /// Issue #1068 adds one from the ranked-retrieval boundary note in
     /// <c>samples/NivaraChat/README.md</c> (<c>docs/METRICS.md</c>): 255 + 1 = 256.
     /// Issue #1077 adds one from the ADR-010 index line in <c>AGENTS.md</c>: 256 + 1 = 257.
+    /// The OpenBLAS probe adds three: one backticked README reference in
+    /// <c>docs/BLAS-MKL.md</c> (the section 6 deviations note), one markdown link to
+    /// <c>docs/BLAS-MKL.md</c> and one backticked README reference in
+    /// <c>tests/Nivara.PerformanceTests/README.md</c>: 257 + 3 = 260.
+    /// The BLAS provider (branch khurram/1117) adds two: the `OpenBlasInterop.cs`
+    /// move to `src/Nivara.Extensions/Blas/` carries the `docs/BLAS-MKL.md` reference, and
+    /// `src/Nivara/GemmProvider.cs` adds one: 260 + 2 = 262.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 257;
+    internal const int ExpectedDocumentReferenceCount = 262;
 }

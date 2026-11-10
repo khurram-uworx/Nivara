@@ -1,9 +1,10 @@
 # OpenBLAS / oneMKL — options and the measurement-first plan
 
-> **Status: recorded 2026-10-15. Not started.** No `src/` change, no package reference,
-> no issue filed. This captures the options, the decision, and the probe that has to run
-> before either library becomes a dependency. It graduates into issues and a proper plan
-> only if that probe clears the gate in §6.
+> **Status: probe run 2026-11-10.** No `src/` change, no package reference, no issue filed
+> yet. The probe cleared its gate (`maxAbs <= 1e-3` on every row, all four runs) and the
+> recommendation is recorded below. The seam issue and any follow-up are still to be filed
+> against [#458](https://github.com/khurram-uworx/Nivara/issues/458) if the recommendation
+> is accepted. This document is the record of the measurement, not the implementation.
 
 This page is the CPU-BLAS counterpart of the GPU story in
 [ACCELERATION.md](ACCELERATION.md). The earlier capture of the same three options (managed
@@ -159,9 +160,10 @@ A BLAS bridge also does **not** fix [#457](https://github.com/khurram-uworx/Niva
 The vision gap is convolution (naive nested loops, no SIMD, no parallelism), and convolution
 does not go through `MultiplyCore`.
 
-## 5. Decision (2026-10-15)
+## 5. Decision as recorded (2026-10-15)
 
-Measure first. Do not add a dependency to core or to `Nivara.Extensions`.
+The decision recorded before the probe ran. Items 2 and 3 are what the probe
+changed: see §5.1.
 
 1. **Probe, not a seam.** Add a BLAS leg to the existing `--cpu-gemm` probe
    (`tests/Nivara.PerformanceTests/CpuGemmProbe.cs`). The P/Invoke stays in that project.
@@ -183,10 +185,137 @@ Measure first. Do not add a dependency to core or to `Nivara.Extensions`.
    / [#444](https://github.com/khurram-uworx/Nivara/issues/444) provider, not a BLAS-specific
    one.
 
-## 6. The probe
+## 5.1. What the probe actually found (2026-11-10)
 
-Home: `tests/Nivara.PerformanceTests`, mode `--cpu-gemm`. Document the new leg in that
-project's `README.md` in the same change. Run:
+### Where the DLL comes from
+
+- **Source.** The official OpenBLAS GitHub release
+  [`v0.3.34`](https://github.com/xianyi/OpenBLAS/releases/tag/v0.3.34), asset
+  `OpenBLAS-0.3.34-x64.zip` (39 MB). It contains a single `libopenblas.dll` (49 MB).
+- **Why this and not MKL.** MKL is 481 MB on disk and ships no official NuGet; OpenBLAS is
+  49 MB and its import table is `KERNEL32.dll` + `msvcrt.dll` only (no gcc/gfortran/quadmath/
+  winpthread). Both answer the same question; the lean one is the candidate. This probe does
+  not measure MKL and does not claim to.
+- **How to get it.** Download the zip, extract `libopenblas.dll` to `lib/libopenblas.dll`
+  at the repository root (that directory is gitignored). That is the only location the probe
+  looks in. Nothing is committed to the repository and nothing is restored.
+- **Recommendation (acquisition).** If the seam lands, ship the DLL as an opt-in native asset in
+  `Nivara.Extensions` (RID-specific, default off), never in core. Core stays dependency-free.
+
+The probe ran on the i5-1135G7 laptop (4C/8T, AVX-512 enabled, 31.7 GB RAM,
+.NET 11.0.100-rc.3, AC power, Balanced plan), against OpenBLAS 0.3.34
+(`DYNAMIC_ARCH NO_AFFINITY MAX_THREADS=64`, LP64, imports `KERNEL32.dll` +
+`msvcrt.dll` only). Four runs, all `Gate PASS` on every row, all against the
+same double-precision truth the other legs use.
+
+### Measured table — projected Laya forward, GEMM only (total ms / GMAC/s)
+
+| leg | SkylakeX (AVX-512) | GMAC/s | Haswell (AVX2) | GMAC/s |
+|---|---|---|---|---|---|
+| AutoDiff (managed) | 14286 | 13 | 14147 | 13 |
+| BTranspose (managed) | 16889 | 11 | 16545 | 11 |
+| Blocked (managed) | 14788 | 12 | 14364 | 13 |
+| Blas 1t | 8988 | 21 | 11038 | 17 |
+| Blas 1t-NT | 9368 | 20 | 11224 | 16 |
+| Blas Nt | 2191 | 84 | 2612 | 71 |
+| Blas hybrid | 2112 | 87 | 2358 | 78 |
+
+Run-to-run spread for the projection: AutoDiff 11238-15018 ms, Blas 1t 4851-11038 ms,
+Blas 8t 2178-4838 ms, Blas hybrid 1878-2261 ms. The hybrid's ratio to the managed kernel is
+the stable quantity (6.0-6.8x); the absolute GMAC/s figures are not.
+
+### What changed relative to the plan
+
+1. **MKL was not measured and is not needed.** §5.3's assumption that the probe vehicle
+   had to be MKL (because that is what the PyTorch number is) does not survive contact with
+   the leanness requirement: MKL is 481 MB on disk (82.8 MB rt+core, 245 MB kernel variants,
+   84 MB VML, 69.2 MB thread layers) and ships no official NuGet. OpenBLAS 0.3.34 is a
+   single 49 MB DLL whose import table is `KERNEL32.dll` + `msvcrt.dll` only. Both answer
+   the same question — "how fast is a tuned native BLAS here" — and the lean one is the
+   candidate. The write-up therefore cannot claim "MKL measured on this box"; it says so.
+2. **No package reference at all.** §5.2's `MKL.NET.win-x64` / `MathNet.Numerics.MKL.Win-*`
+   assumption is gone. The DLL is resolved at runtime from `lib/libopenblas.dll`; there is no
+   build-time gating, no environment variable, no copy step. Default builds restore and
+   define nothing extra.
+3. **OpenBLAS needs no preload dance.** `openblas_set_num_threads(1)` works before any GEMM
+   (unlike MKL, whose `mkl_set_num_threads` / `mkl_set_threading_layer` crash before init).
+   Setting the thread count through the CRT (`putenv`) is silently ignored; a real process
+   environment variable flips `openblas_get_corename()` from `SkylakeX` to `Haswell`.
+4. **The CBLAS mapping differs from §3B.** That table has the two layouts swapped relative to
+   the binding that actually ran. The binding in `OpenBlasInterop.cs` uses:
+   - B as `[N x K]` (the `MatMulTransposedB` layout): `TransB = Trans`, `ldb = K`
+   - B as `[K x N]` (the `MatMul` layout): `TransB = NoTrans`, `ldb = N`
+   `RowMajor = 101`, `NoTrans = 111`, `Trans = 112`. The probe gate caught the swap; the
+   doc's §3B table is left as the earlier reading and is superseded by this one.
+5. **The driver-BLAS property does not transfer to CPU BLAS.** Intel graphics drivers ship
+   OpenCL, Level Zero and oneVPL and no MKL, so "MKL is already on every machine like
+   OpenCL" is false. Torch's MKL is statically linked into `torch_cpu.dll` (290.9 MB,
+   59,776 C++-mangled ATen exports; `hasattr(dll, "cblas_sgemm")` is False) and is not
+   hookable. Neither is a usable acquisition vehicle.
+6. **The 8-thread leg is not a candidate.** Its `min` and `median` disagree by up to 30x
+   because waking OpenBLAS's pool costs more than the GEMM at M=128. `Blas hybrid` (Nivara's
+   `Parallel.For` over row blocks, one OpenBLAS thread per call) matched or beat it in 3 of
+   4 runs and never had a bad one, so it is the integration shape. See §8.
+7. **AVX-512 buys about 10-15%.** Haswell is 78 GMAC/s against SkylakeX's 82-87 on the
+   hybrid. The AVX2 fallback is usable; the AVX-512-transference worry largely dissolves.
+
+### Findings
+
+1. **Native BLAS closes the gap.** Hybrid is 6.0-6.8x over the managed kernel on the
+   GEMM-only forward, which is the size of the #458 deficit (~5.6x against PyTorch CPU).
+   Single-threaded native is 1.6-2.4x, so even the conservative configuration wins.
+2. **`Blocked` still does not beat the in-tree kernel** on this box (14788 vs 14286 ms), so
+   the "MultiplyRowFloat's one-Dot-per-element is the bottleneck" hypothesis remains
+   falsified. The small-M win is not available to a managed kernel.
+3. **The 8-thread leg is erratic, not slow.** It is fast when it is fast (84-85 GMAC/s
+   projected) and collapses to 38-45 when the process is not continuously busy. Its `min`
+   stays fast in every run, which is the signature of wake-up latency, not of a slow kernel.
+
+### Recommendation
+
+Adopt the seam, with the **hybrid** configuration as the default behaviour of the provider:
+Nivara owns the row parallelism, OpenBLAS is called single-threaded from each chunk. The
+provider is off by default (Extensions, opt-in), and the managed path remains the default and
+bit-identical fallback. `Blas 1t` is the conservative configuration for callers who do not
+want a second pool in their process at all.
+
+### Decision rule, applied
+
+| result | do |
+|---|---|
+| BLAS clearly ahead of `Blocked` at both M=128 and M=512 | file the seam issue. Scope is §7. One commit records the probe table on [#458](https://github.com/khurram-uworx/Nivara/issues/458) first, so the issue exists before the design |
+| BLAS ≈ `Blocked`, or the win is M=128 only and `Blocked` already has it | no native dependency. The small-M fix is a managed-kernel item under [#458](https://github.com/khurram-uworx/Nivara/issues/458) |
+| BLAS ≈ in-tree at both | no GEMM change. [#458](https://github.com/khurram-uworx/Nivara/issues/458)'s non-GEMM lead stands |
+
+The hybrid is clearly ahead of `Blocked` at both regimes (2112 vs 14788 ms at M=512, and
+1.46 ms vs 7.02 ms on `distilbert qkv/o` at M=128), and the 8-thread leg's own pool is the
+reason it is not the configuration to ship. **First row applies.** The seam issue is to be
+filed against [#458](https://github.com/khurram-uworx/Nivara/issues/458) before any design work.
+
+"Clearly ahead" means ahead of the noise, not ahead of zero. The roll-up moves ~2% run to
+run for the in-tree legs and ~9% for `Blocked`. The hybrid's 6.0-6.8x is not in that noise.
+
+---
+
+## 6. The probe (as run)
+
+The plan as written assumed MKL as the vehicle and a single `Blas` leg. The probe that
+actually ran is documented in §5.1 and `tests/Nivara.PerformanceTests/README.md`. Deviations
+from the plan below:
+
+- **Vehicle.** OpenBLAS 0.3.34, not MKL. No package reference; the DLL is resolved at
+  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See �5.1.
+- **Legs.** Four BLAS legs, not one: `Blas 1t`, `Blas 1t-NT`, `Blas Nt`, `Blas hybrid`.
+  See `CpuGemmProbe.cs` and the README leg table.
+- **Protocol.** The probe already used 1 untimed warmup and 20 interleaved rounds (the README's
+  "5 untimed warmups" line was stale and is corrected). The BLAS legs report `min ms` alongside
+  `median ms`, because `Blas Nt`'s min and median diverge by up to 30x.
+- **AVX2 control.** `OPENBLAS_CORETYPE=Haswell` as a real process env var, confirmed by
+  `corename: Haswell` in the header. No new CLI flag.
+- **LP64 assertion.** `TryInitialize` rejects an ILP64 build by searching for `USE64BITINT`
+  in `openblas_get_config()`.
+
+The original plan text below is retained as the record of intent.
 
 ```bash
 dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
@@ -256,6 +385,14 @@ Recorded so the probe's successor does not re-derive it. Not authorized by this 
   asset. Default off. Thread count is a knob, defaulting to 1 inside a call that may
   already be running under `Parallel.For` or the query engine — oversubscription is a
   behaviour bug, not a tuning preference.
+  **Binding note.** `LibraryImportAttribute` has no `CallingConvention` property:
+  source-generated P/Invoke always uses the platform default. That is correct on x64
+  Windows (one convention) and wrong on x86, so this binding is x64-only. If an x86 target
+  is ever wanted, use `[DllImport]` with `CallingConvention.Cdecl`. Also, with no
+  `DefaultDllImportSearchPaths` flag the runtime searches the assembly directory and then
+  falls back to the OS, which is what makes the "copy the DLL next to the executable"
+  acquisition work without a resolver; specifying `DllImportSearchPath.AssemblyDirectory`
+  would both drop that fallback (.NET 10+) and trip CA5393.
 - **Stays on the managed path.** Anything that is not dense float or double: transpose,
   null mask, Half, BFloat16, and the integer types `MultiplyCore` still accepts. Falling
   through to managed for those is the correct result, not a gap.
@@ -287,12 +424,26 @@ Recorded so the probe's successor does not re-derive it. Not authorized by this 
 - **Licensing.** Both are permissive enough to redistribute. oneMKL's redistributable is
   large enough that "opt-in, Extensions or the probe, never core" is the policy even after
   a win. Record the licence in the package notes if a shipped package ever carries it.
+- **Acquisition (measured 2026-11-10).** No package reference anywhere. OpenBLAS 0.3.34 is a
+  single 49 MB DLL whose imports are `KERNEL32.dll` + `msvcrt.dll` only; MKL is 481 MB on
+  disk (82.8 rt+core, 245 kernel variants, 84 VML, 69.2 thread layers) and ships no official
+  NuGet. Driver-shipped Intel graphics stacks carry OpenCL/Level Zero/oneVPL and no MKL.
+  Torch's MKL is statically linked and unexported. The binding is seven hand-written
+  `LibraryImport` declarations (not a generator pass over `cblas.h`), LP64 only, with an
+  ILP64 guard in `TryInitialize`.
+- **Threading (measured).** OpenBLAS's own pool is the hazard, not the kernel: its `min` and
+  `median` disagree by up to 30x at M=128 because waking the pool costs more than the GEMM.
+  The integration shape is the hybrid — Nivara's `Parallel.For` over row blocks, one
+  OpenBLAS thread per call — which matched or beat the 8-thread leg in 3 of 4 runs and never
+  had a bad one. Default the provider's thread count to 1.
+- **AVX2 (measured).** Haswell is 78 GMAC/s against SkylakeX's 82-87 on the hybrid. The
+  AVX2 fallback is usable; the AVX-512-transference worry largely dissolves for OpenBLAS.
 
 ## References
 
 - [ROADMAP-SUGGESTION.md](ROADMAP-SUGGESTION.md) — options A/B/C and the M3 gate this page executes.
 - [ACCELERATION.md](ACCELERATION.md) §7 — the GPU side of the same gap; open work names the native BLAS bridge as the CPU follow-up to [#458](https://github.com/khurram-uworx/Nivara/issues/458).
-- [`tests/Nivara.PerformanceTests/README.md`](../tests/Nivara.PerformanceTests/README.md) — `--cpu-gemm` as it stands (three legs, the projected Laya table, the run-to-run caveat).
+- [`tests/Nivara.PerformanceTests/README.md`](../tests/Nivara.PerformanceTests/README.md) — `--cpu-gemm`: four in-tree legs plus four gated OpenBLAS legs, the projected Laya table (both the #458 box and the 2026-11-10 laptop), and the run-to-run caveat.
 - `src/Nivara/Tensors/TensorsHelper.cs` — `MultiplyCore`, and the note that `Tensor.MatrixMultiply` has not shipped.
 - Issues: [#458](https://github.com/khurram-uworx/Nivara/issues/458) (the CPU gap; GEMM cleared at S=512, not at S=128) · [#435](https://github.com/khurram-uworx/Nivara/issues/435) (the GEMM harness this probe extends) · [#133](https://github.com/khurram-uworx/Nivara/issues/133) (provider-seam decision, open) · [#444](https://github.com/khurram-uworx/Nivara/issues/444) (GPU consumer of that seam) · [#457](https://github.com/khurram-uworx/Nivara/issues/457) (vision conv — not this bridge).
 - [LibraryImport source generation](https://learn.microsoft.com/dotnet/standard/native-interop/pinvoke-source-generation) · [native library loading](https://learn.microsoft.com/dotnet/standard/native-interop/native-library-loading) · [native interop best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices).

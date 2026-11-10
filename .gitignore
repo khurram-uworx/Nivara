@@ -385,3 +385,6 @@ samples/data/nivarachat
 !/release/**/*.csv
 !/release/**/*.md
 !/release/**/.gitkeep
+
+# OpenBLAS probe DLL (downloaded, gitignored; see docs/BLAS-MKL.md section 5.1)
+/lib/
