@@ -350,10 +350,11 @@ Usable on Silk-only machines where `--silk-kernels` cannot run.
 `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --cpu-gemm`
 
 Measures what the CPU can do at the same shapes the GPU gate uses, so the two backends are
-compared on identical inputs rather than across harnesses. **Four legs** as of #458, all gated
-`maxAbs(leg - double-precision truth) <= 1e-3` against the same truth the GPU gate uses. Timing is
-5 untimed warmups per leg followed by 20 interleaved rounds (first-measured leg alternates each
-round); the printed `best ms` column is the median of those 20 rounds, not best-of-N.
+compared on identical inputs rather than across harnesses. **Four in-tree legs**, all gated
+`maxAbs(leg - double-precision truth) <= 1e-3` against the same truth the GPU gate uses, plus
+**four optional OpenBLAS legs** (below). Timing is 1 untimed warmup per leg followed by 20
+interleaved rounds (first-measured leg alternates each round); `median ms` is the median of those
+20 rounds and `min ms` is the fastest of them.
 
 | leg | what it is |
 |---|---|
@@ -361,6 +362,10 @@ round); the printed `best ms` column is the median of those 20 rounds, not best-
 | `BTranspose` | `GradKernels.MatMul`, B as `[K x N]`, transposes B on every call |
 | `Blocked` | probe-local `Parallel.For` + `Vector<float>` register accumulators held across the whole K loop, A and B read in place with no `RentCopy` and no staging copy |
 | `NoRentCopy` | probe-local copy of `MultiplyCore`'s parallel path that reads A in place (no `RentCopy`, no `clearArray`) — isolates the pooled-copy cost; added in #458 |
+| `Blas 1t` | `cblas_sgemm`, B as `[N x K]` (`TransB=Trans`), one OpenBLAS thread — optional, see below |
+| `Blas 1t-NT` | same call with B as `[K x N]` (`TransB=NoTrans`) — isolates the B-layout question from the thread-pool question |
+| `Blas Nt` | `Blas 1t` with `ProcessorCount` OpenBLAS threads |
+| `Blas hybrid` | `Parallel.For` over row blocks, one OpenBLAS thread per call |
 
 `Blocked` exists because there is no BCL matrix multiply to compare against
 (`TensorPrimitives.Dot` is the *vector* dot product; `Tensor.MatrixMultiply` has not
@@ -372,6 +377,39 @@ Note the two in-tree legs take **different B layouts** - `MatMulTransposedB` mea
 already transposed" and expects `[N x K]`, while `MatMul` takes `[K x N]` and transposes.
 Both compute `A[M x K] · B[K x N]`.
 
+#### The OpenBLAS legs (opt-in)
+
+`docs/BLAS-MKL.md` §6 needs native BLAS measured against `Blocked` before either library can
+become a dependency. There is no official OpenBLAS NuGet, so the DLL is supplied by path and
+nothing is restored:
+
+```bash
+dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
+  -p:OpenBlasDll=/path/to/libopenblas.dll -- --cpu-gemm
+# OPENBLAS_DLL=<path> works too: MSBuild imports environment variables as properties
+```
+
+`-p:BlasProbe=true` defines `BLAS_PROBE`, enables `AllowUnsafeBlocks` (the `LibraryImport`
+source generator emits unsafe code) and copies the DLL next to the executable. The default build
+defines nothing, restores nothing, and prints `BLAS : legs not available` - so every run states
+which configuration produced it. If the property is set without a path, the build fails with a
+message naming both ways to supply one.
+
+Each run prints `openblas_get_config()` and `openblas_get_corename()`, and initialisation
+**refuses an ILP64 build** (it looks for `USE64BITINT`), because the binding declares `int`
+dimensions and an ILP64 library would silently misread every one of them.
+
+**AVX2 control.** Set `OPENBLAS_CORETYPE=Haswell` to force the AVX2 kernel, and read
+`corename: Haswell` in the header before consuming the numbers. Set it as a real process
+environment variable - OpenBLAS ignores it when it is set through the CRT.
+
+**`Blas hybrid` is the candidate, not `Blas Nt`.** Two thread pools on one machine
+oversubscribe, and on this shape regime OpenBLAS's own pool is the one that misbehaves:
+`Blas Nt`'s `min` and `median` columns disagree by up to 30x (`minilm fc1`: 0.76 ms min against
+25.6 ms median) because waking the pool costs more than the GEMM, while `Blas hybrid` keeps its
+`min` and `median` within 20%. `Blas Nt` stays in the table as the evidence for that, not as a
+recommendation.
+
 Projected Laya forward, GEMM only (28 encoder layers of qkv + attn out + Wi + Wo at S=512,
 plus the 2-layer decision head and the act/scorer tail; attention, norms and dispatch
 excluded, so it is a lower bound on wall-clock for every leg equally):
@@ -382,11 +420,44 @@ excluded, so it is a lower bound on wall-clock for every leg equally):
 | BTranspose | 93.0 | 2603 | 188.4 | 2791 | 66 |
 | Blocked | 86.1 | 2412 | 117.3 | 2529 | 73 |
 
-`Blocked` does **not** beat the in-tree kernel (2529 vs 2414 ms), so the hypothesis that
-`MultiplyRowFloat`'s one-`Dot`-per-output-element structure is the CPU bottleneck is
-falsified - BCL's `Dot` is already well tuned. The `AutoDiff` vs `BTranspose` gap (1.16x
-overall, up to 1.51x at head ff2) is the real cost of the per-call B transpose, avoidable
-by hoisting the transpose to weight-load time as the GPU path already does.
+That table is from the box recorded in #458 (2026-10). The machine this BLAS probe ran on is
+slower and the absolute numbers below are not comparable to it; the ratios between legs are.
+
+#### OpenBLAS probe — recorded 2026-11-10
+
+Machine: i5-1135G7 (4C/8T, AVX-512 enabled), 31.7 GB RAM, .NET 11.0.100-rc.3, AC power,
+Balanced power plan. OpenBLAS 0.3.34 `DYNAMIC_ARCH NO_AFFINITY MAX_THREADS=64`, LP64 (no
+`USE64BITINT`), linked against `KERNEL32.dll` + `msvcrt.dll` only. Four runs, all with
+`Gate PASS` on every row:
+
+| leg | total ms, SkylakeX | GMAC/s | total ms, Haswell (AVX2) | GMAC/s |
+|---|---|---|---|---|---|
+| AutoDiff | 14286 | 13 | 14147 | 13 |
+| BTranspose | 16889 | 11 | 16545 | 11 |
+| Blocked | 14788 | 12 | 14364 | 13 |
+| Blas 1t | 8988 | 21 | 11038 | 17 |
+| Blas 1t-NT | 9368 | 20 | 11224 | 16 |
+| Blas 8t | 2191 | 84 | 2612 | 71 |
+| Blas hybrid | 2112 | 87 | 2358 | 78 |
+
+Run-to-run spread for the projection: AutoDiff 11238-15018 ms, Blas 1t 4851-11038 ms,
+Blas 8t 2178-4838 ms, Blas hybrid 1878-2261 ms. The hybrid's ratio to the managed kernel
+is the stable quantity (6.0-6.8x); the absolute GMAC/s figures are not.
+
+Three findings:
+
+1. **Native BLAS closes the gap.** Hybrid is 6.0-6.8x over `AutoDiff` on the GEMM-only forward,
+   which is the size of the #458 deficit (~5.6x against PyTorch CPU). Single-threaded native
+   is 1.6-2.4x, so even the conservative configuration wins.
+2. **Do not let OpenBLAS own the parallelism at M=128.** Its `min` and `median` disagree by
+   up to 30x (`minilm fc1`: 0.76 ms min against 25.6 ms median), and in one of four runs
+   `Blas 8t`'s projection collapsed to 4838 ms while its mins stayed fast. The pool, not the
+   kernel, is the problem. The hybrid matched or beat it in 3 of 4 runs and never had a bad one.
+3. **AVX-512 is worth about 10-15% here, not a cliff.** Haswell is 78 GMAC/s against SkylakeX's
+   82-87 on the hybrid, and 17 against 20-21 single-threaded. The AVX2 fallback is usable.
+
+`Blocked` still does not beat the in-tree kernel on this box either (14788 vs 14286 ms), so the
+"MultiplyRowFloat's one-Dot-per-element is the bottleneck" hypothesis remains falsified.
 
 Caveat: individual rows vary up to 6.5x run to run (`distilbert fc1` `AutoDiff` read 6.3 ms
 and 41.3 ms on consecutive runs, most likely `ArrayPool` `clearArray` interacting with GC).
@@ -395,7 +466,7 @@ The in-tree legs' projected roll-up is stable to ~2% across three runs (2414 / 2
 probe-local `Blocked` leg is looser (~9%: 2529 / 2646 / 2772 ms) because it carries its own
 `Parallel.For` scheduling behaviour, which widens the interval on the thin `scorer` rows
 where task overhead is a large share of the row. It was behind `AutoDiff` in all three
-runs, so the conclusion does not depend on the spread. Runs in ~7 s.
+runs, so the conclusion does not depend on the spread.
 
 **Steady-state vs per-call.** The two in-tree legs are exactly the two cases the probe plan
 asked to distinguish. `AutoDiff` receives B as `[N x K]` ready-made, so it is the
