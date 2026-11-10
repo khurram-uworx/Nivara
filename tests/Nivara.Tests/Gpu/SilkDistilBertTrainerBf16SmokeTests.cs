@@ -1,9 +1,8 @@
 using Nivara.AI;
-using Nivara.AutoDiff;
 using Nivara.Samples;
 using Nivara.Silk;
-using System.Numerics;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.Gpu;
 

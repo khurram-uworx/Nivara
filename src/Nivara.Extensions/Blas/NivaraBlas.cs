@@ -1,5 +1,3 @@
-using Nivara;
-
 namespace Nivara.Extensions.Blas;
 
 /// <summary>

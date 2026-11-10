@@ -5,7 +5,6 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Primitives;
 using Nivara.Samples;
-using Nivara.Silk;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;

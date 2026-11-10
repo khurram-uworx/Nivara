@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-
 namespace Nivara.Silk;
 
 public sealed partial class SilkLayaHeadGpuRunner
