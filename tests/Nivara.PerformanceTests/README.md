@@ -385,8 +385,8 @@ nothing is restored:
 
 ```bash
 dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
-  -p:OpenBlasDll=lib/libopenblas.dll -- --cpu-gemm
-# OPENBLAS_DLL=lib/libopenblas.dll works too: MSBuild imports environment variables as properties
+  -p:OpenBlasDll=../../lib/libopenblas.dll -- --cpu-gemm
+# OPENBLAS_DLL=../../lib/libopenblas.dll works too: MSBuild imports environment variables as properties
 ```
 
 `-p:BlasProbe=true` defines `BLAS_PROBE`, enables `AllowUnsafeBlocks` (the `LibraryImport`
@@ -406,8 +406,8 @@ repository root (that directory is gitignored), then run:
 
 ```bash
 dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true \
-  -p:OpenBlasDll=lib/libopenblas.dll -- --cpu-gemm
-# or: OPENBLAS_DLL=lib/libopenblas.dll dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
+  -p:OpenBlasDll=../../lib/libopenblas.dll -- --cpu-gemm
+# or: OPENBLAS_DLL=../../lib/libopenblas.dll dotnet run -c Release --project tests/Nivara.PerformanceTests -- --cpu-gemm
 ```
 
 Nothing is committed to the repository and nothing is restored. This probe does not measure MKL

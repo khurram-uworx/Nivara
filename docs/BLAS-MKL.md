@@ -199,7 +199,7 @@ changed: see §5.1.
 - **How to get it.** Download the zip, extract `libopenblas.dll` to `lib/libopenblas.dll`
   at the repository root (that directory is gitignored), and point the probe at it:
   `dotnet run -c Release --project tests/Nivara.PerformanceTests -p:BlasProbe=true
-  -p:OpenBlasDll=lib/libopenblas.dll -- --cpu-gemm`, or set `OPENBLAS_DLL=lib/libopenblas.dll`.
+  -p:OpenBlasDll=../../lib/libopenblas.dll -- --cpu-gemm`, or set `OPENBLAS_DLL=../../lib/libopenblas.dll`.
   Nothing is committed to the repository and nothing is restored.
 - **Recommendation (acquisition).** If the seam lands, ship the DLL as an opt-in native asset in
   `Nivara.Extensions` (RID-specific, default off), never in core. Core stays dependency-free.
