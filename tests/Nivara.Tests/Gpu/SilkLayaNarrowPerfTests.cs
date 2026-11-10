@@ -150,8 +150,7 @@ public class SilkLayaNarrowPerfTests
     [Test]
     public void Forward_NarrowVsF32_InterleavedTiming()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk perf verification."); }
+        GpuTestGuard.RequireGpu();
 
         TimingGuards.RequireOptimizedBuildForTiming();
 

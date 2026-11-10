@@ -986,6 +986,21 @@ Device-dependent (OpenCL/Silk) tests are categorized [Category("Gpu")] and are e
   dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "Category=Gpu"
   ``n- On CI (no GPU) these tests are excluded by Category!=Gpu and skip via Assert.Ignore when run manually.
 
+### Skip detection (narrow parity / perf gates)
+
+GPU tests call `SilkRuntime.IsAvailable(out reason)` (and the test helper `GpuTestGuard.RequireGpu()`)
+to probe for a device. When no device is present they are reported as **Skipped**, not Passed, so a
+no-GPU run must not be read as green parity.
+
+To make a no-GPU run fail instead of skip (e.g. in a CI job that is supposed to have a GPU), set:
+
+```
+NIVARA_REQUIRE_GPU=1
+```
+
+With that variable set, `GpuTestGuard.RequireGpu()` calls `Assert.Fail` rather than `Assert.Ignore`,
+so an all-skipped run exits non-zero and cannot be mistaken for a passing parity run.
+
 ## Narrow-precision BF16 inference lane (issue #1013, Phase 1)
 
 Silk BERT-family inference is opt-in narrow precision, never the default:

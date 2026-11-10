@@ -447,6 +447,26 @@ public sealed unsafe class SilkRuntime : IDisposable
         return "    " + Encoding.UTF8.GetString(buffer, 0, end < 0 ? buffer.Length : end).Trim();
     }
 
+    /// <summary>
+    /// Probe whether an OpenCL GPU device is available without throwing. Consumers (including CI)
+    /// can use this to distinguish a genuine parity pass from a run where every GPU test was
+    /// skipped because no device was present.
+    /// </summary>
+    public static bool IsAvailable(out string? reason)
+    {
+        try
+        {
+            using var probe = new SilkRuntime();
+            reason = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            reason = ex.Message;
+            return false;
+        }
+    }
+
     public void Dispose()
     {
         if (disposed)

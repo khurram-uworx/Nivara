@@ -107,8 +107,7 @@ public class SilkBertNarrowParityTests
     [Test]
     public void MiniLM_Bf16_MatchesF32()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyBertConfig;
         var f32 = BuildMini();
@@ -131,8 +130,7 @@ public class SilkBertNarrowParityTests
     [Test]
     public void MiniLM_Fp16_MatchesF32()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyBertConfig;
         var f32 = BuildMini();
@@ -155,8 +153,7 @@ public class SilkBertNarrowParityTests
     [Test]
     public void DistilBert_Bf16_MatchesF32()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyBertConfig;
         var f32 = BuildDistil();
@@ -181,8 +178,7 @@ public class SilkBertNarrowParityTests
     [Test]
     public void DistilBert_Fp16_MatchesF32()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyBertConfig;
         var f32 = BuildDistil();

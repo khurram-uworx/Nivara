@@ -133,8 +133,7 @@ public class SilkLayaNarrowParityTests
     [Test]
     public void Forward_Bf16_SilkMatchesF32ArgmaxAndBounded()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyConfig;
         var tensors = Combine(BuildEncoderStateDict("encoder"), BuildHeadTensors());
@@ -172,8 +171,7 @@ public class SilkLayaNarrowParityTests
     [Test]
     public void Forward_Fp16_SilkMatchesF32ArgmaxAndBounded()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyConfig;
         var tensors = Combine(BuildEncoderStateDict("encoder"), BuildHeadTensors());
@@ -212,8 +210,7 @@ public class SilkLayaNarrowParityTests
     [Test]
     public void Forward_ActivationBf16_SilkMatchesF32ArgmaxAndBounded()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyConfig;
         var tensors = Combine(BuildEncoderStateDict("encoder"), BuildHeadTensors());

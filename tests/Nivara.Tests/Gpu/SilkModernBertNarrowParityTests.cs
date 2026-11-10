@@ -66,8 +66,7 @@ public class SilkModernBertNarrowParityTests
     [Test]
     public void Forward_Bf16_SilkMatchesF32ArgmaxAndBounded()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyConfig;
         var tensors = BuildStateDict("model");
@@ -105,8 +104,7 @@ public class SilkModernBertNarrowParityTests
     [Test]
     public void Forward_Fp16_SilkMatchesF32ArgmaxAndBounded()
     {
-        try { using var probe = new SilkRuntime(); }
-        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+        GpuTestGuard.RequireGpu();
 
         var config = TinyConfig;
         var tensors = BuildStateDict("model");
