@@ -187,6 +187,20 @@ changed: see §5.1.
 
 ## 5.1. What the probe actually found (2026-11-10)
 
+### Where the DLL comes from
+
+- **Source.** The official OpenBLAS GitHub release
+  [`v0.3.34`](https://github.com/xianyi/OpenBLAS/releases/tag/v0.3.34), asset
+  `OpenBLAS-0.3.34-x64.zip` (39 MB). It contains a single `libopenblas.dll` (49 MB).
+- **Why this and not MKL.** MKL is 481 MB on disk and ships no official NuGet; OpenBLAS is
+  49 MB and its import table is `KERNEL32.dll` + `msvcrt.dll` only (no gcc/gfortran/quadmath/
+  winpthread). Both answer the same question; the lean one is the candidate. This probe does
+  not measure MKL and does not claim to.
+- **How to get it.** Download the zip, extract `libopenblas.dll` anywhere, and point the probe
+  at it. Nothing is committed to the repository and nothing is restored.
+- **Recommendation (acquisition).** If the seam lands, ship the DLL as an opt-in native asset in
+  `Nivara.Extensions` (RID-specific, default off), never in core. Core stays dependency-free.
+
 The probe ran on the i5-1135G7 laptop (4C/8T, AVX-512 enabled, 31.7 GB RAM,
 .NET 11.0.100-rc.3, AC power, Balanced plan), against OpenBLAS 0.3.34
 (`DYNAMIC_ARCH NO_AFFINITY MAX_THREADS=64`, LP64, imports `KERNEL32.dll` +

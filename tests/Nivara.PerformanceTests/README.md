@@ -399,6 +399,13 @@ Each run prints `openblas_get_config()` and `openblas_get_corename()`, and initi
 **refuses an ILP64 build** (it looks for `USE64BITINT`), because the binding declares `int`
 dimensions and an ILP64 library would silently misread every one of them.
 
+**Where to get the DLL.** Official OpenBLAS release
+[`v0.3.34`](https://github.com/xianyi/OpenBLAS/releases/tag/v0.3.34), asset
+`OpenBLAS-0.3.34-x64.zip` (39 MB). Extract `libopenblas.dll` (49 MB) anywhere; point the
+probe at it with `-p:OpenBlasDll=<path>` or `OPENBLAS_DLL=<path>`. Nothing is committed and
+nothing is restored. This probe does not measure MKL and does not claim to; MKL is 481 MB on
+disk and ships no official NuGet, so OpenBLAS is the lean candidate and the one measured.
+
 **AVX2 control.** Set `OPENBLAS_CORETYPE=Haswell` to force the AVX2 kernel, and read
 `corename: Haswell` in the header before consuming the numbers. Set it as a real process
 environment variable - OpenBLAS ignores it when it is set through the CRT.
