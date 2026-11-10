@@ -69,24 +69,84 @@ internal static class CpuGemmProbe
 
         /// <summary>Probe-local copy of MultiplyCore's parallel path, reading A in place (no RentCopy, no clearArray).</summary>
         NoRentCopy,
+
+        /// <summary>OpenBLAS <c>cblas_sgemm</c>, B as [N x K], one OpenBLAS thread (the like-for-like single-threaded reading).</summary>
+        BlasSt,
+
+        /// <summary>
+        /// OpenBLAS <c>cblas_sgemm</c>, B as [K x N] with <c>TransB = NoTrans</c>, one thread. Isolates
+        /// the B-layout question from the thread-pool question: if this is materially faster than
+        /// <see cref="BlasSt"/>, the seam's call mapping should stop staging B transposed.
+        /// </summary>
+        BlasStNoTrans,
+
+        /// <summary>
+        /// OpenBLAS <c>cblas_sgemm</c> with <see cref="Environment.ProcessorCount"/> OpenBLAS threads.
+        /// Measured to record what OpenBLAS's own pool does, not because it is a candidate: on this
+        /// shape regime it is bimodal (fast min, multi-millisecond median), because waking the pool
+        /// costs more than the GEMM.
+        /// </summary>
+        BlasNt,
+
+        /// <summary>
+        /// The integration candidate: Nivara owns the parallelism (<see cref="Parallel.For{TResult}(int, Func{int, TResult})"/>
+        /// over row blocks) and every call into OpenBLAS is single-threaded. Two pools on one machine
+        /// oversubscribe, and OpenBLAS's own pool is the one that misbehaves here.
+        /// </summary>
+        BlasHybrid,
     }
+
+    /// <summary>
+    /// OpenBLAS threads used by the multi-threaded legs. Read once so the label and the call
+    /// cannot disagree.
+    /// </summary>
+    static readonly int BlasThreads = Environment.ProcessorCount;
 
     public static int Run(string[] args)
     {
         GemmBenchmark.PrintPowerState();
         Console.WriteLine("CPU GEMM ceiling probe: in-tree path vs a register-blocked reference");
         Console.WriteLine();
+
+        bool blasAvailable = false;
+        string blasDetail = "not built with -p:BlasProbe=true (see tests/Nivara.PerformanceTests/README.md)";
+#if BLAS_PROBE
+        blasAvailable = OpenBlasInterop.TryInitialize(out blasDetail);
+#endif
+
         Console.WriteLine($"  Legs     : {Leg.AutoDiff} (GradKernels.MatMulTransposedB), {Leg.BTranspose} (GradKernels.MatMul), {Leg.Blocked} (Parallel.For + register accumulators)");
         Console.WriteLine($"  Gate     : maxAbs(leg - dp-truth) <= {GateMaxAbs}");
-        Console.WriteLine($"  Timing   : {Warmups} untimed warmup per leg, then interleaved rounds per cell, median reported (see methodology)");
+        Console.WriteLine($"  Timing   : {Warmups} untimed warmup per leg, then interleaved rounds per cell, median and min reported (see methodology)");
         Console.WriteLine($"  Layout   : the two in-tree legs differ only in B's layout — MatMul takes [K x N]");
         Console.WriteLine($"             and transposes per call, MatMulTransposedB takes [N x K] ready-made.");
         Console.WriteLine($"             Both compute A[M x K] · B[K x N]. Blocked reads the same [N x K].");
+        Console.WriteLine($"  BLAS     : {(blasAvailable ? $"OpenBLAS legs enabled (hybrid = Parallel.For rows x 1-thread gemm, {BlasThreads} rows-chunks)" : "legs not available — " + blasDetail)}");
+#if BLAS_PROBE
+        if (blasAvailable)
+        {
+            Console.WriteLine($"             {blasDetail}");
+            Console.WriteLine($"             corename: {OpenBlasInterop.CoreName}");
+            Console.WriteLine($"             min is the kernel's capability; median is what an intermittent caller sees.");
+        }
+#endif
         Console.WriteLine();
 
-        Console.WriteLine($"{"shape",-16} {"M",-5} {"K",-5} {"N",-6} {"leg",-12} {"maxAbs",-10} {"gate",-6} {"best ms",-9} {"GMAC/s",-8} {"x vs MatMul",-12}");
+        Console.WriteLine($"{"shape",-16} {"M",-5} {"K",-5} {"N",-6} {"leg",-14} {"maxAbs",-10} {"gate",-6} {"median ms",-10} {"min ms",-8} {"GMAC/s",-8} {"x vs MatMul",-12}");
         int failures = 0;
-        var bestMs = new Dictionary<(string, Leg), double>();
+        var medianMs = new Dictionary<(string, Leg), double>();
+
+        // The roll-up deliberately excludes NoRentCopy (it is an in-tree variant, not a
+        // candidate), and includes the BLAS legs only when they were measured.
+        var projectionLegs = new List<Leg> { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked };
+#if BLAS_PROBE
+        if (blasAvailable)
+        {
+            projectionLegs.Add(Leg.BlasSt);
+            projectionLegs.Add(Leg.BlasStNoTrans);
+            projectionLegs.Add(Leg.BlasNt);
+            projectionLegs.Add(Leg.BlasHybrid);
+        }
+#endif
 
         foreach (var shape in GemmBenchmark.s_shapes)
         {
@@ -111,23 +171,69 @@ internal static class CpuGemmProbe
             var resultBlocked = new float[m * n];
             var resultNoRent = new float[m * n];
 
-            var runs = new Action[]
+            var order = new List<Leg> { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked, Leg.NoRentCopy };
+            var runs = new List<Action>
             {
                 () => GradKernels.MatMulTransposedB(a, bt, resultAuto, m, k, n),
                 () => GradKernels.MatMul(a, b, resultBTrans, m, k, n),
                 () => BlockedGemm(a, bt, resultBlocked, m, k, n),
                 () => NoRentCopyGemm(a, bt, resultNoRent, m, k, n),
             };
-            var results = new[] { resultAuto, resultBTrans, resultBlocked, resultNoRent };
+            var results = new List<float[]> { resultAuto, resultBTrans, resultBlocked, resultNoRent };
 
-            var order = new[] { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked, Leg.NoRentCopy };
-            var legMs = new double[order.Length];
-            var legAbs = new double[order.Length];
+#if BLAS_PROBE
+            if (blasAvailable)
+            {
+                var resultBlasSt = new float[m * n];
+                var resultBlasStNoTrans = new float[m * n];
+                var resultBlasNt = new float[m * n];
+                var resultBlasHybrid = new float[m * n];
+
+                // The thread count is set inside each call because the legs are interleaved and
+                // disagree about it; it is a sub-microsecond call next to a GEMM, and the
+                // per-call setter was measured not to be the cause of the 8-thread spread.
+                order.Add(Leg.BlasSt);
+                runs.Add(() =>
+                {
+                    OpenBlasInterop.SetNumThreads(1);
+                    OpenBlasInterop.Sgemm(OpenBlasInterop.RowMajor, OpenBlasInterop.NoTrans, OpenBlasInterop.Trans,
+                        m, n, k, 1f, ref a[0], k, ref bt[0], k, 0f, ref resultBlasSt[0], n);
+                });
+                results.Add(resultBlasSt);
+
+                order.Add(Leg.BlasStNoTrans);
+                runs.Add(() =>
+                {
+                    OpenBlasInterop.SetNumThreads(1);
+                    OpenBlasInterop.Sgemm(OpenBlasInterop.RowMajor, OpenBlasInterop.NoTrans, OpenBlasInterop.NoTrans,
+                        m, n, k, 1f, ref a[0], k, ref b[0], n, 0f, ref resultBlasStNoTrans[0], n);
+                });
+                results.Add(resultBlasStNoTrans);
+
+                order.Add(Leg.BlasNt);
+                runs.Add(() =>
+                {
+                    OpenBlasInterop.SetNumThreads(BlasThreads);
+                    OpenBlasInterop.Sgemm(OpenBlasInterop.RowMajor, OpenBlasInterop.NoTrans, OpenBlasInterop.Trans,
+                        m, n, k, 1f, ref a[0], k, ref bt[0], k, 0f, ref resultBlasNt[0], n);
+                });
+                results.Add(resultBlasNt);
+
+                order.Add(Leg.BlasHybrid);
+                runs.Add(() => HybridGemm(a, bt, resultBlasHybrid, m, k, n));
+                results.Add(resultBlasHybrid);
+            }
+#endif
+
+            int legCount = order.Count;
+            var legMs = new double[legCount];
+            var legMinMs = new double[legCount];
+            var legAbs = new double[legCount];
             const int InterleavedRounds = 20;
-            var rounds = new double[order.Length, InterleavedRounds];
+            var rounds = new double[legCount, InterleavedRounds];
 
             // Correctness gate: run every leg once and check against DP truth.
-            for (int li = 0; li < order.Length; li++)
+            for (int li = 0; li < legCount; li++)
             {
                 runs[li]();
                 double maxAbs = 0.0;
@@ -140,16 +246,22 @@ internal static class CpuGemmProbe
 
             // Untimed warmup of every leg.
             for (int w = 0; w < Warmups; w++)
-                for (int li = 0; li < order.Length; li++)
+                for (int li = 0; li < legCount; li++)
                     runs[li]();
 
             // Interleaved rounds: alternate which leg is measured first so load drift
             // cannot systematically penalise the first-measured route.
+            var forwardOrder = new int[legCount];
+            var backwardOrder = new int[legCount];
+            for (int li = 0; li < legCount; li++)
+            {
+                forwardOrder[li] = li;
+                backwardOrder[li] = legCount - 1 - li;
+            }
+
             for (int r = 0; r < InterleavedRounds; r++)
             {
-                var roundOrder = (r % 2 == 0)
-                    ? new[] { 0, 1, 2, 3 }
-                    : new[] { 3, 2, 1, 0 };
+                var roundOrder = (r % 2 == 0) ? forwardOrder : backwardOrder;
                 foreach (int li in roundOrder)
                 {
                     long start = Stopwatch.GetTimestamp();
@@ -158,31 +270,36 @@ internal static class CpuGemmProbe
                 }
             }
 
-            // Medians (more stable than best-of-N for this protocol).
-            for (int li = 0; li < order.Length; li++)
+            // Median and minimum. The median is the headline (it is what an intermittent
+            // caller experiences and it is what the Laya roll-up uses); the minimum is
+            // reported alongside because a leg whose min and median disagree by an order of
+            // magnitude is telling you about thread wake-up, not about its kernel.
+            for (int li = 0; li < legCount; li++)
             {
                 var samples = new double[InterleavedRounds];
                 for (int r = 0; r < InterleavedRounds; r++)
                     samples[r] = rounds[li, r];
                 legMs[li] = MedianTicks(samples);
+                legMinMs[li] = samples.Min();
             }
 
             long freq = Stopwatch.Frequency;
             double msConv = 1000.0 / freq;
-            for (int li = 0; li < order.Length; li++)
+            for (int li = 0; li < legCount; li++)
             {
                 legMs[li] *= msConv;
-                bestMs[(shape.Name, order[li])] = legMs[li];
+                legMinMs[li] *= msConv;
+                medianMs[(shape.Name, order[li])] = legMs[li];
             }
 
-            double baselineMs = legMs[Array.IndexOf(order, Leg.BTranspose)];
+            double baselineMs = legMs[order.IndexOf(Leg.BTranspose)];
             double baselineGmacs = shape.Macs / (baselineMs * 1e6);
-            for (int li = 0; li < order.Length; li++)
+            for (int li = 0; li < legCount; li++)
             {
                 double gmacs = shape.Macs / (legMs[li] * 1e6);
                 string speedup = order[li] == Leg.BTranspose ? "-" : $"{gmacs / baselineGmacs:F2}x";
                 bool failed = legAbs[li] > GateMaxAbs;
-                Console.WriteLine($"{shape.Name,-16} {m,-5} {k,-5} {n,-6} {order[li],-12} {legAbs[li],-10:E2} {(failed ? "FAIL" : "PASS"),-6} {legMs[li],-9:F3} {gmacs,-8:F1} {speedup,-12}");
+                Console.WriteLine($"{shape.Name,-16} {m,-5} {k,-5} {n,-6} {LegName(order[li]),-14} {legAbs[li],-10:E2} {(failed ? "FAIL" : "PASS"),-6} {legMs[li],-10:F3} {legMinMs[li],-8:F3} {gmacs,-8:F1} {speedup,-12}");
             }
         }
 
@@ -191,9 +308,47 @@ internal static class CpuGemmProbe
             ? $"Gate PASS — all legs within {GateMaxAbs} of double-precision truth."
             : $"Gate FAIL — {failures} leg(s) exceed {GateMaxAbs}.");
 
-        ProjectLayaForward(bestMs);
+        ProjectLayaForward(medianMs, [.. projectionLegs]);
         return failures;
     }
+
+    /// <summary>
+    /// Display name for a leg. The BLAS legs carry their thread configuration so the table
+    /// records the setup that produced each number.
+    /// </summary>
+    static string LegName(Leg leg) => leg switch
+    {
+        Leg.BlasSt => "Blas 1t",
+        Leg.BlasStNoTrans => "Blas 1t-NT",
+        Leg.BlasNt => $"Blas {BlasThreads}t",
+        Leg.BlasHybrid => "Blas hybrid",
+        _ => leg.ToString(),
+    };
+
+#if BLAS_PROBE
+    /// <summary>
+    /// The integration candidate, as it would actually be wired: Nivara owns the row
+    /// parallelism and OpenBLAS is called single-threaded from each chunk. Avoids the
+    /// two-pools-on-one-machine oversubscription and, measured on this box, avoids the
+    /// multi-millisecond wake-up that OpenBLAS's own pool pays on M=128 shapes.
+    /// </summary>
+    static void HybridGemm(float[] a, float[] bt, float[] result, int aRows, int aCols, int bCols)
+    {
+        OpenBlasInterop.SetNumThreads(1);
+        int chunks = BlasThreads;
+        int rowsPerChunk = (aRows + chunks - 1) / chunks;
+        Parallel.For(0, chunks, t =>
+        {
+            int rowStart = t * rowsPerChunk;
+            int rows = Math.Min(rowsPerChunk, aRows - rowStart);
+            if (rows <= 0)
+                return;
+            OpenBlasInterop.Sgemm(OpenBlasInterop.RowMajor, OpenBlasInterop.NoTrans, OpenBlasInterop.Trans,
+                rows, bCols, aCols, 1f, ref a[rowStart * aCols], aCols, ref bt[0], aCols,
+                0f, ref result[rowStart * bCols], bCols);
+        });
+    }
+#endif
 
     /// <summary>
     /// Rolls the per-shape numbers up into a projected Laya forward pass, GEMM only.
@@ -202,7 +357,7 @@ internal static class CpuGemmProbe
     /// plus the 2-layer decision head. Attention, LayerNorm, GeGLU and dispatch are
     /// excluded, so this is a lower bound on wall-clock for every leg equally.
     /// </summary>
-    static void ProjectLayaForward(Dictionary<(string, Leg), double> bestMs)
+    static void ProjectLayaForward(Dictionary<(string, Leg), double> medianMs, Leg[] legs)
     {
         string[] encoderLayer = ["laya qkv", "laya attn out", "laya fc1 (Wi)", "laya fc2 (Wo)"];
         string[] headLayer = ["laya head ff1", "laya head ff2"];
@@ -210,9 +365,8 @@ internal static class CpuGemmProbe
 
         Console.WriteLine();
         Console.WriteLine("Projected Laya forward, GEMM only (attention / norms / dispatch excluded):");
-        Console.WriteLine($"{"leg",-12} {"enc layer",-12} {"x28 layers",-13} {"head",-10} {"total",-10} {"GMAC/s",-9} {"vs MatMul",-12}");
+        Console.WriteLine($"{"leg",-14} {"enc layer",-12} {"x28 layers",-13} {"head",-10} {"total",-10} {"GMAC/s",-9} {"vs MatMul",-12}");
 
-        var legs = new[] { Leg.AutoDiff, Leg.BTranspose, Leg.Blocked };
         var totals = new double[legs.Length];
         var layerMs = new double[legs.Length];
         var headMs = new double[legs.Length];
@@ -221,10 +375,10 @@ internal static class CpuGemmProbe
 
         for (int i = 0; i < legs.Length; i++)
         {
-            layerMs[i] = SumPresent(bestMs, encoderLayer, legs[i], absent);
+            layerMs[i] = SumPresent(medianMs, encoderLayer, legs[i], absent);
             encoderMs[i] = layerMs[i] * 28;
-            headMs[i] = SumPresent(bestMs, headLayer, legs[i], absent) * 2
-                      + SumPresent(bestMs, headTail, legs[i], absent);
+            headMs[i] = SumPresent(medianMs, headLayer, legs[i], absent) * 2
+                      + SumPresent(medianMs, headTail, legs[i], absent);
             totals[i] = encoderMs[i] + headMs[i];
         }
 
@@ -235,7 +389,7 @@ internal static class CpuGemmProbe
         {
             double gmacs = totalMacs / (totals[i] * 1e6);
             string speedup = legs[i] == Leg.BTranspose ? "-" : $"{baseline / totals[i]:F2}x";
-            Console.WriteLine($"{legs[i],-12} {layerMs[i],-12:F1} {encoderMs[i],-13:F0} {headMs[i],-10:F1} {totals[i],-10:F0} {gmacs,-9:F0} {speedup,-12}");
+            Console.WriteLine($"{LegName(legs[i]),-14} {layerMs[i],-12:F1} {encoderMs[i],-13:F0} {headMs[i],-10:F1} {totals[i],-10:F0} {gmacs,-9:F0} {speedup,-12}");
         }
 
         Console.WriteLine();
@@ -249,18 +403,18 @@ internal static class CpuGemmProbe
     }
 
     /// <summary>
-    /// Sums the per-shape timings for one leg, skipping shapes that the shared shape list no
+    /// Sums the per-shape medians for one leg, skipping shapes that the shared shape list no
     /// longer carries and recording them. A missing shape used to throw a
     /// <see cref="KeyNotFoundException"/> out of the roll-up after every table had already
     /// printed; it is now reported on screen instead, because a silently dropped term is worse
     /// than a named one.
     /// </summary>
-    static double SumPresent(Dictionary<(string, Leg), double> bestMs, string[] names, Leg leg, List<string> absent)
+    static double SumPresent(Dictionary<(string, Leg), double> medianMs, string[] names, Leg leg, List<string> absent)
     {
         double total = 0.0;
         foreach (string name in names)
         {
-            if (bestMs.TryGetValue((name, leg), out double ms))
+            if (medianMs.TryGetValue((name, leg), out double ms))
                 total += ms;
             else if (!absent.Contains(name))
                 absent.Add(name);
