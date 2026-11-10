@@ -230,7 +230,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         get => trainableLayerCount;
         set
         {
-            int normalized = value < 0 ? numLayers : Math.Clamp(value, 0, numLayers);
+            int normalized = Math.Clamp(value, 0, numLayers);
             trainableLayerCount = normalized;
             if (weights is not null)
             {
