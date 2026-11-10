@@ -31,7 +31,7 @@ public static partial class Laya
         PrintSetup(config, agent);
 
         var buildSw = Stopwatch.StartNew();
-        using Nivara.AI.ILayaGpuSession session = Nivara.Silk.SilkLayaSession.Open(config, tensors, agent.HeadLayers);
+        using Nivara.AI.ILayaGpuSession session = Nivara.AI.GpuSeamFactories.LayaBf16(config, tensors, agent.HeadLayers);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision BFloat16");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -76,7 +76,7 @@ public static partial class Laya
         PrintSetup(config, agent);
 
         var buildSw = Stopwatch.StartNew();
-        using Nivara.AI.ILayaGpuSession session = Nivara.Silk.SilkLayaSession.Open(config, tensors, agent.HeadLayers);
+        using Nivara.AI.ILayaGpuSession session = Nivara.AI.GpuSeamFactories.LayaFp16(config, tensors, agent.HeadLayers);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision Half");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");

@@ -276,7 +276,7 @@ public sealed class NivaraTypeSafeClient : ITypeSafeClient, IDisposable
         calibration = new LayaCalibration(agent.Temperature, agent.TemperatureByOptions);
 
         var tensors = SafeTensorsLoader.Read(path);
-        session = SilkLayaSession.Open(encoderConfig, tensors, agent.HeadLayers);
+        session = Nivara.AI.GpuSeamFactories.Laya(encoderConfig, tensors, agent.HeadLayers);
         loadSw.Stop();
     }
 

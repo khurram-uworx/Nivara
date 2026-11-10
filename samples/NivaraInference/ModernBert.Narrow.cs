@@ -17,7 +17,7 @@ public static partial class ModernBert
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
+        using var session = Nivara.AI.GpuSeamFactories.ModernBertBf16(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision BFloat16");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
@@ -60,7 +60,7 @@ public static partial class ModernBert
         Console.WriteLine();
 
         var buildSw = Stopwatch.StartNew();
-        using var session = Nivara.Silk.SilkModernBertSession.Open(config, tensors);
+        using var session = Nivara.AI.GpuSeamFactories.ModernBertFp16(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Device: {session.DeviceName}, precision Half");
         Console.WriteLine($"GPU model build: {buildSw.ElapsedMilliseconds} ms");
