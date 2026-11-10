@@ -217,13 +217,14 @@ internal static class CpuGemmProbe
         var layerMs = new double[legs.Length];
         var headMs = new double[legs.Length];
         var encoderMs = new double[legs.Length];
+        var absent = new List<string>();
 
         for (int i = 0; i < legs.Length; i++)
         {
-            layerMs[i] = encoderLayer.Sum(s => bestMs[(s, legs[i])]);
+            layerMs[i] = SumPresent(bestMs, encoderLayer, legs[i], absent);
             encoderMs[i] = layerMs[i] * 28;
-            headMs[i] = headLayer.Sum(s => bestMs[(s, legs[i])]) * 2
-                      + headTail.Sum(s => bestMs[(s, legs[i])]);
+            headMs[i] = SumPresent(bestMs, headLayer, legs[i], absent) * 2
+                      + SumPresent(bestMs, headTail, legs[i], absent);
             totals[i] = encoderMs[i] + headMs[i];
         }
 
@@ -240,6 +241,32 @@ internal static class CpuGemmProbe
         Console.WriteLine();
         Console.WriteLine("  enc layer = qkv + attn out + Wi + Wo at S=512; 28 layers.");
         Console.WriteLine("  head      = (ff1 + ff2) x 2 layers + act + scorer.");
+        if (absent.Count > 0)
+        {
+            Console.WriteLine($"  absent    : {string.Join(", ", absent)} — not in GemmBenchmark.s_shapes,");
+            Console.WriteLine($"              so excluded from the head term for every leg equally.");
+        }
+    }
+
+    /// <summary>
+    /// Sums the per-shape timings for one leg, skipping shapes that the shared shape list no
+    /// longer carries and recording them. A missing shape used to throw a
+    /// <see cref="KeyNotFoundException"/> out of the roll-up after every table had already
+    /// printed; it is now reported on screen instead, because a silently dropped term is worse
+    /// than a named one.
+    /// </summary>
+    static double SumPresent(Dictionary<(string, Leg), double> bestMs, string[] names, Leg leg, List<string> absent)
+    {
+        double total = 0.0;
+        foreach (string name in names)
+        {
+            if (bestMs.TryGetValue((name, leg), out double ms))
+                total += ms;
+            else if (!absent.Contains(name))
+                absent.Add(name);
+        }
+
+        return total;
     }
 
     /// <summary>
