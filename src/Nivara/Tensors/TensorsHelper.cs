@@ -140,6 +140,28 @@ static class TensorsHelper
             return;
         }
 
+        if (GemmProviders.Current is { } provider && aRows > 1 && (typeof(T) == typeof(float) || typeof(T) == typeof(double)))
+        {
+            if (typeof(T) == typeof(float))
+            {
+                provider.MatMul(
+                    MemoryMarshal.Cast<T, float>(a),
+                    MemoryMarshal.Cast<T, float>(b),
+                    MemoryMarshal.Cast<T, float>(result.AsSpan()),
+                    aRows, aCols, bCols, bTransposed);
+                return;
+            }
+            if (typeof(T) == typeof(double))
+            {
+                provider.MatMul(
+                    MemoryMarshal.Cast<T, double>(a),
+                    MemoryMarshal.Cast<T, double>(b),
+                    MemoryMarshal.Cast<T, double>(result.AsSpan()),
+                    aRows, aCols, bCols, bTransposed);
+                return;
+            }
+        }
+
         if (typeof(T) == typeof(float))
         {
             MultiplyCoreFloat(MemoryMarshal.Cast<T, float>(a), MemoryMarshal.Cast<T, float>(b),
