@@ -90,6 +90,12 @@ internal static class SilkKernels
     public const string LayerNorm = "layer_norm";
     public const string Add = "add";
     public const string AddBias = "add_bias";
+    // Activation-level BF16 (issue #1102): elementwise kernels over BF16 storage.
+    public const string LayerNormBf16Act = "layer_norm_bf16_act";
+    public const string AddBf16Act = "add_bf16_act";
+    public const string AddBiasBf16Act = "add_bias_bf16_act";
+    public const string GatherRowsBf16Act = "gather_rows_bf16_act";
+    public const string AttentionBf16Act = "batched_attention_bf16_act";
     public const string SplitColumns = "split_columns";
     public const string Rotary = "rotary";
     public const string GeGlu = "geglu";
@@ -106,6 +112,11 @@ internal static class SilkKernels
     public const string GemmGeluF16 = "gemm_row4_gelu_f16";
     public const string GemmQkvBf16 = "gemm_row4_qkv_bf16";
     public const string GemmQkvF16 = "gemm_row4_qkv_f16";
+    // Activation-level BF16 (issue #1102): A and C are BF16 storage, B (weights) BF16.
+    public const string GemmBiasBf16Act = "gemm_row4_bias_bf16_act";
+    public const string GemmGeluBf16Act = "gemm_row4_gelu_bf16_act";
+    public const string GemmReluBf16Act = "gemm_row4_relu_bf16_act";
+    public const string GemmQkvBf16Act = "gemm_row4_qkv_bf16_act";
 
     // Measured candidate geometries (issue #784) — not routed by any runner yet.
     public const string GemmReg2x4 = "gemm_reg2x4";
@@ -196,7 +207,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-        EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmRelu, GemmReluBf16, GemmReluF16, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
@@ -1215,6 +1226,143 @@ internal static class SilkKernels
             for (uint d = 0; d < headDim; ++d)
                 attnOut[outBase + dOffset + d] = acc[d * MAXHEADDIM + lane];
         }
+
+
+        inline float attn_score_bf16(
+            __global const ushort* q,
+            __global const ushort* k,
+            uint qRow,
+            uint jRow,
+            uint dOffset,
+            uint D,
+            uint headDim,
+            float scale)
+        {
+            uint qBase = qRow * D + dOffset;
+            uint kBase = jRow * D + dOffset;
+            float acc = 0.0f;
+            for (uint d = 0; d < headDim; ++d)
+                acc += BF16_TO_F32(q[qBase + d]) * BF16_TO_F32(k[kBase + d]);
+            return acc * scale;
+        }
+
+        __kernel void batched_attention_bf16_act(
+            __global const ushort* q,
+            __global const ushort* k,
+            __global const ushort* v,
+            __global const float* mask,
+            __global ushort* attnOut,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const int band,
+            const float scale)
+        {
+            __local float acc[MAXHEADDIM * ATTNGROUP];
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint qPos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint dOffset = h * headDim;
+            uint qRow = b * seqLen + qPos;
+            uint maskBase = b * seqLen;
+            uint outBase = qRow * D;
+
+            int qp = (int)qPos;
+            int sl = (int)seqLen;
+            int jFirst = band < 0 ? 0 : max(0, qp - band);
+            int jLast = band < 0 ? sl - 1 : min(sl - 1, qp + band);
+
+            // seqLen <= 512 covers the attention shapes this backend is benchmarked on; higher values keep
+            // the original recompute path to avoid fixed-size local bounds.
+            float scoreCache[512];
+            int cacheReady = sl <= 512 ? 1 : 0;
+            int range = jLast - jFirst + 1;
+
+            float mx = -INFINITY;
+            if (cacheReady)
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score_bf16(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    scoreCache[j - jFirst] = s;
+                    if (s > mx) mx = s;
+                }
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score_bf16(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    if (s > mx) mx = s;
+                }
+            }
+
+            if (mx == -INFINITY)
+            {
+                for (uint d = 0; d < headDim; ++d)
+                    attnOut[outBase + dOffset + d] = (ushort)(as_uint(0.0f) >> 16);
+                return;
+            }
+
+            float sum = 0.0f;
+            if (cacheReady)
+            {
+                for (int j = 0; j < range; ++j)
+                    sum += exp(scoreCache[j] - mx);
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score_bf16(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    sum += exp(s - mx);
+                }
+            }
+
+            uint lane = get_local_id(0);
+            for (uint d = 0; d < headDim; ++d)
+                acc[d * MAXHEADDIM + lane] = 0.0f;
+
+            if (cacheReady)
+            {
+                for (int j = 0; j < range; ++j)
+                {
+                    float s = scoreCache[j];
+                    float p = exp(s - mx) / sum;
+                    int jGlobal = jFirst + j;
+                    uint vBase = (b * seqLen + (uint)jGlobal) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        acc[d * MAXHEADDIM + lane] += p * BF16_TO_F32(v[vBase + d]);
+                }
+            }
+            else
+            {
+                for (int j = jFirst; j <= jLast; ++j)
+                {
+                    float s = attn_score_bf16(q, k, qRow, b * seqLen + (uint)j, dOffset, D, headDim, scale);
+                    if (!attn_keep(mask, maskBase, qp, j, band)) s = -INFINITY;
+                    float p = exp(s - mx) / sum;
+                    uint vBase = (b * seqLen + (uint)j) * D + dOffset;
+                    for (uint d = 0; d < headDim; ++d)
+                        acc[d * MAXHEADDIM + lane] += p * BF16_TO_F32(v[vBase + d]);
+                }
+            }
+
+            for (uint d = 0; d < headDim; ++d)
+                attnOut[outBase + dOffset + d] = (ushort)(as_uint(acc[d * MAXHEADDIM + lane]) >> 16);
+        }
+
 
         __kernel void batched_attention_sliding(
             __global const float* q,
@@ -3791,6 +3939,224 @@ internal static class SilkKernels
                 acc += G[i] * p * (s - F[i]) / D[i];
             }
             dW[k] = acc;
+        }
+
+
+        /* Activation-level BF16 elementwise kernels (issue #1102). Activations are stored as
+           BF16 (ushort) and converted to f32 in-register; reductions stay f32. */
+        __kernel void layer_norm_bf16_act(
+            __global const ushort* x,
+            __global const float* gamma,
+            __global const float* beta,
+            __global ushort* y,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint r = get_global_id(0);
+            if (r >= rows) return;
+            uint off = r * cols;
+            float sum = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+                sum += BF16_TO_F32(x[off + c]);
+            float mean = sum / (float)cols;
+            float sumSq = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+            {
+                float d = BF16_TO_F32(x[off + c]) - mean;
+                sumSq += d * d;
+            }
+            float invStd = 1.0f / sqrt(sumSq / (float)cols + eps);
+            for (uint c = 0; c < cols; ++c)
+            {
+                float v = (BF16_TO_F32(x[off + c]) - mean) * invStd * gamma[c] + beta[c];
+                y[off + c] = (ushort)(as_uint(v) >> 16);
+            }
+        }
+
+        __kernel void add_bf16_act(
+            __global const ushort* a,
+            __global const ushort* b,
+            __global ushort* y,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            float va = BF16_TO_F32(a[idx]);
+            float vb = BF16_TO_F32(b[idx]);
+            y[idx] = (ushort)(as_uint(va + vb) >> 16);
+        }
+
+        __kernel void add_bias_bf16_act(
+            __global const ushort* x,
+            __global const float* bias,
+            __global ushort* y,
+            const uint rows,
+            const uint cols)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * cols) return;
+            float v = BF16_TO_F32(x[idx]) + bias[idx % cols];
+            y[idx] = (ushort)(as_uint(v) >> 16);
+        }
+
+        __kernel void gather_rows_bf16_act(
+            __global const ushort* table,
+            __global const int* ids,
+            __global ushort* y,
+            const uint n,
+            const uint hidden)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            uint row = idx / hidden;
+            uint col = idx - row * hidden;
+            y[idx] = table[(uint)ids[row] * hidden + col];
+        }
+
+
+        #define GEMM_ROW4_ACCUMULATE_BF16_ACT \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols) { \
+                        ushort4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = BF16_TO_F32(av.s0); \
+                        smem[x + (y * 4u + 1u) * TILE] = BF16_TO_F32(av.s1); \
+                        smem[x + (y * 4u + 2u) * TILE] = BF16_TO_F32(av.s2); \
+                        smem[x + (y * 4u + 3u) * TILE] = BF16_TO_F32(av.s3); \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? BF16_TO_F32(a[outRow * aCols + aCol]) : 0.0f; \
+                        } \
+                    } \
+                } \
+                uint bRow = k0 + x; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols) { \
+                        ushort4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = BF16_TO_F32(bv.s0); \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = BF16_TO_F32(bv.s1); \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = BF16_TO_F32(bv.s2); \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = BF16_TO_F32(bv.s3); \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
+                        } \
+                    } \
+                } \
+            GEMM_ACCUMULATE_CORE
+
+        __kernel void gemm_row4_bias_bf16_act(
+            __global const ushort* a,
+            __global const ushort* b,
+            __global ushort* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16_ACT
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = (ushort)(as_uint(a0 + b0) >> 16);
+                if (c1 < bCols) c[rowBase + 1] = (ushort)(as_uint(a1 + b1) >> 16);
+                if (c2 < bCols) c[rowBase + 2] = (ushort)(as_uint(a2 + b2) >> 16);
+                if (c3 < bCols) c[rowBase + 3] = (ushort)(as_uint(a3 + b3) >> 16);
+            }
+        }
+
+        __kernel void gemm_row4_gelu_bf16_act(
+            __global const ushort* a,
+            __global const ushort* b,
+            __global ushort* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16_ACT
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = (ushort)(as_uint(gelu_exact(a0 + b0)) >> 16);
+                if (c1 < bCols) c[rowBase + 1] = (ushort)(as_uint(gelu_exact(a1 + b1)) >> 16);
+                if (c2 < bCols) c[rowBase + 2] = (ushort)(as_uint(gelu_exact(a2 + b2)) >> 16);
+                if (c3 < bCols) c[rowBase + 3] = (ushort)(as_uint(gelu_exact(a3 + b3)) >> 16);
+            }
+        }
+
+        __kernel void gemm_row4_relu_bf16_act(
+            __global const ushort* a,
+            __global const ushort* b,
+            __global ushort* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16_ACT
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                float r0 = a0 + b0; if (r0 < 0.0f) r0 = 0.0f;
+                float r1 = a1 + b1; if (r1 < 0.0f) r1 = 0.0f;
+                float r2 = a2 + b2; if (r2 < 0.0f) r2 = 0.0f;
+                float r3 = a3 + b3; if (r3 < 0.0f) r3 = 0.0f;
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = (ushort)(as_uint(r0) >> 16);
+                if (c1 < bCols) c[rowBase + 1] = (ushort)(as_uint(r1) >> 16);
+                if (c2 < bCols) c[rowBase + 2] = (ushort)(as_uint(r2) >> 16);
+                if (c3 < bCols) c[rowBase + 3] = (ushort)(as_uint(r3) >> 16);
+            }
+        }
+
+        __kernel void gemm_row4_qkv_bf16_act(
+            __global const ushort* a,
+            __global const ushort* b,
+            __global ushort* c,
+            __global const float* bias,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols,
+            const uint blockWidth)
+        {
+            GEMM_ROW4_ACCUMULATE_BF16_ACT
+            if (outRow < aRows)
+            {
+                float b0 = c0 < bCols ? bias[c0] : 0.0f;
+                float b1 = c1 < bCols ? bias[c1] : 0.0f;
+                float b2 = c2 < bCols ? bias[c2] : 0.0f;
+                float b3 = c3 < bCols ? bias[c3] : 0.0f;
+                if (c0 < bCols) c[qkv_dest(c0, outRow, aRows, blockWidth)] = (ushort)(as_uint(a0 + b0) >> 16);
+                if (c1 < bCols) c[qkv_dest(c1, outRow, aRows, blockWidth)] = (ushort)(as_uint(a1 + b1) >> 16);
+                if (c2 < bCols) c[qkv_dest(c2, outRow, aRows, blockWidth)] = (ushort)(as_uint(a2 + b2) >> 16);
+                if (c3 < bCols) c[qkv_dest(c3, outRow, aRows, blockWidth)] = (ushort)(as_uint(a3 + b3) >> 16);
+            }
         }
 
         """;
