@@ -41,7 +41,7 @@ namespace Nivara.Silk;
 /// state.
 /// </para>
 /// </summary>
-public sealed class SilkDistilBertTrainer : IDisposable
+public sealed partial class SilkDistilBertTrainer : IDisposable
 {
     const float Beta1 = 0.9f;
     const float Beta2 = 0.999f;

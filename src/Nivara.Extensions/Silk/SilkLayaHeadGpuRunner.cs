@@ -443,9 +443,29 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
 
     void LaunchGemm(string kernel, nint a, nint b, nint c, nint bias, int aRows, int aCols, int bCols, int? blockWidth = null)
     {
-        string mapped = kernel;
+        string mapped = ChooseKernel(kernel, activationBf16, narrowBf16, narrowF16);
+        SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
+    }
+
+    internal static string ChooseKernel(string kernel, bool activationBf16 = false, bool narrowBf16 = false, bool narrowF16 = false)
+        => ChooseKernelImpl(kernel, activationBf16, narrowBf16, narrowF16);
+
+    internal static string MapKernel(string kernel, bool activationBf16 = false, bool narrowBf16 = false, bool narrowF16 = false)
+        => ChooseKernelImpl(kernel, activationBf16, narrowBf16, narrowF16);
+
+    internal static string MapGemmKernel(string kernel, bool activationBf16 = false, bool narrowBf16 = false, bool narrowF16 = false)
+        => ChooseKernelImpl(kernel, activationBf16, narrowBf16, narrowF16);
+
+    internal static string MapHeadGemmKernel(string kernel, bool activationBf16 = false, bool narrowBf16 = false, bool narrowF16 = false)
+        => ChooseKernelImpl(kernel, activationBf16, narrowBf16, narrowF16);
+
+    internal static string DispatchKernel(string kernel, bool activationBf16 = false, bool narrowBf16 = false, bool narrowF16 = false)
+        => ChooseKernelImpl(kernel, activationBf16, narrowBf16, narrowF16);
+
+    static string ChooseKernelImpl(string kernel, bool activationBf16, bool narrowBf16, bool narrowF16)
+    {
         if (activationBf16)
-            mapped = kernel switch
+            return kernel switch
             {
                 SilkKernels.GemmQkv => SilkKernels.GemmQkvBf16Act,
                 SilkKernels.GemmGelu => SilkKernels.GemmGeluBf16Act,
@@ -453,8 +473,8 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
                 SilkKernels.GemmBias => SilkKernels.GemmBiasBf16Act,
                 _ => kernel
             };
-        else if (narrowBf16)
-            mapped = kernel switch
+        if (narrowBf16)
+            return kernel switch
             {
                 SilkKernels.GemmQkv => SilkKernels.GemmQkvBf16,
                 SilkKernels.GemmGelu => SilkKernels.GemmGeluBf16,
@@ -462,8 +482,8 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
                 SilkKernels.GemmBias => SilkKernels.GemmBiasBf16,
                 _ => kernel
             };
-        else if (narrowF16)
-            mapped = kernel switch
+        if (narrowF16)
+            return kernel switch
             {
                 SilkKernels.GemmQkv => SilkKernels.GemmQkvF16,
                 SilkKernels.GemmGelu => SilkKernels.GemmGeluF16,
@@ -471,10 +491,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
                 SilkKernels.GemmBias => SilkKernels.GemmBiasF16,
                 _ => kernel
             };
-        if (activationBf16)
-            SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
-        else
-            SilkLauncher.GemmEpilogue(runtime, mapped, a, b, c, bias, aRows, aCols, bCols, blockWidth);
+        return kernel;
     }
 
     void LaunchAttention(nint q, nint k, nint v, nint mask, nint output, int seqLen)
