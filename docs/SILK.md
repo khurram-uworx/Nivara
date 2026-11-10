@@ -845,6 +845,13 @@ a top-N suffix is trainable, embedding and lower-layer backpropagation are skipp
 well. Head gradients are compared against a CPU reverse-mode pass for head-only and
 top-one-layer cases in `SilkDistilBertTrainerTests`.
 
+The rule itself lives in `SilkPartialTrainingPolicy` (`src/Nivara.Extensions/Silk/
+SilkPartialTrainingPolicy.cs`): `Normalize`, `EmbeddingsTrainable`, `LayerTrainable`,
+`HeadTrainable`. Both `SilkDistilBertTrainer` and `SilkBertWeights` call it, so any
+future Silk trainer (Laya/ModernBERT) must call the same helper with its own layer count
+and head parameters rather than reimplementing a second freeze policy. The Laya decision
+head's own layer count is independent of the encoder's `NumHiddenLayers`.
+
 For Laya, which trains its decision head with AutoDiff on frozen ModernBERT features,
 keep encoder-derived features outside the gradient path (`requiresGrad: false` where
 applicable). Nivara does not currently ship a Silk Laya trainer; the same top-down
