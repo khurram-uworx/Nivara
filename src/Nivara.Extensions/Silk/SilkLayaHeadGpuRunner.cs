@@ -255,9 +255,19 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         if (layers.Length > 0)
         {
             runtime.Upload(maskBuf.Handle, LayaHeadScoring.PrefixMask(rows, validLength));
-            nint q = runtime.CreateSubview(qkv.Handle, 0, rows * hiddenDim);
-            nint kv = runtime.CreateSubview(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
-            nint v = runtime.CreateSubview(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            nint q, kv, v;
+            if (activationBf16)
+            {
+                q = runtime.CreateSubviewUshort(qkv.Handle, 0, rows * hiddenDim);
+                kv = runtime.CreateSubviewUshort(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
+                v = runtime.CreateSubviewUshort(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            }
+            else
+            {
+                q = runtime.CreateSubview(qkv.Handle, 0, rows * hiddenDim);
+                kv = runtime.CreateSubview(qkv.Handle, rows * hiddenDim, rows * hiddenDim);
+                v = runtime.CreateSubview(qkv.Handle, 2 * rows * hiddenDim, rows * hiddenDim);
+            }
             try
             {
                 long _norm = 0, _gemm = 0, _attn = 0, _add = 0;
@@ -487,13 +497,10 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
     {
         if (activationBf16)
             SilkLauncher.GatherBf16Act(runtime, table, ids, y, n, hiddenDim);
-        else if (narrowBf16)
-            SilkLauncher.GatherBf16(runtime, table, ids, y, n, hiddenDim);
-        else if (narrowF16)
-            SilkLauncher.GatherF16(runtime, table, ids, y, n, hiddenDim);
         else
             SilkLauncher.Gather(runtime, table, ids, y, n, hiddenDim);
     }
+
     nint UploadTransposedUshort(Dictionary<string, (ushort[] Data, int[] Shape)> tensors, string key)
     {
         var data = WeightLayout.Transposed(tensors, key, "Silk");
