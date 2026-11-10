@@ -824,15 +824,19 @@ and AdamW (60.6 ms) are the next targets; softmax-cross-entropy input gradient o
 
 ### Partial/frozen training (#1012)
 
-`SilkDistilBertTrainer` supports opt-in partial/frozen training via `trainableLayerCount`
-(default `-1`, meaning all layers):
+`SilkDistilBertTrainer` supports opt-in partial/frozen training via the canonical
+`TrainableLayerCount` property (default `-1` at construction, meaning all layers):
 
 - `0` trains only the classifier/pre-classifier head.
 - `N` trains the top `N` transformer layers plus the head.
-- values are clamped to `[0, NumHiddenLayers]`.
+- values are clamped to `[0, NumHiddenLayers]` (negative values clamp to `0`).
 
-The constructor also accepts `freezeEncoder: true`, equivalent to
-`trainableLayerCount: 0`. The CLI sample exposes this as `--trainable-layers`.
+`TrainableLayerCount` is the single public entry point for this: the former aliases
+(`NumTrainableLayers`, `TrainableLayers`) and helper methods (`FreezeEncoder`,
+`SetTrainableLayers`, `FreezeLayers`, `Freeze`) have been removed; use the property
+directly (e.g. `trainer.TrainableLayerCount = 0` to freeze the encoder). The constructor
+also accepts `freezeEncoder: true`, equivalent to `trainableLayerCount: 0`. The CLI sample
+exposes this as `--trainable-layers`.
 
 Frozen layers (and frozen embeddings in any partial mode) keep their checkpoint value
 buffers, but backward accumulation and the AdamW step skip them:
