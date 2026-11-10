@@ -130,8 +130,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
         runtime.EnsureAttentionLocalMemory(headDim);
 
-        int normalizedTrainable = trainableLayerCount < 0 ? config.NumHiddenLayers
-            : Math.Clamp(trainableLayerCount, 0, config.NumHiddenLayers);
+        int normalizedTrainable = SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable: true);
         this.trainableLayerCount = normalizedTrainable;
 
         weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: true, trainableLayerCount: normalizedTrainable);
@@ -232,19 +231,18 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         get => trainableLayerCount;
         set
         {
-            int normalized = Math.Clamp(value, 0, numLayers);
+            int normalized = SilkPartialTrainingPolicy.Normalize(value, numLayers, trainable: true);
             trainableLayerCount = normalized;
             if (weights is not null)
             {
-                int firstTrainable = numLayers - normalized;
-                bool embeddingsTrainable = normalized == numLayers;
+                bool embeddingsTrainable = SilkPartialTrainingPolicy.EmbeddingsTrainable(normalized, numLayers, trainable: true);
                 weights.WordEmb.Trainable = embeddingsTrainable;
                 weights.PosEmb.Trainable = embeddingsTrainable;
                 weights.EmbLnW.Trainable = embeddingsTrainable;
                 weights.EmbLnB.Trainable = embeddingsTrainable;
                 for (int i = 0; i < numLayers; i++)
                 {
-                    bool layerTrainable = i >= firstTrainable;
+                    bool layerTrainable = SilkPartialTrainingPolicy.LayerTrainable(i, numLayers, normalized, trainable: true);
                     var layer = weights.Layers[i];
                     layer.Wqkv.Trainable = layerTrainable;
                     layer.Bqkv.Trainable = layerTrainable;
@@ -261,10 +259,11 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
                 }
                 if (weights.HasHead)
                 {
-                    weights.PreW.Trainable = true;
-                    weights.PreB.Trainable = true;
-                    weights.ClsW.Trainable = true;
-                    weights.ClsB.Trainable = true;
+                    bool headTrainable = SilkPartialTrainingPolicy.HeadTrainable(trainable: true);
+                    weights.PreW.Trainable = headTrainable;
+                    weights.PreB.Trainable = headTrainable;
+                    weights.ClsW.Trainable = headTrainable;
+                    weights.ClsB.Trainable = headTrainable;
                 }
             }
         }
