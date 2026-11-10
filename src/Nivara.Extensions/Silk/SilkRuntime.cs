@@ -175,6 +175,18 @@ public sealed unsafe class SilkRuntime : IDisposable
         return floatCount == 0 ? SilkBuffer.Empty : new SilkBuffer(Allocate(floatCount), floatCount);
     }
 
+    public SilkBuffer EnsureUshort(SilkBuffer buffer, int ushortCount)
+    {
+        if (ushortCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(ushortCount), ushortCount, "ushortCount cannot be negative.");
+        if (buffer.Handle != 0 && buffer.Capacity >= ushortCount)
+            return buffer;
+        Release(buffer.Handle);
+        return ushortCount == 0 ? SilkBuffer.Empty : new SilkBuffer(AllocateUshort(ushortCount), ushortCount);
+    }
+
+    public nint AllocateUshort(int ushortCount) => AllocateBytes((ulong)ushortCount * sizeof(ushort));
+
     public nint Allocate(int floatCount) => AllocateBytes((ulong)floatCount * sizeof(float));
 
     public nint AllocateBytes(ulong bytes)
@@ -214,6 +226,26 @@ public sealed unsafe class SilkRuntime : IDisposable
         if (err != 0 || view == 0)
             throw new InvalidOperationException(
                 $"Silk clCreateSubBuffer(offset {elementOffset}, {elementCount} floats) failed ({err}).");
+        return view;
+    }
+
+    public nint CreateSubviewUshort(nint parent, int elementOffset, int elementCount)
+        => CreateSubviewUshort(parent, elementOffset, elementCount, readOnly: true);
+
+    public nint CreateSubviewUshort(nint parent, int elementOffset, int elementCount, bool readOnly)
+    {
+        var region = new BufferRegion
+        {
+            Origin = (nuint)((ulong)elementOffset * sizeof(ushort)),
+            Size = (nuint)((ulong)elementCount * sizeof(ushort))
+        };
+
+        int err = 0;
+        nint view = cl.CreateSubBuffer(parent, readOnly ? MemFlags.ReadOnly : MemFlags.ReadWrite,
+            BufferCreateType.Region, ref region, out err);
+        if (err != 0 || view == 0)
+            throw new InvalidOperationException(
+                $"Silk clCreateSubBuffer(offset {elementOffset}, {elementCount} ushorts) failed ({err}).");
         return view;
     }
 

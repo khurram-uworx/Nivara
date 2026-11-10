@@ -43,6 +43,47 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.GatherRowsF16, n);
     }
 
+    public static void LayerNormBf16Act(
+        SilkRuntime runtime, nint src, nint gamma, nint beta, nint y, int rows, int cols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.LayerNormBf16Act, 0, src);
+        runtime.SetBuffer(SilkKernels.LayerNormBf16Act, 1, gamma);
+        runtime.SetBuffer(SilkKernels.LayerNormBf16Act, 2, beta);
+        runtime.SetBuffer(SilkKernels.LayerNormBf16Act, 3, y);
+        runtime.SetUInt32(SilkKernels.LayerNormBf16Act, 4, (uint)rows);
+        runtime.SetUInt32(SilkKernels.LayerNormBf16Act, 5, (uint)cols);
+        runtime.SetFloat32(SilkKernels.LayerNormBf16Act, 6, eps);
+        Linear(runtime, SilkKernels.LayerNormBf16Act, rows);
+    }
+
+    public static void AddBf16Act(SilkRuntime runtime, nint a, nint b, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.AddBf16Act, 0, a);
+        runtime.SetBuffer(SilkKernels.AddBf16Act, 1, b);
+        runtime.SetBuffer(SilkKernels.AddBf16Act, 2, y);
+        runtime.SetUInt32(SilkKernels.AddBf16Act, 3, (uint)n);
+        Linear(runtime, SilkKernels.AddBf16Act, n);
+    }
+
+    public static void AddBiasBf16Act(SilkRuntime runtime, nint x, nint bias, nint y, int rows, int cols)
+    {
+        runtime.SetBuffer(SilkKernels.AddBiasBf16Act, 0, x);
+        runtime.SetBuffer(SilkKernels.AddBiasBf16Act, 1, bias);
+        runtime.SetBuffer(SilkKernels.AddBiasBf16Act, 2, y);
+        runtime.SetUInt32(SilkKernels.AddBiasBf16Act, 3, (uint)rows);
+        runtime.SetUInt32(SilkKernels.AddBiasBf16Act, 4, (uint)cols);
+        Linear(runtime, SilkKernels.AddBiasBf16Act, rows * cols);
+    }
+
+    public static void GatherBf16Act(SilkRuntime runtime, nint table, nint ids, nint y, int n, int hidden)
+    {
+        runtime.SetBuffer(SilkKernels.GatherRowsBf16Act, 0, table);
+        runtime.SetBuffer(SilkKernels.GatherRowsBf16Act, 1, ids);
+        runtime.SetBuffer(SilkKernels.GatherRowsBf16Act, 2, y);
+        runtime.SetUInt32(SilkKernels.GatherRowsBf16Act, 3, (uint)n);
+        runtime.SetUInt32(SilkKernels.GatherRowsBf16Act, 4, (uint)hidden);
+        Linear(runtime, SilkKernels.GatherRowsBf16Act, n);
+    }
     public static void LayerNorm(
         SilkRuntime runtime, nint src, nint gamma, nint beta, nint y, int rows, int cols, float eps)
     {
@@ -70,6 +111,27 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.LayerNormResidual, rows);
     }
 
+    public static void AttentionBf16Act(
+        SilkRuntime runtime, nint q, nint k, nint v, nint mask, nint output,
+        int batch, int seqLen, int numHeads, int headDim, float scale)
+    {
+        string kernelName = SilkKernels.AttentionBf16Act;
+        runtime.SetBuffer(kernelName, 0, q);
+        runtime.SetBuffer(kernelName, 1, k);
+        runtime.SetBuffer(kernelName, 2, v);
+        runtime.SetBuffer(kernelName, 3, mask);
+        runtime.SetBuffer(kernelName, 4, output);
+        runtime.SetUInt32(kernelName, 5, (uint)batch);
+        runtime.SetUInt32(kernelName, 6, (uint)seqLen);
+        runtime.SetUInt32(kernelName, 7, (uint)numHeads);
+        runtime.SetUInt32(kernelName, 8, (uint)headDim);
+        runtime.SetInt32(kernelName, 9, -1);
+        runtime.SetFloat32(kernelName, 10, scale);
+        int total = batch * numHeads * seqLen;
+        // use Linear global rounding
+        int g = (total == 0 ? 1 : total);
+        runtime.Run(kernelName, [(nuint)SilkKernels.AttentionGlobal(g)], [(nuint)SilkKernels.AttentionGroupSize]);
+    }
     /// <summary>
     /// The bias-free ModernBERT GEMM: three buffers and the three dimensions, no epilogue.
     /// </summary>
