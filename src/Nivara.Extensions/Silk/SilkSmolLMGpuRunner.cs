@@ -700,8 +700,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         {
             var t = WeightLayout.Req(tensors, key, "Silk");
             var f = new float[t.Data.Length];
-            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(t.Data.AsSpan());
-            for (int i = 0; i < f.Length; i++) f[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+            for (int i = 0; i < f.Length; i++) f[i] = (float)t.Data[i];
             nint buf = owner.runtime.Allocate(f.Length);
             owner.runtime.Upload(buf, f);
             return buf;
@@ -710,6 +709,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         static nint UploadTBf16(SilkSmolLMGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key)
         {
             var data = WeightLayout.Transposed(tensors, key, "Silk");
+            // Device storage is BF16 bit-pattern (ushort); bit-preserving reinterpretation.
             var us = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(data.AsSpan());
             var arr = new ushort[us.Length];
             us.CopyTo(arr);
