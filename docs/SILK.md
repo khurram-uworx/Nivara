@@ -1041,5 +1041,17 @@ Silk BERT-family inference is opt-in narrow precision, never the default:
 - Parity against the F32 runner on synthetic fixtures: SilkBertNarrowParityTests,
   SilkModernBertNarrowParityTests, SilkLayaNarrowParityTests. Documented tolerance follows
   the BERT encoder's maxAbs <= 1e-2 * (1+|reference|).
-- Training (moments in FP32) and full activation-traffic halving in the Laya head are deferred to
-   issue #1103 (training moments) remains; #1102 (activation-level BF16 in the Laya head) is now available as an opt-in.
+- Training: the true BF16 DistilBERT trainer is available via `SilkDistilBertTrainer.CreateTrueBf16`
+  (matmul weights stay BF16 on device, activations and AdamW moments stay F32). It is gated by
+  `SilkDistilBertTrainerBf16ParityTests` (forward logits and parameter gradients agree with the
+  F32 trainer within `maxAbs <= 1e-2 * (1+|reference|)`) and by
+  `SilkDistilBertTrainerTrueBf16SmokeTests` (loss decreases on the smoke fixture, with F32
+  checkpoint export). Issue #1103 (training moments) is satisfied by this path.
+- BERT-family (BERT/MiniLM) and Laya BF16 trainers are **not yet implemented** and remain gated
+  behind the passing DistilBERT gates above; remaining scope includes wiring the same true BF16
+  path into `SilkDistilBertTrainer`'s BERT/MiniLM naming and the Laya head trainer.
+- Activation-level BF16 in the Laya head (#1102) is available as an opt-in for inference; full
+  activation-traffic halving in training is not yet wired.
+- `GeluBackward`, `LayerNormBackward` and `ColSum` remain F32-only kernels: narrow training keeps
+  activations and gradients in F32, so no BF16 variants are needed for the DistilBERT trainer.
+  BF16 variants would be added only if activation-level BF16 training is pursued (spin off).
