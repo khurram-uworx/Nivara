@@ -393,6 +393,18 @@ class Program
             return 1;
         }
 
+        if (useBlas && !blasThreadsSet)
+        {
+            Console.Error.WriteLine("--blas requires --threads N.");
+            return 1;
+        }
+
+        if (blasThreadsSet && !useBlas)
+        {
+            Console.Error.WriteLine("--threads is an option of '--blas' only; add --blas or drop --threads.");
+            return 1;
+        }
+
         if (useBlas)
         {
             if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(blasThreads))
@@ -467,18 +479,6 @@ class Program
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
             Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: {string.Join(", ", SilkModes.Keys)}).");
-            return 1;
-        }
-
-        if (blasThreadsSet && !useBlas)
-        {
-            Console.Error.WriteLine("--threads is an option of '--blas' only; add --blas or drop --threads.");
-            return 1;
-        }
-
-        if (useBlas && !blasThreadsSet)
-        {
-            Console.Error.WriteLine("--blas requires --threads N.");
             return 1;
         }
 
