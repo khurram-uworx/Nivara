@@ -1,7 +1,7 @@
 # BERT-family end-to-end eval after BLAS (issue #1119 part 1)
 
 > Status: harness wired (env-gated via `NIVARA_USE_BLAS=1` / `NIVARA_BLAS_THREADS=N`).
-> Numbers to be recorded by the human on the reference box (i5-1135G7, AC, Balanced plan).
+> Numbers recorded on the dev box (Intel Core Ultra 7 255H, AC, Balanced plan).
 
 ## How to run
 
@@ -21,7 +21,7 @@ For `modernbert`, append `--seq 128,256` (or `--seq 128,512,2048,4096` on Silk; 
 
 ## Results (to be filled in)
 
-Machine: i5-1135G7 (4C/8T, AVX-512), 31.7 GB RAM, .NET 11.0.0, AC power, Balanced plan.
+Machine: Intel Core Ultra 7 255H (16 logical processors), Windows 10.0.26300, .NET 11.0.0, AC power, Balanced plan.
 OpenBLAS 0.3.34 (`lib/libopenblas.dll`), LP64. Date: 2026-11-11.
 Protocol: 3 warmup + 10 timed passes (median of min reported for ModernBERT/Laya per their
 built-in protocol); managed = default provider (none), BLAS (hybrid) = `NIVARA_USE_BLAS=1`
