@@ -16,7 +16,7 @@ namespace Nivara.Tests.Inference;
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
 /// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
-/// scopes (#580), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
+/// scopes (#580), the <c>--blas</c>/<c>--threads</c>/<c>--blas-threads</c> rejects (#1119), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
 /// and the <c>--url</c>, <c>--model</c>, engine-positional and benchmark scope). The <c>typesafe</c>
 /// happy path is
 /// deliberately not gated: it needs a live decision-model server. #589 requires each reject to be
@@ -604,8 +604,22 @@ public class InferenceCliArgumentTests
             "--threads needs a value.");
 
     [Test]
-    public void Blas_WithoutThreads_Rejected() =>
-        AssertRejected(Run("minilm", "benchmark", "--blas"),
-            "--blas requires --threads N.");
+    public void BlasThreads_WithoutBlas_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--blas-threads", "4"),
+            "--blas-threads is an option of '--blas' only");
+
+    [Test]
+    public void BlasThreads_InvalidValue_Rejected()
+    {
+        AssertRejected(Run("minilm", "benchmark", "--blas", "--threads", "1", "--blas-threads", "0"),
+            "--blas-threads expects a positive integer");
+        AssertRejected(Run("minilm", "benchmark", "--blas", "--threads", "1", "--blas-threads", "x"),
+            "--blas-threads expects a positive integer");
+    }
+
+    [Test]
+    public void BlasThreads_MissingValue_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--blas-threads"),
+            "--blas-threads needs a value.");
 
 }

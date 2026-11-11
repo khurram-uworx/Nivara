@@ -1,10 +1,13 @@
 # OpenBLAS / oneMKL — options and the measurement-first plan
 
-> **Status: probe run 2026-11-10.** No `src/` change, no package reference, no issue filed
-> yet. The probe cleared its gate (`maxAbs <= 1e-3` on every row, all four runs) and the
-> recommendation is recorded below. The seam issue and any follow-up are still to be filed
-> against [#458](https://github.com/khurram-uworx/Nivara/issues/458) if the recommendation
-> is accepted. This document is the record of the measurement, not the implementation.
+> **Status update (2026-11-12):** the seam shipped, opt-in via `--blas`. `--threads` is the
+> Nivara row-block count and `--blas-threads` is `openblas_set_num_threads`; both optional,
+> default 1. GEMV is `IGemvProvider`, registered by the same `--blas` switch. Other Part 2 routines stay on the BCL. The comparison command is `--cpu-gemv`.
+> The sections below are the 2026-11-10 probe record and are not rewritten.
+>
+> **Status: probe run 2026-11-10.** No package reference. The probe cleared its gate
+> (`maxAbs <= 1e-3` on every row, all four runs) and the recommendation is recorded below.
+> This document remains the record of that measurement.
 
 This page is the CPU-BLAS counterpart of the GPU story in
 [ACCELERATION.md](ACCELERATION.md). The earlier capture of the same three options (managed

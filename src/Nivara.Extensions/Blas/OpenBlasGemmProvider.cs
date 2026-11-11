@@ -6,15 +6,17 @@ namespace Nivara.Extensions.Blas;
 /// <summary>
 /// <see cref="IGemmProvider" /> backed by OpenBLAS via the hand-written CBLAS binding in
 /// <see cref="OpenBlasInterop" />. Uses the hybrid configuration: Nivara owns the row
-/// parallelism and OpenBLAS is called single-threaded from each chunk.
+/// parallelism. OpenBLAS's pool size is the constructor argument (default 1).
 /// </summary>
 public sealed class OpenBlasGemmProvider : IGemmProvider
 {
     readonly int threadCount;
+    readonly int openBlasThreads;
 
-    public OpenBlasGemmProvider(int threadCount = 1)
+    public OpenBlasGemmProvider(int threadCount = 1, int openBlasThreads = 1)
     {
         this.threadCount = threadCount < 1 ? 1 : threadCount;
+        this.openBlasThreads = openBlasThreads < 1 ? 1 : openBlasThreads;
         if (!OpenBlasInterop.TryInitialize(out string detail))
             throw new InvalidOperationException($"OpenBLAS is not available: {detail}");
     }
@@ -25,7 +27,7 @@ public sealed class OpenBlasGemmProvider : IGemmProvider
         if (m <= 0 || n <= 0 || k <= 0)
             return;
 
-        OpenBlasInterop.SetNumThreads(1);
+        OpenBlasInterop.SetNumThreads(openBlasThreads);
 
         unsafe
         {
@@ -71,7 +73,7 @@ public sealed class OpenBlasGemmProvider : IGemmProvider
         if (m <= 0 || n <= 0 || k <= 0)
             return;
 
-        OpenBlasInterop.SetNumThreads(1);
+        OpenBlasInterop.SetNumThreads(openBlasThreads);
 
         unsafe
         {
