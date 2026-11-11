@@ -59,8 +59,8 @@ public sealed partial class SilkDistilBertTrainer
         BertGpuNaming naming,
         int maxBatch,
         int maxSeqLen,
-        bool trueBf16,
-        int trainableLayerCount = -1)
+        int trainableLayerCount = -1,
+        bool trueBf16 = false)
         : this(runtime, config,
               trueBf16
                   ? new SilkBertWeights(runtime, config, ToUshort(tensors), naming, trainable: true, true, false, trainableLayerCount)
@@ -69,19 +69,21 @@ public sealed partial class SilkDistilBertTrainer
     {
     }
 
+    // freezeEncoder convenience for true BF16 is provided by CreateTrueBf16(..., freezeEncoder).
+
     public static SilkDistilBertTrainer CreateTrueBf16(
         SilkRuntime runtime, BertConfig config,
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
         BertGpuNaming naming, int maxBatch, int maxSeqLen,
         int trainableLayerCount = -1)
-        => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, true, trainableLayerCount);
+        => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, trainableLayerCount, true);
 
     public static SilkDistilBertTrainer CreateTrueBf16(
         SilkRuntime runtime, BertConfig config,
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
         BertGpuNaming naming, int maxBatch, int maxSeqLen,
         bool freezeEncoder)
-        => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, true, freezeEncoder ? 0 : -1);
+        => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, freezeEncoder ? 0 : -1, true);
 
     public static SilkDistilBertTrainer CreateBf16(
         SilkRuntime runtime, BertConfig config,
@@ -109,5 +111,5 @@ public sealed partial class SilkDistilBertTrainer
         Dictionary<string, (ushort[] Data, int[] Shape)> tensors,
         BertGpuNaming naming, int maxBatch, int maxSeqLen,
         bool freezeEncoder)
-        => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, freezeEncoder, true, false);
+        => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, true, false, freezeEncoder ? 0 : -1);
 }
