@@ -1,4 +1,6 @@
 using Silk.NET.OpenCL;
+using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Nivara.Silk;
@@ -185,7 +187,13 @@ public sealed unsafe class SilkRuntime : IDisposable
         return ushortCount == 0 ? SilkBuffer.Empty : new SilkBuffer(AllocateUshort(ushortCount), ushortCount);
     }
 
+    /// <summary>BFloat16 storage is bit-identical to ushort; this aliases <see cref="EnsureUshort"/>.</summary>
+    public SilkBuffer EnsureBFloat16(SilkBuffer buffer, int count) => EnsureUshort(buffer, count);
+
     public nint AllocateUshort(int ushortCount) => AllocateBytes((ulong)ushortCount * sizeof(ushort));
+
+    /// <summary>BFloat16 storage is bit-identical to ushort; this aliases <see cref="AllocateUshort"/>.</summary>
+    public nint AllocateBFloat16(int count) => AllocateUshort(count);
 
     public nint Allocate(int floatCount) => AllocateBytes((ulong)floatCount * sizeof(float));
 
@@ -263,6 +271,12 @@ public sealed unsafe class SilkRuntime : IDisposable
             WriteRaw(buffer, p, (ulong)data.Length * sizeof(ushort));
     }
 
+    /// <summary>Blocking write of exactly <paramref name="data"/>.Length BFloat16 elements (bit-identical to ushort storage).</summary>
+    public void Upload(nint buffer, ReadOnlySpan<BFloat16> data)
+    {
+        Upload(buffer, MemoryMarshal.Cast<BFloat16, ushort>(data));
+    }
+
     /// <summary>Blocking write of exactly <paramref name="data"/>.Length elements.</summary>
     public void Upload(nint buffer, ReadOnlySpan<int> data)
     {
@@ -297,6 +311,13 @@ public sealed unsafe class SilkRuntime : IDisposable
             }
         }
         return values;
+    }
+
+    /// <summary>Blocking read of <paramref name="count"/> BFloat16 values (narrow bf16 weights).</summary>
+    public BFloat16[] DownloadBFloat16(nint buffer, int count)
+    {
+        var ushorts = DownloadUshort(buffer, count);
+        return MemoryMarshal.Cast<ushort, BFloat16>(ushorts).ToArray();
     }
 
     /// <summary>Blocking read of <paramref name="count"/> ints.</summary>
