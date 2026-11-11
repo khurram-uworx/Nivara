@@ -226,17 +226,17 @@ See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format detai
 
 Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes, median reported - except the SmolLM and ModernBERT rows, which use 1 warmup + 3 timed on the Nivara side (see the note under the table). Both frameworks are always measured in the same session.
 
-| Model | Input | PyTorch cur | Nivara cur | Slowdown cur |
-|-------|-------|-------------|-------------|--------------|
-| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** |
-| **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** |
-| **MiniLM-L6** | 128 tokens | 11.0 ms | 78.7 ms | **~7.2x** |
-| **DistilBERT** | 128 tokens | 26.9 ms | 200.6 ms | **~7.5x** |
-| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 179.4 ms | **~5.5x** |
-| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** |
-| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** |
-| **ModernBERT-large** | 128 tokens | 312.4 ms | 1457.5 ms | **~4.7x** |
-| **ModernBERT-large** | 256 tokens | 574.4 ms | 2084.6 ms | **~3.6x** |
+| Model | Input | PyTorch | Nivara CPU | Slowdown (CPU) | Nivara GPU | Slowdown (GPU) |
+|-------|-------|---------|------------|----------------|------------|----------------|
+| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** |  |  |
+| **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** |  |  |
+| **MiniLM-L6** | 128 tokens | 11.0 ms | 78.7 ms | **~7.2x** | 24.1 ms | **~2.2x** |
+| **DistilBERT** | 128 tokens | 26.9 ms | 200.6 ms | **~7.5x** | 63.3 ms | **~2.4x** |
+| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 179.4 ms | **~5.5x** | 63.8 ms | **~1.9x** |
+| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** |  |  |
+| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** |  |  |
+| **ModernBERT-large** | 128 tokens | 312.4 ms | 1457.5 ms | **~4.7x** |  |  |
+| **ModernBERT-large** | 256 tokens | 574.4 ms | 2084.6 ms | **~3.6x** |  |  |
 
 *Cur* = 2026-11-07, both frameworks measured in one session from the captured `ni-*` / `py-*` `%TEMP%` outputs, same machine, Nivara .NET 11.0.0 Release. Transformer rows: 128-token single forward pass; SmolLM rows report 32 generated tokens (median of 3 runs - 1 warmup + 3 timed Nivara, 3 warmup + 3 timed PyTorch); ModernBERT rows are medians under 1 warmup + 3 timed passes. PyTorch MobileNetV2/ResNet-18/SST-2 figures are carried from the 2026-09-27 capture for unchanged-weight runs; no fresh capture was available for them in this prep. `modernbert benchmark --warmup 3` matches the Python side's protocol. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
 
@@ -257,17 +257,9 @@ alongside the machine line.
 
 
 
-**GPU (iGPU, historical `` backend removed in 1.5.0)** — same machine, Arc 140T-class iGPU via ILGPU 1.5.3 (OpenCL), F32 only, AC power (historical baseline):
-
-| Model | GPU Nivara | CPU Nivara | vs CPU |
-|-------|-----------|------------|--------|
-| **MiniLM** | 24.1 ms | 71.2 ms | **~3.0× faster** |
-| **DistilBERT** | 63.3 ms | 209.7 ms | **~3.3× faster** |
-| **DistilBERT SST-2** | 63.8 ms | 199.9 ms | **~3.1× faster** |
-
 These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --silk benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
-The MiniLM table above is the AC-powered historical `` baseline (backend removed in 1.5.0). The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+The MiniLM row above is the AC-powered historical `` baseline (backend removed in 1.5.0). The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
 See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
 
