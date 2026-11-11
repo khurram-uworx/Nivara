@@ -1,5 +1,6 @@
 using Nivara.AI;
 using System.Diagnostics;
+using System.Numerics;
 
 namespace Nivara.Silk;
 
@@ -233,7 +234,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         {
             float[] __h = runtime.Download(hidden, rows * hiddenDim);
             var __u = new ushort[__h.Length];
-            for (int __i = 0; __i < __h.Length; __i++) __u[__i] = (ushort)(BitConverter.SingleToInt32Bits(__h[__i]) >> 16);
+            for (int __i = 0; __i < __h.Length; __i++) __u[__i] = BitConverter.BFloat16ToUInt16Bits((BFloat16)__h[__i]);
             hidden = runtime.AllocateUshort(__u.Length);
             runtime.Upload(hidden, __u);
         }
@@ -355,7 +356,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         if (activationBf16)
         {
             var __u = new ushort[actRowHost.Length];
-            for (int __i = 0; __i < actRowHost.Length; __i++) __u[__i] = (ushort)(BitConverter.SingleToInt32Bits(actRowHost[__i]) >> 16);
+            for (int __i = 0; __i < actRowHost.Length; __i++) __u[__i] = BitConverter.BFloat16ToUInt16Bits((BFloat16)actRowHost[__i]);
             runtime.Upload(actRow.Handle, __u);
         }
         else runtime.Upload(actRow.Handle, actRowHost);
