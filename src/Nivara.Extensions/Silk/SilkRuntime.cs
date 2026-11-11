@@ -492,6 +492,10 @@ public sealed unsafe class SilkRuntime : IDisposable
         }
         if (queue != 0)
         {
+            // Drain before release: some OpenCL drivers (Intel Arc) access-violate on
+            // clReleaseCommandQueue for a queue that was never flushed. Finish is a
+            // no-op on an empty in-order queue and is the standard pre-release step.
+            cl.Finish(queue);
             cl.ReleaseCommandQueue(queue);
             queue = 0;
         }
