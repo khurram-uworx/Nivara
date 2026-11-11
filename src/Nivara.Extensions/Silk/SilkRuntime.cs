@@ -195,6 +195,13 @@ public sealed unsafe class SilkRuntime : IDisposable
     /// <summary>BFloat16 storage is bit-identical to ushort; this aliases <see cref="AllocateUshort"/>.</summary>
     public nint AllocateBFloat16(int count) => AllocateUshort(count);
 
+    /// <summary>Widen a BFloat16 bit-pattern (stored as ushort) to float. Exact conversion:
+    /// BFloat16 is the upper 16 bits of a float, so this is a bit-preserving widen.</summary>
+    public static float WidenBf16(ushort u) => (float)BitConverter.UInt16BitsToBFloat16(u);
+
+    /// <summary>Widen an FP16 bit-pattern (stored as ushort) to float.</summary>
+    public static float WidenFp16(ushort u) => (float)BitConverter.Int16BitsToHalf((short)u);
+
     public nint Allocate(int floatCount) => AllocateBytes((ulong)floatCount * sizeof(float));
 
     public nint AllocateBytes(ulong bytes)
