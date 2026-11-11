@@ -369,6 +369,37 @@ class Program
             return 1;
         }
 
+        // Env-gated BLAS provider (issue #1119 part 1). No CLI flag, so the pinned
+        // InferenceCliArgumentTests surface is untouched; benchmarks flip the provider via
+        // NIVARA_USE_BLAS=1 (and NIVARA_BLAS_THREADS=N, default 1) and report end-to-end
+        // throughput under managed vs BLAS configs.
+        {
+            string? blasEnv = Environment.GetEnvironmentVariable("NIVARA_USE_BLAS");
+            bool wantBlas = blasEnv is not null
+                && (blasEnv.Equals("1", StringComparison.OrdinalIgnoreCase)
+                    || blasEnv.Equals("true", StringComparison.OrdinalIgnoreCase)
+                    || blasEnv.Equals("yes", StringComparison.OrdinalIgnoreCase));
+            if (wantBlas)
+            {
+                int threads = 1;
+                string? thrEnv = Environment.GetEnvironmentVariable("NIVARA_BLAS_THREADS");
+                if (thrEnv is not null && int.TryParse(thrEnv, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > 0)
+                    threads = parsed;
+
+                if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(threads))
+                    Console.WriteLine($"BLAS: enabled ({threads} thread{(threads == 1 ? "" : "s")})");
+                else
+                {
+                    Console.Error.WriteLine("BLAS: requested via NIVARA_USE_BLAS but provider could not be registered (libopenblas.dll not found).");
+                    return 1;
+                }
+            }
+            else
+            {
+                Console.WriteLine("BLAS: disabled (managed path)");
+            }
+        }
+
         int[]? seqLengths = null;
         int warmup = ModernBert.DefaultWarmup;
         int iterations = ModernBert.DefaultIterations;
