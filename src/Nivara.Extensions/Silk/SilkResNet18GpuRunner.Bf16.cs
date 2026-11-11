@@ -19,10 +19,9 @@ public sealed partial class SilkResNet18GpuRunner
         foreach (var kv in tensors)
         {
             var src = kv.Value.Data;
-            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<BFloat16, ushort>(src.AsSpan());
             var dst = new float[src.Length];
             for (int i = 0; i < src.Length; i++)
-                dst[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+                dst[i] = (float)src[i];
             result[kv.Key] = (dst, kv.Value.Shape);
         }
         return result;
