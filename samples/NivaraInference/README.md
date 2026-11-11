@@ -222,21 +222,54 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format details.
 
+## OpenBLAS acceleration (opt-in)
+
+OpenBLAS is an opt-in GEMM provider in `Nivara.Extensions.Blas` (see `docs/BLAS-MKL.md`). Default off; the managed path remains the fallback. Requires `lib/libopenblas.dll` at the repo root.
+
+```bash
+# managed (default)
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
+# BLAS (row-block parallelism; --threads required)
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --blas --threads 2
+dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark --blas --threads 4
+```
+
+Recommended `--threads` (measured on Intel Core Ultra 7 255H, 16 logical cores, AC power, 2026-11-11):
+
+| Model | Recommended `--threads` | Notes |
+|-------|------------------------|-------|
+| MiniLM (128 tok) | 2 (or skip BLAS) | ~1.0x at 2; ≥4 slower |
+| ModernBERT (seq=128) | 4 | 2.6x vs managed |
+| DistilBERT | 4 (not swept) | 1.15x at 1 thread |
+| Laya (max_len=512) | 4 (not swept) | ~1.0x at 1 thread |
+
+End-to-end results (managed vs BLAS, ms, same machine):
+
+| Model | managed | BLAS (best threads) | Speedup |
+|-------|---------|---------------------|---------|
+| MiniLM (128 tok) | 127.8 | 130.3 (2 thr) | ~1.0x |
+| DistilBERT (128 tok) | 321.6 | 278.8 (1 thr) | 1.15x |
+| ModernBERT (seq=128) | 2422.5 | 927.8 (4 thr) | 2.61x |
+| ModernBERT (seq=256) | 4079.0 | 1599.7 (4 thr) | 2.55x |
+| Laya (max_len=512) | ~8.3-8.8 s | ~8.4-8.7 s | ~1.0x |
+
+Interpretation: end-to-end improvement 1.0-2.6x depending on model, below the issue #1119 acceptance bar (2x) for most. The ~6x GEMM-only win (docs/BLAS-MKL.md §5.1) does not translate to end-to-end because GEMM is only ~1/6 of the gap (#458). Issue #1119 part 1.
+
 ## Performance benchmarks
 
 Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes, median reported - except the SmolLM and ModernBERT rows, which use 1 warmup + 3 timed on the Nivara side (see the note under the table). Both frameworks are always measured in the same session.
 
-| Model | Input | PyTorch | Nivara CPU | Slowdown (CPU) | Nivara GPU | Slowdown (GPU) |
-|-------|-------|---------|------------|----------------|------------|----------------|
-| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** |  |  |
-| **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** |  |  |
-| **MiniLM-L6** | 128 tokens | 11.0 ms | 78.7 ms | **~7.2x** | 24.1 ms | **~2.2x** |
-| **DistilBERT** | 128 tokens | 26.9 ms | 200.6 ms | **~7.5x** | 63.3 ms | **~2.4x** |
-| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 179.4 ms | **~5.5x** | 63.8 ms | **~1.9x** |
-| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** |  |  |
-| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** |  |  |
-| **ModernBERT-large** | 128 tokens | 312.4 ms | 1457.5 ms | **~4.7x** |  |  |
-| **ModernBERT-large** | 256 tokens | 574.4 ms | 2084.6 ms | **~3.6x** |  |  |
+| Model | Input | PyTorch | Nivara CPU | Slowdown (CPU) | Nivara BLAS | Nivara GPU | Slowdown (GPU) |
+|-------|-------|---------|------------|----------------|-------------------|------------|----------------|
+| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** | — (conv) |  |  |
+| **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** | — (conv) |  |  |
+| **MiniLM-L6** | 128 tokens | 11.0 ms | 78.7 ms | **~7.2x** | 130.3 ms (2 thr) | 24.1 ms | **~2.2x** |
+| **DistilBERT** | 128 tokens | 26.9 ms | 200.6 ms | **~7.5x** | 278.8 ms (1 thr) | 63.3 ms | **~2.4x** |
+| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 179.4 ms | **~5.5x** | — | 63.8 ms | **~1.9x** |
+| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** | — |  |  |
+| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** | — |  |  |
+| **ModernBERT-large** | 128 tokens | 312.4 ms | 1457.5 ms | **~4.7x** | 927.8 ms (4 thr) |  |  |
+| **ModernBERT-large** | 256 tokens | 574.4 ms | 2084.6 ms | **~3.6x** | 1599.7 ms (4 thr) |  |  |
 
 *Cur* = 2026-11-07, both frameworks measured in one session from the captured `ni-*` / `py-*` `%TEMP%` outputs, same machine, Nivara .NET 11.0.0 Release. Transformer rows: 128-token single forward pass; SmolLM rows report 32 generated tokens (median of 3 runs - 1 warmup + 3 timed Nivara, 3 warmup + 3 timed PyTorch); ModernBERT rows are medians under 1 warmup + 3 timed passes. PyTorch MobileNetV2/ResNet-18/SST-2 figures are carried from the 2026-09-27 capture for unchanged-weight runs; no fresh capture was available for them in this prep. `modernbert benchmark --warmup 3` matches the Python side's protocol. SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
 
