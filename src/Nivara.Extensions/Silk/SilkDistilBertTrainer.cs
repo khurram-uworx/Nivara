@@ -132,6 +132,8 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(weights);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBatch);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSeqLen);
 
         this.runtime = runtime;
         this.config = config;
@@ -741,7 +743,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
             SilkLauncher.LayerNorm(runtime, a.PreNorm1, w.Ln1W.Handle, w.Ln1B.Handle,
                 a.H1, rows, hiddenDim, eps);
 
-            SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmGelu), a.H1, w.W1.Handle, a.F1Pre,
+            SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmBias), a.H1, w.W1.Handle, a.F1Pre,
                 w.B1.Handle, rows, hiddenDim, intermediateDim);
             SilkLauncher.Gelu(runtime, a.F1Pre, a.F1Post, intermLen);
 
