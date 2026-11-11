@@ -1020,6 +1020,39 @@ internal static class SilkLauncher
         runtime.Run(SilkKernels.ColSum, [(nuint)SilkKernels.LinearGlobal(cols)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void GeluBackwardBf16Act(SilkRuntime runtime, nint d, nint act, nint y, int n)
+    {
+        runtime.SetBuffer(SilkKernels.GeluBackwardBf16Act, 0, d);
+        runtime.SetBuffer(SilkKernels.GeluBackwardBf16Act, 1, act);
+        runtime.SetBuffer(SilkKernels.GeluBackwardBf16Act, 2, y);
+        runtime.SetUInt32(SilkKernels.GeluBackwardBf16Act, 3, (uint)n);
+        runtime.Run(SilkKernels.GeluBackwardBf16Act, [(nuint)SilkKernels.LinearGlobal(n)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void LayerNormBackwardBf16Act(SilkRuntime runtime, nint d, nint x, nint gamma, nint dx, nint dgammaAcc, nint dbetaAcc, int rows, int cols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.LayerNormBackwardBf16Act, 0, d);
+        runtime.SetBuffer(SilkKernels.LayerNormBackwardBf16Act, 1, x);
+        runtime.SetBuffer(SilkKernels.LayerNormBackwardBf16Act, 2, gamma);
+        runtime.SetBuffer(SilkKernels.LayerNormBackwardBf16Act, 3, dx);
+        runtime.SetBuffer(SilkKernels.LayerNormBackwardBf16Act, 4, dgammaAcc);
+        runtime.SetBuffer(SilkKernels.LayerNormBackwardBf16Act, 5, dbetaAcc);
+        runtime.SetUInt32(SilkKernels.LayerNormBackwardBf16Act, 6, (uint)rows);
+        runtime.SetUInt32(SilkKernels.LayerNormBackwardBf16Act, 7, (uint)cols);
+        runtime.SetFloat32(SilkKernels.LayerNormBackwardBf16Act, 8, eps);
+        runtime.Run(SilkKernels.LayerNormBackwardBf16Act, [(nuint)SilkKernels.LinearGlobal(rows * cols)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void ColSumBf16Act(SilkRuntime runtime, nint x, nint y, int rows, int cols, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.ColSumBf16Act, 0, x);
+        runtime.SetBuffer(SilkKernels.ColSumBf16Act, 1, y);
+        runtime.SetUInt32(SilkKernels.ColSumBf16Act, 2, (uint)rows);
+        runtime.SetUInt32(SilkKernels.ColSumBf16Act, 3, (uint)cols);
+        runtime.SetFloat32(SilkKernels.ColSumBf16Act, 4, scale);
+        runtime.Run(SilkKernels.ColSumBf16Act, [(nuint)SilkKernels.LinearGlobal(cols)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     public static void Fill(SilkRuntime runtime, nint y, float value, int n)
     {
         runtime.SetBuffer(SilkKernels.Fill, 0, y);

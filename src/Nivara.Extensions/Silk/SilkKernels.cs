@@ -182,8 +182,11 @@ internal static class SilkKernels
     public const string GemmTnBf16 = "gemm_row4_tn_bf16";
     public const string ReluBackward = "relu_backward";
     public const string GeluBackward = "gelu_backward";
+    public const string GeluBackwardBf16Act = "gelu_backward_bf16_act";
     public const string LayerNormBackward = "layer_norm_backward";
+    public const string LayerNormBackwardBf16Act = "layer_norm_backward_bf16_act";
     public const string ColSum = "col_sum";
+    public const string ColSumBf16Act = "col_sum_bf16_act";
     public const string Fill = "fill";
     public const string Conv2dBackwardWeight = "conv2d_backward_weight";
     public const string Conv2dBackwardInput = "conv2d_backward_input";
@@ -215,7 +218,7 @@ internal static class SilkKernels
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
-        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
+        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, ColSum, ColSumBf16Act, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
@@ -2296,6 +2299,90 @@ internal static class SilkKernels
             float acc = 0.0f;
             for (uint r = 0; r < rows; ++r)
                 acc += x[r * cols + col];
+            y[col] = acc * scale;
+        }
+
+        /* Activation-level BF16 variants of the three backward kernels (#1149): storage is
+           BF16 (ushort), accumulation stays F32. Opt-in only; not the default lane. */
+        __kernel void gelu_backward_bf16_act(
+            __global const ushort* d,
+            __global const ushort* act,
+            __global ushort* y,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            float dv = BF16_TO_F32(d[idx]);
+            float v = BF16_TO_F32(act[idx]);
+            float invSqrt2 = 0.7071067811865475f;
+            float invSqrt2Pi = 0.3989422804014327f;
+            float cdf = 0.5f * (1.0f + erf(v * invSqrt2));
+            float pdf = exp(-0.5f * v * v) * invSqrt2Pi;
+            float out = (cdf + v * pdf) * dv;
+            y[idx] = (ushort)(as_uint(out) >> 16);
+        }
+
+        __kernel void layer_norm_backward_bf16_act(
+            __global const ushort* d,
+            __global const ushort* x,
+            __global const float* gamma,
+            __global ushort* dx,
+            __global float* dgammaAcc,
+            __global float* dbetaAcc,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint idx = get_global_id(0);
+            uint total = rows * cols;
+            if (idx >= total) return;
+            uint row = idx / cols;
+            uint col = idx % cols;
+            uint base = row * cols;
+
+            float mean = 0.0f;
+            for (uint c = 0; c < cols; ++c) mean += BF16_TO_F32(x[base + c]);
+            mean /= (float)cols;
+            float var = 0.0f;
+            for (uint c = 0; c < cols; ++c) {
+                float diff = BF16_TO_F32(x[base + c]) - mean;
+                var += diff * diff;
+            }
+            var /= (float)cols;
+            float invStd = 1.0f / sqrt(var + eps);
+
+            float normalized = (BF16_TO_F32(x[idx]) - mean) * invStd;
+            float dv = BF16_TO_F32(d[idx]);
+            dgammaAcc[idx] = dv * normalized;
+            dbetaAcc[idx] = dv;
+
+            float meanD = 0.0f;
+            float meanDNorm = 0.0f;
+            for (uint c = 0; c < cols; ++c) {
+                float nrm = (BF16_TO_F32(x[base + c]) - mean) * invStd;
+                float dd = BF16_TO_F32(d[base + c]);
+                meanD += dd;
+                meanDNorm += dd * nrm;
+            }
+            meanD /= (float)cols;
+            meanDNorm /= (float)cols;
+
+            float out = (gamma[col] * invStd) * (dv - meanD - normalized * meanDNorm);
+            dx[idx] = (ushort)(as_uint(out) >> 16);
+        }
+
+        __kernel void col_sum_bf16_act(
+            __global const ushort* x,
+            __global float* y,
+            const uint rows,
+            const uint cols,
+            const float scale)
+        {
+            uint col = get_global_id(0);
+            if (col >= cols) return;
+            float acc = 0.0f;
+            for (uint r = 0; r < rows; ++r)
+                acc += BF16_TO_F32(x[r * cols + col]);
             y[col] = acc * scale;
         }
 
