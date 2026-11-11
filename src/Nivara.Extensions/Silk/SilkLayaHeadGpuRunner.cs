@@ -637,7 +637,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         {
             runtime = owner.runtime;
             Func<ushort, float> widen = isBf16
-                ? new Func<ushort, float>(u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+                ? new Func<ushort, float>(u => (float)BitConverter.UInt16BitsToBFloat16(u))
                 : new Func<ushort, float>(u => (float)BitConverter.Int16BitsToHalf((short)u));
             try
             {
