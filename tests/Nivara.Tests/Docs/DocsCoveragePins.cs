@@ -80,5 +80,5 @@ internal static class DocsCoveragePins
     /// move to `src/Nivara.Extensions/Blas/` carries the `docs/BLAS-MKL.md` reference, and
     /// `src/Nivara/GemmProvider.cs` adds one: 260 + 2 = 262.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 263;
+    internal const int ExpectedDocumentReferenceCount = 265;
 }
