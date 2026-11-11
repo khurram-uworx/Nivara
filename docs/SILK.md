@@ -1053,7 +1053,7 @@ Silk BERT-family inference is opt-in narrow precision, never the default:
   head is the DistilBERT layout `[CLS] -> pre_classifier -> ReLU -> classifier`, which both
   namings share because the repo's `BertModel` has no pooler. The Laya decision head still trains
   on CPU via AutoDiff; a Silk trainer for it is #1148, designed in
-  `docs/LAYA-HEAD-TRAINING.md`.
+  `docs/plan/LAYA-HEAD-TRAINING.md`.
 - Activation-level BF16 in the Laya head (#1102) is available as an opt-in for inference; full
   activation-traffic halving in training is not yet wired.
 - `GeluBackward`, `LayerNormBackward` and `ColSum` remain F32-only kernels: narrow training keeps
