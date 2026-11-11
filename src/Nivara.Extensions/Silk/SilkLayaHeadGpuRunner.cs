@@ -175,7 +175,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         runtime.EnsureAttentionLocalMemory(headDim);
 
         Func<ushort, float> widen = isBf16
-            ? new Func<ushort, float>(u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+            ? new Func<ushort, float>(u => (float)BitConverter.UInt16BitsToBFloat16(u))
             : new Func<ushort, float>(u => (float)BitConverter.Int16BitsToHalf((short)u));
 
         try
@@ -331,7 +331,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         {
             ushort[] __l = runtime.DownloadUshort(logits.Handle, k);
             logitsHost = new float[__l.Length];
-            for (int __i = 0; __i < __l.Length; __i++) logitsHost[__i] = BitConverter.Int32BitsToSingle(__l[__i] << 16);
+            for (int __i = 0; __i < __l.Length; __i++) logitsHost[__i] = (float)BitConverter.UInt16BitsToBFloat16(__l[__i]);
         }
         else logitsHost = runtime.Download(logits.Handle, k);
         if (ProfilingEnabled) LastPhaseMs["MarkerHead"] = _markerMs;
@@ -347,7 +347,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         {
             ushort[] __a = runtime.DownloadUshort(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
             actRowHost = new float[__a.Length];
-            for (int __i = 0; __i < __a.Length; __i++) actRowHost[__i] = BitConverter.Int32BitsToSingle(__a[__i] << 16);
+            for (int __i = 0; __i < __a.Length; __i++) actRowHost[__i] = (float)BitConverter.UInt16BitsToBFloat16(__a[__i]);
         }
         else actRowHost = runtime.Download(actRow.Handle, hiddenDim + LayaHeadOutput.FeatureCount);
         for (int i = 0; i < features.Length; i++)
@@ -369,7 +369,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         {
             ushort[] __a = runtime.DownloadUshort(actLogits.Handle, actClassCount);
             actHost = new float[__a.Length];
-            for (int __i = 0; __i < __a.Length; __i++) actHost[__i] = BitConverter.Int32BitsToSingle(__a[__i] << 16);
+            for (int __i = 0; __i < __a.Length; __i++) actHost[__i] = (float)BitConverter.UInt16BitsToBFloat16(__a[__i]);
         }
         else actHost = runtime.Download(actLogits.Handle, actClassCount);
         if (ProfilingEnabled) LastPhaseMs["ActHead"] = _actMs;
@@ -637,7 +637,7 @@ public sealed partial class SilkLayaHeadGpuRunner : IDisposable
         {
             runtime = owner.runtime;
             Func<ushort, float> widen = isBf16
-                ? new Func<ushort, float>(u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+                ? new Func<ushort, float>(u => (float)BitConverter.UInt16BitsToBFloat16(u))
                 : new Func<ushort, float>(u => (float)BitConverter.Int16BitsToHalf((short)u));
             try
             {

@@ -688,7 +688,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             return buf;
         }
 
-        static float Widen(System.Numerics.BFloat16 b) => BitConverter.UInt32BitsToSingle((uint)System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(new System.Numerics.BFloat16[] { b })[0] << 16);
+        static float Widen(System.Numerics.BFloat16 b) => (float)b;
         // helper not needed beyond below
 
         public LayerWeights(SilkQwenGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, int i)
@@ -712,8 +712,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         {
             var t = WeightLayout.Req(tensors, key, "Silk");
             var f = new float[t.Data.Length];
-            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(t.Data.AsSpan());
-            for (int i = 0; i < f.Length; i++) f[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+            for (int i = 0; i < f.Length; i++) f[i] = (float)t.Data[i];
             nint buf = owner.runtime.Allocate(f.Length);
             owner.runtime.Upload(buf, f);
             return buf;
@@ -723,6 +722,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         static nint UploadTBf16(SilkQwenGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key)
         {
             var data = WeightLayout.Transposed(tensors, key, "Silk");
+            // Device storage is BF16 bit-pattern (ushort); bit-preserving reinterpretation.
             var us = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(data.AsSpan());
             var arr = new ushort[us.Length];
             us.CopyTo(arr);

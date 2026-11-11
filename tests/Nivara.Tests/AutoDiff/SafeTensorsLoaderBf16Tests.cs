@@ -34,7 +34,7 @@ public class SafeTensorsLoaderBf16Tests
 
         for (int i = 0; i < src.Length; i++)
         {
-            uint expectedBits = (uint)i << 16;
+            uint expectedBits = BitConverter.SingleToUInt32Bits((float)BitConverter.UInt16BitsToBFloat16((ushort)i));
             Assert.That(BitConverter.SingleToUInt32Bits(dst[i]), Is.EqualTo(expectedBits),
                 $"pattern 0x{i:X4}: expect bit-exact 0x{expectedBits:X8}, got 0x{BitConverter.SingleToUInt32Bits(dst[i]):X8}");
         }
@@ -58,7 +58,7 @@ public class SafeTensorsLoaderBf16Tests
             for (int i = 0; i < length; i++)
             {
                 src[i] = (ushort)rng.Next(0, 65536);
-                expected[i] = BitConverter.UInt32BitsToSingle((uint)src[i] << 16);
+                expected[i] = (float)BitConverter.UInt16BitsToBFloat16(src[i]);
             }
 
             var dst = new float[length];
@@ -221,7 +221,7 @@ public class SafeTensorsLoaderBf16Tests
         var patterns = BuildBf16Sections().First(s => s.Name == name).Patterns;
         var result = new float[patterns.Length];
         for (int i = 0; i < patterns.Length; i++)
-            result[i] = BitConverter.UInt32BitsToSingle((uint)patterns[i] << 16);
+            result[i] = (float)BitConverter.UInt16BitsToBFloat16(patterns[i]);
         return result;
     }
 }

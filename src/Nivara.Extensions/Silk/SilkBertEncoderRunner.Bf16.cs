@@ -23,6 +23,7 @@ public sealed partial class SilkBertEncoderRunner
         {
             var src = kv.Value.Data;
             var arr = new ushort[src.Length];
+            // BFloat16 and ushort share an identical 2-byte layout; bit-preserving reinterpretation for device storage.
             MemoryMarshal.Cast<BFloat16, ushort>(src.AsSpan()).CopyTo(arr.AsSpan());
             result[kv.Key] = (arr, kv.Value.Shape);
         }
