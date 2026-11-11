@@ -37,6 +37,9 @@ static class Program
         if (args.Any(a => a.Equals("--qwen-decode-attn", StringComparison.OrdinalIgnoreCase)))
             return QwenDecodeAttentionProbe.Run();
 
+        if (args.Any(a => a.Equals("--cpu-gemv", StringComparison.OrdinalIgnoreCase)))
+            return CpuGemvProbe.Run();
+
         if (args.Any(a => a.Equals("--metrics", StringComparison.OrdinalIgnoreCase)))
             return MetricsProbe.Run();
 
@@ -1117,7 +1120,7 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--silk-kernels] [--silk-gemm] [--mask] [--laya-forward] [--cpu-gemm] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--silk-kernels] [--silk-gemm] [--mask] [--laya-forward] [--cpu-gemm] [--cpu-gemv] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }

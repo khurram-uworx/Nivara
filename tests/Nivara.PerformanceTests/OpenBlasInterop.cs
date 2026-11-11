@@ -3,10 +3,10 @@ using System.Runtime.InteropServices;
 namespace Nivara.PerformanceTests;
 
 /// <summary>
-/// Hand-written CBLAS binding for the official OpenBLAS release, used only by the
-/// <c>--cpu-gemm</c> probe ([docs/BLAS-MKL.md](../../docs/BLAS-MKL.md) §6).
+/// Hand-written CBLAS binding for the official OpenBLAS release, used by the
+/// <c>--cpu-gemm</c> and <c>--cpu-gemv</c> probes ([docs/BLAS-MKL.md](../../docs/BLAS-MKL.md) §6).
 ///
-/// Seven declarations, not a generated binding. Running a P/Invoke generator over
+/// The declarations below, not a generated binding. Running a P/Invoke generator over
 /// <c>cblas.h</c> produces the whole BLAS + LAPACK surface, which is the opposite of what this
 /// probe is for; the surface the probe needs is the table below.
 ///
@@ -140,6 +140,18 @@ internal static partial class OpenBlasInterop
         float alpha, ref float a, int lda,
         ref float b, int ldb,
         float beta, ref float c, int ldc);
+
+    /// <summary>
+    /// y = alpha·op(A)·x + beta·y, row-major. For the Nivara single-row path, A is
+    /// <c>[N x K]</c>, <c>trans = NoTrans</c>, <c>M = N</c>, <c>N = K</c>, <c>lda = K</c>.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "cblas_sgemv")]
+    internal static partial void Sgemv(
+        int order, int transA,
+        int m, int n,
+        float alpha, ref float a, int lda,
+        ref float x, int incX,
+        float beta, ref float y, int incY);
 
     [LibraryImport(Library, EntryPoint = "openblas_get_config")]
     private static partial IntPtr GetConfig();

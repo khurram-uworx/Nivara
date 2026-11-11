@@ -70,4 +70,4 @@ No new decision. The design was cleared in the session that produced `WORK.md`. 
 
 ## GitHub issues log
 
-- [ ] (pending) GEMV bind — `IGemvProvider` only if `--cpu-gemv` shows a median ratio of at least 2×. Created when the probe lands.
+- [x] #1154 — `IGemvProvider` only if `--cpu-gemv` shows a median ratio of at least 2× (created with the probe; not bound on this branch).
