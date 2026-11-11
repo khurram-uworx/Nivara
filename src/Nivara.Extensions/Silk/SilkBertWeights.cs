@@ -202,7 +202,7 @@ internal sealed class SilkBertWeights : IDisposable
         tracked = new List<SilkParam>(capacity: 4 + 12 * config.NumHiddenLayers + 4);
 
         Func<ushort, float> widen = isBf16
-            ? (u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+            ? (u => (float)BitConverter.UInt16BitsToBFloat16(u))
             : (u => (float)BitConverter.Int16BitsToHalf((short)u));
 
         string emb = BertGpuKeys.Embeddings(naming);
@@ -320,12 +320,18 @@ internal sealed class SilkBertWeights : IDisposable
             float[] device;
             if (narrowWeights && p.Slot.NarrowMatrix)
             {
-                Func<ushort, float> widen = narrowBf16
-                    ? (u => BitConverter.UInt32BitsToSingle((uint)u << 16))
-                    : (u => (float)BitConverter.Int16BitsToHalf((short)u));
-                var us = runtime.DownloadUshort(select(p).Handle, p.Count);
-                device = new float[us.Length];
-                for (int i = 0; i < device.Length; i++) device[i] = widen(us[i]);
+                if (narrowBf16)
+                {
+                    var bf = runtime.DownloadBFloat16(select(p).Handle, p.Count);
+                    device = new float[bf.Length];
+                    for (int i = 0; i < device.Length; i++) device[i] = (float)bf[i];
+                }
+                else
+                {
+                    var us = runtime.DownloadUshort(select(p).Handle, p.Count);
+                    device = new float[us.Length];
+                    for (int i = 0; i < device.Length; i++) device[i] = (float)BitConverter.Int16BitsToHalf((short)us[i]);
+                }
             }
             else
             {
@@ -459,13 +465,18 @@ internal sealed class SilkBertWeights : IDisposable
         return param;
     }
 
+    /// <summary>
+    /// Uploads a narrow (BF16/FP16) weight buffer. Storage is <c>ushort</c> holding the
+    /// narrow dtype's bit-pattern (BFloat16 or Half); the buffer is bit-identical to the
+    /// on-disk narrow representation and is widened only at read-back/export time.
+    /// </summary>
     SilkParam NewParamNarrow(SilkWeightSlot slot, ReadOnlySpan<ushort> data, bool track = true)
     {
         if (data.Length != slot.Count)
             throw new InvalidOperationException(
                 $"Silk weight '{slot.Name}' has {data.Length} elements but its {slot.Layout} slot expects {slot.Count}.");
 
-        nint buffer = Register(runtime.AllocateBytes((ulong)data.Length * sizeof(ushort)));
+        nint buffer = Register(runtime.AllocateUshort(data.Length));
         runtime.Upload(buffer, data);
         var param = new SilkParam(new SilkRuntime.SilkBuffer(buffer, data.Length), slot);
         if (trainable && track)
