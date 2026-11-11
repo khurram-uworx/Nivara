@@ -260,7 +260,7 @@ Interpretation: end-to-end improvement 1.0-2.6x depending on model, below the is
 Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H (16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels. Batch size 1, 3-pass warmup + 10 timed passes, median reported - except the SmolLM and ModernBERT rows, which use 1 warmup + 3 timed on the Nivara side (see the note under the table). Both frameworks are always measured in the same session.
 
 | Model | Input | PyTorch | Nivara CPU | Slowdown (CPU) | Nivara BLAS | Slowdown (BLAS) | Nivara GPU | Slowdown (GPU) |
-|-------|-------|---------|------------|----------------|-------------------|------------|----------------|
+|-------|-------|---------|------------|----------------|-------------|-----------------|------------|----------------|
 | **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** | — (conv) | — |  |  |
 | **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** | — (conv) | — |  |  |
 | **MiniLM-L6** | 128 tokens | 11.0 ms | 78.7 ms | **~7.2x** | 130.3 ms (2 thr) | **~11.8x** | 24.1 ms | **~2.2x** |

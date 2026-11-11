@@ -1,4 +1,3 @@
-using System.Linq;
 using Nivara.Silk;
 using NUnit.Framework;
 
