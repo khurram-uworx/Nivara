@@ -34,10 +34,9 @@ public sealed partial class SilkQwenGpuRunner
 
         static float[] Widen(BFloat16[] src)
         {
-            var u = System.Runtime.InteropServices.MemoryMarshal.Cast<BFloat16, ushort>(src.AsSpan());
             var dst = new float[src.Length];
             for (int i = 0; i < src.Length; i++)
-                dst[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+                dst[i] = (float)src[i];
             return dst;
         }
 
@@ -45,6 +44,8 @@ public sealed partial class SilkQwenGpuRunner
         {
             int h = hiddenDim;
             var tok = WeightLayout.Req(tensors, "model.embed_tokens.weight", "Silk");
+            // BFloat16 and ushort share an identical 2-byte layout, so this is a
+            // bit-preserving reinterpretation (no conversion) for device storage.
             var tokUs = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(tok.Data.AsSpan()).ToArray();
             tokEmb = runtime.AllocateBytes((ulong)tokUs.Length * sizeof(ushort));
             runtime.Upload(tokEmb, tokUs.AsSpan());
