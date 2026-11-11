@@ -353,8 +353,8 @@ Human-run. Agents do not run this command. M=1 was excluded from `--cpu-gemm`. T
 mode compares `GradKernels.MatMulTransposedB` at `aRows == 1` with `cblas_sgemv` at
 1, 4, and 8 OpenBLAS threads. Shapes are hidden widths 384/768/1024/4096 and the
 same K against N=30522. The numeric gate is `maxAbs <= 1e-3` against a double-precision
-dot. It does not register a provider. A production `IGemvProvider` is in scope only
-if the printed `managed/leg` column for `sgemv-1t` is at least 2×. Exit 2 if
+dot. It does not register a provider. Production dispatch is `IGemvProvider`,
+opt-in via `--blas`, using the same `--blas-threads` pool. Exit 2 if
 `lib/libopenblas.dll` is missing; exit 1 if a leg fails the numeric gate.
 
 #### `--cpu-gemm` - CPU GEMM ceiling

@@ -123,6 +123,27 @@ static class TensorsHelper
 
         if (bTransposed && aRows == 1)
         {
+            if (GemvProviders.Current is { } gemv && aCols > 0 && bCols > 0
+                && (typeof(T) == typeof(float) || typeof(T) == typeof(double)))
+            {
+                if (typeof(T) == typeof(float))
+                {
+                    gemv.Gemv(
+                        MemoryMarshal.Cast<T, float>(a).Slice(0, aCols),
+                        MemoryMarshal.Cast<T, float>(b).Slice(0, aCols * bCols),
+                        MemoryMarshal.Cast<T, float>(result.AsSpan(0, bCols)),
+                        bCols, aCols);
+                    return;
+                }
+
+                gemv.Gemv(
+                    MemoryMarshal.Cast<T, double>(a).Slice(0, aCols),
+                    MemoryMarshal.Cast<T, double>(b).Slice(0, aCols * bCols),
+                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, bCols)),
+                    bCols, aCols);
+                return;
+            }
+
             // Single-row mat-vec (BLAS2 GEMV): weights are row-major [out, in], so each
             // output column is a dot against one weight row. No rent/copy — the copy was a
             // pure identity at aRows == 1 and every return then cleared the whole pool bucket

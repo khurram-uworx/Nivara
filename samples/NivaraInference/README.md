@@ -226,7 +226,7 @@ See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format detai
 
 OpenBLAS is an opt-in GEMM provider in `Nivara.Extensions.Blas` (see `docs/BLAS-MKL.md`). Default off; the managed path remains the fallback. Requires `lib/libopenblas.dll` at the repo root.
 
-`--threads N` is the Nivara row-block count. `--blas-threads N` is `openblas_set_num_threads`. Both are optional and default to 1, so `--blas` alone is one row-block and one OpenBLAS thread. `--blas-threads` was not swept; the default stays 1 until a same-session capture says otherwise. Both above 1 is two pools and is printed, not rejected.
+`--threads N` is the Nivara row-block count. `--blas-threads N` is `openblas_set_num_threads`. Both are optional and default to 1, so `--blas` alone is one row-block and one OpenBLAS thread. The same switch covers single-row GEMV (`aRows == 1`); that call has no row-blocks, so `--blas-threads` is its only pool. `--blas-threads` was not swept on the sentence benchmarks; the default stays 1. Both above 1 is two pools and is printed, not rejected.
 
 ```bash
 # managed (default)

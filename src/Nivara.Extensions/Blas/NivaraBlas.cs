@@ -1,7 +1,7 @@
 namespace Nivara.Extensions.Blas;
 
 /// <summary>
-/// Registration entry point for the native BLAS GEMM provider. Opt-in: nothing is
+/// Registration entry point for the native BLAS providers. Opt-in: nothing is
 /// registered by default and the managed path remains the fallback.
 /// </summary>
 public static class NivaraBlas
@@ -25,15 +25,19 @@ public static class NivaraBlas
     {
         try
         {
-            var provider = new OpenBlasGemmProvider(threadCount, openBlasThreads);
+            var gemm = new OpenBlasGemmProvider(threadCount, openBlasThreads);
+            var gemv = new OpenBlasGemvProvider(openBlasThreads);
             // If an explicit path was given, override the resolver? For now, the resolver
             // handles auto-discovery; an explicit path is validated by TryInitialize having
             // succeeded during construction. Store it for diagnostics.
-            GemmProviders.Current = provider;
+            GemmProviders.Current = gemm;
+            GemvProviders.Current = gemv;
             return true;
         }
         catch (InvalidOperationException)
         {
+            GemmProviders.Current = null;
+            GemvProviders.Current = null;
             return false;
         }
     }
@@ -51,7 +55,11 @@ public static class NivaraBlas
     /// <summary>
     /// Unregisters any provider, reverting to the managed path.
     /// </summary>
-    public static void UseManaged() => GemmProviders.Current = null;
+    public static void UseManaged()
+    {
+        GemmProviders.Current = null;
+        GemvProviders.Current = null;
+    }
 }
 
 /// <summary>

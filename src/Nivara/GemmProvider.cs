@@ -7,9 +7,9 @@ namespace Nivara;
 /// type is not float or double, the managed path runs unchanged and bit-identically.
 /// </summary>
 /// <remarks>
-/// Half, BFloat16, null-masked multiply, integer types, the single-row GEMV fast path
-/// and transpose materialization are deliberately outside this contract and always use
-/// the managed path. A native BLAS has no concept of null masks or non-float/double
+/// Half, BFloat16, null-masked multiply, integer types, and transpose materialization
+/// are deliberately outside this contract and always use the managed path. The
+/// single-row path is <see cref="IGemvProvider" />, not this interface. A native BLAS has no concept of null masks or non-float/double
 /// types, and <c>Tensor.MatrixMultiply</c> (when it ships) is expected to replace the
 /// managed path without touching this interface.
 /// </remarks>

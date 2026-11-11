@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace Nivara.Extensions.Blas;
 
 /// <summary>
-/// Hand-written CBLAS binding for the official OpenBLAS release, used only by the
+/// Hand-written CBLAS binding for the official OpenBLAS release, used by the GEMM and GEMV providers and by the
 /// <c>--cpu-gemm</c> probe ([docs/BLAS-MKL.md](../../docs/BLAS-MKL.md) §6).
 ///
 /// Seven declarations, not a generated binding. Running a P/Invoke generator over
@@ -159,6 +159,26 @@ internal static partial class OpenBlasInterop
         double alpha, ref double a, int lda,
         ref double b, int ldb,
         double beta, ref double c, int ldc);
+
+    /// <summary>
+    /// y = alpha·op(A)·x + beta·y, row-major. For the Nivara single-row path, A is
+    /// [N x K], trans = NoTrans, M = N, N = K, lda = K.
+    /// </summary>
+    [LibraryImport(Library, EntryPoint = "cblas_sgemv")]
+    internal static partial void Sgemv(
+        int order, int transA,
+        int m, int n,
+        float alpha, ref float a, int lda,
+        ref float x, int incX,
+        float beta, ref float y, int incY);
+
+    [LibraryImport(Library, EntryPoint = "cblas_dgemv")]
+    internal static partial void Dgemv(
+        int order, int transA,
+        int m, int n,
+        double alpha, ref double a, int lda,
+        ref double x, int incX,
+        double beta, ref double y, int incY);
 
     [LibraryImport(Library, EntryPoint = "openblas_get_config")]
     private static partial IntPtr GetConfig();

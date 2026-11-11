@@ -2,8 +2,7 @@
 
 > **Status update (2026-11-12):** the seam shipped, opt-in via `--blas`. `--threads` is the
 > Nivara row-block count and `--blas-threads` is `openblas_set_num_threads`; both optional,
-> default 1. Part 2 non-GEMM routines are not bound. The GEMV comparison is
-> `--cpu-gemv` in the performance harness; `IGemvProvider` waits on that measurement.
+> default 1. GEMV is `IGemvProvider`, registered by the same `--blas` switch. Other Part 2 routines stay on the BCL. The comparison command is `--cpu-gemv`.
 > The sections below are the 2026-11-10 probe record and are not rewritten.
 >
 > **Status: probe run 2026-11-10.** No package reference. The probe cleared its gate

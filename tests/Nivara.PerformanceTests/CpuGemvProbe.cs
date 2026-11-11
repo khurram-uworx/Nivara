@@ -5,9 +5,8 @@ namespace Nivara.PerformanceTests;
 
 /// <summary>
 /// On-demand GEMV comparison for issue #1119 part 2. M=1 was excluded from
-/// <c>--cpu-gemm</c>. This mode does not register a provider and does not change
-/// <c>MultiplyCore</c>. A production <c>IGemvProvider</c> waits on a human-run
-/// median ratio of at least 2× (managed / sgemv at 1 OpenBLAS thread).
+/// <c>--cpu-gemm</c>. This mode does not register a provider. Production dispatch
+/// is <c>IGemvProvider</c>, opt-in via <c>--blas</c>.
 /// </summary>
 internal static class CpuGemvProbe
 {
