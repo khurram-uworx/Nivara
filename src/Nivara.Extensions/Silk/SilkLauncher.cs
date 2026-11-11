@@ -1120,6 +1120,23 @@ internal static class SilkLauncher
         runtime.Run(SilkKernels.AdamUpdate, [(nuint)SilkKernels.LinearGlobal(count)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void AdamUpdateBf16(
+        SilkRuntime runtime, nint weights, nint gradients, nint firstMoment, nint secondMoment,
+        float learningRate, float biasCorrection1, float biasCorrection2, float epsilon, float weightDecay, int count)
+    {
+        runtime.SetBuffer(SilkKernels.AdamUpdateBf16, 0, weights);
+        runtime.SetBuffer(SilkKernels.AdamUpdateBf16, 1, gradients);
+        runtime.SetBuffer(SilkKernels.AdamUpdateBf16, 2, firstMoment);
+        runtime.SetBuffer(SilkKernels.AdamUpdateBf16, 3, secondMoment);
+        runtime.SetFloat32(SilkKernels.AdamUpdateBf16, 4, learningRate);
+        runtime.SetFloat32(SilkKernels.AdamUpdateBf16, 5, biasCorrection1);
+        runtime.SetFloat32(SilkKernels.AdamUpdateBf16, 6, biasCorrection2);
+        runtime.SetFloat32(SilkKernels.AdamUpdateBf16, 7, epsilon);
+        runtime.SetFloat32(SilkKernels.AdamUpdateBf16, 8, weightDecay);
+        runtime.SetUInt32(SilkKernels.AdamUpdateBf16, 9, (uint)count);
+        runtime.Run(SilkKernels.AdamUpdateBf16, [(nuint)SilkKernels.LinearGlobal(count)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     public static void EmbeddingGatherPool(SilkRuntime runtime, nint ids, nint table, nint output, int batchSize, int seqLen, int embedDim)
     {
         runtime.SetBuffer(SilkKernels.EmbeddingGatherPool, 0, ids);

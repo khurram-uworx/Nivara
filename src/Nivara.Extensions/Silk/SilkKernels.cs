@@ -189,6 +189,7 @@ internal static class SilkKernels
     public const string Conv2dBackwardInput = "conv2d_backward_input";
     public const string Conv2dBackwardBias = "conv2d_backward_bias";
     public const string AdamUpdate = "adam_update";
+    public const string AdamUpdateBf16 = "adam_update_bf16";
     public const string SoftmaxCrossEntropyBackward = "softmax_cross_entropy_backward";
 
     // Rag-learn fused late-fusion helpers (#915 follow-up).
@@ -216,7 +217,7 @@ internal static class SilkKernels
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
         GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         SoftmaxCrossEntropyBackward,
-        Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
+        Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
         AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
@@ -270,6 +271,7 @@ internal static class SilkKernels
         #define GEMVLANES 32
         #define GEMVCOLS 128
         #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
+        #define F32_TO_BF16(x) ((ushort)(as_uint(x) >> 16))
         #define F16_TO_F32(x) (float)as_half((ushort)(x))
 
         inline float gelu_exact(float v)
@@ -2489,6 +2491,35 @@ internal static class SilkKernels
                 w[i] -= lr * ((m1 / bc1) / (sqrt(v1 / bc2) + eps) + weightDecay * w[i]);
             else
                 w[i] -= lr * (m1 / bc1) / (sqrt(v1 / bc2) + eps);
+        }
+
+        /* BF16 in-place Adam step: weights are BF16 storage, gradients/moments F32. */
+        __kernel void adam_update_bf16(
+            __global ushort* w,
+            __global const float* g,
+            __global float* m,
+            __global float* v,
+            const float lr,
+            const float bc1,
+            const float bc2,
+            const float eps,
+            const float weightDecay,
+            const uint n)
+        {
+            uint i = get_global_id(0);
+            if (i >= n) return;
+            float wi = BF16_TO_F32(w[i]);
+            float grad = g[i];
+            float m1 = 0.9f * m[i] + 0.1f * grad;
+            float v1 = 0.999f * v[i] + 0.001f * grad * grad;
+            m[i] = m1;
+            v[i] = v1;
+            float newW;
+            if (weightDecay != 0.0f)
+                newW = wi - lr * ((m1 / bc1) / (sqrt(v1 / bc2) + eps) + weightDecay * wi);
+            else
+                newW = wi - lr * (m1 / bc1) / (sqrt(v1 / bc2) + eps);
+            w[i] = F32_TO_BF16(newW);
         }
 
         /* Decode (single-query) GQA attention. q: [numHeads*headDim], kCache/vCache: [kvLen, numKvHeads*headDim].

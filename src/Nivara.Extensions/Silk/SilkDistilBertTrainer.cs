@@ -63,6 +63,8 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
     int trainableLayerCount;
     readonly SilkBertWeights weights;
+    readonly bool narrowBf16;
+    readonly bool narrowFp16;
     readonly LayerActivations[] activations;
     readonly List<nint> owned = [];
 
@@ -111,15 +113,33 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         int maxBatch,
         int maxSeqLen,
         int trainableLayerCount = -1)
+        : this(runtime, config,
+              new SilkBertWeights(runtime, config, tensors, naming, trainable: true, trainableLayerCount: trainableLayerCount < 0 ? config.NumHiddenLayers : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable: true)),
+              false, false, maxBatch, maxSeqLen, trainableLayerCount)
+    {
+    }
+
+    internal SilkDistilBertTrainer(
+        SilkRuntime runtime,
+        BertConfig config,
+        SilkBertWeights weights,
+        bool narrowBf16,
+        bool narrowFp16,
+        int maxBatch,
+        int maxSeqLen,
+        int trainableLayerCount)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(tensors);
+        ArgumentNullException.ThrowIfNull(weights);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBatch);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSeqLen);
 
         this.runtime = runtime;
         this.config = config;
+        this.weights = weights;
+        this.narrowBf16 = narrowBf16;
+        this.narrowFp16 = narrowFp16;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -135,7 +155,6 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
             : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable: true);
         this.trainableLayerCount = normalizedTrainable;
 
-        weights = new SilkBertWeights(runtime, config, tensors, naming, trainable: true, trainableLayerCount: normalizedTrainable);
         if (!weights.HasHead)
             throw new InvalidOperationException(
                 "SilkDistilBertTrainer needs the classifier head keys 'pre_classifier.*' and 'classifier.*' in the checkpoint.");
@@ -451,13 +470,13 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         SilkLauncher.ColSum(runtime, dLogits, weights.ClsB.Gradient.Handle, batch, numClasses, 1f);
         SilkLauncher.GemmTn(runtime, reluH, dLogits, weights.ClsW.Gradient.Handle,
             aRows: hiddenDim, aCols: batch, bCols: numClasses);
-        SilkLauncher.GemmNt(runtime, dLogits, weights.ClsW.Handle, dTmp,
+        GemmNtW(dLogits, weights.ClsW.Handle, dTmp,
             aRows: batch, aCols: numClasses, bCols: hiddenDim);
         SilkLauncher.ReluBackward(runtime, dTmp, reluH, dTmp, batch * hiddenDim);
         SilkLauncher.ColSum(runtime, dTmp, weights.PreB.Gradient.Handle, batch, hiddenDim, 1f);
         SilkLauncher.GemmTn(runtime, clsIn, dTmp, weights.PreW.Gradient.Handle,
             aRows: hiddenDim, aCols: batch, bCols: hiddenDim);
-        SilkLauncher.GemmNt(runtime, dTmp, weights.PreW.Handle, dClsIn,
+        GemmNtW(dTmp, weights.PreW.Handle, dClsIn,
             aRows: batch, aCols: hiddenDim, bCols: hiddenDim);
 
         // Only the CLS rows consume the final hidden state, so the top-level gradient is those rows
@@ -489,7 +508,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
             SilkLauncher.GemmTn(runtime, a.F1Post, dTmp, w.W2.Gradient.Handle,
                 aRows: intermediateDim, aCols: rows, bCols: hiddenDim);
             SilkLauncher.ColSum(runtime, dTmp, w.B2.Gradient.Handle, rows, hiddenDim, 1f);
-            SilkLauncher.GemmNt(runtime, dTmp, w.W2.Handle, dInterm,
+            GemmNtW(dTmp, w.W2.Handle, dInterm,
                 aRows: rows, aCols: hiddenDim, bCols: intermediateDim);
 
             SilkLauncher.GeluBackward(runtime, dInterm, a.F1Pre, dInterm, intermLen);
@@ -498,7 +517,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
                 aRows: hiddenDim, aCols: rows, bCols: intermediateDim);
             SilkLauncher.ColSum(runtime, dInterm, w.B1.Gradient.Handle, rows, intermediateDim, 1f);
             // Fused residual epilogue: dTmp = (dInterm @ W1) + dTmp.
-            SilkLauncher.GemmNtResidual(runtime, dInterm, w.W1.Handle, dTmp, dTmp,
+            GemmNtResidualW(dInterm, w.W1.Handle, dTmp, dTmp,
                 aRows: rows, aCols: intermediateDim, bCols: hiddenDim);
 
             // LN1: h1 = layer_norm(preNorm1), and dCur now holds dH1.
@@ -510,7 +529,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
             SilkLauncher.GemmTn(runtime, a.Attn, dCur, w.O.Gradient.Handle,
                 aRows: hiddenDim, aCols: rows, bCols: hiddenDim);
             SilkLauncher.ColSum(runtime, dCur, w.Bo.Gradient.Handle, rows, hiddenDim, 1f);
-            SilkLauncher.GemmNt(runtime, dCur, w.O.Handle, dAttn,
+            GemmNtW(dCur, w.O.Handle, dAttn,
                 aRows: rows, aCols: hiddenDim, bCols: hiddenDim);
 
             if (ProfilingEnabled)
@@ -553,7 +572,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
                 aRows: hiddenDim, aCols: rows, bCols: 3 * hiddenDim);
             SilkLauncher.ColSum(runtime, dQkv, w.Bqkv.Gradient.Handle, rows, 3 * hiddenDim, 1f);
             // Fused residual epilogue: dCur = (dQkv @ Wqkv) + dCur.
-            SilkLauncher.GemmNtResidual(runtime, dQkv, w.Wqkv.Handle, dCur, dCur,
+            GemmNtResidualW(dQkv, w.Wqkv.Handle, dCur, dCur,
                 aRows: rows, aCols: 3 * hiddenDim, bCols: hiddenDim);
             if (ProfilingEnabled)
             {
@@ -607,9 +626,18 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
         foreach (var p in weights.Parameters.Where(p => p.Trainable))
         {
-            SilkLauncher.AdamUpdate(runtime, p.Weight.Handle, p.Gradient.Handle,
-                p.FirstMoment.Handle, p.SecondMoment.Handle,
-                learningRate, correction1, correction2, AdamEpsilon, weightDecay, p.Count);
+            if (p.Slot.NarrowMatrix && narrowBf16)
+            {
+                SilkLauncher.AdamUpdateBf16(runtime, p.Weight.Handle, p.Gradient.Handle,
+                    p.FirstMoment.Handle, p.SecondMoment.Handle,
+                    learningRate, correction1, correction2, AdamEpsilon, weightDecay, p.Count);
+            }
+            else
+            {
+                SilkLauncher.AdamUpdate(runtime, p.Weight.Handle, p.Gradient.Handle,
+                    p.FirstMoment.Handle, p.SecondMoment.Handle,
+                    learningRate, correction1, correction2, AdamEpsilon, weightDecay, p.Count);
+            }
         }
     }
 
@@ -638,6 +666,27 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
     }
 
     void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
+
+    string ChooseKernel(string kernel) => kernel switch
+    {
+        SilkKernels.GemmQkv => narrowBf16 ? SilkKernels.GemmQkvBf16 : narrowFp16 ? SilkKernels.GemmQkvF16 : kernel,
+        SilkKernels.GemmBias => narrowBf16 ? SilkKernels.GemmBiasBf16 : narrowFp16 ? SilkKernels.GemmBiasF16 : kernel,
+        SilkKernels.GemmGelu => narrowBf16 ? SilkKernels.GemmGeluBf16 : narrowFp16 ? SilkKernels.GemmGeluF16 : kernel,
+        SilkKernels.GemmRelu => narrowBf16 ? SilkKernels.GemmReluBf16 : narrowFp16 ? SilkKernels.GemmReluF16 : kernel,
+        _ => kernel,
+    };
+
+    void GemmNtW(nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        if (narrowBf16) SilkLauncher.GemmNtBf16(runtime, a, b, c, aRows, aCols, bCols);
+        else SilkLauncher.GemmNt(runtime, a, b, c, aRows, aCols, bCols);
+    }
+
+    void GemmNtResidualW(nint a, nint b, nint c, nint residual, int aRows, int aCols, int bCols)
+    {
+        if (narrowBf16) SilkLauncher.GemmNtResidualBf16(runtime, a, b, c, residual, aRows, aCols, bCols);
+        else SilkLauncher.GemmNtResidual(runtime, a, b, c, residual, aRows, aCols, bCols);
+    }
 
     internal void UploadBatch(ReadOnlySpan<int> tokenIds, ReadOnlySpan<float> attentionMask, int batch, int seqLen)
     {
@@ -682,23 +731,23 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
             var w = weights.Layers[i];
             var a = activations[i];
 
-            SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmQkv, hidden[i], w.Wqkv.Handle, a.Qkv,
+            SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmQkv), hidden[i], w.Wqkv.Handle, a.Qkv,
                 w.Bqkv.Handle, rows, hiddenDim, 3 * hiddenDim, hiddenDim);
             a.PrepareSubviews(runtime, rows, hiddenDim);
             SilkLauncher.Attention(runtime, a.Q, a.K, a.V, maskBuf, a.Attn,
                 batch, seqLen, numHeads, headDim, SilkKernels.GlobalAttentionBand, scale);
 
-            SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmBias, a.Attn, w.O.Handle, a.PreNorm1,
+            SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmBias), a.Attn, w.O.Handle, a.PreNorm1,
                 w.Bo.Handle, rows, hiddenDim, hiddenDim);
             SilkLauncher.Add(runtime, a.PreNorm1, hidden[i], a.PreNorm1, hiddenLen);
             SilkLauncher.LayerNorm(runtime, a.PreNorm1, w.Ln1W.Handle, w.Ln1B.Handle,
                 a.H1, rows, hiddenDim, eps);
 
-            SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmBias, a.H1, w.W1.Handle, a.F1Pre,
+            SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmBias), a.H1, w.W1.Handle, a.F1Pre,
                 w.B1.Handle, rows, hiddenDim, intermediateDim);
             SilkLauncher.Gelu(runtime, a.F1Pre, a.F1Post, intermLen);
 
-            SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmBias, a.F1Post, w.W2.Handle, a.PreNorm2,
+            SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmBias), a.F1Post, w.W2.Handle, a.PreNorm2,
                 w.B2.Handle, rows, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, a.PreNorm2, a.H1, a.PreNorm2, hiddenLen);
             SilkLauncher.LayerNorm(runtime, a.PreNorm2, w.Ln2W.Handle, w.Ln2B.Handle,
@@ -710,9 +759,9 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         runtime.Upload(clsIdsBuf, clsIds.AsSpan(0, batch));
 
         SilkLauncher.Gather(runtime, hidden[numLayers], clsIdsBuf, clsIn, batch * hiddenDim, hiddenDim);
-        SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmRelu, clsIn, weights.PreW.Handle, reluH,
+        SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmRelu), clsIn, weights.PreW.Handle, reluH,
             weights.PreB.Handle, batch, hiddenDim, hiddenDim);
-        SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmBias, reluH, weights.ClsW.Handle, logits,
+        SilkLauncher.GemmEpilogue(runtime, ChooseKernel(SilkKernels.GemmBias), reluH, weights.ClsW.Handle, logits,
             weights.ClsB.Handle, batch, hiddenDim, numClasses);
     }
 
