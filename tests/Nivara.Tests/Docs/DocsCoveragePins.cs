@@ -44,8 +44,9 @@ internal static class DocsCoveragePins
     /// plus the new <c>NIVARACHAT-EVALS.md</c>). #868 adds <c>docs/METRICS.md</c>: 56 + 1 = 57.
     /// #1064 adds <c>docs/adr/009-metrics-mergeable-accumulator.md</c>: 57 + 1 = 58.
     /// #1077 adds <c>docs/adr/010-chunk-count-growth-policy-on-concat.md</c>: 58 + 1 = 59.
+    /// Issue #1119 adds <c>docs/BLAS-BENCH.md</c>: 59 + 1 = 60.
     /// </remarks>
-    internal const int ExpectedDocumentCount = 59;
+    internal const int ExpectedDocumentCount = 60;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -79,6 +80,8 @@ internal static class DocsCoveragePins
     /// The BLAS provider (branch khurram/1117) adds two: the `OpenBlasInterop.cs`
     /// move to `src/Nivara.Extensions/Blas/` carries the `docs/BLAS-MKL.md` reference, and
     /// `src/Nivara/GemmProvider.cs` adds one: 260 + 2 = 262.
+    /// Issue #1119 adds two references to <c>docs/BLAS-MKL.md</c> in <c>docs/BLAS-BENCH.md</c>:
+    /// 263 + 2 = 265.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 263;
+    internal const int ExpectedDocumentReferenceCount = 265;
 }
