@@ -226,12 +226,16 @@ See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format detai
 
 OpenBLAS is an opt-in GEMM provider in `Nivara.Extensions.Blas` (see `docs/BLAS-MKL.md`). Default off; the managed path remains the fallback. Requires `lib/libopenblas.dll` at the repo root.
 
+`--threads N` is the Nivara row-block count. `--blas-threads N` is `openblas_set_num_threads`. Both are optional and default to 1, so `--blas` alone is one row-block and one OpenBLAS thread. `--blas-threads` was not swept; the default stays 1 until a same-session capture says otherwise. Both above 1 is two pools and is printed, not rejected.
+
 ```bash
 # managed (default)
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
-# BLAS (row-block parallelism; --threads required)
+# BLAS (row-blocks; OpenBLAS pool stays 1 unless --blas-threads is set)
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --blas --threads 2
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark --blas --threads 4
+# OpenBLAS pool, one Nivara block
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --blas --threads 1 --blas-threads 4
 ```
 
 Recommended `--threads` (measured on Intel Core Ultra 7 255H, 16 logical cores, AC power, 2026-11-11):

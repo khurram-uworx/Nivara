@@ -104,7 +104,7 @@ regression when it is not.
 
 **BLAS backend (required, non-skippable):** every model that supports `--blas` (minilm,
 distilbert, modernbert, laya) must run the BLAS variant in the same session and record a
-BLAS column (ms, same units as the CPU column) plus the thread count used, following the
+BLAS column (ms, same units as the CPU column) plus both `--threads` (row-blocks, default 1) and `--blas-threads` (OpenBLAS pool, default 1), following the
 `## OpenBLAS acceleration` section of `samples/NivaraInference/README.md` (recommended
 thread counts per model). BLAS runs are CPU-only and require `lib/libopenblas.dll`. Do not
 skip this line item; if the DLL is unavailable, record the reason in the PR.

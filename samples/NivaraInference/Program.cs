@@ -129,6 +129,8 @@ class Program
         bool useBlas = false;
         int blasThreads = 1;
         bool blasThreadsSet = false;
+        int openBlasThreads = 1;
+        bool openBlasThreadsSet = false;
         string engine = TypeSafe.DefaultEngine;
         bool engineSet = false;
         string? urlArg = null;
@@ -226,6 +228,21 @@ class Program
                     return 1;
                 }
                 blasThreadsSet = true;
+                i++;
+            }
+            else if (args[i] == "--blas-threads")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--blas-threads needs a value.");
+                    return 1;
+                }
+                if (!TryParseCount(args[i + 1], out openBlasThreads) || openBlasThreads < 1)
+                {
+                    Console.Error.WriteLine($"--blas-threads expects a positive integer; got '{args[i + 1]}'.");
+                    return 1;
+                }
+                openBlasThreadsSet = true;
                 i++;
             }
             else if (args[i] == "--url")
@@ -355,8 +372,10 @@ class Program
             Console.WriteLine();
             Console.WriteLine("BLAS (all models):");
             Console.WriteLine("  --blas             Register the OpenBLAS GEMM provider (opt-in). Default off;");
-            Console.WriteLine("                     managed path remains the fallback. Requires --threads N.");
-            Console.WriteLine("  --threads N        Row-block parallelism for --blas (required with --blas).");
+            Console.WriteLine("                     managed path remains the fallback.");
+            Console.WriteLine("  --threads N        Nivara row-block count for --blas. Optional, default 1.");
+            Console.WriteLine("  --blas-threads N   OpenBLAS pool size (openblas_set_num_threads). Optional,");
+            Console.WriteLine("                     default 1. Not a rename of --threads.");
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
             Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --silk. The CPU path no");
@@ -393,22 +412,26 @@ class Program
             return 1;
         }
 
-        if (useBlas && !blasThreadsSet)
-        {
-            Console.Error.WriteLine("--blas requires --threads N.");
-            return 1;
-        }
-
         if (blasThreadsSet && !useBlas)
         {
             Console.Error.WriteLine("--threads is an option of '--blas' only; add --blas or drop --threads.");
             return 1;
         }
 
+        if (openBlasThreadsSet && !useBlas)
+        {
+            Console.Error.WriteLine("--blas-threads is an option of '--blas' only; add --blas or drop --blas-threads.");
+            return 1;
+        }
+
         if (useBlas)
         {
-            if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(blasThreads))
-                Console.WriteLine($"BLAS: enabled ({blasThreads} thread{(blasThreads == 1 ? "" : "s")})");
+            if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(blasThreads, openBlasThreads))
+            {
+                Console.WriteLine($"BLAS: enabled ({blasThreads} row-block{(blasThreads == 1 ? "" : "s")}, {openBlasThreads} OpenBLAS thread{(openBlasThreads == 1 ? "" : "s")})");
+                if (blasThreads > 1 && openBlasThreads > 1)
+                    Console.WriteLine("BLAS: row-blocks and OpenBLAS threads are both above 1 (two pools).");
+            }
             else
             {
                 Console.Error.WriteLine("BLAS: requested via --blas but provider could not be registered (libopenblas.dll not found).");

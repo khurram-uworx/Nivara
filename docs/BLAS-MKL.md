@@ -1,10 +1,13 @@
 # OpenBLAS / oneMKL — options and the measurement-first plan
 
-> **Status: probe run 2026-11-10.** No `src/` change, no package reference, no issue filed
-> yet. The probe cleared its gate (`maxAbs <= 1e-3` on every row, all four runs) and the
-> recommendation is recorded below. The seam issue and any follow-up are still to be filed
-> against [#458](https://github.com/khurram-uworx/Nivara/issues/458) if the recommendation
-> is accepted. This document is the record of the measurement, not the implementation.
+> **Status update (2026-11-12):** the seam shipped, opt-in via `--blas`. `--threads` is the
+> Nivara row-block count and `--blas-threads` is `openblas_set_num_threads`; both optional,
+> default 1. Part 2 non-GEMM routines are not bound; `IGemvProvider` waits on a measured
+> GEMV gap. The sections below are the 2026-11-10 probe record and are not rewritten.
+>
+> **Status: probe run 2026-11-10.** No package reference. The probe cleared its gate
+> (`maxAbs <= 1e-3` on every row, all four runs) and the recommendation is recorded below.
+> This document remains the record of that measurement.
 
 This page is the CPU-BLAS counterpart of the GPU story in
 [ACCELERATION.md](ACCELERATION.md). The earlier capture of the same three options (managed
@@ -304,7 +307,7 @@ actually ran is documented in §5.1 and `tests/Nivara.PerformanceTests/README.md
 from the plan below:
 
 - **Vehicle.** OpenBLAS 0.3.34, not MKL. No package reference; the DLL is resolved at
-  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See �5.1.
+  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See �5.1.
 - **Legs.** Four BLAS legs, not one: `Blas 1t`, `Blas 1t-NT`, `Blas Nt`, `Blas hybrid`.
   See `CpuGemmProbe.cs` and the README leg table.
 - **Protocol.** The probe already used 1 untimed warmup and 20 interleaved rounds (the README's

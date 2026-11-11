@@ -40,6 +40,31 @@ public class BlasSmokeTests
     }
 
     [Test]
+    public void UseBlas_OpenBlasThreads_IsWhatGetNumThreadsReports()
+    {
+        if (!DllPresent())
+            Assert.Ignore("libopenblas.dll not present; skipping BLAS smoke test.");
+
+        var registered = false;
+        try
+        {
+            registered = NivaraBlas.UseBlas(threadCount: 1, openBlasThreads: 4);
+            Assert.That(registered, Is.True);
+            var a = new float[8 * 8];
+            var b = new float[8 * 8];
+            var result = new float[8 * 8];
+            GradKernels.MatMulTransposedB(a, b, result, 8, 8, 8);
+            Assert.That(OpenBlasInterop.GetNumThreads(), Is.EqualTo(4));
+        }
+        finally
+        {
+            NivaraBlas.UseManaged();
+            if (registered)
+                OpenBlasInterop.SetNumThreads(1);
+        }
+    }
+
+    [Test]
     public void UseManaged_FallsBackToManagedPath()
     {
         NivaraBlas.UseManaged();
