@@ -585,22 +585,27 @@ public class InferenceCliArgumentTests
     }
 
     [Test]
-    public void BlasThreads_WithoutBlas_Rejected() =>
-        AssertRejected(Run("minilm", "benchmark", "--blas-threads", "2"),
-            "--blas-threads is an option of '--blas' only");
+    public void Threads_WithoutBlas_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--threads", "2"),
+            "--threads is an option of '--blas' only");
 
     [Test]
-    public void BlasThreads_InvalidValue_Rejected()
+    public void Threads_InvalidValue_Rejected()
     {
-        AssertRejected(Run("minilm", "benchmark", "--blas", "--blas-threads", "0"),
-            "--blas-threads expects a positive integer");
-        AssertRejected(Run("minilm", "benchmark", "--blas", "--blas-threads", "x"),
-            "--blas-threads expects a positive integer");
+        AssertRejected(Run("minilm", "benchmark", "--blas", "--threads", "0"),
+            "--threads expects a positive integer");
+        AssertRejected(Run("minilm", "benchmark", "--blas", "--threads", "x"),
+            "--threads expects a positive integer");
     }
 
     [Test]
-    public void BlasThreads_MissingValue_Rejected() =>
-        AssertRejected(Run("minilm", "benchmark", "--blas-threads"),
-            "--blas-threads needs a value.");
+    public void Threads_MissingValue_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--threads"),
+            "--threads needs a value.");
+
+    [Test]
+    public void Blas_WithoutThreads_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--blas"),
+            "--blas requires --threads N.");
 
 }

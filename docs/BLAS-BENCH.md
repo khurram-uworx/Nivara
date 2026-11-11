@@ -10,10 +10,8 @@ From the repo root, Release build, same session:
 ```
 # managed (default)
 dotnet run -c Release --project samples/NivaraInference -- <model> benchmark
-# BLAS (hybrid, Nivara owns row parallelism, OpenBLAS 1 thread per call)
-dotnet run -c Release --project samples/NivaraInference -- <model> benchmark --blas
-# BLAS (conservative, single OpenBLAS thread, no second pool)
-dotnet run -c Release --project samples/NivaraInference -- <model> benchmark --blas --blas-threads 1
+# BLAS (row-block parallelism; --threads required)
+dotnet run -c Release --project samples/NivaraInference -- <model> benchmark --blas --threads 4
 ```
 
 Models: `minilm`, `distilbert`, `modernbert` (use `--seq 128,256`), `laya`.
@@ -71,6 +69,17 @@ for GEMM-dominated workloads and training, not the BERT-family inference headlin
 - [ ] The ~6x GEMM win translates to a measurable end-to-end improvement, OR the non-GEMM share is
       quantified and a follow-up issue is filed for it.
 - [ ] If end-to-end improvement is < 2x, revisit whether the seam is worth shipping at all.
+
+## Recommended `--threads` values
+
+Measured on Intel Core Ultra 7 255H (16 logical cores). `--blas` requires `--threads N`.
+
+| Model | Recommended `--threads` | Measured vs managed |
+|---|---|---|
+| MiniLM (128 tok) | 2 (or skip BLAS) | ~1.0x at 2; ≥4 slower |
+| ModernBERT (seq=128) | 4 | 2.6x |
+| DistilBERT | 4 (not swept) | 1.15x at 1 thread |
+| Laya (max_len=512) | 4 (not swept) | ~1.0x at 1 thread |
 
 ## References
 - `docs/BLAS-MKL.md` §5.1 (probe table), §7 (seam), §8 (constraints).

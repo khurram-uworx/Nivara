@@ -213,16 +213,16 @@ class Program
                 useSilk = true;
             else if (args[i] == "--blas")
                 useBlas = true;
-            else if (args[i] == "--blas-threads")
+            else if (args[i] == "--threads")
             {
                 if (i + 1 >= args.Length)
                 {
-                    Console.Error.WriteLine("--blas-threads needs a value.");
+                    Console.Error.WriteLine("--threads needs a value.");
                     return 1;
                 }
                 if (!TryParseCount(args[i + 1], out blasThreads) || blasThreads < 1)
                 {
-                    Console.Error.WriteLine($"--blas-threads expects a positive integer; got '{args[i + 1]}'.");
+                    Console.Error.WriteLine($"--threads expects a positive integer; got '{args[i + 1]}'.");
                     return 1;
                 }
                 blasThreadsSet = true;
@@ -355,8 +355,8 @@ class Program
             Console.WriteLine();
             Console.WriteLine("BLAS (all models):");
             Console.WriteLine("  --blas             Register the OpenBLAS GEMM provider (opt-in). Default off;");
-            Console.WriteLine("                     managed path remains the fallback. Combine with --blas-threads.");
-            Console.WriteLine("  --blas-threads N   OpenBLAS thread count (default 1). Requires --blas.");
+            Console.WriteLine("                     managed path remains the fallback. Requires --threads N.");
+            Console.WriteLine("  --threads N        Row-block parallelism for --blas (required with --blas).");
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
             Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --silk. The CPU path no");
@@ -472,7 +472,13 @@ class Program
 
         if (blasThreadsSet && !useBlas)
         {
-            Console.Error.WriteLine("--blas-threads is an option of '--blas' only; add --blas or drop --blas-threads.");
+            Console.Error.WriteLine("--threads is an option of '--blas' only; add --blas or drop --threads.");
+            return 1;
+        }
+
+        if (useBlas && !blasThreadsSet)
+        {
+            Console.Error.WriteLine("--blas requires --threads N.");
             return 1;
         }
 
