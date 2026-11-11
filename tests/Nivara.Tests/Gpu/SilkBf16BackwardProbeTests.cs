@@ -1,5 +1,6 @@
 using Nivara.Silk;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.Gpu;
 
@@ -23,14 +24,14 @@ public sealed class SilkBf16BackwardProbeTests
     static ushort[] ToBf16(float[] f)
     {
         var r = new ushort[f.Length];
-        for (int i = 0; i < f.Length; i++) r[i] = (ushort)(BitConverter.SingleToInt32Bits(f[i]) >> 16);
+        for (int i = 0; i < f.Length; i++) r[i] = BitConverter.BFloat16ToUInt16Bits((BFloat16)f[i]);
         return r;
     }
 
     static float[] FromBf16(ushort[] u)
     {
         var r = new float[u.Length];
-        for (int i = 0; i < u.Length; i++) r[i] = BitConverter.Int32BitsToSingle(u[i] << 16);
+        for (int i = 0; i < u.Length; i++) r[i] = (float)BitConverter.UInt16BitsToBFloat16(u[i]);
         return r;
     }
 
