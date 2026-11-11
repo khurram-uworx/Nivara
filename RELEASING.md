@@ -89,7 +89,7 @@ prerequisites, and table-update instructions. Run them in order:
 | 2 | NivaraIncident | `samples/NivaraIncident/README.md` | Generated dataset (see Prerequisites) |
 | 3 | NivaraInference (CPU) | `samples/NivaraInference/README.md` | Python + PyTorch + model weights |
 | 3a | NivaraInference (Silk/OpenCL) | `samples/NivaraInference/README.md` | OpenCL GPU + AC power + model weights |
-| 3b | NivaraInference (BLAS, opt-in) | `samples/NivaraInference/README.md` (OpenBLAS section) | OpenBLAS DLL (`lib/libopenblas.dll`); optional, record only if measured |
+| 3b | NivaraInference (BLAS) | `samples/NivaraInference/README.md` (OpenBLAS section) | OpenBLAS DLL (`lib/libopenblas.dll`) + model weights |
 | 4 | NivaraFineTuning | `samples/NivaraFineTuning/README.md` | Python + PyTorch + model weights |
 
 For each benchmark: **open the README → follow the `## Release Benchmark` section →
@@ -102,10 +102,12 @@ machine difference in the table footer. Do not compute ratios across machines �
 a Nivara improvement plus a PyTorch improvement from more cores looks like a
 regression when it is not.
 
-**BLAS backend (optional):** the OpenBLAS opt-in path (`--blas --threads N`) is documented in
-the `## OpenBLAS acceleration` section of `samples/NivaraInference/README.md` with recommended
-thread counts per model. It is not a release gate (default off, managed path is the fallback);
-record a BLAS column only if measured in the same session, and note the thread count used.
+**BLAS backend (required, non-skippable):** every model that supports `--blas` (minilm,
+distilbert, modernbert, laya) must run the BLAS variant in the same session and record a
+BLAS column (ms, same units as the CPU column) plus the thread count used, following the
+`## OpenBLAS acceleration` section of `samples/NivaraInference/README.md` (recommended
+thread counts per model). BLAS runs are CPU-only and require `lib/libopenblas.dll`. Do not
+skip this line item; if the DLL is unavailable, record the reason in the PR.
 
 **Silk backend (required, non-skippable):** every sample that supports a `--silk`
 variant (`minilm`, `distilbert`, `distilbert_sst`, `laya`, `modernbert` where
