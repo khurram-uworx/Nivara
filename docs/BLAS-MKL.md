@@ -308,7 +308,7 @@ actually ran is documented in Â§5.1 and `tests/Nivara.PerformanceTests/README.md
 from the plan below:
 
 - **Vehicle.** OpenBLAS 0.3.34, not MKL. No package reference; the DLL is resolved at
-  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See ï¿½5.1.
+  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See §5.1.
 - **Legs.** Four BLAS legs, not one: `Blas 1t`, `Blas 1t-NT`, `Blas Nt`, `Blas hybrid`.
   See `CpuGemmProbe.cs` and the README leg table.
 - **Protocol.** The probe already used 1 untimed warmup and 20 interleaved rounds (the README's

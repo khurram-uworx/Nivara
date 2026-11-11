@@ -11,7 +11,6 @@ namespace Nivara.PerformanceTests;
 /// </summary>
 internal static class CpuGemvProbe
 {
-    const int Warmups = 1;
     const int Rounds = 20;
     const double GateMaxAbs = 1e-3;
     const int MissingDllExit = 2;
@@ -50,9 +49,9 @@ internal static class CpuGemvProbe
         Console.WriteLine($"  {detail}");
         Console.WriteLine($"  corename: {OpenBlasInterop.CoreName}");
         Console.WriteLine($"  Gate: maxAbs(leg - double dot) <= {GateMaxAbs}");
-        Console.WriteLine($"  Timing: {Warmups} untimed warmup, then {Rounds} interleaved rounds; median and min.");
+        Console.WriteLine($"  Timing: the correctness call is the untimed warmup, then {Rounds} interleaved rounds; median and min.");
         Console.WriteLine();
-        Console.WriteLine($"{"shape",-16} {"K",-6} {"N",-7} {"leg",-12} {"maxAbs",-10} {"gate",-6} {"median ms",-10} {"min ms",-8} {"GMAC/s",-8} {"vs managed",-12}");
+        Console.WriteLine($"{"shape",-16} {"K",-6} {"N",-7} {"leg",-12} {"maxAbs",-10} {"gate",-6} {"median ms",-10} {"min ms",-8} {"GMAC/s",-8} {"managed/leg",-12}");
 
         int failures = 0;
         foreach (var shape in Shapes)
@@ -100,9 +99,6 @@ internal static class CpuGemvProbe
         var samples = new List<double>[legs.Length];
         for (int i = 0; i < legs.Length; i++)
             samples[i] = new List<double>(Rounds);
-
-        for (int i = 0; i < legs.Length; i++)
-            legs[i](buffers[i]);
 
         for (int round = 0; round < Rounds; round++)
         {
