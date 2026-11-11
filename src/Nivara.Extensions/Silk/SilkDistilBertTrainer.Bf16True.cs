@@ -15,6 +15,8 @@ public sealed partial class SilkDistilBertTrainer
         {
             var src = kv.Value.Data;
             var arr = new ushort[src.Length];
+            // BFloat16 and ushort share an identical 2-byte layout, so this is a
+            // bit-preserving reinterpretation (no conversion) — safe to copy via Cast.
             MemoryMarshal.Cast<BFloat16, ushort>(src.AsSpan()).CopyTo(arr.AsSpan());
             result[kv.Key] = (arr, kv.Value.Shape);
         }
