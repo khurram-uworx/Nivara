@@ -584,4 +584,23 @@ public class InferenceCliArgumentTests
         });
     }
 
+    [Test]
+    public void BlasThreads_WithoutBlas_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--blas-threads", "2"),
+            "--blas-threads is an option of '--blas' only");
+
+    [Test]
+    public void BlasThreads_InvalidValue_Rejected()
+    {
+        AssertRejected(Run("minilm", "benchmark", "--blas", "--blas-threads", "0"),
+            "--blas-threads expects a positive integer");
+        AssertRejected(Run("minilm", "benchmark", "--blas", "--blas-threads", "x"),
+            "--blas-threads expects a positive integer");
+    }
+
+    [Test]
+    public void BlasThreads_MissingValue_Rejected() =>
+        AssertRejected(Run("minilm", "benchmark", "--blas-threads"),
+            "--blas-threads needs a value.");
+
 }

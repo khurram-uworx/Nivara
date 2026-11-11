@@ -11,9 +11,9 @@ From the repo root, Release build, same session:
 # managed (default)
 dotnet run -c Release --project samples/NivaraInference -- <model> benchmark
 # BLAS (hybrid, Nivara owns row parallelism, OpenBLAS 1 thread per call)
-NIVARA_USE_BLAS=1 dotnet run -c Release --project samples/NivaraInference -- <model> benchmark
+dotnet run -c Release --project samples/NivaraInference -- <model> benchmark --blas
 # BLAS (conservative, single OpenBLAS thread, no second pool)
-NIVARA_USE_BLAS=1 NIVARA_BLAS_THREADS=1 dotnet run -c Release --project samples/NivaraInference -- <model> benchmark
+dotnet run -c Release --project samples/NivaraInference -- <model> benchmark --blas --blas-threads 1
 ```
 
 Models: `minilm`, `distilbert`, `modernbert` (use `--seq 128,256`), `laya`.

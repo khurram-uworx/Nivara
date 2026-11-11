@@ -126,6 +126,9 @@ class Program
         bool force = false;
         bool plain = false;
         bool useSilk = false;
+        bool useBlas = false;
+        int blasThreads = 1;
+        bool blasThreadsSet = false;
         string engine = TypeSafe.DefaultEngine;
         bool engineSet = false;
         string? urlArg = null;
@@ -208,6 +211,23 @@ class Program
                 plain = true;
             else if (args[i] == "--silk")
                 useSilk = true;
+            else if (args[i] == "--blas")
+                useBlas = true;
+            else if (args[i] == "--blas-threads")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    Console.Error.WriteLine("--blas-threads needs a value.");
+                    return 1;
+                }
+                if (!TryParseCount(args[i + 1], out blasThreads) || blasThreads < 1)
+                {
+                    Console.Error.WriteLine($"--blas-threads expects a positive integer; got '{args[i + 1]}'.");
+                    return 1;
+                }
+                blasThreadsSet = true;
+                i++;
+            }
             else if (args[i] == "--url")
             {
                 // A required value, validated here because every other value-taking flag in this CLI
@@ -333,6 +353,10 @@ class Program
             Console.WriteLine("                     default/benchmark/compare modes; 'qwen' adds tools/distill. Competing");
             Console.WriteLine("                     BF16 weights on ModernBERT; fp16 supported there too. (Issue #1019)");
             Console.WriteLine();
+            Console.WriteLine("BLAS (all models):");
+            Console.WriteLine("  --blas             Register the OpenBLAS GEMM provider (opt-in). Default off;");
+            Console.WriteLine("                     managed path remains the fallback. Combine with --blas-threads.");
+            Console.WriteLine("  --blas-threads N   OpenBLAS thread count (default 1). Requires --blas.");
             Console.WriteLine("ModernBERT benchmark options (both paths, 'benchmark' mode only):");
             Console.WriteLine("  --seq N[,N...]   Sequence lengths to time, ascending and de-duplicated. Defaults to");
             Console.WriteLine("                   128,256 on CPU and 128,512,2048,4096 on --silk. The CPU path no");
@@ -369,34 +393,14 @@ class Program
             return 1;
         }
 
-        // Env-gated BLAS provider (issue #1119 part 1). No CLI flag, so the pinned
-        // InferenceCliArgumentTests surface is untouched; benchmarks flip the provider via
-        // NIVARA_USE_BLAS=1 (and NIVARA_BLAS_THREADS=N, default 1) and report end-to-end
-        // throughput under managed vs BLAS configs.
+        if (useBlas)
         {
-            string? blasEnv = Environment.GetEnvironmentVariable("NIVARA_USE_BLAS");
-            bool wantBlas = blasEnv is not null
-                && (blasEnv.Equals("1", StringComparison.OrdinalIgnoreCase)
-                    || blasEnv.Equals("true", StringComparison.OrdinalIgnoreCase)
-                    || blasEnv.Equals("yes", StringComparison.OrdinalIgnoreCase));
-            if (wantBlas)
-            {
-                int threads = 1;
-                string? thrEnv = Environment.GetEnvironmentVariable("NIVARA_BLAS_THREADS");
-                if (thrEnv is not null && int.TryParse(thrEnv, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > 0)
-                    threads = parsed;
-
-                if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(threads))
-                    Console.WriteLine($"BLAS: enabled ({threads} thread{(threads == 1 ? "" : "s")})");
-                else
-                {
-                    Console.Error.WriteLine("BLAS: requested via NIVARA_USE_BLAS but provider could not be registered (libopenblas.dll not found).");
-                    return 1;
-                }
-            }
+            if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(blasThreads))
+                Console.WriteLine($"BLAS: enabled ({blasThreads} thread{(blasThreads == 1 ? "" : "s")})");
             else
             {
-                Console.WriteLine("BLAS: disabled (managed path)");
+                Console.Error.WriteLine("BLAS: requested via --blas but provider could not be registered (libopenblas.dll not found).");
+                return 1;
             }
         }
 
@@ -463,6 +467,12 @@ class Program
         if (useSilk && !SilkModes.ContainsKey(modelType))
         {
             Console.Error.WriteLine($"--silk is not supported for '{modelType}' (Silk models: {string.Join(", ", SilkModes.Keys)}).");
+            return 1;
+        }
+
+        if (blasThreadsSet && !useBlas)
+        {
+            Console.Error.WriteLine("--blas-threads is an option of '--blas' only; add --blas or drop --blas-threads.");
             return 1;
         }
 
