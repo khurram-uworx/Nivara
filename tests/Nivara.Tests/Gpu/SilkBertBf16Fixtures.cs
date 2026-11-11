@@ -137,6 +137,22 @@ internal static class SilkBertBf16Fixtures
         return (tokens, mask, labels);
     }
 
+    /// <summary>
+    /// The exported F32 checkpoint must keep the source key space and shapes; only the values are
+    /// expected to have moved. A bare <c>Count &gt; 0</c> would pass on a truncated export.
+    /// </summary>
+    internal static void AssertCheckpointShape(
+        Dictionary<string, (float[] Data, int[] Shape)> exported,
+        Dictionary<string, (float[] Data, int[] Shape)> source)
+    {
+        Assert.That(exported.Keys, Is.EquivalentTo(source.Keys), "exported key space");
+        foreach (var kv in source)
+        {
+            Assert.That(exported[kv.Key].Shape, Is.EqualTo(kv.Value.Shape), $"{kv.Key} shape");
+            Assert.That(exported[kv.Key].Data.Length, Is.EqualTo(kv.Value.Data.Length), $"{kv.Key} length");
+        }
+    }
+
     internal static void AssertNarrow(float[] actual, float[] expected, string context)
     {
         Assert.That(actual.Length, Is.EqualTo(expected.Length), context);

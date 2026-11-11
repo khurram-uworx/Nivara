@@ -15,7 +15,8 @@ public sealed class SilkDistilBertTrainerTrueBf16SmokeTests
         using (runtime)
         {
             var config = SilkBertBf16Fixtures.Config();
-            var bf16Tensors = SilkBertBf16Fixtures.ToBf16(SilkBertBf16Fixtures.Checkpoint(BertGpuNaming.DistilBert));
+            var source = SilkBertBf16Fixtures.Checkpoint(BertGpuNaming.DistilBert);
+            var bf16Tensors = SilkBertBf16Fixtures.ToBf16(source);
 
             using var trainer = SilkDistilBertTrainer.CreateTrueBf16(runtime, config, bf16Tensors, BertGpuNaming.DistilBert,
                 maxBatch: 4, maxSeqLen: 16);
@@ -30,7 +31,7 @@ public sealed class SilkDistilBertTrainerTrueBf16SmokeTests
             Assert.That(epochs[^1].Loss, Is.LessThan(0.75f * epochs[0].Loss));
 
             var exported = trainer.ExportCheckpoint();
-            Assert.That(exported.Count, Is.GreaterThan(0));
+            SilkBertBf16Fixtures.AssertCheckpointShape(exported, source);
 
             // The exported F32 checkpoint must be loadable by the CPU model that produced the
             // trainer's key space.
