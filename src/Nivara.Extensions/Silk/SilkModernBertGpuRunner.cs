@@ -128,7 +128,7 @@ public sealed partial class SilkModernBertGpuRunner : IDisposable
         runtime.EnsureAttentionLocalMemory(headDim);
 
         Func<ushort, float> widen = isBf16
-            ? (u => BitConverter.UInt32BitsToSingle((uint)u << 16))
+            ? (u => (float)BitConverter.UInt16BitsToBFloat16(u))
             : (u => (float)BitConverter.Int16BitsToHalf((short)u));
 
         try
