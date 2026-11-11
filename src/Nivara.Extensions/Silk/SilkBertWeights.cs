@@ -294,7 +294,7 @@ internal sealed class SilkBertWeights : IDisposable
     /// tensors, and the plain buffers pass through. Shapes match what <c>LoadWeights</c> expects
     /// (biases are 1-D). The token-type row is derived and therefore absent.
     /// </summary>
-    public Dictionary<string, (float[] Data, int[] Shape)> Export() => ExportCore(p => p.Weight);
+    public Dictionary<string, (float[] Data, int[] Shape)> Export() => ExportCore(p => p.Weight, narrowWeights: true);
 
     /// <summary>
     /// The same inversion as <see cref="Export"/>, over the accumulated gradients instead of the
@@ -306,17 +306,19 @@ internal sealed class SilkBertWeights : IDisposable
     {
         if (!trainable)
             throw new InvalidOperationException("This weight set was uploaded read-only and has no gradients.");
-        return ExportCore(p => p.Gradient);
+        // Gradients are always stored in F32, even for narrow (BF16/FP16) weight matrices, so they
+        // are downloaded as floats regardless of the weight storage type.
+        return ExportCore(p => p.Gradient, narrowWeights: false);
     }
 
-    Dictionary<string, (float[] Data, int[] Shape)> ExportCore(Func<SilkParam, SilkRuntime.SilkBuffer> select)
+    Dictionary<string, (float[] Data, int[] Shape)> ExportCore(Func<SilkParam, SilkRuntime.SilkBuffer> select, bool narrowWeights)
     {
         var result = new Dictionary<string, (float[] Data, int[] Shape)>(StringComparer.Ordinal);
         foreach (var p in tracked)
         {
             if (p.Slot.Keys.Length == 0) continue;
             float[] device;
-            if (p.Slot.NarrowMatrix)
+            if (narrowWeights && p.Slot.NarrowMatrix)
             {
                 Func<ushort, float> widen = narrowBf16
                     ? (u => BitConverter.UInt32BitsToSingle((uint)u << 16))
