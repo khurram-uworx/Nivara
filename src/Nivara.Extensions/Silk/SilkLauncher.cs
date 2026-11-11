@@ -943,6 +943,40 @@ internal static class SilkLauncher
         GemmGrid(runtime, SilkKernels.GemmTn, aRows, bCols);
     }
 
+    public static void GemmNtBf16(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmNtBf16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmNtBf16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmNtBf16, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmNtBf16, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmNtBf16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmNtBf16, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmNtBf16, aRows, bCols);
+    }
+
+    public static void GemmNtResidualBf16(SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmNtResidualBf16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmNtResidualBf16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmNtResidualBf16, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmNtResidualBf16, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmNtResidualBf16, 4, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmNtResidualBf16, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmNtResidualBf16, 6, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmNtResidualBf16, aRows, bCols);
+    }
+
+    public static void GemmTnBf16(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)
+    {
+        runtime.SetBuffer(SilkKernels.GemmTnBf16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmTnBf16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmTnBf16, 2, c);
+        runtime.SetUInt32(SilkKernels.GemmTnBf16, 3, (uint)aRows);
+        runtime.SetUInt32(SilkKernels.GemmTnBf16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmTnBf16, 5, (uint)bCols);
+        GemmGrid(runtime, SilkKernels.GemmTnBf16, aRows, bCols);
+    }
+
     public static void ReluBackward(SilkRuntime runtime, nint d, nint act, nint y, int n)
     {
         runtime.SetBuffer(SilkKernels.ReluBackward, 0, d);

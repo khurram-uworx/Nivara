@@ -175,8 +175,11 @@ internal static class SilkKernels
     // Text-classifier backward kernels (#900): transposed-operand GEMMs, elementwise backward,
     // reductions, and the fused Adam step.
     public const string GemmNt = "gemm_row4_nt";
+    public const string GemmNtBf16 = "gemm_row4_nt_bf16";
     public const string GemmNtResidual = "gemm_row4_nt_residual";
+    public const string GemmNtResidualBf16 = "gemm_row4_nt_residual_bf16";
     public const string GemmTn = "gemm_row4_tn";
+    public const string GemmTnBf16 = "gemm_row4_tn_bf16";
     public const string ReluBackward = "relu_backward";
     public const string GeluBackward = "gelu_backward";
     public const string LayerNormBackward = "layer_norm_backward";
@@ -211,7 +214,7 @@ internal static class SilkKernels
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
-        GemmNt, GemmNtResidual, GemmTn, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
+        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, LayerNormBackward, ColSum, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate,
         FusionForward, FusionWgrad,
@@ -743,6 +746,77 @@ internal static class SilkKernels
                             uint outCol = outCol0 + w; \
                             smem[x + (TILE + y * BLOCK + w) * TILE] = \
                                 (bRow < aCols && outCol < bCols) ? b[bRow * bCols + outCol] : 0.0f; \
+                        } \
+                    } \
+                } \
+            GEMM_ACCUMULATE_CORE
+
+        #define GEMM_NT_ACCUMULATE_BF16 \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    uint aBase = outRow * aCols + aColBase; \
+                    if (outRow < aRows && (aColBase + 3u) < aCols) { \
+                        float4 av = vload4(0, a + aBase); \
+                        smem[x + (y * 4u + 0u) * TILE] = av.s0; \
+                        smem[x + (y * 4u + 1u) * TILE] = av.s1; \
+                        smem[x + (y * 4u + 2u) * TILE] = av.s2; \
+                        smem[x + (y * 4u + 3u) * TILE] = av.s3; \
+                    } else { \
+                        for (uint aw = 0u; aw < 4u; ++aw) { \
+                            uint aCol = aColBase + aw; \
+                            smem[x + (y * 4u + aw) * TILE] = (outRow < aRows && aCol < aCols) ? a[outRow * aCols + aCol] : 0.0f; \
+                        } \
+                    } \
+                } \
+                uint bRow = k0 + x; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    for (uint w = 0; w < BLOCK; ++w) { \
+                        uint outCol = outCol0 + w; \
+                        smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                            (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[outCol * aCols + bRow]) : 0.0f; \
+                    } \
+                } \
+            GEMM_ACCUMULATE_CORE
+
+        #define GEMM_TN_ACCUMULATE_BF16 \
+            __local float smem[TILE * ROWSTRIDE]; \
+            uint x = get_local_id(0); \
+            uint y = get_local_id(1); \
+            uint outRow = get_global_id(0); \
+            uint colBase = get_group_id(1) * TILECOLS; \
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f; \
+            for (uint k0 = 0; k0 < aCols; k0 += TILE) { \
+                if (y < 4u) { \
+                    uint aColBase = k0 + y * 4u; \
+                    for (uint aw = 0u; aw < 4u; ++aw) { \
+                        uint aCol = aColBase + aw; \
+                        smem[x + (y * 4u + aw) * TILE] = \
+                            (outRow < aRows && aCol < aCols) ? a[aCol * aRows + outRow] : 0.0f; \
+                    } \
+                } \
+                uint bRow = k0 + x; \
+                { \
+                    uint outCol0 = colBase + y * BLOCK; \
+                    uint bBase = bRow * bCols + outCol0; \
+                    if (bRow < aCols && (outCol0 + 3u) < bCols) { \
+                        ushort4 bv = vload4(0, b + bBase); \
+                        smem[x + (TILE + y * BLOCK + 0) * TILE] = BF16_TO_F32(bv.s0); \
+                        smem[x + (TILE + y * BLOCK + 1) * TILE] = BF16_TO_F32(bv.s1); \
+                        smem[x + (TILE + y * BLOCK + 2) * TILE] = BF16_TO_F32(bv.s2); \
+                        smem[x + (TILE + y * BLOCK + 3) * TILE] = BF16_TO_F32(bv.s3); \
+                    } else { \
+                        for (uint w = 0; w < BLOCK; ++w) { \
+                            uint outCol = outCol0 + w; \
+                            smem[x + (TILE + y * BLOCK + w) * TILE] = \
+                                (bRow < aCols && outCol < bCols) ? BF16_TO_F32(b[bRow * bCols + outCol]) : 0.0f; \
                         } \
                     } \
                 } \
@@ -1809,6 +1883,64 @@ internal static class SilkKernels
             const uint bCols)
         {
             GEMM_NT_ACCUMULATE
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) { float r = residual[rowBase + 0]; c[rowBase + 0] = a0 + r; }
+                if (c1 < bCols) { float r = residual[rowBase + 1]; c[rowBase + 1] = a1 + r; }
+                if (c2 < bCols) { float r = residual[rowBase + 2]; c[rowBase + 2] = a2 + r; }
+                if (c3 < bCols) { float r = residual[rowBase + 3]; c[rowBase + 3] = a3 + r; }
+            }
+        }
+
+        __kernel void gemm_row4_nt_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_NT_ACCUMULATE_BF16
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        __kernel void gemm_row4_tn_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_TN_ACCUMULATE_BF16
+            if (outRow < aRows)
+            {
+                uint rowBase = outRow * bCols + colBase + y * BLOCK;
+                if (c0 < bCols) c[rowBase + 0] = a0;
+                if (c1 < bCols) c[rowBase + 1] = a1;
+                if (c2 < bCols) c[rowBase + 2] = a2;
+                if (c3 < bCols) c[rowBase + 3] = a3;
+            }
+        }
+
+        __kernel void gemm_row4_nt_residual_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* residual,
+            const uint aRows,
+            const uint aCols,
+            const uint bCols)
+        {
+            GEMM_NT_ACCUMULATE_BF16
             if (outRow < aRows)
             {
                 uint rowBase = outRow * bCols + colBase + y * BLOCK;
