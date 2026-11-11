@@ -1056,6 +1056,15 @@ Silk BERT-family inference is opt-in narrow precision, never the default:
   `docs/plan/LAYA-HEAD-TRAINING.md`.
 - Activation-level BF16 in the Laya head (#1102) is available as an opt-in for inference; full
   activation-traffic halving in training is not yet wired.
-- `GeluBackward`, `LayerNormBackward` and `ColSum` remain F32-only kernels: narrow training keeps
-  activations and gradients in F32, so no BF16 variants are needed for the DistilBERT trainer.
-  Widening them is #1149, and it buys activation bandwidth rather than GEMM throughput.
+- BF16-storage (activation-level) variants of the three backward kernels are now available as an
+  opt-in (#1149): `gelu_backward_bf16_act`, `layer_norm_backward_bf16_act`, `col_sum_bf16_act`.
+  Storage is BF16 (`ushort`); accumulation stays F32. They are **not** the default: the DistilBERT
+  / BERT narrow trainer keeps activations and gradients in F32 and uses the F32 kernels. Opt in by
+  allocating BF16 activation buffers and calling the new launchers. Parity against the F32 kernels
+  holds within `maxAbs <= 1e-2 * (1+|reference|)` on seeded fixtures (`SilkBackwardBf16ActKernelTests`,
+  `Category=Gpu`). Measured on Intel Arc 140T (Release, 20 runs, median):
+  - `gelu_backward`: 1.05 M elems - 0.451 ms (F32) vs 0.238 ms (BF16), 1.89x (bandwidth-bound).
+  - `col_sum`: 1024x768 - 1.078 ms (F32) vs 0.841 ms (BF16), 1.28x.
+  - `layer_norm_backward`: 1024x768 - 22.63 ms (F32) vs 26.50 ms (BF16), 0.85x (compute-bound;
+    the BF16 variant is slower here because the reduction dominates and the in-register widen adds
+    overhead, so it is not a win for this kernel).
