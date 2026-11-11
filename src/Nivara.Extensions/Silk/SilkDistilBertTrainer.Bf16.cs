@@ -36,8 +36,9 @@ public sealed partial class SilkDistilBertTrainer
         BertGpuNaming naming,
         int maxBatch,
         int maxSeqLen,
-        int trainableLayerCount = -1)
-        : this(runtime, config, ToFloat(tensors), naming, maxBatch, maxSeqLen, trainableLayerCount)
+        int trainableLayerCount = -1,
+        bool trueBf16 = false)
+        : this(runtime, config, tensors, naming, maxBatch, maxSeqLen, trueBf16, trainableLayerCount)
     {
     }
 
