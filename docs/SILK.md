@@ -1047,9 +1047,10 @@ Silk BERT-family inference is opt-in narrow precision, never the default:
   F32 trainer within `maxAbs <= 1e-2 * (1+|reference|)`) and by
   `SilkDistilBertTrainerTrueBf16SmokeTests` (loss decreases on the smoke fixture, with F32
   checkpoint export). Issue #1103 (training moments) is satisfied by this path.
-- BERT-family (BERT/MiniLM) and Laya BF16 trainers are **not yet implemented** and remain gated
-  behind the passing DistilBERT gates above; remaining scope includes wiring the same true BF16
-  path into `SilkDistilBertTrainer`'s BERT/MiniLM naming and the Laya head trainer.
+- BERT/MiniLM BF16 training is now available through the same trainer using
+  `BertGpuNaming.Bert` (see `SilkBertBf16ParityTests` / `SilkBertBf16SmokeTests`); the
+  Laya decision head still trains on CPU via AutoDiff. A future Silk Laya head trainer is
+  sketched in `docs/LAYA-HEAD-TRAINING.md`.
 - Activation-level BF16 in the Laya head (#1102) is available as an opt-in for inference; full
   activation-traffic halving in training is not yet wired.
 - `GeluBackward`, `LayerNormBackward` and `ColSum` remain F32-only kernels: narrow training keeps
