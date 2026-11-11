@@ -201,9 +201,7 @@ internal sealed class SilkBertWeights : IDisposable
             : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, config.NumHiddenLayers, trainable);
         tracked = new List<SilkParam>(capacity: 4 + 12 * config.NumHiddenLayers + 4);
 
-        Func<ushort, float> widen = isBf16
-            ? (u => (float)BitConverter.UInt16BitsToBFloat16(u))
-            : (u => (float)BitConverter.Int16BitsToHalf((short)u));
+        Func<ushort, float> widen = isBf16 ? SilkRuntime.WidenBf16 : SilkRuntime.WidenFp16;
 
         string emb = BertGpuKeys.Embeddings(naming);
         WordEmb = PlainUshort("wordEmb", $"{emb}.word_embeddings.weight", widen, tensors);
@@ -330,7 +328,7 @@ internal sealed class SilkBertWeights : IDisposable
                 {
                     var us = runtime.DownloadUshort(select(p).Handle, p.Count);
                     device = new float[us.Length];
-                    for (int i = 0; i < device.Length; i++) device[i] = (float)BitConverter.Int16BitsToHalf((short)us[i]);
+                    for (int i = 0; i < device.Length; i++) device[i] = SilkRuntime.WidenFp16(us[i]);
                 }
             }
             else
