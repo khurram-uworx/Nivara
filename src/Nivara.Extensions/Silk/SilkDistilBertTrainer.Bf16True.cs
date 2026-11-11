@@ -23,7 +23,14 @@ public sealed partial class SilkDistilBertTrainer
         return result;
     }
 
-    /// <summary>True BF16 path: keeps matrix weights as BF16 (<c>ushort</c>) on device.</summary>
+    /// <summary>
+    /// True BF16/FP16 path: keeps matrix weights narrow (<c>ushort</c>) on device.
+    /// </summary>
+    /// <param name="isBf16">
+    /// How to interpret the <c>ushort</c> payload — BF16 bits when <see langword="true"/> (the
+    /// default), FP16 bits when <see langword="false"/>. This is a bit-interpretation flag, not a
+    /// precision preference; the <c>BFloat16</c> overload carries the widen-or-keep choice instead.
+    /// </param>
     public SilkDistilBertTrainer(
         SilkRuntime runtime,
         BertConfig config,
@@ -54,6 +61,16 @@ public sealed partial class SilkDistilBertTrainer
     {
     }
 
+    /// <summary>
+    /// Ingests a <see cref="BFloat16"/> checkpoint. By default the weights are widened to F32 on
+    /// load; pass <paramref name="trueBf16"/> to keep them BF16 on device.
+    /// </summary>
+    /// <param name="trueBf16">
+    /// <see langword="false"/> (the default) widens the checkpoint to F32 and runs the F32 lane;
+    /// <see langword="true"/> keeps the weights BF16 and runs the narrow lane. Widening is the
+    /// default so that narrow precision is always an explicit choice — <see cref="CreateTrueBf16"/>
+    /// names the same decision at the call site.
+    /// </param>
     public SilkDistilBertTrainer(
         SilkRuntime runtime,
         BertConfig config,
@@ -73,6 +90,12 @@ public sealed partial class SilkDistilBertTrainer
 
     // freezeEncoder convenience for true BF16 is provided by CreateTrueBf16(..., freezeEncoder).
 
+    /// <summary>
+    /// Keeps the checkpoint's matrix weights BF16 on device while activations, gradients and AdamW
+    /// moments stay F32 — the narrow lane the parity gates measure. Equivalent to the
+    /// <c>BFloat16</c> constructor with <c>trueBf16: true</c>, but named so the call site states the
+    /// precision decision.
+    /// </summary>
     public static SilkDistilBertTrainer CreateTrueBf16(
         SilkRuntime runtime, BertConfig config,
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
@@ -86,20 +109,6 @@ public sealed partial class SilkDistilBertTrainer
         BertGpuNaming naming, int maxBatch, int maxSeqLen,
         bool freezeEncoder)
         => new SilkDistilBertTrainer(runtime, config, tensors, naming, maxBatch, maxSeqLen, freezeEncoder ? 0 : -1, true);
-
-    public static SilkDistilBertTrainer CreateBf16(
-        SilkRuntime runtime, BertConfig config,
-        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
-        BertGpuNaming naming, int maxBatch, int maxSeqLen,
-        int trainableLayerCount = -1)
-        => CreateTrueBf16(runtime, config, tensors, naming, maxBatch, maxSeqLen, trainableLayerCount);
-
-    public static SilkDistilBertTrainer CreateNarrowBf16(
-        SilkRuntime runtime, BertConfig config,
-        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
-        BertGpuNaming naming, int maxBatch, int maxSeqLen,
-        int trainableLayerCount = -1)
-        => CreateTrueBf16(runtime, config, tensors, naming, maxBatch, maxSeqLen, trainableLayerCount);
 
     public static SilkDistilBertTrainer CreateTrueBf16(
         SilkRuntime runtime, BertConfig config,
