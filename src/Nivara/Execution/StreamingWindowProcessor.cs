@@ -513,7 +513,7 @@ internal sealed class StreamingWindowProcessor
     static IColumn sliceRange(IColumn column, int start, int count)
     {
         if (count <= 0)
-            return ColumnFilterHelper.CreateEmptyColumn(column.ElementType);
+            return column.CreateEmpty();
         if (start == 0 && count == column.Length)
             return column;
         return column.Slice(start, count);

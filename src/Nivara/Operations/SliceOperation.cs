@@ -73,7 +73,7 @@ sealed class SliceOperation : IQueryOperation
                 var emptyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
                 foreach (var kvp in input)
                 {
-                    var emptyColumn = CreateEmptyColumn(kvp.Value.ElementType);
+                    var emptyColumn = kvp.Value.CreateEmpty();
                     emptyColumns[kvp.Key] = emptyColumn;
                 }
                 return emptyColumns;
@@ -112,9 +112,6 @@ sealed class SliceOperation : IQueryOperation
     /// <returns>A sliced column</returns>
     static IColumn SliceColumn(IColumn column, int start, int length)
         => column.Slice(start, length);
-
-    static IColumn CreateEmptyColumn(Type elementType)
-        => ColumnFilterHelper.CreateEmptyColumn(elementType);
 
     public override string ToString()
     {

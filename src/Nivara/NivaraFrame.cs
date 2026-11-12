@@ -959,7 +959,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = originalColumn.CreateEmpty();
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -996,7 +996,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = originalColumn.CreateEmpty();
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -1036,7 +1036,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = originalColumn.CreateEmpty();
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -1087,7 +1087,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = originalColumn.CreateEmpty();
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);

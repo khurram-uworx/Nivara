@@ -45,6 +45,12 @@ public interface IColumn : IDisposable
     /// <returns>A new column representing the slice</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     IColumn Slice(int start, int length);
+
+    /// <summary>
+    /// Creates an empty column preserving the runtime type of this column.
+    /// </summary>
+    /// <returns>A new zero-length column of the same runtime type as this column.</returns>
+    internal IColumn CreateEmpty();
 }
 
 /// <summary>
