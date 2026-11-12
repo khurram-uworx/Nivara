@@ -1242,6 +1242,12 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     public Type ElementType => Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
 
     /// <inheritdoc />
+    IColumn IColumn.CreateEmpty()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return NivaraColumn<T>.Create(Array.Empty<T>());
+    }
+    /// <inheritdoc />
     public object? GetValue(int index)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
