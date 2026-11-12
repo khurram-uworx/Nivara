@@ -272,6 +272,17 @@ Null-related behavior is a major source of subtle bugs.
 
 A `NivaraFrame` is a collection of named columns governed by a schema.
 
+Ownership and disposal:
+
+- A frame owns only the columns it created. Columns borrowed from another frame
+  (via `SelectColumns`, `WithoutColumn`, `RenameColumn`, `Skip(0)`, identity
+  `ReorderByIndices`, and carried columns in `Normalize`) are shared and are NOT
+  disposed when the borrowing frame is disposed.
+- `NivaraFrame.Create` and the public constructor own every column they receive.
+- Disposing an owning frame disposes its owned columns; any borrower of those
+  columns becomes invalid.
+- Disposing a borrowing frame leaves its source fully usable.
+
 Schema responsibilities:
 
 - Column name resolution

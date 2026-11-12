@@ -378,6 +378,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     readonly IColumnStorage<T> storage;
     bool disposed;
 
+    /// <inheritdoc />
+    public bool IsDisposed => disposed;
+
     /// <summary>
     /// Initializes a new instance of NivaraColumn with the specified storage
     /// </summary>
