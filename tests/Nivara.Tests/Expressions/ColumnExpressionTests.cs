@@ -336,4 +336,30 @@ public class ColumnExpressionTests
 
         Assert.That(result.GetColumnType("(Salary + 5)"), Is.EqualTo(typeof(double)));
     }
+
+    [Test]
+    public void IsNullExpression_ResultType_IsBool()
+    {
+        var expr = ColumnExpressions.IsNull(new ColumnReference("Name"));
+
+        Assert.That(expr.ResultType, Is.EqualTo(typeof(bool)));
+        Assert.That(expr.Name, Does.Contain("is null"));
+    }
+
+    [Test]
+    public void IsNotNullExpression_ResultType_IsBool()
+    {
+        var expr = ColumnExpressions.IsNotNull(new ColumnReference("Name"));
+
+        Assert.That(expr.ResultType, Is.EqualTo(typeof(bool)));
+        Assert.That(expr.Name, Does.Contain("is not null"));
+    }
+
+    [Test]
+    public void IsNullExpression_Validate_DelegatesToOperand()
+    {
+        var expr = ColumnExpressions.IsNull(new ColumnReference("Name"));
+
+        Assert.DoesNotThrow(() => expr.Validate(testSchema));
+    }
 }

@@ -148,6 +148,98 @@ public class TypedLinqTests
     }
 
     [Test]
+    public void Where_NullComparison_String_FiltersNullRows()
+    {
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "b" })));
+
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(1));
+        Assert.That(rows[0].Name, Is.Null);
+    }
+
+    [Test]
+    public void Where_NotNullComparison_String_FiltersNonNullRows()
+    {
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "b" })));
+
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name != null).ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(2));
+        Assert.That(rows.Select(r => r.Name), Is.EqualTo(new string[] { "a", "b" }));
+    }
+
+    [Test]
+    public void Where_NullComparison_IntNullable_FiltersNullRows()
+    {
+        using var frame = CreateNullableFrame();
+
+        var rows = frame.Query<NullableRow>().Where(r => r.Value == null).ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(1));
+        Assert.That(rows[0].Value, Is.Null);
+    }
+
+    [Test]
+    public void Where_NotNullComparison_IntNullable_FiltersNonNullRows()
+    {
+        using var frame = CreateNullableFrame();
+
+        var rows = frame.Query<NullableRow>().Where(r => r.Value != null).ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Where_NullComparison_AllNullColumn_ReturnsAllRows()
+    {
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { null!, null! })));
+
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Where_NullComparison_NoNullColumn_ReturnsNoRows()
+    {
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", "b" })));
+
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Where_NullComparison_ComposedWithAnd_Works()
+    {
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "b" })),
+            ("Age", NivaraColumnFactory.CreateFromNullable(new int?[] { 10, 20, null })));
+
+        var rows = frame.Query<NullableMixedRow>()
+            .Where(r => r.Name == null || r.Age == null)
+            .ToObjects();
+
+        Assert.That(rows.Count, Is.EqualTo(2));
+    }
+
+    sealed class NullableStringRow
+    {
+        public string? Name { get; set; }
+    }
+
+    sealed class NullableMixedRow
+    {
+        public string? Name { get; set; }
+        public int? Age { get; set; }
+    }
+
+    [Test]
     public void Where_MethodCall_FailsFast()
     {
         using var frame = CreatePeopleFrame();
