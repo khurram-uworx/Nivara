@@ -110,23 +110,53 @@ static class NivaraResourceManager
     }
 
     /// <summary>
-    /// Gets memory management recommendations for large dataset operations
+    /// Gets memory management recommendations for large dataset operations.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="estimatedDataSize"/> is compared against an available-memory figure and against
+    /// absolute thresholds scaled to megabytes. The available-memory figure defaults to
+    /// <see cref="GC.GetGCMemoryInfo"/>'s <c>TotalAvailableMemoryBytes</c> (a process/container-aware value,
+    /// <em>not</em> the managed heap size reported by <see cref="GC.GetTotalMemory(bool)"/>); pass an explicit
+    /// <paramref name="memoryBudgetBytes"/> to tie the advice to a caller-supplied budget such as
+    /// <see cref="Nivara.Execution.NivaraExecutionContext.MemoryBudget"/> (the streaming governor).
+    /// </para>
+    /// <para>
+    /// This is advisory heuristics only. The real, enforceable governor is
+    /// <see cref="Nivara.Execution.MemoryBudget"/> / <see cref="Nivara.Execution.NivaraExecutionContext.MemoryBudget"/>.
+    /// </para>
+    /// </remarks>
     /// <param name="estimatedDataSize">Estimated size of the dataset in bytes</param>
     /// <param name="operationType">The type of operation being performed</param>
+    /// <param name="memoryBudgetBytes">Optional caller-supplied memory budget in bytes. When null, the runtime's available memory is used.</param>
     /// <returns>Memory management recommendations</returns>
-    public static MemoryRecommendations GetMemoryRecommendations(long estimatedDataSize, string operationType)
+    public static MemoryRecommendations GetMemoryRecommendations(long estimatedDataSize, string operationType, long? memoryBudgetBytes = null)
     {
-        var availableMemory = GC.GetTotalMemory(false);
+        long availableMemory;
+        if (memoryBudgetBytes.HasValue && memoryBudgetBytes.Value > 0)
+        {
+            availableMemory = memoryBudgetBytes.Value;
+        }
+        else
+        {
+            var gcInfo = GC.GetGCMemoryInfo();
+            availableMemory = gcInfo.TotalAvailableMemoryBytes;
+            if (availableMemory <= 0)
+            {
+                availableMemory = 1024L * 1024 * 1024; // 1 GB fallback
+            }
+        }
+
         var recommendations = new List<string>();
         var warningLevel = MemoryWarningLevel.None;
 
         // Check if dataset is large relative to available memory
         var memoryRatio = (double)estimatedDataSize / availableMemory;
 
-        // Also consider absolute size thresholds for datasets
-        const long LARGE_DATASET_THRESHOLD = 20 * 1024; // 20KB (more appropriate for test data)
-        const long VERY_LARGE_DATASET_THRESHOLD = 100 * 1024; // 100KB
+        // Absolute size thresholds scaled to megabytes (production scale, not test-data scale).
+        const long SMALL_DATASET_THRESHOLD = 5 * 1024 * 1024; // 5 MB
+        const long LARGE_DATASET_THRESHOLD = 20 * 1024 * 1024; // 20 MB
+        const long VERY_LARGE_DATASET_THRESHOLD = 100 * 1024 * 1024; // 100 MB
 
         if (memoryRatio > 0.5 || estimatedDataSize > VERY_LARGE_DATASET_THRESHOLD)
         {
@@ -141,7 +171,7 @@ static class NivaraResourceManager
             recommendations.Add("Dataset is moderately large. Consider using lazy evaluation for better memory efficiency.");
             recommendations.Add("Apply column selection early to reduce memory usage.");
         }
-        else if (estimatedDataSize > 5 * 1024) // 5KB
+        else if (estimatedDataSize > SMALL_DATASET_THRESHOLD)
         {
             warningLevel = MemoryWarningLevel.Medium;
             recommendations.Add("Consider using lazy evaluation for better memory efficiency.");
@@ -287,7 +317,10 @@ public class MemoryRecommendations
     public long EstimatedMemoryUsage { get; init; }
 
     /// <summary>
-    /// Available memory in bytes
+    /// Available memory in bytes. Defaults to <see cref="GC.GetGCMemoryInfo"/>'s
+    /// <c>TotalAvailableMemoryBytes</c> (a process/container-aware figure), or the caller-supplied
+    /// budget when <see cref="NivaraResourceManager.GetMemoryRecommendations(long, string, long?)"/>
+    /// is invoked with one. This is <em>not</em> the managed heap size.
     /// </summary>
     public long AvailableMemory { get; init; }
 }

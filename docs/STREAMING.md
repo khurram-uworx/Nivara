@@ -570,6 +570,19 @@ await telemetry.ToFlux(chunkSize: 50_000)
 falling back to `Console.WriteLine`. All operators are zero-cost when not subscribed
 (no allocations until the pipeline is consumed).
 
+### Memory recommendations vs. the memory budget
+
+`NivaraFrame.GetMemoryRecommendations(string operationType, long? memoryBudgetBytes)` is **advisory
+heuristics**: it compares an estimated frame size against an available-memory figure (defaulting to
+`GC.GetGCMemoryInfo().TotalAvailableMemoryBytes`) and against megabyte-scale absolute thresholds
+(5 MB / 20 MB / 100 MB), and returns a warning level plus textual advice. It is intentionally
+conservative and does not enforce anything.
+
+The enforceable governor is `MemoryBudget` / `NivaraExecutionContext.MemoryBudget` (see sections above):
+it gates chunk allocation on the materializing path and derives chunk sizes on the streaming path.
+To keep advice aligned with the governor, pass the budget through:
+`frame.GetMemoryRecommendations(operationType, memoryBudgetBytes: context.MemoryBudget)`.
+
 ### Known limitations
 
 - **In-memory frames yield a single chunk.** `MemoryQuerySource.CanReadInChunks` is `false`,

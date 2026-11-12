@@ -18,7 +18,10 @@ namespace Nivara;
 public sealed class NivaraFrame : IFrame
 {
     /// <summary>
-    /// Estimates the memory usage of a column (rough approximation)
+    /// Estimates the memory usage of a column (rough, lower-bound approximation).
+    /// Includes the element payload and the null mask (1 byte per row when present).
+    /// String payloads are estimated at ~50 bytes per element; chunk/object overhead is approximated;
+    /// pooling and allocator overhead are not accounted for. Treat as a lower bound.
     /// </summary>
     /// <param name="column">The column to estimate</param>
     /// <returns>Estimated memory usage in bytes</returns>
@@ -293,7 +296,9 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <summary>
-    /// Estimates the total memory usage of this frame
+    /// Estimates the total memory usage of this frame (rough, lower-bound approximation).
+    /// Sums per-column estimates (which include null masks). Chunk overhead and frame-level
+    /// structures are approximated; pooling is not accounted for.
     /// </summary>
     /// <returns>Estimated memory usage in bytes</returns>
     internal long estimateFrameMemoryUsage()
@@ -1209,16 +1214,22 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <summary>
-    /// Gets memory management recommendations for operations on this frame
+    /// Gets memory management recommendations for operations on this frame.
     /// </summary>
+    /// <remarks>
+    /// Advisory heuristics only. The enforceable governor is
+    /// <see cref="Nivara.Execution.MemoryBudget"/> / <see cref="Nivara.Execution.NivaraExecutionContext.MemoryBudget"/>;
+    /// pass <paramref name="memoryBudgetBytes"/> to align advice with a caller-supplied budget.
+    /// </remarks>
     /// <param name="operationType">The type of operation being performed</param>
+    /// <param name="memoryBudgetBytes">Optional caller-supplied memory budget in bytes. When null, the runtime's available memory is used.</param>
     /// <returns>Memory management recommendations</returns>
-    public MemoryRecommendations GetMemoryRecommendations(string operationType = "general")
+    public MemoryRecommendations GetMemoryRecommendations(string operationType = "general", long? memoryBudgetBytes = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
         var estimatedSize = estimateFrameMemoryUsage();
-        return NivaraResourceManager.GetMemoryRecommendations(estimatedSize, operationType);
+        return NivaraResourceManager.GetMemoryRecommendations(estimatedSize, operationType, memoryBudgetBytes);
     }
 
     /// <inheritdoc />
