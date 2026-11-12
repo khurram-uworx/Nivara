@@ -1123,7 +1123,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Estimates the memory usage of this column
+    /// Estimates the memory usage of this column (rough, lower-bound approximation).
+    /// Includes the element payload and the null mask (1 byte per row when present).
     /// </summary>
     /// <returns>Estimated memory usage in bytes</returns>
     long estimateMemoryUsage()
