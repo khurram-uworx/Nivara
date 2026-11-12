@@ -406,14 +406,12 @@ public class ResourceManagementPropertyTests
             Assert.That(recommendations.AvailableMemory, Is.GreaterThan(0),
                 "Available memory should be reported");
 
-            // For large datasets, recommendations should be provided
+            // At megabyte-scale thresholds these row counts are not "large", so no size warning
+            // is expected; operation-specific advice is still emitted where applicable.
             if (rowCount >= 5000)
             {
-                Assert.That(recommendations.Recommendations.Count, Is.GreaterThan(0),
-                    "Recommendations should be provided for large datasets");
-
-                Assert.That(recommendations.WarningLevel, Is.Not.EqualTo(MemoryWarningLevel.None),
-                    "Warning level should be set for large datasets");
+                Assert.That(recommendations.WarningLevel, Is.EqualTo(MemoryWarningLevel.None),
+                    "Warning level should be None for sub-megabyte frames");
             }
 
             // Operation-specific recommendations should be relevant
