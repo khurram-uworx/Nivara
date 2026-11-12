@@ -4,6 +4,28 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ## [1.5.0] - 2026-11-07
 
+### Breaking changes (migration)
+
+Nivara is pre-2.0 and 1.5.0 removes/renames several public types without an `[Obsolete]`
+deprecation window. Migrate as follows:
+
+- `DataFrameSchemaValidationException` (removed) → catch `QuerySchemaValidationException`
+  (query engine) or `DataSchemaValidationException` (I/O) instead.
+  `catch (DataFrameSchemaValidationException)` → `catch (QuerySchemaValidationException)` /
+  `catch (DataSchemaValidationException)`.
+- `SchemaValidationException` (ambiguous, removed) → `QuerySchemaValidationException` (query
+  engine, ~60 call sites) or `DataSchemaValidationException` (Parquet reader/writer).
+- `NivaraColumn` (non-generic factory, renamed) → `NivaraColumnFactory`.
+  `NivaraColumn.CreateFromNullable<T>(values)` → `NivaraColumnFactory.CreateFromNullable<T>(values)`.
+- Legacy `ExpressionEvaluator` (removed) → `FusedExpressionEvaluator`.
+  `new ExpressionEvaluator()` → `new FusedExpressionEvaluator()`.
+- Dead AutoDiff exceptions removed (`GradientComputationException`, `CircularDependencyException`,
+  `InvalidBackwardCallException`, `TypeValidationException`) → `AutoGradException` or the standard
+  `InvalidOperationException` / `ArgumentException` thrown by the hot paths.
+- Array-based tensor conversions removed → span-based helpers in `TensorInteropExtensions`
+  (`FromTensor`, `FromTensorSpan`, `ToTensor`, `FlattenFromTensor`, `ReshapeToTensor`).
+- ILGPU removed from the shipped stack → Silk (OpenCL) backend (`Nivara.Silk`). See `docs/SILK.md`.
+
 ### Added
 
 - **Silk (OpenCL) GPU backend + BERT/AI layer are first-class** — moved from samples into
