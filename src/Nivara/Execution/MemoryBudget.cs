@@ -96,12 +96,17 @@ public sealed class MemoryBudget : IDisposable
         if (releasedBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(releasedBytes), releasedBytes, "Released bytes cannot be negative.");
 
+        List<CancellationTokenRegistration>? toDispose = null;
         lock (gate)
         {
             if (disposed)
                 return;
 
-            current = Math.Max(0, current - releasedBytes);
+            if (releasedBytes > current)
+                throw new InvalidOperationException(
+                    $"Released bytes ({releasedBytes}) exceed current usage ({current}); over-release is not allowed.");
+
+            current -= releasedBytes;
 
             // Wake waiters in FIFO order; stop when the next request no longer fits so
             // that a large waiter cannot be starved by a stream of small ones.
@@ -113,7 +118,11 @@ public sealed class MemoryBudget : IDisposable
                 {
                     current += waiter.RequestedBytes;
                     waiters.RemoveAt(i);
-                    waiter.Registration?.Dispose();
+                    if (waiter.Registration.HasValue)
+                    {
+                        toDispose ??= new List<CancellationTokenRegistration>();
+                        toDispose.Add(waiter.Registration.Value);
+                    }
                     waiter.Completion.TrySetResult();
                 }
                 else
@@ -122,24 +131,42 @@ public sealed class MemoryBudget : IDisposable
                 }
             }
         }
+
+        // Dispose registrations outside the lock: a registration's callback may need
+        // the gate, and CancellationTokenRegistration.Dispose() waits for an in-flight
+        // callback to finish.
+        if (toDispose != null)
+        {
+            foreach (var registration in toDispose)
+                registration.Dispose();
+        }
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
+        List<CancellationTokenRegistration>? toDispose = null;
         lock (gate)
         {
             if (disposed)
                 return;
             disposed = true;
 
+            toDispose = new List<CancellationTokenRegistration>(waiters.Count);
             foreach (var waiter in waiters)
             {
-                waiter.Registration?.Dispose();
+                if (waiter.Registration.HasValue)
+                    toDispose.Add(waiter.Registration.Value);
                 waiter.Completion.TrySetException(new ObjectDisposedException(nameof(MemoryBudget)));
             }
             waiters.Clear();
             current = 0;
+        }
+
+        if (toDispose != null)
+        {
+            foreach (var registration in toDispose)
+                registration.Dispose();
         }
     }
 
