@@ -22,6 +22,12 @@ public interface IColumn : IDisposable
     Type ElementType { get; }
 
     /// <summary>
+    /// Gets a value indicating whether this column has been disposed.
+    /// Used for debug-only ownership assertions.
+    /// </summary>
+    bool IsDisposed { get; }
+
+    /// <summary>
     /// Gets the element at the specified index as an object
     /// </summary>
     /// <param name="index">The zero-based index of the element to get</param>

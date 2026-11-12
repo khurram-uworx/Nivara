@@ -195,6 +195,7 @@ public sealed class NivaraFrame : IFrame
 
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;
+    readonly HashSet<IColumn> ownedColumns = new(ReferenceEqualityComparer.Instance);
     bool disposed;
 
     /// <summary>
@@ -210,6 +211,11 @@ public sealed class NivaraFrame : IFrame
     /// <exception cref="ArgumentNullException">Thrown when namedColumns is null</exception>
     /// <exception cref="ArgumentException">Thrown when columns have different lengths or invalid names</exception>
     public NivaraFrame(IEnumerable<(string Name, IColumn Column)> namedColumns)
+        : this(namedColumns, true)
+    {
+    }
+
+    public NivaraFrame(IEnumerable<(string Name, IColumn Column)> namedColumns, bool ownsColumns)
     {
         if (namedColumns == null)
             throw new ArgumentNullException(nameof(namedColumns));
@@ -266,10 +272,29 @@ public sealed class NivaraFrame : IFrame
         columns = columnDict;
         schema = new Schema(schemaColumns);
 
+        if (ownsColumns)
+        {
+            foreach (var column in columnDict.Values)
+                ownedColumns.Add(column);
+        }
+
         // Track this frame for resource management only when opted in
         if (NivaraResourceManager.IsEnabled)
         {
             NivaraResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
+        }
+    }
+
+    /// <summary>
+    /// Initializes a new instance owning only the specified columns (borrowing the rest).
+    /// </summary>
+    internal NivaraFrame(IEnumerable<(string Name, IColumn Column)> namedColumns, IEnumerable<IColumn> ownedColumns)
+        : this(namedColumns, false)
+    {
+        if (ownedColumns != null)
+        {
+            foreach (var column in ownedColumns)
+                this.ownedColumns.Add(column);
         }
     }
 
@@ -830,7 +855,7 @@ public sealed class NivaraFrame : IFrame
     /// <param name="column">The column to add</param>
     /// <returns>A new NivaraFrame with the additional column</returns>
     /// <exception cref="ArgumentException">Thrown when the column name already exists or column length doesn't match</exception>
-    public NivaraFrame WithColumn(string name, IColumn column)
+    public NivaraFrame WithColumn(string name, IColumn column, bool ownsColumn = true)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -855,7 +880,9 @@ public sealed class NivaraFrame : IFrame
         var newColumns = columns.Concat(new[] { new KeyValuePair<string, IColumn>(name, column) });
         var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
 
-        return new NivaraFrame(namedColumns);
+        if (ownsColumn)
+            return new NivaraFrame(namedColumns, new[] { column });
+        return new NivaraFrame(namedColumns, false);
     }
 
     /// <summary>
@@ -881,7 +908,7 @@ public sealed class NivaraFrame : IFrame
         var newColumns = columns.Where(kvp => !string.Equals(kvp.Key, name, StringComparison.OrdinalIgnoreCase));
         var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
 
-        return new NivaraFrame(namedColumns);
+        return new NivaraFrame(namedColumns, false);
     }
 
     /// <summary>
@@ -925,7 +952,7 @@ public sealed class NivaraFrame : IFrame
         }
 
         var selectedColumns = selectedNames.Select(name => (name, columns[name]));
-        return new NivaraFrame(selectedColumns);
+        return new NivaraFrame(selectedColumns, false);
     }
 
     /// <summary>
@@ -1051,7 +1078,7 @@ public sealed class NivaraFrame : IFrame
         {
             // Return copy of entire frame
             var allColumns = columns.Select(kvp => (kvp.Key, kvp.Value));
-            return new NivaraFrame(allColumns);
+            return new NivaraFrame(allColumns, false);
         }
 
         // Slice all columns from count to end
@@ -1143,7 +1170,7 @@ public sealed class NivaraFrame : IFrame
         if (indices.SequenceEqual(Enumerable.Range(0, RowCount)))
         {
             var identityColumns = columns.Select(kvp => (kvp.Key, kvp.Value));
-            return new NivaraFrame(identityColumns);
+            return new NivaraFrame(identityColumns, false);
         }
 
         // Reorder all columns using the indices
@@ -1233,6 +1260,13 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A frame owns only the columns it created. Columns borrowed from another frame
+    /// (via <c>SelectColumns</c>, <c>WithoutColumn</c>, etc.) are shared and are NOT
+    /// disposed here, so disposing a derived frame never invalidates its source.
+    /// Disposing an owning frame disposes its owned columns; any borrower of those
+    /// columns becomes invalid.
+    /// </remarks>
     public void Dispose()
     {
         if (!disposed)
@@ -1240,10 +1274,15 @@ public sealed class NivaraFrame : IFrame
             // Untrack from resource manager
             NivaraResourceManager.UntrackResource(this);
 
-            // Dispose all columns
+            // Dispose only owned columns
             foreach (var column in columns.Values)
             {
-                column?.Dispose();
+                if (ownedColumns.Contains(column))
+                {
+                    System.Diagnostics.Debug.Assert(!column.IsDisposed,
+                        "Column owned by this frame was already disposed by another owner");
+                    column?.Dispose();
+                }
             }
             disposed = true;
         }

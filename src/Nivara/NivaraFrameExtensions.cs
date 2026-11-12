@@ -153,7 +153,7 @@ public static partial class NivaraFrameExtensions
             selectedColumns.Add((finalName, column));
         }
 
-        return new NivaraFrame(selectedColumns);
+        return new NivaraFrame(selectedColumns, false);
     }
 
     /// <summary>
@@ -229,7 +229,7 @@ public static partial class NivaraFrameExtensions
 
         // Create new frame with all columns except the old one, then add with new name
         var resultFrame = frame.WithoutColumn(oldName);
-        return resultFrame.WithColumn(newName, column);
+        return resultFrame.WithColumn(newName, column, ownsColumn: false);
     }
 
     /// <summary>
@@ -1252,6 +1252,7 @@ public static partial class NivaraFrameExtensions
 
         // Build a new list of columns, normalizing as needed
         var newColumns = new List<(string Name, IColumn Column)>();
+        var ownedColumns = new List<IColumn>();
 
         foreach (var columnName in frame.ColumnNames)
         {
@@ -1263,6 +1264,7 @@ public static partial class NivaraFrameExtensions
                     throw new NotSupportedException($"Normalization for column '{columnName}' of type {frame.Schema.GetColumnType(columnName)} is not supported. Only INumber<T> columns can be normalized.");
 
                 resultColumn = NormalizeColumn(frame, columnName);
+                ownedColumns.Add(resultColumn);
             }
             else
             {
@@ -1272,7 +1274,7 @@ public static partial class NivaraFrameExtensions
             newColumns.Add((columnName, resultColumn));
         }
 
-        return new NivaraFrame(newColumns);
+        return new NivaraFrame(newColumns, ownedColumns);
     }
 
     /// <summary>
