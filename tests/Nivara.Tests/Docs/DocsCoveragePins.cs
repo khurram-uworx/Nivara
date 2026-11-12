@@ -80,6 +80,8 @@ internal static class DocsCoveragePins
     /// The BLAS provider (branch khurram/1117) adds two: the `OpenBlasInterop.cs`
     /// move to `src/Nivara.Extensions/Blas/` carries the `docs/BLAS-MKL.md` reference, and
     /// `src/Nivara/GemmProvider.cs` adds one: 260 + 2 = 262.
+    /// Issue #1163 adds one backticked `docs/SILK.md` reference in `CHANGELOG.md`
+    /// (the 1.5.0 breaking-changes migration note): 265 + 1 = 266.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 265;
+    internal const int ExpectedDocumentReferenceCount = 266;
 }
