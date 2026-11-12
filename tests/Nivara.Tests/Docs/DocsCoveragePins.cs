@@ -44,8 +44,9 @@ internal static class DocsCoveragePins
     /// plus the new <c>NIVARACHAT-EVALS.md</c>). #868 adds <c>docs/METRICS.md</c>: 56 + 1 = 57.
     /// #1064 adds <c>docs/adr/009-metrics-mergeable-accumulator.md</c>: 57 + 1 = 58.
     /// #1077 adds <c>docs/adr/010-chunk-count-growth-policy-on-concat.md</c>: 58 + 1 = 59.
+    /// The 2026-11-12 library review adds <c>docs/REVIEW-2026-11-12.md</c>: 59 + 1 = 60.
     /// </remarks>
-    internal const int ExpectedDocumentCount = 59;
+    internal const int ExpectedDocumentCount = 60;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
