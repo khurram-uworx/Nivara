@@ -26,6 +26,13 @@ namespace Nivara.Storage;
 /// internal <c>AsWritableSpan()</c> is the deliberate exception: it exposes <c>data</c>
 /// writable for the AutoDiff optimizers' in-place parameter updates and does not invalidate
 /// the cache — callers of that span accept that every hosted view tracks the writes.</para>
+/// <para><b>Thread safety.</b> Concurrent calls to <see cref="AsTensor"/> and
+/// <see cref="TryGetHashCodes"/> are safe and return the same cached instance/contents; the
+/// cache is published through interlocked operations so a reader never observes a partially
+/// constructed value. Other members — including <c>AsWritableSpan()</c>, <see cref="Slice"/>,
+/// and <see cref="Dispose"/> — are not safe to use concurrently with reads or writes and
+/// must be externally synchronized. "Immutable data" and "safe lazy publication" are
+/// separate claims.</para>
 /// </remarks>
 sealed class ColumnStorage<T> : IColumnStorage<T>
 {
@@ -35,9 +42,9 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     readonly bool[]? nullMask;
     readonly int maskStart;
     bool disposed;
+    // Published only via Volatile/LazyInitializer (see AsTensor / TryGetHashCodes).
     Tensor<T>? tensorView;
     int[]? hashCodes;
-    readonly object hashLock = new();
 
     /// <summary>
     /// Initializes a new instance of ColumnStorage with the specified values
@@ -238,18 +245,24 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        if (tensorView is not null)
-            return tensorView;
+        var view = Volatile.Read(ref tensorView);
+        if (view is not null)
+            return view;
 
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>())
             throw new InvalidOperationException(
                 $"Cannot create a Tensor view for non-unmanaged type {typeof(T).Name}; " +
                 "ColumnStorage<T>.AsTensor() requires unmanaged T.");
 
-        tensorView = dataLength == 0
-            ? Tensor.Create<T>([], [], [])
-            : Tensor.Create(data, dataStart, [dataLength], [1]);
-        return tensorView;
+        return LazyInitializer.EnsureInitialized(ref tensorView, () =>
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var result = dataLength == 0
+                ? Tensor.Create<T>([], [], [])
+                : Tensor.Create(data, dataStart, [dataLength], [1]);
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return result;
+        });
     }
 
     /// <inheritdoc />
@@ -262,33 +275,22 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
             return false;
         }
 
-        if (hashCodes is null)
+        var computed = LazyInitializer.EnsureInitialized(ref hashCodes, () =>
         {
-            lock (hashLock)
+            var result = new int[dataLength];
+            var mask = NullMask; // ReadOnlySpan<bool>, length dataLength or empty
+            var stringData = (string[])(object)data;
+            for (int i = 0; i < dataLength; i++)
             {
-                if (hashCodes is null)
-                {
-                    var computed = new int[dataLength];
-                    var mask = NullMask; // ReadOnlySpan<bool>, length dataLength or empty
-                    var stringData = (string[])(object)data;
-                    for (int i = 0; i < dataLength; i++)
-                    {
-                        bool isNull = mask.Length > 0 && i < mask.Length && mask[i];
-                        if (isNull)
-                        {
-                            computed[i] = 0;
-                        }
-                        else
-                        {
-                            computed[i] = stringData[dataStart + i]?.GetHashCode() ?? 0;
-                        }
-                    }
-                    hashCodes = computed;
-                }
+                bool isNull = mask.Length > 0 && i < mask.Length && mask[i];
+                result[i] = isNull
+                    ? 0
+                    : stringData[dataStart + i]?.GetHashCode() ?? 0;
             }
-        }
+            return result;
+        });
 
-        hashes = hashCodes.AsSpan();
+        hashes = computed.AsSpan();
         return true;
     }
 
@@ -330,7 +332,7 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
         if (!disposed)
         {
             disposed = true;
-            tensorView = null;
+            Volatile.Write(ref tensorView, null);
         }
     }
 

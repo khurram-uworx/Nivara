@@ -82,7 +82,7 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
     /// <summary>
     /// Gets a value indicating whether the contiguous copy has been materialised.
     /// </summary>
-    internal bool IsMaterialized => materializedData is not null;
+    internal bool IsMaterialized => Volatile.Read(ref materializedData) is not null;
 
     /// <inheritdoc />
     public int Length
@@ -234,8 +234,8 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
 
         lock (materializeLock)
         {
-            materializedData = null;
-            materializedMask = null;
+            Volatile.Write(ref materializedData, null);
+            Volatile.Write(ref materializedMask, null);
         }
 
         // Chunks are views over buffers owned elsewhere; dropping the references is all this type owns.
@@ -293,12 +293,12 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
 
     void EnsureMaterialized()
     {
-        if (materializedData is not null)
+        if (Volatile.Read(ref materializedData) is not null)
             return;
 
         lock (materializeLock)
         {
-            if (materializedData is not null)
+            if (Volatile.Read(ref materializedData) is not null)
                 return;
 
             var data = new T[length];
@@ -320,8 +320,8 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
                 offset += storage.Length;
             }
 
-            materializedMask = mask;
-            materializedData = data;
+            Volatile.Write(ref materializedMask, mask);
+            Volatile.Write(ref materializedData, data);
         }
     }
 
