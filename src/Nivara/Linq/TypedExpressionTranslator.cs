@@ -90,6 +90,34 @@ sealed class TypedExpressionTranslator
         if (binary.NodeType == ExpressionType.Add && (binary.Left.Type == typeof(string) || binary.Right.Type == typeof(string)))
             throw Unsupported(binary, "string concatenation is not supported");
 
+        // Null comparisons are handled structurally rather than by type coercion: a null
+        // constant on either side rewrites to an IsNull/IsNotNull node (issue #1157).
+        if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
+        {
+            bool leftIsNull = binary.Left is ConstantExpression cLeft && cLeft.Value == null;
+            bool rightIsNull = binary.Right is ConstantExpression cRight && cRight.Value == null;
+
+            if (leftIsNull || rightIsNull)
+            {
+                var memberExpr = (leftIsNull ? binary.Right : binary.Left) as MemberExpression;
+                if (memberExpr?.Member is PropertyInfo propertyInfo)
+                {
+                    var propertyType = propertyInfo.PropertyType;
+                    var underlying = Nullable.GetUnderlyingType(propertyType);
+                    if (propertyType.IsValueType && underlying is null)
+                    {
+                        throw Unsupported(binary,
+                            "null comparison is not supported on a non-nullable value-type property");
+                    }
+                }
+
+                var operand = Translate(leftIsNull ? binary.Right : binary.Left);
+                return binary.NodeType == ExpressionType.Equal
+                    ? new IsNullExpression(operand)
+                    : new IsNotNullExpression(operand);
+            }
+        }
+
         var left = Translate(binary.Left);
         var right = Translate(binary.Right);
 

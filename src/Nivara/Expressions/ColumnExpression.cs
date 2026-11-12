@@ -822,6 +822,76 @@ internal sealed class ConditionalExpression : ColumnExpression
 }
 
 /// <summary>
+/// Represents a null test: true where the operand is null.
+/// </summary>
+internal sealed class IsNullExpression : ColumnExpression
+{
+    /// <summary>
+    /// Initializes a new instance of IsNullExpression
+    /// </summary>
+    /// <param name="operand">The expression to test for null</param>
+    public IsNullExpression(ColumnExpression operand)
+    {
+        Operand = operand ?? throw new ArgumentNullException(nameof(operand));
+    }
+
+    /// <summary>
+    /// Gets the tested operand
+    /// </summary>
+    public ColumnExpression Operand { get; }
+
+    /// <inheritdoc />
+    public override Type ResultType => typeof(bool);
+
+    /// <inheritdoc />
+    public override string Name => $"({Operand.Name} is null)";
+
+    /// <inheritdoc />
+    public override void Validate(Schema schema)
+    {
+        Operand.Validate(schema);
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => Name;
+}
+
+/// <summary>
+/// Represents a non-null test: true where the operand is not null.
+/// </summary>
+internal sealed class IsNotNullExpression : ColumnExpression
+{
+    /// <summary>
+    /// Initializes a new instance of IsNotNullExpression
+    /// </summary>
+    /// <param name="operand">The expression to test for non-null</param>
+    public IsNotNullExpression(ColumnExpression operand)
+    {
+        Operand = operand ?? throw new ArgumentNullException(nameof(operand));
+    }
+
+    /// <summary>
+    /// Gets the tested operand
+    /// </summary>
+    public ColumnExpression Operand { get; }
+
+    /// <inheritdoc />
+    public override Type ResultType => typeof(bool);
+
+    /// <inheritdoc />
+    public override string Name => $"({Operand.Name} is not null)";
+
+    /// <inheritdoc />
+    public override void Validate(Schema schema)
+    {
+        Operand.Validate(schema);
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => Name;
+}
+
+/// <summary>
 /// Global function for creating column references
 /// </summary>
 public static class ColumnExpressions
@@ -865,6 +935,26 @@ public static class ColumnExpressions
     public static ColumnExpression Not(ColumnExpression operand)
     {
         return new NotExpression(operand);
+    }
+
+    /// <summary>
+    /// Creates a null-test expression: true where the operand is null.
+    /// </summary>
+    /// <param name="operand">The expression to test for null</param>
+    /// <returns>An is-null expression</returns>
+    public static ColumnExpression IsNull(ColumnExpression operand)
+    {
+        return new IsNullExpression(operand);
+    }
+
+    /// <summary>
+    /// Creates a non-null-test expression: true where the operand is not null.
+    /// </summary>
+    /// <param name="operand">The expression to test for non-null</param>
+    /// <returns>An is-not-null expression</returns>
+    public static ColumnExpression IsNotNull(ColumnExpression operand)
+    {
+        return new IsNotNullExpression(operand);
     }
 
     /// <summary>
