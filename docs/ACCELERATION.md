@@ -192,9 +192,14 @@ band. Shapes: MiniLM (seq 128, hidden 384, 12 heads, headDim 32) and DistilBERT 
 64; headDim drives the compiled local-memory bound). Timing is best-of-N after warmups and is reported, not a
 correctness gate. An unavailable device or program exits `UNBUILT` (10).
 
-CLI allow-list (`SilkModes`): `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, `laya` with empty, `benchmark`,
-or `compare`; Qwen with `""`, `benchmark`, or `tools`; `mobilenet_v2`, `resnet18`, and `modernbert` also carry `compare_diag` (routed to the CPU diagnostic path). The visitor-facing sample no longer exposes these commands (#1051); use the performance harness (`--inference-compare` / `--inference-compare-diag`) to run them (issue #1097). Checks run in this order:
-mutual exclusion, model scope before model-file lookup, F32-only, and no `--gpu` alias.
+CLI allow-list (`SilkModes`): `minilm` with empty, `benchmark`, or `similarity`; `distilbert` with empty or `benchmark`;
+`distilbert_sst` with empty, `benchmark`, or `predict`; `modernbert` and `laya` with empty or `benchmark`; `smollm`
+with empty, `benchmark`, or `generate`; `qwen` with empty, `benchmark`, `tools`, or `distill`; `mobilenet_v2` and
+`resnet18` with empty or `benchmark`. The visitor-facing sample does not expose `compare`/`compare_diag` (#1051); the
+performance harness runs the **CPU** compares (`--inference-compare` / `--inference-compare-diag`), and has no Silk
+variant (issue #1097). Checks run in this order:
+model scope before model-file lookup, then F32-only. There is no `--gpu`/`--ilgpu` alias: the old flag went
+with the ILGPU backend in 1.5.0, so a stale invocation falls through to the mode allow-list and is refused.
 
 ## 7. Open work
 

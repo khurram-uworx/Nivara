@@ -49,11 +49,11 @@ Two pre-existing core bugs were found and fixed, both now regression-tested:
 
 ## Verification
 
-`compare` PASSED against HuggingFace 5.14.1 (`attn_implementation: "sdpa"`), 128 padded positions / 26 valid: **128/128 token ids identical**, `maxAbs 1.62e-5`, `meanAbs 9.22e-7`, `maxRel 6.09e-4`, **cosine 1.0000000000**, 0 non-finite values on either side in both the valid and padding regions (gate bound `|diff| <= 1e-3·(1 + |ref|)`).
+`--inference-compare modernbert` PASSED against HuggingFace 5.14.1 (`attn_implementation: "sdpa"`), 128 padded positions / 26 valid: **128/128 token ids identical**, `maxAbs 1.62e-5`, `meanAbs 9.22e-7`, `maxRel 6.09e-4`, **cosine 1.0000000000**, 0 non-finite values on either side in both the valid and padding regions (gate bound `|diff| <= 1e-3·(1 + |ref|)`).
 
 Re-run after the encoder norms switched from an unloaded zero Beta to `LayerNorm<T>(..., bias: false)`. The gate reproduced that baseline at the reported precision: printed max abs diff `0.00001621`, mean abs diff `0.0000009215`, max rel diff `0.00060944`, cosine `1.0000000000`. The zero-Beta emulation and the real bias-free norm agree.
 
-`compare_diag` matches at every stage from embeddings through layer 26 (cosine 1.000000, max|diff| ≤ 5.9e-3); the raw layer-27 output is absmax 25730.7 vs HF 25741.3 (0.04%), and the final norm is back to `max|diff| 1.6e-5`.
+`--inference-compare-diag modernbert` matches at every stage from embeddings through layer 26 (cosine 1.000000, max|diff| ≤ 5.9e-3); the raw layer-27 output is absmax 25730.7 vs HF 25741.3 (0.04%), and the final norm is back to `max|diff| 1.6e-5`.
 
 ## Performance
 
@@ -68,7 +68,7 @@ Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates shor
 
 ## GPU path
 
-`ModernBertGpuRunner` was originally the GPU runner (issue #449; backend removed in 1.5.0). `modernbert --silk` is the same contract on the hand-authored OpenCL backend: F32 only, modes `default` / `benchmark` / `compare`, the band inside the kernel, and the same 4096 benchmark lengths. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry. `modernbert --silk compare` passes (AC, 2026-10-13) at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the same figures as the ILGPU gate.
+`ModernBertGpuRunner` was originally the GPU runner (issue #449; backend removed in 1.5.0). `modernbert --silk` is the same contract on the hand-authored OpenCL backend: F32 only, modes `default` / `benchmark`, the band inside the kernel, and the same 4096 benchmark lengths. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry. The Silk-vs-CPU compare (`InferenceCompare.ModernBertCompareGpu`, an entry point rather than a CLI mode — see [SILK.md](SILK.md)) passes (AC, 2026-10-13) at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the same figures as the ILGPU gate.
 
 The gate is GPU-vs-CPU in-process (no PyTorch fixture needed). Fixture seqLen 128, 26 valid positions:
 

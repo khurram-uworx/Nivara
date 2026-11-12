@@ -27,10 +27,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
-    <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.11.0" />
+    <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="11.0.0" />
     <PackageReference Include="OllamaSharp" Version="5.5.2" />
   </ItemGroup>
 

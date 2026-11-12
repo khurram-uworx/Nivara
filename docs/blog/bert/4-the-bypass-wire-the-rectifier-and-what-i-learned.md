@@ -220,7 +220,7 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
    "which block moved the numbers?" Methodology:
    1. Generate a fixed input fixture once (`python samples/NivaraInference/Python/generate_input.py`).
    2. Run the reference (PyTorch) and the port on identical inputs.
-   3. Diff **layer by layer** (max abs diff + cosine) — the sample has a `compare_diag`
+   3. Diff **layer by layer** (max abs diff + cosine) — the sample had a `compare_diag`
       mode for vision models and `compare` modes for MiniLM/DistilBERT.
    4. Bisect to the first layer whose diff exceeds tolerance; fix and re-run.
    This is how the GELU/ReLU bug (logit drift ~0.05) and the ε issue surfaced. Never
