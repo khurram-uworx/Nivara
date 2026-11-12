@@ -113,6 +113,9 @@ var rows = frame.Query<Person>()
     .ToObjects();
 ```
 
+Null tests are written directly against a (possibly nullable) property: `Where(p => p.Name == null)` and
+`Where(p => p.Name != null)`. The comparison is lowered to an `IsNull`/`IsNotNull` node rather than a
+value comparison, so it works for reference types and nullable value types (`int?`, `DateTime?`).
 ### Select
 
 ```csharp

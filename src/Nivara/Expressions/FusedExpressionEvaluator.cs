@@ -185,6 +185,12 @@ sealed class FusedExpressionEvaluator
                 CollectColumnReferences(comparison.Left, references);
                 CollectColumnReferences(comparison.Right, references);
                 break;
+            case IsNullExpression isNull:
+                CollectColumnReferences(isNull.Operand, references);
+                break;
+            case IsNotNullExpression isNotNull:
+                CollectColumnReferences(isNotNull.Operand, references);
+                break;
             case NotExpression not:
                 CollectColumnReferences(not.Operand, references);
                 break;
@@ -216,6 +222,24 @@ sealed class FusedExpressionEvaluator
         {
             var synthetic = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
             expression = HydrateWindows(expression, input, synthetic);
+
+            if (synthetic.Count > 0)
+            {
+                var combined = new Dictionary<string, IColumn>(input, StringComparer.OrdinalIgnoreCase);
+                foreach (var kvp in synthetic)
+                    combined[kvp.Key] = kvp.Value;
+                input = combined;
+            }
+        }
+
+        // Hydrate null-check expressions (issue #1157): each IsNull/IsNotNull node is materialized
+        // into a null-free boolean column derived from the operand's leaf null masks, so the rest of
+        // the fused/compiled/fallback machinery (which assumes SQL-like masked-false semantics) is
+        // unaffected and composition with && / || keeps correct masks.
+        if (ContainsNullCheckExpression(expression))
+        {
+            var synthetic = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            expression = HydrateNullChecks(expression, input, synthetic);
 
             if (synthetic.Count > 0)
             {
@@ -372,6 +396,10 @@ sealed class FusedExpressionEvaluator
                 return ContainsWindowExpression(binary.Left) || ContainsWindowExpression(binary.Right);
             case ComparisonExpression comparison:
                 return ContainsWindowExpression(comparison.Left) || ContainsWindowExpression(comparison.Right);
+            case IsNullExpression isNull:
+                return ContainsWindowExpression(isNull.Operand);
+            case IsNotNullExpression isNotNull:
+                return ContainsWindowExpression(isNotNull.Operand);
             case NotExpression not:
                 return ContainsWindowExpression(not.Operand);
             case ConditionalExpression conditional:
@@ -409,6 +437,12 @@ sealed class FusedExpressionEvaluator
             case ComparisonExpression comparison:
                 return new ComparisonExpression(comparison.Operator, HydrateWindows(comparison.Left, input, synthetic), HydrateWindows(comparison.Right, input, synthetic));
 
+            case IsNullExpression isNull:
+                return new IsNullExpression(HydrateWindows(isNull.Operand, input, synthetic));
+
+            case IsNotNullExpression isNotNull:
+                return new IsNotNullExpression(HydrateWindows(isNotNull.Operand, input, synthetic));
+
             case NotExpression not:
                 return new NotExpression(HydrateWindows(not.Operand, input, synthetic));
 
@@ -421,6 +455,123 @@ sealed class FusedExpressionEvaluator
             default:
                 return node;
         }
+    }
+
+    /// <summary>
+    /// Gets whether the expression contains a null-check (IsNull/IsNotNull) node anywhere.
+    /// </summary>
+    internal static bool ContainsNullCheckExpression(ColumnExpression node)
+    {
+        switch (node)
+        {
+            case IsNullExpression isNull:
+                return true || ContainsNullCheckExpression(isNull.Operand);
+            case IsNotNullExpression isNotNull:
+                return true || ContainsNullCheckExpression(isNotNull.Operand);
+            case ScalarExpression scalar:
+                return ContainsNullCheckExpression(scalar.Column);
+            case BinaryExpression binary:
+                return ContainsNullCheckExpression(binary.Left) || ContainsNullCheckExpression(binary.Right);
+            case ComparisonExpression comparison:
+                return ContainsNullCheckExpression(comparison.Left) || ContainsNullCheckExpression(comparison.Right);
+            case NotExpression not:
+                return ContainsNullCheckExpression(not.Operand);
+            case ConditionalExpression conditional:
+                return ContainsNullCheckExpression(conditional.Test)
+                    || ContainsNullCheckExpression(conditional.TrueValue)
+                    || ContainsNullCheckExpression(conditional.FalseValue);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Rewrites the tree, replacing each IsNull/IsNotNull node with a reference to a synthetic
+    /// boolean column derived from the operand's leaf null masks.
+    /// </summary>
+    ColumnExpression HydrateNullChecks(ColumnExpression node, IReadOnlyDictionary<string, IColumn> input, Dictionary<string, IColumn> synthetic)
+    {
+        switch (node)
+        {
+            case IsNullExpression isNull:
+                {
+                    var result = EvaluateNullCheckColumn(isNull.Operand, input, false);
+                    var name = NextSyntheticName(input, synthetic);
+                    synthetic[name] = result;
+                    return new ColumnReference(name, typeof(bool));
+                }
+
+            case IsNotNullExpression isNotNull:
+                {
+                    var result = EvaluateNullCheckColumn(isNotNull.Operand, input, true);
+                    var name = NextSyntheticName(input, synthetic);
+                    synthetic[name] = result;
+                    return new ColumnReference(name, typeof(bool));
+                }
+
+            case ScalarExpression scalar:
+                return new ScalarExpression(scalar.Operator, HydrateNullChecks(scalar.Column, input, synthetic), scalar.Scalar);
+
+            case BinaryExpression binary:
+                return new BinaryExpression(binary.Operator, HydrateNullChecks(binary.Left, input, synthetic), HydrateNullChecks(binary.Right, input, synthetic));
+
+            case ComparisonExpression comparison:
+                return new ComparisonExpression(comparison.Operator, HydrateNullChecks(comparison.Left, input, synthetic), HydrateNullChecks(comparison.Right, input, synthetic));
+
+            case NotExpression not:
+                return new NotExpression(HydrateNullChecks(not.Operand, input, synthetic));
+
+            case ConditionalExpression conditional:
+                return new ConditionalExpression(
+                    HydrateNullChecks(conditional.Test, input, synthetic),
+                    HydrateNullChecks(conditional.TrueValue, input, synthetic),
+                    HydrateNullChecks(conditional.FalseValue, input, synthetic));
+
+            default:
+                return node;
+        }
+    }
+
+    /// <summary>
+    /// Computes a boolean column that is true where the operand expression is null (or its
+    /// negation). Nullness is the OR of the null masks of the operand's leaf columns; a literal
+    /// operand is never null.
+    /// </summary>
+    static NivaraColumn<bool> EvaluateNullCheckColumn(ColumnExpression operand, IReadOnlyDictionary<string, IColumn> input, bool negate)
+    {
+        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectColumnReferences(operand, refs);
+
+        var columns = new List<IColumn>();
+        foreach (var name in refs)
+        {
+            if (input.TryGetValue(name, out var column))
+                columns.Add(column);
+        }
+
+        int length;
+        if (columns.Count > 0)
+            length = columns[0].Length;
+        else
+            length = input.Values.FirstOrDefault()?.Length ?? 0;
+
+        var result = new bool[length];
+        for (int i = 0; i < length; i++)
+        {
+            bool isNull = false;
+            foreach (var column in columns)
+            {
+                if (column.IsNull(i))
+                {
+                    isNull = true;
+                    break;
+                }
+            }
+
+            result[i] = negate ? !isNull : isNull;
+        }
+
+        return NivaraColumn<bool>.Create(result);
     }
 
     /// <summary>
