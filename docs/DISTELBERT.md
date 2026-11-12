@@ -36,7 +36,7 @@ Three BERT-family encoder models sharing the same Post-LN architecture pattern:
 - **Softmax + argmax** for the sentiment label and confidence
 - **Inference-default path**: `PredictLogits` runs outside any `Grad()` scope, producing leaf logits with no computation-graph overhead
 - **Padded-input contract**: `BertEncoder.ForwardBatched` requires attention-mask tensors of length `batchSize * seqLen`; token IDs are passed as exact `int[]` (see the BFloat16 note) so they survive narrow-precision dtypes, and `PredictLogits` passes the padded `[maxLen]` token ids
-- **Verification**: `compare` matches HuggingFace to `max abs logit diff 9.5e-7`, `argmax agreement 8/8`; the `bf16` mode matches the same reference at `8/8` argmax with a `max abs logit diff ~0.33` (genuine BFloat16 precision)
+- **Verification**: `--inference-compare distilbert_sst` matches HuggingFace to `max abs logit diff 9.5e-7`, `argmax agreement 8/8`; the `bf16` mode matches the same reference at `8/8` argmax with a `max abs logit diff ~0.33` (genuine BFloat16 precision)
 
 ## How this model improved the library
 
@@ -77,9 +77,9 @@ The BERT-family models were the first text models in the sample. They surfaced:
 | Model | Gate | Result |
 |-------|------|--------|
 | DistilBERT | `last_hidden_state` vs HuggingFace | max abs diff 5e-6, cosine 0.99999988 |
-| MiniLM | `compare` vs CPU reference | hidden maxRel 1.0e-5, pooled maxRel 1.5e-7, 0 violations |
-| SST-2 | `compare` vs HuggingFace | max abs logit diff 9.5e-7, argmax 8/8 |
-| SST-2 bf16 | `compare` vs HuggingFace | argmax 8/8, max abs logit diff ~0.33 |
+| MiniLM | compare vs CPU reference | hidden maxRel 1.0e-5, pooled maxRel 1.5e-7, 0 violations |
+| SST-2 | compare vs HuggingFace | max abs logit diff 9.5e-7, argmax 8/8 |
+| SST-2 bf16 | compare vs HuggingFace | argmax 8/8, max abs logit diff ~0.33 |
 
 ## Narrow-precision inference (BFloat16 / Half)
 
@@ -88,7 +88,7 @@ Every transformer model in this sample is generic over the compute dtype `T : IF
 **What a narrow-precision mode does**
 - Loads the on-disk **F32** weights as `BFloat16` (`SafeTensorsLoader.Read<BFloat16>`) or `Half` (`SafeTensorsLoader.Read<Half>`) — the loader truncates each `float` to the narrow dtype at load time.
 - Builds the `<BFloat16>` / `<Half>` model via the generic `LoadWeights<...>` and runs the full forward pass in that dtype.
-- Diffs the output against the same PyTorch reference fixtures used by `compare`.
+- Diffs the output against the same PyTorch reference fixtures used by the compare gates.
 
 **Token-ID correctness (the subtle bit)** — BFloat16 represents integers *exactly* only up to 256 and Half only up to 2048, but transformer vocabularies reach ~30k. Converting token IDs to a narrow-precision tensor before the embedding lookup corrupts them (e.g. `30522 → 30512` in BF16), sending the lookup to the wrong row and producing garbage (we measured a ~7.4 logit diff vs the F32 reference before the fix). The fix keeps token IDs as **exact `int`**: `Embedding<T>`, `BertEncoder<T>`, `MiniLMDistilled<T>` and `DistilBertForSequenceClassification<T>` all expose `Forward(int[] tokenIds, ...)` overloads that look up embeddings by exact integer index, independent of the compute dtype. Only the attention mask stays a narrow tensor (its `0`/`1` values round-trip exactly).
 
@@ -145,10 +145,12 @@ The same three models also run through the second backend: hand-authored OpenCL 
   GEMM epilogues (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`) and
   `batched_attention`. The SST-2 head runs entirely on the device — `gather_rows` (CLS row) →
   `gemm_row4_relu` → `gemm_row4_bias` — not a host round-trip.
-- **Parity.** `distilbert --silk compare` — GPU vs same-process CPU, **0/98304 violations** at
+- **Parity.** `RunDistilBertSilkCompare` — GPU vs same-process CPU, **0/98304 violations** at
   `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` (the `last_hidden_state_py.bin` PyTorch fixture is absent, so this is
-  GPU-vs-CPU only). `distilbert_sst --silk compare` — logits vs CPU and vs PyTorch, **0/16
-  violations, argmax 8/8 both**.
+  GPU-vs-CPU only); `RunDistilBertSstSilkCompare` — logits vs CPU and vs PyTorch, **0/16 violations,
+  argmax 8/8 both**. Neither is a CLI mode: `--silk compare` left the visitor-facing sample in #1051
+  and the harness `--inference-compare` path carries only the CPU compares (#1097), so re-running
+  one means calling the entry point from a small caller.
 - **Gate.** `--silk-kernels` holds `gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_qkv` and
   `gather_rows` to **byte-identity** against ILGPU over both MiniLM and DistilBERT shapes; DistilBERT
   drives `headDim` to 64, the attention kernel's `MaxHeadDim` local-memory bound.

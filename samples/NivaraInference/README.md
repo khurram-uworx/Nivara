@@ -58,13 +58,9 @@ dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 # `--silk` (hand-authored OpenCL); older GPU snippets below are historical
 # baselines retained for the performance tables.
 # Historical first-backend command lines (removed in 1.5.0; use --silk now):
-#   (no live command for the old backend; the equivalents are --silk / --silk compare)
+#   (no live command for the old backend; the equivalents are the --silk commands below)
 #   dotnet run --project samples/NivaraInference -c Release -- modernbert --silk
 #   dotnet run --project samples/NivaraInference -c Release -- laya --silk            # encoder + decision head
-#
-# GPU-vs-CPU parity gates (live gates use --silk compare):
-#   dotnet run --project samples/NivaraInference -c Release -- modernbert --silk compare
-#   dotnet run --project samples/NivaraInference -c Release -- laya --silk compare
 
 # BERT-family encoders on the second OpenCL backend: hand-authored OpenCL C via Silk.NET
 # (MiniLM / DistilBERT / DistilBERT SST-2; --silk now accepts --precision bf16 (widened to F32 on device
@@ -74,9 +70,6 @@ dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
 dotnet run --project samples/NivaraInference -c Release -- distilbert --silk
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk
-dotnet run --project samples/NivaraInference -c Release -- minilm --silk compare            # Silk-vs-CPU parity gate
-dotnet run --project samples/NivaraInference -c Release -- distilbert --silk compare
-dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk compare    # logits vs CPU + argmax 8/8
 
 # Narrow-precision inference (half weight memory; see model docs for details)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
@@ -179,21 +172,16 @@ dotnet run --project samples/NivaraInference -- laya
 ### Argument validation
 
 Every option is validated before the first weight file is touched: an unrecognised model or mode, a
-flag whose consuming path is not selected, or a narrow `--precision` / `--simd-widen` that the
-selected run does not read exits `1` with a message naming the requirement instead of silently
-running something else. In particular:
+flag whose consuming path is not selected, or a narrow `--precision` that the selected run does not
+read exits `1` with a message naming the requirement instead of silently running something else. In
+particular:
 
 - Each model accepts a fixed mode set — `minilm` `benchmark`/`similarity`, `qwen` `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through to the model's default runner.
 - `--precision f32|bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya`; `qwen` for `benchmark`). `f32` is always accepted. The vision models reject bf16/fp16: they have no narrow path. Even where a bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16.
-- `--simd-widen` is an A/B lever for those narrow runs only. `smollm` and `qwen` enable widen for
-  their narrow runs themselves (use `smollm ab`), and an F32 run is unchanged, so the flag is
-  rejected there.
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16          # accepted (narrow runner)
-dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16 --simd-widen  # accepted (A/B lever)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 --precision bf16    # rejected: no narrow path
-dotnet run --project samples/NivaraInference -c Release -- smollm --simd-widen              # rejected: auto-enabled
 ```
 
 ### Python (PyTorch reference)

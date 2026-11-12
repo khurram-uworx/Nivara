@@ -86,13 +86,6 @@ class Program
         _ => false, // mobilenet_v2 / resnet18 have no narrow-float path
     };
 
-    // --simd-widen changes a run only where a narrow runner reads NivaraPrimitives.UseWidenSimd and does
-    // not set it itself: smollm's and qwen's narrow runners auto-enable it, so the flag is inert there
-    // (and the 'ab' mode toggles it on its own), which is why this is narrower than ConsumesNarrow.
-    static bool ConsumesWiden(string model, string mode)
-        => model is "minilm" or "distilbert" or "distilbert_sst" or "laya" or "modernbert"
-           && ConsumesNarrow(model, mode, synthetic: false);
-
     static bool IsVisionModel(string model) => model is "mobilenet_v2" or "resnet18";
 
     // A vision model's mode is either a keyword or the path of an image that exists; every other model's
@@ -633,7 +626,6 @@ class Program
             return 1;
         }
 
-        // Narrow runs are auto-widened by default; --simd-widen is no longer accepted.
         // The TypeSafe demo has no checkpoint: it calls a decision-model engine over HTTP, so it
         // dispatches here, before the model-file lookup below (which assumes a safetensors file).
         // warmup/iterations default to the same 1 + 3 the benchmark used before #676, so an
@@ -809,9 +801,9 @@ class Program
                     if (fp16) return SmolLMAb(tensorsHalf);
                     return SmolLMAb(tensors);
                 }
-                if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16, false) : RunSmolLM(tensorsBf16, false);
-                if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, false) : RunSmolLM(tensorsHalf, false);
-                return benchmark ? BenchmarkSmolLM(tensors, false) : RunSmolLM(tensors, false);
+                if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16) : RunSmolLM(tensorsBf16);
+                if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf) : RunSmolLM(tensorsHalf);
+                return benchmark ? BenchmarkSmolLM(tensors) : RunSmolLM(tensors);
             case "qwen":
                 if (useSilk)
                 {
@@ -2793,40 +2785,28 @@ class Program
         return 0;
     }
 
-    static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors, bool simdWiden)
-        => RunSmolLMCore(tensors, simdWiden);
+    static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore(tensors);
 
-    static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, bool simdWiden)
-        => RunSmolLMCore(tensors, simdWiden);
+    static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore(tensors);
 
-    static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors, bool simdWiden)
-        => RunSmolLMCore(tensors, simdWiden);
+    static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore(tensors);
 
     static string PrecisionName(Type t)
         => t == typeof(BFloat16) ? "BFloat16"
          : t == typeof(Half) ? "Half"
          : "F32";
 
-    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, bool simdWiden)
+    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
         where T : struct, IFloatingPointIeee754<T>
     {
         string precisionName = PrecisionName(typeof(T));
 
-        // The narrow 16-bit paths (BFloat16/Half) run through the Phase-1 SIMD
-        // widen-compute-narrow kernels by default; without them BF16 matmul falls back
-        // to a ~100x-slower scalar dot. --simd-widen opts additional precisions in, and
-        // setting it off explicitly (scalar A/B) is done by the 'ab' mode. Save and
-        // restore the prior global value so other model modes are unaffected.
-        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
-        bool priorDisable = NivaraPrimitives.DisableWidenSimd;
-        try
-        {
-            RunSmolLMGenerate(tensors, precisionName);
-        }
-        finally
-        {
-            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", priorDisable);
-        }
+        // The narrow 16-bit paths (BFloat16/Half) run through the Phase-1 SIMD widen-compute-narrow
+        // kernels by default; the scalar A/B is the 'ab' mode's own business, not this run's.
+        RunSmolLMGenerate(tensors, precisionName);
         return 0;
     }
 
@@ -3176,20 +3156,9 @@ class Program
         return 0;
     }
 
-    static int BenchmarkSmolLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, bool simdWiden)
+    static int BenchmarkSmolLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
         where T : struct, IFloatingPointIeee754<T>
-    {
-        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
-        bool priorDisable = NivaraPrimitives.DisableWidenSimd;
-        try
-        {
-            return BenchmarkSmolLMCore(tensors);
-        }
-        finally
-        {
-            AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", priorDisable);
-        }
-    }
+        => BenchmarkSmolLMCore(tensors);
 
     static int BenchmarkSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
         where T : struct, IFloatingPointIeee754<T>

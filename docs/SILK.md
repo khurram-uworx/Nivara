@@ -365,7 +365,7 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
 real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
 Qwen, MobileNetV2, and ResNet-18**. F32 is the default. Qwen and the vision models expose their own mode
-sets (see §14); the BERT-family models use `default` / `benchmark` / `compare`. Narrow precision on the silk path:
+sets (see §14); the BERT-family models use `default` / `benchmark`. Narrow precision on the silk path:
 `--precision bf16` stores selected weights (tokEmb/tied LM head for SmolLM/Qwen; the QKV, FFN and
 tokEmb matrices for ModernBERT and Laya) as BF16 and widens in-register; activations stay f32.
 MiniLM/DistilBERT/DistilBERT+SST-2 still widen BF16 to f32 before upload. `--precision fp16` is
@@ -703,14 +703,14 @@ gradients within 5e-4 against reverse-mode AutoDiff on identical weights (the de
 reassociate, so these are tolerance bounds, not bit-identity claims), a loss-decreasing smoke run
 per classifier, and the CPU-layout round trip exact.
 
-- **`SilkModes`** is the allow-list: `minilm`, `distilbert`, `distilbert_sst`, `modernbert`, and
-  `laya` (empty, `benchmark`, `compare`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty,
-  `benchmark`, `tools`, `distill`); `mobilenet_v2`, `resnet18`, and `modernbert` also carry
-  `compare_diag`, which routes to the existing CPU/AutoDiff diagnostic path rather than to a Silk
-  runner (the Silk runners expose only final outputs). The visitor-facing sample CLI no longer
-  exposes `compare`/`compare_diag`; run them through the performance harness
-  (`--inference-compare` / `--inference-compare-diag`, issue #1097). SmolLM and Qwen are causal decoders (not
-  encoders) and own their runners, as do the MobileNetV2 and ResNet-18 vision runners.
+- **`SilkModes`** is the allow-list: `minilm` (empty, `benchmark`, `similarity`); `distilbert` (empty,
+  `benchmark`); `distilbert_sst` (empty, `benchmark`, `predict`); `modernbert` and `laya` (empty,
+  `benchmark`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty, `benchmark`, `tools`,
+  `distill`); `mobilenet_v2` and `resnet18` (empty, `benchmark`). `compare`/`compare_diag` are not
+  CLI modes: they were removed from the visitor-facing sample in #1051, and the harness route
+  (`--inference-compare` / `--inference-compare-diag`, #1097) carries only the CPU variants. SmolLM
+  and Qwen are causal decoders (not encoders) and own their runners, as do the MobileNetV2 and
+  ResNet-18 vision runners.
 - **Mutual exclusion no longer applies**: the old GPU flag was removed in 1.5.0, so `--silk` is now
   the only GPU backend and there is nothing to conflict with.
 - **Precision**: `--silk --precision bf16` is supported. Selected weights stay bf16 on device
@@ -718,7 +718,9 @@ per classifier, and the CPU-layout round trip exact.
   in-register widening and f32 activations; MiniLM/DistilBERT/DistilBERT+SST-2 widen bf16 to f32
   before upload. `--silk --precision fp16` is rejected — bf16 is preferred, there is no measured
   speedup at current shapes (0.97–1.07× vs f32); use bf16 or drop --silk. F32 remains the default.
-- **`--gpu` is rejected, not aliased** to the removed backend, so an old invocation fails loudly.
+- **`--gpu` / `--ilgpu` are rejected, not aliased** to the removed backend, so an old invocation fails
+  loudly: neither is a flag any more, so the token falls through to the positional mode slot and the
+  mode allow-list refuses it.
 - **`OpenSilkEncoder`** implements the `OpenEncoder` delegate shared by the MiniLM/DistilBERT
   SST-2 entry points, so the CPU and Silk paths stay structurally identical.
 - **The gate** is `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels`
@@ -736,18 +738,21 @@ per classifier, and the CPU-layout round trip exact.
   or program exits `UNBUILT` (10). The gate covers the forward kernels shared by the runners; the
   trainer's backward/Adam kernels are exercised by `SilkDistilBertTrainerTests` (gradient parity)
   rather than byte-identity.
-- **End-to-end compares are the other half.** `minilm --silk compare`, `distilbert --silk compare` and
-  `distilbert_sst --silk compare` each check the GPU against the **same-process CPU** at
+- **End-to-end compares are the other half.** `RunMiniLmSilkCompare`, `RunDistilBertSilkCompare` and
+  `RunDistilBertSstSilkCompare` each check the GPU against the **same-process CPU** at
   `|gpu−cpu| ≤ 1e-3·(1+|cpu|)` — with pooled-embedding cosine for MiniLM, and the PyTorch 3-way
-  (`argmax 8/8`) for SST-2. `modernbert --silk compare` and `laya --silk compare` are the same bound
-  against the in-process CPU encoder and head. **Both pass (AC, 2026-10-13):** ModernBERT at maxAbs
-  2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the identical figures to the ILGPU gate — and
-  Laya at 1.110E-005 = 1.1% of the 1e-3 bound with act matching to 0.0 and mask clamp PASS on both.
+  (`argmax 8/8`) for SST-2. `InferenceCompare.ModernBertCompareGpu` and `LayaCompareGpu` are the same
+  bound against the in-process CPU encoder and head. **Both pass (AC, 2026-10-13):** ModernBERT at
+  maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the identical figures to the ILGPU gate —
+  and Laya at 1.110E-005 = 1.1% of the 1e-3 bound with act matching to 0.0 and mask clamp PASS on both.
   The `--silk-kernels` cells are what localise a failure; the compares are what say the
-  assembled forward is right. **The benchmark A/B has been run too** — ModernBERT and Laya timing
-  (back-to-back `--silk` runs vs the historical first backend, AC, same session, 1 warmup + 3 timed median) is in
-  the cross-backend rows are now historical; the current acceleration results and Silk-only scope are in
-  [docs/ACCELERATION.md](ACCELERATION.md), and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
+  assembled forward is right. None of them is a CLI mode — `--silk compare` left the visitor-facing
+  sample in #1051 and the harness `--inference-compare` path carries only the CPU compares (#1097) —
+  so re-running one means calling the entry point above from a small caller. **The benchmark A/B has
+  been run too** — ModernBERT and Laya timing (back-to-back `--silk` runs vs the historical first
+  backend, AC, same session, 1 warmup + 3 timed median): the current acceleration results and
+  Silk-only scope are in [docs/ACCELERATION.md](ACCELERATION.md), the cross-backend rows are now
+  historical, and earlier backend comparisons remain in [docs/ILGPU.md](ILGPU.md).
   The compare and the benchmark remain separate verdicts.
 
 ## 13e. SilkDistilBertTrainer (#956)
@@ -932,10 +937,9 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
     generation on `SilkSmolLMChatClient`.
   - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.
 - **NivaraInference**
-  - `minilm {default, benchmark, compare, similarity}`; `distilbert …`; `distilbert_sst
-    {default, benchmark, compare, predict}`; `modernbert {default, benchmark, compare, compare_diag}`;
-    `laya {default, benchmark, compare}`; `smollm {default, benchmark, generate}`; `qwen …`;
-    `mobilenet_v2`, `resnet18 {default, benchmark, compare, compare_diag}`.
+  - `minilm {default, benchmark, similarity}`; `distilbert …`; `distilbert_sst
+    {default, benchmark, predict}`; `modernbert`, `laya {default, benchmark}`; `smollm {default,
+    benchmark, generate}`; `qwen …`; `mobilenet_v2`, `resnet18 {default, benchmark}`.
 - **NivaraClassifier** — `train/predict/benchmark` for the conv and linear text classifiers
   (`GpuTextConvClassifier` / `GpuTextLinearClassifier`).
 - **NivaraIncident** — `--silk` grouped-aggregation path (`grouped_hash_reduce_partial`).
@@ -945,7 +949,6 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
 
 Deliberately out of scope (no Silk seam exists yet):
 - `NivaraChat --embed`/`--intent` without a model directory present (CPU fallback only).
-- `minilm --silk compare_diag` is not a mode (diagnostics is an AutoDiff/CPU path).
 
 ## 15. Adding a model to the Silk path
 

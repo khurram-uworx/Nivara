@@ -227,9 +227,6 @@ dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp
 
 - Vision models (MobileNetV2/ResNet-18) have no fp16 path.
 - Qwen does not support fp16 (Half's range/precision is insufficient for Qwen2.5-0.5B; use `f32` or `bf16`).
-- `modernbert compare` / `laya compare` are F32-only.
-- `--simd-widen` is an A/B lever for narrow runs (minilm/distilbert/sst/
-  modernbert/laya; smollm/qwen manage their own).
 - Silk/OpenCL (`--silk`) supports `--precision bf16` (widened on device); `--precision fp16` is rejected — bf16 is preferred (no measured speedup at current shapes, 0.97–1.07× vs f32). Use bf16 instead.
 
 ---

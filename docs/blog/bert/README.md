@@ -202,9 +202,8 @@ dotnet run --project samples/NivaraInference -c Release -- minilm
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 # pairwise cosine-similarity demo
 dotnet run --project samples/NivaraInference -c Release -- minilm similarity
-# compare embedding against a PyTorch reference (run python first)
+# write the PyTorch reference embeddings the parity gates read
 python samples/NivaraInference/Python/minilm_compare.py
-dotnet run --project samples/NivaraInference -c Release -- minilm compare
 ```
 
 ## Series map

@@ -54,8 +54,8 @@ The vision gap is now tracked as issue **#457** (SIMD + row parallelism for the 
 
 | Model | Gate | Result |
 |-------|------|--------|
-| MobileNetV2 | `compare` vs PyTorch | output match |
-| ResNet-18 | `compare` vs PyTorch | output match |
+| MobileNetV2 | compare vs PyTorch | output match |
+| ResNet-18 | compare vs PyTorch | output match |
 
 ## Performance
 
