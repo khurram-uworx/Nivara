@@ -1,4 +1,5 @@
 using Nivara.Execution;
+using Nivara.Tests;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Execution;
@@ -84,6 +85,26 @@ public class MemoryBudgetTests
     }
 
     [Test]
+    public void Release_OverRelease_Throws()
+    {
+        using var budget = new MemoryBudget(100);
+        budget.AcquireAsync(40).GetAwaiter().GetResult();
+        Assert.Throws<InvalidOperationException>(() => budget.Release(41));
+        // Clamp is gone: usage is unchanged by the failed release.
+        Assert.That(budget.CurrentUsage, Is.EqualTo(40));
+    }
+
+    [Test]
+    public void Release_DoubleRelease_Throws()
+    {
+        using var budget = new MemoryBudget(100);
+        budget.AcquireAsync(40).GetAwaiter().GetResult();
+        budget.Release(40);
+        Assert.Throws<InvalidOperationException>(() => budget.Release(40));
+        Assert.That(budget.CurrentUsage, Is.EqualTo(0));
+    }
+
+    [Test]
     public async Task Dispose_UnblocksWaitersWithObjectDisposed()
     {
         var budget = new MemoryBudget(100);
@@ -101,5 +122,34 @@ public class MemoryBudgetTests
         var budget = new MemoryBudget(100);
         budget.Dispose();
         await Assert.ThrowsAsync<ObjectDisposedException>(async () => await budget.AcquireAsync(10));
+    }
+
+    [Test]
+    [Category("Performance")]
+    public async Task AcquireAsync_CancellationRacesRelease_NoHang()
+    {
+        TimingGuards.RequireOptimizedBuildForTiming();
+        const int iterations = 200;
+        for (int i = 0; i < iterations; i++)
+        {
+            using var budget = new MemoryBudget(100);
+            await budget.AcquireAsync(100);
+
+            using var cts = new CancellationTokenSource();
+            var waiterTask = budget.AcquireAsync(50, cts.Token).AsTask();
+
+            // Cancel concurrently with a release on another thread.
+            var releaseTask = Task.Run(() =>
+            {
+                cts.Cancel();
+                budget.Release(100);
+            });
+
+            var completed = await Task.WhenAny(waiterTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.That(completed, Is.EqualTo(waiterTask), $"Iteration {i}: waiter did not complete in time.");
+            try { await waiterTask; }
+            catch (OperationCanceledException) { /* expected */ }
+            await releaseTask;
+        }
     }
 }
