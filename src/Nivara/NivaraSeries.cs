@@ -1173,8 +1173,14 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable, IEquatable<Ni
 
         if (index is null)
         {
+            // Mirror the hash shape of a positional index column so that a
+            // default series hashes identically to one with an explicit 0..n-1 index.
+            var positional = new HashCode();
+            positional.Add(Length);
+            positional.Add(false);
             for (int i = 0; i < Length; i++)
-                hash.Add(i);
+                positional.Add(i);
+            hash.Add(positional.ToHashCode());
         }
         else
         {
