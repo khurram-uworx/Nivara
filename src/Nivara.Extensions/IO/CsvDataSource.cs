@@ -854,14 +854,24 @@ sealed class CsvLazySource : IQuerySource
             accumulator.Add(column.GetValue(i));
     }
 
+    ~CsvLazySource()
+    {
+        Dispose(false);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!disposed)
-        {
-            DisposeChunkReader();
-            disposed = true;
-        }
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    private void Dispose(bool disposing)
+    {
+        if (disposed)
+            return;
+        disposed = true;
+        DisposeChunkReader();
     }
 }
 

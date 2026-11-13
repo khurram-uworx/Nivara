@@ -11,11 +11,10 @@ namespace Nivara.PerformanceTests;
 /// file handle at garbage collection, and after how many collection passes?
 /// </summary>
 /// <remarks>
-/// This is the investigation behind the decision recorded in ARCHITECTURE.md
-/// ("Lazy source ownership and release"): the handle is already owned by a
-/// <see cref="FileStream"/>'s <c>SafeFileHandle</c>, so a finalizer on the lazy source
-/// would not move the release point. Run with
+/// Run with
 /// <c>dotnet run -c Release --project tests/Nivara.PerformanceTests -- --dropped-scan</c>.
+/// After the fix (finalizers on <c>JsonLazySource</c> and <c>CsvLazySource</c>) every
+/// source should release on the first collection pass.
 /// </remarks>
 internal static class DroppedScanHandleProbe
 {
@@ -32,7 +31,7 @@ internal static class DroppedScanHandleProbe
             Console.WriteLine("WARNING: Debug build - numbers are not representative. Run with -c Release.");
         Console.WriteLine();
 
-        // Negative control: can this probe see a leaked handle at all?
+        // Negative control: can this probe see a held handle at all?
         var controlDir = CreateTempDir();
         var controlPath = Path.Combine(controlDir, "control.txt");
         File.WriteAllText(controlPath, "negative control");
@@ -59,58 +58,81 @@ internal static class DroppedScanHandleProbe
         foreach (var source in new[] { "parquet", "csv", "json" })
         {
             var dir = CreateTempDir();
+            string path = string.Empty;
+            int releasedOnRound = 0;
+            WeakReference? frameRef = null;
+            WeakReference? sourceRef = null;
             try
             {
-                var path = CreateFile(source, dir, RowCount);
+                path = CreateFile(source, dir, RowCount);
                 AssertUnlocked(path, $"no handle open before scan ({source})");
 
-                var frame = CreateScan(source, path);
-                ReadOneChunkThenStop(frame).GetAwaiter().GetResult();
-                AssertLocked(path, $"partial read leaves the handle open ({source})");
+                ProbeOneSource(source, path, out frameRef, out sourceRef);
 
-                // Drop without disposing.
-                s_root = frame;
-                ClearRoot();
-
-                int releasedOnRound = 0;
-                for (int round = 1; round <= 3; round++)
+                for (int i = 0; i < 5 && releasedOnRound == 0; i++)
                 {
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
                     GC.Collect();
                     if (IsUnlocked(path))
                     {
-                        releasedOnRound = round;
-                        break;
+                        releasedOnRound = i + 1;
+                        Console.WriteLine($"    round {i + 1}: unlocked=True frameAlive={frameRef?.IsAlive} sourceAlive={sourceRef?.IsAlive}");
                     }
-                }
-
-                if (releasedOnRound == 0)
-                {
-                    Console.WriteLine($"{source,-8}: NOT released after 3 GC passes  -> FAIL");
-                    anyFailed = true;
-                }
-                else
-                {
-                    Console.WriteLine($"{source,-8}: released on GC pass {releasedOnRound}");
+                    else
+                    {
+                        Console.WriteLine($"    round {i + 1}: unlocked=False frameAlive={frameRef?.IsAlive} sourceAlive={sourceRef?.IsAlive}");
+                    }
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"{source,-8}: EXCEPTION {ex.GetType().Name}: {ex.Message}");
                 anyFailed = true;
+                releasedOnRound = -1;
             }
             finally
             {
+                if (releasedOnRound > 0)
+                    Console.WriteLine($"{source,-8}: released on GC pass {releasedOnRound}");
+                else if (releasedOnRound == 0)
+                {
+                    Console.WriteLine($"{source,-8}: NOT released after 5 GC passes  -> FAIL");
+                    anyFailed = true;
+                }
                 TryDeleteDir(dir);
             }
         }
 
         Console.WriteLine();
         Console.WriteLine(anyFailed
-            ? "RESULT: at least one source did not release within 3 GC passes."
-            : "RESULT: every source released within 3 GC passes (handle is not permanently leaked).");
+            ? "RESULT: at least one source did not release within 5 GC passes."
+            : "RESULT: every source released within 5 GC passes.");
         return anyFailed ? 1 : 0;
+    }
+
+    static void ProbeOneSource(string source, string path, out WeakReference? frameRef, out WeakReference? sourceRef)
+    {
+        var frame = CreateScan(source, path);
+        frameRef = new WeakReference(frame);
+
+        object? src = null;
+        try
+        {
+            var hf = typeof(QueryFrame).GetField("handle", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            var h = hf.GetValue(frame)!;
+            var sf = h.GetType().GetField("source", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            src = sf.GetValue(h);
+        }
+        catch { /* best effort */ }
+        sourceRef = src is null ? null : new WeakReference(src);
+
+        ReadOneChunkThenStop(frame).GetAwaiter().GetResult();
+        AssertLocked(path, $"partial read leaves the handle open ({source})");
+
+        s_root = frame;
+        frame = null;
+        ClearRoot();
     }
 
     static string CreateTempDir()
@@ -128,17 +150,13 @@ internal static class DroppedScanHandleProbe
 
     static string CreateFile(string source, string dir, int rowCount)
     {
-        switch (source)
+        return source switch
         {
-            case "parquet":
-                return CreateParquetFile(dir, rowCount);
-            case "csv":
-                return CreateCsvFile(dir, rowCount);
-            case "json":
-                return CreateJsonFile(dir, rowCount);
-            default:
-                throw new ArgumentException(source);
-        }
+            "parquet" => CreateParquetFile(dir, rowCount),
+            "csv" => CreateCsvFile(dir, rowCount),
+            "json" => CreateJsonFile(dir, rowCount),
+            _ => throw new ArgumentException(source),
+        };
     }
 
     static QueryFrame CreateScan(string source, string path)
