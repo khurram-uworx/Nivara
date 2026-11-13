@@ -257,13 +257,11 @@ await foreach (var frame in sorted.AsStream())
   `NivaraFrame` and discards the `QueryFrame`, which is the frame that actually owns the
   source. Bind the scan to a named local and dispose that:
   `await using var scan = Csv.ScanAsQueryFrame(p); var result = scan.Collect();`
-- **One source, one release.** A frame derived from another shares the same source, so
-  disposing any frame in a chain releases it for the whole chain and the survivors then throw
-  `ObjectDisposedException`. This is the same contract `FileStream` has, and it is deliberate —
-  reference counting is not possible because derived frames are temporaries inside expressions
-  that are never disposed. So you do not have to dispose each intermediate: a `using` bound to
-  the terminal of a chain is sufficient, and an abandoned intermediate is not itself a leak.
-  Dispose the scan you created. See [LINQ.md](LINQ.md#resource-management) for the typed-query
+- **A failed release propagates.** `QueryFrame.Dispose`/`DisposeAsync` (and the typed-query
+  equivalents) no longer swallow a source-disposal failure, so a scope exit can throw an I/O or
+  close error (for example a Parquet reader that fails to close). Disposing twice is still safe —
+  the second call is a no-op — and a failed release still leaves the chain disposed. Wrap cleanup
+  in `try`/`finally` when you need to observe or translate that error.
 
 - **There is no safety net.** Nivara has no process-global abandoned-resource cleanup: a scan you
   do not dispose is released only when its underlying stream is finalized (non-deterministic, and

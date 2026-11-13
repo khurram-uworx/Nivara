@@ -7,6 +7,12 @@
 - `ResourceStatistics` (removed) → no replacement. The type was public but only ever reachable
   through the internal `NivaraResourceManager`, which has been deleted (#1168). Delete any
   reference; no shipped code path produced an instance.
+- `QueryFrame.Dispose()` / `QueryFrame.DisposeAsync()` (and the typed `NivaraQuery<T>` /
+  `NivaraGroupedQuery<TKey, T>` equivalents) no longer swallow a source-disposal failure:
+  a failed close/flush now propagates out of `Dispose`/`DisposeAsync`. `Dispose` stays idempotent
+  (a second call is a no-op, including after a failure), so `using`/`await using` cleanup can
+  surface an I/O error. `ParquetLazySource.Dispose()` likewise propagates a reader-close failure
+  instead of swallowing it. (#1170)
 
 ### Removed
 

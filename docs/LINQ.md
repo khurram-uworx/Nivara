@@ -93,6 +93,12 @@ reference counting is not possible here, because derived queries are temporaries
 (`q.Where(...).Collect()`) that are never disposed, so a count would never return to zero and the
 common pattern would leak instead. Dispose the query you created.
 
+A disposal failure (for example a Parquet reader that fails to close, or a source that fails to
+flush buffered data) propagates out of `Dispose`/`DisposeAsync`, so a scope exit can throw an I/O
+error. Disposing twice is still safe — the second call is a no-op — and a failed release still
+leaves the chain disposed. Wrap cleanup in `try`/`finally` (or `using`) when you need to observe
+or translate that error; otherwise it surfaces at the end of the `using` block.
+
 `NivaraGroupedQuery<TKey, T>` also releases through `Dispose`, so a grouped Parquet query is
 disposable too:
 
