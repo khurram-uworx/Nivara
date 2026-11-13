@@ -61,17 +61,72 @@ sealed class FusedExpressionEvaluator
 
     delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart, bool[]? mask, int[] baseOffsets);
 
-    static readonly ConcurrentDictionary<string, CompiledFusedInvoke> compiledKernelCache = new();
+    /// <summary>
+    /// Maximum number of compiled delegates held in one generation of
+    /// <see cref="compiledKernelCache"/>. Two generations are retained, so the cache never holds
+    /// more than <c>2 × CompiledKernelCacheCapacity</c> entries; on overflow the older generation
+    /// is dropped and a new one started (approximate LRU). Compiled delegates bake in literals as
+    /// <see cref="System.Linq.Expressions.Expression.Constant"/> and carry generated IL, so an
+    /// unbounded cache grew forever for a process that evaluates many distinct expressions.
+    /// </summary>
+    internal const int CompiledKernelCacheCapacity = 1024;
 
+    /// <summary>
+    /// Compiled-delegate cache, keyed by the structural expression signature. Bounded: see
+    /// <see cref="CompiledKernelCacheCapacity"/>. Recomputation on overflow is strictly better than
+    /// unbounded growth; correctness is unaffected because the cache is purely a performance
+    /// optimization over <see cref="BuildCompiledDelegate"/>.
+    /// </summary>
+    static readonly BoundedCache<string, CompiledFusedInvoke> compiledKernelCache = new(CompiledKernelCacheCapacity);
+
+    /// <summary>
+    /// Reflection cache for <see cref="SnapshotLeaf{T}"/>. Bounded by the closed-generic type
+    /// universe (one entry per element type) — not per query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<Type, MethodInfo> snapshotKernelCache = new();
 
+    /// <summary>
+    /// Reflection cache for <see cref="CreateColumn{T}"/>. Bounded by the closed-generic type
+    /// universe (one entry per element type) — not per query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<Type, MethodInfo> createColumnKernelCache = new();
 
+    /// <summary>
+    /// Reflection cache for <see cref="CreateColumnFromSpans{T}"/>. Bounded by the closed-generic
+    /// type universe (one entry per element type) — not per query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<Type, MethodInfo> createFromSpansKernelCache = new();
 
+    /// <summary>
+    /// Reflection cache for <see cref="AllocateResultArrayOf{T}"/>. Bounded by the closed-generic
+    /// type universe (one entry per element type) — not per query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<Type, MethodInfo> allocateArrayKernelCache = new();
 
+    /// <summary>
+    /// Reflection cache for <see cref="ConvertNumeric{TSource, TResult}"/>. Bounded by the
+    /// closed-generic (source, target) type pairs among the supported numeric types — not per
+    /// query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<(Type Source, Type Target), MethodInfo> numericConvertKernelCache = new();
+
+    /// <summary>
+    /// Gets the number of entries currently held by <see cref="compiledKernelCache"/> across both
+    /// generations. Exposed for tests and diagnostics.
+    /// </summary>
+    internal static int CompiledKernelCacheEntryCount => compiledKernelCache.Count;
+
+    /// <summary>
+    /// Gets the number of times <see cref="compiledKernelCache"/> has rotated (overflowed) since
+    /// creation or the last <see cref="ClearCompiledKernelCache"/> call.
+    /// </summary>
+    internal static long CompiledKernelCacheOverflowCount => compiledKernelCache.OverflowCount;
+
+    /// <summary>
+    /// Clears <see cref="compiledKernelCache"/> and resets its overflow counter. Intended for
+    /// tests and diagnostics; not part of the public contract.
+    /// </summary>
+    internal static void ClearCompiledKernelCache() => compiledKernelCache.Clear();
 
     /// <summary>
     /// Evaluates a column expression and returns the result column through the fused path.
@@ -727,6 +782,10 @@ sealed class FusedExpressionEvaluator
 
     delegate IColumn FusedNodeTreeInvoker(KernelPlan plan, int? chunkSize);
 
+    /// <summary>
+    /// Delegate cache for the generic node-tree runner. Bounded by the closed-generic type universe
+    /// (one entry per element type) — not per query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<Type, FusedNodeTreeInvoker> nodeTreeRunnerCache = new();
 
     static FusedNodeTreeInvoker GetNodeTreeRunner(Type elementType)
@@ -781,6 +840,10 @@ sealed class FusedExpressionEvaluator
 
     delegate IColumn TensorPrimitivesInvoker(KernelPlan plan, int? chunkSize);
 
+    /// <summary>
+    /// Delegate cache for the TensorPrimitives runner. Bounded by the closed-generic type universe
+    /// (one entry per element type) — not per query — so no eviction path is needed.
+    /// </summary>
     static readonly ConcurrentDictionary<Type, TensorPrimitivesInvoker> tensorPrimitivesRunnerCache = new();
 
     static TensorPrimitivesInvoker GetTensorPrimitivesRunner(Type elementType)
