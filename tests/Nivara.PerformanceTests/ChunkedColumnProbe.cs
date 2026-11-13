@@ -132,17 +132,17 @@ static class ChunkedColumnProbe
 
             // equality (scalar 1 op, column 2 ops)
             AddCell($"equals scalar (1 op) uncached", k, false,
-                flat: () => { var c = new NivaraColumn<int>(flatStoreNN); _ = c.Equals(1); },
-                chunked: () => { var c = new NivaraColumn<int>(new ChunkedColumn<int>(chunksNN)); _ = c.Equals(1); });
+                flat: () => { var c = new NivaraColumn<int>(flatStoreNN); _ = c.EqualTo(1); },
+                chunked: () => { var c = new NivaraColumn<int>(new ChunkedColumn<int>(chunksNN)); _ = c.EqualTo(1); });
             AddCell($"equals scalar (1 op) cached 2nd", k, false,
-                flat: () => { _ = flatCachedA.Equals(1); },
-                chunked: () => { _ = chunkedCachedA.Equals(1); });
+                flat: () => { _ = flatCachedA.EqualTo(1); },
+                chunked: () => { _ = chunkedCachedA.EqualTo(1); });
             AddCell($"equals column (2 ops) uncached", k, false,
-                flat: () => { var a = new NivaraColumn<int>(flatStoreNN); var b = new NivaraColumn<int>(flatStoreNN2); _ = a.Equals(b); },
-                chunked: () => { var a = new NivaraColumn<int>(new ChunkedColumn<int>(chunksNN)); var b = new NivaraColumn<int>(new ChunkedColumn<int>(chunksNN)); _ = a.Equals(b); });
+                flat: () => { var a = new NivaraColumn<int>(flatStoreNN); var b = new NivaraColumn<int>(flatStoreNN2); _ = a.EqualTo(b); },
+                chunked: () => { var a = new NivaraColumn<int>(new ChunkedColumn<int>(chunksNN)); var b = new NivaraColumn<int>(new ChunkedColumn<int>(chunksNN)); _ = a.EqualTo(b); });
             AddCell($"equals column (2 ops) cached 2nd", k, false,
-                flat: () => { _ = flatCachedA.Equals(flatCachedB); },
-                chunked: () => { _ = chunkedCachedA.Equals(chunkedCachedB); });
+                flat: () => { _ = flatCachedA.EqualTo(flatCachedB); },
+                chunked: () => { _ = chunkedCachedA.EqualTo(chunkedCachedB); });
 
             // greater-than
             AddCell($"greater-than scalar (1 op) uncached", k, false,

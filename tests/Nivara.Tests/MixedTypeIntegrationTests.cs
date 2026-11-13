@@ -268,7 +268,7 @@ public class MixedTypeIntegrationTests
 
         // Act - Perform operations that should handle nulls correctly
         var intComparison = intColumn.GreaterThan(2);
-        var stringComparison = stringColumn.Equals("A");
+        var stringComparison = stringColumn.EqualTo("A");
         var doubleArithmetic = doubleColumn * 2.0;
 
         // Query with null-aware filtering

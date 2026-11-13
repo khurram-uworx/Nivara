@@ -57,6 +57,16 @@ public interface IColumn : IDisposable
     /// </summary>
     /// <returns>A new zero-length column of the same runtime type as this column.</returns>
     internal IColumn CreateEmpty();
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to another column.
+    /// </summary>
+    internal bool ContentEquals(IColumn other);
+
+    /// <summary>
+    /// Returns a hash code for the column's contents.
+    /// </summary>
+    internal int ContentHashCode();
 }
 
 /// <summary>

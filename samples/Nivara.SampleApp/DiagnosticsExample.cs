@@ -63,7 +63,7 @@ public static class DiagnosticsExample
         var result3 = doubleColumn.GreaterThan(3.0);
         Console.WriteLine("✓ Scalar comparison performed");
 
-        var result4 = stringColumn.Equals("banana");
+        var result4 = stringColumn.EqualTo("banana");
         Console.WriteLine("✓ String comparison performed");
 
         Console.WriteLine();

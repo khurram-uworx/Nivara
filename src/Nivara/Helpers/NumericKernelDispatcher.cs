@@ -27,7 +27,10 @@ static class NumericKernelDispatcher
         DivideByCount,
         Equals,
         GreaterThan,
-        LessThan
+        LessThan,
+        NotEquals,
+        GreaterThanOrEqual,
+        LessThanOrEqual
     }
 
     enum Shape
@@ -128,6 +131,24 @@ static class NumericKernelDispatcher
 
     public static bool TryLessThan<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
         => tryInvokeComparison<T>(Operation.LessThan, Shape.Span, x, y, destination);
+
+    public static bool TryNotEquals<T>(ReadOnlySpan<T> x, T y, Span<bool> destination)
+        => tryInvokeComparison<T>(Operation.NotEquals, Shape.ScalarRight, x, y, destination);
+
+    public static bool TryNotEquals<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+        => tryInvokeComparison<T>(Operation.NotEquals, Shape.Span, x, y, destination);
+
+    public static bool TryGreaterThanOrEqual<T>(ReadOnlySpan<T> x, T y, Span<bool> destination)
+        => tryInvokeComparison<T>(Operation.GreaterThanOrEqual, Shape.ScalarRight, x, y, destination);
+
+    public static bool TryGreaterThanOrEqual<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+        => tryInvokeComparison<T>(Operation.GreaterThanOrEqual, Shape.Span, x, y, destination);
+
+    public static bool TryLessThanOrEqual<T>(ReadOnlySpan<T> x, T y, Span<bool> destination)
+        => tryInvokeComparison<T>(Operation.LessThanOrEqual, Shape.ScalarRight, x, y, destination);
+
+    public static bool TryLessThanOrEqual<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+        => tryInvokeComparison<T>(Operation.LessThanOrEqual, Shape.Span, x, y, destination);
 
     static bool tryInvokeComparison<T>(Operation op, Shape shape, ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
@@ -239,6 +260,24 @@ static class NumericKernelDispatcher
             {
                 Shape.Span => new Action<ReadOnlySpan<U>, ReadOnlySpan<U>, Span<bool>>(NumericTensorKernels<U>.LessThan),
                 Shape.ScalarRight => new Action<ReadOnlySpan<U>, U, Span<bool>>(NumericTensorKernels<U>.LessThan),
+                _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+            },
+            Operation.NotEquals => shape switch
+            {
+                Shape.Span => new Action<ReadOnlySpan<U>, ReadOnlySpan<U>, Span<bool>>(NumericTensorKernels<U>.NotEquals),
+                Shape.ScalarRight => new Action<ReadOnlySpan<U>, U, Span<bool>>(NumericTensorKernels<U>.NotEquals),
+                _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+            },
+            Operation.GreaterThanOrEqual => shape switch
+            {
+                Shape.Span => new Action<ReadOnlySpan<U>, ReadOnlySpan<U>, Span<bool>>(NumericTensorKernels<U>.GreaterThanOrEqual),
+                Shape.ScalarRight => new Action<ReadOnlySpan<U>, U, Span<bool>>(NumericTensorKernels<U>.GreaterThanOrEqual),
+                _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+            },
+            Operation.LessThanOrEqual => shape switch
+            {
+                Shape.Span => new Action<ReadOnlySpan<U>, ReadOnlySpan<U>, Span<bool>>(NumericTensorKernels<U>.LessThanOrEqual),
+                Shape.ScalarRight => new Action<ReadOnlySpan<U>, U, Span<bool>>(NumericTensorKernels<U>.LessThanOrEqual),
                 _ => throw new ArgumentOutOfRangeException(nameof(shape)),
             },
             _ => throw new ArgumentOutOfRangeException(nameof(op)),

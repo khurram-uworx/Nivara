@@ -907,7 +907,7 @@ public class NivaraColumnTests
         var intColumn = NivaraColumn<int>.Create(intValues);
         var targetValue = 3;
 
-        var equalsResult = intColumn.Equals(targetValue);
+        var equalsResult = intColumn.EqualTo(targetValue);
 
         Assert.That(equalsResult, Is.Not.Null, "Equals result should not be null");
         Assert.That(equalsResult.Length, Is.EqualTo(intValues.Length), "Equals result should preserve length");
@@ -923,7 +923,7 @@ public class NivaraColumnTests
         var otherIntValues = new[] { 1, 0, 3, 0, 5 };
         var otherIntColumn = NivaraColumn<int>.Create(otherIntValues);
 
-        var elementWiseEquals = intColumn.Equals(otherIntColumn);
+        var elementWiseEquals = intColumn.EqualTo(otherIntColumn);
 
         Assert.That(elementWiseEquals, Is.Not.Null, "Element-wise equals result should not be null");
         Assert.That(elementWiseEquals.Length, Is.EqualTo(intValues.Length), "Element-wise equals result should preserve length");
@@ -992,7 +992,7 @@ public class NivaraColumnTests
         var floatColumn = NivaraColumn<float>.Create(floatValues);
         var floatTarget = 3.0f;
 
-        var floatEquals = floatColumn.Equals(floatTarget);
+        var floatEquals = floatColumn.EqualTo(floatTarget);
         var floatGreater = floatColumn.GreaterThan(floatTarget);
         var floatLess = floatColumn.LessThan(floatTarget);
 
@@ -1011,7 +1011,7 @@ public class NivaraColumnTests
         var stringColumn = NivaraColumn<string>.Create(stringValues);
         var stringTarget = "cherry";
 
-        var stringEquals = stringColumn.Equals(stringTarget);
+        var stringEquals = stringColumn.EqualTo(stringTarget);
         var stringGreater = stringColumn.GreaterThan(stringTarget);
         var stringLess = stringColumn.LessThan(stringTarget);
 
@@ -1034,7 +1034,7 @@ public class NivaraColumnTests
         var dateColumn = NivaraColumn<DateTime>.Create(dateValues);
         var dateTarget = new DateTime(2023, 6, 15);
 
-        var dateEquals = dateColumn.Equals(dateTarget);
+        var dateEquals = dateColumn.EqualTo(dateTarget);
         var dateGreater = dateColumn.GreaterThan(dateTarget);
         var dateLess = dateColumn.LessThan(dateTarget);
 
@@ -1068,7 +1068,7 @@ public class NivaraColumnTests
         var targetValue = "world";
 
         // Test scalar equality with nulls
-        var equalsResult = stringColumnWithNulls.Equals(targetValue);
+        var equalsResult = stringColumnWithNulls.EqualTo(targetValue);
 
         Assert.That(equalsResult, Is.Not.Null, "Equals result with nulls should not be null");
         Assert.That(equalsResult.Length, Is.EqualTo(stringValuesWithNulls.Length), "Result should preserve length");
@@ -1112,7 +1112,7 @@ public class NivaraColumnTests
 
         var otherStringColumn = NivaraColumn<string>.CreateForReferenceType(otherStringArray);
 
-        var elementWiseEquals = stringColumnWithNulls.Equals(otherStringColumn);
+        var elementWiseEquals = stringColumnWithNulls.EqualTo(otherStringColumn);
 
         Assert.That(elementWiseEquals.HasNulls, Is.True, "Element-wise equals should have nulls");
 
@@ -1138,7 +1138,7 @@ public class NivaraColumnTests
         var shortColumn = NivaraColumn<int>.Create(new[] { 1, 2 });
 
         // Test mismatched lengths
-        Assert.Throws<ArgumentException>(() => intColumn.Equals(shortColumn),
+        Assert.Throws<ArgumentException>(() => intColumn.EqualTo(shortColumn),
             "Equals with mismatched lengths should throw ArgumentException");
         Assert.Throws<ArgumentException>(() => intColumn.GreaterThan(shortColumn),
             "GreaterThan with mismatched lengths should throw ArgumentException");
@@ -1146,7 +1146,7 @@ public class NivaraColumnTests
             "LessThan with mismatched lengths should throw ArgumentException");
 
         // Test null arguments
-        Assert.Throws<ArgumentNullException>(() => intColumn.Equals((NivaraColumn<int>)null!),
+        Assert.Throws<ArgumentNullException>(() => intColumn.EqualTo((NivaraColumn<int>)null!),
             "Equals with null column should throw ArgumentNullException");
         Assert.Throws<ArgumentNullException>(() => intColumn.GreaterThan((NivaraColumn<int>)null!),
             "GreaterThan with null column should throw ArgumentNullException");
@@ -1157,7 +1157,7 @@ public class NivaraColumnTests
         var disposedColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
         disposedColumn.Dispose();
 
-        Assert.Throws<ObjectDisposedException>(() => disposedColumn.Equals(5),
+        Assert.Throws<ObjectDisposedException>(() => disposedColumn.EqualTo(5),
             "Equals on disposed column should throw ObjectDisposedException");
         Assert.Throws<ObjectDisposedException>(() => disposedColumn.GreaterThan(5),
             "GreaterThan on disposed column should throw ObjectDisposedException");
@@ -1169,7 +1169,7 @@ public class NivaraColumnTests
         var otherDisposedColumn = NivaraColumn<int>.Create(new[] { 4, 5, 6 });
         otherDisposedColumn.Dispose();
 
-        Assert.Throws<ObjectDisposedException>(() => anotherColumn.Equals(otherDisposedColumn),
+        Assert.Throws<ObjectDisposedException>(() => anotherColumn.EqualTo(otherDisposedColumn),
             "Equals with disposed other column should throw ObjectDisposedException");
         Assert.Throws<ObjectDisposedException>(() => anotherColumn.GreaterThan(otherDisposedColumn),
             "GreaterThan with disposed other column should throw ObjectDisposedException");
@@ -1188,7 +1188,7 @@ public class NivaraColumnTests
         var targetGuid = Guid.NewGuid();
 
         // Equals should work for all types
-        Assert.DoesNotThrow(() => guidColumn.Equals(targetGuid),
+        Assert.DoesNotThrow(() => guidColumn.EqualTo(targetGuid),
             "Equals should work for all types including Guid");
 
         // But ordering comparisons should work for Guid since it implements IComparable
@@ -1198,7 +1198,7 @@ public class NivaraColumnTests
             "LessThan should work for Guid since it implements IComparable");
 
         // Test that the results are boolean columns
-        var equalsResult = guidColumn.Equals(targetGuid);
+        var equalsResult = guidColumn.EqualTo(targetGuid);
         var greaterResult = guidColumn.GreaterThan(targetGuid);
         var lessResult = guidColumn.LessThan(targetGuid);
 
@@ -1415,7 +1415,7 @@ public class NivaraColumnTests
         var originalColumn = NivaraColumn<int>.Create(originalValues);
 
         // Test scalar comparison
-        var equalsResult = originalColumn.Equals(30);
+        var equalsResult = originalColumn.EqualTo(30);
 
         Assert.That(equalsResult, Is.Not.Null, "Equals should return a new instance");
         Assert.That(ReferenceEquals(equalsResult, originalColumn), Is.False, "Equals should return a different instance");
@@ -1438,7 +1438,7 @@ public class NivaraColumnTests
 
         // Test element-wise comparison
         var otherColumn = NivaraColumn<int>.Create(new[] { 15, 25, 30, 35, 45 });
-        var elementEqualsResult = originalColumn.Equals(otherColumn);
+        var elementEqualsResult = originalColumn.EqualTo(otherColumn);
 
         Assert.That(elementEqualsResult, Is.Not.Null, "Element-wise equals should return new instance");
         Assert.That(ReferenceEquals(elementEqualsResult, originalColumn), Is.False, "Element-wise equals should return different instance");
@@ -1550,7 +1550,7 @@ public class NivaraColumnTests
         var targetValue = values.Length > 0 ? values[values.Length / 2] : 0;
 
         // Test all comparison operations
-        var equalsResult = originalColumn.Equals(targetValue);
+        var equalsResult = originalColumn.EqualTo(targetValue);
         var greaterResult = originalColumn.GreaterThan(targetValue);
         var lessResult = originalColumn.LessThan(targetValue);
 
@@ -1578,7 +1578,7 @@ public class NivaraColumnTests
             var otherValues = values.Select(x => x % 2 == 0 ? x : x + 1).ToArray();
             var otherColumn = NivaraColumn<int>.Create(otherValues);
 
-            var elementEquals = originalColumn.Equals(otherColumn);
+            var elementEquals = originalColumn.EqualTo(otherColumn);
 
             Assert.That(ReferenceEquals(elementEquals, originalColumn), Is.False,
                 "Element-wise equals should return a new instance");
@@ -1618,7 +1618,7 @@ public class NivaraColumnTests
             var targetValue = values.Length > 0 ? values[0] : "test";
 
             // Test comparison operations on strings
-            var equalsResult = originalColumn.Equals(targetValue);
+            var equalsResult = originalColumn.EqualTo(targetValue);
             var greaterResult = originalColumn.GreaterThan(targetValue);
             var lessResult = originalColumn.LessThan(targetValue);
 
@@ -2588,8 +2588,8 @@ public class NivaraColumnTests
             Assert.That(addEw[i], Is.EqualTo(values[i] + (values[i] + scalar)));
         }
 
-        var equalsScalar = column.Equals(scalar);
-        var equalsEw = column.Equals(column);
+        var equalsScalar = column.EqualTo(scalar);
+        var equalsEw = column.EqualTo(column);
         var greaterScalar = column.GreaterThan(scalar);
         var greaterEw = column.GreaterThan(column);
         var lessScalar = column.LessThan(scalar);

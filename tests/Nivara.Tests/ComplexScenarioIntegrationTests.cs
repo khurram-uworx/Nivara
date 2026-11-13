@@ -136,7 +136,7 @@ public class ComplexScenarioIntegrationTests
         var doubledInts = vectorizedInts * 2; // Vectorized operation
         var scaledDoubles = vectorizedDoubles * 0.5; // Vectorized operation
         var intComparison = vectorizedInts.GreaterThan(500); // Vectorized comparison
-        var stringComparison = scalarStrings.Equals("Item500"); // Scalar comparison
+        var stringComparison = scalarStrings.EqualTo("Item500"); // Scalar comparison
 
         // Assert - Verify mixed operations work correctly
         Assert.That(doubledInts.Length, Is.EqualTo(1000), "Vectorized operations should preserve length");

@@ -15,7 +15,7 @@ namespace Nivara;
 /// </summary>
 /// <typeparam name="T">The type of elements in the column</typeparam>
 [CollectionBuilder(typeof(NivaraColumnBuilder), nameof(NivaraColumnBuilder.Create))]
-public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
+public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, IEquatable<NivaraColumn<T>>
 {
     /// <summary>
     /// Performs vectorized element-wise multiplication with a scalar
@@ -163,6 +163,78 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             for (int i = 0; i < x.Length; i++)
             {
                 destination[i] = comparer.Compare(x[i], y[i]) < 0;
+            }
+        }
+    }
+
+    static void notEqualsTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
+    {
+        if (!NumericKernelDispatcher.TryNotEquals(x, y, destination))
+        {
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = !comparer.Equals(x[i], y);
+            }
+        }
+    }
+
+    static void notEqualsTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+    {
+        if (!NumericKernelDispatcher.TryNotEquals(x, y, destination))
+        {
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = !comparer.Equals(x[i], y[i]);
+            }
+        }
+    }
+
+    static void greaterThanOrEqualTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
+    {
+        if (!NumericKernelDispatcher.TryGreaterThanOrEqual(x, y, destination))
+        {
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y) >= 0;
+            }
+        }
+    }
+
+    static void greaterThanOrEqualTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+    {
+        if (!NumericKernelDispatcher.TryGreaterThanOrEqual(x, y, destination))
+        {
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y[i]) >= 0;
+            }
+        }
+    }
+
+    static void lessThanOrEqualTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
+    {
+        if (!NumericKernelDispatcher.TryLessThanOrEqual(x, y, destination))
+        {
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y) <= 0;
+            }
+        }
+    }
+
+    static void lessThanOrEqualTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+    {
+        if (!NumericKernelDispatcher.TryLessThanOrEqual(x, y, destination))
+        {
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y[i]) <= 0;
             }
         }
     }
@@ -840,6 +912,369 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Performs vectorized element-wise inequality comparison
+    /// </summary>
+    NivaraColumn<bool> notEqualsVectorized(NivaraColumn<T> other)
+    {
+        return applyElementwiseCompare(other, notEqualsTensorPrimitive);
+    }
+
+    /// <summary>
+    /// Performs vectorized scalar inequality comparison
+    /// </summary>
+    NivaraColumn<bool> notEqualsVectorized(T scalar)
+    {
+        var data = storage.Data.Span;
+        var result = new bool[data.Length];
+        notEqualsTensorPrimitive(data, scalar, result.AsSpan());
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = storage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMaskArray[i])
+                    result[i] = false;
+            }
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs scalar inequality comparison using standard equality
+    /// </summary>
+    NivaraColumn<bool> notEqualsScalar(T scalar)
+    {
+        var data = storage.Data.Span;
+        var result = new bool[data.Length];
+        var comparer = EqualityComparer<T>.Default;
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = storage.NullMaskMemory;
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            bool isNull = nullMask.HasValue && nullMask.Value.Length > 0 && nullMask.Value.Span[i];
+
+            if (isNull)
+            {
+                result[i] = false;
+            }
+            else
+            {
+                result[i] = !comparer.Equals(data[i], scalar);
+            }
+        }
+
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs element-wise inequality comparison using standard equality
+    /// </summary>
+    NivaraColumn<bool> notEqualsScalar(NivaraColumn<T> other)
+    {
+        var leftData = storage.Data.Span;
+        var rightData = other.storage.Data.Span;
+        var result = new bool[leftData.Length];
+        var comparer = EqualityComparer<T>.Default;
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var leftNulls = storage.NullMaskMemory;
+        var rightNulls = other.storage.NullMaskMemory;
+
+        bool hasAnyNulls = (leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0);
+        bool[]? resultNullMaskArray = null;
+
+        if (hasAnyNulls)
+        {
+            resultNullMaskArray = new bool[result.Length];
+        }
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
+            bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
+            bool hasNull = leftIsNull || rightIsNull;
+
+            if (hasNull)
+            {
+                result[i] = false;
+                if (resultNullMaskArray != null)
+                    resultNullMaskArray[i] = true;
+            }
+            else
+            {
+                result[i] = !comparer.Equals(leftData[i], rightData[i]);
+                if (resultNullMaskArray != null)
+                    resultNullMaskArray[i] = false;
+            }
+        }
+
+        if (resultNullMaskArray != null)
+        {
+            resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs vectorized scalar greater than or equal comparison
+    /// </summary>
+    NivaraColumn<bool> greaterThanOrEqualVectorized(T scalar)
+    {
+        var data = storage.Data.Span;
+        var result = new bool[data.Length];
+        greaterThanOrEqualTensorPrimitive(data, scalar, result.AsSpan());
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = storage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMaskArray[i])
+                    result[i] = false;
+            }
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs vectorized element-wise greater than or equal comparison
+    /// </summary>
+    NivaraColumn<bool> greaterThanOrEqualVectorized(NivaraColumn<T> other)
+    {
+        return applyElementwiseCompare(other, greaterThanOrEqualTensorPrimitive);
+    }
+
+    /// <summary>
+    /// Performs scalar greater than or equal comparison using standard comparison
+    /// </summary>
+    NivaraColumn<bool> greaterThanOrEqualScalar(T scalar)
+    {
+        var data = storage.Data.Span;
+        var result = new bool[data.Length];
+        var comparer = Comparer<T>.Default;
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = storage.NullMaskMemory;
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            bool isNull = nullMask.HasValue && nullMask.Value.Length > 0 && nullMask.Value.Span[i];
+
+            if (isNull)
+            {
+                result[i] = false;
+            }
+            else
+            {
+                result[i] = comparer.Compare(data[i], scalar) >= 0;
+            }
+        }
+
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs element-wise greater than or equal comparison using standard comparison
+    /// </summary>
+    NivaraColumn<bool> greaterThanOrEqualScalar(NivaraColumn<T> other)
+    {
+        var leftData = storage.Data.Span;
+        var rightData = other.storage.Data.Span;
+        var result = new bool[leftData.Length];
+        var comparer = Comparer<T>.Default;
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var leftNulls = storage.NullMaskMemory;
+        var rightNulls = other.storage.NullMaskMemory;
+
+        bool hasAnyNulls = (leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0);
+        bool[]? resultNullMaskArray = null;
+
+        if (hasAnyNulls)
+        {
+            resultNullMaskArray = new bool[result.Length];
+        }
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
+            bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
+            bool hasNull = leftIsNull || rightIsNull;
+
+            if (hasNull)
+            {
+                result[i] = false;
+                if (resultNullMaskArray != null)
+                    resultNullMaskArray[i] = true;
+            }
+            else
+            {
+                result[i] = comparer.Compare(leftData[i], rightData[i]) >= 0;
+                if (resultNullMaskArray != null)
+                    resultNullMaskArray[i] = false;
+            }
+        }
+
+        if (resultNullMaskArray != null)
+        {
+            resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs vectorized scalar less than or equal comparison
+    /// </summary>
+    NivaraColumn<bool> lessThanOrEqualVectorized(T scalar)
+    {
+        var data = storage.Data.Span;
+        var result = new bool[data.Length];
+        lessThanOrEqualTensorPrimitive(data, scalar, result.AsSpan());
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = storage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMaskArray[i])
+                    result[i] = false;
+            }
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs vectorized element-wise less than or equal comparison
+    /// </summary>
+    NivaraColumn<bool> lessThanOrEqualVectorized(NivaraColumn<T> other)
+    {
+        return applyElementwiseCompare(other, lessThanOrEqualTensorPrimitive);
+    }
+
+    /// <summary>
+    /// Performs scalar less than or equal comparison using standard comparison
+    /// </summary>
+    NivaraColumn<bool> lessThanOrEqualScalar(T scalar)
+    {
+        var data = storage.Data.Span;
+        var result = new bool[data.Length];
+        var comparer = Comparer<T>.Default;
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = storage.NullMaskMemory;
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            bool isNull = nullMask.HasValue && nullMask.Value.Length > 0 && nullMask.Value.Span[i];
+
+            if (isNull)
+            {
+                result[i] = false;
+            }
+            else
+            {
+                result[i] = comparer.Compare(data[i], scalar) <= 0;
+            }
+        }
+
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
+    /// Performs element-wise less than or equal comparison using standard comparison
+    /// </summary>
+    NivaraColumn<bool> lessThanOrEqualScalar(NivaraColumn<T> other)
+    {
+        var leftData = storage.Data.Span;
+        var rightData = other.storage.Data.Span;
+        var result = new bool[leftData.Length];
+        var comparer = Comparer<T>.Default;
+
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var leftNulls = storage.NullMaskMemory;
+        var rightNulls = other.storage.NullMaskMemory;
+
+        bool hasAnyNulls = (leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0);
+        bool[]? resultNullMaskArray = null;
+
+        if (hasAnyNulls)
+        {
+            resultNullMaskArray = new bool[result.Length];
+        }
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
+            bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
+            bool hasNull = leftIsNull || rightIsNull;
+
+            if (hasNull)
+            {
+                result[i] = false;
+                if (resultNullMaskArray != null)
+                    resultNullMaskArray[i] = true;
+            }
+            else
+            {
+                result[i] = comparer.Compare(leftData[i], rightData[i]) <= 0;
+                if (resultNullMaskArray != null)
+                    resultNullMaskArray[i] = false;
+            }
+        }
+
+        if (resultNullMaskArray != null)
+        {
+            resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+        }
+
+        return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
+    }
+
+    /// <summary>
     /// Performs vectorized scalar greater than comparison
     /// </summary>
     NivaraColumn<bool> greaterThanVectorized(T scalar)
@@ -1246,6 +1681,115 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return NivaraColumn<T>.Create(Array.Empty<T>());
+    }
+
+    bool IColumn.ContentEquals(IColumn other)
+    {
+        if (other is NivaraColumn<T> typed)
+            return ContentEquals(typed);
+        return false;
+    }
+
+    int IColumn.ContentHashCode()
+    {
+        return ContentHashCode();
+    }
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to another column
+    /// of the same element type (same length, null mask and values).
+    /// </summary>
+    public bool ContentEquals(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(other.disposed, other);
+
+        if (ReferenceEquals(this, other))
+            return true;
+
+        if (Length != other.Length || HasNulls != other.HasNulls)
+            return false;
+
+        var leftMask = storage.NullMaskMemory;
+        var rightMask = other.storage.NullMaskMemory;
+
+        if (leftMask.HasValue != rightMask.HasValue)
+            return false;
+
+        if (leftMask.HasValue)
+        {
+            if (leftMask.Value.Length != rightMask!.Value.Length)
+                return false;
+            if (!leftMask.Value.Span.SequenceEqual(rightMask.Value.Span))
+                return false;
+        }
+
+        // Compare non-null values only; null positions hold default(T) and are masked.
+        if (storage is ColumnStorage<T> ls && other.storage is ColumnStorage<T> rs)
+        {
+            var leftData = ls.Data.Span;
+            var rightData = rs.Data.Span;
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < Length; i++)
+            {
+                bool isNull = leftMask.HasValue && leftMask.Value.Length > 0 && leftMask.Value.Span[i];
+                if (isNull)
+                    continue;
+                if (!comparer.Equals(leftData[i], rightData[i]))
+                    return false;
+            }
+        }
+        else
+        {
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsNull(i) || other.IsNull(i))
+                    continue;
+                if (!comparer.Equals(this[i], other[i]))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns a hash code for the column's contents.
+    /// </summary>
+    public int ContentHashCode()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var hash = new HashCode();
+        hash.Add(Length);
+        hash.Add(HasNulls);
+
+        var mask = storage.NullMaskMemory;
+        var comparer = EqualityComparer<T>.Default;
+
+        if (storage is ColumnStorage<T> cs)
+        {
+            var data = cs.Data.Span;
+            for (int i = 0; i < Length; i++)
+            {
+                bool isNull = mask.HasValue && mask.Value.Length > 0 && mask.Value.Span[i];
+                if (isNull)
+                    continue;
+                hash.Add(comparer.GetHashCode(data[i]!));
+            }
+        }
+        else
+        {
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsNull(i))
+                    continue;
+                hash.Add(comparer.GetHashCode(this[i]!));
+            }
+        }
+
+        return hash.ToHashCode();
     }
     /// <inheritdoc />
     public object? GetValue(int index)
@@ -1857,10 +2401,11 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// <summary>
     /// Compares all elements in the column to a scalar value for equality.
     /// Returns a boolean column indicating comparison results.
+    /// Element-wise comparison: not structural equality (see <see cref="Equals(object)"/>).
     /// </summary>
     /// <param name="value">The scalar value to compare against</param>
     /// <returns>A new boolean column with comparison results</returns>
-    public NivaraColumn<bool> Equals(T value)
+    public NivaraColumn<bool> EqualTo(T value)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -1882,7 +2427,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// <returns>A new boolean column with element-wise comparison results</returns>
     /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
     /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
-    public NivaraColumn<bool> Equals(NivaraColumn<T> other)
+    public NivaraColumn<bool> EqualTo(NivaraColumn<T> other)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -1902,6 +2447,168 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         else
         {
             return equalsScalar(other);
+        }
+    }
+
+    /// <summary>
+    /// Compares all elements in the column to a scalar value for inequality.
+    /// Returns a boolean column indicating comparison results.
+    /// Element-wise comparison: not structural equality (see <see cref="Equals(object)"/>).
+    /// </summary>
+    /// <param name="value">The scalar value to compare against</param>
+    /// <returns>A new boolean column with comparison results</returns>
+    public NivaraColumn<bool> NotEqualTo(T value)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (storage.IsVectorizable)
+        {
+            return notEqualsVectorized(value);
+        }
+        else
+        {
+            return notEqualsScalar(value);
+        }
+    }
+
+    /// <summary>
+    /// Compares corresponding elements of two columns for inequality.
+    /// Returns a boolean column indicating comparison results.
+    /// Element-wise comparison: not structural equality (see <see cref="Equals(object)"/>).
+    /// </summary>
+    /// <param name="other">The column to compare against</param>
+    /// <returns>A new boolean column with element-wise comparison results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    public NivaraColumn<bool> NotEqualTo(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (other.disposed)
+            throw new ObjectDisposedException(nameof(other));
+
+        validateCompatibleLength(other, "inequality comparison");
+
+        if (storage.IsVectorizable && other.storage.IsVectorizable)
+        {
+            return notEqualsVectorized(other);
+        }
+        else
+        {
+            return notEqualsScalar(other);
+        }
+    }
+
+    /// <summary>
+    /// Compares all elements in the column to a scalar value for greater than or equal.
+    /// Only supported for comparable types.
+    /// </summary>
+    /// <param name="value">The scalar value to compare against</param>
+    /// <returns>A new boolean column with comparison results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
+    public NivaraColumn<bool> GreaterThanOrEqual(T value)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        validateTypeSupportsOperation("comparison");
+
+        if (storage.IsVectorizable)
+        {
+            return greaterThanOrEqualVectorized(value);
+        }
+        else
+        {
+            return greaterThanOrEqualScalar(value);
+        }
+    }
+
+    /// <summary>
+    /// Compares corresponding elements of two columns for greater than or equal.
+    /// Only supported for comparable types.
+    /// </summary>
+    /// <param name="other">The column to compare against</param>
+    /// <returns>A new boolean column with element-wise comparison results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
+    public NivaraColumn<bool> GreaterThanOrEqual(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (other.disposed)
+            throw new ObjectDisposedException(nameof(other));
+
+        validateCompatibleLength(other, "greater than or equal comparison");
+        validateTypeSupportsOperation("comparison");
+
+        if (storage.IsVectorizable && other.storage.IsVectorizable)
+        {
+            return greaterThanOrEqualVectorized(other);
+        }
+        else
+        {
+            return greaterThanOrEqualScalar(other);
+        }
+    }
+
+    /// <summary>
+    /// Compares all elements in the column to a scalar value for less than or equal.
+    /// Only supported for comparable types.
+    /// </summary>
+    /// <param name="value">The scalar value to compare against</param>
+    /// <returns>A new boolean column with comparison results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
+    public NivaraColumn<bool> LessThanOrEqual(T value)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        validateTypeSupportsOperation("comparison");
+
+        if (storage.IsVectorizable)
+        {
+            return lessThanOrEqualVectorized(value);
+        }
+        else
+        {
+            return lessThanOrEqualScalar(value);
+        }
+    }
+
+    /// <summary>
+    /// Compares corresponding elements of two columns for less than or equal.
+    /// Only supported for comparable types.
+    /// </summary>
+    /// <param name="other">The column to compare against</param>
+    /// <returns>A new boolean column with element-wise comparison results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
+    public NivaraColumn<bool> LessThanOrEqual(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (other.disposed)
+            throw new ObjectDisposedException(nameof(other));
+
+        validateCompatibleLength(other, "less than or equal comparison");
+        validateTypeSupportsOperation("comparison");
+
+        if (storage.IsVectorizable && other.storage.IsVectorizable)
+        {
+            return lessThanOrEqualVectorized(other);
+        }
+        else
+        {
+            return lessThanOrEqualScalar(other);
         }
     }
 
@@ -2486,6 +3193,62 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             result[i] = storage[i];
         }
         return result;
+    }
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to another column.
+    /// </summary>
+    public bool Equals(NivaraColumn<T>? other)
+    {
+        if (other is null)
+            return false;
+
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(other.disposed, other);
+
+        return ContentEquals(other);
+    }
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to the specified object.
+    /// </summary>
+    public override bool Equals(object? obj)
+    {
+        if (obj is NivaraColumn<T> other)
+            return Equals(other);
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns a hash code for this column's contents.
+    /// </summary>
+    public override int GetHashCode()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return ContentHashCode();
+    }
+
+    /// <summary>
+    /// Structural equality operator for columns.
+    /// </summary>
+    public static bool operator ==(NivaraColumn<T>? left, NivaraColumn<T>? right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+
+        if (left is null || right is null)
+            return false;
+
+        return left.Equals(right);
+    }
+
+    /// <summary>
+    /// Structural inequality operator for columns.
+    /// </summary>
+    public static bool operator !=(NivaraColumn<T>? left, NivaraColumn<T>? right)
+    {
+        return !(left == right);
     }
 
     /// <inheritdoc />

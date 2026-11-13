@@ -68,7 +68,7 @@ public class ChunkedColumnOperationTests
     {
         var column = ChunkedColumn([1, 2], [3, 4]);
 
-        var result = column.Equals(3);
+        var result = column.EqualTo(3);
 
         Assert.That(result.ToArray(), Is.EqualTo(new[] { false, false, true, false }));
     }
@@ -79,7 +79,7 @@ public class ChunkedColumnOperationTests
         var left = ChunkedColumn([1, 2], [3, 4]);
         var right = NivaraColumn<int>.Create(new[] { 1, 0, 3, 0 });
 
-        var result = left.Equals(right);
+        var result = left.EqualTo(right);
 
         Assert.That(result.ToArray(), Is.EqualTo(new[] { true, false, true, false }));
     }
