@@ -15,7 +15,7 @@ namespace Nivara;
 /// </summary>
 /// <typeparam name="T">The type of elements in the column</typeparam>
 [CollectionBuilder(typeof(NivaraColumnBuilder), nameof(NivaraColumnBuilder.Create))]
-public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
+public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, IEquatable<NivaraColumn<T>>
 {
     /// <summary>
     /// Performs vectorized element-wise multiplication with a scalar
@@ -1682,6 +1682,115 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
         return NivaraColumn<T>.Create(Array.Empty<T>());
     }
+
+    bool IColumn.ContentEquals(IColumn other)
+    {
+        if (other is NivaraColumn<T> typed)
+            return ContentEquals(typed);
+        return false;
+    }
+
+    int IColumn.ContentHashCode()
+    {
+        return ContentHashCode();
+    }
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to another column
+    /// of the same element type (same length, null mask and values).
+    /// </summary>
+    public bool ContentEquals(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(other.disposed, other);
+
+        if (ReferenceEquals(this, other))
+            return true;
+
+        if (Length != other.Length || HasNulls != other.HasNulls)
+            return false;
+
+        var leftMask = storage.NullMaskMemory;
+        var rightMask = other.storage.NullMaskMemory;
+
+        if (leftMask.HasValue != rightMask.HasValue)
+            return false;
+
+        if (leftMask.HasValue)
+        {
+            if (leftMask.Value.Length != rightMask!.Value.Length)
+                return false;
+            if (!leftMask.Value.Span.SequenceEqual(rightMask.Value.Span))
+                return false;
+        }
+
+        // Compare non-null values only; null positions hold default(T) and are masked.
+        if (storage is ColumnStorage<T> ls && other.storage is ColumnStorage<T> rs)
+        {
+            var leftData = ls.Data.Span;
+            var rightData = rs.Data.Span;
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < Length; i++)
+            {
+                bool isNull = leftMask.HasValue && leftMask.Value.Length > 0 && leftMask.Value.Span[i];
+                if (isNull)
+                    continue;
+                if (!comparer.Equals(leftData[i], rightData[i]))
+                    return false;
+            }
+        }
+        else
+        {
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsNull(i) || other.IsNull(i))
+                    continue;
+                if (!comparer.Equals(this[i], other[i]))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns a hash code for the column's contents.
+    /// </summary>
+    public int ContentHashCode()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var hash = new HashCode();
+        hash.Add(Length);
+        hash.Add(HasNulls);
+
+        var mask = storage.NullMaskMemory;
+        var comparer = EqualityComparer<T>.Default;
+
+        if (storage is ColumnStorage<T> cs)
+        {
+            var data = cs.Data.Span;
+            for (int i = 0; i < Length; i++)
+            {
+                bool isNull = mask.HasValue && mask.Value.Length > 0 && mask.Value.Span[i];
+                if (isNull)
+                    continue;
+                hash.Add(comparer.GetHashCode(data[i]!));
+            }
+        }
+        else
+        {
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsNull(i))
+                    continue;
+                hash.Add(comparer.GetHashCode(this[i]!));
+            }
+        }
+
+        return hash.ToHashCode();
+    }
     /// <inheritdoc />
     public object? GetValue(int index)
     {
@@ -3084,6 +3193,62 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             result[i] = storage[i];
         }
         return result;
+    }
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to another column.
+    /// </summary>
+    public bool Equals(NivaraColumn<T>? other)
+    {
+        if (other is null)
+            return false;
+
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(other.disposed, other);
+
+        return ContentEquals(other);
+    }
+
+    /// <summary>
+    /// Determines whether this column is structurally equal to the specified object.
+    /// </summary>
+    public override bool Equals(object? obj)
+    {
+        if (obj is NivaraColumn<T> other)
+            return Equals(other);
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns a hash code for this column's contents.
+    /// </summary>
+    public override int GetHashCode()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return ContentHashCode();
+    }
+
+    /// <summary>
+    /// Structural equality operator for columns.
+    /// </summary>
+    public static bool operator ==(NivaraColumn<T>? left, NivaraColumn<T>? right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+
+        if (left is null || right is null)
+            return false;
+
+        return left.Equals(right);
+    }
+
+    /// <summary>
+    /// Structural inequality operator for columns.
+    /// </summary>
+    public static bool operator !=(NivaraColumn<T>? left, NivaraColumn<T>? right)
+    {
+        return !(left == right);
     }
 
     /// <inheritdoc />
