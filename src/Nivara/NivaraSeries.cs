@@ -12,7 +12,7 @@ namespace Nivara;
 /// </summary>
 /// <typeparam name="T">The type of values in the series</typeparam>
 [CollectionBuilder(typeof(NivaraSeriesBuilder), nameof(NivaraSeriesBuilder.Create))]
-public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
+public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable, IEquatable<NivaraSeries<T>>
 {
     readonly struct TopKPriority
     {
@@ -1091,6 +1091,119 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Determines whether this series is structurally equal to another series
+    /// (values and index labels).
+    /// </summary>
+    public bool Equals(NivaraSeries<T>? other)
+    {
+        if (other is null)
+            return false;
+
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(other.disposed, other);
+
+        if (ReferenceEquals(this, other))
+            return true;
+
+        if (Length != other.Length)
+            return false;
+
+        if (!values.Equals(other.values))
+            return false;
+
+        // Index labels: a default positional index equals an explicit 0..n-1 index.
+        var thisHasIndex = index is not null;
+        var otherHasIndex = other.index is not null;
+
+        if (thisHasIndex && otherHasIndex)
+        {
+            return index!.ContentEquals(other.index!);
+        }
+
+        if (!thisHasIndex && !otherHasIndex)
+        {
+            return true;
+        }
+
+        // One default, one explicit: compare the explicit index to positional labels.
+        var explicitIndex = thisHasIndex ? index! : other.index!;
+        for (int i = 0; i < Length; i++)
+        {
+            if (explicitIndex.IsNull(i))
+                return false;
+
+            var label = explicitIndex[i];
+            if (label is int intLabel)
+            {
+                if (intLabel != i)
+                    return false;
+            }
+            else if (!EqualityComparer<object>.Default.Equals(label, i))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Determines whether this series is structurally equal to the specified object.
+    /// </summary>
+    public override bool Equals(object? obj)
+    {
+        if (obj is NivaraSeries<T> other)
+            return Equals(other);
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns a hash code for this series' contents.
+    /// </summary>
+    public override int GetHashCode()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var hash = new HashCode();
+        hash.Add(values.ContentHashCode());
+
+        if (index is null)
+        {
+            for (int i = 0; i < Length; i++)
+                hash.Add(i);
+        }
+        else
+        {
+            hash.Add(index.ContentHashCode());
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Structural equality operator for series.
+    /// </summary>
+    public static bool operator ==(NivaraSeries<T>? left, NivaraSeries<T>? right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+
+        if (left is null || right is null)
+            return false;
+
+        return left.Equals(right);
+    }
+
+    /// <summary>
+    /// Structural inequality operator for series.
+    /// </summary>
+    public static bool operator !=(NivaraSeries<T>? left, NivaraSeries<T>? right)
+    {
+        return !(left == right);
     }
 
     /// <inheritdoc />
