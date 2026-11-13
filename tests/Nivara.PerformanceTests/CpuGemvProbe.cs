@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.Extensions.Blas;
 using System.Diagnostics;
 
 namespace Nivara.PerformanceTests;
