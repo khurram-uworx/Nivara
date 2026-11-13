@@ -71,4 +71,4 @@ state on the hot path and clobbering settings any other library in the process m
 
 ## GitHub issues log
 
-(none yet)
+- [ ] #1193 — consolidate the duplicated OpenBlasInterop binding in PerformanceTests (created while working on #1171)
