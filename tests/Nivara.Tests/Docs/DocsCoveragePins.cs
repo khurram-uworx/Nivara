@@ -82,6 +82,9 @@ internal static class DocsCoveragePins
     /// `src/Nivara/GemmProvider.cs` adds one: 260 + 2 = 262.
     /// Issue #1163 adds one backticked `docs/SILK.md` reference in `CHANGELOG.md`
     /// (the 1.5.0 breaking-changes migration note): 265 + 1 = 266.
+    /// Issue #1189 adds two backticked `docs/STREAMING.md` references in source XML doc
+    /// comments (`JsonExtensions.cs` and `CsvExtensions.cs` "Resource management" remarks):
+    /// 266 + 2 = 268.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 266;
+    internal const int ExpectedDocumentReferenceCount = 268;
 }
