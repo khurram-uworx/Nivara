@@ -599,24 +599,9 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         return $"QueryFrame {{ Source: {handle.Source.GetType().Name}, Pipeline: {pipeline} }}";
     }
 
-    /// <summary>
-    /// Determines whether the specified object is equal to the current query frame
-    /// </summary>
-    /// <param name="obj">The object to compare</param>
-    /// <returns>True if the objects are equal, false otherwise</returns>
-    public override bool Equals(object? obj)
-    {
-        return ReferenceEquals(this, obj);
-    }
-
-    /// <summary>
-    /// Returns a hash code for the query frame
-    /// </summary>
-    /// <returns>A hash code for the query frame</returns>
-    public override int GetHashCode()
-    {
-        return base.GetHashCode();
-    }
+    // QueryFrame intentionally keeps object identity semantics for Equals/GetHashCode:
+    // structural comparison would force materialisation and consume streaming state.
+    // Collect() first, then compare the resulting NivaraFrame instances.
 
     /// <summary>
     /// Adds a row-selection operation that extracts rows by index.
