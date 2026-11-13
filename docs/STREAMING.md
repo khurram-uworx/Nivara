@@ -264,6 +264,12 @@ await foreach (var frame in sorted.AsStream())
   that are never disposed. So you do not have to dispose each intermediate: a `using` bound to
   the terminal of a chain is sufficient, and an abandoned intermediate is not itself a leak.
   Dispose the scan you created. See [LINQ.md](LINQ.md#resource-management) for the typed-query
+
+- **There is no safety net.** Nivara has no process-global abandoned-resource cleanup: a scan you
+  do not dispose is released only when its underlying stream is finalized (non-deterministic, and
+  blocked while any live chain still references it). "Dispose the scan you created" is the whole
+  contract. Partial reads on an undisposed scan are where the leak actually happens, and Parquet
+  holds its reader until disposal in every case.
   form of the same contract.
 - **A full read masks a missing `Dispose`.** CSV and JSON close their chunk reader on their own
   once a read reaches EOF, so reading to completion releases the handle even if the scan was

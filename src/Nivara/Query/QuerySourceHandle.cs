@@ -19,8 +19,7 @@ internal sealed class QuerySourceHandle
     int released;
 
     /// <summary>
-    /// Initializes a new instance wrapping <paramref name="source"/>, registering it for
-    /// abandoned-resource cleanup when the source is lazy.
+    /// Initializes a new instance wrapping <paramref name="source"/>.
     /// </summary>
     /// <param name="source">The source to own</param>
     /// <exception cref="ArgumentNullException">Thrown when source is null</exception>
@@ -28,24 +27,8 @@ internal sealed class QuerySourceHandle
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
 
-        // Track lazy sources for abandoned resource cleanup (opt-in via NivaraResourceManager.Enable).
-        // The closure captures `source` and must never capture `this`: the tracked cleanup actions
-        // live in a static dictionary, so anything they capture stays reachable forever and the weak
-        // reference could never clear, silently disabling cleanup.
-        if (source.IsLazy && NivaraResourceManager.IsEnabled)
-        {
-            NivaraResourceManager.TrackResource(this, "LazyQuerySource", 0, () =>
-            {
-                try
-                {
-                    source.Dispose();
-                }
-                catch
-                {
-                    // Ignore disposal errors for abandoned resources
-                }
-            });
-        }
+        // Abandoned-resource cleanup is no longer tracked here (see #1168): explicit Dispose/Release
+        // is the only release path for a lazy source, matching the one-source-one-release contract.
     }
 
     /// <summary>
@@ -66,27 +49,23 @@ internal sealed class QuerySourceHandle
     {
         if (Interlocked.Exchange(ref released, 1) != 0) return;
 
-        NivaraResourceManager.UntrackResource(this);
-
         try
         {
             source.Dispose();
         }
         catch
         {
-            // Ignore disposal errors, mirroring the abandoned-resource cleanup path.
+            // Ignore disposal errors, mirroring Release().
         }
     }
 
     /// <summary>
     /// Releases the source asynchronously. Idempotent; disposal errors are swallowed, mirroring
-    /// <see cref="Release"/> and the abandoned-resource cleanup path so neither disposal path throws.
+    /// <see cref="Release"/> so neither disposal path throws.
     /// </summary>
     internal async ValueTask ReleaseAsync()
     {
         if (Interlocked.Exchange(ref released, 1) != 0) return;
-
-        NivaraResourceManager.UntrackResource(this);
 
         try
         {
@@ -97,7 +76,7 @@ internal sealed class QuerySourceHandle
         }
         catch
         {
-            // Ignore disposal errors, mirroring Release() and the abandoned-resource cleanup path.
+            // Ignore disposal errors, mirroring Release().
         }
     }
 }

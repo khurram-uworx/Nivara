@@ -13,67 +13,6 @@ namespace Nivara.Tests;
 [TestFixture]
 public class ResourceManagementPropertyTests
 {
-    [OneTimeSetUp]
-    public void OneTimeSetUp()
-    {
-        // Resource tracking is opt-in by default; enable it for the tracking assertions below
-        NivaraResourceManager.Enable();
-    }
-
-    [OneTimeTearDown]
-    public void OneTimeTearDown()
-    {
-        // Restore the performance-first default so other fixtures don't pay tracking cost
-        NivaraResourceManager.Disable();
-    }
-
-    [SetUp]
-    public void Setup()
-    {
-        // Force cleanup before each test to ensure clean state
-        NivaraResourceManager.ForceCleanup();
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        // Force cleanup after each test to prevent resource leaks
-        NivaraResourceManager.ForceCleanup();
-    }
-
-    /// <summary>
-    /// Property 18: Resource tracking is opt-in
-    /// With tracking disabled (the default), constructing columns and frames must not
-    /// register anything in the resource manager and must not grow the tracking dictionary.
-    /// </summary>
-    [Test]
-    public void ResourceTrackingDisabledByDefault_ShouldNotTrackResources()
-    {
-        // Arrange - ensure tracking is in the disabled (default) state
-        NivaraResourceManager.Disable();
-
-        try
-        {
-            // Act - create resources through the normal public surface
-            var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
-            var frame = new NivaraFrame(new[] { ("data", (IColumn)column) });
-
-            // Assert - nothing is tracked
-            Assert.That(NivaraResourceManager.IsEnabled, Is.False,
-                "Resource tracking should be disabled by default");
-            var stats = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(stats.TotalTrackedResources, Is.EqualTo(0),
-                "No resources should be tracked when tracking is disabled");
-            Assert.That(stats.TrackedResourcesByType.Count, Is.EqualTo(0),
-                "No resource types should appear when tracking is disabled");
-        }
-        finally
-        {
-            // Restore the enabled state for the tracking tests in this fixture
-            NivaraResourceManager.Enable();
-        }
-    }
-
     /// <summary>
     /// Property 18: Resource disposal
     /// For any NivaraFrame or QueryFrame, proper disposal should clean up all underlying column resources
@@ -102,11 +41,7 @@ public class ResourceManagementPropertyTests
         frame = new NivaraFrame(columns);
         frameRef = new WeakReference(frame);
 
-        // Verify frame is tracked
-        var statsBefore = NivaraResourceManager.GetResourceStatistics();
-        Assert.That(statsBefore.TotalTrackedResources, Is.GreaterThan(0),
-            "Frame and columns should be tracked before disposal");
-
+        // (Tracking removed in #1168; disposal is the only release path.)
         // Dispose the frame
         frame.Dispose();
 
@@ -133,13 +68,7 @@ public class ResourceManagementPropertyTests
         GC.WaitForPendingFinalizers();
         GC.Collect();
 
-        // Force cleanup of abandoned resources
-        NivaraResourceManager.ForceCleanup();
-
-        // Verify resources are cleaned up
-        var statsAfter = NivaraResourceManager.GetResourceStatistics();
-        Assert.That(statsAfter.AbandonedResourceCount, Is.EqualTo(0),
-            "No abandoned resources should remain after disposal and cleanup");
+        // (Abandoned-resource cleanup removed in #1168; explicit disposal is the release path.)
     }
 
     /// <summary>
@@ -173,11 +102,7 @@ public class ResourceManagementPropertyTests
             queryFrame = Json.ScanFrame(tempFile);
             queryRef = new WeakReference(queryFrame);
 
-            // Verify the query source handle behind the frame is tracked
-            var statsBefore = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQuerySource"), Is.True,
-                "Lazy query source should be tracked");
-
+            // (Tracking removed in #1168; explicit disposal releases the handle.)
             // Dispose the query frame
             queryFrame.Dispose();
 
@@ -194,13 +119,9 @@ public class ResourceManagementPropertyTests
             GC.WaitForPendingFinalizers();
             GC.Collect();
 
-            // Force cleanup of abandoned resources
-            NivaraResourceManager.ForceCleanup();
-
-            // Verify resources are cleaned up
-            var statsAfter = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(statsAfter.AbandonedResourceCount, Is.EqualTo(0),
-                "No abandoned resources should remain after disposal and cleanup");
+            // Handle must be released so the file can be deleted (Windows).
+            Assert.DoesNotThrow(() => File.Delete(tempFile),
+                "Disposing the query frame must release the file handle");
         }
         finally
         {
@@ -282,100 +203,6 @@ public class ResourceManagementPropertyTests
     }
 
     /// <summary>
-    /// Property 18: Abandoned query cleanup
-    /// For any abandoned lazy query, the resource manager should automatically clean up resources.
-    /// **Validates: Requirements 10.2**
-    /// </summary>
-    [TestCase(3)]
-    [TestCase(5)]
-    public void AbandonedQueryCleanup_ShouldAutomaticallyCleanupResources(int queryCount)
-    {
-        // Arrange - Create temporary JSON files
-        var tempFiles = new List<string>();
-        var testData = """
-        [
-            {"id": 1, "value": 100},
-            {"id": 2, "value": 200}
-        ]
-        """;
-
-        try
-        {
-            for (int i = 0; i < queryCount; i++)
-            {
-                var tempFile = Path.Combine(Path.GetTempPath(), $"test_abandoned_{i}_{Guid.NewGuid():N}.json");
-                File.WriteAllText(tempFile, testData);
-                tempFiles.Add(tempFile);
-            }
-
-            var weakRefs = new List<WeakReference>();
-
-            // Act - Create lazy queries and abandon them in a separate method to ensure no strong references
-            CreateAndAbandonQueries(tempFiles, weakRefs);
-
-            // Verify the query source handles behind them are tracked
-            var statsBefore = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQuerySource"), Is.True,
-                "Lazy query sources should be tracked");
-
-            // Force multiple garbage collection cycles to ensure cleanup
-            for (int i = 0; i < 5; i++)
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-                Thread.Sleep(10); // Give some time for cleanup
-            }
-
-            // Force cleanup of abandoned resources multiple times
-            NivaraResourceManager.ForceCleanup();
-            Thread.Sleep(50);
-            NivaraResourceManager.ForceCleanup();
-
-            // Assert - Check if most queries are garbage collected (allow for some variance in GC behavior)
-            int collectedCount = 0;
-            foreach (var weakRef in weakRefs)
-            {
-                if (weakRef.Target == null)
-                    collectedCount++;
-            }
-
-            // At least half should be collected (GC is not deterministic in tests)
-            Assert.That(collectedCount, Is.GreaterThanOrEqualTo(queryCount / 2),
-                $"At least {queryCount / 2} out of {queryCount} abandoned query frames should be garbage collected");
-
-            // Verify abandoned resources are cleaned up
-            var statsAfter = NivaraResourceManager.GetResourceStatistics();
-            Assert.That(statsAfter.AbandonedResourceCount, Is.LessThanOrEqualTo(queryCount / 2),
-                "Most abandoned resources should be automatically cleaned up");
-        }
-        finally
-        {
-            // Cleanup temp files
-            foreach (var tempFile in tempFiles)
-            {
-                if (File.Exists(tempFile))
-                {
-                    File.Delete(tempFile);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Helper method to create and abandon queries without holding strong references
-    /// </summary>
-    private static void CreateAndAbandonQueries(List<string> tempFiles, List<WeakReference> weakRefs)
-    {
-        for (int i = 0; i < tempFiles.Count; i++)
-        {
-            var queryFrame = Json.ScanFrame(tempFiles[i]);
-            weakRefs.Add(new WeakReference(queryFrame));
-            // queryFrame goes out of scope here, making it eligible for GC
-        }
-    }
-
-    /// <summary>
     /// Property 18: Memory management for large datasets
     /// For any large dataset operation, the system should provide appropriate memory management guidance.
     /// **Validates: Requirements 10.1**
@@ -429,83 +256,4 @@ public class ResourceManagementPropertyTests
         }
     }
 
-    /// <summary>
-    /// Property 19: Resource tracking statistics
-    /// For any set of resource operations, the resource manager should provide accurate statistics.
-    /// **Validates: Requirements 10.4**
-    /// </summary>
-    [TestCase(2, 3)]
-    [TestCase(5, 10)]
-    [TestCase(1, 100)]
-    public void ResourceTracking_ShouldProvideAccurateStatistics(int frameCount, int rowCount)
-    {
-        // Arrange
-        var frames = new List<NivaraFrame>();
-        var statsBefore = NivaraResourceManager.GetResourceStatistics();
-
-        try
-        {
-            // Act - Create multiple frames
-            for (int i = 0; i < frameCount; i++)
-            {
-                var data = Enumerable.Range(0, rowCount).Select(x => x + i * 1000).ToArray();
-                var column = NivaraColumn<int>.Create(data);
-                var frame = new NivaraFrame(new[] { ($"data{i}", (IColumn)column) });
-                frames.Add(frame);
-            }
-
-            // Get statistics after creation
-            var statsAfter = NivaraResourceManager.GetResourceStatistics();
-
-            // Assert - Verify statistics are accurate
-            Assert.That(statsAfter.TotalTrackedResources,
-                Is.GreaterThan(statsBefore.TotalTrackedResources),
-                "Total tracked resources should increase after creating frames");
-
-            Assert.That(statsAfter.TrackedResourcesByType.ContainsKey("NivaraFrame"), Is.True,
-                "NivaraFrame resources should be tracked by type");
-
-            Assert.That(statsAfter.TotalEstimatedMemoryUsage,
-                Is.GreaterThan(statsBefore.TotalEstimatedMemoryUsage),
-                "Total estimated memory usage should increase");
-
-            // Dispose half the frames
-            var framesToDispose = frameCount / 2;
-            if (framesToDispose > 0)
-            {
-                for (int i = 0; i < framesToDispose; i++)
-                {
-                    frames[i].Dispose();
-                }
-
-                // Force cleanup and give time for tracking updates
-                NivaraResourceManager.ForceCleanup();
-                Thread.Sleep(10);
-
-                // Verify statistics reflect disposal
-                var statsAfterDisposal = NivaraResourceManager.GetResourceStatistics();
-
-                // The total should be less than after creation, but may not be exactly equal to before
-                // due to remaining frames and columns still being tracked
-                Assert.That(statsAfterDisposal.TotalTrackedResources,
-                    Is.LessThan(statsAfter.TotalTrackedResources),
-                    "Total tracked resources should decrease after disposal");
-            }
-            else
-            {
-                // If no frames to dispose, just verify tracking is working
-                Assert.That(statsAfter.TotalTrackedResources,
-                    Is.GreaterThan(statsBefore.TotalTrackedResources),
-                    "Resource tracking should be working");
-            }
-        }
-        finally
-        {
-            // Cleanup remaining frames
-            foreach (var frame in frames)
-            {
-                frame?.Dispose();
-            }
-        }
-    }
 }

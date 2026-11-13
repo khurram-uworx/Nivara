@@ -232,7 +232,6 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         int? expectedLength = null;
-        long estimatedMemoryUsage = 0;
 
         foreach (var (name, column) in columnList)
         {
@@ -264,9 +263,6 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
 
             columnDict[name] = column;
             schemaColumns.Add((name, column.ElementType));
-
-            // Estimate memory usage (rough approximation)
-            estimatedMemoryUsage += estimateColumnMemoryUsage(column);
         }
 
         columns = columnDict;
@@ -278,11 +274,7 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
                 ownedColumns.Add(column);
         }
 
-        // Track this frame for resource management only when opted in
-        if (NivaraResourceManager.IsEnabled)
-        {
-            NivaraResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
-        }
+        // Resource tracking is no longer performed: see #1168 (explicit Dispose is the release path).
     }
 
     /// <summary>
@@ -1256,7 +1248,7 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
         ObjectDisposedException.ThrowIf(disposed, this);
 
         var estimatedSize = estimateFrameMemoryUsage();
-        return NivaraResourceManager.GetMemoryRecommendations(estimatedSize, operationType, memoryBudgetBytes);
+        return MemoryAdvisor.GetMemoryRecommendations(estimatedSize, operationType, memoryBudgetBytes);
     }
 
     /// <inheritdoc />
@@ -1271,9 +1263,6 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
     {
         if (!disposed)
         {
-            // Untrack from resource manager
-            NivaraResourceManager.UntrackResource(this);
-
             // Dispose only owned columns
             foreach (var column in columns.Values)
             {

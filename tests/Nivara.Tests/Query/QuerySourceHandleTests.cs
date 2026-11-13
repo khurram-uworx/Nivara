@@ -1,23 +1,16 @@
 using Nivara.Expressions;
-using Nivara.Helpers;
 using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Query;
 
 /// <summary>
-/// Contract of <c>QuerySourceHandle</c>: one source, one explicit release, and abandoned-resource
-/// cleanup that fires only when nothing can still reach the source.
+/// Contract of <c>QuerySourceHandle</c>: one source, one explicit release. There is no
+/// abandoned-resource cleanup (see #1168): explicit Dispose/Release is the only release path.
 /// </summary>
 [TestFixture]
 public class QuerySourceHandleTests
 {
-    [SetUp]
-    public void SetUp() => NivaraResourceManager.Enable();
-
-    [TearDown]
-    public void TearDown() => NivaraResourceManager.Disable();
-
     [Test]
     public void Release_CalledTwice_DisposesSourceOnceAndDoesNotThrow()
     {
@@ -35,42 +28,6 @@ public class QuerySourceHandleTests
     }
 
     [Test]
-    public void Handle_Abandoned_ReleasesSourceWhenNothingReferencesIt()
-    {
-        // Guards the closure-capture constraint: NivaraResourceManager holds cleanup actions in a
-        // static dictionary, so an action capturing the handle would keep it permanently reachable
-        // and this test - and abandoned-resource cleanup generally - would silently never fire.
-        var source = CreateAbandonedChain();
-
-        CollectAbandoned();
-
-        Assert.That(source.DisposeCount, Is.GreaterThanOrEqualTo(1),
-            "an abandoned lazy source must be released once nothing references it");
-    }
-
-    [Test]
-    public void DerivedFrame_Added_RegistersNoAdditionalTrackedResource()
-    {
-        // The deterministic half of the ownership contract: deriving a frame must not register
-        // another tracked resource, because the source is owned by the handle and not per frame.
-        var source = new RecordingLazySource();
-        var root = new QueryFrame(source);
-
-        var trackedAfterRoot = NivaraResourceManager.GetResourceStatistics().TotalTrackedResources;
-
-        var leaf = root.Filter(ColumnExpressions.Col("A") > 0).Filter(ColumnExpressions.Col("A") > 1);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(NivaraResourceManager.GetResourceStatistics().TotalTrackedResources,
-                Is.EqualTo(trackedAfterRoot),
-                "deriving frames must not add tracked resources - only the source handle is tracked");
-            Assert.That(source.DisposeCount, Is.Zero);
-            Assert.That(leaf, Is.Not.Null);
-        });
-    }
-
-    [Test]
     public void DerivedFrame_Abandoned_DoesNotReleaseSourceWhileSiblingLives()
     {
         // The regression test. Losing an intermediate frame used to dispose the shared source out
@@ -79,8 +36,8 @@ public class QuerySourceHandleTests
         var source = new RecordingLazySource();
         var leaf = BuildTwoStepLeaf(new QueryFrame(source));
 
-        CollectAbandoned();
-
+        // There is no abandoned-resource cleanup any more (#1168): dropping the intermediate
+        // frame cannot release the shared source, because only the handle owns release.
         Assert.Multiple(() =>
         {
             Assert.That(source.DisposeCount, Is.Zero,
@@ -215,28 +172,6 @@ public class QuerySourceHandleTests
     /// </summary>
     static QueryFrame BuildTwoStepLeaf(QueryFrame root)
         => root.Filter(ColumnExpressions.Col("A") > 0).Filter(ColumnExpressions.Col("A") > -1);
-
-    static RecordingLazySource CreateAbandonedChain()
-    {
-        var source = new RecordingLazySource();
-        var chain = BuildTwoStepLeaf(new QueryFrame(source));
-
-        Assert.That(chain, Is.Not.Null, "precondition: the chain was built");
-
-        return source;
-    }
-
-    static void CollectAbandoned()
-    {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-        }
-
-        GC.Collect();
-        NivaraResourceManager.ForceCleanup();
-    }
 
     sealed class RecordingLazySource : IQuerySource
     {

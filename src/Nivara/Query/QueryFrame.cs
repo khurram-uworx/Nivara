@@ -1110,7 +1110,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// any frame releases the source for the whole chain (the same one-source-one-release contract
     /// as <see cref="System.IO.FileStream"/>). The call is idempotent — repeated calls are no-ops.
     /// Source-disposal errors are <b>swallowed</b>, so <c>using</c> cleanup never throws; this
-    /// matches <see cref="DisposeAsync"/> and the abandoned-resource cleanup path.
+    /// matches <see cref="DisposeAsync"/>.
     /// </remarks>
     public void Dispose()
     {
