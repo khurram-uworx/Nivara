@@ -4,7 +4,7 @@ namespace Nivara.Extensions.Blas;
 
 /// <summary>
 /// Hand-written CBLAS binding for the official OpenBLAS release, used by the GEMM and GEMV providers and by the
-/// <c>--cpu-gemm</c> probe ([docs/BLAS-MKL.md](../../docs/BLAS-MKL.md) §6).
+/// <c>--cpu-gemm</c> and <c>--cpu-gemv</c> probes ([docs/BLAS-MKL.md](../../docs/BLAS-MKL.md) §6).
 ///
 /// Seven declarations, not a generated binding. Running a P/Invoke generator over
 /// <c>cblas.h</c> produces the whole BLAS + LAPACK surface, which is the opposite of what this

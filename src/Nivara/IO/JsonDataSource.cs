@@ -787,14 +787,36 @@ sealed class JsonLazySource : IQuerySource
             accumulator.Add(column.GetValue(i));
     }
 
+    ~JsonLazySource()
+    {
+        Dispose(false);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!disposed)
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    private void Dispose(bool disposing)
+    {
+        if (disposed)
+            return;
+        disposed = true;
+        try
         {
             CloseChunkReader();
-            chunkLock.Dispose();
-            disposed = true;
+        }
+        catch
+        {
+            if (disposing)
+                throw;
+        }
+        if (disposing)
+        {
+            try { chunkLock.Dispose(); }
+            catch { throw; }
         }
     }
 }

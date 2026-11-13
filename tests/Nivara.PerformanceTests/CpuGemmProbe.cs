@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.Extensions.Blas;
 using System.Buffers;
 using System.Diagnostics;
 using System.Numerics;

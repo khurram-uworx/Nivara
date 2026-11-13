@@ -49,6 +49,9 @@ static class Program
             a.Equals("--chunked-vs-flat", StringComparison.OrdinalIgnoreCase)))
             return ChunkedColumnProbe.Run();
 
+        if (args.Any(a => a.Equals("--dropped-scan", StringComparison.OrdinalIgnoreCase)))
+            return DroppedScanHandleProbe.Run();
+
         var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap, cpuGemm, mask, silkKernels, layaForward, silkLayaForward, silkLayaHeadProfile, silkEncoderProfile, silkDistilBertTrainProfile, cpuDistilBertTrainProfile, silkGemm) = ParseArgs(args);
 
         if (datasetTest)
@@ -1120,7 +1123,7 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--silk-kernels] [--silk-gemm] [--mask] [--laya-forward] [--cpu-gemm] [--cpu-gemv] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--silk-kernels] [--silk-gemm] [--mask] [--laya-forward] [--cpu-gemm] [--cpu-gemv] [--dropped-scan] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
