@@ -28,8 +28,9 @@ public enum PerformanceWarningSeverity
 /// Provides comprehensive diagnostic information about query execution,
 /// including timing, memory usage, and performance analysis.
 /// </summary>
-public sealed class ExecutionDiagnostics
+public sealed class ExecutionDiagnostics : IOperationDiagnosticsSink
 {
+    readonly object kernelLock = new();
     readonly List<OperationTiming> operationTimings = new();
     readonly List<PerformanceWarning> warnings = new();
     readonly List<OptimizationApplied> optimizationsApplied = new();
@@ -37,6 +38,16 @@ public sealed class ExecutionDiagnostics
     readonly Stopwatch totalTimer = new();
     long initialMemory;
     long peakMemoryUsage;
+
+    bool IOperationDiagnosticsSink.IsEnabled => true;
+
+    void IOperationDiagnosticsSink.RecordOperation(OperationDiagnostics diagnostic)
+    {
+        if (diagnostic == null)
+            return;
+        lock (kernelLock)
+            kernelOperations.Add(diagnostic);
+    }
 
     /// <summary>
     /// Initializes a new instance of ExecutionDiagnostics
@@ -216,6 +227,30 @@ public sealed class ExecutionDiagnostics
     /// Gets the kernel-level operation diagnostics recorded during execution
     /// </summary>
     public IReadOnlyList<OperationDiagnostics> KernelOperations => kernelOperations;
+
+    /// <summary>
+    /// Gets a snapshot of the recorded kernel-level operation diagnostics.
+    /// </summary>
+    public OperationDiagnostics[] GetRecordedOperations()
+    {
+        lock (kernelLock)
+            return kernelOperations.ToArray();
+    }
+
+    /// <summary>
+    /// Clears the recorded kernel-level operation diagnostics.
+    /// </summary>
+    public void ClearRecordedOperations()
+    {
+        lock (kernelLock)
+            kernelOperations.Clear();
+    }
+
+    /// <summary>
+    /// Gets summary statistics for the recorded kernel-level operation diagnostics.
+    /// </summary>
+    public OperationSummary GetOperationSummary()
+        => DiagnosticsTracker.BuildSummary(GetRecordedOperations());
 
     /// <summary>
     /// Gets a value indicating whether execution is currently in progress
