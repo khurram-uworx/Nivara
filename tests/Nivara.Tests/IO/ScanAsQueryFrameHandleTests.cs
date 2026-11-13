@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Nivara.IO;
 using Nivara.Linq;
 using Nivara.Query;
@@ -216,6 +217,108 @@ public class ScanAsQueryFrameHandleTests
             + "so query.Dispose() above is the release path");
     }
 
+    // ── Dropped (never-disposed) scans release at finalization (#1189) ──
+
+    [Test]
+    public void ParquetScanAsQueryFrame_ReleasesHandleOnDrop()
+    {
+        var path = CreateParquetFile(RowCount, rowGroupSize: 1000);
+
+        FileHandleProbe.AssertUnlocked(path, "a handle was already open before NivaraParquetReader.ScanAsQueryFrame");
+
+        ReadAndDrop("parquet", path);
+
+        for (int i = 0; i < 5; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (IsUnlockedHelper(path)) break;
+        }
+
+        FileHandleProbe.AssertUnlocked(path,
+            "a dropped scan left the file handle open; the finalizer should have released it (#1189)");
+    }
+
+    [Test]
+    public void CsvScanAsQueryFrame_ReleasesHandleOnDrop()
+    {
+        var path = CreateCsvFile(RowCount);
+
+        FileHandleProbe.AssertUnlocked(path, "a handle was already open before Csv.ScanAsQueryFrame");
+
+        ReadAndDrop("csv", path);
+
+        for (int i = 0; i < 5; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (IsUnlockedHelper(path)) break;
+        }
+
+        FileHandleProbe.AssertUnlocked(path,
+            "a dropped scan left the file handle open; the finalizer should have released it (#1189)");
+    }
+
+    [Test]
+    public void JsonScanAsQueryFrame_ReleasesHandleOnDrop()
+    {
+        var path = CreateJsonFile(RowCount);
+
+        FileHandleProbe.AssertUnlocked(path, "a handle was already open before Json.ScanAsQueryFrame");
+
+        ReadAndDrop("json", path);
+
+        for (int i = 0; i < 5; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (IsUnlockedHelper(path)) break;
+        }
+
+        FileHandleProbe.AssertUnlocked(path,
+            "a dropped scan left the file handle open; the finalizer should have released it (#1189)");
+    }
+
+    static bool IsUnlockedHelper(string path)
+    {
+        try { using var p = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None); return true; }
+        catch (IOException) { return false; }
+    }
+
+    static void ReadAndDrop(string source, string path)
+    {
+        QueryFrame? frame = source switch
+        {
+            "parquet" => NivaraParquetReader.ScanAsQueryFrame(path),
+            "csv" => Csv.ScanAsQueryFrame(path),
+            "json" => Json.ScanAsQueryFrame(path),
+            _ => throw new ArgumentException(source, nameof(source)),
+        };
+
+        // Partial read (synchronous enumeration) so the reader is open but the scan is not complete.
+        var e = frame!.AsStream(PartialChunkSize).GetAsyncEnumerator();
+        try
+        {
+            if (e.MoveNextAsync().AsTask().GetAwaiter().GetResult())
+                e.Current.Dispose();
+        }
+        finally
+        {
+            e.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        FileHandleProbe.AssertLocked(path,
+            "the read stopped short of EOF, so the source's reader must still be open");
+
+        DropFrame(ref frame);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void DropFrame(ref QueryFrame? frame) => frame = null;
+
     // ── Helpers ──
 
     /// <summary>
@@ -224,7 +327,7 @@ public class ScanAsQueryFrameHandleTests
     /// </summary>
     static async Task ReadOneChunkThenStopAsync(QueryFrame frame)
     {
-        await foreach (var chunk in frame.AsStream(PartialChunkSize))
+        await foreach (var chunk in frame!.AsStream(PartialChunkSize))
         {
             Assert.That(chunk.RowCount, Is.EqualTo(PartialChunkSize),
                 "expected a full first chunk, so the stop point is unambiguously mid-file");
