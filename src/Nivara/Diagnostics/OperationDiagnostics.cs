@@ -137,19 +137,187 @@ public sealed class OperationDiagnostics
 }
 
 /// <summary>
+/// Sink that receives recorded operation diagnostics.
+/// </summary>
+public interface IOperationDiagnosticsSink
+{
+    /// <summary>
+    /// Gets a value indicating whether recording is enabled.
+    /// </summary>
+    bool IsEnabled { get; }
+
+    /// <summary>
+    /// Records an operation diagnostic.
+    /// </summary>
+    void RecordOperation(OperationDiagnostics diagnostic);
+}
+
+/// <summary>
+/// A scoped, bounded collector of operation diagnostics.
+/// </summary>
+public sealed class OperationDiagnosticsCollector : IOperationDiagnosticsSink
+{
+    readonly object lockObject = new object();
+    readonly OperationDiagnostics[] buffer;
+    int head;
+    int count;
+    long overflowCount;
+
+    /// <summary>
+    /// Initializes a new collector with the default capacity (10,000) and enabled.
+    /// </summary>
+    public OperationDiagnosticsCollector()
+        : this(10000, true)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new collector with the specified capacity.
+    /// </summary>
+    public OperationDiagnosticsCollector(int capacity)
+        : this(capacity, true)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new collector with the specified enabled state.
+    /// </summary>
+    public OperationDiagnosticsCollector(bool isEnabled)
+        : this(10000, isEnabled)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new collector with the specified capacity and enabled state.
+    /// </summary>
+    public OperationDiagnosticsCollector(int capacity, bool isEnabled)
+    {
+        if (capacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        Capacity = capacity;
+        buffer = new OperationDiagnostics[capacity];
+        IsEnabled = isEnabled;
+    }
+
+    /// <summary>
+    /// Initializes a new collector with the specified enabled state and capacity.
+    /// </summary>
+    public OperationDiagnosticsCollector(bool isEnabled, int capacity)
+        : this(capacity, isEnabled)
+    {
+    }
+
+    /// <summary>
+    /// Gets the maximum number of entries retained.
+    /// </summary>
+    public int Capacity { get; }
+
+    /// <summary>
+    /// Gets the maximum number of entries retained (alias of <see cref="Capacity"/>).
+    /// </summary>
+    public int MaxEntries => Capacity;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether recording is enabled.
+    /// </summary>
+    public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// Gets the number of entries dropped due to capacity.
+    /// </summary>
+    public long Overflowed => overflowCount;
+
+    /// <summary>
+    /// Gets the number of entries dropped due to capacity (alias).
+    /// </summary>
+    public long OverflowCount => overflowCount;
+
+    /// <summary>
+    /// Gets the number of entries dropped due to capacity (alias).
+    /// </summary>
+    public long DroppedCount => overflowCount;
+
+    /// <summary>
+    /// Gets the number of entries dropped due to capacity (alias).
+    /// </summary>
+    public long DroppedEntries => overflowCount;
+
+    /// <summary>
+    /// Gets the number of entries dropped due to capacity (alias).
+    /// </summary>
+    public long DroppedOperations => overflowCount;
+
+    /// <inheritdoc />
+    public void RecordOperation(OperationDiagnostics diagnostic)
+    {
+        if (!IsEnabled || diagnostic == null)
+            return;
+
+        lock (lockObject)
+        {
+            if (count < Capacity)
+            {
+                buffer[(head + count) % Capacity] = diagnostic;
+                count++;
+            }
+            else
+            {
+                buffer[head] = diagnostic;
+                head = (head + 1) % Capacity;
+                overflowCount++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a snapshot of all recorded operations.
+    /// </summary>
+    public OperationDiagnostics[] GetRecordedOperations()
+    {
+        lock (lockObject)
+        {
+            var result = new OperationDiagnostics[count];
+            for (int i = 0; i < count; i++)
+                result[i] = buffer[(head + i) % Capacity];
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Clears all recorded operations and the overflow counter.
+    /// </summary>
+    public void ClearRecordedOperations()
+    {
+        lock (lockObject)
+        {
+            Array.Clear(buffer, 0, buffer.Length);
+            head = 0;
+            count = 0;
+            overflowCount = 0;
+        }
+    }
+
+    /// <summary>
+    /// Gets summary statistics about recorded operations.
+    /// </summary>
+    public OperationSummary GetSummary()
+        => DiagnosticsTracker.BuildSummary(GetRecordedOperations());
+}
+
+/// <summary>
 /// Captures allocation and timing measurements for a diagnostics operation.
 /// </summary>
 internal readonly struct OperationMeasurement
 {
-    readonly bool enabled;
+    readonly IOperationDiagnosticsSink? sink;
     readonly long initialAllocatedBytes;
     readonly Stopwatch? stopwatch;
 
-    internal OperationMeasurement(bool enabled)
+    internal OperationMeasurement(IOperationDiagnosticsSink? sink)
     {
-        this.enabled = enabled;
-        initialAllocatedBytes = enabled ? GC.GetAllocatedBytesForCurrentThread() : 0;
-        stopwatch = enabled ? Stopwatch.StartNew() : null;
+        this.sink = sink != null && sink.IsEnabled ? sink : null;
+        initialAllocatedBytes = this.sink != null ? GC.GetAllocatedBytesForCurrentThread() : 0;
+        stopwatch = this.sink != null ? Stopwatch.StartNew() : null;
     }
 
     public void Record(
@@ -160,12 +328,12 @@ internal readonly struct OperationMeasurement
         bool hadNulls,
         string? notes = null)
     {
-        if (!enabled || stopwatch == null)
+        if (sink == null || stopwatch == null)
             return;
 
         stopwatch.Stop();
         var allocatedBytes = Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - initialAllocatedBytes);
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+        sink.RecordOperation(new OperationDiagnostics(
             operationType,
             kernelUsed,
             inputLength,
@@ -183,28 +351,127 @@ internal readonly struct OperationMeasurement
 /// </summary>
 public static class DiagnosticsTracker
 {
-    static readonly object lockObject = new object();
-    static readonly List<OperationDiagnostics> operations = new List<OperationDiagnostics>();
-    static bool isEnabled = false;
+    static readonly object globalLock = new object();
+    static bool globalEnabled = false;
+    static OperationDiagnosticsCollector globalCollector = new OperationDiagnosticsCollector(10000, true);
+    static readonly AsyncLocal<IOperationDiagnosticsSink?> currentSink = new AsyncLocal<IOperationDiagnosticsSink?>();
 
     /// <summary>
-    /// Gets or sets a value indicating whether diagnostic tracking is enabled
+    /// Gets or sets a value indicating whether diagnostic tracking is enabled (global sink).
     /// </summary>
     public static bool IsEnabled
     {
         get
         {
-            lock (lockObject)
-            {
-                return isEnabled;
-            }
+            var sink = currentSink.Value;
+            if (sink != null)
+                return sink.IsEnabled;
+            return Volatile.Read(ref globalEnabled);
         }
         set
         {
-            lock (lockObject)
+            Volatile.Write(ref globalEnabled, value);
+        }
+    }
+
+    /// <summary>
+    /// Gets the currently active diagnostics sink, if any.
+    /// </summary>
+    public static IOperationDiagnosticsSink? CurrentSink => currentSink.Value;
+
+    /// <summary>
+    /// Gets or sets the maximum number of entries retained by the global sink.
+    /// </summary>
+    public static int MaxEntries
+    {
+        get => globalCollector.Capacity;
+        set
+        {
+            lock (globalLock)
             {
-                isEnabled = value;
+                var replacement = new OperationDiagnosticsCollector(value, true);
+                foreach (var op in globalCollector.GetRecordedOperations())
+                    replacement.RecordOperation(op);
+                globalCollector = replacement;
             }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the maximum number of entries retained by the global sink (alias).
+    /// </summary>
+    public static int Capacity
+    {
+        get => MaxEntries;
+        set => MaxEntries = value;
+    }
+
+    /// <summary>
+    /// Gets the number of entries dropped by the global sink due to capacity.
+    /// </summary>
+    public static long Overflowed => globalCollector.Overflowed;
+
+    /// <summary>
+    /// Gets the number of entries dropped by the global sink due to capacity (alias).
+    /// </summary>
+    public static long OverflowCount => globalCollector.OverflowCount;
+
+    /// <summary>
+    /// Gets the number of entries dropped by the global sink due to capacity (alias).
+    /// </summary>
+    public static long DroppedCount => globalCollector.DroppedCount;
+
+    /// <summary>
+    /// Gets the number of entries dropped by the global sink due to capacity (alias).
+    /// </summary>
+    public static long DroppedEntries => globalCollector.DroppedEntries;
+
+    /// <summary>
+    /// Gets the number of entries dropped by the global sink due to capacity (alias).
+    /// </summary>
+    public static long DroppedOperations => globalCollector.DroppedOperations;
+
+    /// <summary>
+    /// Begins a diagnostics scope that routes recording to the given sink.
+    /// </summary>
+    public static IDisposable BeginScope(IOperationDiagnosticsSink sink)
+    {
+        if (sink == null)
+            throw new ArgumentNullException(nameof(sink));
+
+        var previous = currentSink.Value;
+        currentSink.Value = sink;
+        return new DiagnosticsScope(previous);
+    }
+
+    /// <summary>
+    /// Begins a diagnostics scope that routes recording to the given collector.
+    /// </summary>
+    public static IDisposable BeginScope(OperationDiagnosticsCollector collector)
+        => BeginScope((IOperationDiagnosticsSink)collector);
+
+    /// <summary>
+    /// Begins a diagnostics scope that routes recording to the given execution diagnostics.
+    /// </summary>
+    public static IDisposable BeginScope(ExecutionDiagnostics diagnostics)
+        => BeginScope((IOperationDiagnosticsSink)diagnostics);
+
+    sealed class DiagnosticsScope : IDisposable
+    {
+        readonly IOperationDiagnosticsSink? previous;
+        bool disposed;
+
+        internal DiagnosticsScope(IOperationDiagnosticsSink? previous)
+        {
+            this.previous = previous;
+        }
+
+        public void Dispose()
+        {
+            if (disposed)
+                return;
+            currentSink.Value = previous;
+            disposed = true;
         }
     }
 
@@ -217,11 +484,17 @@ public static class DiagnosticsTracker
         if (diagnostic == null)
             return;
 
-        lock (lockObject)
+        var sink = currentSink.Value;
+        if (sink != null)
         {
-            if (isEnabled)
-                operations.Add(diagnostic);
+            sink.RecordOperation(diagnostic);
+            return;
         }
+
+        if (!Volatile.Read(ref globalEnabled))
+            return;
+
+        globalCollector.RecordOperation(diagnostic);
     }
 
     /// <summary>
@@ -229,10 +502,14 @@ public static class DiagnosticsTracker
     /// </summary>
     internal static OperationMeasurement StartMeasurement()
     {
-        lock (lockObject)
-        {
-            return new OperationMeasurement(isEnabled);
-        }
+        var sink = currentSink.Value;
+        if (sink != null)
+            return new OperationMeasurement(sink);
+
+        if (!Volatile.Read(ref globalEnabled))
+            return new OperationMeasurement(null);
+
+        return new OperationMeasurement(globalCollector);
     }
 
     /// <summary>
@@ -261,10 +538,12 @@ public static class DiagnosticsTracker
     /// <returns>An array of all recorded operation diagnostics</returns>
     public static OperationDiagnostics[] GetRecordedOperations()
     {
-        lock (lockObject)
-        {
-            return operations.ToArray();
-        }
+        var sink = currentSink.Value;
+        if (sink is OperationDiagnosticsCollector collector)
+            return collector.GetRecordedOperations();
+        if (sink is ExecutionDiagnostics diagnostics)
+            return diagnostics.GetRecordedOperations();
+        return globalCollector.GetRecordedOperations();
     }
 
     /// <summary>
@@ -272,10 +551,18 @@ public static class DiagnosticsTracker
     /// </summary>
     public static void ClearRecordedOperations()
     {
-        lock (lockObject)
+        var sink = currentSink.Value;
+        if (sink is OperationDiagnosticsCollector collector)
         {
-            operations.Clear();
+            collector.ClearRecordedOperations();
+            return;
         }
+        if (sink is ExecutionDiagnostics diagnostics)
+        {
+            diagnostics.ClearRecordedOperations();
+            return;
+        }
+        globalCollector.ClearRecordedOperations();
     }
 
     /// <summary>
@@ -284,39 +571,49 @@ public static class DiagnosticsTracker
     /// <returns>A summary of operation statistics</returns>
     public static OperationSummary GetSummary()
     {
-        lock (lockObject)
-        {
-            if (operations.Count == 0)
-                return new OperationSummary(0, 0, 0, 0, 0, new Dictionary<string, int>(), new Dictionary<KernelType, int>(), new Dictionary<string, long>());
+        var sink = currentSink.Value;
+        if (sink is OperationDiagnosticsCollector collector)
+            return collector.GetSummary();
+        if (sink is ExecutionDiagnostics diagnostics)
+            return diagnostics.GetOperationSummary();
+        return globalCollector.GetSummary();
+    }
 
-            var totalOperations = operations.Count;
-            var vectorizedOperations = operations.Count(op => op.KernelUsed == KernelType.Vectorized);
-            var scalarOperations = operations.Count(op => op.KernelUsed == KernelType.Scalar);
-            var operationsWithNulls = operations.Count(op => op.HadNulls);
-            var totalAllocatedBytes = operations.Sum(op => op.AllocatedBytes);
+    /// <summary>
+    /// Builds an <see cref="OperationSummary"/> from a snapshot of diagnostics.
+    /// </summary>
+    internal static OperationSummary BuildSummary(OperationDiagnostics[] operations)
+    {
+        if (operations.Length == 0)
+            return new OperationSummary(0, 0, 0, 0, 0, new Dictionary<string, int>(), new Dictionary<KernelType, int>(), new Dictionary<string, long>());
 
-            var operationTypes = operations
-                .GroupBy(op => op.OperationType)
-                .ToDictionary(g => g.Key, g => g.Count());
+        var totalOperations = operations.Length;
+        var vectorizedOperations = operations.Count(op => op.KernelUsed == KernelType.Vectorized);
+        var scalarOperations = operations.Count(op => op.KernelUsed == KernelType.Scalar);
+        var operationsWithNulls = operations.Count(op => op.HadNulls);
+        var totalAllocatedBytes = operations.Sum(op => op.AllocatedBytes);
 
-            var kernelTypes = operations
-                .GroupBy(op => op.KernelUsed)
-                .ToDictionary(g => g.Key, g => g.Count());
+        var operationTypes = operations
+            .GroupBy(op => op.OperationType)
+            .ToDictionary(g => g.Key, g => g.Count());
 
-            var allocatedBytesByOperationType = operations
-                .GroupBy(op => op.OperationType)
-                .ToDictionary(g => g.Key, g => g.Sum(op => op.AllocatedBytes));
+        var kernelTypes = operations
+            .GroupBy(op => op.KernelUsed)
+            .ToDictionary(g => g.Key, g => g.Count());
 
-            return new OperationSummary(
-                totalOperations,
-                vectorizedOperations,
-                scalarOperations,
-                operationsWithNulls,
-                totalAllocatedBytes,
-                operationTypes,
-                kernelTypes,
-                allocatedBytesByOperationType);
-        }
+        var allocatedBytesByOperationType = operations
+            .GroupBy(op => op.OperationType)
+            .ToDictionary(g => g.Key, g => g.Sum(op => op.AllocatedBytes));
+
+        return new OperationSummary(
+            totalOperations,
+            vectorizedOperations,
+            scalarOperations,
+            operationsWithNulls,
+            totalAllocatedBytes,
+            operationTypes,
+            kernelTypes,
+            allocatedBytesByOperationType);
     }
 }
 

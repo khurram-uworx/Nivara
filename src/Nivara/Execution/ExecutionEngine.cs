@@ -129,6 +129,8 @@ public sealed class ExecutionEngine
         diagnostics.StartExecution();
         lastDiagnostics = diagnostics;
 
+        var diagnosticsScope = DiagnosticsTracker.BeginScope(diagnostics);
+
         try
         {
             // Apply optimization if optimizer is available
@@ -163,6 +165,7 @@ public sealed class ExecutionEngine
         }
         finally
         {
+            diagnosticsScope.Dispose();
             diagnostics.EndExecution();
             diagnostics.ImportFromDiagnosticsTracker();
         }
@@ -199,6 +202,8 @@ public sealed class ExecutionEngine
         diagnostics.StartExecution();
         lastDiagnostics = diagnostics;
 
+        var diagnosticsScope = DiagnosticsTracker.BeginScope(diagnostics);
+
         try
         {
             // Apply optimization if optimizer is available
@@ -233,6 +238,7 @@ public sealed class ExecutionEngine
         }
         finally
         {
+            diagnosticsScope.Dispose();
             diagnostics.EndExecution();
             diagnostics.ImportFromDiagnosticsTracker();
         }
