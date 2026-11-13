@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Query;
 using System.Threading.Channels;
@@ -461,14 +462,24 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             await producer.ConfigureAwait(false);
             memoryBudget?.Dispose();
         }
-        catch
+        catch (Exception primary)
         {
             memoryBudget?.Dispose();
             foreach (var f in chunkFrames) f.Dispose();
             channel.Writer.TryComplete();
             while (channel.Reader.TryRead(out var buffered))
                 buffered.Dispose();
-            try { await producer.ConfigureAwait(false); } catch { }
+
+            var producerFailure = await StreamingProducerCleanup.ObserveAsync(producer, primary, context.CancellationToken)
+                .ConfigureAwait(false);
+
+            if (producerFailure is not null)
+            {
+                throw new QueryExecutionException(
+                    $"{primary.Message} (the streaming producer also failed: {producerFailure.Message})",
+                    new AggregateException(primary, producerFailure));
+            }
+
             throw;
         }
 

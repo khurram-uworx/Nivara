@@ -40,6 +40,9 @@ public class AsyncStreamingTests
 
     sealed class DisposalRecordingSource : IQuerySource
     {
+        readonly bool throwOnDispose;
+        public DisposalRecordingSource(bool throwOnDispose = false) => this.throwOnDispose = throwOnDispose;
+
         public Schema Schema { get; } = new(new[] { ("A", typeof(int)) });
         public bool IsLazy => true;
         public bool Disposed { get; private set; }
@@ -47,7 +50,12 @@ public class AsyncStreamingTests
         public IReadOnlyDictionary<string, IColumn> Execute() =>
             new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
 
-        public void Dispose() => Disposed = true;
+        public void Dispose()
+        {
+            Disposed = true;
+            if (throwOnDispose)
+                throw new InvalidOperationException("disposal failed");
+        }
     }
 
     sealed class CancellationChunkSource : IQuerySource
@@ -544,6 +552,29 @@ public class AsyncStreamingTests
         Assert.Throws<ObjectDisposedException>(() => queryFrame.Collect());
     }
 
+    [Test]
+    public void QueryFrame_Dispose_SourceThrows_Propagates()
+    {
+        var source = new DisposalRecordingSource(throwOnDispose: true);
+        var queryFrame = new QueryFrame(source);
+
+        Assert.Throws<InvalidOperationException>(() => queryFrame.Dispose(),
+            "sync Dispose must propagate the source-disposal failure");
+        Assert.That(source.Disposed, Is.True);
+        Assert.Throws<ObjectDisposedException>(() => queryFrame.Collect());
+    }
+
+    [Test]
+    public async Task QueryFrame_DisposeAsync_SourceThrows_Propagates()
+    {
+        var source = new DisposalRecordingSource(throwOnDispose: true);
+        var queryFrame = new QueryFrame(source);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await queryFrame.DisposeAsync(),
+            "async Dispose must propagate the source-disposal failure");
+        Assert.That(source.Disposed, Is.True);
+        Assert.Throws<ObjectDisposedException>(() => queryFrame.Collect());
+    }
     [Test]
     public async Task QueryFrame_DisposeAsync_ReleasesSourceResources()
     {
