@@ -261,33 +261,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
         }
     }
 
-    /// <summary>
-    /// Gets the approximate size of a type in bytes
-    /// </summary>
-    /// <param name="type">The type to get size for</param>
-    /// <returns>Size in bytes</returns>
-    static int getTypeSize(Type type)
-    {
-        if (type == typeof(bool)) return 1;
-        if (type == typeof(byte) || type == typeof(sbyte)) return 1;
-        if (type == typeof(short) || type == typeof(ushort)) return 2;
-        if (type == typeof(int) || type == typeof(uint)) return 4;
-        if (type == typeof(long) || type == typeof(ulong)) return 8;
-        if (type == typeof(float)) return 4;
-        if (type == typeof(double)) return 8;
-        if (type == typeof(decimal)) return 16;
-        if (type == typeof(DateTime)) return 8;
-        if (type == typeof(Guid)) return 16;
-
-        // For reference types, estimate pointer size + average string length
-        if (!type.IsValueType)
-        {
-            if (type == typeof(string)) return 50; // Average string estimate
-            return 8; // Pointer size on 64-bit systems
-        }
-
-        return 8; // Default estimate for unknown types
-    }
 
     /// <summary>
     /// Creates appropriate storage for the given values based on type characteristics
@@ -461,11 +434,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
     {
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
 
-        // Track column for resource management only when opted in
-        if (NivaraResourceManager.IsEnabled)
-        {
-            NivaraResourceManager.TrackResource(this, $"NivaraColumn<{typeof(T).Name}>", estimateMemoryUsage());
-        }
+        // Resource tracking is no longer performed: see #1168 (explicit Dispose is the release path).
     }
 
     /// <summary>
@@ -1560,25 +1529,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
             throw new ArgumentException($"Cannot perform {operationName} on columns of different lengths: {Length} vs {other.Length}. Both columns must have the same number of elements.");
     }
 
-    /// <summary>
-    /// Estimates the memory usage of this column (rough, lower-bound approximation).
-    /// Includes the element payload and the null mask (1 byte per row when present).
-    /// </summary>
-    /// <returns>Estimated memory usage in bytes</returns>
-    long estimateMemoryUsage()
-    {
-        var elementSize = getTypeSize(typeof(T));
-        var baseMemory = Length * elementSize;
-
-        // Add overhead for null mask if present
-        if (HasNulls)
-        {
-            baseMemory += Length; // 1 byte per boolean in null mask
-        }
-
-        // Add some overhead for object structure
-        return baseMemory + 64; // 64 bytes overhead estimate
-    }
 
     /// <summary>
     /// Gets the underlying storage for advanced operations (internal use only)
@@ -3256,9 +3206,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
     {
         if (!disposed)
         {
-            // Untrack from resource manager
-            NivaraResourceManager.UntrackResource(this);
-
             storage?.Dispose();
             disposed = true;
         }
