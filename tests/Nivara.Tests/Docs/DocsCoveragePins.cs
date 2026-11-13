@@ -85,6 +85,8 @@ internal static class DocsCoveragePins
     /// Issue #1189 adds two backticked `docs/STREAMING.md` references in source XML doc
     /// comments (`JsonExtensions.cs` and `CsvExtensions.cs` "Resource management" remarks):
     /// 266 + 2 = 268.
+    /// Issue #1193 deletes `tests/Nivara.PerformanceTests/OpenBlasInterop.cs`, whose doc comment
+    /// carried the `docs/BLAS-MKL.md` markdown link (counted twice, link text + URL): 268 - 2 = 266.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 268;
+    internal const int ExpectedDocumentReferenceCount = 266;
 }
