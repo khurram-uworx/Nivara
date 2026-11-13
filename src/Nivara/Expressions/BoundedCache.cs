@@ -70,14 +70,16 @@ internal sealed class BoundedCache<TKey, TValue> where TKey : notnull
         var stale = Volatile.Read(ref previous);
         if (stale.TryGetValue(key, out value))
         {
-            live.TryAdd(key, value);
-            return value;
+            if (!live.TryAdd(key, value))
+                live.TryGetValue(key, out value);
+            return value!;
         }
 
         value = factory(key);
-        live.TryAdd(key, value);
+        if (!live.TryAdd(key, value))
+            live.TryGetValue(key, out value);
         RotateIfFull();
-        return value;
+        return value!;
     }
 
     /// <summary>
