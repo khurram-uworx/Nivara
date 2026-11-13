@@ -165,13 +165,15 @@ does not go through `MultiplyCore`.
 
 ## 5. Decision as recorded (2026-10-15)
 
-The decision recorded before the probe ran. Items 2 and 3 are what the probe
+The decision recorded before the probe ran. Items 1, 2 and 3 are what the probe
 changed: see §5.1.
 
 1. **Probe, not a seam.** Add a BLAS leg to the existing `--cpu-gemm` probe
    (`tests/Nivara.PerformanceTests/CpuGemmProbe.cs`). The P/Invoke stays in that project.
    `src/` does not change. This is the same rule #444 states for the GPU seam: introduce the
-   contract when the consumer lands, not before.
+   contract when the consumer lands, not before. (Superseded by #1117/#1193: the P/Invoke now
+   lives in `src/Nivara.Extensions/Blas/OpenBlasInterop.cs`, and the probe consumes that binding
+   rather than its own copy, so the measured legs and the shipped provider cannot drift.)
 2. **Probe-only package.** Reference a win-x64 MKL runtime package (`MKL.NET.win-x64`, or
    `MathNet.Numerics.MKL.Win-x64` if its binding is the one that actually exports
    `cblas_sgemm`) from `Nivara.PerformanceTests.csproj` only, `PrivateAssets="all"`. Confirm
@@ -202,6 +204,10 @@ changed: see §5.1.
 - **How to get it.** Download the zip, extract `libopenblas.dll` to `lib/libopenblas.dll`
   at the repository root (that directory is gitignored). That is the only location the probe
   looks in. Nothing is committed to the repository and nothing is restored.
+- **Binding location (#1117/#1193).** The P/Invoke binding moved to
+  `src/Nivara.Extensions/Blas/OpenBlasInterop.cs` when the provider landed, and the probe
+  now consumes that binding rather than its own copy, so the measured legs and the shipped
+  provider (`OpenBlasGemmProvider`/`OpenBlasGemvProvider`) cannot drift.
 - **Recommendation (acquisition).** If the seam lands, ship the DLL as an opt-in native asset in
   `Nivara.Extensions` (RID-specific, default off), never in core. Core stays dependency-free.
 
