@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking changes (migration)
+
+- `ResourceStatistics` (removed) → no replacement. The type was public but only ever reachable
+  through the internal `NivaraResourceManager`, which has been deleted (#1168). Delete any
+  reference; no shipped code path produced an instance.
+
+### Removed
+
+- Internal abandoned-resource tracking subsystem (`NivaraResourceManager`: `Enable`/`Disable`/
+  `ForceCleanup`/`GetResourceStatistics`/`TrackResource`/`UntrackResource`, the 30 s cleanup timer,
+  and the tracking dictionary). It was internal and unreachable from a consumer, and its `Untrack`
+  was an O(n) scan under a global lock on every frame/column dispose. Explicit `Dispose`/`Release`
+  is now the only release path for frames, columns and query sources — the same one-source-one-release
+  contract `FileStream` has.
+- `NivaraColumn`/`NivaraFrame` no longer register themselves for abandoned-resource cleanup, and
+  `NivaraFrame`'s constructor no longer computes the per-column memory estimate that was discarded
+  when tracking was disabled.
+
+### Changed
+
+- `MemoryRecommendations` / `MemoryWarningLevel` moved to `src/Nivara/Helpers/MemoryRecommendations.cs`
+  and `GetMemoryRecommendations` to the internal `MemoryAdvisor` class. Public API (`NivaraFrame.
+  GetMemoryRecommendations`) and behaviour are unchanged.
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
 ## [1.5.0] - 2026-11-07
