@@ -31,6 +31,24 @@
 - `MemoryRecommendations` / `MemoryWarningLevel` moved to `src/Nivara/Helpers/MemoryRecommendations.cs`
   and `GetMemoryRecommendations` to the internal `MemoryAdvisor` class. Public API (`NivaraFrame.
   GetMemoryRecommendations`) and behaviour are unchanged.
+
+### Fixed
+
+- `NivaraBlas.UseBlas(path)` now honours `path` on the process's first OpenBLAS load and returns
+  `false` with the path in `NivaraBlas.LastDiagnostic` when the file is missing or cannot be used;
+  the previously dead `OpenBlasInterop.ExplicitPath` branch is live.
+- The real reason a registration failed (ILP64 build, bad image, missing file) is now surfaced via
+  `NivaraBlas.LastDiagnostic` instead of being swallowed and reported as "libopenblas.dll not
+  found".
+
+### Changed
+
+- OpenBLAS thread count is applied once, at registration, instead of inside every `MatMul`/`Gemv`.
+- `NivaraBlas.UseManaged()` and the `IDisposable` returned by `NivaraBlas.EnterBlas` restore the
+  previous registration and the previous OpenBLAS pool size.
+- `BlasOptions.OpenBlasThreads` is documented as process-wide; `BlasOptions.DllPath` is now wired
+  through to the loader.
+
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
 ## [1.5.0] - 2026-11-07

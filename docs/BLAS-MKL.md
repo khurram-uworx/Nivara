@@ -307,7 +307,7 @@ actually ran is documented in §5.1 and `tests/Nivara.PerformanceTests/README.md
 from the plan below:
 
 - **Vehicle.** OpenBLAS 0.3.34, not MKL. No package reference; the DLL is resolved at
-  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See �5.1.
+  runtime from `lib/libopenblas.dll` (see `OpenBlasInterop.CandidatePaths`). See �5.1.
 - **Legs.** Four BLAS legs, not one: `Blas 1t`, `Blas 1t-NT`, `Blas Nt`, `Blas hybrid`.
   See `CpuGemmProbe.cs` and the README leg table.
 - **Protocol.** The probe already used 1 untimed warmup and 20 interleaved rounds (the README's
@@ -399,6 +399,18 @@ Recorded so the probe's successor does not re-derive it. Not authorized by this 
 - **Stays on the managed path.** Anything that is not dense float or double: transpose,
   null mask, Half, BFloat16, and the integer types `MultiplyCore` still accepts. Falling
   through to managed for those is the correct result, not a gap.
+
+- **Registration shape (as of #1171).** The seam is deliberately process-wide: `MultiplyCore`
+  and every AutoDiff/Nn caller (`GradKernels`, `ForwardGradOperations`, `Linear`,
+  `LlamaFusedKernels`, `AttentionKernels`, `ModernBertModel`) have no
+  `NivaraExecutionContext`, so threading one through is the #133/#444 seam decision, not this
+  issue. Registration is therefore an atomic swap of an immutable pair
+  (`ProviderRegistry.Current`), `openblas_set_num_threads` is applied **once**, at
+  registration, and `UseManaged()` / the `IDisposable` returned by `EnterBlas` restore both
+  the previous registration and the previous OpenBLAS pool size. `UseBlas(path)` honours
+  `path` on the process's first OpenBLAS load (the runtime caches that resolution); a later
+  registration naming a different file is rejected with both paths named, and a missing file
+  returns `false` with the path in `NivaraBlas.LastDiagnostic`.
 - **Integer width.** LP64 (`MKL_INT` = 32-bit `int`) is the Windows CBLAS default. ILP64
   (`long long`) is a different DLL and a different entry point. Pin one, assert it, do not
   discover it from a wrong answer.
@@ -410,8 +422,11 @@ Recorded so the probe's successor does not re-derive it. Not authorized by this 
 ## 8. Constraints that apply either way
 
 - **Threading.** OpenBLAS and MKL own a pool. Nivara already uses `Parallel.For` inside
-  `MultiplyCore` and in the query engine. Two pools on one machine oversubscribe. Any
-  native call sets its own thread count; it does not inherit "whatever the library likes".
+  `MultiplyCore` and in the query engine. Two pools on one machine oversubscribe. The
+  OpenBLAS pool size is set once, at registration (`openblas_set_num_threads`), not on
+  every `MatMul`/`Gemv`; it is process-wide and is restored by `UseManaged()` or by
+  disposing the scope from `EnterBlas`. `openblas_set_num_threads_local` was considered
+  and rejected: the count is fixed per provider, so a per-call call would only add cost.
 - **Layout.** Nivara is row-major. Column-major BLAS (`CblasColMajor`, or a Fortran `sgemm`
   without the CBLAS wrapper) silently transposes the problem. Use the CBLAS layout argument.
   Do not transpose on the way in to satisfy a column-major entry point — that copy is a
