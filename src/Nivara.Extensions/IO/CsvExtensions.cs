@@ -55,6 +55,12 @@ public static class Csv
     /// fluent query chains (Filter/Select/Sort/...). Prefer <see cref="ScanQuery{T}"/> for
     /// typed row queries.
     /// </summary>
+    /// <remarks>
+    /// The source opens its file lazily and holds it until the frame is disposed; a dropped
+    /// (never-disposed) scan is still released within one collection cycle by the source's
+    /// finalizer, but disposing the scan you created is the whole contract. See
+    /// docs/STREAMING.md "Resource management".
+    /// </remarks>
     /// <param name="filePath">The path to the CSV file</param>
     /// <param name="options">Optional CSV reading options</param>
     /// <returns>A QueryFrame that will read the CSV when executed</returns>
