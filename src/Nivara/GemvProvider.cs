@@ -28,8 +28,10 @@ public interface IGemvProvider
 /// Holds the currently registered <see cref="IGemvProvider" />, if any. Extensions
 /// sets this when <c>UseBlas</c> is called; core reads it inside
 /// <c>TensorsHelper.MultiplyCore</c>. Core never instantiates a provider itself.
+/// Backed by the single <see cref="ProviderRegistry" /> slot so a reader can never
+/// observe a half-registration.
 /// </summary>
 internal static class GemvProviders
 {
-    internal static IGemvProvider? Current;
+    internal static IGemvProvider? Current => ProviderRegistry.Current?.Gemv;
 }

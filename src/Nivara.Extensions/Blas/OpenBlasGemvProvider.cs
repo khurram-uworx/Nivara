@@ -10,13 +10,12 @@ namespace Nivara.Extensions.Blas;
 /// </summary>
 public sealed class OpenBlasGemvProvider : IGemvProvider
 {
-    readonly int openBlasThreads;
-
     public OpenBlasGemvProvider(int openBlasThreads = 1)
     {
-        this.openBlasThreads = openBlasThreads < 1 ? 1 : openBlasThreads;
         if (!OpenBlasInterop.TryInitialize(out string detail))
             throw new InvalidOperationException($"OpenBLAS is not available: {detail}");
+        // Process-wide OpenBLAS pool size: applied once, at registration.
+        OpenBlasInterop.SetNumThreads(openBlasThreads < 1 ? 1 : openBlasThreads);
     }
 
     public void Gemv(ReadOnlySpan<float> x, ReadOnlySpan<float> a, Span<float> y, int n, int k)
@@ -24,7 +23,6 @@ public sealed class OpenBlasGemvProvider : IGemvProvider
         if (n <= 0 || k <= 0)
             return;
 
-        OpenBlasInterop.SetNumThreads(openBlasThreads);
         ref float aRef = ref Unsafe.AsRef(in MemoryMarshal.GetReference(a));
         ref float xRef = ref Unsafe.AsRef(in MemoryMarshal.GetReference(x));
         ref float yRef = ref Unsafe.AsRef(in MemoryMarshal.GetReference(y));
@@ -38,7 +36,6 @@ public sealed class OpenBlasGemvProvider : IGemvProvider
         if (n <= 0 || k <= 0)
             return;
 
-        OpenBlasInterop.SetNumThreads(openBlasThreads);
         ref double aRef = ref Unsafe.AsRef(in MemoryMarshal.GetReference(a));
         ref double xRef = ref Unsafe.AsRef(in MemoryMarshal.GetReference(x));
         ref double yRef = ref Unsafe.AsRef(in MemoryMarshal.GetReference(y));

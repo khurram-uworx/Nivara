@@ -11,14 +11,15 @@ namespace Nivara.Extensions.Blas;
 public sealed class OpenBlasGemmProvider : IGemmProvider
 {
     readonly int threadCount;
-    readonly int openBlasThreads;
 
     public OpenBlasGemmProvider(int threadCount = 1, int openBlasThreads = 1)
     {
         this.threadCount = threadCount < 1 ? 1 : threadCount;
-        this.openBlasThreads = openBlasThreads < 1 ? 1 : openBlasThreads;
         if (!OpenBlasInterop.TryInitialize(out string detail))
             throw new InvalidOperationException($"OpenBLAS is not available: {detail}");
+        // Process-wide OpenBLAS pool size: applied once, at registration. Mutates
+        // state shared by every component in the process that links this library.
+        OpenBlasInterop.SetNumThreads(openBlasThreads < 1 ? 1 : openBlasThreads);
     }
 
     public void MatMul(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> c,
@@ -26,8 +27,6 @@ public sealed class OpenBlasGemmProvider : IGemmProvider
     {
         if (m <= 0 || n <= 0 || k <= 0)
             return;
-
-        OpenBlasInterop.SetNumThreads(openBlasThreads);
 
         unsafe
         {
@@ -72,8 +71,6 @@ public sealed class OpenBlasGemmProvider : IGemmProvider
     {
         if (m <= 0 || n <= 0 || k <= 0)
             return;
-
-        OpenBlasInterop.SetNumThreads(openBlasThreads);
 
         unsafe
         {

@@ -16,11 +16,13 @@ namespace Nivara.Extensions.Blas;
 /// dimensions) would silently misread every dimension, so <see cref="TryInitialize" /> asserts
 /// the ABI instead of discovering it from a wrong answer.
 ///
-/// The DLL is resolved at runtime from a single canonical location — <c>lib/libopenblas.dll</c>
-/// at the repository root (i.e. <c>../../lib/libopenblas.dll</c> relative to the executable).
-/// If it is missing, <see cref="TryInitialize" /> returns <c>false</c> with a message naming
-/// that path and the download URL, and the BLAS legs are skipped. No build-time gating, no
-/// environment variable, no search path.
+/// The DLL is resolved at runtime from the first of three candidate locations that exists and
+/// loads: <c>lib/libopenblas.dll</c> relative to the executable, relative to the current
+/// working directory, or next to the executable. An explicit path supplied via
+/// <see cref="NivaraBlas.UseBlas(string, int, int)" /> takes priority on the first load.
+/// If none is found, <see cref="TryInitialize" /> returns <c>false</c> with a message naming
+/// the canonical path and the download URL, and the BLAS legs are skipped. No build-time
+/// gating, no environment variable, no <c>OPENBLAS_DLL</c>.
 ///
 /// <c>LibraryImportAttribute</c> has no <c>CallingConvention</c> property — source-generated
 /// P/Invoke always uses the platform default. On x64 Windows there is one convention, so this
@@ -42,10 +44,16 @@ internal static partial class OpenBlasInterop
     internal static string ResolvedPath { get; private set; } = string.Empty;
 
     /// <summary>
-    /// An explicit path supplied by the caller (via <see cref="NivaraBlas.UseBlas(string, int)" />).
+    /// An explicit path supplied by the caller (via <see cref="NivaraBlas.UseBlas(string, int, int)" />).
     /// When set, the resolver tries this first.
     /// </summary>
     internal static string? ExplicitPath;
+
+    /// <summary>The file the resolver actually loaded, recorded on the first successful
+    /// resolution. Null until the library has loaded. The runtime caches the first
+    /// resolution per assembly load context, so a later, different <see cref="ExplicitPath" />
+    /// cannot take effect; <see cref="TryInitialize" /> reports this.</summary>
+    internal static string? LoadedPath;
 
     /// <summary>The build's self-reported configuration, e.g. <c>DYNAMIC_ARCH ... MAX_THREADS=64</c>.</summary>
     internal static string Config => ReadAnsi(GetConfig());
@@ -66,12 +74,18 @@ internal static partial class OpenBlasInterop
             // Explicit path takes priority.
             if (!string.IsNullOrEmpty(ExplicitPath) && File.Exists(ExplicitPath) &&
                 NativeLibrary.TryLoad(ExplicitPath!, out IntPtr explicitHandle))
+            {
+                LoadedPath ??= ExplicitPath;
                 return explicitHandle;
+            }
 
             foreach (string candidate in CandidatePaths())
             {
                 if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out IntPtr handle))
+                {
+                    LoadedPath ??= candidate;
                     return handle;
+                }
             }
 
             return IntPtr.Zero;
@@ -98,6 +112,71 @@ internal static partial class OpenBlasInterop
     /// </summary>
     internal static bool TryInitialize(out string detail)
     {
+        // Explicit path: validate before any P/Invoke so this is order-independent.
+        if (!string.IsNullOrEmpty(ExplicitPath))
+        {
+            string explicitFull = Path.GetFullPath(ExplicitPath!);
+            if (!File.Exists(explicitFull))
+            {
+                ResolvedPath = explicitFull;
+                detail = $"libopenblas.dll not found at {explicitFull} (explicit path).";
+                return false;
+            }
+
+            // The resolver is only consulted on the first load in a process; if a
+            // different file already won, the request cannot be honoured.
+            if (LoadedPath is { } loaded && !string.Equals(Path.GetFullPath(loaded), explicitFull, StringComparison.OrdinalIgnoreCase))
+            {
+                ResolvedPath = loaded;
+                detail = $"OpenBLAS is already loaded from {loaded}; the explicit path {explicitFull} " +
+                         "is ignored for this process (the runtime caches the first resolution). " +
+                         "Restart the process to use a different build.";
+                return false;
+            }
+
+            ResolvedPath = LoadedPath ?? explicitFull;
+            try
+            {
+                string config = Config;
+                if (config.Contains("USE64BITINT", StringComparison.Ordinal))
+                {
+                    detail = $"ILP64 build ({config}) — int64 dimensions, not the LP64 ABI this binding declares";
+                    return false;
+                }
+
+                detail = config;
+                return true;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                detail = $"{ex.GetType().Name}: {ex.Message} (looked at {explicitFull})";
+                return false;
+            }
+        }
+
+        // Already loaded from a previous registration: report it, do not re-scan.
+        if (LoadedPath is { } alreadyLoaded)
+        {
+            ResolvedPath = alreadyLoaded;
+            try
+            {
+                string config = Config;
+                if (config.Contains("USE64BITINT", StringComparison.Ordinal))
+                {
+                    detail = $"ILP64 build ({config}) — int64 dimensions, not the LP64 ABI this binding declares";
+                    return false;
+                }
+
+                detail = config;
+                return true;
+            }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                detail = $"{ex.GetType().Name}: {ex.Message} (looked at {alreadyLoaded})";
+                return false;
+            }
+        }
+
         string? found = null;
         foreach (string candidate in CandidatePaths())
         {

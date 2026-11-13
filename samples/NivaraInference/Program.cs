@@ -427,7 +427,7 @@ class Program
             }
             else
             {
-                Console.Error.WriteLine("BLAS: requested via --blas but provider could not be registered (libopenblas.dll not found).");
+                Console.Error.WriteLine($"BLAS: requested via --blas but provider could not be registered: {Nivara.Extensions.Blas.NivaraBlas.LastDiagnostic ?? "unknown reason"}");
                 return 1;
             }
         }
