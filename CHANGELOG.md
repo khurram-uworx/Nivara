@@ -1,5 +1,7 @@
 # Changelog
 
+All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
+
 ## [Unreleased]
 
 ### Breaking changes (migration)
@@ -48,8 +50,6 @@
   previous registration and the previous OpenBLAS pool size.
 - `BlasOptions.OpenBlasThreads` is documented as process-wide; `BlasOptions.DllPath` is now wired
   through to the loader.
-
-All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
 ## [1.5.0] - 2026-11-07
 

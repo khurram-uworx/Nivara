@@ -263,12 +263,16 @@ await foreach (var frame in sorted.AsStream())
   the second call is a no-op — and a failed release still leaves the chain disposed. Wrap cleanup
   in `try`/`finally` when you need to observe or translate that error.
 
-- **There is no safety net.** Nivara has no process-global abandoned-resource cleanup: a scan you
-  do not dispose is released only when its underlying stream is finalized (non-deterministic, and
-  blocked while any live chain still references it). "Dispose the scan you created" is the whole
-  contract. Partial reads on an undisposed scan are where the leak actually happens, and Parquet
-  holds its reader until disposal in every case.
-  form of the same contract.
+- **There is no safety net of our own.** Nivara has no process-global abandoned-resource
+  cleanup. A scan you do not dispose is released only when its underlying stream is finalized
+  (non-deterministic, and blocked while any live chain still references it) — and on the async
+  I/O path (JSON, and CSV when read asynchronously) finalization alone is *not* enough: the
+  `ThreadPoolBoundHandle` is unbound only by an explicit `Dispose()`, so a dropped async scan
+  would otherwise leak the handle until the process exits. `JsonLazySource` and `CsvLazySource`
+  therefore carry a finalizer that disposes their reader, so a dropped scan releases within
+  one collection cycle. Even so, disposing the scan you created is the whole contract. Partial
+  reads on an undisposed scan are where the leak actually happens, and Parquet holds its
+  reader until disposal in every case.
 - **A full read masks a missing `Dispose`.** CSV and JSON close their chunk reader on their own
   once a read reaches EOF, so reading to completion releases the handle even if the scan was
   never disposed. Partial reads (a filter, a `break`, cancellation) are where an undisposed scan

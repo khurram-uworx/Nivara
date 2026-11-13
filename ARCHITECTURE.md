@@ -282,6 +282,8 @@ Ownership and disposal:
 - Disposing an owning frame disposes its owned columns; any borrower of those
   columns becomes invalid.
 - Disposing a borrowing frame leaves its source fully usable.
+- Lazy query sources own one file handle released through `QuerySourceHandle`; see
+  `## File I/O Architecture` → `### Lazy source ownership and release` (#1189).
 
 Schema responsibilities:
 
@@ -648,6 +650,27 @@ File-based data sources (CSV, JSON) integrate with the query engine:
 - Filters and projections are pushed down where possible
 
 This enables scalable processing of large files without eager loading.
+
+### Lazy source ownership and release (#1189)
+
+A lazy source owns a single file handle. Release is one-shot through `QuerySourceHandle`
+(`src/Nivara/Query/QuerySourceHandle.cs`): disposing any frame in a chain releases the
+source for the whole chain, and survivors throw `ObjectDisposedException`.
+
+- **Parquet** holds its reused reader (and so the file stream) until `Dispose()`; its
+  stream is opened synchronously, so a dropped scan releases the handle at finalization.
+- **CSV / JSON** open their chunk reader lazily. CSV uses a synchronous stream in the
+  synchronous read path; JSON always uses `useAsync: true` streams and performs async
+  reads, which bind a `ThreadPoolBoundHandle` that finalization alone does *not* unbind —
+  an explicit `Dispose()` is required to close the handle.
+- **Decision (recorded here, per issue #1189):** `JsonLazySource` and `CsvLazySource`
+  carry a finalizer that disposes their reader, so a dropped scan releases within one
+  collection cycle. Parquet needs no finalizer (its stream is synchronous and finalizes
+  correctly). We do not add a finalizer to Parquet, and we do not keep a
+  process-global safety net (removed in #1168): finalizers are a last resort, and here
+  they exist only because async I/O binding makes finalization insufficient. Disposing
+  the scan you created remains the whole contract; the finalizer is the safety net for
+  the forgotten case.
 
 ---
 
