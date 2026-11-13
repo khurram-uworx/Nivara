@@ -1001,4 +1001,163 @@ public class FusedExpressionEvaluatorTests
                 Assert.That(compiledResult.GetValue(i), Is.EqualTo(spanResult.GetValue(i)), $"value at {i}");
         }
     }
+
+    // ── #1169: temporal literal cache-key precision ──
+
+    [Test]
+    public void Signature_TemporalLiteralsDifferingBelowOneSecond_AreDistinct()
+    {
+        var input = new Dictionary<string, IColumn> { ["D"] = NivaraColumn<DateTime>.Create(new[] { DateTime.UtcNow }) };
+
+        var t0 = new DateTime(2026, 11, 12, 10, 0, 0, 100);
+        var t1 = new DateTime(2026, 11, 12, 10, 0, 0, 900);
+        var sameSecondDifferentMs = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("D") > ColumnExpressions.Lit(t0), input)!.Signature;
+        var sameSecondDifferentMs2 = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("D") > ColumnExpressions.Lit(t1), input)!.Signature;
+        Assert.That(sameSecondDifferentMs, Is.Not.EqualTo(sameSecondDifferentMs2));
+
+        // TimeOnly: default formatting dropped seconds AND sub-second ticks (worse than filed).
+        var toInput = new Dictionary<string, IColumn> { ["T"] = NivaraColumn<TimeOnly>.Create(new[] { new TimeOnly(10, 0, 0) }) };
+        var to0 = new TimeOnly(10, 0, 0, 100);
+        var to1 = new TimeOnly(10, 0, 5, 900);
+        Assert.That(
+            ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("T") > ColumnExpressions.Lit(to0), toInput)!.Signature,
+            Is.Not.EqualTo(ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("T") > ColumnExpressions.Lit(to1), toInput)!.Signature));
+
+        // DateTimeOffset: sub-second precision and offset both matter.
+        var dtoInput = new Dictionary<string, IColumn> { ["O"] = NivaraColumn<DateTimeOffset>.Create(new[] { DateTimeOffset.UtcNow }) };
+        var dto0 = new DateTimeOffset(2026, 11, 12, 10, 0, 0, 100, TimeSpan.FromHours(2));
+        var dto1 = new DateTimeOffset(2026, 11, 12, 10, 0, 0, 900, TimeSpan.FromHours(5));
+        Assert.That(
+            ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("O") > ColumnExpressions.Lit(dto0), dtoInput)!.Signature,
+            Is.Not.EqualTo(ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("O") > ColumnExpressions.Lit(dto1), dtoInput)!.Signature));
+    }
+
+    [Test]
+    public void Evaluate_DateTimeLiteralsDifferingByTicks_UsesTheQueryLiteral()
+    {
+        // The real bug is not a signature collision alone: the second evaluation must not reuse the
+        // delegate compiled for the first literal. Warm the cache with t0, then evaluate with t1.
+        var t0 = new DateTime(2026, 11, 12, 10, 0, 0, 100);
+        var t1 = new DateTime(2026, 11, 12, 10, 0, 0, 900);
+        var rows = new[]
+        {
+            new DateTime(2026, 11, 12, 10, 0, 0, 50),   // below both
+            new DateTime(2026, 11, 12, 10, 0, 0, 500),  // between
+            new DateTime(2026, 11, 12, 10, 0, 0, 950),  // above both
+        };
+        var input = new Dictionary<string, IColumn> { ["D"] = NivaraColumn<DateTime>.Create(rows) };
+        var fused = new FusedExpressionEvaluator();
+
+        // Warm the cache with t0.
+        var r0 = (NivaraColumn<bool>)fused.Evaluate(ColumnExpressions.Col("D") > ColumnExpressions.Lit(t0), input);
+        Assert.That(new[] { r0[0], r0[1], r0[2] }, Is.EqualTo(new[] { false, true, true }));
+
+        // Must NOT reuse the t0 delegate: t1 is a later instant, so the middle row flips.
+        var r1 = (NivaraColumn<bool>)fused.Evaluate(ColumnExpressions.Col("D") > ColumnExpressions.Lit(t1), input);
+        Assert.That(new[] { r1[0], r1[1], r1[2] }, Is.EqualTo(new[] { false, false, true }));
+    }
+
+    [Test]
+    public void Evaluate_TimeOnlyLiteralsDifferingBySeconds_UsesTheQueryLiteral()
+    {
+        var t0 = new TimeOnly(10, 0, 0, 100);
+        var t1 = new TimeOnly(10, 0, 5, 900);
+        var rows = new[]
+        {
+            new TimeOnly(9, 59, 59, 500),
+            new TimeOnly(10, 0, 2, 500),
+            new TimeOnly(10, 0, 10, 0),
+        };
+        var input = new Dictionary<string, IColumn> { ["T"] = NivaraColumn<TimeOnly>.Create(rows) };
+        var fused = new FusedExpressionEvaluator();
+
+        var r0 = (NivaraColumn<bool>)fused.Evaluate(ColumnExpressions.Col("T") > ColumnExpressions.Lit(t0), input);
+        Assert.That(new[] { r0[0], r0[1], r0[2] }, Is.EqualTo(new[] { false, true, true }));
+
+        var r1 = (NivaraColumn<bool>)fused.Evaluate(ColumnExpressions.Col("T") > ColumnExpressions.Lit(t1), input);
+        Assert.That(new[] { r1[0], r1[1], r1[2] }, Is.EqualTo(new[] { false, false, true }));
+    }
+
+    [Test]
+    public void Signature_FloatingPointLiteralsDifferingByOneUlp_AreDistinct()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<double>.Create(new[] { 1.0, 2.0 }) };
+
+        // double, one ULP apart
+        var d0 = 0.1;
+        var d1 = BitConverter.Int64BitsToDouble(BitConverter.DoubleToInt64Bits(d0) + 1);
+        Assert.That(
+            ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + d0, input)!.Signature,
+            Is.Not.EqualTo(ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + d1, input)!.Signature));
+
+        // float, one ULP apart
+        var fInput = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<float>.Create(new[] { 1f, 2f }) };
+        var f0 = 0.1f;
+        var f1 = BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits(f0) + 1);
+        Assert.That(
+            ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + f0, fInput)!.Signature,
+            Is.Not.EqualTo(ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + f1, fInput)!.Signature));
+
+        // Half, one ULP apart
+        var hInput = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<Half>.Create(new[] { (Half)1f, (Half)2f }) };
+        var h0 = (Half)0.1f;
+        var h1 = BitConverter.HalfToInt16Bits(h0) is var hb ? BitConverter.Int16BitsToHalf((short)(hb + 1)) : h0;
+        Assert.That(
+            ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + h0, hInput)!.Signature,
+            Is.Not.EqualTo(ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + h1, hInput)!.Signature));
+
+        // BFloat16, one ULP apart (BFloat16 has no BitConverter; cast through float, whose ULP spacing
+        // is 2^16 times finer, so adjacent BFloat16 values differ in the float bits).
+        var bfInput = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<System.Numerics.BFloat16>.Create(new[] { (System.Numerics.BFloat16)1f, (System.Numerics.BFloat16)2f }) };
+        var bf0 = (System.Numerics.BFloat16)0.1f;
+        var bf1 = (System.Numerics.BFloat16)BitConverter.Int32BitsToSingle(BitConverter.SingleToInt32Bits((float)bf0) + (1 << 16));
+        Assert.That(
+            ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + bf0, bfInput)!.Signature,
+            Is.Not.EqualTo(ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + bf1, bfInput)!.Signature));
+    }
+
+    [Test]
+    public void Signature_StringLiteralContainingSignatureDelimiters_DoesNotCollide()
+    {
+        var input = new Dictionary<string, IColumn> { ["S"] = NivaraColumn<string>.Create(new[] { "a", "b" }) };
+
+        // A string literal whose value contains the signature's own delimiters and a type suffix.
+        var forged = "x) > 1:System.Int32";
+        var literalSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("S") == ColumnExpressions.Lit(forged), input)!.Signature;
+
+        // A structurally different expression must not share that signature.
+        var otherSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("S") == ColumnExpressions.Lit("x"), input)!.Signature;
+        Assert.That(literalSig, Is.Not.EqualTo(otherSig));
+    }
+
+    [Test]
+    public void CompiledKernelCache_Overflow_IsBoundedAndCounted()
+    {
+        FusedExpressionEvaluator.ClearCompiledKernelCache();
+        try
+        {
+            var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1 }) };
+            var fused = new FusedExpressionEvaluator();
+
+            // Each literal is distinct -> distinct signature -> distinct compiled delegate.
+            // Use a comparison (bool result) so the plan routes to the compiled target rather than
+            // the TensorPrimitives single-op fast path.
+            for (int i = 0; i < FusedExpressionEvaluator.CompiledKernelCacheCapacity + 64; i++)
+            {
+                var result = (NivaraColumn<bool>)fused.Evaluate(ColumnExpressions.Col("A") > i, input);
+                Assert.That(result[0], Is.EqualTo(1 > i));
+            }
+
+            Assert.That(FusedExpressionEvaluator.CompiledKernelCacheEntryCount, Is.LessThanOrEqualTo(2 * FusedExpressionEvaluator.CompiledKernelCacheCapacity));
+            Assert.That(FusedExpressionEvaluator.CompiledKernelCacheOverflowCount, Is.EqualTo(1));
+
+            // After rotation, re-evaluating a dropped expression still returns the correct value.
+            var dropped = (NivaraColumn<bool>)fused.Evaluate(ColumnExpressions.Col("A") > 0, input);
+            Assert.That(dropped[0], Is.EqualTo(true));
+        }
+        finally
+        {
+            FusedExpressionEvaluator.ClearCompiledKernelCache();
+        }
+    }
 }

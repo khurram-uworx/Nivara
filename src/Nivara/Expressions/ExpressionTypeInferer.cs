@@ -196,18 +196,45 @@ internal static class ExpressionTypeInferer
 
     static string TypeName(Type? type) => type?.FullName ?? "?";
 
+    /// <summary>
+    /// Formats a literal value into a cache-safe, round-trip-safe, injective signature token.
+    /// Numeric components are used in preference to formatted text so that sub-second temporal
+    /// precision (and floating-point ULPs) are preserved: the previous <c>IFormattable.ToString(null, …)</c>
+    /// path rendered <see cref="DateTime"/>/<see cref="DateTimeOffset"/>/<see cref="TimeOnly"/>
+    /// without fractional seconds, which let two literals differing only below one second share a
+    /// compiled-delegate cache entry (issue #1169). The text is length-prefixed so that a literal
+    /// whose value contains the signature's own delimiters cannot forge another expression's key.
+    /// </summary>
     static string FormatValue(object? value)
     {
         if (value == null)
             return "null";
 
+        // Encode the value's *bits* (not its formatted text) wherever that is exact, so the token
+        // is round-trip-safe regardless of culture or machine. DateTime/DateTimeOffset encode Kind
+        // and offset as ticks rather than via "O" formatting, because "O" for Kind=Local embeds the
+        // machine's offset and would make signatures environment-dependent.
+        var text = value switch
+        {
+            DateTime dt => $"{dt.Ticks}:{(int)dt.Kind}",
+            DateTimeOffset dto => $"{dto.UtcTicks}:{dto.Offset.Ticks}",
+            TimeOnly t => $"{t.Ticks}",
+            DateOnly d => $"{d.DayNumber}",
+            TimeSpan ts => $"{ts.Ticks}",
+            Guid g => g.ToString("D", CultureInfo.InvariantCulture),
+            float f => $"{BitConverter.SingleToInt32Bits(f)}",
+            double d => $"{BitConverter.DoubleToInt64Bits(d)}",
+            Half h => $"{BitConverter.HalfToInt16Bits(h)}",
+            decimal m => m.ToString(CultureInfo.InvariantCulture),
+            string s => s,
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+            _ => value.ToString() ?? string.Empty,
+        };
+
         // Include the literal runtime type: two literals that stringify identically
         // (0.1f vs 0.1, 1.1m vs 1.1, nint vs int) must not share a signature, or the
         // compiled-delegate cache would reuse the wrong typed kernel (issue #246).
-        var text = value is IFormattable formattable
-            ? formattable.ToString(null, CultureInfo.InvariantCulture)
-            : value.ToString() ?? string.Empty;
-
-        return $"{text}:{value.GetType().FullName}";
+        // The length prefix makes the concatenation injective against delimiter injection.
+        return $"{text.Length}:{text}:{value.GetType().FullName}";
     }
 }
