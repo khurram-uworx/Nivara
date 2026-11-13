@@ -139,7 +139,7 @@ public class DiagnosticsTests
         // Act - perform multiple operations
         var result1 = column1.Add(column2);
         var result2 = column1.Multiply(2);
-        var result3 = column1.Equals(3);
+        var result3 = column1.EqualTo(3);
 
         var summary = DiagnosticsTracker.GetSummary();
 

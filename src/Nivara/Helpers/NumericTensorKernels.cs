@@ -117,6 +117,54 @@ static class NumericTensorKernels<T>
         }
     }
 
+    public static void NotEquals(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = x[i] != y[i];
+        }
+    }
+
+    public static void NotEquals(ReadOnlySpan<T> x, T y, Span<bool> destination)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = x[i] != y;
+        }
+    }
+
+    public static void GreaterThanOrEqual(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = x[i] >= y[i];
+        }
+    }
+
+    public static void GreaterThanOrEqual(ReadOnlySpan<T> x, T y, Span<bool> destination)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = x[i] >= y;
+        }
+    }
+
+    public static void LessThanOrEqual(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = x[i] <= y[i];
+        }
+    }
+
+    public static void LessThanOrEqual(ReadOnlySpan<T> x, T y, Span<bool> destination)
+    {
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = x[i] <= y;
+        }
+    }
+
     public static T Sum(ReadOnlySpan<T> values)
         => TensorPrimitives.Sum(values);
 
