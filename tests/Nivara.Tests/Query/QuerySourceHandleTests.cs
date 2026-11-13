@@ -83,16 +83,16 @@ public class QuerySourceHandleTests
         });
     }
 
-    // ── Disposal-error contract (#508) ──
+    // ── Disposal-error contract (#1170) ──
 
     [Test]
-    public void Release_SourceDisposeThrows_DoesNotPropagate()
+    public void Release_SourceDisposeThrows_Propagates()
     {
         var source = new ThrowingSource();
         var handle = new QuerySourceHandle(source);
 
-        Assert.DoesNotThrow(() => handle.Release(),
-            "Dispose must not throw; the source-disposal error is swallowed");
+        Assert.Throws<InvalidOperationException>(() => handle.Release(),
+            "Dispose must propagate the source-disposal failure");
         Assert.Multiple(() =>
         {
             Assert.That(handle.Released, Is.True);
@@ -101,15 +101,15 @@ public class QuerySourceHandleTests
     }
 
     [Test]
-    public async Task ReleaseAsync_SourceDisposeThrows_DoesNotPropagate()
+    public async Task ReleaseAsync_SourceDisposeThrows_Propagates()
     {
         // A source implementing only IDisposable takes ReleaseAsync's synchronous fallback branch;
-        // the fallback must swallow just as Release does.
+        // the fallback must propagate just as Release does.
         var source = new ThrowingSource();
         var handle = new QuerySourceHandle(source);
 
-        await Assert.DoesNotThrowAsync(async () => await handle.ReleaseAsync(),
-            "DisposeAsync must not throw; the synchronous fallback swallows like Release");
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await handle.ReleaseAsync(),
+            "DisposeAsync must propagate when the synchronous fallback faults");
         Assert.Multiple(() =>
         {
             Assert.That(handle.Released, Is.True);
@@ -118,15 +118,15 @@ public class QuerySourceHandleTests
     }
 
     [Test]
-    public async Task ReleaseAsync_AsyncDisposableThrows_DoesNotPropagate()
+    public async Task ReleaseAsync_AsyncDisposableThrows_Propagates()
     {
         // Exercises the awaited IAsyncDisposable branch. No production IQuerySource implements
         // IAsyncDisposable, so this is the only place that branch is executed.
         var source = new RecordingAsyncSource(throwOnDispose: true);
         var handle = new QuerySourceHandle(source);
 
-        await Assert.DoesNotThrowAsync(async () => await handle.ReleaseAsync(),
-            "DisposeAsync must not throw when the awaited source disposal faults");
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await handle.ReleaseAsync(),
+            "DisposeAsync must propagate when the awaited source disposal faults");
         Assert.Multiple(() =>
         {
             Assert.That(handle.Released, Is.True);
@@ -166,8 +166,40 @@ public class QuerySourceHandleTests
         });
     }
 
-    /// <summary>
-    /// Builds a two-step chain, discarding the intermediate frame, and returns the leaf.
+    [Test]
+    public void Release_AfterFailedDispose_DoesNotThrowAndDoesNotRetry()
+    {
+        var source = new ThrowingSource();
+        var handle = new QuerySourceHandle(source);
+
+        Assert.Throws<InvalidOperationException>(() => handle.Release());
+
+        Assert.DoesNotThrow(() => handle.Release(),
+            "a second release after a failed one is a no-op and must not throw");
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle.Released, Is.True);
+            Assert.That(source.DisposeCount, Is.EqualTo(1),
+                "the source must be disposed at most once");
+        });
+    }
+
+    [Test]
+    public async Task ReleaseAsync_AfterFailedDispose_DoesNotThrowAndDoesNotRetry()
+    {
+        var source = new RecordingAsyncSource(throwOnDispose: true);
+        var handle = new QuerySourceHandle(source);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await handle.ReleaseAsync());
+
+        await Assert.DoesNotThrowAsync(async () => await handle.ReleaseAsync(),
+            "a second release after a failed one is a no-op and must not throw");
+        Assert.Multiple(() =>
+        {
+            Assert.That(handle.Released, Is.True);
+            Assert.That(source.DisposeAsyncCount, Is.EqualTo(1));
+        });
+    }
     /// Kept in its own method so the intermediate is provably unreachable on return.
     /// </summary>
     static QueryFrame BuildTwoStepLeaf(QueryFrame root)

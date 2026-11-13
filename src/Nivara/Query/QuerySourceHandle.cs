@@ -43,40 +43,31 @@ internal sealed class QuerySourceHandle
     internal bool Released => Volatile.Read(ref released) != 0;
 
     /// <summary>
-    /// Releases the source. Idempotent; disposal errors are swallowed.
+    /// Releases the source. Idempotent: a second call is a no-op. The release is
+    /// considered complete even when IQuerySource.Dispose throws, so a retry is
+    /// not attempted; the disposal failure propagates to the caller.
     /// </summary>
     internal void Release()
     {
         if (Interlocked.Exchange(ref released, 1) != 0) return;
 
-        try
-        {
-            source.Dispose();
-        }
-        catch
-        {
-            // Ignore disposal errors, mirroring Release().
-        }
+        source.Dispose();
     }
 
     /// <summary>
-    /// Releases the source asynchronously. Idempotent; disposal errors are swallowed, mirroring
-    /// <see cref="Release"/> so neither disposal path throws.
+    /// Releases the source asynchronously. Idempotent: a second call is a no-op.
+    /// When source implements IAsyncDisposable the awaited DisposeAsync is used;
+    /// otherwise the synchronous Dispose fallback runs. Whichever path runs, a
+    /// disposal failure propagates to the caller; there is no fallback from a
+    /// failed DisposeAsync to the synchronous Dispose.
     /// </summary>
     internal async ValueTask ReleaseAsync()
     {
         if (Interlocked.Exchange(ref released, 1) != 0) return;
 
-        try
-        {
-            if (source is IAsyncDisposable asyncDisposable)
-                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-            else
-                source.Dispose();
-        }
-        catch
-        {
-            // Ignore disposal errors, mirroring Release().
-        }
+        if (source is IAsyncDisposable asyncDisposable)
+            await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+        else
+            source.Dispose();
     }
 }
