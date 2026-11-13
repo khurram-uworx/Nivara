@@ -421,6 +421,10 @@ Nothing is committed to the repository and nothing is restored. This probe does 
 and does not claim to; MKL is 481 MB on disk and ships no official NuGet, so OpenBLAS is the
 lean candidate and the one measured.
 
+The probe consumes `Nivara.Extensions.Blas.OpenBlasInterop` — the same binding the shipped
+`OpenBlasGemmProvider`/`OpenBlasGemvProvider` use — so the A/B legs cannot drift from what
+ships.
+
 **AVX2 control.** Set `OPENBLAS_CORETYPE=Haswell` to force the AVX2 kernel, and read
 `corename: Haswell` in the header before consuming the numbers. Set it as a real process
 environment variable - OpenBLAS ignores it when it is set through the CRT.
