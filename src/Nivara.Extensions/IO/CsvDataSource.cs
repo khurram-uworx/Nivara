@@ -871,7 +871,15 @@ sealed class CsvLazySource : IQuerySource
         if (disposed)
             return;
         disposed = true;
-        DisposeChunkReader();
+        try
+        {
+            DisposeChunkReader();
+        }
+        catch
+        {
+            if (disposing)
+                throw;
+        }
     }
 }
 

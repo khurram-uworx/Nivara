@@ -804,9 +804,20 @@ sealed class JsonLazySource : IQuerySource
         if (disposed)
             return;
         disposed = true;
-        CloseChunkReader();
+        try
+        {
+            CloseChunkReader();
+        }
+        catch
+        {
+            if (disposing)
+                throw;
+        }
         if (disposing)
-            chunkLock.Dispose();
+        {
+            try { chunkLock.Dispose(); }
+            catch { throw; }
+        }
     }
 }
 
