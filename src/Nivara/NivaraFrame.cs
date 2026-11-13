@@ -15,7 +15,7 @@ namespace Nivara;
 /// Immutable DataFrame-like structure that provides schema management and multi-column data operations.
 /// Serves as the primary interface for working with structured, multi-column datasets in Nivara.
 /// </summary>
-public sealed class NivaraFrame : IFrame
+public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
 {
     /// <summary>
     /// Estimates the memory usage of a column (rough, lower-bound approximation).
@@ -1305,17 +1305,95 @@ public sealed class NivaraFrame : IFrame
     /// </summary>
     /// <param name="obj">The object to compare</param>
     /// <returns>True if the objects are equal, false otherwise</returns>
-    public override bool Equals(object? obj)
+    /// <summary>
+    /// Determines whether this frame is structurally equal to another frame
+    /// (column names in order, schema including metadata, and per-column contents).
+    /// </summary>
+    public bool Equals(NivaraFrame? other)
     {
-        return ReferenceEquals(this, obj);
+        if (other is null)
+            return false;
+
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ObjectDisposedException.ThrowIf(other.disposed, other);
+
+        if (ReferenceEquals(this, other))
+            return true;
+
+        if (RowCount != other.RowCount || ColumnCount != other.ColumnCount)
+            return false;
+
+        if (!Schema.Equals(other.Schema))
+            return false;
+
+        // Column names are compared in declared order (Schema.ColumnNames is ordered).
+        for (int i = 0; i < ColumnNames.Count; i++)
+        {
+            var thisName = ColumnNames[i];
+            var otherName = other.ColumnNames[i];
+
+            if (!string.Equals(thisName, otherName, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var thisColumn = columns[thisName];
+            var otherColumn = other.columns[otherName];
+
+            if (!thisColumn.ContentEquals(otherColumn))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>
-    /// Returns a hash code for the frame
+    /// Determines whether this frame is structurally equal to the specified object.
     /// </summary>
-    /// <returns>A hash code for the frame</returns>
+    public override bool Equals(object? obj)
+    {
+        if (obj is NivaraFrame other)
+            return Equals(other);
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns a hash code for the frame's contents.
+    /// </summary>
     public override int GetHashCode()
     {
-        return base.GetHashCode();
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var hash = new HashCode();
+        hash.Add(Schema);
+
+        foreach (var name in ColumnNames)
+        {
+            hash.Add(name, StringComparer.OrdinalIgnoreCase);
+            hash.Add(columns[name].ContentHashCode());
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Structural equality operator for frames.
+    /// </summary>
+    public static bool operator ==(NivaraFrame? left, NivaraFrame? right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+
+        if (left is null || right is null)
+            return false;
+
+        return left.Equals(right);
+    }
+
+    /// <summary>
+    /// Structural inequality operator for frames.
+    /// </summary>
+    public static bool operator !=(NivaraFrame? left, NivaraFrame? right)
+    {
+        return !(left == right);
     }
 }
