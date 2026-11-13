@@ -498,16 +498,14 @@ sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
             disposed = true;
             if (lazyReader.IsValueCreated)
             {
-                try
-                {
-                    lazyReader.Value.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                }
-                catch
-                {
-                    // Best-effort disposal; the reader owns the file stream.
-                }
+                LazySourceDisposal.DisposeReader(
+                    () => lazyReader.Value.DisposeAsync(),
+                    gate.Dispose);
             }
-            gate.Dispose();
+            else
+            {
+                gate.Dispose();
+            }
         }
     }
 }
