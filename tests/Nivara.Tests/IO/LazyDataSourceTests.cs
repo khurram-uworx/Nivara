@@ -132,7 +132,7 @@ public class LazyDataSourceTests
 
         // Act - creating query should not read file
         var queryFrame = Csv.ScanFrame(csvFilePath);
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Age") > 30);
 
         // Assert - file should not have been accessed for data (schema inference may access it briefly)
         // We test that the query was built without full execution
@@ -145,7 +145,7 @@ public class LazyDataSourceTests
     {
         // Arrange
         var queryFrame = Csv.ScanFrame(csvFilePath);
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Age") > 30);
 
         // Act
         var result = filteredQuery.Collect();
@@ -256,7 +256,7 @@ public class LazyDataSourceTests
     {
         // Act - creating query should not fully process file
         var queryFrame = Json.ScanFrame(jsonFilePath);
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Age") > 30);
 
         // Assert - query should be lazy
         Assert.That(queryFrame.IsLazy, Is.True);
@@ -268,7 +268,7 @@ public class LazyDataSourceTests
     {
         // Arrange
         var queryFrame = Json.ScanFrame(jsonFilePath);
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30.0); // Use double for JSON
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Age") > 30.0); // Use double for JSON
 
         // Act
         var result = filteredQuery.Collect();
@@ -444,9 +444,9 @@ public class LazyDataSourceTests
             {
                 query = Csv.ScanFrame(filePath);
                 var complexQuery = query
-                    .Filter(ColumnExpressions.Col("Age") > 25)
+                    .Where(ColumnExpressions.Col("Age") > 25)
                     .Select("Name", "Salary")
-                    .Filter(ColumnExpressions.Col("Salary") > 70000);
+                    .Where(ColumnExpressions.Col("Salary") > 70000);
 
                 // Assert - query should be lazy and no full execution should have occurred
                 Assert.That(query.IsLazy, Is.True, $"Initial query should be lazy for {filePath}");
@@ -460,9 +460,9 @@ public class LazyDataSourceTests
             {
                 query = Json.ScanFrame(filePath);
                 var complexQuery = query
-                    .Filter(ColumnExpressions.Col("Age") > 25.0) // Use double for JSON
+                    .Where(ColumnExpressions.Col("Age") > 25.0) // Use double for JSON
                     .Select("Name", "Salary")
-                    .Filter(ColumnExpressions.Col("Salary") > 70000.0); // Use double for JSON
+                    .Where(ColumnExpressions.Col("Salary") > 70000.0); // Use double for JSON
 
                 // Assert - query should be lazy and no full execution should have occurred
                 Assert.That(query.IsLazy, Is.True, $"Initial query should be lazy for {filePath}");

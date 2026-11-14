@@ -13,11 +13,11 @@ public class SortingIntegrationTests
     public void SortingWorkflow_CompleteExample_ShouldWorkEndToEnd()
     {
         // Arrange - Create a sample employee dataset
-        var names = NivaraColumn<string>.CreateForReferenceType(new[]
+        var names = NivaraColumn<string>.Create(new[]
         {
             "Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Eve Adams"
         });
-        var departments = NivaraColumn<string>.CreateForReferenceType(new[]
+        var departments = NivaraColumn<string>.Create(new[]
         {
             "Engineering", "Sales", "Engineering", "Marketing", "Sales"
         });
@@ -96,7 +96,7 @@ public class SortingIntegrationTests
     public void SortingWithFiltering_CombinedOperations_ShouldWorkCorrectly()
     {
         // Arrange
-        var names = NivaraColumn<string>.CreateForReferenceType(new[]
+        var names = NivaraColumn<string>.Create(new[]
         {
             "Alice", "Bob", "Charlie", "Diana", "Eve", "Frank"
         });
@@ -131,7 +131,7 @@ public class SortingIntegrationTests
     {
         // Arrange
         var numbers = NivaraColumn<int>.Create(new[] { 5, 2, 8, 1, 9, 3, 7, 4, 6 });
-        var letters = NivaraColumn<string>.CreateForReferenceType(new[] { "e", "b", "h", "a", "i", "c", "g", "d", "f" });
+        var letters = NivaraColumn<string>.Create(new[] { "e", "b", "h", "a", "i", "c", "g", "d", "f" });
 
         var frame = NivaraFrame.Create(
             ("Numbers", numbers),
@@ -162,7 +162,7 @@ public class SortingIntegrationTests
         // Arrange
         var data = NivaraFrame.Create(
             ("ID", NivaraColumn<int>.Create(new[] { 100, 200, 300, 400 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C", "D" }))
+            ("Value", NivaraColumn<string>.Create(new[] { "A", "B", "C", "D" }))
         );
 
         // Act: Reverse the order using indices
@@ -191,7 +191,7 @@ public class SortingIntegrationTests
         var randomValues = NivaraColumn<double>.Create(
             Enumerable.Range(0, rowCount).Select(_ => random.NextDouble() * 1000).ToArray()
         );
-        var categories = NivaraColumn<string>.CreateForReferenceType(
+        var categories = NivaraColumn<string>.Create(
             Enumerable.Range(0, rowCount).Select(i => $"Category{i % 10}").ToArray()
         );
 

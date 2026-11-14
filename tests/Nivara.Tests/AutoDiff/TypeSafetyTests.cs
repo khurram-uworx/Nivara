@@ -516,7 +516,7 @@ public class TypeSafetyTests
     public void NivaraColumn_AsTensorView_ThrowsForReferenceTypes()
     {
         // Arrange
-        var column = NivaraColumn<string>.CreateForReferenceType(new string[] { "a", "b", "c" });
+        var column = NivaraColumn<string>.Create(new string[] { "a", "b", "c" });
 
         // Act + Assert
         Assert.Throws<InvalidOperationException>(() => column.AsTensorView());

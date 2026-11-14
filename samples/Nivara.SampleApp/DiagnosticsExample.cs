@@ -33,7 +33,7 @@ public static class DiagnosticsExample
 
         // Create different types of columns
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "apple", "banana", "cherry" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "apple", "banana", "cherry" });
         var doubleColumn = NivaraColumn<double>.Create(new[] { 1.1, 2.2, 3.3, 4.4, 5.5 });
 
         // Demonstrate column diagnostics

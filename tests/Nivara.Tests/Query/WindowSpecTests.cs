@@ -141,7 +141,7 @@ public class WindowSpecTests
     public void EagerAndLazy_WithSameSpec_ProduceSameResults()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
 
@@ -157,7 +157,7 @@ public class WindowSpecTests
     public void EagerAndLazy_RankFamily_WithSameSpec_ProduceSameResults()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "B" })),
             ("t", IntColumn(2, 1, 2, 1)),
             ("v", IntColumn(10, 20, 30, 40)));
 

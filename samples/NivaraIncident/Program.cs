@@ -263,8 +263,8 @@ void BenchStream(string dsPath, IncidentScenario sc)
 
         var sw = Stopwatch.StartNew();
         var qf = Ingestion.LoadParquet(Path.Combine(dsPath, "requests.parquet"))
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks));
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks));
         var stream = qf.AsStream(cs);
 
         var enumerator = stream.GetAsyncEnumerator();

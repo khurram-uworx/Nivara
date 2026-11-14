@@ -10,7 +10,7 @@ public class NivaraFrameFilteringSlicingTests
     {
         // Arrange
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d", "e" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "a", "b", "c", "d", "e" });
         var frame = NivaraFrame.Create(
             ("Numbers", intColumn),
             ("Letters", stringColumn)

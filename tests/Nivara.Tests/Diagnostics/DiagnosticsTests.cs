@@ -30,7 +30,7 @@ public class DiagnosticsTests
     {
         // Arrange
         var values = new[] { "apple", "banana", "cherry" };
-        var column = NivaraColumn<string>.CreateForReferenceType(values);
+        var column = NivaraColumn<string>.Create(values);
 
         // Act
         var diagnostics = column.Diagnostics;
@@ -48,7 +48,7 @@ public class DiagnosticsTests
     {
         // Arrange
         var values = new string[] { "apple", null!, "cherry" };
-        var column = NivaraColumn<string>.CreateForReferenceType(values);
+        var column = NivaraColumn<string>.Create(values);
 
         // Act
         var diagnostics = column.Diagnostics;

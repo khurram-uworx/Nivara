@@ -14,7 +14,7 @@ namespace Nivara.Linq;
 /// <summary>
 /// A typed LINQ query over a frame. The query is lazy: predicates, projections, and ordering are
 /// translated to the expression engine at build time (fail fast) and executed only when
-/// <see cref="Collect"/>, <see cref="ToObjects"/>, or <see cref="ToList"/> is called.
+/// <see cref="Collect"/>, or <see cref="ToList"/> is called.
 /// </summary>
 /// <typeparam name="T">The row type</typeparam>
 /// <remarks>
@@ -77,7 +77,7 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(predicate);
 
         var condition = CreateTranslator().Translate(predicate.Body);
-        return new NivaraQuery<T>(frame.Filter(condition));
+        return new NivaraQuery<T>(frame.Where(condition));
     }
 
     /// <summary>
@@ -317,52 +317,6 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
     public Task<NivaraFrame> CollectAsync(CancellationToken ct = default) => frame.CollectAsync(ct);
 
     /// <summary>
-    /// Streams processed chunks from the query as an async enumerable.
-    /// See <see cref="QueryFrame.AsStream"/> for the chunking contract, including the
-    /// single-frame fallback for non-streamable operations.
-    /// </summary>
-    /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
-    /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
-    /// chunks are aligned to native row-group boundaries.</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
-        => frame.AsStream(chunkSize, ct);
-
-    /// <summary>
-    /// Streams processed chunks from the query as an async enumerable, using the supplied
-    /// execution context for the memory budget, progress, diagnostics, and cancellation.
-    /// </summary>
-    /// <remarks>
-    /// When <see cref="NivaraExecutionContext.ChunkSize"/> is left null, the streaming
-    /// strategy derives the chunk size from <see cref="NivaraExecutionContext.MemoryBudget"/>:
-    /// <c>budget / 10 ÷ 100 estimated bytes/row</c>, clamped to the range [1000, 100,000]
-    /// rows. This is the public route by which a caller sets a streaming memory budget; an
-    /// explicit <see cref="NivaraExecutionContext.ChunkSize"/> always wins over the
-    /// budget-derived value. The context is cloned before execution, so the caller's
-    /// instance is not mutated.
-    /// </remarks>
-    /// <param name="context">The execution context carrying the memory budget and, optionally,
-    /// an explicit <see cref="NivaraExecutionContext.ChunkSize"/>.</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, CancellationToken ct = default)
-        => frame.AsStream(context, ct);
-
-    /// <summary>
-    /// Streams processed chunks from the query as an async enumerable, using the supplied
-    /// execution context and an explicit chunk size.
-    /// </summary>
-    /// <param name="context">The execution context carrying the memory budget, progress, and
-    /// diagnostics.</param>
-    /// <param name="chunkSize">The target number of rows per chunk; overrides
-    /// <see cref="NivaraExecutionContext.ChunkSize"/>.</param>
-    /// <param name="ct">Cancellation token for the operation</param>
-    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    public IAsyncEnumerable<NivaraFrame> AsStream(NivaraExecutionContext context, int chunkSize, CancellationToken ct = default)
-        => frame.AsStream(context, chunkSize, ct);
-
-    /// <summary>
     /// Executes the query and streams the result rows as typed objects with bounded memory:
     /// each chunk is projected to rows as it arrives instead of materializing the whole frame
     /// first, so the CLI can print "Streamed N rows (M chunks)" for arbitrarily large results.
@@ -394,10 +348,10 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
     /// <summary>
     /// Executes the query and materializes the result rows as objects
     /// </summary>
-    /// <returns>A read-only list of typed rows</returns>
-    public IReadOnlyList<T> ToObjects()
+    /// <returns>A list of typed rows</returns>
+    public List<T> ToList()
     {
-        var result = Collect();
+        var result = AsQueryFrame().Collect();
         var factory = TypedRowFactory<T>.GetFactory(result.Schema);
         var columns = result.ColumnNames.Select(name => result.GetColumn(name)).ToArray();
 
@@ -407,12 +361,6 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
 
         return rows;
     }
-
-    /// <summary>
-    /// Executes the query and materializes the result rows as objects
-    /// </summary>
-    /// <returns>A list of typed rows</returns>
-    public List<T> ToList() => ToObjects().ToList();
 
     /// <summary>
     /// Executes the query asynchronously and materializes the result rows as objects
@@ -434,12 +382,6 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
 
         return rows;
     }
-
-    /// <summary>
-    /// Executes the query and materializes the result rows as objects (alias for <see cref="ToObjects"/>)
-    /// </summary>
-    /// <returns>A read-only list of typed rows</returns>
-    public IReadOnlyList<T> ToRows() => ToObjects();
 
     TypedExpressionTranslator CreateTranslator() => CreateTranslator(frame.Schema);
 

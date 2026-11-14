@@ -18,7 +18,7 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Numbers") > 3)
+            .Where(ColumnExpressions.Col("Numbers") > 3)
             .Collect();
 
         // Assert
@@ -113,7 +113,7 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Numbers") > 2)
+            .Where(ColumnExpressions.Col("Numbers") > 2)
             .Sort("Numbers")
             .Select(ColumnExpressions.Col("Letters"))
             .Collect();
@@ -139,7 +139,7 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Numbers") > 1)
+            .Where(ColumnExpressions.Col("Numbers") > 1)
             .Collect();
 
         // Assert
@@ -265,7 +265,7 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("ID") > 1)
+            .Where(ColumnExpressions.Col("ID") > 1)
             .SortByExpression(ColumnExpressions.Col("Val") / 10)
             .Collect();
 

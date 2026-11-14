@@ -10,7 +10,7 @@ public class QueryFrameTests
     static NivaraFrame CreateTestFrame()
     {
         var intColumn = NivaraColumn<int>.Create(new[] { 10, 20, 30, 40, 50 });
-        var strColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d", "e" });
+        var strColumn = NivaraColumn<string>.Create(new[] { "a", "b", "c", "d", "e" });
         return NivaraFrame.Create(
             ("X", intColumn),
             ("Y", strColumn)
@@ -20,7 +20,7 @@ public class QueryFrameTests
     static NivaraFrame CreateTestFrameWithNulls()
     {
         var intColumn = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
-        var strColumn = NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "c", null!, "e" });
+        var strColumn = NivaraColumn<string>.Create(new string[] { "a", null!, "c", null!, "e" });
         return NivaraFrame.Create(
             ("X", intColumn),
             ("Y", strColumn)
@@ -275,7 +275,7 @@ public class QueryFrameTests
     public void Distinct_ByColumnNames_DeduplicatesBySubset()
     {
         var x = NivaraColumn<int>.Create([1, 1, 2, 2]);
-        var y = NivaraColumn<string>.CreateForReferenceType(["a", "b", "a", "b"]);
+        var y = NivaraColumn<string>.Create(["a", "b", "a", "b"]);
         using var frame = NivaraFrame.Create("x", x).WithColumn("y", y);
 
         // Distinct by "y" only: keeps first row for each unique y value

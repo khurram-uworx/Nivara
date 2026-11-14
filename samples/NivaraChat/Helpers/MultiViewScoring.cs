@@ -250,14 +250,14 @@ public static class MultiViewScoring
         }
 
         return NivaraFrame.Create(
-            ("ChunkId", (IColumn)NivaraColumn<string>.CreateForReferenceType(chunkId)),
-            ("Source", (IColumn)NivaraColumn<string>.CreateForReferenceType(source)),
-            ("SourcePath", (IColumn)NivaraColumn<string>.CreateForReferenceType(sourcePath)),
-            ("Title", (IColumn)NivaraColumn<string>.CreateForReferenceType(title)),
-            ("Section", (IColumn)NivaraColumn<string>.CreateForReferenceType(section)),
-            ("AclGroup", (IColumn)NivaraColumn<string>.CreateForReferenceType(aclGroup)),
-            ("Content", (IColumn)NivaraColumn<string>.CreateForReferenceType(content)),
-            ("Code", (IColumn)NivaraColumn<string>.CreateForReferenceType(code)),
+            ("ChunkId", (IColumn)NivaraColumn<string>.Create(chunkId)),
+            ("Source", (IColumn)NivaraColumn<string>.Create(source)),
+            ("SourcePath", (IColumn)NivaraColumn<string>.Create(sourcePath)),
+            ("Title", (IColumn)NivaraColumn<string>.Create(title)),
+            ("Section", (IColumn)NivaraColumn<string>.Create(section)),
+            ("AclGroup", (IColumn)NivaraColumn<string>.Create(aclGroup)),
+            ("Content", (IColumn)NivaraColumn<string>.Create(content)),
+            ("Code", (IColumn)NivaraColumn<string>.Create(code)),
             ("VectorContent", (IColumn)VectorColumn(contentVectors)),
             ("VectorTitle", (IColumn)VectorColumn(titleVectors)),
             ("VectorSection", (IColumn)VectorColumn(sectionVectors)),
@@ -414,7 +414,7 @@ public static class MultiViewScoring
         var values = new float[vectors.Count][];
         for (var i = 0; i < vectors.Count; i++)
             values[i] = vectors[i]!;
-        return NivaraColumn<float[]>.CreateForReferenceType(values);
+        return NivaraColumn<float[]>.Create(values);
     }
 
     static float?[] ReadScores(NivaraSeries<float> series, int count)

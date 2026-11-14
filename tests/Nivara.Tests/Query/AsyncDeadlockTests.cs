@@ -30,7 +30,7 @@ public class AsyncDeadlockTests
     {
         var frame = Nivara.NivaraFrame.Create(
             ("X", Nivara.NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })),
-            ("Y", Nivara.NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d" })));
+            ("Y", Nivara.NivaraColumn<string>.Create(new[] { "a", "b", "c", "d" })));
 
         var query = frame.Query<TestRow>().Where(r => r.X > 1);
 

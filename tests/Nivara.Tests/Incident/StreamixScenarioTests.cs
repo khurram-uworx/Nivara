@@ -53,8 +53,8 @@ public class StreamixScenarioTests
         // would still satisfy TotalRows > 0; only a like-for-like comparison catches that.
         int expected;
         using (var query = Ingestion.LoadParquet(Path.Combine(tempDir, "requests.parquet"))
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks)))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks)))
         using (var frame = query.Collect())
         {
             expected = frame.RowCount;

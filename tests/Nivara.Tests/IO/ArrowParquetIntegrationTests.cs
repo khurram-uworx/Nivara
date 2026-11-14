@@ -29,7 +29,7 @@ public class ArrowParquetIntegrationTests
     {
         // Arrange - Create original NivaraFrame with various data types
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "apple", "banana", "cherry", "date", "elderberry" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "apple", "banana", "cherry", "date", "elderberry" });
         var doubleColumn = NivaraColumn<double>.Create(new[] { 1.1, 2.2, 3.3, 4.4, 5.5 });
         var boolColumn = NivaraColumn<bool>.Create(new[] { true, false, true, false, true });
         var dateTimeColumn = NivaraColumn<DateTime>.Create(new[]
@@ -101,7 +101,7 @@ public class ArrowParquetIntegrationTests
         var intColumn = NivaraColumnFactory.CreateFromNullable(nullableIntArray);
 
         var stringArray = new string[] { "a", null!, "c", null!, "e" };
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringArray);
+        var stringColumn = NivaraColumn<string>.Create(stringArray);
 
         var originalFrame = NivaraFrame.Create(
             ("NullableInts", intColumn),
@@ -214,17 +214,17 @@ public class ArrowParquetIntegrationTests
         // Arrange - Create multiple frames with compatible schemas
         var frame1 = NivaraFrame.Create(
             ("ID", NivaraColumn<int>.Create(new[] { 1, 2, 3 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" }))
         );
 
         var frame2 = NivaraFrame.Create(
             ("ID", NivaraColumn<int>.Create(new[] { 4, 5, 6 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "David", "Eve", "Frank" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "David", "Eve", "Frank" }))
         );
 
         var frame3 = NivaraFrame.Create(
             ("ID", NivaraColumn<int>.Create(new[] { 7, 8, 9 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Grace", "Henry", "Iris" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "Grace", "Henry", "Iris" }))
         );
 
         var frames = new[] { frame1, frame2, frame3 };
@@ -398,7 +398,7 @@ public class ArrowParquetIntegrationTests
 
         var originalFrame = NivaraFrame.Create(
             ("Integers", NivaraColumn<int>.Create(intData)),
-            ("Strings", NivaraColumn<string>.CreateForReferenceType(stringData)),
+            ("Strings", NivaraColumn<string>.Create(stringData)),
             ("Doubles", NivaraColumn<double>.Create(doubleData))
         );
 

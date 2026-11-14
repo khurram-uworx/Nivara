@@ -247,7 +247,7 @@ public class ColumnStorageFactoryTests
     #region Reference Type with Null Detection Tests
 
     [Test]
-    public void ColumnStorageFactory_CreateForReferenceType_DetectsNullsCorrectly()
+    public void ColumnStorageFactory_Create_DetectsNullsCorrectly()
     {
         var testCases = new[]
         {

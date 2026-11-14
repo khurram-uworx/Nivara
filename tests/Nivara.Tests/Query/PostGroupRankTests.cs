@@ -37,7 +37,7 @@ public class PostGroupRankTests
     [Test]
     public void DenseRank_WithTies_ProducesNoGaps()
     {
-        var keys = NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C", "D" });
+        var keys = NivaraColumn<string>.Create(new[] { "A", "B", "C", "D" });
         var scores = NivaraColumn<double>.Create(new[] { 10.0, 20.0, 20.0, 30.0 });
         using var frame = NivaraFrame.Create(("Key", keys), ("Score", scores));
 
@@ -217,7 +217,7 @@ public class PostGroupRankTests
 
     static NivaraFrame CreateRegionFrame()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "us-east-1", "eu-west-1", "ap-south-1", "us-west-2" });
+        var names = NivaraColumn<string>.Create(new[] { "us-east-1", "eu-west-1", "ap-south-1", "us-west-2" });
         var errorRates = NivaraColumn<double>.Create(new[] { 0.12, 0.05, 0.25, 0.08 });
         var counts = NivaraColumn<int>.Create(new[] { 100, 200, 50, 150 });
 
@@ -229,8 +229,8 @@ public class PostGroupRankTests
 
     static NivaraFrame CreatePeopleFrame()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" });
-        var cities = NivaraColumn<string>.CreateForReferenceType(new[] { "NYC", "LA", "NYC", "LA", "NYC" });
+        var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" });
+        var cities = NivaraColumn<string>.Create(new[] { "NYC", "LA", "NYC", "LA", "NYC" });
         var ages = NivaraColumn<int>.Create(new[] { 25, 40, 35, 20, 50 });
         var salaries = NivaraColumn<double>.Create(new[] { 80000.0, 120000.0, 95000.0, 50000.0, 110000.0 });
 

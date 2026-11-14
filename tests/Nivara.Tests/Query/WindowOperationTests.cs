@@ -76,7 +76,7 @@ public class WindowOperationTests
     [Test]
     public void Rolling_NonNumericColumn_Throws()
     {
-        using var frame = FrameWith(("name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })));
+        using var frame = FrameWith(("name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })));
 
         Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().RollingSum("name", "x", 3).Collect());
     }
@@ -199,7 +199,7 @@ public class WindowOperationTests
     public void RollingSum_WithSpec_PartitionsAndOrders()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
         var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
@@ -219,7 +219,7 @@ public class WindowOperationTests
     public void CumulativeSum_WithSpec_PartitionsAndOrders()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
         var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
@@ -239,7 +239,7 @@ public class WindowOperationTests
     public void CumulativeCount_WithSpec_Partitions()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
         var spec = frame.AsQueryFrame().Over().PartitionBy("g");
 
@@ -258,7 +258,7 @@ public class WindowOperationTests
     public void Shift_WithSpec_PartitionsAndOrders()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
         var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
@@ -278,7 +278,7 @@ public class WindowOperationTests
     public void RollingSum_WithSpec_NullOrderKeyRow_Participates()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "A" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "A" })),
             ("t", NivaraColumn<int>.CreateFromSpans(new[] { 3, 0, 1 }, new[] { false, true, false })),
             ("v", IntColumn(30, 20, 10)));
         var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");

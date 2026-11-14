@@ -22,7 +22,7 @@ public class PartitionedWindowEngineTests
     public void Compute_MultiPartitionOrdered_ScattersToOriginalRows()
     {
         var columns = Columns(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "A", "B", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "A", "B", "B" })),
             ("t", NivaraColumn<int>.Create(new[] { 3, 1, 2, 2, 1, 3 })),
             ("v", NivaraColumn<int>.Create(new[] { 30, 10, 20, 20, 10, 30 })));
         var spec = new WindowSpec().PartitionBy("g").OrderBy("t");

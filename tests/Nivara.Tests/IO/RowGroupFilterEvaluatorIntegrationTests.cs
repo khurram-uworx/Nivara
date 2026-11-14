@@ -249,7 +249,7 @@ public class RowGroupFilterEvaluatorIntegrationTests
             using var qf = NivaraParquetReader.ScanAsQueryFrame(tempFile);
 
             var result = qf
-                .Filter(ColumnExpressions.Col("Value") >= ColumnExpressions.Lit(99999))
+                .Where(ColumnExpressions.Col("Value") >= ColumnExpressions.Lit(99999))
                 .Collect();
 
             Assert.That(result, Is.Not.Null);

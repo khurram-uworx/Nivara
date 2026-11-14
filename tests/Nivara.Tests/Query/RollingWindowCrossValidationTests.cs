@@ -53,7 +53,7 @@ public class RollingWindowCrossValidationTests
                 ["v"] = NivaraColumnFactory.CreateFromNullable(values),
             };
             if (partition is not null)
-                columns["g"] = NivaraColumn<string>.CreateForReferenceType(partition!);
+                columns["g"] = NivaraColumn<string>.Create(partition!);
 
             AssertIntegerColumn(name, "rolling_sum", caseEl,
                 ComputeRolling(columns, partitionBy, windowSize, minSamples, c => c.RollingSum(windowSize, minSamples)));

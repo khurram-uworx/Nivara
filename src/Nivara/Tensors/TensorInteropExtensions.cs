@@ -222,7 +222,7 @@ public static class TensorInteropExtensions
         var columns = new List<(string Name, IColumn Column)>();
 
         if (rowLabels != null)
-            columns.Add((rowLabelColumnName, NivaraColumn<object>.CreateForReferenceType(rowLabels)));
+            columns.Add((rowLabelColumnName, NivaraColumn<object>.Create(rowLabels)));
 
         if (rows == 0)
         {

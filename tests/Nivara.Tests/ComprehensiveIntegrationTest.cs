@@ -113,8 +113,8 @@ public class ComprehensiveIntegrationTest
 
         // Build complex query
         var queryResult = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Score") > 50.0)
-            .Filter(ColumnExpressions.Col("Active") == true)
+            .Where(ColumnExpressions.Col("Score") > 50.0)
+            .Where(ColumnExpressions.Col("Active") == true)
             .Select("ID", "Name", "Score")
             .Collect();
 

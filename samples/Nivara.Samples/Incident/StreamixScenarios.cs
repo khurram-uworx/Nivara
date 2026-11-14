@@ -33,8 +33,8 @@ public static class StreamixScenarios
         int chunkCount = 0;
 
         using var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
         await query.ToFlux(chunkSize: chunkSize)
             .Retry(3, (attempt, ex) =>
@@ -70,8 +70,8 @@ public static class StreamixScenarios
         int totalRows = 0;
 
         using var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
         await query
             .ToFluxWithTimestamp(
@@ -144,8 +144,8 @@ public static class StreamixScenarios
         float lastLoss = 0f;
 
         using var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
         for (int epoch = 0; epoch < epochs; epoch++)
         {

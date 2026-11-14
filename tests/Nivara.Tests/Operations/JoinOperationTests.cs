@@ -11,7 +11,7 @@ public class JoinOperationTests
     {
         return NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2, 3, 4 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "Alice", "Bob", "Charlie", "David" })),
+            ("Name", NivaraColumn<string>.Create(new string[] { "Alice", "Bob", "Charlie", "David" })),
             ("Age", NivaraColumn<int>.Create(new int[] { 25, 30, 35, 40 }))
         );
     }
@@ -20,7 +20,7 @@ public class JoinOperationTests
     {
         return NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 2, 3, 4, 5 })),
-            ("Department", NivaraColumn<string>.CreateForReferenceType(new string[] { "HR", "IT", "Finance", "Marketing" })),
+            ("Department", NivaraColumn<string>.Create(new string[] { "HR", "IT", "Finance", "Marketing" })),
             ("Salary", NivaraColumn<decimal>.Create(new decimal[] { 50000m, 60000m, 70000m, 80000m }))
         );
     }
@@ -29,7 +29,7 @@ public class JoinOperationTests
     {
         return NivaraFrame.Create(
             ("Id", NivaraColumnFactory.CreateFromNullable(new int?[] { 1, 2, null, 4 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string?[] { "Alice", "Bob", null, "David" }!))
+            ("Name", NivaraColumn<string>.Create(new string?[] { "Alice", "Bob", null, "David" }!))
         );
     }
 
@@ -37,7 +37,7 @@ public class JoinOperationTests
     {
         return NivaraFrame.Create(
             ("Id", NivaraColumnFactory.CreateFromNullable(new int?[] { 2, null, 4, 5 })),
-            ("Department", NivaraColumn<string>.CreateForReferenceType(new string?[] { "HR", null, "Finance", "Marketing" }!))
+            ("Department", NivaraColumn<string>.Create(new string?[] { "HR", null, "Finance", "Marketing" }!))
         );
     }
 
@@ -49,7 +49,7 @@ public class JoinOperationTests
         var right = CreateRightFrame();
 
         // Act
-        var result = left.InnerJoin(right, "Id");
+        var result = left.Join(right, JoinType.Inner, "Id");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(3), "Inner join should return 3 matching rows");
@@ -77,7 +77,7 @@ public class JoinOperationTests
         var right = CreateRightFrame();
 
         // Act
-        var result = left.LeftJoin(right, "Id");
+        var result = left.Join(right, JoinType.Left, "Id");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(4), "Left join should return all 4 left rows");
@@ -106,7 +106,7 @@ public class JoinOperationTests
         var right = CreateRightFrame();
 
         // Act
-        var result = left.RightJoin(right, "Id");
+        var result = left.Join(right, JoinType.Right, "Id");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(4), "Right join should return all 4 right rows");
@@ -141,7 +141,7 @@ public class JoinOperationTests
         var right = CreateRightFrame();
 
         // Act
-        var result = left.FullOuterJoin(right, "Id");
+        var result = left.Join(right, JoinType.FullOuter, "Id");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(5), "Full outer join should return 5 rows (1 from left only, 3 matches, 1 from right only)");
@@ -161,16 +161,16 @@ public class JoinOperationTests
         // Arrange
         var left = NivaraFrame.Create(
             ("LeftId", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "Alice", "Bob", "Charlie" }))
+            ("Name", NivaraColumn<string>.Create(new string[] { "Alice", "Bob", "Charlie" }))
         );
 
         var right = NivaraFrame.Create(
             ("RightId", NivaraColumn<int>.Create(new int[] { 2, 3, 4 })),
-            ("Department", NivaraColumn<string>.CreateForReferenceType(new string[] { "HR", "IT", "Finance" }))
+            ("Department", NivaraColumn<string>.Create(new string[] { "HR", "IT", "Finance" }))
         );
 
         // Act
-        var result = left.InnerJoin(right, "LeftId", "RightId");
+        var result = left.Join(right, JoinType.Inner, "LeftId", "RightId");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(2), "Should have 2 matching rows");
@@ -191,16 +191,16 @@ public class JoinOperationTests
         // Arrange
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "A", "B" }))
         );
 
         var right = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "X", "Y" }))
         );
 
         // Act - using suffix disambiguation (default)
-        var result = left.InnerJoin(right, "Id");
+        var result = left.Join(right, JoinType.Inner, "Id");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(2));
@@ -226,7 +226,7 @@ public class JoinOperationTests
         var right = CreateRightFrameWithNulls();
 
         // Act
-        var result = left.InnerJoin(right, "Id");
+        var result = left.Join(right, JoinType.Inner, "Id");
 
         // Assert
         // Only rows with matching non-null IDs should be included
@@ -250,11 +250,11 @@ public class JoinOperationTests
         var left = CreateLeftFrame();
         var right = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(Array.Empty<int>())),
-            ("Department", NivaraColumn<string>.CreateForReferenceType(Array.Empty<string>()))
+            ("Department", NivaraColumn<string>.Create(Array.Empty<string>()))
         );
 
         // Act
-        var result = left.InnerJoin(right, "Id");
+        var result = left.Join(right, JoinType.Inner, "Id");
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(0), "Join with empty DataFrame should return empty result");
@@ -267,16 +267,16 @@ public class JoinOperationTests
         // Arrange
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "Alice", "Bob", "Charlie" }))
+            ("Name", NivaraColumn<string>.Create(new string[] { "Alice", "Bob", "Charlie" }))
         );
 
         var right = NivaraFrame.Create(
-            ("Id", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B", "C" })),
-            ("Department", NivaraColumn<string>.CreateForReferenceType(new string[] { "HR", "IT", "Finance" }))
+            ("Id", NivaraColumn<string>.Create(new string[] { "A", "B", "C" })),
+            ("Department", NivaraColumn<string>.Create(new string[] { "HR", "IT", "Finance" }))
         );
 
         // Act & Assert
-        Assert.Throws<QuerySchemaValidationException>(() => left.InnerJoin(right, "Id"),
+        Assert.Throws<QuerySchemaValidationException>(() => left.Join(right, JoinType.Inner, "Id"),
             "Should throw exception when join key types are incompatible");
     }
 
@@ -288,7 +288,7 @@ public class JoinOperationTests
         var right = CreateRightFrame();
 
         // Act & Assert
-        Assert.Throws<QuerySchemaValidationException>(() => left.InnerJoin(right, "NonExistentColumn"),
+        Assert.Throws<QuerySchemaValidationException>(() => left.Join(right, JoinType.Inner, "NonExistentColumn"),
             "Should throw exception when join key doesn't exist");
     }
 
@@ -298,16 +298,16 @@ public class JoinOperationTests
         // Arrange
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "A", "B" }))
         );
 
         var right = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "X", "Y" }))
         );
 
         // Act
-        var result = left.InnerJoin(right, "Id", ColumnDisambiguationStrategy.Prefix, "L", "R");
+        var result = left.Join(right, JoinType.Inner, new[] { new JoinKey("Id") }, ColumnDisambiguationStrategy.Prefix, "L", "R");
 
         // Assert
         var columnNames = result.ColumnNames.ToArray();
@@ -322,17 +322,17 @@ public class JoinOperationTests
         // Arrange
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "A", "B" }))
         );
 
         var right = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "X", "Y" }))
         );
 
         // Act & Assert
         Assert.Throws<QuerySchemaValidationException>(() =>
-            left.InnerJoin(right, "Id", ColumnDisambiguationStrategy.Error),
+            left.Join(right, JoinType.Inner, new[] { new JoinKey("Id") }, ColumnDisambiguationStrategy.Error),
             "Should throw exception when column names conflict and error strategy is used");
     }
 
@@ -341,15 +341,15 @@ public class JoinOperationTests
     {
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<Half>.Create(new Half[] { (Half)1.5, (Half)2.5 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "A", "B" }))
         );
 
         var right = NivaraFrame.Create(
             ("Id", NivaraColumn<Half>.Create(new Half[] { (Half)2.5, (Half)3.5 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "X", "Y" }))
         );
 
-        var result = left.FullOuterJoin(right, "Id");
+        var result = left.Join(right, JoinType.FullOuter, "Id");
 
         var ids = result.GetColumn("Id");
         Assert.That(ids, Is.InstanceOf<NivaraColumn<Half>>(), "coalesced join key must stay typed");
@@ -365,15 +365,15 @@ public class JoinOperationTests
     {
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<nint>.Create(new nint[] { 1, 2 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "A", "B" }))
         );
 
         var right = NivaraFrame.Create(
             ("Id", NivaraColumn<nint>.Create(new nint[] { 2, 3 })),
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+            ("Value", NivaraColumn<string>.Create(new string[] { "X", "Y" }))
         );
 
-        var result = left.FullOuterJoin(right, "Id");
+        var result = left.Join(right, JoinType.FullOuter, "Id");
 
         var ids = result.GetColumn("Id");
         Assert.That(ids, Is.InstanceOf<NivaraColumn<nint>>(), "coalesced join key must stay typed");
@@ -385,7 +385,7 @@ public class JoinOperationTests
     {
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B", "C" }))
+            ("Name", NivaraColumn<string>.Create(new string[] { "A", "B", "C" }))
         );
 
         var right = NivaraFrame.Create(
@@ -393,7 +393,7 @@ public class JoinOperationTests
             ("Score", NivaraColumn<uint>.Create(new uint[] { 10, 30 }))
         );
 
-        var result = left.LeftJoin(right, "Id");
+        var result = left.Join(right, JoinType.Left, "Id");
 
         var scores = result.GetColumn("Score");
         Assert.That(scores, Is.InstanceOf<NivaraColumn<uint>>(), "gathered column must stay typed");
@@ -408,7 +408,7 @@ public class JoinOperationTests
     {
         var left = NivaraFrame.Create(
             ("Id", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })),
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B", "C" }))
+            ("Name", NivaraColumn<string>.Create(new string[] { "A", "B", "C" }))
         );
 
         var right = NivaraFrame.Create(
@@ -416,7 +416,7 @@ public class JoinOperationTests
             ("Score", NivaraColumn<Half>.Create(new Half[] { (Half)1.5, (Half)3.5 }))
         );
 
-        var result = left.LeftJoin(right, "Id");
+        var result = left.Join(right, JoinType.Left, "Id");
 
         var scores = result.GetColumn("Score");
         Assert.That(scores, Is.InstanceOf<NivaraColumn<Half>>(), "gathered column must stay typed");

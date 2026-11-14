@@ -29,7 +29,7 @@ public class QueryFrameDiagnosticsTests
     public void Collect_PopulatesDiagnostics_WithRowCounters()
     {
         using var frame = CreateTestFrame(10);
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("X") > 50);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("X") > 50);
 
         using var result = queryFrame.Collect();
 
@@ -49,7 +49,7 @@ public class QueryFrameDiagnosticsTests
     public async Task CollectAsync_PopulatesDiagnostics_WithRowCounters()
     {
         using var frame = CreateTestFrame(10);
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("X") > 50);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("X") > 50);
 
         using var result = await queryFrame.CollectAsync();
 
@@ -85,7 +85,7 @@ public class QueryFrameDiagnosticsTests
     public void Collect_RepeatedExecution_RefreshesDiagnostics()
     {
         using var frame = CreateTestFrame(10);
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("X") > 50);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("X") > 50);
 
         using (queryFrame.Collect())
         {
@@ -94,7 +94,7 @@ public class QueryFrameDiagnosticsTests
 
         var firstDiagnostics = queryFrame.GetExecutionDiagnostics();
 
-        var filtered = queryFrame.Filter(ColumnExpressions.Col("X") > 70);
+        var filtered = queryFrame.Where(ColumnExpressions.Col("X") > 70);
         using (filtered.Collect())
         {
             Assert.That(filtered.GetExecutionDiagnostics()!.RowsReturned, Is.EqualTo(2));
@@ -107,7 +107,7 @@ public class QueryFrameDiagnosticsTests
     public void Collect_Diagnostics_GetSummary_IncludesRowCounters()
     {
         using var frame = CreateTestFrame(10);
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("X") > 50);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("X") > 50);
 
         using var _ = queryFrame.Collect();
 
@@ -122,7 +122,7 @@ public class QueryFrameDiagnosticsTests
     public void Collect_Diagnostics_GenerateReport_IncludesRowCounters()
     {
         using var frame = CreateTestFrame(10);
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("X") > 50);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("X") > 50);
 
         using var _ = queryFrame.Collect();
 
@@ -136,7 +136,7 @@ public class QueryFrameDiagnosticsTests
     public async Task AsStream_AfterFullEnumeration_PopulatesDiagnostics()
     {
         using var frame = CreateTestFrame(10);
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("X") > 50);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("X") > 50);
 
         var chunks = new List<NivaraFrame>();
         await foreach (var chunk in queryFrame.AsStream(chunkSize: 3))
@@ -167,7 +167,7 @@ public class QueryFrameDiagnosticsTests
     {
         var source = new ChunkedTestSource(totalRows: 25, chunkSize: 10);
         using var queryFrame = new QueryFrame(source)
-            .Filter(ColumnExpressions.Col("V") > 5);
+            .Where(ColumnExpressions.Col("V") > 5);
 
         var chunks = new List<NivaraFrame>();
         int totalRows;

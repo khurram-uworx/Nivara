@@ -51,8 +51,8 @@ A good example shape:
 ```csharp
 // Nivara owns the table.
 using var products = NivaraFrame.Create(
-    ("ProductId", NivaraColumn<string>.CreateForReferenceType(["A", "B", "C"])),
-    ("Embedding", NivaraColumn<float[]>.CreateForReferenceType([
+    ("ProductId", NivaraColumn<string>.Create(["A", "B", "C"])),
+    ("Embedding", NivaraColumn<float[]>.Create([
         [0.9f, 0.2f, 0.5f, 0.4f],
         [0.1f, 0.9f, 0.2f, 0.7f],
         [0.7f, 0.1f, 0.8f, 0.2f],

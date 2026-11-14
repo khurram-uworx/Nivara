@@ -508,7 +508,7 @@ public class NivaraColumnTests
             stringArrayWithNulls[i] = stringValuesWithNulls[i]!; // Suppress null warning for test
         }
 
-        var stringColumnWithNulls = NivaraColumn<string>.CreateForReferenceType(stringArrayWithNulls);
+        var stringColumnWithNulls = NivaraColumn<string>.Create(stringArrayWithNulls);
 
         // Verify null detection works
         Assert.That(stringColumnWithNulls.IsNull(0), Is.False, "First position should not be null");
@@ -1064,7 +1064,7 @@ public class NivaraColumnTests
             stringArrayWithNulls[i] = stringValuesWithNulls[i]!; // Suppress null warning for test
         }
 
-        var stringColumnWithNulls = NivaraColumn<string>.CreateForReferenceType(stringArrayWithNulls);
+        var stringColumnWithNulls = NivaraColumn<string>.Create(stringArrayWithNulls);
         var targetValue = "world";
 
         // Test scalar equality with nulls
@@ -1110,7 +1110,7 @@ public class NivaraColumnTests
             otherStringArray[i] = otherStringValues[i]!; // Suppress null warning for test
         }
 
-        var otherStringColumn = NivaraColumn<string>.CreateForReferenceType(otherStringArray);
+        var otherStringColumn = NivaraColumn<string>.Create(otherStringArray);
 
         var elementWiseEquals = stringColumnWithNulls.EqualTo(otherStringColumn);
 
@@ -1285,7 +1285,7 @@ public class NivaraColumnTests
     public void ReferenceTypeColumns_ShouldDetectNulls()
     {
         // Test string column with nulls - create array with explicit null handling
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "hello", "world" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "hello", "world" });
 
         // Create a column with nulls using a different approach
         var stringValuesWithNulls = new string?[] { "hello", null, "world", null };
@@ -1295,7 +1295,7 @@ public class NivaraColumnTests
             stringArrayWithNulls[i] = stringValuesWithNulls[i]!; // Suppress null warning for test
         }
 
-        var stringColumnWithNulls = NivaraColumn<string>.CreateForReferenceType(stringArrayWithNulls);
+        var stringColumnWithNulls = NivaraColumn<string>.Create(stringArrayWithNulls);
 
         Assert.That(stringColumnWithNulls, Is.Not.Null, "String column with nulls should be created");
         Assert.That(stringColumnWithNulls.Length, Is.EqualTo(4), "Column should have correct length");
@@ -1322,7 +1322,7 @@ public class NivaraColumnTests
     public void ReferenceTypeColumns_ShouldHandleBasicNullDetection()
     {
         // Test string column without nulls
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "hello", "world" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "hello", "world" });
         Assert.That(stringColumn.HasNulls, Is.False, "String column without nulls should have HasNulls false");
 
         // For now, we'll skip the nullable value type test due to generic constraint limitations
@@ -1738,7 +1738,7 @@ public class NivaraColumnTests
     {
         // Test slicing with reference type nulls
         var stringValues = new[] { "apple", null!, "cherry", null!, "elderberry" };
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringValues);
+        var stringColumn = NivaraColumn<string>.Create(stringValues);
 
         var sliced = stringColumn.Slice(1, 3); // Should get [null, "cherry", null]
 
@@ -1924,7 +1924,7 @@ public class NivaraColumnTests
 
         foreach (var testCase in testCases)
         {
-            var originalColumn = NivaraColumn<string>.CreateForReferenceType(testCase.Values);
+            var originalColumn = NivaraColumn<string>.Create(testCase.Values);
 
             var sliced = originalColumn.Slice(testCase.Start, testCase.Length);
 
@@ -2423,7 +2423,7 @@ public class NivaraColumnTests
     public void Zip_DifferentTypes_WorksCorrectly()
     {
         var left = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
-        var right = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
+        var right = NivaraColumn<string>.Create(new[] { "a", "b", "c" });
         var result = left.Zip(right, (a, b) => $"{a}{b}");
 
         Assert.That(result.Length, Is.EqualTo(3));

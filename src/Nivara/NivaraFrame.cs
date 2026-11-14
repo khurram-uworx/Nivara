@@ -178,7 +178,7 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
 
         var columns = new List<(string Name, IColumn Column)>
         {
-            (labelColumnName, NivaraColumn<string>.CreateForReferenceType(rowList.Select(row => row.Label).ToArray()))
+            (labelColumnName, NivaraColumn<string>.Create(rowList.Select(row => row.Label).ToArray()))
         };
 
         for (int col = 0; col < width; col++)

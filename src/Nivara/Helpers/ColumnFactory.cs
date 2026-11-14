@@ -59,5 +59,5 @@ static class ColumnFactory
     }
 
     static IColumn createReferenceColumn<T>(object?[] values)
-        => NivaraColumn<T>.CreateForReferenceType(values.Cast<T>().ToArray());
+        => NivaraColumn<T>.Create(values.Cast<T>().ToArray());
 }

@@ -792,7 +792,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         }
         else
         {
-            // For reference types, create regular array and use CreateForReferenceType
+            // For reference types, create regular array and use Create
             var coalescedArray = new T[joinIndices.Count];
 
             for (int i = 0; i < joinIndices.Count; i++)
@@ -815,7 +815,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             return (IColumn)typeof(NivaraColumn<>)
                 .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
+                .GetMethod(nameof(NivaraColumn<string>.Create), new[] { typeof(T[]) })!
                 .Invoke(null, new object[] { coalescedArray })!;
         }
     }
@@ -887,7 +887,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         }
         else
         {
-            // For reference types, create regular array and use CreateForReferenceType
+            // For reference types, create regular array and use Create
             var gatheredArray = new T[indices.Length];
 
             for (int i = 0; i < indices.Length; i++)
@@ -904,7 +904,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             return (IColumn)typeof(NivaraColumn<>)
                 .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
+                .GetMethod(nameof(NivaraColumn<string>.Create), new[] { typeof(T[]) })!
                 .Invoke(null, new object[] { gatheredArray })!;
         }
     }

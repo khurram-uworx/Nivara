@@ -14,12 +14,12 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
         );
 
         var frame2 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie", "Diana" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Charlie", "Diana" })),
             ("Age", NivaraColumn<int>.Create(new[] { 35, 28 }))
         );
 
@@ -49,12 +49,12 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
         );
 
         var frame2 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Charlie" })),
             ("Salary", NivaraColumn<double>.Create(new[] { 50000.0 }))
         );
 
@@ -93,12 +93,12 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25 }))
         );
 
         var emptyFrame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(Array.Empty<string>())),
+            ("Name", NivaraColumn<string>.Create(Array.Empty<string>())),
             ("Age", NivaraColumn<int>.Create(Array.Empty<int>()))
         );
 
@@ -121,13 +121,13 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
         );
 
         var frame2 = NivaraFrame.Create(
             ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0 })),
-            ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "Engineering", "Sales" }))
+            ("Department", NivaraColumn<string>.Create(new[] { "Engineering", "Sales" }))
         );
 
         // Act
@@ -161,7 +161,7 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
         );
 
@@ -180,12 +180,12 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
         );
 
         var frame2 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie", "Diana" })), // Conflicting column name
+            ("Name", NivaraColumn<string>.Create(new[] { "Charlie", "Diana" })), // Conflicting column name
             ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0 }))
         );
 
@@ -267,11 +267,11 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame1 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice" }))
         );
 
         var frame2 = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Bob" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "Bob" }))
         );
 
         // Act
@@ -349,7 +349,7 @@ public class ConcatenationOperationTests
         );
 
         var frame2 = NivaraFrame.Create(
-            ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" }))
+            ("Value", NivaraColumn<string>.Create(new[] { "a", "b" }))
         );
 
         // Act & Assert
@@ -363,7 +363,7 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice" }))
         );
 
         // Act
@@ -378,7 +378,7 @@ public class ConcatenationOperationTests
     {
         // Arrange
         var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" }))
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice" }))
         );
 
         // Act

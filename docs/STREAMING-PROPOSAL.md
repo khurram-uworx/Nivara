@@ -73,7 +73,7 @@ flight** — tighter than the materializing channel's `[2, 16]` — pinned by
 ```csharp
 // What is settable today: the chunk size, on AsStream.
 await using var telemetry = Csv.ScanAsQueryFrame("data.csv")
-    .Filter(ColumnExpressions.Col("status") == "OK");
+    .Where(ColumnExpressions.Col("status") == "OK");
 
 await foreach (var chunk in telemetry.AsStream(chunkSize: 50_000))
 {

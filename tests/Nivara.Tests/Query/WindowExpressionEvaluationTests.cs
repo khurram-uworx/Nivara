@@ -88,7 +88,7 @@ public class WindowExpressionEvaluationTests
     public void Evaluate_StandaloneRank_OverExpressionKeys()
     {
         var input = Input(
-            ("Dept", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y", "X", "Z" })),
+            ("Dept", NivaraColumn<string>.Create(new[] { "X", "Y", "X", "Z" })),
             ("Score", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })));
         var fused = new FusedExpressionEvaluator();
 

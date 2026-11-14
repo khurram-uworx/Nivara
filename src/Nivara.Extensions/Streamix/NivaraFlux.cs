@@ -229,7 +229,7 @@ public static class NivaraFlux
         var values = new T[count];
         for (int i = 0; i < count; i++)
             values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
-        return NivaraColumn<T>.CreateForReferenceType(values);
+        return NivaraColumn<T>.Create(values);
     }
 
     static IColumn ReadColumnBoxed(IList<NivaraRow> rows, int colIdx, int count, Type elementType)

@@ -46,7 +46,7 @@ using Nivara.Linq;
 
 // Create typed columns
 NivaraColumn<int> ages = [25, 30, 35];
-var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" });
+var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" });
 
 // Combine into a DataFrame
 var frame = NivaraFrame.Create(
@@ -60,7 +60,7 @@ public sealed class Person { public string Name { get; set; } public int Age { g
 var typed = frame.Query<Person>()
     .Where(p => p.Age > 30)
     .Select(p => new { p.Name })
-    .ToObjects();   // IReadOnlyList<anonymous> — { Name = "Charlie" }
+    .ToList();   // IReadOnlyList<anonymous> — { Name = "Charlie" }
 
 // Or materialize to a NivaraFrame
 var adults = frame.Query<Person>()

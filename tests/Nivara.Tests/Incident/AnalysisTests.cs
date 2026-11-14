@@ -272,8 +272,8 @@ public class AnalysisTests
         // involved here, so the two counts must be identical.
         int expected;
         using (var query = Ingestion.LoadParquet(Path.Combine(dir, "requests.parquet"))
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks)))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks)))
         using (var frame = query.Collect())
         {
             expected = frame.RowCount;

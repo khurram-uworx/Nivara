@@ -70,12 +70,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Adds a filter operation to the query chain
+    /// Adds a filter (where) operation to the query chain
     /// </summary>
     /// <param name="condition">The condition to filter by</param>
     /// <returns>A new QueryFrame with the filter operation added</returns>
     /// <exception cref="ArgumentNullException">Thrown when condition is null</exception>
-    public QueryFrame Filter(ColumnExpression condition)
+    public QueryFrame Where(ColumnExpression condition)
     {
         ObjectDisposedException.ThrowIf(handle.Released, this);
 

@@ -370,7 +370,7 @@ static class Program
                 for (int i = 0; i < values.Length; i++)
                     values[i] = i % 100 == 0 ? null : i;
                 var frame = NivaraFrame.Create(
-                    ("Name", NivaraColumn<string>.CreateForReferenceType(Enumerable.Repeat("x", values.Length).ToArray())),
+                    ("Name", NivaraColumn<string>.Create(Enumerable.Repeat("x", values.Length).ToArray())),
                     ("Age", NivaraColumn<int?>.Create(values)));
                 return () => frame.Where(row => row.GetValue<int>("Age") > 15_000);
             });
@@ -420,7 +420,7 @@ static class Program
                 var groups = new string[1_000_000];
                 for (int i = 0; i < groups.Length; i++)
                     groups[i] = (i % 100).ToString();
-                var columns = new Dictionary<string, IColumn> { ["g"] = NivaraColumn<string>.CreateForReferenceType(groups) };
+                var columns = new Dictionary<string, IColumn> { ["g"] = NivaraColumn<string>.Create(groups) };
                 return () => GroupByOperation.CreateGroupsInternal(columns, new[] { "g" });
             });
 
@@ -437,7 +437,7 @@ static class Program
 
                 var columns = new Dictionary<string, IColumn>
                 {
-                    ["g"] = NivaraColumn<string>.CreateForReferenceType(groups),
+                    ["g"] = NivaraColumn<string>.Create(groups),
                     ["v"] = NivaraColumn<int>.Create(data),
                 };
                 var spec = new WindowSpec().PartitionBy("g");

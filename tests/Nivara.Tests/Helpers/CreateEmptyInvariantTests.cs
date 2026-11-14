@@ -14,7 +14,7 @@ public class CreateEmptyInvariantTests
         {
             ("int", NivaraColumn<int>.Create(new[] { 1, 2, 3 })),
             ("int?", NivaraColumn<int?>.Create(new int?[] { 1, null, 3 })),
-            ("string", NivaraColumn<string>.CreateForReferenceType(new[] { "a", null!, "c" })),
+            ("string", NivaraColumn<string>.Create(new[] { "a", null!, "c" })),
             ("double", NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 })),
             ("guid", NivaraColumn<Guid>.Create(new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() })),
             ("timespan", NivaraColumn<TimeSpan>.Create(new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2) })),

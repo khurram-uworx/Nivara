@@ -189,7 +189,7 @@ static class ColumnFilterHelper
                 filteredArray[i] = (T)value!;
             }
 
-            return NivaraColumn<T>.CreateForReferenceType(filteredArray);
+            return NivaraColumn<T>.Create(filteredArray);
         }
     }
 
@@ -274,7 +274,7 @@ static class ColumnFilterHelper
                 reorderedArray[i] = (T)value!;
             }
 
-            return NivaraColumn<T>.CreateForReferenceType(reorderedArray);
+            return NivaraColumn<T>.Create(reorderedArray);
         }
     }
 
@@ -283,7 +283,7 @@ static class ColumnFilterHelper
         if (typeof(T).IsValueType)
             return NivaraColumn<T>.Create(Array.Empty<T>());
 
-        return NivaraColumn<T>.CreateForReferenceType(Array.Empty<T>());
+        return NivaraColumn<T>.Create(Array.Empty<T>());
     }
 
     static List<ColumnStorage<T>> CoalesceConcatChunks<T>(List<ColumnStorage<T>> chunks)
@@ -473,7 +473,7 @@ static class ColumnFilterHelper
                 }
             }
 
-            return NivaraColumn<T>.CreateForReferenceType(concatenatedArray);
+            return NivaraColumn<T>.Create(concatenatedArray);
         }
     }
 
@@ -488,7 +488,7 @@ static class ColumnFilterHelper
         else
         {
             var nullArray = new T[length];
-            return NivaraColumn<T>.CreateForReferenceType(nullArray);
+            return NivaraColumn<T>.Create(nullArray);
         }
     }
 
@@ -589,7 +589,7 @@ static class ColumnFilterHelper
                 }
             }
 
-            return NivaraColumn<T>.CreateForReferenceType(result);
+            return NivaraColumn<T>.Create(result);
         }
     }
 }

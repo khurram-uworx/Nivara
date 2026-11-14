@@ -51,7 +51,7 @@ public class PolarsWindowCrossValidationTests
                 ["v"] = NivaraColumnFactory.CreateFromNullable(order),
             };
             if (partition is not null)
-                columns["g"] = NivaraColumn<string>.CreateForReferenceType(partition!);
+                columns["g"] = NivaraColumn<string>.Create(partition!);
 
             var partitionBy = partition is null ? [] : new[] { "g" };
             var orderBy = new List<SortKey> { new("v") };

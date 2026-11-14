@@ -82,7 +82,7 @@ public class RankFunctionsFrameTests
     public void RowNumber_WithPartition_ResetsPerGroup()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "A" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "A" })),
             ("v", IntColumn(10, 20, 30, 20)));
 
         var result = frame.RowNumber("rn", new[] { "g" });
@@ -175,7 +175,7 @@ public class RankFunctionsFrameTests
     public void Rank_WithSpec_MatchesMethodArgs()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "B" })),
             ("t", IntColumn(2, 1, 2, 1)),
             ("v", IntColumn(10, 20, 30, 40)));
 
@@ -190,7 +190,7 @@ public class RankFunctionsFrameTests
     public void RowNumber_WithSpec_ResetsPerPartition()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "B" })),
             ("v", IntColumn(10, 20, 30, 40)));
 
         var spec = frame.Over().PartitionBy("g");

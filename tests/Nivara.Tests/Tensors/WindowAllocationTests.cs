@@ -124,7 +124,7 @@ public class WindowAllocationTests
 
         var columns = new Dictionary<string, IColumn>
         {
-            ["g"] = NivaraColumn<string>.CreateForReferenceType(groups),
+            ["g"] = NivaraColumn<string>.Create(groups),
             ["v"] = CreateInt(data),
         };
         var spec = new WindowSpec().PartitionBy("g");

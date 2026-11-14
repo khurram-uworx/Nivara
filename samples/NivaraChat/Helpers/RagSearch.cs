@@ -360,7 +360,7 @@ public sealed class RagIndex : IDisposable
             ("SectionPath", (IColumn)NivaraColumn<string>.Create(chunks.Select(c => c.SectionPath).ToArray())),
             ("AclGroup", (IColumn)NivaraColumn<string>.Create(chunks.Select(c => c.AclGroup).ToArray())),
             ("Content", (IColumn)NivaraColumn<string>.Create(chunks.Select(c => c.Content).ToArray())),
-            ("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(embeddings.Select(e => e).ToArray()!)),
+            ("Embedding", (IColumn)NivaraColumn<float[]>.Create(embeddings.Select(e => e).ToArray()!)),
         };
         return NivaraFrame.Create(cols.ToArray());
     }

@@ -42,7 +42,7 @@ public class RankFunctionsTests
     public void RowNumber_WithPartition_ResetsPerGroup()
     {
         var columns = Columns(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "A" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "A" })),
             ("v", NivaraColumn<int>.Create(new[] { 10, 20, 30, 20 })));
 
         var result = Rank<long>(RankKernel.Compute(columns, ["g"], [], RankKind.RowNumber), RankKind.RowNumber);
@@ -196,7 +196,7 @@ public class RankFunctionsTests
     public void PercentRank_NullOrderKey_ExcludedFromDenominator()
     {
         var columns = Columns(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "A" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "A" })),
             ("v", NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 2 }, new[] { false, true, false })));
 
         var result = Rank<double>(RankKernel.Compute(columns, ["g"], [new SortKey("v")], RankKind.PercentRank), RankKind.PercentRank);

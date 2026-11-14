@@ -49,7 +49,7 @@ public static class NivaraEmbeddingExtensions
         for (var i = 0; i < generated.Count; i++)
             vectors[i] = generated[i].Vector.ToArray();
 
-        var embeddingColumn = NivaraColumn<float[]>.CreateForReferenceType(vectors);
+        var embeddingColumn = NivaraColumn<float[]>.Create(vectors);
 
         if (idColumnName is null)
         {
@@ -70,7 +70,7 @@ public static class NivaraEmbeddingExtensions
                 $"Identity count ({idValues.Length}) must match embedding count ({generated.Count}).",
                 nameof(ids));
 
-        var idColumn = NivaraColumn<object>.CreateForReferenceType(idValues);
+        var idColumn = NivaraColumn<object>.Create(idValues);
         return NivaraFrame.Create(
             (embeddingColumnName, (IColumn)embeddingColumn),
             (idColumnName, (IColumn)idColumn));
@@ -294,7 +294,7 @@ public static class NivaraEmbeddingExtensions
             vectors[row] = repaired;
         }
 
-        var column = NivaraColumn<float[]>.CreateForReferenceType(vectors);
+        var column = NivaraColumn<float[]>.Create(vectors);
         return NivaraFrame.Create((embeddingColumnName, (IColumn)column));
     }
 

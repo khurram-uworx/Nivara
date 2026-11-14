@@ -11,7 +11,7 @@ public class ParquetWriterTests
     {
         // Arrange
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d", "e" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "a", "b", "c", "d", "e" });
         var frame = NivaraFrame.Create(
             ("IntColumn", intColumn),
             ("StringColumn", stringColumn)
@@ -165,12 +165,12 @@ public class ParquetWriterTests
         // Arrange
         var frame1 = NivaraFrame.Create(
             ("IntColumn", NivaraColumn<int>.Create(new[] { 1, 2 })),
-            ("StringColumn", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" }))
+            ("StringColumn", NivaraColumn<string>.Create(new[] { "a", "b" }))
         );
 
         var frame2 = NivaraFrame.Create(
             ("IntColumn", NivaraColumn<int>.Create(new[] { 3, 4 })),
-            ("StringColumn", NivaraColumn<string>.CreateForReferenceType(new[] { "c", "d" }))
+            ("StringColumn", NivaraColumn<string>.Create(new[] { "c", "d" }))
         );
 
         var frames = new[] { frame1, frame2 };
@@ -204,7 +204,7 @@ public class ParquetWriterTests
         );
 
         var frame2 = NivaraFrame.Create(
-            ("StringColumn", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" }))
+            ("StringColumn", NivaraColumn<string>.Create(new[] { "a", "b" }))
         );
 
         var frames = new[] { frame1, frame2 };
@@ -233,7 +233,7 @@ public class ParquetWriterTests
         var intColumn = NivaraColumnFactory.CreateFromNullable(nullableIntArray);
 
         var stringArray = new string[] { "a", null!, "c", null!, "e" };
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringArray);
+        var stringColumn = NivaraColumn<string>.Create(stringArray);
 
         var frame = NivaraFrame.Create(
             ("NullableIntColumn", intColumn),
@@ -330,7 +330,7 @@ public class ParquetWriterTests
     {
         // Arrange
         var strings = Enumerable.Range(0, 5000).Select(i => $"row-{i % 50}").ToArray();
-        var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(strings)));
+        var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(strings)));
         var gzipFile = Path.GetTempFileName();
         var noneFile = Path.GetTempFileName();
 

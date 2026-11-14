@@ -46,7 +46,7 @@ public class RagIndexCacheTests
             ("SectionPath", (IColumn)NivaraColumn<string>.Create(titles)),
             ("AclGroup", (IColumn)NivaraColumn<string>.Create(ids.Select(_ => "docs").ToArray())),
             ("Content", (IColumn)NivaraColumn<string>.Create(contents)),
-            ("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(embeddings)));
+            ("Embedding", (IColumn)NivaraColumn<float[]>.Create(embeddings)));
     }
 
     [Test]

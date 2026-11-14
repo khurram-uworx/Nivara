@@ -29,7 +29,7 @@ public class NivaraEmbeddingExtensionsTests
         for (var i = 0; i < vectors.Length; i++)
             values[i] = vectors[i]!;
 
-        return NivaraFrame.Create((Embedding, (IColumn)NivaraColumn<float[]>.CreateForReferenceType(values)));
+        return NivaraFrame.Create((Embedding, (IColumn)NivaraColumn<float[]>.Create(values)));
     }
 
     static NivaraColumn<float[]> Vectors(NivaraFrame frame) => frame.GetColumn<float[]>(Embedding);
@@ -437,7 +437,7 @@ public class NivaraEmbeddingExtensionsTests
     {
         var frame = VectorFrame([1f, 0f], [0f, 1f]);
         var query = NivaraSeries<float>.Create([1f, 0f]);
-        var labels = NivaraColumn<object>.CreateForReferenceType(["chunk-0", "chunk-1"]);
+        var labels = NivaraColumn<object>.Create(["chunk-0", "chunk-1"]);
 
         var scores = frame.RowCosineSimilarity(Embedding, query, labels);
 
@@ -596,7 +596,7 @@ public class NivaraEmbeddingExtensionsTests
             embeddingDimension: 3);
 
         var frame = (await generator.GenerateFrameAsync(["a", "bb", "ccc"]))
-            .WithColumn("ChunkId", NivaraColumn<object>.CreateForReferenceType(["c0", "c1", "c2"]));
+            .WithColumn("ChunkId", NivaraColumn<object>.Create(["c0", "c1", "c2"]));
 
         var visible = frame.FilterByMask(NivaraColumn<bool>.Create([true, false, true]));
 

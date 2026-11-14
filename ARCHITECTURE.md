@@ -216,7 +216,7 @@ All columns use `ColumnStorage<T>` — a sole-owner contiguous `T[]` plus an opt
 ```csharp
 // Kernel selection is automatic and transparent to users:
 var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });                    // vectorizable
-var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" }); // scalar
+var stringColumn = NivaraColumn<string>.Create(new[] { "a", "b", "c" }); // scalar
 ```
 
 This distinction is **internal** and transparent to users.

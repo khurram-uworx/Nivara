@@ -51,14 +51,14 @@ public class QuerySourceHandleTests
     public void Frame_Disposed_SiblingFrame_ThrowsObjectDisposedException()
     {
         var root = new QueryFrame(new RecordingLazySource());
-        var sibling = root.Filter(ColumnExpressions.Col("A") > 0);
+        var sibling = root.Where(ColumnExpressions.Col("A") > 0);
 
         root.Dispose();
 
         Assert.Multiple(() =>
         {
             Assert.Throws<ObjectDisposedException>(() => sibling.Collect());
-            Assert.Throws<ObjectDisposedException>(() => sibling.Filter(ColumnExpressions.Col("A") > 1));
+            Assert.Throws<ObjectDisposedException>(() => sibling.Where(ColumnExpressions.Col("A") > 1));
             Assert.Throws<ObjectDisposedException>(() => _ = sibling.IsLazy);
             Assert.Throws<ObjectDisposedException>(() => _ = sibling.Schema);
         });
@@ -68,7 +68,7 @@ public class QuerySourceHandleTests
     public void Frame_Disposed_SiblingFrame_ReportsSameDisposedState()
     {
         var root = new QueryFrame(new RecordingLazySource());
-        var sibling = root.Filter(ColumnExpressions.Col("A") > 0);
+        var sibling = root.Where(ColumnExpressions.Col("A") > 0);
 
         Assert.That(sibling.ToString(), Does.Not.Contain("QueryFrame [Disposed]"),
             "precondition: the sibling is not disposed yet");
@@ -203,7 +203,7 @@ public class QuerySourceHandleTests
     /// Kept in its own method so the intermediate is provably unreachable on return.
     /// </summary>
     static QueryFrame BuildTwoStepLeaf(QueryFrame root)
-        => root.Filter(ColumnExpressions.Col("A") > 0).Filter(ColumnExpressions.Col("A") > -1);
+        => root.Where(ColumnExpressions.Col("A") > 0).Where(ColumnExpressions.Col("A") > -1);
 
     sealed class RecordingLazySource : IQuerySource
     {

@@ -137,7 +137,7 @@ public class QueryExecutionPropertyTests
             foreach (var condition in filterConditions)
             {
                 var query = Csv.ScanFrame(tempFile)
-                    .Filter(condition);
+                    .Where(condition);
 
                 // Property: Multiple executions of the same filtered query should be identical
                 var result1 = query.Collect();
@@ -277,8 +277,8 @@ public class QueryExecutionPropertyTests
 
             // Create a complex query with multiple operations
             var query = Csv.ScanFrame(tempFile)
-                .Filter(ColumnExpressions.Col("Age") > 25)
-                .Filter(ColumnExpressions.Col("Salary") > 45000)
+                .Where(ColumnExpressions.Col("Age") > 25)
+                .Where(ColumnExpressions.Col("Salary") > 45000)
                 .Select("Name", "Department");
 
             // Property: Complex queries should produce identical results on multiple executions
