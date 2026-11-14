@@ -1,7 +1,5 @@
-using Nivara.Expressions;
 using Nivara.Linq;
 using Nivara.Operations;
-using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Query;

@@ -1,6 +1,5 @@
-using System.IO;
-using System.Text.RegularExpressions;
 using NUnit.Framework;
+using System.Text.RegularExpressions;
 
 namespace Nivara.Tests.Quality;
 

@@ -1,5 +1,3 @@
-using Nivara.Exceptions;
-
 namespace Nivara;
 
 /// <summary>

@@ -2,7 +2,6 @@ using Nivara.AutoDiff.Operations;
 using Nivara.Extensions.Blas;
 using Nivara.Tensors;
 using NUnit.Framework;
-using System.IO;
 using System.Numerics;
 
 namespace Nivara.Tests.BlasSmoke;

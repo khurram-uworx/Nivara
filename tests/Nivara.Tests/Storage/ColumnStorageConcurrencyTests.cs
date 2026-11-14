@@ -1,8 +1,6 @@
 using Nivara.Storage;
 using NUnit.Framework;
-using System.Linq;
 using System.Numerics.Tensors;
-using System.Threading.Tasks;
 
 namespace Nivara.Tests.Storage;
 

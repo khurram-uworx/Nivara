@@ -1,8 +1,7 @@
+using Nivara.IO;
+using Nivara.Query;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Nivara.IO;
-using Nivara.Linq;
-using Nivara.Query;
 
 namespace Nivara.PerformanceTests;
 

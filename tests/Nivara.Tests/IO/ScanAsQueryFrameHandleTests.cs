@@ -1,8 +1,8 @@
-using System.Runtime.CompilerServices;
 using Nivara.IO;
 using Nivara.Linq;
 using Nivara.Query;
 using NUnit.Framework;
+using System.Runtime.CompilerServices;
 
 namespace Nivara.Tests.IO;
 

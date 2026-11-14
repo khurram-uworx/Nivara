@@ -1,6 +1,5 @@
 using Nivara.IO;
 using NUnit.Framework;
-using System.Threading.Tasks;
 
 namespace Nivara.Tests.IO;
 

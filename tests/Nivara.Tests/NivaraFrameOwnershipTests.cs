@@ -1,4 +1,3 @@
-using Nivara;
 using NUnit.Framework;
 
 namespace Nivara.Tests;

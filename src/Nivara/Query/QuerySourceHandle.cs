@@ -1,5 +1,3 @@
-using Nivara.Helpers;
-
 namespace Nivara.Query;
 
 /// <summary>

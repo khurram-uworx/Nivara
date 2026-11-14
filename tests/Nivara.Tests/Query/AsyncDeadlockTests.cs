@@ -1,7 +1,6 @@
-using System.Collections.Concurrent;
-using System.Threading;
 using Nivara.Linq;
 using NUnit.Framework;
+using System.Collections.Concurrent;
 
 namespace Nivara.Tests.Query;
 

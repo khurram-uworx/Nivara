@@ -1,8 +1,5 @@
 using Nivara.Execution;
 using NUnit.Framework;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Nivara.Tests.Execution;
 

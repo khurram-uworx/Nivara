@@ -1,5 +1,3 @@
-using System.Threading;
-
 namespace Nivara.Execution;
 
 /// <summary>

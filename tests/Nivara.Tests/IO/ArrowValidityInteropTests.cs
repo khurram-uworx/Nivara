@@ -1,6 +1,5 @@
 using Apache.Arrow;
 using Apache.Arrow.Types;
-using Nivara;
 using Nivara.IO;
 using NUnit.Framework;
 

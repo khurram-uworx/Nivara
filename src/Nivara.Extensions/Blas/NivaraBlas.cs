@@ -1,6 +1,3 @@
-using Nivara;
-using System.Runtime.CompilerServices;
-
 namespace Nivara.Extensions.Blas;
 
 /// <summary>

@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.Helpers;
 using NUnit.Framework;
 
