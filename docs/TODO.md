@@ -55,20 +55,16 @@ Tasks are sequential because the sample data contract depends on the new differe
 - Include focused #981 routing tests in the same relevant sample-test run if added; do not close #981/#982 until the combined target tests pass.
 - Before final review/landing: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`. No full test suite without the required explicit approval.
 
-## Planned commits
+## Implementation commits (chronological)
 
 1. `b1fb2c8e`, `ae879571` — existing #981 decision-layer commits retained on this branch
-2. `aff78cd5` — `docs: plan adaptive Laya head training in TODO.md`
-3. `f4eb1144` — `docs: refine adaptive Laya training plan`
-4. `e5aa1612` — `fix(samples): include chunk content in Laya decisions`
-5. `d8d1b45d` — `feat(ai): expose differentiable Laya choice logits`
-6. `42c204a4` — `feat(samples): train Laya head from labeled retrieval examples`
-7. `c5cc7243` — `feat(samples): persist adaptive Laya head updates`
-8. `d32cbad5` — `style: fix adaptive training test formatting`
-9. `83e401b3` — `docs: record adaptive Laya implementation verification`
-10. `b4aed006` — `test(samples): cover adaptive RAG decision routing`
-11. `c4d63a71` — `docs: record adaptive routing verification`
-12. After both branch reviews pass, remove this plan in its own commit.
+2. `e5aa1612` — `fix(samples): include chunk content in Laya decisions`
+3. `d8d1b45d` — `feat(ai): expose differentiable Laya choice logits`
+4. `42c204a4` — `feat(samples): train Laya head from labeled retrieval examples`
+5. `c5cc7243` — `feat(samples): persist adaptive Laya head updates`
+6. `d32cbad5` — `style: fix adaptive training test formatting`
+7. `b4aed006` — `test(samples): cover adaptive RAG decision routing`
+8. `b88de9f0` — `test(samples): assert bit-exact decoded adaptive decisions`
 
 ## Implementation and verification status
 
@@ -76,7 +72,7 @@ Tasks are sequential because the sample data contract depends on the new differe
 - [x] Differentiable choice logits: inference still uses the shared head/scorer computation; tests cover exact inference parity and gradients only through the choice path.
 - [x] Training data and updater: resolved judge grades map to binary choice targets; frozen features are extracted outside `Grad()`; query splits are deterministic and disjoint; training updates the choice parameters only.
 - [x] Feedback and persistence: updates wait for a complete 10-example batch, save atomically, restore the prior in-memory head on failure, and retain buffered examples when an update/save fails. Adaptive state is loaded over baseline weights when present.
-- [x] G2 test-coverage review: extracted precomputed-decision ranking and added deterministic accepted-choice/fallback tests without requiring model files.
+- [x] G2 test-coverage review: added deterministic accepted-choice/fallback tests without model files and bit-exact decoded-decision assertions after persistence reload.
 - [x] Formatting: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` — passed after the formatting correction.
 - [x] `dotnet test tests\Nivara.Tests\Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Nivara.Tests.AutoDiff.LayaDecisionHeadTests|FullyQualifiedName~Nivara.Tests.AutoDiff.LayaCalibrationTests|FullyQualifiedName~Nivara.Tests.AutoDiff.SerializationTests|FullyQualifiedName~Nivara.Tests.Samples.Adaptive|FullyQualifiedName~Nivara.Tests.Samples.LayaRetrievalDecisionHeadTests|FullyQualifiedName~Nivara.Tests.Samples.RagDecisionRoutingTests"` — passed, 68/68; covers Laya head/calibration/serialization, chunk-conditioned prompt/routing, adaptive data/training, and feedback persistence.
 - [ ] G2 branch-wide and plan-to-implementation reviews — in progress.
