@@ -306,7 +306,8 @@ public sealed class NivaraQuery<T> : IDisposable, IAsyncDisposable
     /// Executes the query and returns a materialized frame
     /// </summary>
     /// <returns>A NivaraFrame with the query results</returns>
-    public NivaraFrame Collect() => CollectAsync(default).GetAwaiter().GetResult()!;
+    public NivaraFrame Collect()
+        => Task.Run(() => CollectAsync(default(CancellationToken))).GetAwaiter().GetResult()!;
 
     /// <summary>
     /// Executes the query asynchronously and returns a materialized frame
