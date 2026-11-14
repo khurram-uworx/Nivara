@@ -23,6 +23,41 @@ public sealed record LayaChunkDecision(
 
 public static class LayaRetrievalDecisionHead
 {
+    public static (LayaQuestion Question, LayaSequence Sequence) BuildPrompt(
+        Gpt2BpeTokenizer tokenizer,
+        string query,
+        string chunkId,
+        string chunkContent,
+        int maxLen,
+        int headMaxLen)
+    {
+        ArgumentNullException.ThrowIfNull(tokenizer);
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(chunkId);
+        ArgumentNullException.ThrowIfNull(chunkContent);
+
+        var question = new LayaQuestion
+        {
+            Id = $"retrieval-{chunkId}",
+            Type = LayaQuestionType.Choice,
+            Instructions = $"Question: {query}\nIs this retrieved chunk relevant and answer-supporting?",
+            Options =
+            [
+                new("relevant", "this chunk directly supports the answer or the user’s intent"),
+                new("not_relevant", "this chunk is off-topic, stale, or not useful")
+            ]
+        };
+        var stateIds = tokenizer.Encode(chunkContent);
+        var sequence = LayaPromptBuilder.BuildSequence(
+            tokenizer,
+            chunkContent,
+            question,
+            maxLen,
+            headMaxLen,
+            stateIds: stateIds);
+        return (question, sequence);
+    }
+
     public static IReadOnlyList<LayaChunkDecision> Evaluate(
         string query,
         IReadOnlyList<RetrievedChunk> chunks,
@@ -99,26 +134,13 @@ public static class LayaRetrievalDecisionHead
 
         public LayaDecision Decide(string query, RetrievedChunk chunk)
         {
-            var question = new LayaQuestion
-            {
-                Id = $"retrieval-{chunk.ChunkId}",
-                Type = LayaQuestionType.Choice,
-                Instructions = $"Question: {query}\nIs this retrieved chunk relevant and answer-supporting?",
-                Options =
-                [
-                    new("relevant", "this chunk directly supports the answer or the user’s intent"),
-                    new("not_relevant", "this chunk is off-topic, stale, or not useful")
-                ]
-            };
-
-            var stateIds = tokenizer.Encode(query);
-            var sequence = LayaPromptBuilder.BuildSequence(
+            var (question, sequence) = BuildPrompt(
                 tokenizer,
                 query,
-                question,
+                chunk.ChunkId,
+                chunk.Content,
                 agent.MaxLen,
-                agent.HeadMaxLen,
-                stateIds: stateIds);
+                agent.HeadMaxLen);
 
             var hidden = encoder.Forward(sequence.Ids, sequence.Length);
             var output = head.Forward(hidden, question.Type, sequence.Markers, sequence.Length);
