@@ -93,7 +93,7 @@ public class StreamixBridgeIntegrationTests
         var csvPath = CreateCsvFile(tempDir, 30);
         using var queryFrame = Csv.ScanAsQueryFrame(csvPath);
 
-        var filtered = queryFrame.Filter(ColumnExpressions.Col("Id") > 10);
+        var filtered = queryFrame.Where(ColumnExpressions.Col("Id") > 10);
         using var expected = filtered.Collect();
 
         var flux = filtered.ToFlux(chunkSize: 5);

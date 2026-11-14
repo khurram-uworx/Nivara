@@ -133,7 +133,7 @@ public class AsyncStreamingTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 50);
+                .Where(ColumnExpressions.Col("X") > 50);
 
             using var syncResult = queryFrame.Collect();
             using var asyncResult = await queryFrame.CollectAsync();
@@ -160,7 +160,7 @@ public class AsyncStreamingTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 0);
+                .Where(ColumnExpressions.Col("X") > 0);
 
             using var ct = new CancellationTokenSource();
             ct.Cancel();
@@ -180,7 +180,7 @@ public class AsyncStreamingTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 50)
+                .Where(ColumnExpressions.Col("X") > 50)
                 .Select(ColumnExpressions.Col("X") * 2);
 
             using var syncResult = queryFrame.Collect();
@@ -205,7 +205,7 @@ public class AsyncStreamingTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 20);
+                .Where(ColumnExpressions.Col("X") > 20);
 
             using var syncResult = queryFrame.Collect();
 
@@ -232,7 +232,7 @@ public class AsyncStreamingTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 10);
+                .Where(ColumnExpressions.Col("X") > 10);
 
             var chunks = new List<NivaraFrame>();
             await foreach (var chunk in queryFrame.AsStream(chunkSize: 5))
@@ -402,7 +402,7 @@ public class AsyncStreamingTests
 
             var source = new ParquetLazySource(tempFile);
             using var queryFrame = new QueryFrame(source)
-                .Filter(ColumnExpressions.Col("Index") > 1000)
+                .Where(ColumnExpressions.Col("Index") > 1000)
                 .Select(ColumnExpressions.Col("Index") * 2);
 
             using var result = await queryFrame.CollectAsync();
@@ -527,7 +527,7 @@ public class AsyncStreamingTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 5);
+                .Where(ColumnExpressions.Col("X") > 5);
 
             await queryFrame.DisposeAsync();
 
@@ -980,7 +980,7 @@ public class AsyncStreamingTests
             var query = frame.Query<TestRow>();
 
             var chunks = new List<NivaraFrame>();
-            await foreach (var chunk in query.AsStream(chunkSize: 5))
+            await foreach (var chunk in query.AsQueryFrame().AsStream(chunkSize: 5))
                 chunks.Add(chunk);
 
             try

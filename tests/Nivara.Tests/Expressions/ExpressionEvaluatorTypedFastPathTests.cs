@@ -31,17 +31,17 @@ public class ExpressionEvaluatorTypedFastPathTests
         using var frame = CreateFrame();
 
         using var geFiltered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("ID") >= 300)
+            .Where(ColumnExpressions.Col("ID") >= 300)
             .Collect();
         Assert.That(geFiltered.RowCount, Is.EqualTo(3), ">= filter should keep 300, 400, 500");
 
         using var leFiltered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("ID") <= 200)
+            .Where(ColumnExpressions.Col("ID") <= 200)
             .Collect();
         Assert.That(leFiltered.RowCount, Is.EqualTo(2), "<= filter should keep 100, 200");
 
         using var doubleFiltered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Score") < 90.0)
+            .Where(ColumnExpressions.Col("Score") < 90.0)
             .Collect();
         Assert.That(doubleFiltered.RowCount, Is.EqualTo(3), "double < filter should keep 85.5, 78.5, 88.0");
     }
@@ -52,7 +52,7 @@ public class ExpressionEvaluatorTypedFastPathTests
         using var frame = CreateFrame();
 
         using var filtered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Name") == "Alice")
+            .Where(ColumnExpressions.Col("Name") == "Alice")
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(1));
@@ -65,12 +65,12 @@ public class ExpressionEvaluatorTypedFastPathTests
         using var frame = CreateFrame();
 
         using var boolFiltered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Active") == true)
+            .Where(ColumnExpressions.Col("Active") == true)
             .Collect();
         Assert.That(boolFiltered.RowCount, Is.EqualTo(3), "boolean filter should keep active rows");
 
         using var notEqualFiltered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Name") != "Bob")
+            .Where(ColumnExpressions.Col("Name") != "Bob")
             .Collect();
         Assert.That(notEqualFiltered.RowCount, Is.EqualTo(4), "!= filter should keep everyone but Bob");
     }
@@ -78,11 +78,11 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void NotEqual_WithNulls_ExcludesNullRowsUsingSqlSemantics()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", null!, "Charlie", "David", "Eve" });
+        var names = NivaraColumn<string>.Create(new[] { "Alice", null!, "Charlie", "David", "Eve" });
         using var frame = NivaraFrame.Create(("Name", names));
 
         using var filtered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Name") != "Alice")
+            .Where(ColumnExpressions.Col("Name") != "Alice")
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(3), "null name row must be excluded by != (SQL semantics)");
@@ -91,7 +91,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void ComparisonSelect_WithNulls_CarriesNullMask()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", null!, "Charlie", "David", "Eve" });
+        var names = NivaraColumn<string>.Create(new[] { "Alice", null!, "Charlie", "David", "Eve" });
         using var frame = NivaraFrame.Create(("Name", names));
 
         using var selected = frame.AsQueryFrame()
@@ -140,7 +140,7 @@ public class ExpressionEvaluatorTypedFastPathTests
         using var frame = CreateFrame();
 
         using var filtered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("ID") % 200 == 0)
+            .Where(ColumnExpressions.Col("ID") % 200 == 0)
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(2), "% 200 == 0 should keep 200 and 400");
@@ -194,7 +194,7 @@ public class ExpressionEvaluatorTypedFastPathTests
         using var frame = NivaraFrame.Create(("G", guids));
 
         using var filtered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("G") == g1)
+            .Where(ColumnExpressions.Col("G") == g1)
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(3), "Guid equality should run through the compiled comparer kernel and still filter");
@@ -207,7 +207,7 @@ public class ExpressionEvaluatorTypedFastPathTests
         using var frame = NivaraFrame.Create(("ID", ids));
 
         using var filtered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("ID") > 2)
+            .Where(ColumnExpressions.Col("ID") > 2)
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(3), "null row must be excluded and 3, 4, 5 kept");
@@ -276,7 +276,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     {
         var ids = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("ID") > 2);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("ID") > 2);
         var plan = queryFrame.ToQueryPlan();
 
         var diagnostics = new ExecutionDiagnostics();
@@ -306,7 +306,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     public void Filter_SameTypeNumericColumns_RecordsFusedKernelDiagnostics()
     {
         using var frame = CreateFrame();
-        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("Score") < 90.0);
+        var queryFrame = frame.AsQueryFrame().Where(ColumnExpressions.Col("Score") < 90.0);
         var plan = queryFrame.ToQueryPlan();
 
         var diagnostics = new ExecutionDiagnostics();

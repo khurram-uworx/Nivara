@@ -221,7 +221,7 @@ public sealed class ExecutionEngine
                 throw new QueryExecutionException($"Unknown execution strategy: {context.Strategy}");
 
             // Execute using the selected strategy
-            var result = await strategy.ExecuteAsync(optimizedPlan, context);
+            var result = await strategy.ExecuteAsync(optimizedPlan, context).ConfigureAwait(false);
             diagnostics.RowsReturned = result.RowCount;
             diagnostics.MaterializedColumns = result.ColumnCount;
 

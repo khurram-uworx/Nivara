@@ -27,7 +27,7 @@ public class NivaraQueryToObjectsAsyncTests
         await foreach (var row in frame.Query<Person>().ToObjectsAsync())
             rows.Add(row);
 
-        var expected = frame.Query<Person>().ToObjects();
+        var expected = frame.Query<Person>().ToList();
         Assert.That(rows.Count, Is.EqualTo(expected.Count));
         for (int i = 0; i < expected.Count; i++)
         {
@@ -180,7 +180,7 @@ public class NivaraQueryToObjectsAsyncTests
         var salaries = new[] { 75000.0, 80000.0, 90000.0, 60000.0, 85000.0, 95000.0, 70000.0, 65000.0, 88000.0, 72000.0 };
 
         return NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(names)),
+            ("Name", NivaraColumn<string>.Create(names)),
             ("Age", NivaraColumn<int>.Create(ages.Take(count).ToArray())),
             ("Salary", NivaraColumn<double>.Create(salaries.Take(count).ToArray())));
     }

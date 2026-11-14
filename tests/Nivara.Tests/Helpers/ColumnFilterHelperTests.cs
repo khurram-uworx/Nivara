@@ -56,7 +56,7 @@ public class ColumnFilterHelperTests
     [Test]
     public void CreateFilteredColumn_ReferenceType_PreservesElementType()
     {
-        var column = NivaraColumn<Uri>.CreateForReferenceType(new Uri[]
+        var column = NivaraColumn<Uri>.Create(new Uri[]
         {
             new("https://example.com/a"),
             null!,

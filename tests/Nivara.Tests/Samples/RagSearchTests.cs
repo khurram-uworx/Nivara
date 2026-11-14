@@ -24,7 +24,7 @@ public class RagSearchTests
         for (int i = 0; i < rows.Length; i++)
             embeddingArray[i] = rows[i].Embedding!;
 
-        var embeddings = NivaraColumn<float[]>.CreateForReferenceType(embeddingArray);
+        var embeddings = NivaraColumn<float[]>.Create(embeddingArray);
 
         return NivaraFrame.Create(
             ("ChunkId", (IColumn)NivaraColumn<string>.Create(chunkIds)),

@@ -16,7 +16,7 @@ public class QueryFrameTests
 
         // Act
         var queryFrame = frame.AsQueryFrame();
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Numbers") > 3);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Numbers") > 3);
 
         // Assert
         Assert.That(filteredQuery, Is.Not.Null);
@@ -70,7 +70,7 @@ public class QueryFrameTests
         // Act
         var queryFrame = frame.AsQueryFrame();
         var chainedQuery = queryFrame
-            .Filter(ColumnExpressions.Col("Numbers") > 2)
+            .Where(ColumnExpressions.Col("Numbers") > 2)
             .Select("Numbers", "Letters")
             .GroupBy("Numbers");
 
@@ -89,7 +89,7 @@ public class QueryFrameTests
 
         // Act
         var queryFrame = frame.AsQueryFrame();
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Numbers") > 3);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Numbers") > 3);
         var result = filteredQuery.Collect();
 
         // Assert
@@ -163,7 +163,7 @@ public class QueryFrameTests
 
         // Act
         var queryFrame = frame.AsQueryFrame();
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Numbers") > 3);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Numbers") > 3);
         var explanation = filteredQuery.ExplainPlan();
 
         // Assert
@@ -182,8 +182,8 @@ public class QueryFrameTests
         // Act
         var queryFrame = frame.AsQueryFrame();
         var filteredQuery = queryFrame
-            .Filter(ColumnExpressions.Col("Numbers") > 2)
-            .Filter(ColumnExpressions.Col("Numbers") < 5);
+            .Where(ColumnExpressions.Col("Numbers") > 2)
+            .Where(ColumnExpressions.Col("Numbers") < 5);
         var optimizations = filteredQuery.AnalyzeOptimizations();
 
         // Assert
@@ -200,7 +200,7 @@ public class QueryFrameTests
         var queryFrame = frame.AsQueryFrame();
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => queryFrame.Filter(null!));
+        Assert.Throws<ArgumentNullException>(() => queryFrame.Where(null!));
     }
 
     [Test]
@@ -236,7 +236,7 @@ public class QueryFrameTests
 
         // Act
         var queryFrame = frame.AsQueryFrame();
-        var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Numbers") > 2);
+        var filteredQuery = queryFrame.Where(ColumnExpressions.Col("Numbers") > 2);
         var description = filteredQuery.ToString();
 
         // Assert

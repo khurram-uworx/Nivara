@@ -327,7 +327,7 @@ public class JsonStreamingTests
         {
             var file = CreateJsonFile(tempDir, 250);
             var plan = Json.ScanFrame(file)
-                .Filter(ColumnExpressions.Col("value") > 100.0)
+                .Where(ColumnExpressions.Col("value") > 100.0)
                 .Select(ColumnExpressions.Col("i"), ColumnExpressions.Col("name"))
                 .ToQueryPlan();
 

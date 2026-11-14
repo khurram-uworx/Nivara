@@ -1351,7 +1351,7 @@ public static class ArrowInterop
             {
                 referenceValues[i] = nullMask[i] ? default(T)! : values[i];
             }
-            return NivaraColumn<T>.CreateForReferenceType(referenceValues);
+            return NivaraColumn<T>.Create(referenceValues);
         }
     }
 

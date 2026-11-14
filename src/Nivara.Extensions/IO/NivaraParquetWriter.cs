@@ -845,6 +845,6 @@ public static class NivaraParquetWriter
             }
         }
 
-        return NivaraColumn<string>.CreateForReferenceType(values);
+        return NivaraColumn<string>.Create(values);
     }
 }

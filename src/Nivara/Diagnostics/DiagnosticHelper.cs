@@ -73,7 +73,7 @@ public static class DiagnosticHelper
 
         try
         {
-            var result = await operation();
+            var result = await operation().ConfigureAwait(false);
             stopwatch.Stop();
 
             var finalMemory = GC.GetTotalMemory(false);

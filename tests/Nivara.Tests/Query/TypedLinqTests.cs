@@ -18,8 +18,8 @@ public class TypedLinqTests
 
     static NivaraFrame CreatePeopleFrame()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" });
-        var cities = NivaraColumn<string>.CreateForReferenceType(new[] { "NYC", "LA", "NYC", "LA", "NYC" });
+        var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" });
+        var cities = NivaraColumn<string>.Create(new[] { "NYC", "LA", "NYC", "LA", "NYC" });
         var ages = NivaraColumn<int>.Create(new[] { 25, 40, 35, 20, 50 });
         var salaries = NivaraColumn<double>.Create(new[] { 80000.0, 120000.0, 95000.0, 50000.0, 110000.0 });
         var active = NivaraColumn<bool>.Create(new[] { true, true, false, false, true });
@@ -36,7 +36,7 @@ public class TypedLinqTests
     static NivaraFrame CreateNullableFrame()
     {
         var values = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
-        var labels = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
+        var labels = NivaraColumn<string>.Create(new[] { "a", "b", "c" });
         return NivaraFrame.Create(("Value", values), ("Label", labels));
     }
 
@@ -47,7 +47,7 @@ public class TypedLinqTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().ToObjects();
+        var rows = frame.Query<Person>().ToList();
 
         Assert.That(rows.Count, Is.EqualTo(5));
         Assert.That(rows[0].Name, Is.EqualTo("Alice"));
@@ -89,7 +89,7 @@ public class TypedLinqTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().Where(p => p.Age > 30).ToObjects();
+        var rows = frame.Query<Person>().Where(p => p.Age > 30).ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Bob", "Carol", "Eve" }));
     }
@@ -99,7 +99,7 @@ public class TypedLinqTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().Where(p => p.City == "LA").ToObjects();
+        var rows = frame.Query<Person>().Where(p => p.City == "LA").ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Bob", "Dan" }));
     }
@@ -112,7 +112,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .Where(p => p.City == "NYC" && p.Age >= 30)
             .Where(p => !p.IsActive)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Carol" }));
     }
@@ -122,7 +122,7 @@ public class TypedLinqTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().Where(p => p.Age * 2 > 70).ToObjects();
+        var rows = frame.Query<Person>().Where(p => p.Age * 2 > 70).ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Bob", "Eve" }));
     }
@@ -132,7 +132,7 @@ public class TypedLinqTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().Where(p => p.Age % 2 == 1).ToObjects();
+        var rows = frame.Query<Person>().Where(p => p.Age % 2 == 1).ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Alice", "Carol" }));
     }
@@ -142,7 +142,7 @@ public class TypedLinqTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().Where(p => p.Salary >= 100000).ToObjects();
+        var rows = frame.Query<Person>().Where(p => p.Salary >= 100000).ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Bob", "Eve" }));
     }
@@ -151,9 +151,9 @@ public class TypedLinqTests
     public void Where_NullComparison_String_FiltersNullRows()
     {
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "b" })));
+            ("Name", NivaraColumn<string>.Create(new string[] { "a", null!, "b" })));
 
-        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToObjects();
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToList();
 
         Assert.That(rows.Count, Is.EqualTo(1));
         Assert.That(rows[0].Name, Is.Null);
@@ -163,9 +163,9 @@ public class TypedLinqTests
     public void Where_NotNullComparison_String_FiltersNonNullRows()
     {
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "b" })));
+            ("Name", NivaraColumn<string>.Create(new string[] { "a", null!, "b" })));
 
-        var rows = frame.Query<NullableStringRow>().Where(r => r.Name != null).ToObjects();
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name != null).ToList();
 
         Assert.That(rows.Count, Is.EqualTo(2));
         Assert.That(rows.Select(r => r.Name), Is.EqualTo(new string[] { "a", "b" }));
@@ -176,7 +176,7 @@ public class TypedLinqTests
     {
         using var frame = CreateNullableFrame();
 
-        var rows = frame.Query<NullableRow>().Where(r => r.Value == null).ToObjects();
+        var rows = frame.Query<NullableRow>().Where(r => r.Value == null).ToList();
 
         Assert.That(rows.Count, Is.EqualTo(1));
         Assert.That(rows[0].Value, Is.Null);
@@ -187,7 +187,7 @@ public class TypedLinqTests
     {
         using var frame = CreateNullableFrame();
 
-        var rows = frame.Query<NullableRow>().Where(r => r.Value != null).ToObjects();
+        var rows = frame.Query<NullableRow>().Where(r => r.Value != null).ToList();
 
         Assert.That(rows.Count, Is.EqualTo(2));
     }
@@ -196,9 +196,9 @@ public class TypedLinqTests
     public void Where_NullComparison_AllNullColumn_ReturnsAllRows()
     {
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { null!, null! })));
+            ("Name", NivaraColumn<string>.Create(new string[] { null!, null! })));
 
-        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToObjects();
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToList();
 
         Assert.That(rows.Count, Is.EqualTo(2));
     }
@@ -207,9 +207,9 @@ public class TypedLinqTests
     public void Where_NullComparison_NoNullColumn_ReturnsNoRows()
     {
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", "b" })));
+            ("Name", NivaraColumn<string>.Create(new string[] { "a", "b" })));
 
-        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToObjects();
+        var rows = frame.Query<NullableStringRow>().Where(r => r.Name == null).ToList();
 
         Assert.That(rows.Count, Is.EqualTo(0));
     }
@@ -218,12 +218,12 @@ public class TypedLinqTests
     public void Where_NullComparison_ComposedWithAnd_Works()
     {
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "b" })),
+            ("Name", NivaraColumn<string>.Create(new string[] { "a", null!, "b" })),
             ("Age", NivaraColumnFactory.CreateFromNullable(new int?[] { 10, 20, null })));
 
         var rows = frame.Query<NullableMixedRow>()
             .Where(r => r.Name == null || r.Age == null)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Count, Is.EqualTo(2));
     }
@@ -276,7 +276,7 @@ public class TypedLinqTests
 
         var rows = frame.Query<Person>()
             .Select(p => new { p.Name, p.City })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Count, Is.EqualTo(5));
         Assert.That(rows[0].Name, Is.EqualTo("Alice"));
@@ -290,7 +290,7 @@ public class TypedLinqTests
 
         var rows = frame.Query<Person>()
             .Select(p => new { p.Name, DoubleAge = p.Age * 2 })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows[0].Name, Is.EqualTo("Alice"));
         Assert.That(rows[0].DoubleAge, Is.EqualTo(50));
@@ -304,7 +304,7 @@ public class TypedLinqTests
 
         var rows = frame.Query<Person>()
             .Select(p => new { p.Name, OddParity = p.Age % 2 })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.OddParity), Is.EqualTo(new[] { 1, 0, 1, 0, 0 }));
     }
@@ -316,7 +316,7 @@ public class TypedLinqTests
 
         var rows = frame.Query<Person>()
             .Select(p => new PersonRow { Name = p.Name, Age = p.Age })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows[0], Is.EqualTo(new PersonRow { Name = "Alice", Age = 25 }));
     }
@@ -351,7 +351,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .Where(p => p.City == "NYC")
             .Select(p => new { p.Name, p.Age })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(r => r.Name), Is.EqualTo(new[] { "Alice", "Carol", "Eve" }));
     }
@@ -380,7 +380,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .OrderByDescending(p => p.City)
             .ThenBy(p => p.Age)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Alice", "Carol", "Eve", "Dan", "Bob" }));
     }
@@ -394,7 +394,7 @@ public class TypedLinqTests
             .OrderBy(p => p.Age)
             .Skip(1)
             .Take(2)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Alice", "Carol" }));
     }
@@ -409,7 +409,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, Count = g.Count(), AvgAge = g.Average(p => p.Age) })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Count, Is.EqualTo(2));
         Assert.That(rows.Single(r => r.Key == "NYC").Count, Is.EqualTo(3));
@@ -425,7 +425,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, Total = g.Sum(p => p.Age), Oldest = g.Max(p => p.Age) })
-            .ToObjects();
+            .ToList();
 
         var nyc = rows.Single(r => r.Key == "NYC");
         Assert.That(nyc.Total, Is.EqualTo(25L + 35L + 50L));
@@ -440,7 +440,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, MedAge = g.Median(p => p.Age), P90 = g.Quantile(p => p.Age, 0.9) })
-            .ToObjects();
+            .ToList();
 
         var nyc = rows.Single(r => r.Key == "NYC");
         Assert.That(nyc.MedAge, Is.EqualTo(35.0).Within(1e-9));          // {25, 35, 50}
@@ -459,7 +459,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, Med = g.Median(p => p.Salary), Q50 = g.Quantile(p => p.Salary, 0.5) })
-            .ToObjects();
+            .ToList();
 
         foreach (var row in rows)
             Assert.That(row.Q50, Is.EqualTo(row.Med).Within(1e-9));
@@ -491,7 +491,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, Std = g.StdDev(p => p.Age), Var = g.Variance(p => p.Age) })
-            .ToObjects();
+            .ToList();
 
         var nyc = rows.Single(r => r.Key == "NYC");
         Assert.That(nyc.Var, Is.EqualTo(2850.0 / 27.0).Within(1e-9));               // {25, 35, 50}
@@ -510,7 +510,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, Std = g.StdDev(p => p.Age, 1), Var = g.Variance(p => p.Age, 1) })
-            .ToObjects();
+            .ToList();
 
         var nyc = rows.Single(r => r.Key == "NYC");
         Assert.That(nyc.Var, Is.EqualTo(2850.0 / 18.0).Within(1e-9));               // population * 3/2
@@ -552,7 +552,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { City = g.Key, Count = g.Count() })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Single(r => r.City == "LA").Count, Is.EqualTo(2));
     }
@@ -582,7 +582,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, OldCount = g.Sum(p => p.Age >= 35 ? 1 : 0) })
-            .ToObjects();
+            .ToList();
 
         var nyc = rows.Single(r => r.Key == "NYC");
         Assert.That(nyc.OldCount, Is.EqualTo(2));  // Carol(35), Eve(50)
@@ -599,7 +599,7 @@ public class TypedLinqTests
         var rows = frame.Query<Person>()
             .GroupBy(p => p.City)
             .Select(g => new { g.Key, HighSalaryRatio = g.Average(p => p.Salary >= 100000 ? 1.0 : 0.0) })
-            .ToObjects();
+            .ToList();
 
         var nyc = rows.Single(r => r.Key == "NYC");
         Assert.That(nyc.HighSalaryRatio, Is.EqualTo(1.0 / 3.0).Within(1e-9));  // Eve(110k) only
@@ -615,7 +615,7 @@ public class TypedLinqTests
 
         var rows = frame.Query<Person>()
             .Select(p => new { p.Name, SeniorBonus = p.Age >= 30 ? 1000 : 0 })
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows[0].SeniorBonus, Is.EqualTo(0));      // Alice(25)
         Assert.That(rows[1].SeniorBonus, Is.EqualTo(1000));    // Bob(40)
@@ -629,7 +629,7 @@ public class TypedLinqTests
     {
         using var frame = CreateNullableFrame();
 
-        var rows = frame.Query<NullableRow>().ToObjects();
+        var rows = frame.Query<NullableRow>().ToList();
 
         Assert.That(rows[0].Value, Is.EqualTo(1));
         Assert.That(rows[1].Value, Is.Null);
@@ -647,7 +647,7 @@ public class TypedLinqTests
     {
         using var frame = CreateNullableFrame();
 
-        Assert.Throws<QuerySchemaValidationException>(() => frame.Query<NonNullableRow>().ToObjects());
+        Assert.Throws<QuerySchemaValidationException>(() => frame.Query<NonNullableRow>().ToList());
     }
 
     sealed class NonNullableRow

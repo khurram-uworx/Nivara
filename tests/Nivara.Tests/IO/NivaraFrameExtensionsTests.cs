@@ -208,7 +208,7 @@ public class NivaraFrameExtensionsTests
     private static NivaraFrame CreateTestFrame()
     {
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "a", "b", "c" });
 
         return NivaraFrame.Create(
             ("IntColumn", intColumn),

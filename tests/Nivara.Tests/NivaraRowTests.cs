@@ -9,7 +9,7 @@ public class NivaraRowTests
     static NivaraFrame CreateFrame()
     {
         return NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })),
             ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })),
             ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5 })));
     }
@@ -50,7 +50,7 @@ public class NivaraRowTests
     public void Where_IsNull_SelectsOnlyNullRows()
     {
         var ages = NivaraColumnFactory.CreateFromNullable(new int?[] { 30, null, 35 });
-        using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })), ("Age", ages));
+        using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })), ("Age", ages));
 
         var result = frame.Where(row => row.IsNull("Age"));
 
@@ -62,7 +62,7 @@ public class NivaraRowTests
     public void Where_IsNullAndTypedValue_ComposeCorrectly()
     {
         var ages = NivaraColumnFactory.CreateFromNullable(new int?[] { 30, null, 35 });
-        using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })), ("Age", ages));
+        using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })), ("Age", ages));
 
         var result = frame.Where(row => !row.IsNull("Age") && row.GetValue<int>("Age") > 30);
 
@@ -74,7 +74,7 @@ public class NivaraRowTests
     public void Indexer_NullCell_ReturnsNull()
     {
         var ages = NivaraColumnFactory.CreateFromNullable(new int?[] { 30, null, 35 });
-        using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })), ("Age", ages));
+        using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })), ("Age", ages));
 
         var result = frame.Where(row => row["Age"] == null);
 
@@ -114,7 +114,7 @@ public class NivaraRowTests
     {
         var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", ages));
 
         Assert.Throws<ColumnTypeMismatchException>(() => frame.Where(row => row.GetValue<long>("Age") > 0));
@@ -133,7 +133,7 @@ public class NivaraRowTests
     {
         var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", ages));
 
         var result = frame.Where(row => !row.IsNull("Age") && row.GetValue<int>("Age") > 15);
@@ -147,7 +147,7 @@ public class NivaraRowTests
     {
         var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", ages));
 
         var result = frame.Where(row =>
@@ -164,7 +164,7 @@ public class NivaraRowTests
     {
         var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", ages));
 
         var result = frame.Where(row => row.GetValue<int?>("Age") is null);
@@ -178,7 +178,7 @@ public class NivaraRowTests
     {
         var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", ages));
 
         var result = frame.Where(row => row.TryGetValue<int>("Age", out var age) && !row.IsNull("Age") && age > 15);
@@ -192,7 +192,7 @@ public class NivaraRowTests
     {
         var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", ages));
 
         var result = frame.Where(row =>
@@ -277,7 +277,7 @@ public class NivaraRowTests
             values[i] = i % 100 == 0 ? null : i;
 
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(Enumerable.Repeat("x", values.Length).ToArray())),
+            ("Name", NivaraColumn<string>.Create(Enumerable.Repeat("x", values.Length).ToArray())),
             ("Age", NivaraColumn<int?>.Create(values)));
 
         Func<NivaraRow, bool> readPredicate = static row => row.GetValue<int>("Age") > 15;

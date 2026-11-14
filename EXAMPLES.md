@@ -133,10 +133,10 @@ result = in_stock[["SKU", "PriceWithTax", "Category", "Rating"]]
 **Nivara** — typed schema with named columns:
 ```csharp
 var products = NivaraFrame.Create(
-    ("SKU", NivaraColumn<string>.CreateForReferenceType(["A100", "A200", "A300", "A400", "A500"])),
+    ("SKU", NivaraColumn<string>.Create(["A100", "A200", "A300", "A400", "A500"])),
     ("Price", NivaraColumn<float>.Create([29.99f, 49.99f, 9.99f, 199.99f, 14.99f])),
     ("Stock", NivaraColumn<int>.Create([150, 0, 42, 8, 200])),
-    ("Category", NivaraColumn<string>.CreateForReferenceType(["Electronics", "Books", "Electronics", "Home", "Books"])),
+    ("Category", NivaraColumn<string>.Create(["Electronics", "Books", "Electronics", "Home", "Books"])),
     ("Rating", NivaraColumn<float>.Create([4.5f, 3.8f, 4.2f, 4.9f, 3.5f]))
 );
 
@@ -164,7 +164,7 @@ top = customers.nlargest(2, "LoyaltyScore")[["Name", "LoyaltyScore"]]
 **Nivara** — column-wise, single vectorized pass:
 ```csharp
 var customers = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Charlie", "Diana"])),
+    ("Name", NivaraColumn<string>.Create(["Alice", "Bob", "Charlie", "Diana"])),
     ("Spend", NivaraColumn<float>.Create([1200f, 300f, 2500f, 800f])),
     ("Frequency", NivaraColumn<float>.Create([15f, 5f, 30f, 10f]))
 );
@@ -271,8 +271,8 @@ preamble: row-types
 using Nivara.Linq;
 
 var employees = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Charlie", "Diana"])),
-    ("Department", NivaraColumn<string>.CreateForReferenceType(["Engineering", "Sales", "Engineering", "Engineering"])),
+    ("Name", NivaraColumn<string>.Create(["Alice", "Bob", "Charlie", "Diana"])),
+    ("Department", NivaraColumn<string>.Create(["Engineering", "Sales", "Engineering", "Engineering"])),
     ("Salary", NivaraColumn<int>.Create([120000, 90000, 150000, 110000])),
     ("IsActive", NivaraColumn<bool>.Create([true, true, false, true]))
 );
@@ -319,7 +319,7 @@ public sealed class Employee
 The mismatch is caught when the query binds, not when it runs:
 <!-- gate
 preamble: row-types
-locals: NivaraFrame employees = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob"])), ("Department", NivaraColumn<string>.CreateForReferenceType(["Engineering", "Sales"])), ("Salary", NivaraColumn<int>.Create([120000, 90000])), ("IsActive", NivaraColumn<bool>.Create([true, false])));
+locals: NivaraFrame employees = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(["Alice", "Bob"])), ("Department", NivaraColumn<string>.Create(["Engineering", "Sales"])), ("Salary", NivaraColumn<int>.Create([120000, 90000])), ("IsActive", NivaraColumn<bool>.Create([true, false])));
 -->
 ```csharp
 using Nivara.Linq;
@@ -365,8 +365,8 @@ preamble: row-types
 using Nivara.Linq;
 
 var employees = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Carol", "Dan", "Eve"])),
-    ("City", NivaraColumn<string>.CreateForReferenceType(["NYC", "LA", "NYC", "SF", "LA"])),
+    ("Name", NivaraColumn<string>.Create(["Alice", "Bob", "Carol", "Dan", "Eve"])),
+    ("City", NivaraColumn<string>.Create(["NYC", "LA", "NYC", "SF", "LA"])),
     ("Age", NivaraColumn<int>.Create([34, 28, 41, 25, 33])),
     ("Salary", NivaraColumn<double>.Create([90000, 65000, 120000, 55000, 78000]))
 );
@@ -379,14 +379,14 @@ var query = employees.Query<Employee>()
 
 Console.WriteLine(query.ExplainPlan());
 var frame = query.Collect();    // NivaraFrame (Name, Salary) — Carol, Alice, Eve
-var rows = query.ToObjects();   // IReadOnlyList<anonymous>
+var rows = query.ToList();   // IReadOnlyList<anonymous>
 
 // GroupBy aggregates: g.Key, g.Average/Sum/Count/Min/Max
 var byCity = employees.Query<Employee>()
     .Where(e => e.Age > 30)
     .GroupBy(e => e.City)
     .Select(g => new { g.Key, AvgSalary = g.Average(e => e.Salary) })
-    .ToObjects();
+    .ToList();
 // NYC → 105000, LA → 78000
 ```
 
@@ -447,7 +447,7 @@ var vectors = NivaraFrame.FromRows(
 
 var customers = vectors.WithColumn(
     "Segment",
-    NivaraColumn<string>.CreateForReferenceType(["standard", "vip", "standard"]));
+    NivaraColumn<string>.Create(["standard", "vip", "standard"]));
 
 var embeddings = customers.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>();
 

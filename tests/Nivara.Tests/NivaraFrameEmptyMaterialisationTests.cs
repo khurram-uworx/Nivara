@@ -23,7 +23,7 @@ public class NivaraFrameEmptyMaterialisationTests
     public void FilterByMask_AllFalse_PreservesRuntimeType_String()
     {
         using var frame = NivaraFrame.Create(
-            ("B", NivaraColumn<string>.CreateForReferenceType(new[] { "a", null!, "c" })));
+            ("B", NivaraColumn<string>.Create(new[] { "a", null!, "c" })));
         using var empty = frame.FilterByMask(NivaraColumn<bool>.Create(new[] { false, false, false }));
 
         Assert.That(empty.RowCount, Is.EqualTo(0));

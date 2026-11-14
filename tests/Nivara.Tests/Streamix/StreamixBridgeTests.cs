@@ -29,7 +29,7 @@ public class StreamixBridgeTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 20);
+                .Where(ColumnExpressions.Col("X") > 20);
 
             using var expected = queryFrame.Collect();
             var flux = queryFrame.ToFlux(chunkSize: 5);
@@ -149,7 +149,7 @@ public class StreamixBridgeTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 50);
+                .Where(ColumnExpressions.Col("X") > 50);
 
             using var expected = await queryFrame.CollectAsync();
 
@@ -336,7 +336,7 @@ public class StreamixBridgeTests
         try
         {
             var queryFrame = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("X") > 50);
+                .Where(ColumnExpressions.Col("X") > 50);
 
             using var expected = await queryFrame.CollectAsync();
 
@@ -362,7 +362,7 @@ public class StreamixBridgeTests
     public async Task ToNivaraFrameAsync_FromRows_NullableElementColumn_RoundTrips()
     {
         using var frame = NivaraFrame.Create(
-            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Name", NivaraColumn<string>.Create(new[] { "a", "b", "c" })),
             ("Age", NivaraColumn<int?>.Create(new int?[] { 10, null, 30 })));
 
         try

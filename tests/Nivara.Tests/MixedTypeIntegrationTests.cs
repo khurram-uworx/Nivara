@@ -110,15 +110,15 @@ public class MixedTypeIntegrationTests
 
         // Act - Apply filters on different types
         var numericFilter = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Score") > 85.0)
+            .Where(ColumnExpressions.Col("Score") > 85.0)
             .Collect();
 
         var booleanFilter = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Active") == true)
+            .Where(ColumnExpressions.Col("Active") == true)
             .Collect();
 
         var stringComparison = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Name") == "Alice")
+            .Where(ColumnExpressions.Col("Name") == "Alice")
             .Collect();
 
         // Assert - Verify filters work correctly for each type
@@ -198,7 +198,7 @@ public class MixedTypeIntegrationTests
         // Query with invalid column reference
         var queryEx = Assert.Throws<QueryExecutionException>(() => // Expect QueryExecutionException which wraps QuerySchemaValidationException
         {
-            var query = frame.AsQueryFrame().Filter(ColumnExpressions.Col("InvalidColumn") > 0);
+            var query = frame.AsQueryFrame().Where(ColumnExpressions.Col("InvalidColumn") > 0);
             query.Collect();
         });
         Assert.That(queryEx.Message, Contains.Substring("InvalidColumn"));
@@ -229,7 +229,7 @@ public class MixedTypeIntegrationTests
         var startTime = DateTime.Now;
 
         var filtered = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Score") > 75.0)
+            .Where(ColumnExpressions.Col("Score") > 75.0)
             .Select("ID", "Name", "Score")
             .Collect();
 
@@ -257,7 +257,7 @@ public class MixedTypeIntegrationTests
     {
         // Arrange - Create mixed-type data with nulls
         var intColumn = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new string?[] { "A", null, "C", null, "E" }!);
+        var stringColumn = NivaraColumn<string>.Create(new string?[] { "A", null, "C", null, "E" }!);
         var doubleColumn = NivaraColumnFactory.CreateFromNullable(new double?[] { 1.1, 2.2, null, 4.4, null });
 
         var frame = NivaraFrame.Create(
@@ -273,7 +273,7 @@ public class MixedTypeIntegrationTests
 
         // Query with null-aware filtering
         var queryResult = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Integers") > 0) // Use operator syntax
+            .Where(ColumnExpressions.Col("Integers") > 0) // Use operator syntax
             .Collect();
 
         // Assert - Verify null handling across different types
@@ -330,7 +330,7 @@ public class MixedTypeIntegrationTests
         var validFrame = NivaraFrame.Create(("Data", shortColumn));
         var schemaEx = Assert.Throws<QueryExecutionException>(() => // Expect QueryExecutionException which wraps QuerySchemaValidationException
         {
-            var query = validFrame.AsQueryFrame().Filter(ColumnExpressions.Col("NonExistent") > 0);
+            var query = validFrame.AsQueryFrame().Where(ColumnExpressions.Col("NonExistent") > 0);
             query.Collect();
         });
         Assert.That(schemaEx.Message, Contains.Substring("NonExistent"));

@@ -539,7 +539,7 @@ public static class NivaraParquetReader
     private static NivaraColumn<string> CreateStringColumn(Array columnData)
     {
         if (columnData is string[] stringArray)
-            return NivaraColumn<string>.CreateForReferenceType(stringArray);
+            return NivaraColumn<string>.Create(stringArray);
 
         var length = columnData.Length;
         var values = new string[length];
@@ -550,6 +550,6 @@ public static class NivaraParquetReader
             values[i] = value?.ToString()!;
         }
 
-        return NivaraColumn<string>.CreateForReferenceType(values);
+        return NivaraColumn<string>.Create(values);
     }
 }

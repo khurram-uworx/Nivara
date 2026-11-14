@@ -36,9 +36,9 @@ public class ComplexScenarioIntegrationTests
 
         // Act - Build complex query with multiple filters and transformations
         var result = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Salary") > 50000.0)
-            .Filter(ColumnExpressions.Col("IsActive") == true)
-            .Filter(ColumnExpressions.Col("Department") == "Dept1")
+            .Where(ColumnExpressions.Col("Salary") > 50000.0)
+            .Where(ColumnExpressions.Col("IsActive") == true)
+            .Where(ColumnExpressions.Col("Department") == "Dept1")
             .Select("EmployeeID", "Name", "Salary", "Department")
             .Collect();
 
@@ -158,8 +158,8 @@ public class ComplexScenarioIntegrationTests
         );
 
         var queryResult = mixedFrame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("ID") > 750)
-            .Filter(ColumnExpressions.Col("Value") < 1200.0)
+            .Where(ColumnExpressions.Col("ID") > 750)
+            .Where(ColumnExpressions.Col("Value") < 1200.0)
             .Select("ID", "Name")
             .Collect();
 
@@ -190,7 +190,7 @@ public class ComplexScenarioIntegrationTests
         var ex1 = Assert.Throws<QueryExecutionException>(() =>
         {
             var query = frame.AsQueryFrame()
-                .Filter(ColumnExpressions.Col("NonExistentColumn") > 0)
+                .Where(ColumnExpressions.Col("NonExistentColumn") > 0)
                 .Collect();
         });
         Assert.That(ex1.Message, Contains.Substring("NonExistentColumn"), "Error should mention missing column");

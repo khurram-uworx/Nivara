@@ -220,7 +220,7 @@ locals: CancellationToken ct = default;
 -->
 ```csharp
 await using var query = Csv.ScanAsQueryFrame("telemetry.csv")
-    .Filter(ColumnExpressions.Col("status") == "OK")
+    .Where(ColumnExpressions.Col("status") == "OK")
     .Select("timestamp", "value");
 
 await foreach (var chunk in query.AsStream(chunkSize: 50_000, ct))
@@ -346,7 +346,7 @@ locals: ISink sink = new RecordingSink();
 -->
 ```csharp
 await using var cpuSpikes = NivaraParquetReader.ScanAsQueryFrame("telemetry.parquet")
-    .Filter(ColumnExpressions.Col("cpu") > 80);
+    .Where(ColumnExpressions.Col("cpu") > 80);
 
 await cpuSpikes.ToFlux(chunkSize: 50_000)
     .Named("cpu-spike-scan")
@@ -459,7 +459,7 @@ locals: Dashboard dashboard = new(); Archival archival = new();
 // this setup - so the frame cannot be disposed here. It is owned by whoever tears
 // the subscription down.
 var metrics = NivaraParquetReader.ScanAsQueryFrame("metrics.parquet")
-    .Filter(ColumnExpressions.Col("status") == "active");
+    .Where(ColumnExpressions.Col("status") == "active");
 
 var shared = metrics.ToFlux(chunkSize: 50_000).Publish();
 
@@ -517,7 +517,7 @@ public class TelemetryController : ControllerBase
     public IActionResult StreamTelemetry()
     {
         var telemetry = Csv.ScanAsQueryFrame("telemetry.csv")
-            .Filter(ColumnExpressions.Col("host") == "prod-01");
+            .Where(ColumnExpressions.Col("host") == "prod-01");
 
         // ToFlux defers every read until the response body is enumerated, so the frame must
         // outlive this method. Tie it to the request, not to a using — a using here would
@@ -543,7 +543,7 @@ app.MapGet("/api/telemetry/stream", async (HttpResponse response) =>
 {
     // ToSseAsync is awaited to completion, so the frame can be scoped to this handler.
     await using var telemetry = Csv.ScanAsQueryFrame("telemetry.csv")
-        .Filter(ColumnExpressions.Col("host") == "prod-01");
+        .Where(ColumnExpressions.Col("host") == "prod-01");
 
     await telemetry.ToFlux(chunkSize: 1000)
         .ToSseAsync(response);

@@ -833,7 +833,7 @@ public class TensorInteropTests
             0.5f, 0.6f, 0.7f, 0.8f, 0.9f
         });
         var labels = Enumerable.Range(0, 20).Select(i => $"L{i}").Cast<object>().ToArray();
-        using var series = new NivaraSeries<float>(column, NivaraColumn<object>.CreateForReferenceType(labels));
+        using var series = new NivaraSeries<float>(column, NivaraColumn<object>.Create(labels));
 
         var result = series.TopKDescending(2);
 

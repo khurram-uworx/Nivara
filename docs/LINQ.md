@@ -45,7 +45,7 @@ public sealed class Person
 }
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })),
     ("Salary", NivaraColumn<double>.Create(new[] { 70000, 50000, 90000 }))
 );
 
@@ -116,7 +116,7 @@ var totals = grouped.Select(g => new { g.Key, Total = g.Count() }).Collect();
 ```csharp
 var rows = frame.Query<Person>()
     .Where(p => p.Age > 30 && p.City == "NYC")
-    .ToObjects();
+    .ToList();
 ```
 
 Null tests are written directly against a (possibly nullable) property: `Where(p => p.Name == null)` and
@@ -128,7 +128,7 @@ value comparison, so it works for reference types and nullable value types (`int
 var projected = frame.Query<Person>()
     .Where(p => p.Age > 30)
     .Select(p => new { p.Name, Raised = p.Salary * 1.1 })
-    .ToObjects();   // IReadOnlyList<anonymous>
+    .ToList();   // IReadOnlyList<anonymous>
 ```
 
 ### OrderBy / ThenBy — typed multi-key sort
@@ -140,7 +140,7 @@ var rows = frame.Query<Person>()
     .OrderBy(p => p.City)                                     // ascending, NullsLast (default)
     .ThenBy(p => p.Salary, direction: SortDirection.Descending,
             nullOrdering: NullOrdering.NullsFirst)
-    .ToObjects();
+    .ToList();
 ```
 
 | Method | Defaults |
@@ -157,8 +157,8 @@ into a column at execution time and sorted on.
 ### Distinct / DistinctBy
 
 ```csharp
-var unique = frame.Query<Person>().Distinct().ToObjects();       // dedup on all columns
-var byCity = frame.Query<Person>().DistinctBy(p => p.City).ToObjects();  // dedup on a column
+var unique = frame.Query<Person>().Distinct().ToList();       // dedup on all columns
+var byCity = frame.Query<Person>().DistinctBy(p => p.City).ToList();  // dedup on a column
 ```
 
 `DistinctBy` requires a direct column reference; a computed key fails fast with
@@ -167,14 +167,14 @@ var byCity = frame.Query<Person>().DistinctBy(p => p.City).ToObjects();  // dedu
 ### SelectRows
 
 ```csharp
-var sampled = frame.Query<Person>().SelectRows(4, 0, 2).ToObjects();   // preserves the given order
+var sampled = frame.Query<Person>().SelectRows(4, 0, 2).ToList();   // preserves the given order
 ```
 
 ### Skip / Take / Slice
 
 ```csharp
-var page = frame.Query<Person>().Skip(10).Take(5).ToObjects();
-var slice = frame.Query<Person>().Slice(2, 8).ToObjects();
+var page = frame.Query<Person>().Skip(10).Take(5).ToList();
+var slice = frame.Query<Person>().Slice(2, 8).ToList();
 ```
 
 ### GroupBy
@@ -189,7 +189,7 @@ var stats = frame.Query<Person>()
     .Where(p => p.Age > 18)
     .GroupBy(p => p.City)
     .Select(g => new { g.Key, AvgSalary = g.Average(p => p.Salary), People = g.Count() })
-    .ToObjects();
+    .ToList();
 ```
 
 ### Supported expressions
@@ -221,6 +221,22 @@ Row factories require a public parameterless constructor (anonymous types via `S
 automatically); a null cell materialized into a non-nullable value-type property throws at
 materialization time.
 
+### Sync/async split and UI-thread caveat
+
+`Collect()` is a synchronous barrier. It runs the async pipeline on a thread-pool thread
+(`Task.Run`) and blocks the caller until completion, so it does **not** deadlock on a thread
+with a `SynchronizationContext` (WPF/WinForms/MAUI). Prefer `CollectAsync(ct)` in async code;
+`Collect()` is provided for compatibility and synchronous callers.
+
+Cancellation tokens are observed at operation boundaries and inside the row loops of
+`Filter`, `Join`, `Sort`, and `GroupBy`. Other operations check the token at entry only.
+A cancelled operation throws `OperationCanceledException` (not a wrapped
+`QueryExecutionException`).
+
+`IQuerySource.ExecuteAsync`'s default implementation runs `Execute()` synchronously on the
+calling thread and wraps the result in `Task.FromResult`; sources with genuine async I/O
+override it.
+
 ---
 
 ## Frame-Level Operations
@@ -228,10 +244,10 @@ materialization time.
 Join operations are extension methods in `NivaraFrameExtensions`, not part of the query engine:
 
 ```csharp
-var joined = left.InnerJoin(right, "KeyColumn");                    // same column name
-var leftJoin = left.LeftJoin(right, "OrderId", "Id");              // different column names
-var rightJoin = left.RightJoin(right, "Id");
-var fullOuter = left.FullOuterJoin(right, "Id");
+var joined = left.Join(right, JoinType.Inner, "KeyColumn");                    // same column name
+var leftJoin = left.Join(right, JoinType.Left, "OrderId", "Id");              // different column names
+var rightJoin = left.Join(right, JoinType.Right, "Id");
+var fullOuter = left.Join(right, JoinType.FullOuter, "Id");
 ```
 
 All join methods accept optional `ColumnDisambiguationStrategy`, `leftPrefix`, and `rightPrefix`
@@ -488,7 +504,7 @@ public sealed class Product
 }
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C", "D" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "A", "B", "C", "D" })),
     ("Price", NivaraColumn<double>.Create(new[] { 10.0, 25.0, 5.0, 30.0 })),
     ("InStock", NivaraColumn<bool>.Create(new[] { true, false, true, true }))
 );
@@ -497,14 +513,14 @@ var result = frame.Query<Product>()
     .Where(p => p.Price > 10.0 && p.InStock)
     .OrderByDescending(p => p.Price)
     .Select(p => new { p.Name, MarkedUp = p.Price * 1.1 })
-    .ToObjects();
+    .ToList();
 ```
 
 ### Deduplicate and sample
 
 ```csharp
-var uniqueByCategory = frame.Query<Product>().DistinctBy(p => p.Name).ToObjects();
-var sampled = frame.Query<Product>().SelectRows(3, 0).ToObjects();
+var uniqueByCategory = frame.Query<Product>().DistinctBy(p => p.Name).ToList();
+var sampled = frame.Query<Product>().SelectRows(3, 0).ToList();
 ```
 
 ### Lazy CSV query
@@ -518,7 +534,7 @@ using var adultsQuery = Csv.ScanQuery<Person>("people.csv");
 
 var adults = adultsQuery
     .Where(p => p.Age > 30)
-    .ToObjects();
+    .ToList();
 ```
 
 ### GroupBy aggregate
@@ -527,7 +543,7 @@ var adults = adultsQuery
 var stats = frame.Query<Person>()
     .GroupBy(p => p.City)
     .Select(g => new { g.Key, AvgSalary = g.Average(p => p.Salary) })
-    .ToObjects();
+    .ToList();
 // NYC -> average salary, LA -> average salary, ...
 ```
 

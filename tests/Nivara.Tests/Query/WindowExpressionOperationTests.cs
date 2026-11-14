@@ -116,7 +116,7 @@ public class WindowExpressionOperationTests
     public void Rank_OverExpressionKeys_MatchesNameBased()
     {
         using var frame = FrameWith(
-            ("Dept", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y", "X", "Z" })),
+            ("Dept", NivaraColumn<string>.Create(new[] { "X", "Y", "X", "Z" })),
             ("Score", IntColumn(1, 2, 3, 4)));
         using var nameBased = frame.AsQueryFrame().Rank("rn", new[] { new SortKey("Score") }, "Dept").Collect();
         using var expressionBased = frame.AsQueryFrame().Rank(
@@ -131,7 +131,7 @@ public class WindowExpressionOperationTests
     public void Rank_OverComputedOrderExpression_ValuesAreCorrect()
     {
         using var frame = FrameWith(
-            ("Dept", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y", "X", "Z" })),
+            ("Dept", NivaraColumn<string>.Create(new[] { "X", "Y", "X", "Z" })),
             ("Score", IntColumn(1, 2, 3, 4)));
         using var result = frame.AsQueryFrame().Rank(
             "r",

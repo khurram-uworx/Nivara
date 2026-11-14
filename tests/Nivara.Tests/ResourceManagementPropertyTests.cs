@@ -110,7 +110,7 @@ public class ResourceManagementPropertyTests
             Assert.Throws<ObjectDisposedException>(() => _ = queryFrame.Schema,
                 "Disposed query frame should throw ObjectDisposedException when accessed");
 
-            Assert.Throws<ObjectDisposedException>(() => queryFrame.Filter(ColumnExpressions.Col("age") > 25),
+            Assert.Throws<ObjectDisposedException>(() => queryFrame.Where(ColumnExpressions.Col("age") > 25),
                 "Disposed query frame should throw ObjectDisposedException for operations");
 
             // Clear reference and force garbage collection

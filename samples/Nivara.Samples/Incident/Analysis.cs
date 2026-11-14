@@ -42,8 +42,8 @@ public static class Analysis
         var incidentEnd = scenario.IncidentEnd.Ticks;
 
         return frame
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .Sort("Timestamp", SortDirection.Ascending)
             .RollingMean("StatusCode", "ErrorRate", 60)
             .Shift("ErrorRate", "PrevErrorRate", 1)
@@ -63,8 +63,8 @@ public static class Analysis
 
         using var requestsQf = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
         using var requests = requestsQf
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .Sort("Timestamp", SortDirection.Ascending)
             .Collect();
 
@@ -147,8 +147,8 @@ public static class Analysis
 
         using var instanceQf = Ingestion.LoadParquet(Path.Combine(datasetPath, "instances.parquet"));
         using var instances = instanceQf
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .Sort("Timestamp", SortDirection.Ascending)
             .RollingMax("QueueDepth", "PeakQueueDepth", 10, new WindowSpec().PartitionBy("Service"))
             .Collect();
@@ -177,8 +177,8 @@ public static class Analysis
 
         using var requestsQf = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
         using var requests = requestsQf
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .PercentRank("DurationPercentRank",
                 [new SortKey("DurationMs", SortDirection.Ascending)],
                 "Region")
@@ -214,8 +214,8 @@ public static class Analysis
         var incidentEnd = scenario.IncidentEnd.Ticks;
 
         using var result = frame
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .Collect();
 
         var serviceCol = result.GetColumn<string>("Service");
@@ -330,8 +330,8 @@ public static class Analysis
 
         using var frame = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"));
         using var collected = frame
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .Where(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
+            .Where(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .PercentRank("DurationPercentRank",
                 [new SortKey("DurationMs", SortDirection.Ascending)],
                 "Service")

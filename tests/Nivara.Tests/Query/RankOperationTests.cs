@@ -59,7 +59,7 @@ public class RankOperationTests
     public void RowNumber_WithPartition_ResetsPerGroup()
     {
         var input = Columns(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B" })),
             ("v", IntColumn(10, 20, 30)));
         var op = new RankOperation("rn", RankKind.RowNumber, Array.Empty<SortKey>(), new[] { "g" });
 
@@ -219,7 +219,7 @@ public class RankOperationTests
     public void QueryFrame_RowNumber_WithPartitionAndOrder_ResetsPerGroup()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "A" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "A" })),
             ("v", IntColumn(30, 10, 20, 20)));
         using var result = frame.AsQueryFrame()
             .RowNumber("rn", new[] { "g" }, new[] { new SortKey("v", SortDirection.Descending) })
@@ -302,7 +302,7 @@ public class RankOperationTests
     public void Rank_WithSpec_MatchesNamedColumns()
     {
         var input = Columns(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "B" })),
             ("v", IntColumn(10, 20, 20, 30)));
         var spec = new WindowSpec().PartitionBy("g").OrderBy("v");
         var op = new RankOperation("rnk", RankKind.Rank, spec);
@@ -361,7 +361,7 @@ public class RankOperationTests
     public void QueryFrame_Rank_WithSpec_Collect_AddsResultColumn()
     {
         using var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "B", "B" })),
             ("t", IntColumn(2, 1, 2, 1)),
             ("v", IntColumn(10, 20, 30, 40)));
         var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");

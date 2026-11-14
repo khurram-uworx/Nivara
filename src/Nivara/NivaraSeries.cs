@@ -53,7 +53,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable, IEquatable<Ni
             indexValues[i] = i;
         }
 
-        return NivaraColumn<object>.CreateForReferenceType(indexValues);
+        return NivaraColumn<object>.Create(indexValues);
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable, IEquatable<Ni
             if (index.Length != values.Length)
                 throw new ArgumentException($"Index length ({index.Length}) must match values length ({values.Length})", nameof(index));
 
-            indexColumn = NivaraColumn<object>.CreateForReferenceType(index);
+            indexColumn = NivaraColumn<object>.Create(index);
         }
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);

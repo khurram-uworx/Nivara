@@ -872,7 +872,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithStringValues_ThrowsArgumentException()
         {
-            var column = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" });
+            var column = NivaraColumn<string>.Create(new[] { "a", "b" });
             var indices = new List<int> { 0, 1 };
             var aggregation = AggregationFunctions.Quantile(0.5);
 
@@ -1034,7 +1034,7 @@ public class AggregationFunctionTests
         [Test]
         public void Apply_WithStringValues_ThrowsArgumentException()
         {
-            var column = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" });
+            var column = NivaraColumn<string>.Create(new[] { "a", "b" });
             var indices = new List<int> { 0, 1 };
             var aggregation = AggregationFunctions.StdDev();
 

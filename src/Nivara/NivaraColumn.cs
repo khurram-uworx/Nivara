@@ -329,38 +329,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
     }
 
     /// <summary>
-    /// Creates a new column from the specified array of reference type values.
-    /// Automatically detects and tracks null references.
-    /// </summary>
-    /// <param name="values">The reference type values to store in the column</param>
-    /// <returns>A new NivaraColumn instance</returns>
-    /// <exception cref="ArgumentNullException">Thrown when values array is null</exception>
-    public static NivaraColumn<T> CreateForReferenceType(T[] values)
-    {
-        if (values == null)
-            throw new ArgumentNullException(nameof(values));
-
-        return CreateForReferenceType(values.AsSpan());
-    }
-
-    /// <summary>
-    /// Creates a new column from the specified span of reference type values.
-    /// Automatically detects and tracks null references.
-    /// </summary>
-    /// <param name="values">The reference type values to store in the column</param>
-    /// <returns>A new NivaraColumn instance</returns>
-    public static NivaraColumn<T> CreateForReferenceType(ReadOnlySpan<T> values)
-    {
-        // This method should only be called for reference types
-        if (!typeof(T).IsClass)
-            throw new InvalidOperationException($"CreateForReferenceType can only be used with reference types. Use Create or CreateFromNullable for value types.");
-
-        // For reference types, always detect nulls using ColumnStorage directly
-        var storage = new ColumnStorage<T>(values, detectNulls: true);
-        return new NivaraColumn<T>(storage);
-    }
-
-    /// <summary>
     /// Creates a new column from separate value and null-mask spans.
     /// Provided for interop and internal use, especially from AutoDiff and tensor-aware paths.
     /// When the null mask contains no true values, delegates to <see cref="Create(ReadOnlySpan{T})"/>.
@@ -2843,8 +2811,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
         }
         else
         {
-            // For reference types, use CreateForReferenceType
-            return NivaraColumn<TResult>.CreateForReferenceType(result);
+            // For reference types, use Create
+            return NivaraColumn<TResult>.Create(result);
         }
     }
 
@@ -2921,8 +2889,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
         }
         else
         {
-            // For reference types, use CreateForReferenceType
-            return NivaraColumn<TResult>.CreateForReferenceType(result);
+            // For reference types, use Create
+            return NivaraColumn<TResult>.Create(result);
         }
     }
 

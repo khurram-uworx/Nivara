@@ -131,7 +131,7 @@ public class IntegrationTests
 
         // Act - Perform complex query operations
         var queryResult = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Score") > 500.0)
+            .Where(ColumnExpressions.Col("Score") > 500.0)
             .Select("ID", "Name", "Score")
             .Collect();
 
@@ -198,7 +198,7 @@ public class IntegrationTests
         var stringValues = new string?[] { "A", null, "C", "D", null };
 
         var intColumn = NivaraColumnFactory.CreateFromNullable(intValues);
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringValues!);
+        var stringColumn = NivaraColumn<string>.Create(stringValues!);
 
         // Act - Create series and frame with null data
         var intSeries = new NivaraSeries<int>(intColumn);
@@ -335,8 +335,8 @@ public class IntegrationTests
 
         // Act - Execute complex query with multiple conditions
         var result = frame.AsQueryFrame()
-            .Filter(ColumnExpressions.Col("Score") > 100.0)
-            .Filter(ColumnExpressions.Col("Active") == true)
+            .Where(ColumnExpressions.Col("Score") > 100.0)
+            .Where(ColumnExpressions.Col("Active") == true)
             .Select("ID", "Name", "Score")
             .Collect();
 

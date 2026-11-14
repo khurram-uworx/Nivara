@@ -96,7 +96,7 @@ using Microsoft.Extensions.AI;
 using Nivara.AI;
 
 NivaraFrame table = NivaraFrame.Create(
-    ("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(
+    ("Embedding", (IColumn)NivaraColumn<float[]>.Create(
         new float[][] { [1f, 2f], null!, [3f, 4f] })));
 
 var generated = table.ToGeneratedEmbeddings(
@@ -143,9 +143,9 @@ it back to a row index, or use a natural key such as a chunk id.
 using Nivara.AI;
 
 var embeddings = NivaraFrame.Create(
-    ("Embedding", (IColumn)NivaraColumn<float[]>.CreateForReferenceType(
+    ("Embedding", (IColumn)NivaraColumn<float[]>.Create(
         new float[][] { [1f, 0f], [0f, 1f], [1f, 1f] })),
-    ("ChunkId", (IColumn)NivaraColumn<object>.CreateForReferenceType(["c0", "c1", "c2"])),
+    ("ChunkId", (IColumn)NivaraColumn<object>.Create(["c0", "c1", "c2"])),
     ("Group", (IColumn)NivaraColumn<string>.Create(new[] { "eng", "eng", "hr" })));
 
 var visible = embeddings.FilterByMask(NivaraColumn<bool>.Create(new[] { true, true, false }));

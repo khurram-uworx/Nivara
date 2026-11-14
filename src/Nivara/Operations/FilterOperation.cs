@@ -49,6 +49,9 @@ sealed class FilterOperation : IQueryOperation
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+        => Execute(input, default);
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input, CancellationToken ct)
     {
         if (input == null)
             throw new ArgumentNullException(nameof(input));
@@ -58,6 +61,8 @@ sealed class FilterOperation : IQueryOperation
 
         try
         {
+            ct.ThrowIfCancellationRequested();
+
             // Evaluate the condition to get a boolean mask
             var evaluator = new FusedExpressionEvaluator();
             var mask = evaluator.EvaluateBoolean(Condition, input);
@@ -67,13 +72,14 @@ sealed class FilterOperation : IQueryOperation
 
             foreach (var kvp in input)
             {
-                var filteredColumn = ApplyMask(kvp.Value, mask);
+                ct.ThrowIfCancellationRequested();
+                var filteredColumn = ApplyMask(kvp.Value, mask, ct);
                 filteredColumns[kvp.Key] = filteredColumn;
             }
 
             return filteredColumns;
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             throw new QueryExecutionException($"Filter operation failed: {ex.Message}", ex);
         }
@@ -84,7 +90,7 @@ sealed class FilterOperation : IQueryOperation
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return new(Execute(input));
+        return new(Execute(input, ct));
     }
 
     /// <summary>
@@ -93,7 +99,7 @@ sealed class FilterOperation : IQueryOperation
     /// <param name="column">The column to filter</param>
     /// <param name="mask">The boolean mask indicating which rows to keep</param>
     /// <returns>A new column with filtered values</returns>
-    static IColumn ApplyMask(IColumn column, NivaraColumn<bool> mask)
+    static IColumn ApplyMask(IColumn column, NivaraColumn<bool> mask, CancellationToken ct = default)
     {
         if (column.Length != mask.Length)
             throw new ArgumentException("Column and mask must have the same length");
@@ -101,8 +107,12 @@ sealed class FilterOperation : IQueryOperation
         var filteredIndices = new List<int>();
 
         for (int i = 0; i < mask.Length; i++)
+        {
+            if ((i & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             if (mask[i] == true) // Only include rows where mask is true
                 filteredIndices.Add(i);
+        }
 
         // Create a new column with only the filtered values
         return ColumnFilterHelper.CreateFilteredColumn(column, filteredIndices);

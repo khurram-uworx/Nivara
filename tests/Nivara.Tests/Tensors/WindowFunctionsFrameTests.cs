@@ -279,7 +279,7 @@ public class WindowFunctionsFrameTests
     public void RollingSum_WithSpec_PartitionsAndOrders()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
 
@@ -299,7 +299,7 @@ public class WindowFunctionsFrameTests
     public void CumulativeSum_WithSpec_PartitionsAndOrders()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
 
@@ -319,7 +319,7 @@ public class WindowFunctionsFrameTests
     public void CumulativeCount_WithSpec_Partitions()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
 
         var spec = frame.Over().PartitionBy("g");
@@ -338,7 +338,7 @@ public class WindowFunctionsFrameTests
     public void Shift_WithSpec_PartitionsAndOrders()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "B", "A", "B", "A", "B" })),
             ("t", IntColumn(1, 1, 2, 2, 3, 3)),
             ("v", IntColumn(10, 20, 30, 40, 50, 60)));
 
@@ -358,7 +358,7 @@ public class WindowFunctionsFrameTests
     public void RollingSum_WithSpec_NullOrderKeyRow_Participates()
     {
         var frame = FrameWith(
-            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "A" })),
+            ("g", NivaraColumn<string>.Create(new[] { "A", "A", "A" })),
             ("t", NivaraColumn<int>.CreateFromSpans(new[] { 3, 0, 1 }, new[] { false, true, false })),
             ("v", IntColumn(30, 20, 10)));
 

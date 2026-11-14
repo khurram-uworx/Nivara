@@ -70,12 +70,12 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Adds a filter operation to the query chain
+    /// Adds a filter (where) operation to the query chain
     /// </summary>
     /// <param name="condition">The condition to filter by</param>
     /// <returns>A new QueryFrame with the filter operation added</returns>
     /// <exception cref="ArgumentNullException">Thrown when condition is null</exception>
-    public QueryFrame Filter(ColumnExpression condition)
+    public QueryFrame Where(ColumnExpression condition)
     {
         ObjectDisposedException.ThrowIf(handle.Released, this);
 
@@ -364,7 +364,8 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// </summary>
     /// <returns>A materialized NivaraFrame with the query results</returns>
     /// <exception cref="QueryExecutionException">Thrown when query execution fails</exception>
-    public NivaraFrame Collect() => CollectAsync(default).GetAwaiter().GetResult()!;
+    public NivaraFrame Collect()
+        => Task.Run(() => CollectAsync(default(CancellationToken))).GetAwaiter().GetResult()!;
 
     /// <summary>
     /// Executes the query asynchronously and returns a materialized NivaraFrame
@@ -389,7 +390,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
             };
             try
             {
-                var result = await engine.ExecuteAsync(queryPlan, context);
+                var result = await engine.ExecuteAsync(queryPlan, context).ConfigureAwait(false);
                 lastDiagnostics = diagnostics;
                 return result;
             }
@@ -526,10 +527,17 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         IAsyncEnumerable<NivaraFrame> chunks,
         ExecutionDiagnostics diagnostics)
     {
-        await using var enumerator = chunks.GetAsyncEnumerator();
-        while (await enumerator.MoveNextAsync())
-            yield return enumerator.Current;
-        lastDiagnostics = diagnostics;
+        var enumerator = chunks.GetAsyncEnumerator();
+        try
+        {
+            while (await enumerator.MoveNextAsync().ConfigureAwait(false))
+                yield return enumerator.Current;
+            lastDiagnostics = diagnostics;
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     /// <summary>

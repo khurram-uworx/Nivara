@@ -921,7 +921,7 @@ public class NivaraFrameTests
     public void Create_Generic_WorksWithDifferentTypes()
     {
         var intCol = NivaraColumn<int>.Create([1, 2, 3]);
-        var strCol = NivaraColumn<string>.CreateForReferenceType(["a", "b", "c"]);
+        var strCol = NivaraColumn<string>.Create(["a", "b", "c"]);
 
         var frame = NivaraFrame.Create("int", intCol).WithColumn("str", strCol);
 

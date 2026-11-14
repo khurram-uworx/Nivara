@@ -29,7 +29,7 @@ public class ArrowValidityInteropTests
         new NivaraSeries<bool>(NivaraColumnFactory.CreateFromNullable(values));
 
     private static NivaraSeries<string> MakeStringSeries(params string?[] values) =>
-        new NivaraSeries<string>(NivaraColumn<string>.CreateForReferenceType(values.Select(v => v!).ToArray()));
+        new NivaraSeries<string>(NivaraColumn<string>.Create(values.Select(v => v!).ToArray()));
 
     private static void AssertExportValidityMatchesHelper(IArrowArray array, ReadOnlySpan<bool> nivaraMask)
     {
@@ -150,7 +150,7 @@ public class ArrowValidityInteropTests
     public void ToArrowTable_MultiColumn_MixedNulls_EachColumnValidityMatchesHelper()
     {
         var intColumn = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new string?[] { "a", null, "c" }.Select(v => v!).ToArray());
+        var stringColumn = NivaraColumn<string>.Create(new string?[] { "a", null, "c" }.Select(v => v!).ToArray());
 
         var frame = NivaraFrame.Create(("Ints", intColumn), ("Strs", stringColumn));
         var table = ArrowInterop.ToArrowTable(frame);

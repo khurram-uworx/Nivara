@@ -13,7 +13,7 @@ public class FrameProjectionTests
     {
         // Create a test frame with multiple columns
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
-        var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d", "e" });
+        var stringColumn = NivaraColumn<string>.Create(new[] { "a", "b", "c", "d", "e" });
         var doubleColumn = NivaraColumn<double>.Create(new[] { 1.1, 2.2, 3.3, 4.4, 5.5 });
 
         testFrame = NivaraFrame.Create(
@@ -27,7 +27,7 @@ public class FrameProjectionTests
     public void Select_WithColumnNames_ShouldReturnSelectedColumns()
     {
         // Act
-        var selected = testFrame.Select("IntCol", "StringCol");
+        var selected = testFrame.SelectColumns("IntCol", "StringCol");
 
         // Assert
         Assert.That(selected.ColumnCount, Is.EqualTo(2));
@@ -176,7 +176,7 @@ public class FrameProjectionTests
     {
         // Act & Assert
         Assert.Throws<ColumnNotFoundException>(() =>
-            testFrame.Select("NonExistent"));
+            testFrame.SelectColumns("NonExistent"));
     }
 
     [Test]

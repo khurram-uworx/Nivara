@@ -34,7 +34,7 @@ using Nivara;
 
 // Create columns with explicit types
 NivaraColumn<int> ages = [25, 30, 35];
-var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" });
+var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" });
 
 Console.WriteLine(ages.Length); // 3
 Console.WriteLine(names[0]);    // "Alice"
@@ -96,7 +96,7 @@ NivaraColumn<int> ids = [101, 102, 103];
 NivaraSeries<float> scores = [0.8f, 0.5f, 0.9f];
 
 // For reference types (strings, objects)
-var strings = NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C" });
+var strings = NivaraColumn<string>.Create(new[] { "A", "B", "C" });
 
 // From nullable arrays
 var nullableInts = NivaraColumnFactory.CreateFromNullable(new int?[] { 1, null, 3 });
@@ -150,7 +150,7 @@ var doubled = column * 2;               // [2, null, 6, null, 10]
 ```csharp
 // Create from columns
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })),
     ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 }))
 );
@@ -163,7 +163,7 @@ Console.WriteLine(frame.ColumnNames);   // ["Name", "Age", "Salary"]
 ### Accessing Data
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
 -->
 ```csharp
 // Get columns
@@ -186,7 +186,7 @@ Console.WriteLine(schema.GetColumnType("Age")); // System.Int32
 Schemas are immutable and validated on every transformation:
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })));
 -->
 ```csharp
 try
@@ -240,7 +240,7 @@ preamble: row-types
 using Nivara.Linq;
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
     ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 }))
 );
@@ -269,7 +269,7 @@ var result = frame.Query<Person>()
 
 <!-- gate
 preamble: row-types
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
 -->
 ```csharp
 // Multiple conditions
@@ -309,8 +309,8 @@ preamble: row-types
 -->
 ```csharp
 var people = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
-    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })),
+    ("Department", NivaraColumn<string>.Create(new[] { "IT", "HR", "IT", "Finance" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
     ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 }))
 );
@@ -320,7 +320,7 @@ var result = people.Query<Person>()
     .Where(p => p.Age > 30 && p.Salary > 55000)
     .OrderByDescending(p => p.Salary)
     .Select(p => new { p.Name, AnnualBonus = p.Salary * 0.1 })
-    .ToObjects();
+    .ToList();
 // IReadOnlyList<anonymous>: Diana (8000), Charlie (7000)
 
 // Materialize as a NivaraFrame instead (lazy, ExplainPlan available)
@@ -333,7 +333,7 @@ var resultFrame = people.Query<Person>()
 var byDept = people.Query<Person>()
     .GroupBy(p => p.Department)
     .Select(g => new { g.Key, AvgSalary = g.Average(p => p.Salary), People = g.Count() })
-    .ToObjects();
+    .ToList();
 ```
 
 Notes:
@@ -348,7 +348,7 @@ Queries are planned and validated before execution:
 
 <!-- gate
 preamble: row-types
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
 -->
 ```csharp
 // Build query (no execution yet) — typed queries are lazy and inspectable
@@ -470,7 +470,7 @@ foreach (var name in query.Schema.ColumnNames)
 
 ```csharp
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
     ("Active", NivaraColumn<bool>.Create(new[] { true, false, true, false }))
 );
@@ -491,7 +491,7 @@ var activeUsers = frame.FilterByMask(activeMask);
 ### Row Slicing
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Active", NivaraColumn<bool>.Create(new[] { true, false, true, false })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Active", NivaraColumn<bool>.Create(new[] { true, false, true, false })));
 -->
 ```csharp
 // Take first n rows
@@ -515,7 +515,7 @@ var slice = frame.Slice(1, 2); // Start at index 1, take 2 rows
 
 <!-- gate
 preamble: row-types
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Diana" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0, 80000.0 })));
 -->
 ```csharp
 using Nivara.Linq;
@@ -559,7 +559,7 @@ preamble: row-types
 -->
 ```csharp
 var frameWithNulls = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })),
     ("Score", NivaraColumnFactory.CreateFromNullable(new int?[] { 85, null, 92 }))
 );
 
@@ -584,7 +584,7 @@ var nullsLast = frameWithNulls.Query<Player>()
 
 ```csharp
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })),
     ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 }))
 );
@@ -617,15 +617,15 @@ var frameWithBonus = frame.WithComputedColumn<int, double, double>(
 ### Column Selection and Projection
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
 -->
 ```csharp
 // Select specific columns
-var nameAndAge = frame.Select("Name", "Age");
+var nameAndAge = frame.SelectColumns("Name", "Age");
 // Result: DataFrame with only Name and Age columns
 
 // Select with array
-var selectedColumns = frame.Select(new[] { "Name", "Salary" });
+var selectedColumns = frame.SelectColumns(new[] { "Name", "Salary" });
 
 // Select and rename
 var renamedFrame = frame.SelectAndRename(new Dictionary<string, string?>
@@ -640,7 +640,7 @@ var renamedFrame = frame.SelectAndRename(new Dictionary<string, string?>
 ### Column Renaming
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
 -->
 ```csharp
 // Rename single column
@@ -657,7 +657,7 @@ var renamedMultiple = frame.RenameColumns(new Dictionary<string, string>
 ### Column Exclusion
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })), ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 70000.0 })));
 -->
 ```csharp
 // Exclude specific columns
@@ -709,30 +709,30 @@ var sum = frameWithNulls.WithComputedColumn<int, int, int>(
 ```csharp
 var employees = NivaraFrame.Create(
     ("Id", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })),
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "David" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "David" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 }))
 );
 
 var departments = NivaraFrame.Create(
     ("Id", NivaraColumn<int>.Create(new[] { 2, 3, 4, 5 })),
-    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "HR", "IT", "Finance", "Marketing" })),
+    ("Department", NivaraColumn<string>.Create(new[] { "HR", "IT", "Finance", "Marketing" })),
     ("Salary", NivaraColumn<decimal>.Create(new[] { 50000m, 60000m, 70000m, 80000m }))
 );
 
 // Inner join - only matching rows
-var innerJoin = employees.InnerJoin(departments, "Id");
+var innerJoin = employees.Join(departments, JoinType.Inner, "Id");
 // Result: 3 rows (Id: 2, 3, 4) with all columns from both DataFrames
 
 // Left join - all left rows, matching right rows
-var leftJoin = employees.LeftJoin(departments, "Id");
+var leftJoin = employees.Join(departments, JoinType.Left, "Id");
 // Result: 4 rows, Alice (Id=1) has null Department and Salary
 
 // Right join - all right rows, matching left rows
-var rightJoin = employees.RightJoin(departments, "Id");
+var rightJoin = employees.Join(departments, JoinType.Right, "Id");
 // Result: 4 rows, Marketing (Id=5) has null Name and Age
 
 // Full outer join - all rows from both DataFrames
-var fullJoin = employees.FullOuterJoin(departments, "Id");
+var fullJoin = employees.Join(departments, JoinType.FullOuter, "Id");
 // Result: 5 rows, includes Alice (left only) and Marketing (right only)
 ```
 
@@ -741,7 +741,7 @@ var fullJoin = employees.FullOuterJoin(departments, "Id");
 ```csharp
 var customers = NivaraFrame.Create(
     ("CustomerId", NivaraColumn<int>.Create(new[] { 1, 2, 3 })),
-    ("CustomerName", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" }))
+    ("CustomerName", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" }))
 );
 
 var orders = NivaraFrame.Create(
@@ -751,7 +751,7 @@ var orders = NivaraFrame.Create(
 );
 
 // Join using different column names
-var customerOrders = customers.InnerJoin(orders, "CustomerId", "CustId");
+var customerOrders = customers.Join(orders, JoinType.Inner, "CustomerId", "CustId");
 // Result: Matches customers with orders using CustomerId = CustId
 ```
 
@@ -760,27 +760,27 @@ var customerOrders = customers.InnerJoin(orders, "CustomerId", "CustId");
 ```csharp
 var leftFrame = NivaraFrame.Create(
     ("Id", NivaraColumn<int>.Create(new[] { 1, 2 })),
-    ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B" }))
+    ("Value", NivaraColumn<string>.Create(new[] { "A", "B" }))
 );
 
 var rightFrame = NivaraFrame.Create(
     ("Id", NivaraColumn<int>.Create(new[] { 1, 2 })),
-    ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y" }))
+    ("Value", NivaraColumn<string>.Create(new[] { "X", "Y" }))
 );
 
 // Suffix disambiguation (default)
-var suffixResult = leftFrame.InnerJoin(rightFrame, "Id");
+var suffixResult = leftFrame.Join(rightFrame, JoinType.Inner, "Id");
 // Result: Columns are Id, Value_left, Value_right
 
 // Prefix disambiguation
-var prefixResult = leftFrame.InnerJoin(rightFrame, "Id", 
+var prefixResult = leftFrame.Join(rightFrame, JoinType.Inner, "Id", 
     ColumnDisambiguationStrategy.Prefix, "L", "R");
 // Result: Columns are Id, L_Value, R_Value
 
 // Error on conflicts
 try 
 {
-    var errorResult = leftFrame.InnerJoin(rightFrame, "Id", 
+    var errorResult = leftFrame.Join(rightFrame, JoinType.Inner, "Id", 
         ColumnDisambiguationStrategy.Error);
 }
 catch (QuerySchemaValidationException ex)
@@ -795,12 +795,12 @@ catch (QuerySchemaValidationException ex)
 
 ```csharp
 var frame1 = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
 );
 
 var frame2 = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie", "Diana" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Charlie", "Diana" })),
     ("Age", NivaraColumn<int>.Create(new[] { 35, 28 }))
 );
 
@@ -816,12 +816,12 @@ var appended = frame1.Append(frame2);
 
 ```csharp
 var employees = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
 );
 
 var contractors = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Charlie" })),
     ("Salary", NivaraColumn<double>.Create(new[] { 50000.0 }))
 );
 
@@ -844,13 +844,13 @@ catch (QuerySchemaValidationException ex)
 
 ```csharp
 var names = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
 );
 
 var details = NivaraFrame.Create(
     ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0 })),
-    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "Engineering", "Sales" }))
+    ("Department", NivaraColumn<string>.Create(new[] { "Engineering", "Sales" }))
 );
 
 // Horizontal concatenation
@@ -887,8 +887,8 @@ preamble: row-types
 using Nivara.Linq;
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Alice", "Charlie" })),
-    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Alice", "Charlie" })),
+    ("Department", NivaraColumn<string>.Create(new[] { "IT", "HR", "IT", "Finance" })),
     ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0, 85000.0 }))
 );
 
@@ -907,13 +907,13 @@ var byDept = frame.Query<Employee>()
         TotalSalary = g.Sum(e => e.Salary),
         AvgSalary = g.Average(e => e.Salary)
     })
-    .ToObjects();
+    .ToList();
 ```
 
 ### Aggregation Functions
 <!-- gate
 preamble: row-types
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Alice", "Charlie" })), ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })), ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0, 85000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Alice", "Charlie" })), ("Department", NivaraColumn<string>.Create(new[] { "IT", "HR", "IT", "Finance" })), ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0, 85000.0 })));
 -->
 ```csharp
 // Built-in aggregation functions
@@ -935,7 +935,7 @@ Console.WriteLine($"Employee count: {countAgg.Apply(salaryColumn, allIndices)}")
 var grouped = frame.Query<Employee>()
     .GroupBy(e => e.Department)
     .Select(g => new { g.Key, AvgSalary = g.Average(e => e.Salary) })
-    .ToObjects();
+    .ToList();
 foreach (var group in grouped)
 {
     Console.WriteLine($"{group.Key}: Avg = {group.AvgSalary:C}");
@@ -979,7 +979,7 @@ public class MedianAggregation : AggregationFunction
 An aggregation is a plain class, so it can also be called directly against a column:
 
 <!-- gate
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })), ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" })), ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 65000.0, 78000.0 })));
 -->
 ```csharp
 // Use custom aggregation
@@ -1036,7 +1036,7 @@ using Nivara.Linq;
 using Nivara.Operations;
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Alice" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })),
     ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 }))
 );
@@ -1091,7 +1091,7 @@ Console.WriteLine(query.ExplainPlan());
 
 <!-- gate
 preamble: row-types
-locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
+locals: var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
 -->
 ```csharp
 // Execution is lazy by default. The engine optimizes the plan (predicate
@@ -1110,13 +1110,13 @@ var result = query.Collect();
 
 <!-- gate
 preamble: row-types
-locals: var leftFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B" }))); var rightFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y" }))); var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
+locals: var leftFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.Create(new[] { "A", "B" }))); var rightFrame = NivaraFrame.Create(("Id", NivaraColumn<int>.Create(new[] { 1, 2 })), ("Value", NivaraColumn<string>.Create(new[] { "X", "Y" }))); var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "Alice" })), ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })), ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 })));
 -->
 ```csharp
 // Structured exception handling
 try
 {
-    var errorResult = leftFrame.InnerJoin(rightFrame, "InvalidKey");
+    var errorResult = leftFrame.Join(rightFrame, JoinType.Inner, "InvalidKey");
 }
 catch (JoinException ex)
 {
@@ -1539,7 +1539,7 @@ int nextToken = sampler.Sample(logits, temperature: 0.8, topK: 50);
 using Nivara.IO;
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
 );
 
@@ -1572,7 +1572,7 @@ Export-side zero-copy (v1.5): set `UseZeroCopy = true` on `ArrowConversionOption
 using Nivara.IO;
 
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
 );
 
@@ -1599,9 +1599,9 @@ var parquetOptions = ParquetWriteOptions.Default.With(
 frame.ToParquet("employees_custom.parquet", parquetOptions);
 
 // Batch operations — frames come first
-var frame1 = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" })));
-var frame2 = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Bob" })));
-var frame3 = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie" })));
+var frame1 = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Alice" })));
+var frame2 = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Bob" })));
+var frame3 = NivaraFrame.Create(("Name", NivaraColumn<string>.Create(new[] { "Charlie" })));
 var frames = new[] { frame1, frame2, frame3 };
 NivaraParquetWriter.WriteParquetBatch(frames, "batch.parquet", parquetOptions);
 ```
@@ -1615,8 +1615,8 @@ preamble: row-types
 -->
 ```csharp
 var frame = NivaraFrame.Create(
-    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
-    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR" })),
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob" })),
+    ("Department", NivaraColumn<string>.Create(new[] { "IT", "HR" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 41 })),
     ("Salary", NivaraColumn<double>.Create(new[] { 75000.0, 82000.0 }))
 );

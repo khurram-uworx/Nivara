@@ -37,8 +37,8 @@ public class NivaraQueryFeatureTests
 
     static NivaraFrame CreatePeopleFrame()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" });
-        var cities = NivaraColumn<string>.CreateForReferenceType(new[] { "NYC", "LA", "NYC", "LA", "NYC" });
+        var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" });
+        var cities = NivaraColumn<string>.Create(new[] { "NYC", "LA", "NYC", "LA", "NYC" });
         var ages = NivaraColumn<int>.Create(new[] { 25, 40, 35, 20, 50 });
         var salaries = NivaraColumn<double>.Create(new[] { 80000.0, 120000.0, 95000.0, 50000.0, 110000.0 });
 
@@ -52,7 +52,7 @@ public class NivaraQueryFeatureTests
 
     static NivaraFrame CreateNullableFrame()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d" });
+        var names = NivaraColumn<string>.Create(new[] { "a", "b", "c", "d" });
         var ages = NivaraColumnFactory.CreateFromNullable(new int?[] { 30, null, 20, null });
         return NivaraFrame.Create(("Name", names), ("Age", ages));
     }
@@ -62,11 +62,11 @@ public class NivaraQueryFeatureTests
     [Test]
     public void Distinct_DedupsAllColumns_KeepsFirstOccurrence()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "a", "c", "b" });
-        var cities = NivaraColumn<string>.CreateForReferenceType(new[] { "NYC", "LA", "NYC", "LA", "LA" });
+        var names = NivaraColumn<string>.Create(new[] { "a", "b", "a", "c", "b" });
+        var cities = NivaraColumn<string>.Create(new[] { "NYC", "LA", "NYC", "LA", "LA" });
         using var frame = NivaraFrame.Create(("Name", names), ("City", cities));
 
-        var rows = frame.Query<NameCityRow>().Distinct().ToObjects();
+        var rows = frame.Query<NameCityRow>().Distinct().ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "a", "b", "c" }));
     }
@@ -76,7 +76,7 @@ public class NivaraQueryFeatureTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().DistinctBy(p => p.City).ToObjects();
+        var rows = frame.Query<Person>().DistinctBy(p => p.City).ToList();
 
         Assert.That(rows.Select(p => p.City), Is.EqualTo(new[] { "NYC", "LA" }));
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Alice", "Bob" }));
@@ -97,7 +97,7 @@ public class NivaraQueryFeatureTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().SelectRows(4, 0, 2).ToObjects();
+        var rows = frame.Query<Person>().SelectRows(4, 0, 2).ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Eve", "Alice", "Carol" }));
     }
@@ -119,7 +119,7 @@ public class NivaraQueryFeatureTests
 
         var rows = frame.Query<Person>()
             .OrderBy(p => p.Age, direction: SortDirection.Descending)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Eve", "Bob", "Carol", "Alice", "Dan" }));
     }
@@ -131,7 +131,7 @@ public class NivaraQueryFeatureTests
 
         var rows = frame.Query<NullablePerson>()
             .OrderBy(p => p.Age, nullOrdering: NullOrdering.NullsFirst)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "b", "d", "c", "a" }));
     }
@@ -143,7 +143,7 @@ public class NivaraQueryFeatureTests
 
         var rows = frame.Query<NullablePerson>()
             .OrderBy(p => p.Age, nullOrdering: NullOrdering.NullsLast)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "c", "a", "b", "d" }));
     }
@@ -151,14 +151,14 @@ public class NivaraQueryFeatureTests
     [Test]
     public void OrderBy_ThenBy_ComposeLexicographically()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "b", "a", "b", "a" });
+        var names = NivaraColumn<string>.Create(new[] { "b", "a", "b", "a" });
         var ages = NivaraColumn<int>.Create(new[] { 30, 20, 10, 40 });
         using var frame = NivaraFrame.Create(("Name", names), ("Age", ages));
 
         var rows = frame.Query<NameAgeRow>()
             .OrderBy(p => p.Name)
             .ThenBy(p => p.Age)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "a", "a", "b", "b" }));
         Assert.That(rows.Select(p => p.Age), Is.EqualTo(new[] { 20, 40, 10, 30 }));
@@ -167,14 +167,14 @@ public class NivaraQueryFeatureTests
     [Test]
     public void OrderBy_ThenByDescending_SortsWithinPrimaryGroups()
     {
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] { "b", "a", "b", "a" });
+        var names = NivaraColumn<string>.Create(new[] { "b", "a", "b", "a" });
         var ages = NivaraColumn<int>.Create(new[] { 30, 20, 10, 40 });
         using var frame = NivaraFrame.Create(("Name", names), ("Age", ages));
 
         var rows = frame.Query<NameAgeRow>()
             .OrderBy(p => p.Name)
             .ThenBy(p => p.Age, direction: SortDirection.Descending)
-            .ToObjects();
+            .ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "a", "a", "b", "b" }));
         Assert.That(rows.Select(p => p.Age), Is.EqualTo(new[] { 40, 20, 30, 10 }));
@@ -185,7 +185,7 @@ public class NivaraQueryFeatureTests
     {
         using var frame = CreatePeopleFrame();
 
-        var rows = frame.Query<Person>().OrderBy(p => p.Age * 2).ToObjects();
+        var rows = frame.Query<Person>().OrderBy(p => p.Age * 2).ToList();
 
         Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Dan", "Alice", "Carol", "Bob", "Eve" }));
     }
@@ -204,7 +204,7 @@ public class NivaraQueryFeatureTests
         Assert.That(frame.RowCount, Is.EqualTo(3));
         Assert.That(frame.GetColumn<int>("Salary")[0], Is.EqualTo(75000));
 
-        var rows = testFiles.CsvQuery.ToObjects();
+        var rows = testFiles.CsvQuery.ToList();
         Assert.That(rows.Select(r => r.Name), Is.EqualTo(new[] { "Alice", "Bob", "Charlie" }));
     }
 
@@ -213,7 +213,7 @@ public class NivaraQueryFeatureTests
     {
         using var testFiles = new TestFileScope();
 
-        var rows = testFiles.CsvQuery.Where(p => p.Age > 25).ToObjects();
+        var rows = testFiles.CsvQuery.Where(p => p.Age > 25).ToList();
 
         Assert.That(rows.Select(r => r.Name), Is.EqualTo(new[] { "Alice", "Charlie" }));
     }
@@ -230,7 +230,7 @@ public class NivaraQueryFeatureTests
         Assert.That(frame.RowCount, Is.EqualTo(3));
         Assert.That(frame.GetColumn<double>("Salary")[1], Is.EqualTo(65000));
 
-        var rows = testFiles.JsonQuery.ToObjects();
+        var rows = testFiles.JsonQuery.ToList();
         Assert.That(rows.Select(r => r.Name), Is.EqualTo(new[] { "Alice", "Bob", "Charlie" }));
     }
 
@@ -239,7 +239,7 @@ public class NivaraQueryFeatureTests
     {
         using var testFiles = new TestFileScope();
 
-        var rows = testFiles.JsonQuery.Where(p => p.Salary > 70000).ToObjects();
+        var rows = testFiles.JsonQuery.Where(p => p.Salary > 70000).ToList();
 
         Assert.That(rows.Select(r => r.Name), Is.EqualTo(new[] { "Alice", "Charlie" }));
     }
