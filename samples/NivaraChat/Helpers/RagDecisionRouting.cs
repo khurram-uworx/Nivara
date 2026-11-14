@@ -15,7 +15,15 @@ public static class RagDecisionRouting
         if (chunks.Count == 0)
             throw new ArgumentException("At least one retrieved chunk is required.", nameof(chunks));
 
-        var decisions = LayaRetrievalDecisionHead.Evaluate(query, chunks, confidenceThreshold);
+        return SelectBestDecisionFrom(LayaRetrievalDecisionHead.Evaluate(query, chunks, confidenceThreshold));
+    }
+
+    public static LayaChunkDecision SelectBestDecisionFrom(IReadOnlyList<LayaChunkDecision> decisions)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+        if (decisions.Count == 0)
+            throw new ArgumentException("At least one Laya decision is required.", nameof(decisions));
+
         var accepted = decisions
             .Where(d => d.Accepted)
             .OrderByDescending(d => d.AnswerConfidence)
