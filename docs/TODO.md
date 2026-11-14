@@ -57,16 +57,18 @@ Tasks are sequential because the sample data contract depends on the new differe
 
 ## Planned commits
 
-1. `aff78cd5` — `docs: plan adaptive Laya head training in TODO.md`
-2. `f4eb1144` — `docs: refine adaptive Laya training plan`
-3. `ae879571`, `b1fb2c8e` — existing #981 decision-layer commits retained on this branch
+1. `b1fb2c8e`, `ae879571` — existing #981 decision-layer commits retained on this branch
+2. `aff78cd5` — `docs: plan adaptive Laya head training in TODO.md`
+3. `f4eb1144` — `docs: refine adaptive Laya training plan`
 4. `e5aa1612` — `fix(samples): include chunk content in Laya decisions`
 5. `d8d1b45d` — `feat(ai): expose differentiable Laya choice logits`
 6. `42c204a4` — `feat(samples): train Laya head from labeled retrieval examples`
 7. `c5cc7243` — `feat(samples): persist adaptive Laya head updates`
 8. `d32cbad5` — `style: fix adaptive training test formatting`
-9. `b4aed006` — `test(samples): cover adaptive RAG decision routing`
-10. After both branch reviews pass, remove this plan in its own commit.
+9. `83e401b3` — `docs: record adaptive Laya implementation verification`
+10. `b4aed006` — `test(samples): cover adaptive RAG decision routing`
+11. `c4d63a71` — `docs: record adaptive routing verification`
+12. After both branch reviews pass, remove this plan in its own commit.
 
 ## Implementation and verification status
 
