@@ -10,9 +10,11 @@ The current branch already contains the #981 decision-layer commits (`ae879571`,
 
 The current `LayaDecisionHead.Forward` copies choice logits to `float[]` and builds detached host-side features. #982 therefore adds a differentiable choice-forward API in `Nivara.Extensions`, sharing the canonical head/scorer computation while preserving inference behavior. Training is limited to the type embedding, Laya head layers, and relevance scorer. Keep the act-head weights unchanged because the feedback labels do not contain action labels; do not gate on `ActionProbability`.
 
+The #981 inference path currently tokenizes `query` as both the question and the Laya state; it never includes the retrieved chunk's content in ModernBERT input (`LayaRetrievalDecisionHead.cs:112-125`). Correct this before training so the relevance labels supervise actual query/chunk pairs, and pin the prompt behavior with a sample test.
+
 ## Operational choices
 
-- Binary labels: grade `0` is negative; grades `1` and `2` are relevant. Use only resolved #980 labels; invalid or unresolved examples must not silently become negatives.
+- Binary labels: grade `0` is negative; grades `1` and `2` are relevant. Train on the resolved judge labels from #980; do not use leakage-prone auto/heading-derived labels for the baseline comparison. Invalid or unresolved examples must not silently become negatives.
 - Feedback batch threshold: 10 examples, matching `OnlineLearningMode`.
 - Optimizer: Adam at `0.0005`, five epochs over each completed feedback batch, matching the existing NivaraChat incremental-training defaults.
 - Calibration: retain the existing temperature values for #982; report baseline-versus-trained choice/routing metrics, and do not claim post-update confidence remains calibrated. Broader evaluation is #983.
@@ -34,11 +36,12 @@ The current `LayaDecisionHead.Forward` copies choice logits to `float[]` and bui
 
 ## Execution order
 
-1. Add the differentiable training-forward API and tests. Preserve exact inference output and verify the relevant choice-path parameters receive gradients.
-2. Add deterministic frozen-feature training examples and baseline/holdout metrics. Keep ModernBERT outside the graph.
-3. Implement 10-example feedback batching and the five-epoch Adam update at 0.0005. Make failed updates explicit and do not discard unconsumed examples.
-4. Add adaptive save/restore over the pretrained head, exact parameter/decision reload tests, and the explicit both-files-missing fallback.
-5. Expose the updater for #983 without taking over its end-to-end loop or full evaluation.
+1. Fix Laya prompt construction to encode retrieved chunk content and add a regression test that different chunks produce different prompt states for the same query.
+2. Add the differentiable training-forward API and tests. Preserve inference output and verify intended choice-path parameters receive gradients.
+3. Add deterministic frozen-feature examples from judge labels and baseline/holdout metrics. Keep ModernBERT outside the graph and train/eval splits query-disjoint.
+4. Implement 10-example feedback batching and the five-epoch Adam update at 0.0005. Make failed updates explicit and do not discard unconsumed examples.
+5. Add adaptive save/restore over the pretrained head, exact parameter/decision reload tests, and the explicit both-files-missing fallback.
+6. Expose the updater for #983 without taking over its end-to-end loop or full evaluation.
 
 Tasks are sequential because the sample data contract depends on the new differentiable API and persistence depends on the updater. No parallel implementation.
 
@@ -55,10 +58,11 @@ Tasks are sequential because the sample data contract depends on the new differe
 ## Planned commits
 
 1. `docs: plan adaptive Laya head training in TODO.md`
-2. `feat(ai): expose differentiable Laya choice logits`
-3. `feat(samples): train Laya head from labeled retrieval examples`
-4. `feat(samples): persist adaptive Laya head updates`
-5. After both branch reviews pass, remove this plan in its own commit.
+2. `fix(samples): include chunk content in Laya decisions`
+3. `feat(ai): expose differentiable Laya choice logits`
+4. `feat(samples): train Laya head from labeled retrieval examples`
+5. `feat(samples): persist adaptive Laya head updates`
+6. After both branch reviews pass, remove this plan in its own commit.
 
 ## GitHub issues log
 
