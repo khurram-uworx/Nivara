@@ -65,6 +65,7 @@ Tasks are sequential because the sample data contract depends on the new differe
 6. `d32cbad5` — `style: fix adaptive training test formatting`
 7. `b4aed006` — `test(samples): cover adaptive RAG decision routing`
 8. `b88de9f0` — `test(samples): assert bit-exact decoded adaptive decisions`
+9. `9fbaa3ba` — `test(samples): assert adaptive update changes choice logits`
 
 ## Implementation and verification status
 
