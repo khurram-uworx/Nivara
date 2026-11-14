@@ -74,9 +74,10 @@ Tasks are sequential because the sample data contract depends on the new differe
 - [x] Training data and updater: resolved judge grades map to binary choice targets; frozen features are extracted outside `Grad()`; query splits are deterministic and disjoint; training updates the choice parameters only.
 - [x] Feedback and persistence: updates wait for a complete 10-example batch, save atomically, restore the prior in-memory head on failure, and retain buffered examples when an update/save fails. Adaptive state is loaded over baseline weights when present.
 - [x] G2 test-coverage review: added deterministic accepted-choice/fallback tests without model files and bit-exact decoded-decision assertions after persistence reload.
+- [x] `dotnet build Nivara.slnx` — passed; one existing NU5104 warning for the prerelease Parquet.Net dependency.
 - [x] Formatting: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` — passed after the formatting correction.
 - [x] `dotnet test tests\Nivara.Tests\Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Nivara.Tests.AutoDiff.LayaDecisionHeadTests|FullyQualifiedName~Nivara.Tests.AutoDiff.LayaCalibrationTests|FullyQualifiedName~Nivara.Tests.AutoDiff.SerializationTests|FullyQualifiedName~Nivara.Tests.Samples.Adaptive|FullyQualifiedName~Nivara.Tests.Samples.LayaRetrievalDecisionHeadTests|FullyQualifiedName~Nivara.Tests.Samples.RagDecisionRoutingTests"` — passed, 68/68; covers Laya head/calibration/serialization, chunk-conditioned prompt/routing, adaptive data/training, and feedback persistence.
-- [ ] G2 branch-wide and plan-to-implementation reviews — in progress.
+- [x] G2 branch-wide and plan-to-implementation reviews — passed; the discovered routing-test and decoded-decision verification gaps were closed in focused test commits.
 - Full solution test suite not run. End-to-end training with judge labels was not run because `samples/data/nivarachat/eval/relevance.tsv` is absent; the local Laya checkpoint exists. Synthetic deterministic tests cover training and persistence without downloading model weights.
 - No push or issue closure has occurred; #981 and #982 remain open pending combined landing.
 
