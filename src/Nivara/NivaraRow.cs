@@ -16,12 +16,24 @@ namespace Nivara;
 public readonly struct NivaraRow
 {
     readonly IColumn[] columns;
+    readonly string[]? columnNames;
     readonly IReadOnlyDictionary<string, int>? map;
     readonly int rowIndex;
 
+    internal NivaraRow(IColumn[] columns, string[] columnNames, IReadOnlyDictionary<string, int> map, int rowIndex)
+    {
+        this.columns = columns;
+        this.columnNames = columnNames;
+        this.map = map;
+        this.rowIndex = rowIndex;
+    }
+
+    // Legacy constructor: column names are materialised lazily (allocating) on access. Retained for
+    // backwards compatibility with callers that only have a name->index map.
     internal NivaraRow(IColumn[] columns, IReadOnlyDictionary<string, int> map, int rowIndex)
     {
         this.columns = columns;
+        this.columnNames = null;
         this.map = map;
         this.rowIndex = rowIndex;
     }
@@ -34,14 +46,17 @@ public readonly struct NivaraRow
     internal IColumn[] Columns => columns;
 
     /// <summary>
-    /// Gets the column names for this row's source frame
+    /// Gets the column names for this row's source frame. On the framework's hot path (e.g.
+    /// <see cref="NivaraFrameExtensions.Where"/>) this returns the shared, pre-built array and
+    /// does not allocate; otherwise it materialises a fresh array.
     /// </summary>
-    public string[] ColumnNames => map is not null
-        ? [.. map.Keys]
-        : [];
+    public string[] ColumnNames => columnNames is not null
+        ? columnNames
+        : (map is not null ? map.Keys.ToArray() : Array.Empty<string>());
 
     /// <summary>
-    /// Gets the value at the specified column as an object, or <c>null</c> for a null cell
+    /// Gets the value at the specified column as an object, or <c>null</c> for a null cell.
+    /// Boxes value-type cells; prefer <see cref="GetValue{T}"/> in hot paths.
     /// </summary>
     /// <param name="columnName">The name of the column</param>
     /// <returns>The value at the column, or <c>null</c> when the cell is null</returns>
@@ -126,7 +141,71 @@ public readonly struct NivaraRow
     /// <exception cref="ColumnNotFoundException">Thrown when the column is not found</exception>
     public bool IsNull(string columnName) => GetColumn(columnName).IsNull(rowIndex);
 
-    IColumn GetColumn(string columnName)
+    /// <summary>
+    /// Resolves a column name to its zero-based index within this row's source frame.
+    /// </summary>
+    /// <param name="columnName">The name of the column</param>
+    /// <returns>The zero-based column index</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the row is the default struct value</exception>
+    /// <exception cref="ArgumentException">Thrown when columnName is null or whitespace</exception>
+    /// <exception cref="ColumnNotFoundException">Thrown when the column is not found</exception>
+    public int GetColumnIndex(string columnName)
+    {
+        if (columns is null)
+            throw new InvalidOperationException("NivaraRow is the default value and does not reference a frame row.");
+
+        if (string.IsNullOrWhiteSpace(columnName))
+            throw new ArgumentException("Column name cannot be null or whitespace", nameof(columnName));
+
+        if (map is null || !map.TryGetValue(columnName, out var index))
+            throw new ColumnNotFoundException(columnName, map?.Keys ?? []);
+
+        return index;
+    }
+
+    /// <summary>
+    /// Attempts to resolve a column name to its zero-based index within this row's source frame.
+    /// </summary>
+    /// <param name="columnName">The name of the column</param>
+    /// <param name="index">When this method returns <c>true</c>, the zero-based column index</param>
+    /// <returns><c>true</c> when the column exists; otherwise <c>false</c></returns>
+    public bool TryGetColumnIndex(string columnName, out int index)
+    {
+        index = -1;
+
+        if (columns is null || map is null || string.IsNullOrWhiteSpace(columnName))
+            return false;
+
+        return map.TryGetValue(columnName, out index);
+    }
+
+    /// <summary>
+    /// Gets the column at the specified zero-based index.
+    /// </summary>
+    /// <param name="columnIndex">The zero-based column index</param>
+    /// <returns>The column at that index</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the row is the default struct value</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when columnIndex is out of range</exception>
+    public IColumn GetColumn(int columnIndex)
+    {
+        if (columns is null)
+            throw new InvalidOperationException("NivaraRow is the default value and does not reference a frame row.");
+
+        if (columnIndex < 0 || columnIndex >= columns.Length)
+            throw new ArgumentOutOfRangeException(nameof(columnIndex));
+
+        return columns[columnIndex];
+    }
+
+    /// <summary>
+    /// Gets the column with the specified name.
+    /// </summary>
+    /// <param name="columnName">The name of the column</param>
+    /// <returns>The column with that name</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the row is the default struct value</exception>
+    /// <exception cref="ArgumentException">Thrown when columnName is null or whitespace</exception>
+    /// <exception cref="ColumnNotFoundException">Thrown when the column is not found</exception>
+    public IColumn GetColumn(string columnName)
     {
         if (columns is null)
             throw new InvalidOperationException("NivaraRow is the default value and does not reference a frame row.");
@@ -140,7 +219,13 @@ public readonly struct NivaraRow
         return columns[index];
     }
 
-    bool TryGetColumn(string columnName, out IColumn? column)
+    /// <summary>
+    /// Attempts to get the column with the specified name.
+    /// </summary>
+    /// <param name="columnName">The name of the column</param>
+    /// <param name="column">When this method returns <c>true</c>, the column with that name</param>
+    /// <returns><c>true</c> when the column exists; otherwise <c>false</c></returns>
+    public bool TryGetColumn(string columnName, out IColumn? column)
     {
         column = null;
 
@@ -152,6 +237,26 @@ public readonly struct NivaraRow
 
         column = columns[index];
         return true;
+    }
+
+    /// <summary>
+    /// Creates a cached read delegate for the specified column, resolving the nullable-element
+    /// probe once. The returned delegate performs no dictionary lookup or reflection per call.
+    /// </summary>
+    public static Func<int, T> CreateColumnReader<T>(IColumn column, string? columnName = null)
+        => NullableColumnReader.CreateReader<T>(column, columnName);
+
+    /// <summary>
+    /// Wraps this row's columns in a <see cref="NivaraRowReader"/> so columns can be pre-resolved
+    /// and read without per-cell string lookups.
+    /// </summary>
+    public NivaraRowReader AsReader()
+    {
+        if (columns is null)
+            throw new InvalidOperationException("NivaraRow is the default value and does not reference a frame row.");
+
+        var names = columnNames ?? ColumnNames;
+        return new NivaraRowReader(names, columns);
     }
 
     // Reads a nullable-element column (NivaraColumn<T?>, which implements IColumn<T?> rather than
@@ -184,6 +289,22 @@ public readonly struct NivaraRow
                     readCore.MakeGenericMethod(t).CreateDelegate(typeof(Func<,,>)
                         .MakeGenericType(typeof(IColumn), typeof(int), t)));
             return ((Func<IColumn, int, T>)reader)(column, rowIndex);
+        }
+
+        public static Func<int, T> CreateReader<T>(IColumn column, string? columnName = null)
+        {
+            if (column is IColumn<T> typed)
+                return i => typed[i];
+
+            if (IsNullableColumnFor<T>(column))
+            {
+                var reader = (Func<IColumn, int, T>)cache.GetOrAdd(typeof(T), static t =>
+                    readCore.MakeGenericMethod(t).CreateDelegate(typeof(Func<,,>)
+                        .MakeGenericType(typeof(IColumn), typeof(int), t)));
+                return i => reader(column, i);
+            }
+
+            throw new ColumnTypeMismatchException(columnName ?? string.Empty, typeof(T), column.ElementType);
         }
 
         static TValue ReadCore<TValue>(IColumn column, int rowIndex)

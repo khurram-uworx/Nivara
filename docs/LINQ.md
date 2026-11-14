@@ -570,3 +570,19 @@ var stats = frame.Query<Person>()
 | ExecutionEngine | `src/Nivara/Execution/ExecutionEngine.cs` |
 | NivaraFrameExtensions (joins) | `src/Nivara/NivaraFrameExtensions.cs` |
 | Window functions | `src/Nivara/WindowFrameExtensions.cs`, `src/Nivara/Tensors/WindowFunctions.cs`, `src/Nivara/Tensors/PartitionedWindowEngine.cs`, `src/Nivara/Operations/WindowSpec.cs` |
+
+---
+
+## Row-level access cost
+
+`NivaraFrame.Where(Func<NivaraRow, bool>)` is the only filtering API that accepts ordinary C# code
+(no expression tree, no typed row class). It is convenient but expensive: each cell read pays a
+case-insensitive dictionary lookup plus a runtime type probe, and `NivaraRow.ColumnNames` allocates
+a fresh array on every read. The object indexer (`row["Col"]`) boxes value-type cells. Prefer the
+expression/typed overloads in hot paths.
+
+To make row-level code fast without expression trees, pre-resolve columns with
+`NivaraRowReader` / `NivaraRowAccessor` (e.g. `frame.RowReader()`) and read through
+`NivaraColumnReader<T>` / `NivaraColumnAccessor<T>`, which resolves the nullable-element probe once
+at construction and reads with a single delegate invocation per cell. `NivaraRow.AsReader()` exposes
+the same reader from an existing row.
