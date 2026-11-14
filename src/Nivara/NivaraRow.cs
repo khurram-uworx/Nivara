@@ -39,6 +39,42 @@ public readonly struct NivaraRow
     }
 
     /// <summary>
+    /// Creates a <see cref="NivaraRow"/> view for testing or interop scenarios that need to invoke
+    /// row-based predicates outside a frame. The row is a thin view over the provided columns and
+    /// index; it does not copy cell data, but the caller is responsible for supplying a consistent
+    /// column array and name-to-index map.
+    /// </summary>
+    /// <param name="columns">The columns backing the row, in index order matching <paramref name="columnIndexMap"/>.</param>
+    /// <param name="columnIndexMap">A case-insensitive map from column name to column index.</param>
+    /// <param name="rowIndex">The zero-based row index within each column.</param>
+    /// <returns>A row view that can be passed to predicates such as <see cref="NivaraFrameExtensions.Where"/> callbacks.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="columns"/> or <paramref name="columnIndexMap"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="rowIndex"/> is negative.</exception>
+    public static NivaraRow Create(IReadOnlyList<IColumn> columns, IReadOnlyDictionary<string, int> columnIndexMap, int rowIndex)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(columnIndexMap);
+        ArgumentOutOfRangeException.ThrowIfNegative(rowIndex);
+
+        var columnArray = columns as IColumn[] ?? columns.ToArray();
+        var names = new string[columnArray.Length];
+        foreach (var kvp in columnIndexMap)
+        {
+            if (kvp.Value >= 0 && kvp.Value < names.Length)
+                names[kvp.Value] = kvp.Key;
+        }
+
+        for (int i = 0; i < names.Length; i++)
+            names[i] ??= string.Empty;
+
+        var map = columnIndexMap as Dictionary<string, int>;
+        if (map is null || !ReferenceEquals(map.Comparer, StringComparer.OrdinalIgnoreCase))
+            map = new Dictionary<string, int>(columnIndexMap, StringComparer.OrdinalIgnoreCase);
+
+        return new NivaraRow(columnArray, names, map, rowIndex);
+    }
+
+    /// <summary>
     /// Gets the zero-based position of this row within the source frame
     /// </summary>
     public int RowIndex => rowIndex;
