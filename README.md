@@ -8,15 +8,15 @@ Nivara is designed for developers who want predictable behavior, strong typing, 
 
 ## Why Nivara
 
-- https://khurram-uworx.github.io/2026/01/12/LLMs-Equalizers.html
+- **Motivation:** [LLMs as equalizers](https://khurram-uworx.github.io/2026/01/12/LLMs-Equalizers.html) — background on why Nivara prioritizes correctness and explicitness.
 
 Most DataFrame-style libraries trade correctness and type safety for convenience. Nivara takes a different approach:
 
 - **Strong typing end-to-end** — column types are explicit and enforced
-- **Explicit null handling** — no NaN-based semantics or hidden behavior
+- **Explicit null handling** — nulls are tracked with validity masks rather than NaN-based semantics
 - **Immutable data model** — operations return new data structures
 - **Interop with .NET primitives** — use Nivara for tabular data and `System.Numerics.Tensors` for tensor math
-- **Schema-aware query planning** — errors surface early, not at runtime
+- **Schema-aware query planning** — validates schema and expression shape where possible, though some issues can still surface during execution
 
 If you care about correctness, debuggability, and performance in .NET data processing, Nivara is built for you.
 
