@@ -101,6 +101,7 @@ public sealed class AdaptiveFeedbackCollectorTests
             Assert.That(ParameterBits(head), Is.EqualTo(ParameterBits(restored)));
             Assert.That(ChoiceLogits(head), Is.EqualTo(ChoiceLogits(restored)));
             Assert.That(ParameterBits(head), Is.Not.EqualTo(baseline));
+            Assert.That(ChoiceLogits(head), Is.Not.EqualTo(logitsBefore));
             Assert.That(restoredDecision.QuestionId, Is.EqualTo(decision.QuestionId));
             Assert.That(restoredDecision.Type, Is.EqualTo(decision.Type));
             Assert.That(restoredDecision.Choice, Is.EqualTo(decision.Choice));
