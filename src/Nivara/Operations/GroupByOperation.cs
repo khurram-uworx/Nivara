@@ -341,6 +341,9 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+        => Execute(input, default);
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input, CancellationToken ct)
     {
         if (input == null)
             throw new ArgumentNullException(nameof(input));
@@ -350,9 +353,11 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
 
         try
         {
+            ct.ThrowIfCancellationRequested();
+
             // Create grouped data using hash-based grouping
             var keyColumnNames = GroupByColumns.Select(expr => GetColumnName(expr, input)).ToArray();
-            var groupedData = CreateGroupsInternal(input, keyColumnNames);
+            var groupedData = CreateGroupsInternal(input, keyColumnNames, ct: ct);
 
             // Create result columns with distinct key values
             var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
@@ -387,10 +392,18 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
 
             return resultColumns;
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             throw new QueryExecutionException($"GroupBy operation failed: {ex.Message}", ex);
         }
+    }
+
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input, ct));
     }
 
     /// <summary>
@@ -401,7 +414,7 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
     /// <param name="input">The input columns</param>
     /// <param name="keyColumns">The key column names</param>
     /// <returns>The grouped data</returns>
-    internal static GroupedData CreateGroupsInternal(IReadOnlyDictionary<string, IColumn> input, string[] keyColumns, int offset = 0)
+    internal static GroupedData CreateGroupsInternal(IReadOnlyDictionary<string, IColumn> input, string[] keyColumns, int offset = 0, CancellationToken ct = default)
     {
         var firstColumn = input.Values.First();
         var rowCount = firstColumn.Length;
@@ -418,6 +431,8 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
 
             for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
+                if ((rowIndex & 255) == 0)
+                    ct.ThrowIfCancellationRequested();
                 int hash = hashes[rowIndex];
 
                 if (!hashBuckets.TryGetValue(hash, out var reps))

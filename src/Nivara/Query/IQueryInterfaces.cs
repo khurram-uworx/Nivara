@@ -16,7 +16,10 @@ public interface IQueryOperation
     ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
         IReadOnlyDictionary<string, IColumn> input,
         CancellationToken ct = default)
-        => new(Execute(input));
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input));
+    }
 }
 
 public interface IQuerySource : IDisposable
@@ -25,6 +28,12 @@ public interface IQuerySource : IDisposable
     bool IsLazy { get; }
     IReadOnlyDictionary<string, IColumn> Execute();
 
+    /// <summary>
+    /// Default implementation is a synchronous fallback: it runs <see cref="Execute"/> on the
+    /// calling thread and wraps the result in <see cref="Task.FromResult{TResult}(TResult)"/>.
+    /// It observes the token only at entry. Implementations with genuine async I/O should
+    /// override this method.
+    /// </summary>
     Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

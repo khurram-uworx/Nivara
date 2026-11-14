@@ -170,6 +170,9 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+        => Execute(input, default);
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input, CancellationToken ct)
     {
         if (input == null)
             throw new ArgumentNullException(nameof(input));
@@ -179,6 +182,8 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
 
         try
         {
+            ct.ThrowIfCancellationRequested();
+
             // Get the row count from any column
             var rowCount = input.Values.First().Length;
 
@@ -189,7 +194,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
             }
 
             // Compute sort indices
-            var sortIndices = ComputeSortIndices(input, rowCount);
+            var sortIndices = ComputeSortIndices(input, rowCount, ct);
 
             // Reorder all columns using the computed indices
             var sortedColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
@@ -201,10 +206,18 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
 
             return sortedColumns;
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             throw new QueryExecutionException($"Sort operation failed: {ex.Message}", ex);
         }
+    }
+
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input, ct));
     }
 
     /// <summary>
@@ -212,12 +225,15 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
     /// Fast path: pre-captures all column references once via delegates,
     /// eliminating per-comparison dictionary lookup and type-switch dispatch.
     /// </summary>
-    private int[] ComputeSortIndices(IReadOnlyDictionary<string, IColumn> input, int rowCount)
+    private int[] ComputeSortIndices(IReadOnlyDictionary<string, IColumn> input, int rowCount, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         var indices = Enumerable.Range(0, rowCount).ToArray();
 
         if (SortKeyComparerFactory.TryCreatePreCapturedComparer(input, sortKeys, out var comparer))
         {
+            ct.ThrowIfCancellationRequested();
             Array.Sort(indices, comparer);
             return indices;
         }

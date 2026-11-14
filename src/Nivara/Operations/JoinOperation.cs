@@ -272,12 +272,17 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+        => Execute(input, default);
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input, CancellationToken ct)
     {
         // Note: For join operations, the input parameter is not used as we work with two separate DataFrames
         // This is a limitation of the current IQueryOperation interface design
 
         try
         {
+            ct.ThrowIfCancellationRequested();
+
             // Validate join keys exist in both DataFrames and check type compatibility
             foreach (var joinKey in joinKeys)
             {
@@ -305,15 +310,24 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             }
 
             // Compute join indices
-            var joinIndices = ComputeJoinIndices();
+            ct.ThrowIfCancellationRequested();
+            var joinIndices = ComputeJoinIndices(ct);
 
             // Materialize the join result
-            return MaterializeJoinResult(joinIndices);
+            return MaterializeJoinResult(joinIndices, ct);
         }
-        catch (Exception ex) when (ex is not QueryExecutionException and not QuerySchemaValidationException)
+        catch (Exception ex) when (ex is not QueryExecutionException and not QuerySchemaValidationException and not OperationCanceledException)
         {
             throw new QueryExecutionException($"Join operation failed: {ex.Message}", ex);
         }
+    }
+
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input, ct));
     }
 
     /// <summary>
@@ -343,7 +357,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Computes the join indices based on the join type and keys
     /// </summary>
-    private JoinIndices ComputeJoinIndices()
+    private JoinIndices ComputeJoinIndices(CancellationToken ct = default)
     {
         // Get row counts
         var leftRowCount = leftColumns.Values.FirstOrDefault()?.Length ?? 0;
@@ -355,16 +369,18 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             return HandleEmptyDataFrames(leftRowCount, rightRowCount);
         }
 
+        ct.ThrowIfCancellationRequested();
+
         // Build hash map for right DataFrame
-        var rightHashMap = BuildHashMap(rightColumns, joinKeys.Select(jk => jk.RightColumn).ToArray(), rightRowCount);
+        var rightHashMap = BuildHashMap(rightColumns, joinKeys.Select(jk => jk.RightColumn).ToArray(), rightRowCount, ct: ct);
 
         // Perform join based on type
         return joinType switch
         {
-            JoinType.Inner => ComputeInnerJoinIndices(leftRowCount, rightHashMap),
-            JoinType.Left => ComputeLeftJoinIndices(leftRowCount, rightHashMap),
-            JoinType.Right => ComputeRightJoinIndices(leftRowCount, rightRowCount, rightHashMap),
-            JoinType.FullOuter => ComputeFullOuterJoinIndices(leftRowCount, rightRowCount, rightHashMap),
+            JoinType.Inner => ComputeInnerJoinIndices(leftRowCount, rightHashMap, ct),
+            JoinType.Left => ComputeLeftJoinIndices(leftRowCount, rightHashMap, ct),
+            JoinType.Right => ComputeRightJoinIndices(leftRowCount, rightRowCount, rightHashMap, ct),
+            JoinType.FullOuter => ComputeFullOuterJoinIndices(leftRowCount, rightRowCount, rightHashMap, ct),
             _ => throw new ArgumentException($"Unsupported join type: {joinType}")
         };
     }
@@ -439,7 +455,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         IReadOnlyDictionary<string, IColumn> columns,
         string[] keyColumns,
         int rowCount,
-        int offset = 0)
+        int offset = 0,
+        CancellationToken ct = default)
     {
         var hashMap = new Dictionary<CompositeKey, List<int>>();
 
@@ -447,6 +464,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
         for (int i = 0; i < rowCount; i++)
         {
+            if ((i & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             // Null keys never match in a join; skip them to keep hash buckets clean.
             bool hasNull = false;
             for (int j = 0; j < readers.Length; j++)
@@ -482,7 +501,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Computes indices for inner join
     /// </summary>
-    private JoinIndices ComputeInnerJoinIndices(int leftRowCount, Dictionary<CompositeKey, List<int>> rightHashMap)
+    private JoinIndices ComputeInnerJoinIndices(int leftRowCount, Dictionary<CompositeKey, List<int>> rightHashMap, CancellationToken ct = default)
     {
         var leftIndices = new List<int>();
         var rightIndices = new List<int>();
@@ -492,6 +511,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
+            if ((leftIndex & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             var leftKeyValues = new object?[leftKeyColumns.Length];
             for (int j = 0; j < leftKeyColumns.Length; j++)
             {
@@ -516,7 +537,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Computes indices for left join
     /// </summary>
-    private JoinIndices ComputeLeftJoinIndices(int leftRowCount, Dictionary<CompositeKey, List<int>> rightHashMap)
+    private JoinIndices ComputeLeftJoinIndices(int leftRowCount, Dictionary<CompositeKey, List<int>> rightHashMap, CancellationToken ct = default)
     {
         var leftIndices = new List<int>();
         var rightIndices = new List<int>();
@@ -526,6 +547,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
+            if ((leftIndex & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             var leftKeyValues = new object?[leftKeyColumns.Length];
             for (int j = 0; j < leftKeyColumns.Length; j++)
             {
@@ -556,7 +579,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Computes indices for right join
     /// </summary>
-    private JoinIndices ComputeRightJoinIndices(int leftRowCount, int rightRowCount, Dictionary<CompositeKey, List<int>> rightHashMap)
+    private JoinIndices ComputeRightJoinIndices(int leftRowCount, int rightRowCount, Dictionary<CompositeKey, List<int>> rightHashMap, CancellationToken ct = default)
     {
         var leftIndices = new List<int>();
         var rightIndices = new List<int>();
@@ -568,6 +591,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
+            if ((leftIndex & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             var leftKeyValues = new object?[leftKeyColumns.Length];
             for (int j = 0; j < leftKeyColumns.Length; j++)
             {
@@ -590,6 +615,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         // Add unmatched right rows
         for (int rightIndex = 0; rightIndex < rightRowCount; rightIndex++)
         {
+            if ((rightIndex & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             if (!matchedRightIndices.Contains(rightIndex))
             {
                 leftIndices.Add(-1);
@@ -603,7 +630,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Computes indices for full outer join
     /// </summary>
-    private JoinIndices ComputeFullOuterJoinIndices(int leftRowCount, int rightRowCount, Dictionary<CompositeKey, List<int>> rightHashMap)
+    private JoinIndices ComputeFullOuterJoinIndices(int leftRowCount, int rightRowCount, Dictionary<CompositeKey, List<int>> rightHashMap, CancellationToken ct = default)
     {
         var leftIndices = new List<int>();
         var rightIndices = new List<int>();
@@ -615,6 +642,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
         for (int leftIndex = 0; leftIndex < leftRowCount; leftIndex++)
         {
+            if ((leftIndex & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             var leftKeyValues = new object?[leftKeyColumns.Length];
             for (int j = 0; j < leftKeyColumns.Length; j++)
             {
@@ -643,6 +672,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         // Add unmatched right rows
         for (int rightIndex = 0; rightIndex < rightRowCount; rightIndex++)
         {
+            if ((rightIndex & 255) == 0)
+                ct.ThrowIfCancellationRequested();
             if (!matchedRightIndices.Contains(rightIndex))
             {
                 leftIndices.Add(-1);
@@ -656,7 +687,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Materializes the join result using the computed indices
     /// </summary>
-    private IReadOnlyDictionary<string, IColumn> MaterializeJoinResult(JoinIndices joinIndices)
+    private IReadOnlyDictionary<string, IColumn> MaterializeJoinResult(JoinIndices joinIndices, CancellationToken ct = default)
     {
         var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -680,11 +711,11 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             if (joinKey != null && (joinType == JoinType.Right || joinType == JoinType.FullOuter))
             {
                 // For right and full outer joins, coalesce join key values
-                resultColumn = CreateCoalescedJoinKeyColumn(kvp.Value, rightColumns[joinKey.RightColumn], joinIndices);
+                resultColumn = CreateCoalescedJoinKeyColumn(kvp.Value, rightColumns[joinKey.RightColumn], joinIndices, ct);
             }
             else
             {
-                resultColumn = GatherColumn(kvp.Value, joinIndices.LeftIndices);
+                resultColumn = GatherColumn(kvp.Value, joinIndices.LeftIndices, ct);
             }
 
             resultColumns[columnName] = resultColumn;
@@ -701,7 +732,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             if (!isJoinKey)
             {
                 var columnName = ResolveColumnName(kvp.Key, false, leftColumnNames, rightColumnNames);
-                var resultColumn = GatherColumn(kvp.Value, joinIndices.RightIndices);
+                var resultColumn = GatherColumn(kvp.Value, joinIndices.RightIndices, ct);
                 resultColumns[columnName] = resultColumn;
                 usedNames.Add(columnName);
             }
@@ -713,17 +744,17 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Creates a coalesced join key column that uses left values when available, otherwise right values
     /// </summary>
-    private IColumn CreateCoalescedJoinKeyColumn(IColumn leftColumn, IColumn rightColumn, JoinIndices joinIndices)
+    private IColumn CreateCoalescedJoinKeyColumn(IColumn leftColumn, IColumn rightColumn, JoinIndices joinIndices, CancellationToken ct = default)
     {
         var elementType = Nullable.GetUnderlyingType(leftColumn.ElementType) ?? leftColumn.ElementType;
         var kernel = coalesceKernelCache.GetOrAdd(elementType, static t => coalesceKernel.MakeGenericMethod(t));
-        return (IColumn)kernel.Invoke(null, new object[] { leftColumn, rightColumn, joinIndices })!;
+        return (IColumn)kernel.Invoke(null, new object[] { leftColumn, rightColumn, joinIndices, ct })!;
     }
 
     /// <summary>
     /// Creates a coalesced join key column for a specific type
     /// </summary>
-    static IColumn CreateCoalescedJoinKeyColumnTyped<T>(IColumn leftColumn, IColumn rightColumn, JoinIndices joinIndices)
+    static IColumn CreateCoalescedJoinKeyColumnTyped<T>(IColumn leftColumn, IColumn rightColumn, JoinIndices joinIndices, CancellationToken ct = default)
     {
         // Check if T is a value type to determine which creation method to use
         if (typeof(T).IsValueType)
@@ -734,6 +765,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             for (int i = 0; i < joinIndices.Count; i++)
             {
+                if ((i & 255) == 0)
+                    ct.ThrowIfCancellationRequested();
                 object? value = null;
 
                 // Use left value if available, otherwise use right value
@@ -764,6 +797,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             for (int i = 0; i < joinIndices.Count; i++)
             {
+                if ((i & 255) == 0)
+                    ct.ThrowIfCancellationRequested();
                 // Use left value if available, otherwise use right value
                 if (joinIndices.LeftIndices[i] >= 0)
                 {
@@ -812,17 +847,17 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// <summary>
     /// Gathers values from a column using the specified indices
     /// </summary>
-    private static IColumn GatherColumn(IColumn sourceColumn, int[] indices)
+    private static IColumn GatherColumn(IColumn sourceColumn, int[] indices, CancellationToken ct = default)
     {
         var elementType = Nullable.GetUnderlyingType(sourceColumn.ElementType) ?? sourceColumn.ElementType;
         var kernel = gatherKernelCache.GetOrAdd(elementType, static t => gatherKernel.MakeGenericMethod(t));
-        return (IColumn)kernel.Invoke(null, new object[] { sourceColumn, indices })!;
+        return (IColumn)kernel.Invoke(null, new object[] { sourceColumn, indices, ct })!;
     }
 
     /// <summary>
     /// Gathers values from a column for a specific type
     /// </summary>
-    static IColumn GatherColumnTyped<T>(IColumn sourceColumn, int[] indices)
+    static IColumn GatherColumnTyped<T>(IColumn sourceColumn, int[] indices, CancellationToken ct = default)
     {
         // Check if T is a value type to determine which creation method to use
         if (typeof(T).IsValueType)
@@ -833,6 +868,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             for (int i = 0; i < indices.Length; i++)
             {
+                if ((i & 255) == 0)
+                    ct.ThrowIfCancellationRequested();
                 if (indices[i] >= 0) // -1 indicates null (no match in join)
                 {
                     var value = sourceColumn.GetValue(indices[i]);
@@ -855,6 +892,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 
             for (int i = 0; i < indices.Length; i++)
             {
+                if ((i & 255) == 0)
+                    ct.ThrowIfCancellationRequested();
                 if (indices[i] >= 0) // -1 indicates null (no match in join)
                 {
                     var value = sourceColumn.GetValue(indices[i]);
