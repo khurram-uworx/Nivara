@@ -13,8 +13,8 @@ public sealed class AdaptiveTrainingTests
     {
         var features = new float[4 * HiddenSize];
         for (var row = 0; row < 4; row++)
-        for (var column = 0; column < HiddenSize; column++)
-            features[row * HiddenSize + column] = MathF.Sin((row + 1) * (column + seed + 1) * 0.13f);
+            for (var column = 0; column < HiddenSize; column++)
+                features[row * HiddenSize + column] = MathF.Sin((row + 1) * (column + seed + 1) * 0.13f);
 
         return new AdaptiveTrainingExample(query, $"chunk-{query}", features, 4, HiddenSize, [1, 2], target);
     }
