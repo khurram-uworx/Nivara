@@ -56,6 +56,19 @@ public sealed class AdaptiveFeedbackCollectorTests
         return output.Logits;
     }
 
+    static LayaDecision DecodeChoice(LayaDecisionHead<float, float> head)
+    {
+        var question = new LayaQuestion
+        {
+            Id = "adaptive-roundtrip",
+            Type = LayaQuestionType.Choice,
+            Instructions = "Select the relevant option.",
+            Options = [new("relevant", null), new("not_relevant", null)]
+        };
+        var calibration = new LayaCalibration([1.0, 1.0, 1.0]);
+        return calibration.Decode(question, ChoiceLogits(head), actProbability: 0.5);
+    }
+
     [Test]
     public void Add_UpdatesOnlyAtThresholdAndReloadsBitExactly()
     {
@@ -76,9 +89,11 @@ public sealed class AdaptiveFeedbackCollectorTests
         });
 
         Assert.That(collector.Add(Example(9)), Is.True);
+        var decision = DecodeChoice(head);
 
         var restored = new LayaDecisionHead<float>(HiddenSize, headLayerCount: 0);
         Assert.That(AdaptiveHeadPersistence.LoadIfPresent(restored, path), Is.True);
+        var restoredDecision = DecodeChoice(restored);
         Assert.Multiple(() =>
         {
             Assert.That(collector.BufferCount, Is.Zero);
@@ -86,6 +101,14 @@ public sealed class AdaptiveFeedbackCollectorTests
             Assert.That(ParameterBits(head), Is.EqualTo(ParameterBits(restored)));
             Assert.That(ChoiceLogits(head), Is.EqualTo(ChoiceLogits(restored)));
             Assert.That(ParameterBits(head), Is.Not.EqualTo(baseline));
+            Assert.That(restoredDecision.QuestionId, Is.EqualTo(decision.QuestionId));
+            Assert.That(restoredDecision.Type, Is.EqualTo(decision.Type));
+            Assert.That(restoredDecision.Choice, Is.EqualTo(decision.Choice));
+            Assert.That(restoredDecision.Probabilities, Is.EqualTo(decision.Probabilities));
+            Assert.That(restoredDecision.Confidence, Is.EqualTo(decision.Confidence));
+            Assert.That(restoredDecision.AnswerConfidence, Is.EqualTo(decision.AnswerConfidence));
+            Assert.That(restoredDecision.ActionProbability, Is.EqualTo(decision.ActionProbability));
+            Assert.That(restoredDecision.Temperature, Is.EqualTo(decision.Temperature));
         });
     }
 
