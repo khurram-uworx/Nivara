@@ -258,6 +258,7 @@ void PrintUsage()
     Console.WriteLine("  --critic             Writer-critic loop: LLM writes, Nivara scores, retry if poor");
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
     Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer (Ollama optional)");
+    Console.WriteLine("  --rag-adaptive       Retrieval-first RAG with a Laya decision layer that accepts or rejects the retrieved chunk");
     Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection (Ollama optional)");
     Console.WriteLine("  --rag-multiview      Multi-view retrieval (#914): four views per chunk, late fusion, disagreement report");
     Console.WriteLine("  --rag-learn          Differentiable retrieval (#915): learn the fusion weights and a query gate, compare on held-out queries");

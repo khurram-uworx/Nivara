@@ -59,7 +59,7 @@ public static class LayaRetrievalDecisionHead
                 var decision = engine.Decide(query, chunk);
                 bool accepted = decision.Choice == "relevant" && decision.AnswerConfidence >= confidenceThreshold;
                 bool abstained = decision.Choice == "not_relevant" && decision.AnswerConfidence >= confidenceThreshold;
-                string verdict = accepted ? "accept" : abstained ? "noul" : "fallback";
+                string verdict = accepted ? "accept" : abstained ? "abstain" : "fallback";
                 return new LayaChunkDecision(
                     chunk.ChunkId,
                     chunk.Source,
