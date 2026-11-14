@@ -573,16 +573,20 @@ var stats = frame.Query<Person>()
 
 ---
 
-## Row-level access cost
+## Row-level access
 
-`NivaraFrame.Where(Func<NivaraRow, bool>)` is the only filtering API that accepts ordinary C# code
-(no expression tree, no typed row class). It is convenient but expensive: each cell read pays a
-case-insensitive dictionary lookup plus a runtime type probe, and `NivaraRow.ColumnNames` allocates
-a fresh array on every read. The object indexer (`row["Col"]`) boxes value-type cells. Prefer the
-expression/typed overloads in hot paths.
+`NivaraFrame` supports row-major access for interop and inspection: `foreach (var row in frame)` /
+`frame.GetEnumerator()` yields `NivaraRow` values in order, and `frame.GetRow(i)` returns a row view
+for a specific index. `NivaraRow.Create(...)` can construct a row view for unit-testing row predicates
+outside a frame.
 
-To make row-level code fast without expression trees, pre-resolve columns with
-`NivaraRowReader` / `NivaraRowAccessor` (e.g. `frame.RowReader()`) and read through
-`NivaraColumnReader<T>` / `NivaraColumnAccessor<T>`, which resolves the nullable-element probe once
-at construction and reads with a single delegate invocation per cell. `NivaraRow.AsReader()` exposes
-the same reader from an existing row.
+Row-major access is significantly slower than column access. Each cell read pays a case-insensitive
+dictionary lookup plus a runtime type probe, and the object indexer (`row["Col"]`) boxes value-type
+cells. Prefer column-oriented APIs (`GetColumn<T>`, vectorized/query operations) in hot paths. For
+row-level C# code without expression trees, pre-resolve columns with `NivaraRowReader` /
+`NivaraRowAccessor` (e.g. `frame.RowReader()`) and read through `NivaraColumnReader<T>` /
+`NivaraColumnAccessor<T>`; `NivaraRow.AsReader()` exposes the same reader from an existing row.
+
+`NivaraFrame.Where(Func<NivaraRow, bool>)` remains available as a row-predicate filter (it evaluates a
+`NivaraRow` per row, builds a mask, and returns a filtered frame). Prefer typed/expression-based
+filtering in hot paths.

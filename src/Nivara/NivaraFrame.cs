@@ -6,6 +6,7 @@ using Nivara.Query;
 using Nivara.Storage;
 using Nivara.Tensors;
 using System.Buffers;
+using System.Collections;
 using System.Numerics;
 using System.Numerics.Tensors;
 
@@ -15,7 +16,7 @@ namespace Nivara;
 /// Immutable DataFrame-like structure that provides schema management and multi-column data operations.
 /// Serves as the primary interface for working with structured, multi-column datasets in Nivara.
 /// </summary>
-public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
+public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>, IEnumerable<NivaraRow>
 {
     /// <summary>
     /// Estimates the memory usage of a column (rough, lower-bound approximation).
@@ -1249,6 +1250,134 @@ public sealed class NivaraFrame : IFrame, IEquatable<NivaraFrame>
 
         var estimatedSize = estimateFrameMemoryUsage();
         return MemoryAdvisor.GetMemoryRecommendations(estimatedSize, operationType, memoryBudgetBytes);
+    }
+
+    /// <summary>
+    /// Gets a row view at the specified zero-based index.
+    /// </summary>
+    /// <param name="rowIndex">The zero-based row index.</param>
+    /// <returns>A <see cref="NivaraRow"/> view over this frame's columns at <paramref name="rowIndex"/>.</returns>
+    /// <remarks>
+    /// Row-major access performs name/index lookups and type checks per cell access and can box value types
+    /// through object-based APIs. Prefer column-oriented access (<see cref="GetColumn{T}(string)"/>) or
+    /// <see cref="NivaraFrameExtensions.RowReader(NivaraFrame)"/> in performance-sensitive code.
+    /// The returned row is a thin view tied to this frame's underlying columns and remains usable for the
+    /// lifetime of the frame (until disposed).
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">Thrown when this frame has been disposed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="rowIndex"/> is outside the valid range.</exception>
+    public NivaraRow GetRow(int rowIndex)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (rowIndex < 0 || rowIndex >= RowCount)
+            throw new ArgumentOutOfRangeException(nameof(rowIndex));
+
+        var context = CreateRowAccessContext();
+        return new NivaraRow(context.Columns, context.ColumnNames, context.Map, rowIndex);
+    }
+
+    /// <summary>
+    /// Returns a struct enumerator that iterates rows in order.
+    /// </summary>
+    /// <returns>A struct enumerator over <see cref="NivaraRow"/> values.</returns>
+    /// <remarks>
+    /// Enumeration provides row views without per-row heap allocations. Row-major access is significantly
+    /// slower than column-oriented access; prefer <see cref="GetColumn{T}(string)"/> or
+    /// <see cref="NivaraFrameExtensions.RowReader(NivaraFrame)"/> for hot paths.
+    /// Each enumerated <see cref="NivaraRow"/> is a thin view over this frame's columns at the current index.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">Thrown when this frame has been disposed.</exception>
+    public Enumerator GetEnumerator()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return new Enumerator(this);
+    }
+
+    IEnumerator<NivaraRow> IEnumerable<NivaraRow>.GetEnumerator() => GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    RowAccessContext CreateRowAccessContext()
+    {
+        var names = ColumnNames.ToArray();
+        var cols = new IColumn[names.Length];
+        var map = new Dictionary<string, int>(names.Length, StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < names.Length; i++)
+        {
+            names[i] = schema.ColumnNames[i];
+            cols[i] = columns[names[i]];
+            map[names[i]] = i;
+        }
+
+        return new RowAccessContext(cols, names, map, RowCount);
+    }
+
+    readonly record struct RowAccessContext(IColumn[] Columns, string[] ColumnNames, Dictionary<string, int> Map, int RowCount);
+
+    /// <summary>
+    /// Struct enumerator for iterating rows of a <see cref="NivaraFrame"/>.
+    /// </summary>
+    public struct Enumerator : IEnumerator<NivaraRow>
+    {
+        readonly NivaraFrame frame;
+        readonly IColumn[] frameColumns;
+        readonly string[] columnNames;
+        readonly Dictionary<string, int> map;
+        readonly int rowCount;
+        int index;
+        NivaraRow current;
+
+        internal Enumerator(NivaraFrame frame)
+        {
+            this.frame = frame ?? throw new ArgumentNullException(nameof(frame));
+            ObjectDisposedException.ThrowIf(frame.disposed, frame);
+
+            var context = frame.CreateRowAccessContext();
+            frameColumns = context.Columns;
+            columnNames = context.ColumnNames;
+            map = context.Map;
+            rowCount = context.RowCount;
+            index = -1;
+            current = default;
+        }
+
+        /// <inheritdoc />
+        public readonly NivaraRow Current => current;
+
+        readonly object IEnumerator.Current => Current;
+
+        /// <inheritdoc />
+        public bool MoveNext()
+        {
+            ObjectDisposedException.ThrowIf(frame.disposed, frame);
+
+            var next = index + 1;
+            if (next >= rowCount)
+            {
+                index = rowCount;
+                current = default;
+                return false;
+            }
+
+            index = next;
+            current = new NivaraRow(frameColumns, columnNames, map, index);
+            return true;
+        }
+
+        /// <inheritdoc />
+        public void Reset()
+        {
+            ObjectDisposedException.ThrowIf(frame.disposed, frame);
+            index = -1;
+            current = default;
+        }
+
+        /// <inheritdoc />
+        public readonly void Dispose()
+        {
+        }
     }
 
     /// <inheritdoc />
