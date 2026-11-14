@@ -79,14 +79,17 @@ internal static class DocsCoveragePins
     /// <c>tests/Nivara.PerformanceTests/README.md</c>: 257 + 3 = 260.
     /// The BLAS provider (branch khurram/1117) adds two: the `OpenBlasInterop.cs`
     /// move to `src/Nivara.Extensions/Blas/` carries the `docs/BLAS-MKL.md` reference, and
-    /// `src/Nivara/GemmProvider.cs` adds one: 260 + 2 = 262.
-    /// Issue #1163 adds one backticked `docs/SILK.md` reference in `CHANGELOG.md`
+    /// <c>src/Nivara/GemmProvider.cs</c> adds one: 260 + 2 = 262.
+    /// Issue #1163 adds one backticked <c>docs/SILK.md</c> reference in <c>CHANGELOG.md</c>
     /// (the 1.5.0 breaking-changes migration note): 265 + 1 = 266.
-    /// Issue #1189 adds two backticked `docs/STREAMING.md` references in source XML doc
-    /// comments (`JsonExtensions.cs` and `CsvExtensions.cs` "Resource management" remarks):
+    /// Issue #1189 adds two backticked <c>docs/STREAMING.md</c> references in source XML doc
+    /// comments (<c>JsonExtensions.cs</c> and <c>CsvExtensions.cs</c> "Resource management" remarks):
     /// 266 + 2 = 268.
-    /// Issue #1193 deletes `tests/Nivara.PerformanceTests/OpenBlasInterop.cs`, whose doc comment
-    /// carried the `docs/BLAS-MKL.md` markdown link (counted twice, link text + URL): 268 - 2 = 266.
+    /// Issue #1193 deletes <c>tests/Nivara.PerformanceTests/OpenBlasInterop.cs</c>, whose doc comment
+    /// carried the <c>docs/BLAS-MKL.md</c> markdown link (counted twice, link text + URL): 268 - 2 = 266.
+    /// Issue #1178 widens markdown reference discovery to root-relative/bare <c>.md</c> targets used as
+    /// link targets/backticked paths across the scanned scope and resolves bare names relative to the
+    /// containing document/root/docs (so root-doc links are gate-checked): 266 + 230 = 496.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 266;
+    internal const int ExpectedDocumentReferenceCount = 496;
 }
