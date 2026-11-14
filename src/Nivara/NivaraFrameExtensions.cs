@@ -813,6 +813,26 @@ public static partial class NivaraFrameExtensions
     #region Fluent API Operations
 
     /// <summary>
+    /// Creates a <see cref="NivaraRowReader"/> bound to this frame's columns, allowing columns to
+    /// be pre-resolved and read without per-cell string lookups.
+    /// </summary>
+    public static NivaraRowReader RowReader(this NivaraFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        return new NivaraRowReader(frame);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="NivaraRowReader"/> bound to this frame's columns, allowing columns to
+    /// be pre-resolved and read without per-cell string lookups.
+    /// </summary>
+    public static NivaraRowReader GetRowReader(this NivaraFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        return new NivaraRowReader(frame);
+    }
+
+    /// <summary>
     /// Filters rows based on a predicate over a typed <see cref="NivaraRow"/>
     /// </summary>
     /// <param name="frame">The source DataFrame</param>
@@ -824,14 +844,15 @@ public static partial class NivaraFrameExtensions
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(predicate);
 
-        var columns = frame.ColumnNames.Select(name => frame.GetColumn(name)).ToArray();
-        var map = new Dictionary<string, int>(frame.ColumnNames.Count, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < frame.ColumnNames.Count; i++)
-            map[frame.ColumnNames[i]] = i;
+        var columnNames = frame.ColumnNames.ToArray();
+        var columns = columnNames.Select(name => frame.GetColumn(name)).ToArray();
+        var map = new Dictionary<string, int>(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columnNames.Length; i++)
+            map[columnNames[i]] = i;
 
         var mask = new bool[frame.RowCount];
         for (int i = 0; i < frame.RowCount; i++)
-            mask[i] = predicate(new NivaraRow(columns, map, i));
+            mask[i] = predicate(new NivaraRow(columns, columnNames, map, i));
 
         return frame.FilterByMask(NivaraColumn<bool>.Create(mask));
     }

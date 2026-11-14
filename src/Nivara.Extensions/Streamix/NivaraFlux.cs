@@ -250,13 +250,14 @@ public static class NivaraFlux
     {
         await foreach (var frame in queryFrame.AsStream(chunkSize, ct).WithCancellation(ct))
         {
-            var columns = frame.ColumnNames.Select(name => frame.GetColumn(name)).ToArray();
-            var map = new Dictionary<string, int>(frame.ColumnNames.Count, StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < frame.ColumnNames.Count; i++)
-                map[frame.ColumnNames[i]] = i;
+            var columnNames = frame.ColumnNames.ToArray();
+            var columns = columnNames.Select(name => frame.GetColumn(name)).ToArray();
+            var map = new Dictionary<string, int>(columnNames.Length, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < columnNames.Length; i++)
+                map[columnNames[i]] = i;
 
             for (int i = 0; i < frame.RowCount; i++)
-                yield return new NivaraRow(columns, map, i);
+                yield return new NivaraRow(columns, columnNames, map, i);
         }
     }
 }
