@@ -65,7 +65,8 @@ Tasks are sequential because the sample data contract depends on the new differe
 6. `42c204a4` — `feat(samples): train Laya head from labeled retrieval examples`
 7. `c5cc7243` — `feat(samples): persist adaptive Laya head updates`
 8. `d32cbad5` — `style: fix adaptive training test formatting`
-9. After both branch reviews pass, remove this plan in its own commit.
+9. `b4aed006` — `test(samples): cover adaptive RAG decision routing`
+10. After both branch reviews pass, remove this plan in its own commit.
 
 ## Implementation and verification status
 
@@ -73,8 +74,9 @@ Tasks are sequential because the sample data contract depends on the new differe
 - [x] Differentiable choice logits: inference still uses the shared head/scorer computation; tests cover exact inference parity and gradients only through the choice path.
 - [x] Training data and updater: resolved judge grades map to binary choice targets; frozen features are extracted outside `Grad()`; query splits are deterministic and disjoint; training updates the choice parameters only.
 - [x] Feedback and persistence: updates wait for a complete 10-example batch, save atomically, restore the prior in-memory head on failure, and retain buffered examples when an update/save fails. Adaptive state is loaded over baseline weights when present.
+- [x] G2 test-coverage review: extracted precomputed-decision ranking and added deterministic accepted-choice/fallback tests without requiring model files.
 - [x] Formatting: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` — passed after the formatting correction.
-- [x] `dotnet test tests\Nivara.Tests\Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Nivara.Tests.AutoDiff.LayaDecisionHeadTests|FullyQualifiedName~Nivara.Tests.AutoDiff.LayaCalibrationTests|FullyQualifiedName~Nivara.Tests.AutoDiff.SerializationTests|FullyQualifiedName~Nivara.Tests.Samples.Adaptive|FullyQualifiedName~Nivara.Tests.Samples.LayaRetrievalDecisionHeadTests"` — passed, 65/65; covers Laya head/calibration/serialization, chunk-conditioned prompt, adaptive data/training, and feedback persistence.
+- [x] `dotnet test tests\Nivara.Tests\Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Nivara.Tests.AutoDiff.LayaDecisionHeadTests|FullyQualifiedName~Nivara.Tests.AutoDiff.LayaCalibrationTests|FullyQualifiedName~Nivara.Tests.AutoDiff.SerializationTests|FullyQualifiedName~Nivara.Tests.Samples.Adaptive|FullyQualifiedName~Nivara.Tests.Samples.LayaRetrievalDecisionHeadTests|FullyQualifiedName~Nivara.Tests.Samples.RagDecisionRoutingTests"` — passed, 68/68; covers Laya head/calibration/serialization, chunk-conditioned prompt/routing, adaptive data/training, and feedback persistence.
 - [ ] G2 branch-wide and plan-to-implementation reviews — in progress.
 - Full solution test suite not run. End-to-end training with judge labels was not run because `samples/data/nivarachat/eval/relevance.tsv` is absent; the local Laya checkpoint exists. Synthetic deterministic tests cover training and persistence without downloading model weights.
 - No push or issue closure has occurred; #981 and #982 remain open pending combined landing.
