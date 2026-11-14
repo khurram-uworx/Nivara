@@ -221,6 +221,22 @@ Row factories require a public parameterless constructor (anonymous types via `S
 automatically); a null cell materialized into a non-nullable value-type property throws at
 materialization time.
 
+### Sync/async split and UI-thread caveat
+
+`Collect()` is a synchronous barrier. It runs the async pipeline on a thread-pool thread
+(`Task.Run`) and blocks the caller until completion, so it does **not** deadlock on a thread
+with a `SynchronizationContext` (WPF/WinForms/MAUI). Prefer `CollectAsync(ct)` in async code;
+`Collect()` is provided for compatibility and synchronous callers.
+
+Cancellation tokens are observed at operation boundaries and inside the row loops of
+`Filter`, `Join`, `Sort`, and `GroupBy`. Other operations check the token at entry only.
+A cancelled operation throws `OperationCanceledException` (not a wrapped
+`QueryExecutionException`).
+
+`IQuerySource.ExecuteAsync`'s default implementation runs `Execute()` synchronously on the
+calling thread and wraps the result in `Task.FromResult`; sources with genuine async I/O
+override it.
+
 ---
 
 ## Frame-Level Operations
