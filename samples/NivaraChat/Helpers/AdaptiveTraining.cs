@@ -157,19 +157,24 @@ public static class AdaptiveTraining
         return parameters;
     }
 
-    static void ValidateExample(LayaDecisionHead<float, float> head, AdaptiveTrainingExample example)
+    internal static void ValidateExample(LayaDecisionHead<float, float> head, AdaptiveTrainingExample example)
     {
         ArgumentNullException.ThrowIfNull(example);
         ArgumentNullException.ThrowIfNull(example.Features);
         ArgumentNullException.ThrowIfNull(example.MarkerPositions);
+        ArgumentException.ThrowIfNullOrWhiteSpace(example.Query);
+        ArgumentException.ThrowIfNullOrWhiteSpace(example.ChunkId);
         if (example.Target is < 0 or > 1)
             throw new ArgumentOutOfRangeException(nameof(example), example.Target, "Binary choice targets must be 0 or 1.");
         if (example.SequenceLength <= 0 || example.HiddenSize != head.HiddenSize
             || example.Features.Length != (long)example.SequenceLength * example.HiddenSize)
             throw new ArgumentException("Example features must match [sequenceLength, head.HiddenSize].", nameof(example));
         if (example.MarkerPositions.Length != 2
+            || example.MarkerPositions[0] == example.MarkerPositions[1]
             || example.MarkerPositions.Any(marker => marker < 0 || marker >= example.SequenceLength))
             throw new ArgumentException("Binary relevance examples require two valid option markers.", nameof(example));
+        if (example.Features.Any(value => !float.IsFinite(value)))
+            throw new ArgumentException("Example feature values must be finite.", nameof(example));
     }
 
     static void EnsureQueryDisjoint(

@@ -9,6 +9,10 @@ public sealed record AdaptiveFrozenFeatures(
     int HiddenSize,
     int[] MarkerPositions);
 
+/// <summary>
+/// One query/chunk pair and its frozen ModernBERT features. Target 0 means relevant (the first
+/// prompt option); target 1 means not relevant (the second prompt option).
+/// </summary>
 public sealed record AdaptiveTrainingExample(
     string Query,
     string ChunkId,
@@ -35,6 +39,7 @@ public static class AdaptiveTrainingData
     {
         ArgumentNullException.ThrowIfNull(encoder);
         ArgumentNullException.ThrowIfNull(tokenizer);
+        encoder.Eval();
 
         return Build(labels, chunks, (query, chunk) =>
         {
@@ -123,7 +128,10 @@ public static class AdaptiveTrainingData
             || features.Values.Length != (long)features.SequenceLength * features.HiddenSize)
             throw new ArgumentException("Frozen feature values must match [sequenceLength, hiddenSize].", nameof(features));
         if (features.MarkerPositions.Length != 2
+            || features.MarkerPositions[0] == features.MarkerPositions[1]
             || features.MarkerPositions.Any(marker => marker < 0 || marker >= features.SequenceLength))
             throw new ArgumentException("Adaptive relevance examples require two valid option markers.", nameof(features));
+        if (features.Values.Any(value => !float.IsFinite(value)))
+            throw new ArgumentException("Frozen feature values must be finite.", nameof(features));
     }
 }
