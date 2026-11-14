@@ -1,6 +1,6 @@
 # Issue #982 — train and update the Laya decision head
 
-**Status:** in progress · **Tracker:** https://github.com/khurram-uworx/Nivara/issues/982 · **Branch:** `khurram/982`
+**Status:** implementation complete; G2 review in progress · **Tracker:** https://github.com/khurram-uworx/Nivara/issues/982 · **Branch:** `khurram/982`
 
 ## Problem and confirmed direction
 
@@ -57,12 +57,27 @@ Tasks are sequential because the sample data contract depends on the new differe
 
 ## Planned commits
 
-1. `docs: plan adaptive Laya head training in TODO.md`
-2. `fix(samples): include chunk content in Laya decisions`
-3. `feat(ai): expose differentiable Laya choice logits`
-4. `feat(samples): train Laya head from labeled retrieval examples`
-5. `feat(samples): persist adaptive Laya head updates`
-6. After both branch reviews pass, remove this plan in its own commit.
+1. `aff78cd5` — `docs: plan adaptive Laya head training in TODO.md`
+2. `f4eb1144` — `docs: refine adaptive Laya training plan`
+3. `ae879571`, `b1fb2c8e` — existing #981 decision-layer commits retained on this branch
+4. `e5aa1612` — `fix(samples): include chunk content in Laya decisions`
+5. `d8d1b45d` — `feat(ai): expose differentiable Laya choice logits`
+6. `42c204a4` — `feat(samples): train Laya head from labeled retrieval examples`
+7. `c5cc7243` — `feat(samples): persist adaptive Laya head updates`
+8. `d32cbad5` — `style: fix adaptive training test formatting`
+9. After both branch reviews pass, remove this plan in its own commit.
+
+## Implementation and verification status
+
+- [x] #981 prompt correction: the shared prompt includes query instructions and retrieved chunk content; the focused regression test distinguishes chunk inputs for the same query.
+- [x] Differentiable choice logits: inference still uses the shared head/scorer computation; tests cover exact inference parity and gradients only through the choice path.
+- [x] Training data and updater: resolved judge grades map to binary choice targets; frozen features are extracted outside `Grad()`; query splits are deterministic and disjoint; training updates the choice parameters only.
+- [x] Feedback and persistence: updates wait for a complete 10-example batch, save atomically, restore the prior in-memory head on failure, and retain buffered examples when an update/save fails. Adaptive state is loaded over baseline weights when present.
+- [x] Formatting: `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` — passed after the formatting correction.
+- [x] `dotnet test tests\Nivara.Tests\Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Nivara.Tests.AutoDiff.LayaDecisionHeadTests|FullyQualifiedName~Nivara.Tests.AutoDiff.LayaCalibrationTests|FullyQualifiedName~Nivara.Tests.AutoDiff.SerializationTests|FullyQualifiedName~Nivara.Tests.Samples.Adaptive|FullyQualifiedName~Nivara.Tests.Samples.LayaRetrievalDecisionHeadTests"` — passed, 65/65; covers Laya head/calibration/serialization, chunk-conditioned prompt, adaptive data/training, and feedback persistence.
+- [ ] G2 branch-wide and plan-to-implementation reviews — in progress.
+- Full solution test suite not run. End-to-end training with judge labels was not run because `samples/data/nivarachat/eval/relevance.tsv` is absent; the local Laya checkpoint exists. Synthetic deterministic tests cover training and persistence without downloading model weights.
+- No push or issue closure has occurred; #981 and #982 remain open pending combined landing.
 
 ## GitHub issues log
 
