@@ -93,9 +93,10 @@ static partial class DocReferenceExtractor
                 Collect(directory, recursive: true, files, static relative => Path.GetExtension(relative) == ".cs");
         }
 
-        // Markdown reference discovery (issue #704): only top-level docs/*.md plus docs/adr/,
-        // repo-root *.md, and README.md/AGENTS.md anywhere. Subfolders of docs/ other than
-        // adr/ (blog/, research/, plan/, ...) are out of scope for the pin.
+        // Markdown reference discovery (issue #704/#1178): top-level docs/*.md plus docs/adr/,
+        // repo-root *.md (including root docs whose root-relative links are now checked), and
+        // README.md/AGENTS.md anywhere. Subfolders of docs/ other than adr/ (blog/, research/,
+        // plan/, ...) remain out of scope for the pin.
         Collect(root, recursive: false, files, static relative => Path.GetExtension(relative) == ".md");
         var docsDir = Path.Combine(root, "docs");
         if (Directory.Exists(docsDir))
@@ -113,6 +114,48 @@ static partial class DocReferenceExtractor
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
     }
+
+    static readonly Lazy<Dictionary<string, string[]>> MarkdownDocsByBaseName = new(IndexMarkdownDocsByBaseName);
+
+    static Dictionary<string, string[]> IndexMarkdownDocsByBaseName()
+    {
+        var root = DocSnippetExtractor.RepoRoot;
+        var files = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(root, "*.md", SearchOption.TopDirectoryOnly))
+            files.Add(NormalizeRelative(root, file));
+
+        foreach (var subtree in new[] { "docs", "samples", "src", "tests" })
+        {
+            var directory = Path.Combine(root, subtree);
+            if (Directory.Exists(directory))
+                CollectAllMarkdown(directory, files);
+        }
+
+        return files
+            .Distinct(StringComparer.Ordinal)
+            .GroupBy(Path.GetFileName, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key!, g => g.OrderBy(x => x, StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
+    }
+
+    static void CollectAllMarkdown(string directory, List<string> files)
+    {
+        foreach (var file in Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly))
+        {
+            var relative = NormalizeRelative(DocSnippetExtractor.RepoRoot, file);
+            if (!ExcludedSegments.Contains(Path.GetFileName(Path.GetDirectoryName(file) ?? string.Empty), StringComparer.Ordinal))
+                files.Add(relative);
+        }
+
+        foreach (var child in Directory.EnumerateDirectories(directory))
+        {
+            if (!ExcludedSegments.Contains(Path.GetFileName(child), StringComparer.Ordinal))
+                CollectAllMarkdown(child, files);
+        }
+    }
+
+    static string NormalizeRelative(string root, string path) =>
+        Path.GetRelativePath(root, path).Replace('\\', '/');
 
     internal static int FileCount() => ScanFiles().Count;
 
@@ -142,7 +185,7 @@ static partial class DocReferenceExtractor
 
         foreach (var (line, target) in ScanDocumentRefs(documentPath))
         {
-            if (File.Exists(Absolute(target)))
+            if (Resolves(documentPath, target))
                 continue;
 
             if (tolerate && Tolerated.Contains((documentPath, target)))
@@ -153,6 +196,31 @@ static partial class DocReferenceExtractor
         }
 
         return faults;
+    }
+
+    static bool Resolves(string documentPath, string target)
+    {
+        if (target.Contains('/'))
+            return File.Exists(Absolute(target));
+
+        var dir = Path.GetDirectoryName(documentPath)?.Replace('\\', '/');
+        if (!string.IsNullOrEmpty(dir))
+        {
+            var sibling = $"{dir}/{target}";
+            if (File.Exists(Absolute(sibling)))
+                return true;
+        }
+
+        if (File.Exists(Absolute(target)))
+            return true;
+
+        if (File.Exists(Absolute($"docs/{target}")))
+            return true;
+
+        if (MarkdownDocsByBaseName.Value.TryGetValue(Path.GetFileName(target), out var matches) && matches.Length == 1)
+            return File.Exists(Absolute(matches[0]));
+
+        return false;
     }
 
     static void Collect(string directory, bool recursive, List<string> files, Func<string, bool> includeFile)
@@ -201,11 +269,12 @@ static partial class DocReferenceExtractor
         Path.Combine(DocSnippetExtractor.RepoRoot, repoRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>
-    /// A markdown-document reference: <c>docs/</c> plus one or more path segments ending in
-    /// <c>.md</c>. An optional <c>../</c> prefix is consumed by the lookbehind boundary, so a
-    /// relative <c>../../docs/x.md</c> resolves against the repository root like a bare one; the
-    /// boundary keeps a longer identifier such as <c>mydocs/x.md</c> from matching.
+    /// A markdown-document reference. Matches either a <c>docs/...</c> path (one or more segments
+    /// ending in <c>.md</c>) or a markdown document name used as a link target/backticked path.
+    /// Bare names are resolved relative to the containing document, then repo root, then <c>docs/</c>,
+    /// then by unique basename. An optional <c>../</c> prefix is consumed by the lookbehind boundary,
+    /// so a relative <c>../../docs/x.md</c> resolves against the repository root like a bare one.
     /// </summary>
-    [GeneratedRegex(@"(?<![A-Za-z0-9_])(?<doc>docs/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md)")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9_])(?<doc>(?:docs/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md|(?:(?<=\]\()|(?<=`))[A-Za-z0-9_.-]+\.md))")]
     private static partial Regex DocumentPattern();
 }

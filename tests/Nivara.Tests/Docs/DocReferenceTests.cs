@@ -37,10 +37,13 @@ public class DocReferenceTests
                     "docs/NoSuchDocumentAnywhere.md",
                     "docs/gone/AlsoMissing.md",
                     "docs/also/Gone.md",
+                    "MISSING-ROOT-DOC.md",
                 }));
 
             Assert.That(faults.Select(f => f.Reference), Does.Not.Contain("docs/ILGPU.md"),
                 "the negative control rejects a reference that resolves; that would prove nothing");
+            Assert.That(faults.Select(f => f.Reference), Does.Not.Contain("AGENTS.md"),
+                "the negative control rejects a resolvable root-relative reference; that would prove nothing");
         });
     }
 
@@ -50,7 +53,7 @@ public class DocReferenceTests
         var faults = DocReferenceExtractor.Faults(NegativeControl);
 
         Assert.That(faults.Where(f => f.Kind == DocCitationFaultKind.MissingFile).Select(f => f.Reference),
-            Does.Contain("NoSuchFileAnywhere.cs::Foo"),
+            Does.Contain("NoSuchFileAnyone.cs::Foo"),
             "the widened scan must still check File.cs:NN, not only document references");
     }
 

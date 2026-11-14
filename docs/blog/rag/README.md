@@ -71,10 +71,10 @@ top-k sorted by fused → show the chunk, the winning view, the divergence band
 
 ## Series map
 
-1. `1-effective-rag.md` — the mechanical symptoms of bad RAG (average-vision, missing
+1. `1-effective-rag-from-chunks-to-four-views.md` — the mechanical symptoms of bad RAG (average-vision, missing
    code, headings won't win) and three engineering fixes: views, section-scoped chunks, late
    fusion with masking.
-2. `2-better-search-can-we-learn-the-weights.md` — the late-fusion move from constant to
+2. `2-differentiable-rag-from-fixed-weights-to-learned-fusion.md` — the late-fusion move from constant to
    learned: parity at step 0, the gated mixture, three label sources, and honesty about
    small test sets.
 
