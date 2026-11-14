@@ -8,10 +8,8 @@ creating the tag.
 ## Prerequisites
 
 - Push access to `khurram-uworx/Nivara`.
-- The `NUGET_API_KEY` secret must be set in the GitHub repository settings so the CD
-  workflow can publish to NuGet.
-- **.NET SDK** — the same version as the repo target framework (check `global.json` or
-  the `.csproj` `TargetFramework`).
+- **NuGet publishing (OIDC / trusted publishing)** — the CD workflow (`.github/workflows/cd.yml`) publishes via GitHub Actions OIDC: it requests `id-token: write`, uses `NuGet/login@v1` to exchange the workflow OIDC token for a short-lived NuGet API key, and passes that temporary key to `dotnet nuget push`. No long-lived `NUGET_API_KEY` repository secret is required by the workflow. A matching trusted publishing / federated-credential policy must be configured for this repository/workflow in the NuGet account (nuget.org) so the token exchange can succeed.
+- **.NET SDK** — the same version as the repo target framework (check the `.csproj` `TargetFramework`, e.g. `src/Nivara/Nivara.csproj`).
 - **Python 3 + PyTorch** — required for the NivaraInference and NivaraFineTuning
   benchmarks only. Install from https://pytorch.org/get-started/locally/. Verify with
   `python -c "import torch; print(torch.__version__)"`.
@@ -40,7 +38,10 @@ Review these files for anything that changed since the last tag and refresh as n
 - `EXAMPLES.md`
 - `samples/README.md`
 - `AGENTS.md`
+- `RELEASING.md` (if release/publish/tooling mechanics changed)
 - The `docs/adr/` decision records, when a change matches an ADR decision.
+
+For `README.md`, `AGENTS.md`, and `RELEASING.md`, explicitly verify claims about tooling, publishing, dependencies, and measured figures against the current source of truth (`.github/workflows/*`, `*.csproj`, and current test/build artifacts) so drift does not carry into the release.
 
 ### Step 3 — Bump package versions
 
@@ -204,7 +205,8 @@ git push origin vX.Y.Z
 ```
 
 Pushing a `v*` tag to `main` triggers the CD workflow, which builds, tests, packs, and
-publishes `Nivara` and `Nivara.Extensions` to NuGet (`--skip-duplicate`).
+publishes `Nivara` and `Nivara.Extensions` to NuGet using OIDC trusted publishing
+(`NuGet/login@v1` → short-lived API key, `--skip-duplicate`).
 
 ### Step 9 — Confirm the publish
 
