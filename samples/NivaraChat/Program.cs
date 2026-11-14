@@ -139,6 +139,9 @@ if (args.Length > 0)
         case "--rag":
             await RagMode.Run(ctx);
             break;
+        case "--rag-adaptive":
+            await RagAdaptiveMode.Run(ctx);
+            break;
         case "--rag-agent":
             await RagAgentMode.Run(ctx);
             break;
