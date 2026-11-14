@@ -1,6 +1,6 @@
 # Issue #982 — train and update the Laya decision head
 
-**Status:** implementation complete; G2 review in progress · **Tracker:** https://github.com/khurram-uworx/Nivara/issues/982 · **Branch:** `khurram/982`
+**Status:** implementation complete; G2 review passed · **Tracker:** https://github.com/khurram-uworx/Nivara/issues/982 · **Branch:** `khurram/982`
 
 ## Problem and confirmed direction
 
