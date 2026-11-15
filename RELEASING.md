@@ -120,7 +120,9 @@ AC-power-only and require the OpenCL device/driver to be recorded alongside the
 machine line. Do not skip this line item; if an OpenCL device is unavailable,
 record the reason in the PR.
 
-**Capture output for review:** put every benchmark command in a temporary
+**Capture output for review:** a committed, reusable runner exists at
+`release/run-benchmarks.cmd <version>` (see "Canonical runner" below). For a
+one-off re-measurement, put every benchmark command in a temporary
 `release.cmd` at the repository root that redirects each command's console
 output to a working file under `release/vX.Y.Z/`, then run that script and
 delete it afterwards (it is commit noise and must never be committed). Hand
@@ -148,6 +150,14 @@ kill them. The required procedure is:
 4. Wait for the completion notification; do not poll or sleep-wait.
 5. Parse the resulting files and update the README tables from them.
 6. Delete `release.cmd` before committing.
+
+**Canonical runner:** `release/run-benchmarks.cmd <version>` is committed and
+contains the full command set (core harness, NivaraIncident, NivaraInference
+CPU/Silk/BLAS, PyTorch references, NivaraFineTuning) writing to
+`release/<version>/`. Run it from the repo root in the background with no
+timeout, e.g. `cmd /c release\run-benchmarks.cmd 1.5.1` launched as a
+backgrounded command. It is the preferred entry point for both humans and
+agents; keep it updated when benchmark commands change.
 
 The core harness JSON file should be committed as canonical evidence under
 `release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy"
