@@ -2,7 +2,6 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using NivaraChat.Models;
 using NivaraChat.Shared;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -14,7 +13,6 @@ public static class AgentsMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--agents");
         Console.WriteLine("=== NivaraChat Agents ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))
@@ -40,7 +38,16 @@ public static class AgentsMode
         if (ctx.UseOllama)
         {
             Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-            var ollamaClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
+            var ollamaClient = LlmClientFactory.Create(ctx);
+            if (ollamaClient is null)
+            {
+                sentimentModel.Dispose();
+                entityModel.Dispose();
+                validatorModel.Dispose();
+                Console.WriteLine("Error: failed to connect to Ollama.");
+                return;
+            }
+
             var llmAgent = ollamaClient.AsAIAgent(
                 name: "OllamaLLM", instructions:
                     """

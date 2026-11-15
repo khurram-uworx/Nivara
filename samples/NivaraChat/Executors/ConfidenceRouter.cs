@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using OllamaSharp;
 using System.Text.Json;
 
 namespace NivaraChat.Executors;
@@ -8,10 +7,10 @@ namespace NivaraChat.Executors;
 internal sealed class ConfidenceRouter : Executor<string, string>
 {
     private readonly float _threshold;
-    private readonly OllamaApiClient? _chatClient;
+    private readonly IChatClient? _chatClient;
     private readonly List<string> _pending = [];
 
-    public ConfidenceRouter(float threshold, OllamaApiClient? chatClient = null)
+    public ConfidenceRouter(float threshold, IChatClient? chatClient = null)
         : base("ConfidenceRouter")
     {
         _threshold = threshold;

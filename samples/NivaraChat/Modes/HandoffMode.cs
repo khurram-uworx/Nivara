@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Executors;
 using NivaraChat.Shared;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -13,7 +12,6 @@ public static class HandoffMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--handoff");
         Console.WriteLine("=== NivaraChat — Confidence Handoff ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))
@@ -36,7 +34,14 @@ public static class HandoffMode
         }
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-        var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
+        var chatClient = LlmClientFactory.Create(ctx);
+        if (chatClient == null)
+        {
+            Console.WriteLine("Error: failed to connect to Ollama.");
+            sentimentModel.Dispose();
+            entityModel.Dispose();
+            return;
+        }
         Console.WriteLine("Ollama connected.\n");
 
         var router = new TextRouter();

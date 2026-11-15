@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using NivaraChat.Helpers;
-using OllamaSharp;
 using System.Text.Json;
 
 namespace NivaraChat.Executors;
@@ -9,10 +8,10 @@ namespace NivaraChat.Executors;
 internal sealed class FactualExecutor : Executor<string, string>
 {
     private readonly CommunityToolkit.VectorData.InMemory.InMemoryVectorStore _vectorStore;
-    private readonly OllamaApiClient _chatClient;
+    private readonly IChatClient _chatClient;
     private readonly int _topK;
 
-    public FactualExecutor(CommunityToolkit.VectorData.InMemory.InMemoryVectorStore vectorStore, OllamaApiClient chatClient, int topK = 3)
+    public FactualExecutor(CommunityToolkit.VectorData.InMemory.InMemoryVectorStore vectorStore, IChatClient chatClient, int topK = 3)
         : base("Factual RAG")
     {
         _vectorStore = vectorStore;

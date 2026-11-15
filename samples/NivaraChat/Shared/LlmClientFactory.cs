@@ -1,38 +1,40 @@
-using System;
 using Microsoft.Extensions.AI;
 using NivaraChat.Modes;
-using OllamaSharp;
+using OpenAI;
+using System.ClientModel;
 
 namespace NivaraChat.Shared;
 
 /// <summary>
 /// Builds the <see cref="IChatClient"/> used by the plain-chat modes from a <see cref="ModeContext"/>,
-/// selecting Ollama or an OpenAI-compatible endpoint based on <see cref="ModeContext.LlmProvider"/>.
+/// using the OpenAI chat-completions protocol for both Ollama and OpenAI-compatible endpoints.
 /// </summary>
-internal static class LlmClientFactory
+static class LlmClientFactory
 {
-    public const string ApiKeyEnvVar = "NIVARA_CHAT_API_KEY";
-
     public static IChatClient? Create(ModeContext ctx)
     {
         ArgumentNullException.ThrowIfNull(ctx);
-        if (string.Equals(ctx.LlmProvider, "openai", StringComparison.OrdinalIgnoreCase))
+        if (!ctx.UseOllama) return null;
+
+        var baseUrl = string.IsNullOrWhiteSpace(ctx.OllamaUrl) ? "http://localhost:11434" : ctx.OllamaUrl!.TrimEnd('/');
+        if (!baseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            baseUrl += "/v1";
+
+        string apiKey = "ollama";
+        if (ctx.ApiKeyEnvVar is { Length: > 0 })
         {
-            if (string.IsNullOrWhiteSpace(ctx.OpenAiUrl))
-                throw new InvalidOperationException("--llm openai requires --openai-url <base>.");
-            var model = string.IsNullOrWhiteSpace(ctx.OpenAiModel) ? ctx.ModelName : ctx.OpenAiModel!;
-            var key = Environment.GetEnvironmentVariable(ApiKeyEnvVar);
-            return new OpenAiCompatibleChatClient(ctx.OpenAiUrl!, model, key, ctx.OpenAiAuth);
+            var envKey = Environment.GetEnvironmentVariable(ctx.ApiKeyEnvVar);
+            if (string.IsNullOrWhiteSpace(envKey))
+                throw new InvalidOperationException($"API key environment variable '{ctx.ApiKeyEnvVar}' is not set.");
+            apiKey = envKey;
         }
 
-        if (!ctx.UseOllama) return null;
-        return new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
-    }
+        var options = new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
+        var openAIClient = new OpenAIClient(new ApiKeyCredential(apiKey), options);
 
-    public static void RejectForUnsupportedMode(ModeContext ctx, string modeName)
-    {
-        if (string.Equals(ctx.LlmProvider, "openai", StringComparison.OrdinalIgnoreCase))
-            throw new NotSupportedException(
-                $"--llm openai is not supported for {modeName} yet (function calling / streaming on the OpenAI transport is a follow-up). Use --llm ollama.");
+        if (openAIClient is not null && ctx.ModelName is { Length: > 0 })
+            return openAIClient.GetChatClient(ctx.ModelName).AsIChatClient();
+
+        return null;
     }
 }

@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using Nivara.AI;
+using System.Diagnostics;
 
 namespace NivaraChat.Helpers;
 

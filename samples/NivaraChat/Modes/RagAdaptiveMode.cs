@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using NivaraChat.Helpers;
 using NivaraChat.Shared;
-using OllamaSharp;
 using System.Diagnostics;
 
 namespace NivaraChat.Modes;
@@ -34,7 +33,7 @@ public static class RagAdaptiveMode
 
         IChatClient? chatClient = LlmClientFactory.Create(ctx);
         if (chatClient is not null)
-            Console.WriteLine($"LLM connected ({ctx.LlmProvider}).\n");
+            Console.WriteLine($"LLM connected.\n");
 
         Console.WriteLine($"Threshold: {ctx.ConfidenceThreshold:F2} | Top-K: {ctx.TopK} chunks per query.\n");
 

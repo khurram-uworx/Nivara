@@ -1,6 +1,5 @@
 using NivaraChat.Helpers;
 using NivaraChat.Shared;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -20,9 +19,9 @@ public static class OnlineLearningMode
             return;
         }
 
-        if (!ctx.UseOllama && !string.Equals(ctx.LlmProvider, "openai", StringComparison.OrdinalIgnoreCase))
+        if (!ctx.UseOllama)
         {
-            Console.WriteLine("Error: --online-learning requires --ollama or --llm openai for LLM feedback.");
+            Console.WriteLine("Error: --online-learning requires --ollama for LLM feedback.");
             return;
         }
 

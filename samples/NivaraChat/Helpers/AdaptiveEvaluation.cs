@@ -1,5 +1,3 @@
-using Nivara.AI;
-
 namespace NivaraChat.Helpers;
 
 /// <summary>

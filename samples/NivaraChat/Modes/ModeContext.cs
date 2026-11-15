@@ -53,7 +53,4 @@ public sealed record ModeContext(
     int UpdateBatch = 0,
     bool Resume = false,
     bool NoPersist = false,
-    string LlmProvider = "ollama",
-    string? OpenAiUrl = null,
-    string? OpenAiModel = null,
-    string OpenAiAuth = "bearer");
+    string? ApiKeyEnvVar = null);

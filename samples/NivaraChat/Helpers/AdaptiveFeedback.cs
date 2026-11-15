@@ -1,4 +1,3 @@
-using Nivara.AI;
 using Nivara.AutoDiff.Utilities;
 
 namespace NivaraChat.Helpers;
