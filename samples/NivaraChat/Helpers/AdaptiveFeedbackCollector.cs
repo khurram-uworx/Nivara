@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Nivara.AI;
 
 namespace NivaraChat.Helpers;
@@ -9,18 +10,23 @@ public sealed class AdaptiveFeedbackCollector
     readonly int batchThreshold;
     readonly int epochs;
     readonly float learningRate;
+    readonly bool persist;
     readonly List<AdaptiveTrainingExample> buffer = [];
 
     public int BufferCount => buffer.Count;
     public int TotalCollected { get; private set; }
     public int SuccessfulUpdates { get; private set; }
+    public bool Persist { get; }
+    public long UpdateMilliseconds { get; private set; }
+    public long PersistMilliseconds { get; private set; }
 
     public AdaptiveFeedbackCollector(
         LayaDecisionHead<float, float> head,
         string weightsPath,
         int batchThreshold = 10,
         int epochs = AdaptiveTraining.DefaultEpochs,
-        float learningRate = AdaptiveTraining.DefaultLearningRate)
+        float learningRate = AdaptiveTraining.DefaultLearningRate,
+        bool persist = true)
     {
         ArgumentNullException.ThrowIfNull(head);
         ArgumentException.ThrowIfNullOrWhiteSpace(weightsPath);
@@ -34,6 +40,8 @@ public sealed class AdaptiveFeedbackCollector
         this.batchThreshold = batchThreshold;
         this.epochs = epochs;
         this.learningRate = learningRate;
+        this.persist = persist;
+        Persist = persist;
     }
 
     public bool Add(AdaptiveTrainingExample example)
@@ -59,8 +67,18 @@ public sealed class AdaptiveFeedbackCollector
         var previousState = head.StateDict();
         try
         {
+            var updateSw = Stopwatch.StartNew();
             AdaptiveTraining.Update(head, buffer, epochs, learningRate);
-            AdaptiveHeadPersistence.Save(head, weightsPath);
+            updateSw.Stop();
+            UpdateMilliseconds += updateSw.ElapsedMilliseconds;
+
+            if (persist)
+            {
+                var persistSw = Stopwatch.StartNew();
+                AdaptiveHeadPersistence.Save(head, weightsPath);
+                persistSw.Stop();
+                PersistMilliseconds += persistSw.ElapsedMilliseconds;
+            }
         }
         catch (Exception updateError)
         {
