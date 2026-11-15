@@ -99,5 +99,5 @@ internal static class DocsCoveragePins
     /// (<c>RELEASING.md</c>, <c>CHANGELOG.md</c>, <c>PackageVersion</c> is not a doc; the five are
     /// <c>RELEASING.md</c> x3 and <c>CHANGELOG.md</c> x2): 497 + 5 = 502.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 491;
+    internal const int ExpectedDocumentReferenceCount = 492;
 }
