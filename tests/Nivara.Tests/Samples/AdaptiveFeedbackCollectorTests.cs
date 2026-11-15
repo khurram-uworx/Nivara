@@ -133,6 +133,30 @@ public sealed class AdaptiveFeedbackCollectorTests
     }
 
     [Test]
+    public void FlushRemaining_TrainsBelowThreshold()
+    {
+        var head = new LayaDecisionHead<float>(HiddenSize, headLayerCount: 1);
+        var collector = new AdaptiveFeedbackCollector(head, Path.Combine(tempDir, "h.json"), batchThreshold: 10, epochs: 1);
+
+        Assert.That(collector.Add(Example(0)), Is.False);
+        Assert.That(collector.BufferCount, Is.EqualTo(1));
+
+        Assert.That(collector.FlushRemaining(), Is.True);
+        Assert.That(collector.BufferCount, Is.EqualTo(0));
+        Assert.That(collector.SuccessfulUpdates, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void FlushRemaining_EmptyBuffer_ReturnsFalse()
+    {
+        var head = new LayaDecisionHead<float>(HiddenSize, headLayerCount: 1);
+        var collector = new AdaptiveFeedbackCollector(head, Path.Combine(tempDir, "h.json"), batchThreshold: 10, epochs: 1);
+
+        Assert.That(collector.FlushRemaining(), Is.False);
+        Assert.That(collector.SuccessfulUpdates, Is.EqualTo(0));
+    }
+
+    [Test]
     public void LoadIfPresent_RejectsIncompleteHeadState()
     {
         var head = new LayaDecisionHead<float>(HiddenSize, headLayerCount: 0);
