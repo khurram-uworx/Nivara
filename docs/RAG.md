@@ -6,9 +6,66 @@ against a fixed baseline on held-out queries, with reproducible baselines and a 
 gate that refuses stale labels. The reference implementation lives in
 `samples/NivaraChat` (`--rag-multiview`, `--rag-eval`, `--rag-learn`).
 
-The guide is organized as one implementation flow. Each section names the Nivara APIs and
-the sample files that use them, so you can read it top-to-bottom and then jump into the
-code.
+The guide is organized as one implementation flow, but the sample itself is layered: each
+mode builds on the previous one. Read top-to-bottom, or jump to the layer you care about.
+Each section names the Nivara APIs and the sample files that use them, so you can read it
+top-to-bottom and then jump into the code.
+
+## 0. Progressive tour (RAG 101 → Adaptive Intelligence)
+
+NivaraChat ships one corpus (`docs/`) and five retrieval modes that build on each other.
+Run them in order and watch the system grow from "search" to "self-learning":
+
+| Step | Mode | What it adds | Issue |
+|---|---|---|---|
+| 1 | `--rag` | Basic RAG: chunk docs, MiniLM embeddings, top-K retrieval, optional LLM answer | #912 |
+| 2 | `--rag-multiview` | Four views per chunk (Content/Title/Section/Code) + late fusion + disagreement report | #914 |
+| 3 | `--rag-eval` | LLM-as-judge labels (`relevance.tsv`) + paired metrics | #912/#914 |
+| 4 | `--rag-learn` | Learn the fusion weights + optional query gate via AutoDiff, vs fixed baseline | #915 |
+| 5 | `--rag-adaptive` | Laya decision layer accepts/rejects retrieved chunks before answering | #916/#981 |
+| 6 | `--rag-adaptive-eval` | End-to-end loop: retrieve → decide → learn → persist → evaluate → report | #916/#983 |
+
+Commands (run from the repo root, `docs/` is the default corpus):
+
+```
+# 1. Basic RAG (LLM optional)
+dotnet run --project samples/NivaraChat -- --rag --text "What is Nivara?"
+
+# 2. Multi-view retrieval + disagreement report (no LLM)
+dotnet run --project samples/NivaraChat -- --rag-multiview --text "What is Nivara?"
+
+# 3. Judge labels (needs an LLM; use --ollama or --llm openai)
+dotnet run --project samples/NivaraChat -- --rag-eval --regenerate judge --ollama --force
+
+# 4. Differentiable retrieval: learn fusion weights, compare on held-out queries
+dotnet run --project samples/NivaraChat -- --rag-learn
+dotnet run --project samples/NivaraChat -- --rag-learn --labels auto --epochs 2   # offline smoke
+
+# 5. Adaptive RAG: Laya decision layer filters retrieved chunks
+dotnet run --project samples/NivaraChat -- --rag-adaptive --text "What is Nivara?"
+
+# 6. Adaptive eval: retrieve -> decide -> learn -> persist -> evaluate -> report
+dotnet run --project samples/NivaraChat -- --rag-adaptive-eval --labels judge --no-persist
+dotnet run --project samples/NivaraChat -- --rag-adaptive-eval --labels judge --silk
+```
+
+What to notice at each step:
+
+- **Step 1 → 2**: retrieval stops being "one embedding per chunk"; the disagreement
+  report shows which view won and where views diverge. The four views are still fused by
+  hand-picked weights `(0.5, 0.2, 0.2, 0.1)`.
+- **Step 2 → 4**: `--rag-learn` prints `Init parity ≈ 0` (the learned model is numerically
+  the fixed baseline at step 0) and then a held-out before/after table. A non-significant
+  result is a valid result and is reported as such.
+- **Step 4 → 5**: `--rag-adaptive` adds a typed decision (accept / fallback / abstain)
+  with calibrated confidence per chunk, before any answer is generated.
+- **Step 5 → 6**: `--rag-adaptive-eval` trains a small head on frozen ModernBERT
+  features via AutoDiff, persists it with `ModelSerializer`, and re-scores the held-out
+  split; the report shows decision accuracy and calibration before vs after, plus CPU vs
+  Silk parity. Feedback is simulated from judge labels and is stated as such.
+
+The rest of this guide (Sections 1-11) is the deep dive into step 4 and beyond. Sections
+2-9 cover the differentiable retrieval machinery; Section 10 covers the adaptive loop.
 
 ## 1. Overview
 
