@@ -21,7 +21,7 @@ public class QwenToolsWeatherLoopTests
             "samples", "data", "qwen2.5-0.5b-instruct");
 
     static readonly Gpt2BpeTokenizer? CachedTokenizer;
-    static readonly (LlamaForCausalLM<float> Model, LlamaConfig Config)? CachedModel;
+    static readonly (LlamaForCausalLM<float, float> Model, LlamaConfig Config)? CachedModel;
 
     static QwenToolsWeatherLoopTests()
     {

@@ -3334,14 +3334,15 @@ class Program
         return 0;
     }
 
-    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGeneration<T>(
-        LlamaForCausalLM<T> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
-        where T : struct, IFloatingPointIeee754<T>
+    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGeneration<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         int headDim = config.HiddenSize / config.NumAttentionHeads;
         int kvWidth = config.NumKeyValueHeads * headDim;
         int cacheCapacity = Math.Max(16, promptIds.Count + maxNewTokens);
-        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth, cacheCapacity);
+        using var cache = new LlamaKVCache<TModel>(config.NumHiddenLayers, kvWidth, cacheCapacity);
         var sequence = new List<int>(promptIds);
         int generated = 0;
         var genSw = Stopwatch.StartNew();
@@ -3397,13 +3398,14 @@ class Program
     /// final-position logits. Inference-by-default: never enters a <c>GradientUtils.Grad()</c>
     /// scope, so no graph nodes are built.
     /// </summary>
-    static void ConsumeGenerated<T>(
-        LlamaForCausalLM<T> model,
+    static void ConsumeGenerated<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model,
         string modelDir,
         Gpt2BpeTokenizer tokenizer,
         LlamaConfig config,
         string precisionName)
-        where T : struct, IFloatingPointIeee754<T>
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         const string Prompt = "The capital of France is";
         const int MaxNewTokens = 32;
@@ -3486,9 +3488,10 @@ class Program
     }
 
     /// <summary>Runs the full prefix through the model and returns the last-row logits as float[].</summary>
-    static float[] LastPositionLogits<T>(
-        LlamaForCausalLM<T> model, IReadOnlyList<int> sequence, int vocab)
-        where T : struct, IFloatingPointIeee754<T>
+    static float[] LastPositionLogits<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model, IReadOnlyList<int> sequence, int vocab)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var prefix = new int[sequence.Count - 1];
         for (int i = 0; i < prefix.Length; i++)
