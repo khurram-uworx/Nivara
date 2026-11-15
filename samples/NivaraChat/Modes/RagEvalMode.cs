@@ -1,4 +1,6 @@
+using Microsoft.Extensions.AI;
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using OllamaSharp;
 using System.Diagnostics;
 using System.Text.Json;
@@ -45,9 +47,9 @@ public static class RagEvalMode
         if (string.Equals(ctx.Regenerate, "judge", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(ctx.Regenerate, "all", StringComparison.OrdinalIgnoreCase))
         {
-            if (!ctx.UseOllama)
+            if (!ctx.UseOllama && !string.Equals(ctx.LlmProvider, "openai", StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine("--regenerate judge requires --ollama --model <model>.");
+                Console.WriteLine("--regenerate judge requires --ollama or --llm openai (--model / --openai-model <model>).");
                 return;
             }
             if (File.Exists(labelsPath) && !ctx.Force)
@@ -79,8 +81,21 @@ public static class RagEvalMode
 
         Console.WriteLine($"Loaded {queries.Count} queries from {queriesPath}");
 
-        OllamaApiClient? client = null;
-        if (ctx.UseOllama)
+        IChatClient? client = null;
+        if (string.Equals(ctx.LlmProvider, "openai", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                client = LlmClientFactory.Create(ctx);
+                Console.WriteLine($"LLM connected (openai).\n");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to create OpenAI client: {ex.Message}");
+                if (!ctx.Offline) return;
+            }
+        }
+        else if (ctx.UseOllama)
         {
             Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
             client = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
@@ -88,7 +103,7 @@ public static class RagEvalMode
         }
         else if (!ctx.Offline)
         {
-            Console.WriteLine("This mode needs --ollama (or --offline with cached labels).");
+            Console.WriteLine("This mode needs --ollama or --llm openai (or --offline with cached labels).");
             return;
         }
 
@@ -166,9 +181,9 @@ public static class RagEvalMode
 
                     if (passages.Count > 0 && client is not null)
                     {
-                        var graded = await RagEvalJudge.GradeChunksAsync(client, q.Query, passages, runs, ctx.Temperature);
-                        foreach (var (id, res) in graded)
-                            labelMap[id] = res;
+                        var graded = await RagEvalJudge.GradeChunksAsync(client!, q.Query, passages, runs, ctx.Temperature);
+                        foreach (var kv in graded)
+                            labelMap[kv.Key] = kv.Value;
                         var header = $"# corpus={index.CorpusIdentity.ContentHash} chunker={index.CorpusIdentity.ChunkerVersion} chunkSize={index.CorpusIdentity.ChunkSize} backend={index.CorpusIdentity.Backend} dimension={index.CorpusIdentity.Dimension}";
                         RagEvalLabels.Save(labelsPath, labels, header);
                     }

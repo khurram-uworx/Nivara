@@ -1,4 +1,5 @@
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -19,9 +20,9 @@ public static class OnlineLearningMode
             return;
         }
 
-        if (!ctx.UseOllama)
+        if (!ctx.UseOllama && !string.Equals(ctx.LlmProvider, "openai", StringComparison.OrdinalIgnoreCase))
         {
-            Console.WriteLine("Error: --online-learning requires --ollama for LLM feedback.");
+            Console.WriteLine("Error: --online-learning requires --ollama or --llm openai for LLM feedback.");
             return;
         }
 
@@ -30,7 +31,8 @@ public static class OnlineLearningMode
         Console.WriteLine("Intent model loaded.\n");
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-        var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
+        var chatClient = LlmClientFactory.Create(ctx)
+            ?? throw new InvalidOperationException("This mode requires --ollama or --llm openai.");
         Console.WriteLine("Ollama connected.\n");
 
         var collector = new FeedbackCollector(

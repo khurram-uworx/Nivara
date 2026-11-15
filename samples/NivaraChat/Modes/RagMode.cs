@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -18,13 +19,9 @@ public static class RagMode
         using var index = await RagIndex.BuildAsync(ctx);
         if (index is null) return;
 
-        OllamaApiClient? chatClient = null;
-        if (ctx.UseOllama)
-        {
-            Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-            chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
-            Console.WriteLine("Ollama connected.\n");
-        }
+        IChatClient? chatClient = LlmClientFactory.Create(ctx);
+        if (chatClient is not null)
+            Console.WriteLine($"LLM connected ({ctx.LlmProvider}).\n");
         else
         {
             Console.WriteLine("No --ollama: will list retrieved chunks only.\n");

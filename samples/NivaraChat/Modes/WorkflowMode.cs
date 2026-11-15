@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Executors;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -12,6 +13,7 @@ public static class WorkflowMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--workflow");
         Console.WriteLine("=== NivaraChat Workflow ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))
