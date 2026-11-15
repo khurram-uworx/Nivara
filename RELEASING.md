@@ -157,7 +157,8 @@ CPU/Silk/BLAS, PyTorch references, NivaraFineTuning) writing to
 `release/<version>/`. Run it from the repo root in the background with no
 timeout, e.g. `cmd /c release\run-benchmarks.cmd 1.5.1` launched as a
 backgrounded command. It is the preferred entry point for both humans and
-agents; keep it updated when benchmark commands change.
+agents; keep it updated when benchmark commands change. See `release/README.md`
+for full usage and the table-regeneration helper workflow.
 
 The core harness JSON file should be committed as canonical evidence under
 `release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy"
