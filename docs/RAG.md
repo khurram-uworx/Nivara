@@ -228,7 +228,7 @@ updates on train-split simulated feedback) -> persisted update (`laya_head.json`
 - Silk scope: MiniLM embedding generation and parity only. Decisions and head training are CPU
   in both backends. Hand-written Silk weight steps are a follow-up.
 - Report + metrics written to `samples/data/nivarachat/adaptive/` (gitignored):
-  `rag-adaptive-report.md`, `metrics-{kind}-s{seed}-k{k}.json`. `laya_head.json` is ~147 MB;
+  rag-adaptive-report.md, `metrics-{kind}-s{seed}-k{k}.json`. `laya_head.json` is ~147 MB;
   use `--no-persist` or `--head-weights <temp>` for read-only runs.
 
 Run:
