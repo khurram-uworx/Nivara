@@ -17,12 +17,14 @@ closed as **no action** unless a future issue is created and linked here.
 
 ## Bugs / Tech Debt
 
-### 1. Benchmark run not fully captured (carried from v1.5.0)
+### 1. Benchmark run captured for v1.5.1
 
-**Status:** Open — deferred. Core perf harness and model-weight-dependent benchmarks
-(NivaraInference, NivaraFineTuning) were not run in this agent session; per
-RELEASING.md step 5 the existing numbers are left in place and the reason is recorded
-here rather than being carried forward as fresh readings.
+**Status:** Addressed. With human approval, all release benchmarks were run and their
+artefacts committed under `release/v1.5.1/`: core perf harness
+(`nivara-perf-v1.5.1.json`), NivaraIncident (`nivaraincident-v1.5.1.txt`),
+NivaraInference CPU/Silk/BLAS plus PyTorch reference runs, and NivaraFineTuning
+(`nivarafinetuning-v1.5.1.txt`). README tables still need the Prev/Current shift
+pass from these captures.
 
 **Recorded suggestions (not filed):**
 - Split the harness into a machine-runnable quick mode, or document expected runtimes
@@ -57,12 +59,12 @@ reset to the next dev line (`1.6.0-preview` or `2.0.0-preview`) on `main`.
 
 ## Release Process
 
-### 6. Benchmarks deferred to human run
+### 6. Benchmarks run with approval
 
-Per the AGENTS.md benchmark policy, all benchmark commands are human-run. The
-commands for this release are listed in `RELEASING.md` step 5 and the per-sample
-`## Release Benchmark` sections; AC power is available for the Silk variants. Run
-them before tagging and commit the artefacts under `release/v1.5.1/`.
+Benchmarks were run with explicit human approval, launched via a temporary
+`release.cmd` in the background with no timeout, and the artefacts committed under
+`release/v1.5.1/`. The README table regen (Prev/Current shift) is the remaining
+follow-up.
 
 ---
 
