@@ -113,6 +113,21 @@ public static class LayaRetrievalDecisionHead
         }
 
         using var engine = new LayaDecisionEngine(modelDir);
+        return Evaluate(engine, query, chunks, confidenceThreshold);
+    }
+
+    public static IReadOnlyList<LayaChunkDecision> Evaluate(
+        LayaDecisionEngine engine,
+        string query,
+        IReadOnlyList<RetrievedChunk> chunks,
+        float confidenceThreshold)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(chunks);
+        if (chunks.Count == 0)
+            return [];
+
         return chunks
             .Select(chunk =>
             {
@@ -136,6 +151,53 @@ public static class LayaRetrievalDecisionHead
                     "Chunk did not meet the Laya confidence threshold.");
             })
             .ToArray();
+    }
+
+    public static LayaQuestion BuildQuestion(string query, string chunkId, string chunkContent)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(chunkId);
+        ArgumentNullException.ThrowIfNull(chunkContent);
+        var question = new LayaQuestion
+        {
+            Id = $"retrieval-{chunkId}",
+            Type = LayaQuestionType.Choice,
+            Instructions = $"Question: {query}\nIs this retrieved chunk relevant and answer-supporting?",
+            Options =
+            [
+                new("relevant", "this chunk directly supports the answer or the user’s intent"),
+                new("not_relevant", "this chunk is off-topic, stale, or not useful")
+            ]
+        };
+        return question;
+    }
+
+    public static LayaChunkDecision Decide(LayaDecisionEngine engine, string query, MultiViewChunk chunk)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(chunk);
+        var decision = engine.Decide(query, new RetrievedChunk(chunk.ChunkId, chunk.Source, chunk.Title, chunk.Content, 0d));
+        var choice = decision.Choice ?? "unknown";
+        return new LayaChunkDecision(
+            chunk.ChunkId, chunk.Source, chunk.Title, chunk.Content, choice,
+            decision.Confidence, decision.AnswerConfidence, 0d,
+            choice == "relevant", choice == "not_relevant", choice);
+    }
+
+    public static LayaDecision DecideFromFeatures(
+        LayaDecisionEngine engine,
+        string query,
+        MultiViewChunk chunk,
+        AdaptiveFrozenFeatures features)
+    {
+        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(chunk);
+        ArgumentNullException.ThrowIfNull(features);
+        var question = BuildQuestion(query, chunk.ChunkId, chunk.Content);
+        var hidden = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(
+            (float[])features.Values.Clone(), features.SequenceLength, features.HiddenSize);
+        var output = engine.Head.Forward(hidden, question.Type, features.MarkerPositions, features.SequenceLength);
+        return engine.Calibration.Decode(question, output.Logits, output.ActionProbability);
     }
 
     public sealed class LayaDecisionEngine : IDisposable
@@ -182,6 +244,7 @@ public static class LayaRetrievalDecisionHead
         }
 
         public LayaDecisionHead<float, float> Head => head;
+        public LayaCalibration Calibration => calibration;
 
         public AdaptiveFrozenFeatures ExtractFeatures(string query, MultiViewChunk chunk)
         {

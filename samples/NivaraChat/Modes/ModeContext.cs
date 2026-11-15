@@ -44,4 +44,12 @@ public sealed record ModeContext(
     int? EvalK = null,
     string? BaselinePath = null,
     string? Regenerate = null,
-    bool Force = false);
+    bool Force = false,
+    int MaxQueries = 0,
+    int MaxExamples = 0,
+    string? HeadWeights = null,
+    int HeadEpochs = 0,
+    float HeadLearningRate = 0f,
+    int UpdateBatch = 0,
+    bool Resume = false,
+    bool NoPersist = false);

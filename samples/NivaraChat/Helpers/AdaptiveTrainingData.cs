@@ -82,14 +82,7 @@ public static class AdaptiveTrainingData
 
                 var features = extractFeatures(query, chunks[row]);
                 ValidateFeatures(features);
-                examples.Add(new AdaptiveTrainingExample(
-                    query,
-                    chunks[row].ChunkId,
-                    (float[])features.Values.Clone(),
-                    features.SequenceLength,
-                    features.HiddenSize,
-                    (int[])features.MarkerPositions.Clone(),
-                    grade > 0 ? 0 : 1));
+                examples.Add(CreateExample(query, chunks[row], grade, features));
             }
         }
 
@@ -118,7 +111,31 @@ public static class AdaptiveTrainingData
             examples.Where(example => testQueries.Contains(example.Query)).ToArray());
     }
 
-    static void ValidateFeatures(AdaptiveFrozenFeatures features)
+    /// <summary>
+    /// Single authoritative mapping from a graded (query, chunk) pair and its frozen features to an
+    /// adaptive training example. Target 0 means relevant (grade &gt; 0), target 1 means not relevant.
+    /// Shared by <see cref="Build"/> and the retrieval-driven builder in <see cref="AdaptiveFeedback"/>.
+    /// </summary>
+    public static AdaptiveTrainingExample CreateExample(
+        string query,
+        MultiViewChunk chunk,
+        int grade,
+        AdaptiveFrozenFeatures features)
+    {
+        ArgumentNullException.ThrowIfNull(chunk);
+        ArgumentNullException.ThrowIfNull(features);
+        ValidateFeatures(features);
+        return new AdaptiveTrainingExample(
+            query,
+            chunk.ChunkId,
+            (float[])features.Values.Clone(),
+            features.SequenceLength,
+            features.HiddenSize,
+            (int[])features.MarkerPositions.Clone(),
+            grade > 0 ? 0 : 1);
+    }
+
+    public static void ValidateFeatures(AdaptiveFrozenFeatures features)
     {
         ArgumentNullException.ThrowIfNull(features);
         ArgumentNullException.ThrowIfNull(features.Values);

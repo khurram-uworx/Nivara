@@ -8,6 +8,11 @@ using Nivara.AutoDiff.Utilities;
 
 namespace NivaraChat.Helpers;
 
+public sealed record AdaptiveObservedChoice(
+    int Target,
+    int Predicted,
+    double AnswerConfidence);
+
 public sealed record AdaptiveChoiceMetrics(
     int Count,
     int Correct,
@@ -143,6 +148,36 @@ public static class AdaptiveTraining
             precision,
             recall,
             f1);
+    }
+
+    public static IReadOnlyList<AdaptiveObservedChoice> Observe(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> examples,
+        LayaCalibration calibration)
+    {
+        ArgumentNullException.ThrowIfNull(head);
+        ArgumentNullException.ThrowIfNull(examples);
+        ArgumentNullException.ThrowIfNull(calibration);
+        if (examples.Count == 0)
+            throw new ArgumentException("At least one example is required for adaptive observation.", nameof(examples));
+
+        var temperature = calibration.Resolve(LayaQuestionType.Choice, 2);
+        var observed = new List<AdaptiveObservedChoice>(examples.Count);
+        foreach (var example in examples)
+        {
+            ValidateExample(head, example);
+            var hidden = ReverseGradTensor<float>.FromMatrix(
+                (float[])example.Features.Clone(), example.SequenceLength, example.HiddenSize);
+            var output = head.Forward(hidden, LayaQuestionType.Choice, example.MarkerPositions, example.SequenceLength);
+            var values = output.Logits;
+            var predicted = values[0] >= values[1] ? 0 : 1;
+            var logits = new[] { values[0], values[1] };
+            var probabilities = LayaCalibration.SoftmaxAtTemperature(logits, 2, temperature.Scale);
+            var confidence = LayaCalibration.AnswerConfidence(probabilities, 2);
+            observed.Add(new AdaptiveObservedChoice(example.Target, predicted, confidence));
+        }
+
+        return observed;
     }
 
     static IReadOnlyList<Parameter<float>> ChoiceParameters(LayaDecisionHead<float, float> head)

@@ -49,6 +49,14 @@ if (args.Length > 0)
     int trainQueries = 0;
     int? evalK = null;
     string? baselinePath = null;
+    int maxQueries = 0;
+    int maxExamples = 0;
+    string? headWeights = null;
+    int headEpochs = 0;
+    float headLearningRate = 0f;
+    int updateBatch = 0;
+    bool resume = false;
+    bool noPersist = false;
     string? regenerate = null;
     bool force = false;
     for (int i = 1; i < args.Length; i++)
@@ -91,6 +99,14 @@ if (args.Length > 0)
         if (args[i] == "--baseline" && i + 1 < args.Length) baselinePath = args[++i];
         if (args[i] == "--regenerate" && i + 1 < args.Length) regenerate = args[++i];
         if (args[i] == "--force") force = true;
+        if (args[i] == "--max-queries" && i + 1 < args.Length) maxQueries = int.Parse(args[++i]);
+        if (args[i] == "--max-examples" && i + 1 < args.Length) maxExamples = int.Parse(args[++i]);
+        if (args[i] == "--head-weights" && i + 1 < args.Length) headWeights = args[++i];
+        if (args[i] == "--head-epochs" && i + 1 < args.Length) headEpochs = int.Parse(args[++i]);
+        if (args[i] == "--head-lr" && i + 1 < args.Length) headLearningRate = float.Parse(args[++i]);
+        if (args[i] == "--update-batch" && i + 1 < args.Length) updateBatch = int.Parse(args[++i]);
+        if (args[i] == "--resume") resume = true;
+        if (args[i] == "--no-persist") noPersist = true;
     }
 
     var ctx = new ModeContext(modelsDir, ollamaUrl, modelName, useOllama, workflowText, confidenceThreshold, docsDir, topK, useSilk, aclGroup, roundTrip, store, index, rebuild, noCache, batchSize, chunkSize, explore, reportPath, weights, offline, runs, temperature, gradeAll, verbose, queries)
@@ -108,7 +124,15 @@ if (args.Length > 0)
         EvalK = evalK,
         BaselinePath = baselinePath,
         Regenerate = regenerate,
-        Force = force
+        Force = force,
+        MaxQueries = maxQueries,
+        MaxExamples = maxExamples,
+        HeadWeights = headWeights,
+        HeadEpochs = headEpochs,
+        HeadLearningRate = headLearningRate,
+        UpdateBatch = updateBatch,
+        Resume = resume,
+        NoPersist = noPersist
     };
     switch (mode)
     {
@@ -141,6 +165,9 @@ if (args.Length > 0)
             break;
         case "--rag-adaptive":
             await RagAdaptiveMode.Run(ctx);
+            break;
+        case "--rag-adaptive-eval":
+            await RagAdaptiveEvalMode.Run(ctx);
             break;
         case "--rag-agent":
             await RagAgentMode.Run(ctx);
@@ -259,6 +286,7 @@ void PrintUsage()
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
     Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer (Ollama optional)");
     Console.WriteLine("  --rag-adaptive       Retrieval-first RAG with a Laya decision layer that accepts or rejects the retrieved chunk");
+    Console.WriteLine("  --rag-adaptive-eval  End-to-end adaptive loop (#983): retrieve, decide, learn, persist, report");
     Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection (Ollama optional)");
     Console.WriteLine("  --rag-multiview      Multi-view retrieval (#914): four views per chunk, late fusion, disagreement report");
     Console.WriteLine("  --rag-learn          Differentiable retrieval (#915): learn the fusion weights and a query gate, compare on held-out queries");
