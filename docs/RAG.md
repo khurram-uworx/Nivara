@@ -34,7 +34,7 @@ dotnet run --project samples/NivaraChat -- --rag --text "What is Nivara?"
 # 2. Multi-view retrieval + disagreement report (no LLM)
 dotnet run --project samples/NivaraChat -- --rag-multiview --text "What is Nivara?"
 
-# 3. Judge labels (needs an LLM; use --ollama or --llm openai)
+# 3. Judge labels (needs an LLM; use --ollama)
 dotnet run --project samples/NivaraChat -- --rag-eval --regenerate judge --ollama --force
 
 # 4. Differentiable retrieval: learn fusion weights, compare on held-out queries
