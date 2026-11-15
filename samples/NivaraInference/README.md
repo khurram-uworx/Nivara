@@ -254,11 +254,11 @@ Nivara CPU and Nivara BLAS for MiniLM, DistilBERT, SST-2, and ModernBERT are one
 
 | Model | Input | PyTorch | Nivara CPU | Slowdown (CPU) | Nivara BLAS | Slowdown (BLAS) | Nivara GPU | Slowdown (GPU) |
 |-------|-------|---------|------------|----------------|-------------|-----------------|------------|----------------|
-| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 463.5 ms | **~20.7x** | — (conv) | — |  |  |
-| **ResNet-18** | 1x3x224x224 | 14.1 ms | 123.3 ms | **~8.7x** | — (conv) | — |  |  |
-| **MiniLM-L6** | 128 tokens | 11.0 ms | 59.4 ms | — | 119.5 ms (2t 1bt) | — | 24.1 ms | **~2.2x** |
-| **DistilBERT** | 128 tokens | 26.9 ms | 180.3 ms | — | 134.4 ms (4t 1bt) | — | 63.3 ms | **~2.4x** |
-| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 198.8 ms | — | 148.6 ms (4t 1bt) | — | 63.8 ms | **~1.9x** |
+| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 595.4 ms | **~26.6x** | — (conv) | — |  |  |
+| **ResNet-18** | 1x3x224x224 | 14.1 ms | 106.5 ms | **~7.6x** | — (conv) | — |  |  |
+| **MiniLM-L6** | 128 tokens | 11.0 ms | 54.0 ms | — | 119.5 ms (2t 1bt) | — | 24.1 ms | **~2.2x** |
+| **DistilBERT** | 128 tokens | 26.9 ms | 267.2 ms | — | 134.4 ms (4t 1bt) | — | 63.3 ms | **~2.4x** |
+| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 281.2 ms | — | 148.6 ms (4t 1bt) | — | 63.8 ms | **~1.9x** |
 | **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** | — | — |  |  |
 | **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** | — | — |  |  |
 | **ModernBERT-large** | 128 tokens | 312.4 ms | 1234.5 ms | — | 522.3 ms (4t 1bt) | — |  |  |
