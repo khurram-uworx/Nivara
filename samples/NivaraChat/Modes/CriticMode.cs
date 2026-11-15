@@ -1,7 +1,7 @@
+using Microsoft.Extensions.AI;
 using NivaraChat.Executors;
 using NivaraChat.Helpers;
 using NivaraChat.Shared;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -13,7 +13,6 @@ public static class CriticMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--critic");
         Console.WriteLine("=== NivaraChat — Writer-Critic Loop ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))
@@ -32,9 +31,18 @@ public static class CriticMode
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir);
         Console.WriteLine("Models loaded.\n");
 
-        Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-        var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
-        Console.WriteLine("Ollama connected.\n");
+        Console.WriteLine($"Connecting to LLM at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
+        var nullAbleChatClient = LlmClientFactory.Create(ctx);
+
+        if (nullAbleChatClient is null)
+        {
+            validatorModel.Dispose();
+            Console.WriteLine("Error: failed to connect to LLM.");
+            return;
+        }
+
+        Console.WriteLine("LLM connected.\n");
+        IChatClient chatClient = nullAbleChatClient;
 
         var critic = new CriticExecutor(validatorModel, validatorTok);
         var loop = new WriterCriticLoop(chatClient, critic);

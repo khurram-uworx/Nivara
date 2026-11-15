@@ -134,10 +134,6 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--update-batch <int>` | `32` | `--rag-adaptive-eval`: feedback batch size |
 | `--resume` | — | `--rag-adaptive-eval`: load persisted head on startup |
 | `--no-persist` | — | `--rag-adaptive-eval`: train in memory, do not write `laya_head.json` |
-| `--llm <ollama\|openai>` | `ollama` | LLM provider for plain-chat modes |
-| `--openai-url <base>` | — | OpenAI-compatible base URL (e.g. `http://host/v1`) |
-| `--openai-model <name>` | `--model` value | Model name for `--llm openai` |
-| `--openai-auth <mode>` | `bearer` | Auth mode for `--llm openai`: `bearer` or `api-key` (Azure) |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |
@@ -151,6 +147,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
+| `--api-key <env>` | `NIVARA_CHAT_API_KEY` | Environment variable name for API Key |
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
 | `--docs-dir <path>` | `docs/` | Documents directory for `--rag`, `--rag-agent`, `--rag-multiview` and `--rag-learn` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |

@@ -5,7 +5,6 @@ using NivaraChat.Executors;
 using NivaraChat.Helpers;
 using NivaraChat.Shared;
 using NivaraChat.Tools;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -17,7 +16,6 @@ public static class IntentMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--intent");
         Console.WriteLine("=== NivaraChat Intent Routing ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "intent_model.json")))
@@ -38,7 +36,13 @@ public static class IntentMode
         }
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-        var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
+        var chatClient = LlmClientFactory.Create(ctx);
+        if (chatClient == null)
+        {
+            Console.WriteLine("Error: failed to connect to Ollama.");
+            intentModel.Dispose();
+            return;
+        }
         Console.WriteLine("Ollama connected.\n");
 
         var minilmDir = Path.Combine(ModeHelpers.GetRepoRoot(), "samples", "data", "minilm");

@@ -1,17 +1,16 @@
 using Microsoft.Extensions.AI;
 using NivaraChat.Executors;
-using OllamaSharp;
 using System.Text.Json;
 
 namespace NivaraChat.Helpers;
 
 internal sealed class WriterCriticLoop
 {
-    private readonly OllamaApiClient _chatClient;
+    private readonly IChatClient _chatClient;
     private readonly CriticExecutor _critic;
     private const int MaxIterations = 3;
 
-    public WriterCriticLoop(OllamaApiClient chatClient, CriticExecutor critic)
+    public WriterCriticLoop(IChatClient chatClient, CriticExecutor critic)
     {
         _chatClient = chatClient;
         _critic = critic;

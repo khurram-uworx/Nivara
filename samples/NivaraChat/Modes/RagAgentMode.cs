@@ -9,7 +9,6 @@ public static class RagAgentMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--rag-agent");
         Console.WriteLine("=== NivaraChat — RAG Agent (TextSearchProvider) ===\n");
 
         using var index = await RagIndex.BuildAsync(ctx);
@@ -62,7 +61,7 @@ public static class RagAgentMode
     {
         var chatClient = LlmClientFactory.Create(ctx)
             ?? throw new InvalidOperationException("No LLM provider configured.");
-        Console.WriteLine($"LLM connected ({ctx.LlmProvider}).\n");
+        Console.WriteLine($"LLM connected.\n");
 
         async Task<IEnumerable<TextSearchProvider.TextSearchResult>> SearchAsync(string query, CancellationToken ct)
         {

@@ -1,15 +1,14 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using OllamaSharp;
 
 namespace NivaraChat.Executors;
 
 internal sealed class LlmExecutor : Executor<string, string>
 {
-    private readonly OllamaApiClient _chatClient;
+    private readonly IChatClient _chatClient;
 
-    public LlmExecutor(OllamaApiClient chatClient)
-        : base("Ollama LLM")
+    public LlmExecutor(IChatClient chatClient)
+        : base("LLM")
     {
         _chatClient = chatClient;
     }

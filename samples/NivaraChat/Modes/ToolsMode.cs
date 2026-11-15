@@ -3,7 +3,6 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using NivaraChat.Shared;
 using NivaraChat.Tools;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -14,7 +13,6 @@ public static class ToolsMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--tools");
         Console.WriteLine("=== NivaraChat — Nivara as AIFunction Tools ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))
@@ -36,7 +34,12 @@ public static class ToolsMode
         Console.WriteLine("Models loaded.\n");
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-        var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
+        var chatClient = LlmClientFactory.Create(ctx);
+        if (chatClient == null)
+        {
+            Console.WriteLine("Error: Unable to connect to Ollama. Check your connection and try again.");
+            return;
+        }
         Console.WriteLine("Ollama connected.\n");
 
         NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok);

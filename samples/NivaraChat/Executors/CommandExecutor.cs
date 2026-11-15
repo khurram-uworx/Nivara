@@ -1,17 +1,16 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using OllamaSharp;
 using System.Text.Json;
 
 namespace NivaraChat.Executors;
 
 internal sealed class CommandExecutor : Executor<string, string>
 {
-    private readonly OllamaApiClient _chatClient;
+    private readonly IChatClient _chatClient;
     private readonly AIFunction[] _tools;
 
-    public CommandExecutor(OllamaApiClient chatClient, AIFunction[] tools)
+    public CommandExecutor(IChatClient chatClient, AIFunction[] tools)
         : base("Command")
     {
         _chatClient = chatClient;

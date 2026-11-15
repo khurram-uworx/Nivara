@@ -20,7 +20,7 @@ public static class RagMode
 
         IChatClient? chatClient = LlmClientFactory.Create(ctx);
         if (chatClient is not null)
-            Console.WriteLine($"LLM connected ({ctx.LlmProvider}).\n");
+            Console.WriteLine($"LLM connected.\n");
         else
         {
             Console.WriteLine("No --ollama: will list retrieved chunks only.\n");

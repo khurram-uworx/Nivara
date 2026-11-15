@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Executors;
 using NivaraChat.Shared;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 
@@ -13,7 +12,6 @@ public static class WorkflowMode
 {
     public static async Task Run(ModeContext ctx)
     {
-        LlmClientFactory.RejectForUnsupportedMode(ctx, "--workflow");
         Console.WriteLine("=== NivaraChat Workflow ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))
@@ -36,7 +34,12 @@ public static class WorkflowMode
         if (ctx.UseOllama)
         {
             Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-            var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
+            var chatClient = LlmClientFactory.Create(ctx);
+            if (chatClient == null)
+            {
+                Console.WriteLine("Failed to connect to Ollama. Check your connection and try again.");
+                return;
+            }
             llmExecutor = new LlmExecutor(chatClient);
             Console.WriteLine("Ollama connected.\n");
         }
