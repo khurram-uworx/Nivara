@@ -7,35 +7,32 @@ namespace NivaraChat.Shared;
 
 /// <summary>
 /// Builds the <see cref="IChatClient"/> used by the plain-chat modes from a <see cref="ModeContext"/>,
-/// selecting Ollama or an OpenAI-compatible endpoint based on <see cref="ModeContext.LlmProvider"/>.
+/// using the OpenAI chat-completions protocol for both Ollama and OpenAI-compatible endpoints.
 /// </summary>
 static class LlmClientFactory
 {
     public static IChatClient? Create(ModeContext ctx)
     {
         ArgumentNullException.ThrowIfNull(ctx);
+        if (!ctx.UseOllama) return null;
 
-        OpenAIClient? openAIClient = null;
+        var baseUrl = string.IsNullOrWhiteSpace(ctx.OllamaUrl) ? "http://localhost:11434" : ctx.OllamaUrl!.TrimEnd('/');
+        if (!baseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            baseUrl += "/v1";
 
-        if (ctx.OllamaUrl is { Length: > 0 })
+        string apiKey = "ollama";
+        if (ctx.ApiKeyEnvVar is { Length: > 0 })
         {
-            if (ctx.ApiKeyEnvVar is null)
-                throw new InvalidOperationException("API key environment variable name must be provided for OpenAI-compatible endpoints.");
-
-            var key = Environment.GetEnvironmentVariable(ctx.ApiKeyEnvVar);
-            if (key is null)
+            var envKey = Environment.GetEnvironmentVariable(ctx.ApiKeyEnvVar);
+            if (string.IsNullOrWhiteSpace(envKey))
                 throw new InvalidOperationException($"API key environment variable '{ctx.ApiKeyEnvVar}' is not set.");
-
-            var options = new OpenAIClientOptions { Endpoint = new Uri(ctx.OllamaUrl) };
-            openAIClient = new OpenAIClient(new ApiKeyCredential(key), options);
-        }
-        else
-        {
-            var options = new OpenAIClientOptions { Endpoint = new Uri("http://localhost:11434/v1") };
-            openAIClient = new OpenAIClient(new ApiKeyCredential("x"), options);
+            apiKey = envKey;
         }
 
-        if (openAIClient != null && ctx.ModelName is { Length: > 0 })
+        var options = new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
+        var openAIClient = new OpenAIClient(new ApiKeyCredential(apiKey), options);
+
+        if (openAIClient is not null && ctx.ModelName is { Length: > 0 })
             return openAIClient.GetChatClient(ctx.ModelName).AsIChatClient();
 
         return null;
