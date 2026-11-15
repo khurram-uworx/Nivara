@@ -21,12 +21,51 @@ public static class SafeTensorsLoader
         => Read<float>(bytes);
 
     /// <summary>
+    /// Returns the on-disk safetensors dtype of every tensor, keyed by tensor name. Only the
+    /// header is parsed; no tensor data is materialised.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ReadDtypes(string path)
+        => WithMappedFile(path, ReadDtypes);
+
+    /// <summary>
+    /// Returns the on-disk dtype of every tensor in an in-memory safetensors buffer
+    /// (e.g. a test fixture).
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ReadDtypes(byte[] bytes)
+        => ReadDtypes(bytes.AsSpan());
+
+    static IReadOnlyDictionary<string, string> ReadDtypes(ReadOnlySpan<byte> buffer)
+    {
+        var entries = ParseHeader(buffer, out _);
+        var result = new Dictionary<string, string>(entries.Length, StringComparer.Ordinal);
+        foreach (var (name, dtype, _, _, _) in entries)
+            result[name] = dtype;
+        return result;
+    }
+
+    /// <summary>
     /// Loads a safetensors file as <typeparamref name="T"/> tensors, translating each tensor's
     /// on-disk dtype to <typeparamref name="T"/> at load time. The file is memory-mapped and read
     /// on demand per tensor, so no full-file <see cref="byte"/>[] is ever materialized.
     /// </summary>
     public static Dictionary<string, (T[] Data, int[] Shape)> Read<T>(string path)
         where T : struct, IFloatingPointIeee754<T>
+        => WithMappedFile(path, Read<T>);
+
+    /// <summary>
+    /// Loads <typeparamref name="T"/> tensors from an in-memory safetensors buffer
+    /// (e.g. a test fixture).
+    /// </summary>
+    public static Dictionary<string, (T[] Data, int[] Shape)> Read<T>(byte[] bytes)
+        where T : struct, IFloatingPointIeee754<T>
+        => Read<T>(bytes.AsSpan());
+
+    delegate TResult MappedFileReader<TResult>(ReadOnlySpan<byte> buffer);
+
+    // Every file-backed read goes through here so the validation and the read-only mapping exist
+    // once. The span length comes from FileInfo (the file's state at open), not the view capacity,
+    // which is rounded up to the system page size.
+    static TResult WithMappedFile<TResult>(string path, MappedFileReader<TResult> read)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         if (!File.Exists(path))
@@ -48,9 +87,7 @@ public static class SafeTensorsLoader
             view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
             try
             {
-                // Span length comes from FileInfo (file state at open), not the view capacity,
-                // which is rounded up to the system page size.
-                return Read<T>(new ReadOnlySpan<byte>(pointer, (int)fileLength));
+                return read(new ReadOnlySpan<byte>(pointer, (int)fileLength));
             }
             finally
             {
@@ -59,14 +96,6 @@ public static class SafeTensorsLoader
             }
         }
     }
-
-    /// <summary>
-    /// Loads <typeparamref name="T"/> tensors from an in-memory safetensors buffer
-    /// (e.g. a test fixture).
-    /// </summary>
-    public static Dictionary<string, (T[] Data, int[] Shape)> Read<T>(byte[] bytes)
-        where T : struct, IFloatingPointIeee754<T>
-        => Read<T>(bytes.AsSpan());
 
     static Dictionary<string, (T[] Data, int[] Shape)> Read<T>(ReadOnlySpan<byte> buffer)
         where T : struct, IFloatingPointIeee754<T>
@@ -202,6 +231,10 @@ public static class SafeTensorsLoader
         where T : struct, IFloatingPointIeee754<T>
     {
         var src = MemoryMarshal.Cast<byte, float>(bytes);
+        // Zero-hop native read: an F32 target keeps the checkpoint bits as they are.
+        if (typeof(T) == typeof(float))
+            return (T[])(object)src.ToArray();
+
         var result = new T[src.Length];
         for (int i = 0; i < src.Length; i++)
             result[i] = T.CreateChecked(src[i]);
@@ -232,6 +265,10 @@ public static class SafeTensorsLoader
         where T : struct, IFloatingPointIeee754<T>
     {
         var src = MemoryMarshal.Cast<byte, Half>(bytes);
+        // Zero-hop native read: an F16 target keeps the checkpoint bits as they are.
+        if (typeof(T) == typeof(Half))
+            return (T[])(object)src.ToArray();
+
         var result = new T[src.Length];
         for (int i = 0; i < src.Length; i++)
             result[i] = T.CreateChecked(src[i]);
