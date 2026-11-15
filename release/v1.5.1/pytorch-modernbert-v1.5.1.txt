@@ -1,0 +1,25 @@
+=== HuggingFace ModernBERT-large Inference (same weights as C#) ===
+
+Sequence lengths: 128, 256
+
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|##########| 170/170 [00:00<00:00, 4652.80it/s]
+[transformers] [1mModernBertModel LOAD REPORT[0m from: E:\khurram-uworx\Nivara\samples\data\modernbert
+Key               | Status     |  | 
+------------------+------------+--+-
+head.dense.weight | UNEXPECTED |  | 
+decoder.bias      | UNEXPECTED |  | 
+head.norm.weight  | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+  Parameters: 394,781,696
+  attn implementation: sdpa
+  Input text: "Nivara runs ModernBERT-large on CPU in 2026, with 28 layers and sliding-window attention."
+
+seq= 128 (valid  26)  median    318.7 ms  min    296.0 ms       81.6 tok/s  ~11.38 ms/layer
+seq= 256 (valid  26)  median    512.8 ms  min    511.6 ms       50.7 tok/s  ~18.31 ms/layer
+
+Each pass encodes the full padded sequence — this model has no KV cache, since an encoder re-reads the whole sequence every time.
+Output shape: (256, 1024)
+Stats over valid positions: min=-24.170027, max=16.024780, mean=0.011739, std=1.008809
+Non-finite values within the valid region: 0

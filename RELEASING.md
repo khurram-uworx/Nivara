@@ -120,17 +120,39 @@ AC-power-only and require the OpenCL device/driver to be recorded alongside the
 machine line. Do not skip this line item; if an OpenCL device is unavailable,
 record the reason in the PR.
 
-**Capture output for review:** when a human runs these benchmarks on behalf of
-an agent (or for later re-measurement), put every command in a temporary
+**Capture output for review:** put every benchmark command in a temporary
 `release.cmd` at the repository root that redirects each command's console
-output to a working file, run it, and delete the script afterwards (it is
-commit noise and must never be committed). Hand back the file paths
-rather than pasting output into chat. Example lines inside `release.cmd`:
-`dotnet run --project <proj> -c Release -- ... > release\\vX.Y.Z\\<name>-vX.Y.Z.txt 2>&1`
+output to a working file under `release/vX.Y.Z/`, then run that script and
+delete it afterwards (it is commit noise and must never be committed). Hand
+back the file paths rather than pasting output into chat. Example lines
+inside `release.cmd`:
+
+```
+@echo off
+cd /d <repo-root>
+dotnet run --project tests\Nivara.PerformanceTests -c Release -- --json release\vX.Y.Z\nivara-perf-vX.Y.Z.json --runs 3 > release\vX.Y.Z\core.txt 2>&1
+dotnet run --project samples\NivaraInference -c Release -- minilm benchmark > release\vX.Y.Z\minilm.txt 2>&1
+```
+
+**Running benchmarks as an agent (exact procedure):** long-running benchmarks
+must NOT be run as a blocking foreground agent command — tool timeouts will
+kill them. The required procedure is:
+
+1. Ask the human for approval to run the benchmarks. If approval is granted,
+   do not skip a runnable benchmark and record "deferred".
+2. Create `release.cmd` at the repository root containing every benchmark
+   command, each redirected to `release\vX.Y.Z\<name>-vX.Y.Z.txt` (and the
+   core harness to `release\vX.Y.Z\nivara-perf-vX.Y.Z.json`).
+3. Launch the script in the background with no timeout, e.g. a backgrounded
+   shell command with timeout disabled (do not pass a finite timeout).
+4. Wait for the completion notification; do not poll or sleep-wait.
+5. Parse the resulting files and update the README tables from them.
+6. Delete `release.cmd` before committing.
+
 The core harness JSON file should be committed as canonical evidence under
-`release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy" below); a
-`%TEMP%` copy may also be kept as staging during active prep and cleaned up
-manually afterwards. The script may `cd` into sample
+`release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy"
+below); a `%TEMP%` copy may also be kept as staging during active prep and
+cleaned up manually afterwards. The script may `cd` into sample
 directories, but it must end back at the repository root.
 
 **Regenerating benchmark tables safely (hidden-tag technique):** wrap each

@@ -1,0 +1,28 @@
+=== HuggingFace DistilBERT Inference (same weights as C#) ===
+
+Loading tokenizer and model from E:\khurram-uworx\Nivara\samples\data\distilbert...
+Loading weights:   0%|          | 0/100 [00:00<?, ?it/s]Loading weights: 100%|##########| 100/100 [00:00<00:00, 6475.99it/s]
+[transformers] [1mDistilBertModel LOAD REPORT[0m from: E:\khurram-uworx\Nivara\samples\data\distilbert
+Key                     | Status     |  | 
+------------------------+------------+--+-
+vocab_transform.weight  | UNEXPECTED |  | 
+vocab_layer_norm.weight | UNEXPECTED |  | 
+vocab_layer_norm.bias   | UNEXPECTED |  | 
+vocab_transform.bias    | UNEXPECTED |  | 
+vocab_projector.bias    | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+  Parameters: 66,362,880
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 36.3 ms
+  Min:     26 ms
+  Max:     51 ms
+
+Output shape: (128, 768)
+Stats: min=-9.976507, max=3.399175, mean=-0.008178, std=0.318387
