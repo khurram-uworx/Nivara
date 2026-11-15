@@ -46,8 +46,10 @@ internal static class DocsCoveragePins
     /// #1077 adds <c>docs/adr/010-chunk-count-growth-policy-on-concat.md</c>: 58 + 1 = 59.
     /// The 2026-11-12 library review adds <c>docs/REVIEW-2026-11-12.md</c>: 59 + 1 = 60.
     /// Release prep for v1.5.1 adds <c>docs/RELEASE1.5.1-REVIEW.md</c>: 60 + 1 = 61.
+    /// Deleted <c>docs/RELEASE15-REVIEW.md</c> and <c>docs/REVIEW-2026-11-12.md</c> (superseded by
+    /// GitHub issues and the v1.5.1 review): 61 - 2 = 59.
     /// </remarks>
-    internal const int ExpectedDocumentCount = 61;
+    internal const int ExpectedDocumentCount = 59;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -97,5 +99,5 @@ internal static class DocsCoveragePins
     /// (<c>RELEASING.md</c>, <c>CHANGELOG.md</c>, <c>PackageVersion</c> is not a doc; the five are
     /// <c>RELEASING.md</c> x3 and <c>CHANGELOG.md</c> x2): 497 + 5 = 502.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 502;
+    internal const int ExpectedDocumentReferenceCount = 492;
 }
