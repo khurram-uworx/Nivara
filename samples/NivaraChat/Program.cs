@@ -20,7 +20,7 @@ if (args.Length > 0)
     string? docsDir = null;
     int topK = 3;
     bool useSilk = false;
-    string apiKey = "NIVARA_CHAT_API_KEY";
+    string? apiKey = null;
     string? aclGroup = null;
     bool roundTrip = false;
     string store = "frame";

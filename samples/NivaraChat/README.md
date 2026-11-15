@@ -147,7 +147,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
-| `--api-key <env>` | `NIVARA_CHAT_API_KEY` | Environment variable name for API Key |
+| `--api-key <env>` | — | Environment variable name holding the API key for OpenAI-compatible endpoints (optional; Ollama needs none) |
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
 | `--docs-dir <path>` | `docs/` | Documents directory for `--rag`, `--rag-agent`, `--rag-multiview` and `--rag-learn` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
