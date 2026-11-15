@@ -114,6 +114,7 @@ class Program
             _ => modelType
         };
         string precision = "f32";
+        bool precisionSet = false;
         string mode = "";
         bool noKvCache = false;
         bool force = false;
@@ -148,7 +149,7 @@ class Program
             {
                 if (i + 1 >= args.Length)
                 {
-                    Console.Error.WriteLine("--precision needs a value (f32|bf16|fp16).");
+                    Console.Error.WriteLine("--precision needs a value (f32|bf16|fp16|native).");
                     return 1;
                 }
 
@@ -157,23 +158,27 @@ class Program
                     "f32" or "float" => "f32",
                     "bf16" or "bfloat16" => "bf16",
                     "fp16" or "f16" or "half" => "fp16",
+                    "native" => "native",
                     var other => other
                 };
 
-                if (precision is not ("f32" or "bf16" or "fp16"))
+                if (precision is not ("f32" or "bf16" or "fp16" or "native"))
                 {
-                    Console.Error.WriteLine($"--precision expects f32, bf16 or fp16; got '{args[i + 1]}'.");
+                    Console.Error.WriteLine($"--precision expects f32, bf16, fp16 or native; got '{args[i + 1]}'.");
                     return 1;
                 }
+                precisionSet = true;
                 i++;
             }
             else if (args[i] is "bf16" or "bfloat16")
             {
                 precision = "bf16";
+                precisionSet = true;
             }
             else if (args[i] is "fp16" or "f16" or "half")
             {
                 precision = "fp16";
+                precisionSet = true;
             }
             else if (args[i] == "--no-kv-cache")
                 noKvCache = true;
@@ -325,9 +330,15 @@ class Program
                 mode = args[i];
         }
 
+        // SmolLM's default is its snapshot dtype: the BF16 weights stay BF16 in memory and the
+        // kernels widen them in-register, so a bare 'smollm' run never holds a widened F32 copy of
+        // the checkpoint. Every other model keeps its existing default (F32 unless stated).
+        if (isSmolLM && !precisionSet)
+            precision = "native";
+
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|predict|generate|tools|distill|verify|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16|native] [benchmark|similarity|predict|generate|tools|distill|verify|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed passes and report median timing");
@@ -392,6 +403,10 @@ class Program
             Console.WriteLine("  (--plain / --text / --no-kv-cache are 'qwen' options only; --no-kv-cache is the 'qwen tools' path only)");
             Console.WriteLine();
             Console.WriteLine("Precision (narrow-float models only — the vision models have no bf16/fp16 path):");
+            Console.WriteLine("  --precision native  The checkpoint's own dtype with F32 compute: the weights stay exactly as");
+            Console.WriteLine("                    shipped and every kernel widens them in-register. Default for smollm (BF16");
+            Console.WriteLine("                    weights, F32 activations, ~269 MB resident instead of ~1.05 GB); rejected");
+            Console.WriteLine("                    for every other model, whose checkpoints differ or whose default is F32.");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
@@ -601,6 +616,27 @@ class Program
         bool compareDiag = mode == "compare_diag";
         bool fp16 = precision == "fp16";
         bool bf16 = precision == "bf16";
+        bool native = precision == "native";
+
+        // 'native' names the shape of the whole run (storage dtype == snapshot dtype, F32 compute),
+        // not a compute dtype on its own, so it is only meaningful for the checkpoint it was defined
+        // against. SmolLM-135M is the model whose snapshot is BF16 and whose default this is; the
+        // other narrow-float models either differ (Laya ships F16 weights, Qwen's default is F32
+        // compute over widened BF16) or are F32-on-disk.
+        if (native && !isSmolLM)
+        {
+            Console.Error.WriteLine($"--precision native is a 'smollm' option only: SmolLM keeps its BF16 snapshot weights and computes in F32; got '{got}'.");
+            return 1;
+        }
+
+        // The 'ab' mode compares the scalar and SIMD widen kernels *inside* one narrow dtype, which
+        // needs a single dtype for both storage and compute. Native storage has no scalar/widen pair
+        // to compare, so name the mode's own dtype instead of silently picking another run.
+        if (native && mode == "ab")
+        {
+            Console.Error.WriteLine("--precision native has no 'ab' mode: 'smollm ab' compares the scalar and SIMD widen kernels within one narrow dtype; use --precision bf16 for the A/B.");
+            return 1;
+        }
 
         if (isQwen && fp16)
         {
@@ -671,7 +707,7 @@ class Program
         }
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
-        if (bf16)
+        if (bf16 || native)
         {
             var loadSwBf16 = Stopwatch.StartNew();
             tensorsBf16 = SafeTensorsLoader.Read<BFloat16>(modelPath);
@@ -797,7 +833,7 @@ class Program
             case "smollm":
                 if (useSilk)
                 {
-                    if (bf16)
+                    if (bf16 || native)
                     {
                         if (benchmark) return BenchmarkSmolLMSilk(tensorsBf16);
                         return RunSmolLMSilk(tensorsBf16);
@@ -811,6 +847,7 @@ class Program
                     if (fp16) return SmolLMAb(tensorsHalf);
                     return SmolLMAb(F32());
                 }
+                if (native) return benchmark ? BenchmarkSmolLMNative(tensorsBf16) : RunSmolLMNative(tensorsBf16);
                 if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16) : RunSmolLM(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf) : RunSmolLM(tensorsHalf);
                 return benchmark ? BenchmarkSmolLM(F32()) : RunSmolLM(F32());
@@ -2796,27 +2833,33 @@ class Program
     }
 
     static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+        => RunSmolLMCore<float, float>(tensors, PrecisionName(typeof(float)));
 
     static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+        => RunSmolLMCore<BFloat16, BFloat16>(tensors, PrecisionName(typeof(BFloat16)));
 
     static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+        => RunSmolLMCore<Half, Half>(tensors, PrecisionName(typeof(Half)));
+
+    /// <summary>SmolLM's default run: BF16 weights exactly as shipped, F32 activations.</summary>
+    static int RunSmolLMNative(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore<float, BFloat16>(tensors, NativeSmolLMPrecision);
+
+    /// <summary>Display name for a native SmolLM run: the storage dtype and the compute dtype both appear.</summary>
+    const string NativeSmolLMPrecision = "BFloat16 storage / F32 compute";
 
     static string PrecisionName(Type t)
         => t == typeof(BFloat16) ? "BFloat16"
          : t == typeof(Half) ? "Half"
          : "F32";
 
-    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
-        where T : struct, IFloatingPointIeee754<T>
+    static int RunSmolLMCore<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        string precisionName = PrecisionName(typeof(T));
-
         // The narrow 16-bit paths (BFloat16/Half) run through the Phase-1 SIMD widen-compute-narrow
         // kernels by default; the scalar A/B is the 'ab' mode's own business, not this run's.
-        RunSmolLMGenerate(tensors, precisionName);
+        RunSmolLMGenerate<TModel, TWeight>(tensors, precisionName);
         return 0;
     }
 
@@ -3168,12 +3211,16 @@ class Program
 
     static int BenchmarkSmolLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
         where T : struct, IFloatingPointIeee754<T>
-        => BenchmarkSmolLMCore(tensors);
+        => BenchmarkSmolLMCore<T, T>(tensors, PrecisionName(typeof(T)));
 
-    static int BenchmarkSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
-        where T : struct, IFloatingPointIeee754<T>
+    /// <summary>SmolLM's default benchmark: BF16 weights exactly as shipped, F32 activations.</summary>
+    static int BenchmarkSmolLMNative(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => BenchmarkSmolLMCore<float, BFloat16>(tensors, NativeSmolLMPrecision);
+
+    static int BenchmarkSmolLMCore<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        string precisionName = PrecisionName(typeof(T));
         Console.WriteLine($"=== SmolLM-135M Benchmark ({precisionName}) ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}" +
                           $"  SIMD-widen: {(NivaraPrimitives.DisableWidenSimd ? "off" : "on")}");
@@ -3183,12 +3230,12 @@ class Program
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
 
         var buildSw = Stopwatch.StartNew();
-        var model = LlamaLoader.Load<T, T>(config, tensors);
+        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
-        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        int bytesPerWeight = typeof(TWeight) == typeof(BFloat16) || typeof(TWeight) == typeof(Half) ? 2 : 4;
         double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
         Console.WriteLine($"Parameters: {totalParams:N0}");
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
@@ -3362,8 +3409,9 @@ class Program
         return (generated, genSw.ElapsedMilliseconds, sequence);
     }
 
-    static void RunSmolLMGenerate<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precisionName)
-        where T : struct, IFloatingPointIeee754<T>
+    static void RunSmolLMGenerate<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine($"=== SmolLM-135M Causal LM ({precisionName}) ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
@@ -3373,7 +3421,7 @@ class Program
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
 
         var buildSw = Stopwatch.StartNew();
-        var model = LlamaLoader.Load<T, T>(config, tensors);
+        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +
@@ -3381,7 +3429,7 @@ class Program
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
-        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        int bytesPerWeight = typeof(TWeight) == typeof(BFloat16) || typeof(TWeight) == typeof(Half) ? 2 : 4;
         double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
         Console.WriteLine($"Parameters: {totalParams:N0}");
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
@@ -3457,12 +3505,20 @@ class Program
         return best;
     }
 
+    /// <summary>
+    /// Maps a run's precision label to the PyTorch fixture tag: the F32 run is compared against the
+    /// F32 fixture and every BFloat16-backed run (including native, whose label names both dtypes)
+    /// against the BF16 fixture. Half has no tagged fixture and falls back to the untagged one.
+    /// </summary>
+    static string? SmolLMPyTorchFixtureTag(string precisionName)
+        => precisionName.Contains("BFloat16", StringComparison.Ordinal) ? "bf16"
+         : precisionName == "F32" ? "f32"
+         : null;
+
     /// <summary>Loads the PyTorch reference token stream for the given run dtype, if present.</summary>
     static int[]? TryLoadSmolLMReferenceTokenStream(string modelDir, string precisionName)
     {
-        string? tag = precisionName == "F32" ? "f32"
-                   : precisionName == "BFloat16" ? "bf16"
-                   : null;
+        string? tag = SmolLMPyTorchFixtureTag(precisionName);
         string[] candidates = tag != null
             ? new[] { $"compare_smollm_py_{tag}.bin", "compare_smollm_py.bin" }
             : new[] { "compare_smollm_py.bin" };
@@ -3511,9 +3567,7 @@ class Program
     static void CompareSmolLmFixtures(
         string modelDir, int inputLen, IReadOnlyList<int> fullPrefix, float[] lastLogits, string precisionName)
     {
-        string? tag = precisionName == "F32" ? "f32"
-                   : precisionName == "BFloat16" ? "bf16"
-                   : null;
+        string? tag = SmolLMPyTorchFixtureTag(precisionName);
         string tokenName = (tag != null && File.Exists(Path.Combine(modelDir, "..", $"compare_smollm_py_{tag}.bin")))
             ? $"compare_smollm_py_{tag}.bin" : "compare_smollm_py.bin";
         string logitsName = (tag != null && File.Exists(Path.Combine(modelDir, "..", $"compare_smollm_logits_py_{tag}.bin")))
