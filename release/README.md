@@ -1,62 +1,55 @@
-# Release benchmark evidence
+# Release tooling and artefacts
 
-This directory holds the **permanent, release-wise benchmark evidence** for Nivara
-releases. It is committed alongside release prep so reviewers and future maintainers
-can verify that a table was refreshed on the recorded machine rather than carried
-forward.
+This folder holds two kinds of content:
 
-## Layout
+1. **Canonical benchmark runner** — `run-benchmarks.cmd <version>`.
+2. **Helper scripts** — `wrap-table.py` (hidden-tag wrapping) and the per-sample
+   `regen_*_perf_table.py` scripts under `samples/*/Python/`.
+3. **Committed evidence** — `release/<version>/` subfolders with captured benchmark
+   output (see `RELEASING.md` "Benchmark artefact policy").
 
-One folder per release version. Never overwrite or repurpose a prior release folder:
+## Running all benchmarks
 
-```
-release/
-  v1.5.0/
-    nivara-perf-v1.5.0.json
-    nivara-incident-v1.5.0.txt
-    nivarainference-v1.5.0.txt
-  v1.6.0/
-    ...
+From the repository root:
+
+```powershell
+cmd /c release\run-benchmarks.cmd 1.5.1
 ```
 
-## Naming
+Launch it **in the background with no timeout** (it takes tens of minutes). It writes
+captures to `release\<version>\`:
 
-- Core perf harness JSON: `nivara-perf-vX.Y.Z.json` (from
-  `tests/Nivara.PerformanceTests --json ...`).
-- Sample/console capture: `<sample>-vX.Y.Z.txt` (and optional `.csv`), one file per
-  benchmark command.
-- Keep the version in every file name so a path can be cited unambiguously.
+- `nivara-perf-v<version>.json` — core perf harness (canonical evidence).
+- `nivaraincident-v<version>.txt`
+- `nivarainference-cpu/silk/blas-v<version>.txt`
+- `pytorch-*-v<version>.txt`
+- `nivarafinetuning-v<version>.txt`
+- `status.txt` — written last; its presence means the run completed.
 
-## Recording line
+Never run it as a blocking foreground command (tool timeouts will kill it).
 
-Every document table keeps the consolidated machine/recording line format from
-`RELEASING.md` Step 4:
+## Regenerating README tables
 
+1. Wrap the target table in markers:
+
+```powershell
+python release\wrap-table.py --readme tests\Nivara.PerformanceTests\README.md --header "Scenario | Prev"
 ```
-*Recorded YYYY-MM-DD — <CPU model>, <logical cores> logical processors, .NET <version>, <extra context>.*
+
+2. Regenerate rows from the captured JSON:
+
+```powershell
+python samples\Nivara.PerformanceTests\..\..\samples\NivaraInference\Python\regen_perf_table.py --json release\vX.Y.Z\nivara-perf-vX.Y.Z.json --readme tests\Nivara.PerformanceTests\README.md
 ```
 
-Machine, CPU/core count, .NET SDK/runtime version, OS, power state (AC/battery), and
-relevant driver versions must be stated. Do not recompute across machines.
+(Use the matching regen script for NivaraIncident / NivaraFineTuning.)
 
-## Retention and authority
+3. Review the `.bak` diff, update recording/machine lines by hand, then remove the
+   `<!--hidden-start-->` / `<!--hidden-end-->` markers before committing.
 
-- Committed files under `release/<version>/` are the canonical, permanent artefacts.
-- `%TEMP%` files are staging during active prep. They may remain in place while the
-  release is in progress and are cleaned up manually afterwards.
-- The PR may also attach the same files for review. PR attachments are snapshots and
-  can expire; cite the committed `release/<version>/` path as the authoritative
-  location.
-- Cross-machine comparisons: set Prev to `—` where machines differ (see
-  `RELEASING.md` Step 5).
+## Rules
 
-## Regeneration
-
-Regenerate tables from captured JSON with the per-sample helpers, pointing `--json`
-at the committed file:
-
-```
-python samples/NivaraInference/Python/regen_perf_table.py \
-    --json release/vX.Y.Z/nivara-perf-vX.Y.Z.json \
-    --readme tests/Nivara.PerformanceTests/README.md
-```
+- Never overwrite or repurpose a prior `release/<version>/` folder.
+- `release.cmd` at the repo root is commit noise and must never be committed; the
+  committed runner here (`run-benchmarks.cmd`) is the canonical entry point.
+- Update this README when benchmark commands or artefact names change.
