@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using NivaraChat.Models;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -13,6 +14,7 @@ public static class AgentsMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--agents");
         Console.WriteLine("=== NivaraChat Agents ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))

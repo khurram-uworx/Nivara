@@ -167,4 +167,34 @@ public sealed class AdaptiveFeedbackCollectorTests
 
         Assert.Throws<InvalidOperationException>(() => AdaptiveHeadPersistence.LoadIfPresent(head, path));
     }
+
+    [Test]
+    public void SuccessfulUpdate_RecordsNonNegativeTimings()
+    {
+        var head = new LayaDecisionHead<float>(HiddenSize, headLayerCount: 1);
+        var path = Path.Combine(tempDir, AdaptiveHeadPersistence.FileName);
+        var collector = new AdaptiveFeedbackCollector(head, path, batchThreshold: 1, epochs: 1);
+
+        collector.Add(Example(0));
+
+        Assert.That(collector.SuccessfulUpdates, Is.EqualTo(1));
+        Assert.That(collector.UpdateMilliseconds, Is.GreaterThanOrEqualTo(0L));
+        Assert.That(collector.PersistMilliseconds, Is.GreaterThanOrEqualTo(0L));
+        Assert.That(File.Exists(path), Is.True);
+    }
+
+    [Test]
+    public void NoPersist_DoesNotWriteFileAndReportsDisabled()
+    {
+        var head = new LayaDecisionHead<float>(HiddenSize, headLayerCount: 1);
+        var path = Path.Combine(tempDir, AdaptiveHeadPersistence.FileName);
+        var collector = new AdaptiveFeedbackCollector(head, path, batchThreshold: 1, epochs: 1, persist: false);
+
+        Assert.That(collector.Persist, Is.False);
+        collector.Add(Example(0));
+
+        Assert.That(collector.SuccessfulUpdates, Is.EqualTo(1));
+        Assert.That(collector.PersistMilliseconds, Is.EqualTo(0L));
+        Assert.That(File.Exists(path), Is.False);
+    }
 }

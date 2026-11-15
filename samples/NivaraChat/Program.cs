@@ -20,6 +20,10 @@ if (args.Length > 0)
     string? docsDir = null;
     int topK = 3;
     bool useSilk = false;
+    string llmProvider = "ollama";
+    string? openAiUrl = null;
+    string? openAiModel = null;
+    string openAiAuth = "bearer";
     string? aclGroup = null;
     bool roundTrip = false;
     string store = "frame";
@@ -68,6 +72,10 @@ if (args.Length > 0)
         if (args[i] == "--docs-dir" && i + 1 < args.Length) docsDir = args[++i];
         if (args[i] == "--top-k" && i + 1 < args.Length) topK = int.Parse(args[++i]);
         if (args[i] == "--silk") useSilk = true;
+        if (args[i] == "--llm" && i + 1 < args.Length) llmProvider = args[++i];
+        if (args[i] == "--openai-url" && i + 1 < args.Length) openAiUrl = args[++i];
+        if (args[i] == "--openai-model" && i + 1 < args.Length) openAiModel = args[++i];
+        if (args[i] == "--openai-auth" && i + 1 < args.Length) openAiAuth = args[++i];
         if (args[i] == "--acl-group" && i + 1 < args.Length) aclGroup = args[++i];
         if (args[i] == "--roundtrip") roundTrip = true;
         if (args[i] == "--store" && i + 1 < args.Length) store = args[++i];
@@ -132,7 +140,11 @@ if (args.Length > 0)
         HeadLearningRate = headLearningRate,
         UpdateBatch = updateBatch,
         Resume = resume,
-        NoPersist = noPersist
+        NoPersist = noPersist,
+        LlmProvider = llmProvider,
+        OpenAiUrl = openAiUrl,
+        OpenAiModel = openAiModel,
+        OpenAiAuth = openAiAuth
     };
     switch (mode)
     {
@@ -304,6 +316,10 @@ void PrintUsage()
     Console.WriteLine("  --docs-dir <path>    Documents directory for --rag/--rag-agent (default: docs/ + README.md)");
     Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag/--rag-agent (default: 3)");
     Console.WriteLine("  --silk               Use Silk OpenCL backend (MiniLM embedding/intent/RAG, SmolLM and Qwen chat/plain)");
+    Console.WriteLine("  --llm <ollama|openai>  LLM provider for plain-chat modes (default: ollama)");
+    Console.WriteLine("  --openai-url <base>   OpenAI-compatible base URL, e.g. http://host/v1 or https://<res>.openai.azure.com/openai/v1");
+    Console.WriteLine("  --openai-model <name> Model name for --llm openai (default: --model value)");
+    Console.WriteLine("  --openai-auth <mode>  Auth mode for --llm openai: bearer (default) or api-key (Azure)");
     Console.WriteLine("  --acl-group <name>   ACL filter for --rag/--rag-agent/--rag-multiview (e.g. adr, docs, plan)");
     Console.WriteLine("  --roundtrip          Show embedding round-trip details for --rag/--rag-agent/--rag-multiview");
     Console.WriteLine("  --store <frame|inmemory>  Retrieval backend (default: frame)");
@@ -326,6 +342,14 @@ void PrintUsage()
     Console.WriteLine("  --seed <int>              --rag-learn: query-split and shuffle seed (default: 42)");
     Console.WriteLine("  --train-queries <int>     --rag-learn: cap the training split (default: all)");
     Console.WriteLine("  --k <int>                 --rag-learn: metric cut-off (default: 10)");
+    Console.WriteLine("  --max-queries <int>       --rag-adaptive-eval: cap train/test queries (default: 40)");
+    Console.WriteLine("  --max-examples <int>      --rag-adaptive-eval: cap training examples (default: 128)");
+    Console.WriteLine("  --head-weights <path>     --rag-adaptive-eval: persisted head path");
+    Console.WriteLine("  --head-epochs <int>       --rag-adaptive-eval: head training epochs per update (default: 1)");
+    Console.WriteLine("  --head-lr <float>         --rag-adaptive-eval: head learning rate (default: 0.0005)");
+    Console.WriteLine("  --update-batch <int>      --rag-adaptive-eval: feedback batch size (default: 32)");
+    Console.WriteLine("  --resume                  --rag-adaptive-eval: load persisted head on startup");
+    Console.WriteLine("  --no-persist              --rag-adaptive-eval: train in memory, do not write laya_head.json");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");

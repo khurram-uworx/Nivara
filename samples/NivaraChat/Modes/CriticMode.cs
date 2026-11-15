@@ -1,5 +1,6 @@
 using NivaraChat.Executors;
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -12,6 +13,7 @@ public static class CriticMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--critic");
         Console.WriteLine("=== NivaraChat — Writer-Critic Loop ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))

@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Executors;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -12,6 +13,7 @@ public static class HandoffMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--handoff");
         Console.WriteLine("=== NivaraChat — Confidence Handoff ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))

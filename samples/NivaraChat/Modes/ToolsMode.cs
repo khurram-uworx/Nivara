@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using NivaraChat.Shared;
 using NivaraChat.Tools;
 using OllamaSharp;
 
@@ -13,6 +14,7 @@ public static class ToolsMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--tools");
         Console.WriteLine("=== NivaraChat — Nivara as AIFunction Tools ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "sentiment_model.json")))

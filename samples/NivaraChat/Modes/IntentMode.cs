@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Nivara.Samples;
 using NivaraChat.Executors;
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using NivaraChat.Tools;
 using OllamaSharp;
 
@@ -16,6 +17,7 @@ public static class IntentMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--intent");
         Console.WriteLine("=== NivaraChat Intent Routing ===\n");
 
         if (!File.Exists(Path.Combine(ctx.ModelsDir, "intent_model.json")))

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using OllamaSharp;
 using System.Diagnostics;
 
@@ -31,13 +32,9 @@ public static class RagAdaptiveMode
         if (Directory.Exists(modelDir) && File.Exists(Path.Combine(modelDir, "model.safetensors")))
             engine = new LayaRetrievalDecisionHead.LayaDecisionEngine(modelDir);
 
-        OllamaApiClient? chatClient = null;
-        if (ctx.UseOllama)
-        {
-            Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-            chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
-            Console.WriteLine("Ollama connected.\n");
-        }
+        IChatClient? chatClient = LlmClientFactory.Create(ctx);
+        if (chatClient is not null)
+            Console.WriteLine($"LLM connected ({ctx.LlmProvider}).\n");
 
         Console.WriteLine($"Threshold: {ctx.ConfidenceThreshold:F2} | Top-K: {ctx.TopK} chunks per query.\n");
 

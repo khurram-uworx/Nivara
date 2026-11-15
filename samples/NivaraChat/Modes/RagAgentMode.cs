@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Helpers;
+using NivaraChat.Shared;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
@@ -9,6 +10,7 @@ public static class RagAgentMode
 {
     public static async Task Run(ModeContext ctx)
     {
+        LlmClientFactory.RejectForUnsupportedMode(ctx, "--rag-agent");
         Console.WriteLine("=== NivaraChat — RAG Agent (TextSearchProvider) ===\n");
 
         using var index = await RagIndex.BuildAsync(ctx);
@@ -59,9 +61,9 @@ public static class RagAgentMode
 
     static async Task RunOllamaPath(ModeContext ctx, RagIndex index)
     {
-        Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
-        var chatClient = new OllamaApiClient(new Uri(ctx.OllamaUrl), ctx.ModelName);
-        Console.WriteLine("Ollama connected.\n");
+        var chatClient = LlmClientFactory.Create(ctx)
+            ?? throw new InvalidOperationException("No LLM provider configured.");
+        Console.WriteLine($"LLM connected ({ctx.LlmProvider}).\n");
 
         async Task<IEnumerable<TextSearchProvider.TextSearchResult>> SearchAsync(string query, CancellationToken ct)
         {
