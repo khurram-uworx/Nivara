@@ -55,6 +55,10 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - `LayaDecisionHead.ForwardChoiceLogits` exposes differentiable choice logits for head-only training;
   the existing inference `Forward` path remains unchanged.
+- `--rag-adaptive-eval` (#983): end-to-end adaptive retrieval/decision loop — retrieve, decide,
+  learn from simulated feedback, persist the Laya head, evaluate on a held-out split, and write a
+  deterministic markdown/JSON report. CPU path fully functional; Silk accelerates MiniLM embeddings
+  and parity only.
 
 ## [1.5.0] - 2026-11-07
 

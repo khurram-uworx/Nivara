@@ -122,6 +122,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-adaptive` | — | Mode: adaptive retrieval (#981) — retrieval-first flow with a local Laya decision layer that accepts or rejects the relevant chunk before answering |
+| `--rag-adaptive-eval` | — | Mode: adaptive evaluation (#983) — end-to-end loop: retrieve, decide, learn, persist, evaluate, report |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |

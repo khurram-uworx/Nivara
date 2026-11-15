@@ -229,4 +229,14 @@ Nivara core APIs exercised: `NivaraFrame`, `NivaraColumn<T>`, `TensorPrimitives`
 `Module<T>`, `Parameter<T>`, `ReverseGradTensor`, `ReverseGradOperations`,
 `Linear<T>`, `Loss<T>` / `BCEWithLogitsLoss`, `Adam`/`AdamW`, Parquet I/O,
 `NivaraTensorExtensions`.
-EOF
+
+## 10. Adaptive decision loop (#983)
+
+`--rag-adaptive-eval` runs the full loop: retrieve (multi-view top-K) → understand (MiniLM views + frozen ModernBERT features) → decide (Laya choice head) → learn (online AutoDiff updates on train-split simulated feedback) → persisted update (`laya_head.json`) → evaluate on the held-out split → report.
+
+- Candidate set is the index's top-K per query; the table is a within-run reranking comparison. `adaptive-rerank` preserves top-K membership, so its P@K/R@K are invariant by construction; only `adaptive-filter` can move them.
+- Feedback is simulated from judge labels and is stated as such.
+- Auto labels (`--labels auto`) are a declared leakage diagnostic.
+- Calibration: ECE (10 equal-width bins) and Brier on `AnswerConfidence` vs choice correctness, before and after.
+- Timings split feature extraction (encoder) from head updates (AutoDiff) and persistence.
+- Silk scope: MiniLM embedding generation and parity only. Decisions and head training are CPU in both backends. Hand-written Silk weight steps are a follow-up.
