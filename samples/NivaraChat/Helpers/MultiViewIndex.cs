@@ -29,13 +29,15 @@ public sealed class MultiViewIndex : IDisposable
     readonly int[] viewCounts;
 
     public CorpusIdentity CorpusIdentity { get; }
+    public bool FromCache { get; }
 
     MultiViewIndex(
         MiniLMEmbedder.Handle embedder,
         List<MultiViewChunk> chunks,
         NivaraFrame metadata,
         MultiViewMatrices matrices,
-        CorpusIdentity corpusIdentity)
+        CorpusIdentity corpusIdentity,
+        bool fromCache = false)
     {
         this.embedder = embedder;
         this.chunks = chunks;
@@ -43,6 +45,7 @@ public sealed class MultiViewIndex : IDisposable
         this.matrices = matrices;
         viewCounts = s_views.Select(view => CountPresent(metadata, view.Column)).ToArray();
         CorpusIdentity = corpusIdentity;
+        FromCache = fromCache;
     }
 
     public CorpusIdentity Identity => CorpusIdentity;
@@ -255,7 +258,7 @@ public sealed class MultiViewIndex : IDisposable
             Console.WriteLine($"  Corpus:      {identity.FileCount} files, {identity.ChunkCount} chunks, chunker {identity.ChunkerVersion}, chunk size {identity.ChunkSize}");
             Console.WriteLine($"  Content hash: {identity.ContentHash}  backend: {identity.Backend}  dimension: {identity.Dimension}");
 
-            return new MultiViewIndex(embedder, chunks, metadata, matrices, identity);
+            return new MultiViewIndex(embedder, chunks, metadata, matrices, identity, cacheHit);
         }
         catch
         {

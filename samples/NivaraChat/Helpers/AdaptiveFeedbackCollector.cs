@@ -45,9 +45,15 @@ public sealed class AdaptiveFeedbackCollector
         return Flush();
     }
 
-    public bool Flush()
+    public bool Flush() => TrainAndPersist(requireFullBatch: true);
+
+    public bool FlushRemaining() => TrainAndPersist(requireFullBatch: false);
+
+    bool TrainAndPersist(bool requireFullBatch)
     {
-        if (buffer.Count < batchThreshold)
+        if (buffer.Count == 0)
+            return false;
+        if (requireFullBatch && buffer.Count < batchThreshold)
             return false;
 
         var previousState = head.StateDict();
