@@ -1,6 +1,5 @@
 using NivaraChat.Helpers;
 using NivaraChat.Shared;
-using OllamaSharp;
 
 namespace NivaraChat.Modes;
 

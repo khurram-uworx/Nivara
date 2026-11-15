@@ -1,8 +1,7 @@
-using System.Text.Json;
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Utilities;
 using Nivara.AI;
+using Nivara.AutoDiff.Utilities;
 using NivaraChat.Modes;
+using System.Text.Json;
 
 namespace NivaraChat.Helpers;
 

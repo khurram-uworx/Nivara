@@ -1,7 +1,7 @@
+using Microsoft.Extensions.AI;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.AI;
 
 namespace NivaraChat.Shared;
 

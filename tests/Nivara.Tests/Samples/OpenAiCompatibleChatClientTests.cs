@@ -1,10 +1,9 @@
-using System.Net;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.AI;
 using NivaraChat.Shared;
 using NUnit.Framework;
+using System.Net;
+using System.Text;
+using System.Text.Json;
 
 namespace Nivara.Tests.Samples;
 

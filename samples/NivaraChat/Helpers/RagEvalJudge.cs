@@ -1,5 +1,4 @@
 using Microsoft.Extensions.AI;
-using OllamaSharp;
 using System.Text;
 using System.Text.Json;
 

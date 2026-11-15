@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using NivaraChat.Helpers;
 using NivaraChat.Shared;
-using OllamaSharp;
 using System.Diagnostics;
 
 namespace NivaraChat.Modes;
