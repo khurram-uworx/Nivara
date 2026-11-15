@@ -63,8 +63,27 @@ reset to the next dev line (`1.6.0-preview` or `2.0.0-preview`) on `main`.
 
 Benchmarks were run with explicit human approval, launched via a temporary
 `release.cmd` in the background with no timeout, and the artefacts committed under
-`release/v1.5.1/`. The README table regen (Prev/Current shift) is the remaining
-follow-up.
+`release/v1.5.1/`. Core perf table regenerated; inference table partially
+refreshed; incident/fine-tuning tables not yet regen'd.
+
+### 7. CI failures during prep
+
+**Status:** Resolved. The documentation reference pin drifted twice because edits
+to `RELEASING.md`/`docs/RELEASE1.5.1-REVIEW.md` added or removed backticked
+`.md` references; corrected `DocsCoveragePins.ExpectedDocumentReferenceCount` to
+490. Lesson: any doc edit that adds/removes a backticked `.md` path moves the
+pin — update it in the same commit.
+
+### 8. Missed steps / process friction
+
+- README table regen was only done for the core harness and a few inference rows;
+  incident/fine-tuning tables and most inference rows remain stale.
+- Doc refresh (Step 2) was applied unevenly; only RELEASING/AGENTS/inference README
+  touched, not the full list.
+- Shell access was intermittently denied (pwsh spawn), forcing retries.
+- Background benchmark runs are long; the canonical `release/run-benchmarks.cmd`
+  runner and `release/README.md` were added to reduce friction next time.
+- `release/wrap-table.py` added to automate hidden-marker wrapping.
 
 ---
 
