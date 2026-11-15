@@ -108,7 +108,6 @@ public static class RagAdaptiveEvalMode
         Console.WriteLine($"  Test features extracted: {testResult.Examples.Count} examples, {testResult.FeatureBytes} bytes");
 
         // calibration before
-        var observedBefore = AdaptiveTraining.Observe(engine.Head, testResult.Examples, engine.Calibration);
         var adaptiveObsBefore = testResult.Observations
             .Select(o => new AdaptiveObservation(o.Query, o.ChunkId, o.Grade, o.ChoiceRelevant, o.Accepted, o.AnswerConfidence))
             .ToList();
@@ -191,10 +190,10 @@ public static class RagAdaptiveEvalMode
         var combinedRows = new List<AdaptiveReportRow>
         {
             testResult.RetrievalFixedRow,
-            testResult.RetrievalRerankRow,
-            testResultAfter.RetrievalRerankRow,
-            testResult.RetrievalFilterRow,
-            testResultAfter.RetrievalFilterRow,
+            testResult.RetrievalRerankRow with { Name = "adaptive-rerank (before)" },
+            testResultAfter.RetrievalRerankRow with { Name = "adaptive-rerank (after)" },
+            testResult.RetrievalFilterRow with { Name = "adaptive-filter (before)" },
+            testResultAfter.RetrievalFilterRow with { Name = "adaptive-filter (after)" },
         };
 
         // paired comparisons
@@ -205,9 +204,11 @@ public static class RagAdaptiveEvalMode
         if (pc2 is not null) comparisons.Add(pc2);
 
         // persistence verification
-        long bytesWritten = 0;
-        foreach (var f in Directory.GetFiles(Path.GetDirectoryName(headWeightsPath)!, $".laya_head.json.*.tmp", SearchOption.TopDirectoryOnly)) { }
+        var headDir = Path.GetDirectoryName(headWeightsPath)!;
+        if (Directory.Exists(headDir))
+            foreach (var f in Directory.GetFiles(headDir, $".laya_head.json.*.tmp", SearchOption.TopDirectoryOnly)) { }
         var finalSize = File.Exists(headWeightsPath) ? new FileInfo(headWeightsPath).Length : 0;
+        var bytesWritten = finalSize;
         bool verified = false;
         if (File.Exists(headWeightsPath))
         {
@@ -242,7 +243,7 @@ public static class RagAdaptiveEvalMode
 
         // silk build times not measured separately; leave 0 with from-cache flags
         var silkReport = new AdaptiveReportSilk(
-            ctx.UseSilk ? "silk" : "cpu",
+            ctx.UseSilk ? "silk" : "cpu (silk not requested)",
             silkParity.MaxAbsoluteDifference,
             silkParity.MismatchedRows,
             silkParity.WithinTolerance,
@@ -250,7 +251,7 @@ public static class RagAdaptiveEvalMode
             silkBuildMs,
             cpuFromCache,
             silkFromCache,
-            silkIndex is not null || !ctx.UseSilk);
+            ctx.UseSilk && silkIndex is not null);
 
         var input = new AdaptiveReportInput
         {

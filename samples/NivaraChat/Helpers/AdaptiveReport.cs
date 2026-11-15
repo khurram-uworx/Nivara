@@ -191,10 +191,16 @@ public static class AdaptiveReport
         c.AppendLine();
         c.AppendLine($"- Backend used for embeddings: {input.Silk.Backend}");
         c.AppendLine($"- Available: {(input.Silk.Available ? "yes" : "no")}");
-        c.AppendLine($"- Embedding parity max |cpu - silk|: {input.Silk.MaxAbsoluteDifference.ToString("0.0000000", inv)} (tolerance {AdaptiveSilkParity.Tolerance.ToString("0.0E+0", inv)})");
-        c.AppendLine($"- Mismatched rows: {input.Silk.MismatchedRows}");
-        c.AppendLine($"- CPU index build: {input.Silk.CpuBuildMs} ms (cache hit: {input.Silk.CpuFromCache})");
-        c.AppendLine($"- Silk index build: {input.Silk.SilkBuildMs} ms (cache hit: {input.Silk.SilkFromCache})");
+        if (!input.Silk.Available)
+            c.AppendLine("- Embedding parity: not run (pass --silk to enable).");
+        else
+            c.AppendLine($"- Embedding parity max |cpu - silk|: {input.Silk.MaxAbsoluteDifference.ToString("0.0000000", inv)} (tolerance {AdaptiveSilkParity.Tolerance.ToString("0.0E+0", inv)})");
+        if (input.Silk.Available)
+        {
+            c.AppendLine($"- Mismatched rows: {input.Silk.MismatchedRows}");
+            c.AppendLine($"- CPU index build: {input.Silk.CpuBuildMs} ms (cache hit: {input.Silk.CpuFromCache})");
+            c.AppendLine($"- Silk index build: {input.Silk.SilkBuildMs} ms (cache hit: {input.Silk.SilkFromCache})");
+        }
         c.AppendLine("- Scope: MiniLM embedding generation only. ModernBERT feature extraction, decisions and head training are CPU in both runs. Hand-written Silk weight steps are a follow-up.");
         c.AppendLine();
         c.AppendLine("## Persistence");
@@ -202,7 +208,7 @@ public static class AdaptiveReport
         c.AppendLine($"- Path: {input.Persistence.Path}");
         c.AppendLine($"- Existed before run: {(input.Persistence.ExistedBefore ? "yes" : "no")}");
         c.AppendLine($"- Updates persisted: {input.Persistence.Saves}");
-        c.AppendLine($"- Bytes written: {input.Persistence.BytesWritten}");
+        c.AppendLine($"- Checkpoint size (per save): {input.Persistence.BytesWritten}");
         c.AppendLine($"- Final file size: {input.Persistence.FinalSize}");
         c.AppendLine($"- Reload verified bit-identical: {(input.Persistence.Verified ? "yes" : "no")}");
         c.AppendLine();
