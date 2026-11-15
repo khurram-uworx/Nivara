@@ -1,4 +1,4 @@
-# Crazy Roadmap: DataFrames and operators over Nivara's fast tensor layer
+# Roadmap: DataFrames and operators over Nivara's fast tensor layer
 
 This document is deliberately speculative. It captures a long-term direction: keep
 Nivara's dense tensor, AutoDiff, and Silk kernels as the primitive execution

@@ -1,7 +1,6 @@
 # "Better RAG without the math panic: a field guide to late-fusion retrieval"
 
-Source material for a 2-post blog series. The posts are **not** "introducing Nivara"
-marketing — they are a software-engineer's walkthrough of what makes a retrieval layer
+Source material for a 3-post blog series. The posts are **not** "introducing Nivara"marketing — they are a software-engineer's walkthrough of what makes a retrieval layer
 useful beyond "embed both text and query, cosine, top-K," using a chatbot over a
 directory of Markdown files as the running example (think "our team's `docs/` plus `README.md`").
 
@@ -77,6 +76,10 @@ top-k sorted by fused → show the chunk, the winning view, the divergence band
 2. `2-differentiable-rag-from-fixed-weights-to-learned-fusion.md` — the late-fusion move from constant to
    learned: parity at step 0, the gated mixture, three label sources, and honesty about
    small test sets.
+3. `3-adaptive-rag-from-learned-fusion-to-trusted-decisions.md` — from a learned sorting rule to a typed
+   accept/fallback/abstain decision per chunk with calibrated confidence, plus the
+   reproducibility discipline (chunk identity, corpus identity, split stability, coverage
+   gate, baseline artifact) that makes any of those numbers survive a rerun.
 
 ## Model facts reused (do not re-prove)
 
@@ -89,8 +92,8 @@ top-k sorted by fused → show the chunk, the winning view, the divergence band
 ## Series wrap-up planned
 
 Post 2 closes with *"if you want to remember one number from this whole notebook, it's the
-init parity: `max |learned - fixed| ≈ 1e-7`."*
-
+init parity: `max |learned - fixed| ≈ 1e-7`."* Post 3 closes on the same number and adds the
+calibration delta as the second number worth remembering.
 ## Source references (series-level)
 
 - `samples/NivaraChat/Helpers/MultiViewScoring.cs::MultiViewScoring.BuildFrame()`
@@ -98,8 +101,9 @@ init parity: `max |learned - fixed| ≈ 1e-7`."*
 - `samples/NivaraChat/Helpers/MultiViewChunk.cs::MultiViewChunker.ChunkMarkdown()`
 - `samples/NivaraChat/Helpers/RetrievalTrainer.cs::RetrievalTrainer.Train()`
 - `samples/NivaraChat/Helpers/RetrievalEvaluation.cs::RetrievalEvaluation.Compare()`
+- `samples/NivaraChat/Modes/RagAdaptiveMode.cs`
+- `samples/NivaraChat/Modes/RagAdaptiveEvalMode.cs`
 - `docs/EMBEDDINGS.md` — "Multiple views of the same corpus"
-
 ### Visual ideas
 
 - One diagram: single-document tree, four chunks, scores boxed side-by-side.

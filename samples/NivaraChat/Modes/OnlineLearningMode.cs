@@ -31,7 +31,7 @@ public static class OnlineLearningMode
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
         var chatClient = LlmClientFactory.Create(ctx)
-            ?? throw new InvalidOperationException("This mode requires --ollama or --llm openai.");
+            ?? throw new InvalidOperationException("This mode requires --ollama.");
         Console.WriteLine("Ollama connected.\n");
 
         var collector = new FeedbackCollector(

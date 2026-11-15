@@ -104,7 +104,7 @@ Thirteen documents under `docs/` were modified after `relevance.tsv` was written
 (2026-11-07 18:11):
 
 ```text
-ACCELERATION.md  BFLOAT16.md  CRAZY-ROADMAP.md  DISTELBERT.md  HALF-F16.md
+ACCELERATION.md  BFLOAT16.md  DATAFRAME-OVER-TENSORS-ROADMAP.md  DISTELBERT.md  HALF-F16.md
 ILGPU.md         LAYA.md      MODERNBERT.md     QWEN.md        ROADMAP-SUGGESTION.md
 SILK.md          SMOLLM.md    TENSORS.md
 ```
