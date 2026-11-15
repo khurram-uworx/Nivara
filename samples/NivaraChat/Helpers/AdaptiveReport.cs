@@ -70,7 +70,7 @@ public sealed record AdaptiveReportSilk(
     bool CpuFromCache, bool SilkFromCache, bool Available);
 
 public sealed record AdaptiveReportPersistence(
-    string Path, bool ExistedBefore, int Saves, long BytesWritten, long FinalSize, bool Verified);
+    string Path, bool ExistedBefore, int Saves, long BytesWritten, long FinalSize, bool Verified, bool Disabled = false);
 
 public sealed record AdaptiveReportAgreement(int Batch, int Count, int Correct, double Accuracy);
 
@@ -206,12 +206,20 @@ public static class AdaptiveReport
         c.AppendLine("## Persistence");
         c.AppendLine();
         c.AppendLine($"- Path: {input.Persistence.Path}");
-        c.AppendLine($"- Existed before run: {(input.Persistence.ExistedBefore ? "yes" : "no")}");
-        c.AppendLine($"- Updates persisted: {input.Persistence.Saves}");
-        c.AppendLine($"- Checkpoint size (per save): {input.Persistence.BytesWritten}");
-        c.AppendLine($"- Final file size: {input.Persistence.FinalSize}");
-        c.AppendLine($"- Reload verified bit-identical: {(input.Persistence.Verified ? "yes" : "no")}");
-        c.AppendLine();
+        if (input.Persistence.Disabled)
+        {
+            c.AppendLine("- Status: disabled (--no-persist); no writes performed.");
+            c.AppendLine();
+        }
+        else
+        {
+            c.AppendLine($"- Existed before run: {(input.Persistence.ExistedBefore ? "yes" : "no")}");
+            c.AppendLine($"- Updates persisted: {input.Persistence.Saves}");
+            c.AppendLine($"- Checkpoint size (per save): {input.Persistence.BytesWritten}");
+            c.AppendLine($"- Final file size: {input.Persistence.FinalSize}");
+            c.AppendLine($"- Reload verified bit-identical: {(input.Persistence.Verified ? "yes" : "no")}");
+            c.AppendLine();
+        }
         c.AppendLine("## Reading this report");
         c.AppendLine();
         c.AppendLine("- The test split is scored twice (before and after) with no model selection in between, so the delta is attributable to learning rather than selection.");
@@ -287,6 +295,7 @@ public static class AdaptiveReport
             persistence = new
             {
                 path = input.Persistence.Path,
+                disabled = input.Persistence.Disabled,
                 existedBefore = input.Persistence.ExistedBefore,
                 saves = input.Persistence.Saves,
                 bytesWritten = input.Persistence.BytesWritten,

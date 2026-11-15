@@ -24,7 +24,10 @@ public static class RagAdaptiveEvalMode
         var updateBatch = ctx.UpdateBatch > 0 ? ctx.UpdateBatch : 32;
 
         // labels
+        var cpuBuildSw = Stopwatch.StartNew();
         using var index = await MultiViewIndex.BuildAsync(ctx);
+        cpuBuildSw.Stop();
+        var cpuBuildMs = cpuBuildSw.ElapsedMilliseconds;
         if (index is null) return;
         if (!index.HasVisibleChunks)
         {
@@ -63,22 +66,22 @@ public static class RagAdaptiveEvalMode
         var engine = new LayaRetrievalDecisionHead.LayaDecisionEngine(
             modelDir, loadAdaptiveWeights: ctx.Resume, adaptiveWeightsPath: headWeightsPath);
 
-        var collector = new AdaptiveFeedbackCollector(engine.Head, headWeightsPath, updateBatch, headEpochs, headLr);
+        var collector = new AdaptiveFeedbackCollector(
+            engine.Head, headWeightsPath, updateBatch, headEpochs, headLr, persist: !ctx.NoPersist);
 
         // silk parity
         MultiViewIndex? silkIndex = null;
         SilkParityReport silkParity = new(0, 0, 0, true);
-        long cpuBuildMs = 0, silkBuildMs = 0;
+        long silkBuildMs = 0;
         bool cpuFromCache = index.FromCache, silkFromCache = false;
-        var swBuild = Stopwatch.StartNew();
-        // re-time cpu build is not possible after the fact; record from-cache flag only
-        swBuild.Stop();
-        cpuBuildMs = 0;
 
         if (ctx.UseSilk)
         {
             var silkCtx = ctx with { UseSilk = true };
+            var silkBuildSw = Stopwatch.StartNew();
             silkIndex = await MultiViewIndex.BuildAsync(silkCtx);
+            silkBuildSw.Stop();
+            silkBuildMs = silkBuildSw.ElapsedMilliseconds;
             if (silkIndex is not null)
             {
                 silkFromCache = silkIndex.FromCache;
@@ -204,23 +207,17 @@ public static class RagAdaptiveEvalMode
         if (pc2 is not null) comparisons.Add(pc2);
 
         // persistence verification
-        var headDir = Path.GetDirectoryName(headWeightsPath)!;
-        if (Directory.Exists(headDir))
-            foreach (var f in Directory.GetFiles(headDir, $".laya_head.json.*.tmp", SearchOption.TopDirectoryOnly)) { }
         var finalSize = File.Exists(headWeightsPath) ? new FileInfo(headWeightsPath).Length : 0;
         var bytesWritten = finalSize;
         bool verified = false;
-        if (File.Exists(headWeightsPath))
+        if (File.Exists(headWeightsPath) && !ctx.NoPersist)
         {
-            var scratch = new LayaDecisionHead<float, float>(engine.Head.HiddenSize, headLayerCount: 0);
-            // can't easily load without the right shape; instead compare via a fresh engine load
             try
             {
                 using var verifyEngine = new LayaRetrievalDecisionHead.LayaDecisionEngine(modelDir, loadAdaptiveWeights: true, adaptiveWeightsPath: headWeightsPath);
                 verified = StateDictEqual(engine.Head.StateDict(), verifyEngine.Head.StateDict());
             }
             catch { verified = false; }
-            scratch.Dispose();
         }
 
         // counts
@@ -233,15 +230,16 @@ public static class RagAdaptiveEvalMode
         // timings
         var timings = new List<AdaptiveReportTiming>
         {
-            new("index build (cpu)", 1, 0),
-            new("test feature extraction (encoder forwards)", testResult.Examples.Count + (testResult.Observations.Count - testResult.Examples.Count), testSw.ElapsedMilliseconds),
-            new("train feature extraction + decisions", trainExamplesCount, (int)trainSw.ElapsedMilliseconds),
-            new("head updates", saves, 0),
-            new("test pass (after)", testResultAfter.Examples.Count, (int)testAfterSw.ElapsedMilliseconds),
-            new("total test-pass before", testResult.Examples.Count, (int)testSw.ElapsedMilliseconds),
+            new("index build (cpu)", 1, (int)cpuBuildMs),
         };
+        if (ctx.UseSilk)
+            timings.Add(new AdaptiveReportTiming("index build (silk)", 1, (int)silkBuildMs));
+        timings.Add(new AdaptiveReportTiming("test feature extraction (before)", testResult.Examples.Count + (testResult.Observations.Count - testResult.Examples.Count), (int)testSw.ElapsedMilliseconds));
+        timings.Add(new AdaptiveReportTiming("train feature extraction + decisions", trainExamplesCount, (int)trainSw.ElapsedMilliseconds));
+        timings.Add(new AdaptiveReportTiming("head updates (AutoDiff)", saves, (int)collector.UpdateMilliseconds));
+        timings.Add(new AdaptiveReportTiming("head persistence", saves, (int)collector.PersistMilliseconds));
+        timings.Add(new AdaptiveReportTiming("test feature extraction (after)", testResultAfter.Examples.Count, (int)testAfterSw.ElapsedMilliseconds));
 
-        // silk build times not measured separately; leave 0 with from-cache flags
         var silkReport = new AdaptiveReportSilk(
             ctx.UseSilk ? "silk" : "cpu (silk not requested)",
             silkParity.MaxAbsoluteDifference,
@@ -299,7 +297,7 @@ public static class RagAdaptiveEvalMode
             ReliabilityAfter = calibAfter.Bins,
             Timings = timings,
             Silk = silkReport,
-            Persistence = new AdaptiveReportPersistence(headWeightsPath, existedBefore, saves, bytesWritten, finalSize, verified),
+            Persistence = new AdaptiveReportPersistence(headWeightsPath, existedBefore, saves, bytesWritten, finalSize, verified) { Disabled = ctx.NoPersist },
             InSampleAgreement = inSample,
             DecisiveNote = decisiveNote,
         };
@@ -366,18 +364,8 @@ public static class RagAdaptiveEvalMode
                 var chunk = index.Chunks[x.Row];
                 var features = engine.ExtractFeatures(query, chunk);
                 var decision = LayaRetrievalDecisionHead.DecideFromFeatures(engine, query, chunk, features);
-                var accepted = decision.Choice == "relevant" && decision.AnswerConfidence >= 0; // threshold applied later
-                // apply threshold from ctx? not available here; store raw and filter in scoring
-                return new { x.Row, chunk, x.Score, features, decision, accepted };
+                return new { x.Row, chunk, x.Score, features, decision };
             }).ToList();
-
-            // threshold comes from ctx; but RunTestPass lacks ctx. We'll recompute accepted with a default 0.8? 
-            // To keep threshold consistent, accepted flag here is (choice relevant) only; thresholding happens in AdaptiveDecisionScoring? 
-            // Actually Accepted in AdaptiveCandidate should reflect the router's operating point. We don't have threshold here.
-            // Pass threshold via closure by changing signature: add threshold param.
-            // (handled below by re-running; for now mark accepted = choice relevant && confidence >= 0.8 default)
-            // We'll instead store confidence and let caller threshold. Simpler: threshold inside loop requires param.
-            // -> change signature to include threshold.
 
             // grade lookup
             var relevantIds = new HashSet<string>(StringComparer.Ordinal);
@@ -402,7 +390,6 @@ public static class RagAdaptiveEvalMode
             fixedP.Add(fixedMetrics.Precision); fixedR.Add(fixedMetrics.Recall); fixedM.Add(fixedMetrics.Mrr); fixedN.Add(fixedMetrics.Ndcg);
             perQueryFixedNdcg.Add(fixedMetrics.Ndcg);
 
-            // adaptive candidates with threshold 0.8 default (will be overridden? see note)
             var adaptiveCandidates = candidates.Select(c => new AdaptiveCandidate(
                 c.Row, c.chunk.ChunkId, c.Score,
                 c.decision.Choice == "relevant" && c.decision.AnswerConfidence >= threshold,
