@@ -1,6 +1,7 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AI;
@@ -270,6 +271,36 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
             "The decision head needs the question type, the marker positions and the valid length. " +
             "Use Forward(hidden, type, markerPositions, validLength).");
 
+    /// <summary>
+    /// Runs the choice path and returns its differentiable logits as a row tensor of shape
+    /// <c>[1, optionCount]</c>. Enter <see cref="GradientUtils.Grad"/> when training; inference
+    /// remains the default.
+    /// </summary>
+    /// <param name="hidden">
+    /// The encoder's last hidden state, shape <c>[seqLen, hiddenSize]</c>, as produced by
+    /// <see cref="ModernBertEncoder{TModel}.Forward"/>.
+    /// </param>
+    /// <param name="type">The question type, selecting the type-embedding row.</param>
+    /// <param name="markerPositions">
+    /// Indices of the <c>[MASK]</c> tokens, one per option, as returned by
+    /// <see cref="LayaPromptBuilder.BuildSequence"/>. Fewer than the question's option count is
+    /// reachable: the builder drops markers the length budget pushed out.
+    /// </param>
+    /// <param name="validLength">
+    /// The number of leading positions that are real tokens. The reference's collate step makes the
+    /// real tokens a prefix of the row, so the padding mask is this and not an arbitrary vector.
+    /// </param>
+    public ReverseGradTensor<TModel> ForwardChoiceLogits(
+        ReverseGradTensor<TModel> hidden,
+        LayaQuestionType type,
+        IReadOnlyList<int> markerPositions,
+        int validLength)
+    {
+        var (scored, _) = ScoreChoices(hidden, type, markerPositions, validLength);
+        scored.Reshape(1, markerPositions.Count);
+        return scored;
+    }
+
     /// <summary>Runs the head over one question's encoder output.</summary>
     /// <param name="hidden">
     /// The encoder's last hidden state, shape <c>[seqLen, hiddenSize]</c>, as produced by
@@ -286,6 +317,45 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
     /// real tokens a prefix of the row, so the padding mask is this and not an arbitrary vector.
     /// </param>
     public LayaHeadOutput Forward(
+        ReverseGradTensor<TModel> hidden,
+        LayaQuestionType type,
+        IReadOnlyList<int> markerPositions,
+        int validLength)
+    {
+        var (scored, withType) = ScoreChoices(hidden, type, markerPositions, validLength);
+
+        int k = markerPositions.Count;
+        var logits = new float[k];
+        int idx = 0;
+        if (scored.Data.TryGetSpan(out var scoredSpan))
+            for (; idx < k && idx < scoredSpan.Length; idx++)
+                logits[idx] = float.CreateChecked(scoredSpan[idx]);
+        for (; idx < k; idx++)
+            logits[idx] = 0.0f;
+
+        var probabilities = LayaHeadScoring.Softmax(logits);
+        var features = LayaHeadScoring.BuildFeatures(probabilities);
+
+        // pooled = h[:, 0] — the post-head-row 0, i.e. the [CLS] position after the head stack.
+        var pooled = ReverseGradOperations.Gather(withType, [0]);
+        var featureRow = ReverseGradTensor<TModel>.FromMatrix(ToTensor(features), 1, LayaHeadOutput.FeatureCount);
+        var actInputTensor = ReverseGradOperations.Concat([pooled, featureRow], axis: 1);
+
+        // act_head: Sequential(Linear, GELU, Linear)
+        var actLogits = actOut.Forward(ReverseGradOperations.GeluExact(actInput.Forward(actInputTensor)));
+        var actionProbabilities = LayaHeadScoring.Softmax(ToFloats(actLogits));
+
+        return new LayaHeadOutput
+        {
+            Logits = logits,
+            MarkerProbabilities = probabilities,
+            Features = features,
+            ActionProbability = actionProbabilities[0],
+            ActionClassCount = actionProbabilities.Length
+        };
+    }
+
+    (ReverseGradTensor<TModel> Scored, ReverseGradTensor<TModel> Hidden) ScoreChoices(
         ReverseGradTensor<TModel> hidden,
         LayaQuestionType type,
         IReadOnlyList<int> markerPositions,
@@ -329,36 +399,7 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
         // scorer: Sequential(LayerNorm, Linear, GELU, Linear) → [k, 1]
         var scored = scorerOut.Forward(ReverseGradOperations.GeluExact(
             scorerHidden.Forward(scorerNorm.Forward(markerHidden))));
-
-        int k = markerPositions.Count;
-        var logits = new float[k];
-        int idx = 0;
-        if (scored.Data.TryGetSpan(out var scoredSpan))
-            for (; idx < k && idx < scoredSpan.Length; idx++)
-                logits[idx] = float.CreateChecked(scoredSpan[idx]);
-        for (; idx < k; idx++)
-            logits[idx] = 0.0f;
-
-        var probabilities = LayaHeadScoring.Softmax(logits);
-        var features = LayaHeadScoring.BuildFeatures(probabilities);
-
-        // pooled = h[:, 0] — the post-head-row 0, i.e. the [CLS] position after the head stack.
-        var pooled = ReverseGradOperations.Gather(withType, [0]);
-        var featureRow = ReverseGradTensor<TModel>.FromMatrix(ToTensor(features), 1, LayaHeadOutput.FeatureCount);
-        var actInputTensor = ReverseGradOperations.Concat([pooled, featureRow], axis: 1);
-
-        // act_head: Sequential(Linear, GELU, Linear)
-        var actLogits = actOut.Forward(ReverseGradOperations.GeluExact(actInput.Forward(actInputTensor)));
-        var actionProbabilities = LayaHeadScoring.Softmax(ToFloats(actLogits));
-
-        return new LayaHeadOutput
-        {
-            Logits = logits,
-            MarkerProbabilities = probabilities,
-            Features = features,
-            ActionProbability = actionProbabilities[0],
-            ActionClassCount = actionProbabilities.Length
-        };
+        return (scored, withType);
     }
 
     /// <summary>

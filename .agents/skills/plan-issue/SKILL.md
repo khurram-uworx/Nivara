@@ -1,6 +1,6 @@
 ---
 name: plan-issue
-description: Use when planning a GitHub issue before implementation. Takes a GitHub issue for the Nivara repo (number, URL, or pasted title/body), fetches it via gh, maps the affected code through the code-memory MCP (symbols, relationships, call graphs, blast radius, you will love its sql tool), grounds API/behavior claims in official docs via the microsoft-learn MCP, and produces an execution-ready plan document. Front-load triggers: "plan issue", "plan #N", "plan github issue", "plan <title>". Read-only planning — execution hands off to the iterative-work skill. Do NOT use for general codebase questions, feature ideas without an issue, or execution work.
+description: Use when planning a GitHub issue before implementation. Takes a GitHub issue for the Nivara repo (number, URL, or pasted title/body), fetches it via gh, maps the affected code through the code-memory MCP (symbols, relationships, call graphs, blast radius, you will love its sql tool), grounds API/behavior claims in official docs via the microsoft-learn MCP, and produces an execution-ready plan document. Front-load triggers "plan issue", "plan #N", "plan github issue", "plan <title>". Read-only planning — execution hands off to the iterative-work skill. Do NOT use for general codebase questions, feature ideas without an issue, or execution work.
 ---
 
 # Plan-Issue Workflow

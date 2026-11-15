@@ -62,6 +62,10 @@ dotnet run --project samples/NivaraChat -- --embed
 dotnet run --project samples/NivaraChat -- --rag --text "How does embedding search work?"
 dotnet run --project samples/NivaraChat -- --rag --ollama --text "How does embedding search work?"
 
+# Adaptive RAG (#981): retrieval-first flow with a local Laya decision layer that keeps only the best accepted chunk
+dotnet run --project samples/NivaraChat -- --rag-adaptive --text "What is NivaraChat?"
+dotnet run --project samples/NivaraChat -- --rag-adaptive --ollama --text "What is NivaraChat?"
+
 # RAG agent: same retrieval, TextSearchProvider auto-context injection (Ollama optional)
 dotnet run --project samples/NivaraChat -- --rag-agent --text "What is NivaraChat?"
 dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is NivaraChat?"
@@ -117,6 +121,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--critic` | — | Mode: writer-critic loop — LLM writes, Nivara scores, retry if poor |
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
+| `--rag-adaptive` | — | Mode: adaptive retrieval (#981) — retrieval-first flow with a local Laya decision layer that accepts or rejects the relevant chunk before answering |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |

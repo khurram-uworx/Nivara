@@ -51,6 +51,11 @@ All notable changes to Nivara are documented here. Released versions are publish
 - `BlasOptions.OpenBlasThreads` is documented as process-wide; `BlasOptions.DllPath` is now wired
   through to the loader.
 
+### Added
+
+- `LayaDecisionHead.ForwardChoiceLogits` exposes differentiable choice logits for head-only training;
+  the existing inference `Forward` path remains unchanged.
+
 ## [1.5.0] - 2026-11-07
 
 ### Breaking changes (migration)

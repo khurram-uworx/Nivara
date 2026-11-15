@@ -1,4 +1,6 @@
 using Nivara.AI;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -189,6 +191,35 @@ public class LayaDecisionHeadTests
         Assert.That(output.MarkerProbabilities, Has.Length.EqualTo(3));
         Assert.That(output.Features, Has.Length.EqualTo(FeatCount));
         Assert.That(output.ActionClassCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ForwardChoiceLogits_PreservesInferenceValuesAndTracksOnlyChoicePath()
+    {
+        var head = NewHead(headLayers: 1);
+        var hidden = AsTensor(HiddenState(12), 12, Hidden);
+        var expected = head.Forward(hidden, LayaQuestionType.Choice, [2, 5], 12);
+        float[] actual;
+
+        using (GradientUtils.Grad())
+        {
+            var logits = head.ForwardChoiceLogits(hidden, LayaQuestionType.Choice, [2, 5], 12);
+            Assert.That(logits.Shape, Is.EqualTo(new[] { 1, 2 }));
+            logits.Data.TryGetSpan(out var span);
+            actual = span.ToArray();
+            new CrossEntropyLoss<float>().Forward(logits, new[] { 0 }).Backward();
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(actual, Is.EqualTo(expected.Logits), "training logits match inference exactly");
+            Assert.That(head.typeEmb.Weight!.Tensor.Grad, Is.Not.Null);
+            Assert.That(head.HeadLayers[0].Parameters().Values.Any(parameter => parameter.Grad is not null), Is.True);
+            Assert.That(head.scorerHidden.Weight!.Tensor.Grad, Is.Not.Null);
+            Assert.That(head.scorerOut.Weight!.Tensor.Grad, Is.Not.Null);
+            Assert.That(head.actInput.Weight!.Tensor.Grad, Is.Null, "the action path is not evaluated");
+            Assert.That(head.actOut.Weight!.Tensor.Grad, Is.Null, "the action path is not evaluated");
+        });
     }
 
     [Test]
