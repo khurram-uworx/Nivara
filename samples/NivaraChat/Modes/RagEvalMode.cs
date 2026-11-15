@@ -79,6 +79,12 @@ public static class RagEvalMode
             try { EvalGroundTruth.Save(queriesPath, queries); } catch { }
         }
 
+        if (ctx.MaxQueries > 0 && queries.Count > ctx.MaxQueries)
+        {
+            queries = queries.Take(ctx.MaxQueries).ToList();
+            Console.WriteLine($"Capped to {queries.Count} queries (--max-queries {ctx.MaxQueries}).");
+        }
+
         Console.WriteLine($"Loaded {queries.Count} queries from {queriesPath}");
 
         IChatClient? client = null;
@@ -124,8 +130,12 @@ public static class RagEvalMode
 
         var results = new List<QueryResult>();
 
-        foreach (var q in queries)
+        for (var qi = 0; qi < queries.Count; qi++)
         {
+            var q = queries[qi];
+            Console.Write($"\r  Grading query {qi + 1}/{queries.Count}: {q.Query.Substring(0, Math.Min(40, q.Query.Length))}...");
+            Console.Out.Flush();
+
             // Retrieve per config.
             var retrievedByConfig = new Dictionary<string, IReadOnlyList<MultiViewHit>>(StringComparer.Ordinal);
             long latencySum = 0;
