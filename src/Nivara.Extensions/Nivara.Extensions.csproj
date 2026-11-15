@@ -8,9 +8,9 @@
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU5104</WarningsNotAsErrors>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>1.5.0</PackageVersion>
+    <PackageVersion>1.5.1</PackageVersion>
     <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, the BERT-family model layer, and the Silk OpenCL GPU backend for Nivara</Description>
-    <PackageReleaseNotes>v1.5.0: Promoted Silk (OpenCL) backend and BERT-family model layer (BertModel, ModernBertModel, LayaHeadModel, tokenizers, loaders, GPU seam) into Nivara.Extensions (namespace Nivara.Silk / Nivara.AI); added NivaraEmbeddingExtensions for the float[] / E0..En frame convention and Microsoft.Extensions.AI conversion; real opt-in zero-copy Arrow export; mask-based nullable column storage handling; Streamix backpressure and pivot advances. Existing surface: Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure, immutable options with With() builders. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.1: Resource-management and OpenBLAS improvements — removed the internal abandoned-resource tracking subsystem in favour of explicit Dispose/Release, source-disposal failures now propagate from QueryFrame/ParquetLazySource, OpenBLAS registration honours an explicit path and surfaces real failure diagnostics. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>

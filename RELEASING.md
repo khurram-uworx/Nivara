@@ -184,6 +184,10 @@ The PR description must include:
   permanent) and, optionally, the PR attachments used for review.
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
 - The CD test results (3200+ tests passing).
+- A doc-refresh confirmation listing each of README.md, GETTING-STARTED.md,
+  ARCHITECTURE.md, docs/AUTODIFF.md, EXAMPLES.md, samples/README.md, AGENTS.md,
+  RELEASING.md and the docs/adr/ records as reviewed or explicitly out of scope,
+  with named owner per file.
 
 The PR must show a green CI check before merging. Do not merge with `--admin`
 until CI passes, and do not merge a docs-only PR without confirming `dotnet build
@@ -213,6 +217,21 @@ publishes `Nivara` and `Nivara.Extensions` to NuGet using OIDC trusted publishin
 Watch the CD run under the repo's Actions tab. The workflow packs with the tag-derived
 version (tag name minus the leading `v`) and pushes both the `.nupkg` and `.snupkg` for
 each package.
+
+### Step 10 — Reset the working tree to the next dev line (post-tag)
+
+After the tag is pushed and CI confirms the publish, reset the version on `main` to the
+next development line so local packs do not report the just-released version:
+
+```powershell
+# On main, after the release tag:
+# edit src/Nivara/Nivara.csproj and src/Nivara.Extensions/Nivara.Extensions.csproj
+# <PackageVersion>1.6.0-preview</PackageVersion>   (or 2.0.0-preview, per the preview line in use)
+git commit -m "chore: reset version to next dev line"
+```
+
+Document the chosen preview line in this file's release notes so the next release does
+not have to rediscover it.
 
 ## Manual publish (fallback)
 
