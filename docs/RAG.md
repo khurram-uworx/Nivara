@@ -209,7 +209,41 @@ Key flags: `--labels judge|auto`, `--epochs`, `--lr`, `--weight-decay`, `--patie
 Offline smoke: `--rag-learn --labels auto --epochs 2` (after generating queries).
 Reproducibility check: rerun with the same `--seed` and expect weights to agree to 1e-7.
 
-## 10. References
+## 10. Adaptive decision loop (#983)
+
+`--rag-adaptive-eval` runs the full loop: retrieve (multi-view top-K) -> understand (MiniLM
+views + frozen ModernBERT features) -> decide (Laya choice head) -> learn (online AutoDiff
+updates on train-split simulated feedback) -> persisted update (`laya_head.json`, unless
+`--no-persist`) -> evaluate on the held-out split -> report.
+
+- Candidate set is the index's top-K per query; the table is a within-run reranking comparison.
+  `adaptive-rerank` preserves top-K membership, so its P@K/R@K are invariant by construction;
+  only `adaptive-filter` can move them.
+- Feedback is simulated from judge labels and is stated as such.
+- Auto labels (`--labels auto`) are a declared leakage diagnostic.
+- Calibration: ECE (10 equal-width bins) and Brier on `AnswerConfidence` vs choice correctness,
+  before and after.
+- Timings split feature extraction (encoder) from head updates (AutoDiff) and persistence;
+  index build times are recorded for both CPU and Silk (when `--silk`).
+- Silk scope: MiniLM embedding generation and parity only. Decisions and head training are CPU
+  in both backends. Hand-written Silk weight steps are a follow-up.
+- Report + metrics written to `samples/data/nivarachat/adaptive/` (gitignored):
+  `rag-adaptive-report.md`, `metrics-{kind}-s{seed}-k{k}.json`. `laya_head.json` is ~147 MB;
+  use `--no-persist` or `--head-weights <temp>` for read-only runs.
+
+Run:
+
+```
+dotnet run --project samples/NivaraChat -- --rag-adaptive-eval --labels judge
+dotnet run --project samples/NivaraChat -- --rag-adaptive-eval --labels judge --silk
+dotnet run --project samples/NivaraChat -- --rag-adaptive-eval --labels judge --no-persist --max-queries 5
+```
+
+Key flags: `--labels`, `--seed`, `--k`, `--max-queries`, `--max-examples`, `--head-epochs`,
+`--head-lr`, `--update-batch`, `--resume`, `--head-weights`, `--no-persist`, `--report`,
+`--silk`, `--docs-dir`, `--threshold`.
+
+## 11. References
 
 - `samples/NivaraChat/Helpers/MultiViewChunk.cs`, `MultiViewChunker` — chunking.
 - `samples/NivaraChat/Helpers/MultiViewIndex.cs`, `MultiViewIndexCache.cs` — indexing,
@@ -230,13 +264,3 @@ Nivara core APIs exercised: `NivaraFrame`, `NivaraColumn<T>`, `TensorPrimitives`
 `Linear<T>`, `Loss<T>` / `BCEWithLogitsLoss`, `Adam`/`AdamW`, Parquet I/O,
 `NivaraTensorExtensions`.
 
-## 10. Adaptive decision loop (#983)
-
-`--rag-adaptive-eval` runs the full loop: retrieve (multi-view top-K) → understand (MiniLM views + frozen ModernBERT features) → decide (Laya choice head) → learn (online AutoDiff updates on train-split simulated feedback) → persisted update (`laya_head.json`) → evaluate on the held-out split → report.
-
-- Candidate set is the index's top-K per query; the table is a within-run reranking comparison. `adaptive-rerank` preserves top-K membership, so its P@K/R@K are invariant by construction; only `adaptive-filter` can move them.
-- Feedback is simulated from judge labels and is stated as such.
-- Auto labels (`--labels auto`) are a declared leakage diagnostic.
-- Calibration: ECE (10 equal-width bins) and Brier on `AnswerConfidence` vs choice correctness, before and after.
-- Timings split feature extraction (encoder) from head updates (AutoDiff) and persistence.
-- Silk scope: MiniLM embedding generation and parity only. Decisions and head training are CPU in both backends. Hand-written Silk weight steps are a follow-up.

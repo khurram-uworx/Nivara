@@ -66,6 +66,9 @@ dotnet run --project samples/NivaraChat -- --rag --ollama --text "How does embed
 dotnet run --project samples/NivaraChat -- --rag-adaptive --text "What is NivaraChat?"
 dotnet run --project samples/NivaraChat -- --rag-adaptive --ollama --text "What is NivaraChat?"
 
+# Adaptive eval (#983): retrieve, decide, learn, persist, evaluate, report (no LLM needed)
+dotnet run --project samples/NivaraChat -- --rag-adaptive-eval --labels judge --no-persist
+
 # RAG agent: same retrieval, TextSearchProvider auto-context injection (Ollama optional)
 dotnet run --project samples/NivaraChat -- --rag-agent --text "What is NivaraChat?"
 dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is NivaraChat?"
@@ -123,6 +126,18 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-adaptive` | — | Mode: adaptive retrieval (#981) — retrieval-first flow with a local Laya decision layer that accepts or rejects the relevant chunk before answering |
 | `--rag-adaptive-eval` | — | Mode: adaptive evaluation (#983) — end-to-end loop: retrieve, decide, learn, persist, evaluate, report |
+| `--max-queries <int>` | `40` | `--rag-adaptive-eval`: cap train/test queries |
+| `--max-examples <int>` | `128` | `--rag-adaptive-eval`: cap training examples |
+| `--head-weights <path>` | `samples/data/nivarachat/adaptive/laya_head.json` | `--rag-adaptive-eval`: persisted head path |
+| `--head-epochs <int>` | `1` | `--rag-adaptive-eval`: head training epochs per update |
+| `--head-lr <float>` | `0.0005` | `--rag-adaptive-eval`: head learning rate |
+| `--update-batch <int>` | `32` | `--rag-adaptive-eval`: feedback batch size |
+| `--resume` | — | `--rag-adaptive-eval`: load persisted head on startup |
+| `--no-persist` | — | `--rag-adaptive-eval`: train in memory, do not write `laya_head.json` |
+| `--llm <ollama\|openai>` | `ollama` | LLM provider for plain-chat modes |
+| `--openai-url <base>` | — | OpenAI-compatible base URL (e.g. `http://host/v1`) |
+| `--openai-model <name>` | `--model` value | Model name for `--llm openai` |
+| `--openai-auth <mode>` | `bearer` | Auth mode for `--llm openai`: `bearer` or `api-key` (Azure) |
 | `--rag-agent` | — | Mode: RAG agent — retrieval (Ollama optional) plus `TextSearchProvider` auto-context injection when `--ollama` |
 | `--rag-multiview` | — | Mode: multi-view retrieval (#914) — four views per chunk, late fusion, winning view and disagreement report (no LLM) |
 | `--rag-eval` | — | Mode: RAG evaluation (#943) — LLM-as-judge paired comparison of fused vs content-only and ablations |

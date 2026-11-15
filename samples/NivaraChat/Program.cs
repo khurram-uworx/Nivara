@@ -342,6 +342,14 @@ void PrintUsage()
     Console.WriteLine("  --seed <int>              --rag-learn: query-split and shuffle seed (default: 42)");
     Console.WriteLine("  --train-queries <int>     --rag-learn: cap the training split (default: all)");
     Console.WriteLine("  --k <int>                 --rag-learn: metric cut-off (default: 10)");
+    Console.WriteLine("  --max-queries <int>       --rag-adaptive-eval: cap train/test queries (default: 40)");
+    Console.WriteLine("  --max-examples <int>      --rag-adaptive-eval: cap training examples (default: 128)");
+    Console.WriteLine("  --head-weights <path>     --rag-adaptive-eval: persisted head path");
+    Console.WriteLine("  --head-epochs <int>       --rag-adaptive-eval: head training epochs per update (default: 1)");
+    Console.WriteLine("  --head-lr <float>         --rag-adaptive-eval: head learning rate (default: 0.0005)");
+    Console.WriteLine("  --update-batch <int>      --rag-adaptive-eval: feedback batch size (default: 32)");
+    Console.WriteLine("  --resume                  --rag-adaptive-eval: load persisted head on startup");
+    Console.WriteLine("  --no-persist              --rag-adaptive-eval: train in memory, do not write laya_head.json");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
