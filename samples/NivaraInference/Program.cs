@@ -654,11 +654,21 @@ class Program
         }
 
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
-        var loadSw = Stopwatch.StartNew();
-        var tensors = SafeTensorsLoader.Read(modelPath);
-        loadSw.Stop();
-        Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
-        Console.WriteLine();
+
+        // Exactly one dtype is read per run. The F32 map is loaded on first use, so a run that
+        // consumes bf16/Half weights never holds a widened duplicate of the same checkpoint.
+        Dictionary<string, (float[] Data, int[] Shape)>? tensorsF32 = null;
+        Dictionary<string, (float[] Data, int[] Shape)> F32()
+        {
+            if (tensorsF32 is not null) return tensorsF32;
+
+            var loadSwF32 = Stopwatch.StartNew();
+            tensorsF32 = SafeTensorsLoader.Read(modelPath);
+            loadSwF32.Stop();
+            Console.WriteLine($"  SafeTensors parse (F32): {loadSwF32.ElapsedMilliseconds} ms ({tensorsF32.Count} tensors)");
+            Console.WriteLine();
+            return tensorsF32;
+        }
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
         if (bf16)
@@ -685,31 +695,31 @@ class Program
             case "mobilenet_v2":
                 if (useSilk)
                 {
-                    var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (benchmark) return RunMobileNetV2SilkBenchmark(mobSilkTensors);
                     if (compare) return RunMobileNetV2SilkCompare(mobSilkTensors);
-                    if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "mobilenet_v2");
+                    if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "mobilenet_v2");
                     return RunMobileNetV2SilkInference(mobSilkTensors, mode);
                 }
-                if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "mobilenet_v2");
-                if (compare) return InferenceCompare.VisionCompare(tensors, "mobilenet_v2");
-                return benchmark ? RunMobileNetV2Benchmark(tensors) : RunMobileNetV2Inference(tensors, mode);
+                if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "mobilenet_v2");
+                if (compare) return InferenceCompare.VisionCompare(F32(), "mobilenet_v2");
+                return benchmark ? RunMobileNetV2Benchmark(F32()) : RunMobileNetV2Inference(F32(), mode);
             case "resnet18":
                 if (useSilk)
                 {
-                    var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (benchmark) return RunResNet18SilkBenchmark(resSilkTensors);
                     if (compare) return RunResNet18SilkCompare(resSilkTensors);
-                    if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "resnet18");
+                    if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "resnet18");
                     return RunResNet18SilkInference(resSilkTensors, mode);
                 }
-                if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "resnet18");
-                if (compare) return InferenceCompare.VisionCompare(tensors, "resnet18");
-                return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
+                if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "resnet18");
+                if (compare) return InferenceCompare.VisionCompare(F32(), "resnet18");
+                return benchmark ? RunResNet18Benchmark(F32()) : RunResNet18Inference(F32(), mode);
             case "minilm":
                 if (useSilk)
                 {
-                    var miniSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var miniSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (mode == "similarity") return RunMiniLmSilkSimilarity(miniSilkTensors);
                     if (benchmark) return BenchmarkMiniLmSilk(miniSilkTensors);
                     if (compare) return RunMiniLmSilkCompare(miniSilkTensors);
@@ -717,23 +727,23 @@ class Program
                 }
                 if (bf16) return benchmark ? BenchmarkMiniLM(tensorsBf16, "BFloat16") : RunMiniLMBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkMiniLM(tensorsHalf, "Half") : RunMiniLMHalf(tensorsHalf);
-                if (compare) return RunMiniLMCompare(tensors);
-                return mode == "similarity" ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
+                if (compare) return RunMiniLMCompare(F32());
+                return mode == "similarity" ? RunMiniLMSimilarity(F32()) : benchmark ? BenchmarkMiniLM(F32(), "F32") : RunMiniLMInference(F32());
             case "distilbert":
                 if (useSilk)
                 {
-                    var distSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var distSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (compare) return RunDistilBertSilkCompare(distSilkTensors);
                     return benchmark ? BenchmarkDistilBertSilk(distSilkTensors) : RunDistilBertSilkInference(distSilkTensors);
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBert(tensorsBf16, "BFloat16") : RunDistilBertBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBert(tensorsHalf, "Half") : RunDistilBertHalf(tensorsHalf);
-                if (compare) return RunDistilBertCompare(tensors);
-                return benchmark ? BenchmarkDistilBert(tensors, "F32") : RunDistilBertInference(tensors);
+                if (compare) return RunDistilBertCompare(F32());
+                return benchmark ? BenchmarkDistilBert(F32(), "F32") : RunDistilBertInference(F32());
             case "distilbert_sst":
                 if (useSilk)
                 {
-                    var sstSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var sstSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (mode == "predict") return RunDistilBertSstSilkPredict(sstSilkTensors);
                     if (benchmark) return BenchmarkDistilBertSstSilk(sstSilkTensors);
                     if (compare) return RunDistilBertSstSilkCompare(sstSilkTensors);
@@ -741,9 +751,9 @@ class Program
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBertSst(tensorsBf16, "BFloat16") : RunDistilBertSstBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBertSst(tensorsHalf, "Half") : RunDistilBertSstHalf(tensorsHalf);
-                if (compare) return RunDistilBertSstCompare(tensors);
-                if (mode == "predict") return RunDistilBertSstPredict(tensors);
-                return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
+                if (compare) return RunDistilBertSstCompare(F32());
+                if (mode == "predict") return RunDistilBertSstPredict(F32());
+                return benchmark ? BenchmarkDistilBertSst(F32(), "F32") : RunDistilBertSstInference(F32());
             case "laya":
                 if (useSilk)
                 {
@@ -754,14 +764,14 @@ class Program
                         return Laya.RunGpu(tensorsBf16, modelDir);
                     }
                     Nivara.AI.OpenLayaSession open = Nivara.AI.GpuSeamFactories.Laya;
-                    if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
-                    if (compare) return Laya.CompareGpu(tensors, modelDir, open);
-                    return Laya.RunGpu(tensors, modelDir, open);
+                    if (benchmark) return Laya.RunBenchmarkGpu(F32(), modelDir, open);
+                    if (compare) return Laya.CompareGpu(F32(), modelDir, open);
+                    return Laya.RunGpu(F32(), modelDir, open);
                 }
-                if (compare) return Laya.Compare(tensors, modelDir);
+                if (compare) return Laya.Compare(F32(), modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
                 if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
-                return Laya.Run<float, float>(tensors, modelDir, mode, "F32");
+                return Laya.Run<float, float>(F32(), modelDir, mode, "F32");
             case "modernbert":
                 if (useSilk)
                 {
@@ -769,21 +779,21 @@ class Program
                     {
                         if (benchmark) return ModernBert.BenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, seqLengths, warmup, iterations, Nivara.AI.GpuSeamFactories.ModernBert);
                         if (compare) return ModernBert.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.ModernBert);
-                        if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
+                        if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                         return ModernBert.RunGpu(tensorsBf16, modelDir);
                     }
                     OpenModernBertSession open = Nivara.AI.GpuSeamFactories.ModernBert;
-                    var mbSilkTensors = tensors;
+                    var mbSilkTensors = F32();
                     if (benchmark) return ModernBert.BenchmarkGpu(mbSilkTensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(mbSilkTensors, modelDir, open);
-                    if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
+                    if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                     return ModernBert.RunGpu(mbSilkTensors, modelDir, open);
                 }
-                if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
-                if (compare) return ModernBert.Compare(tensors, modelDir);
+                if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
+                if (compare) return ModernBert.Compare(F32(), modelDir);
                 if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16", seqLengths, warmup, iterations);
                 if (fp16) return ModernBert.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half", seqLengths, warmup, iterations);
-                return ModernBert.Run<float, float>(tensors, modelDir, mode, "F32", seqLengths, warmup, iterations);
+                return ModernBert.Run<float, float>(F32(), modelDir, mode, "F32", seqLengths, warmup, iterations);
             case "smollm":
                 if (useSilk)
                 {
@@ -792,18 +802,18 @@ class Program
                         if (benchmark) return BenchmarkSmolLMSilk(tensorsBf16);
                         return RunSmolLMSilk(tensorsBf16);
                     }
-                    if (benchmark) return BenchmarkSmolLMSilk(tensors);
-                    return RunSmolLMSilk(tensors);
+                    if (benchmark) return BenchmarkSmolLMSilk(F32());
+                    return RunSmolLMSilk(F32());
                 }
                 if (mode == "ab")
                 {
                     if (bf16) return SmolLMAb(tensorsBf16);
                     if (fp16) return SmolLMAb(tensorsHalf);
-                    return SmolLMAb(tensors);
+                    return SmolLMAb(F32());
                 }
                 if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16) : RunSmolLM(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf) : RunSmolLM(tensorsHalf);
-                return benchmark ? BenchmarkSmolLM(tensors) : RunSmolLM(tensors);
+                return benchmark ? BenchmarkSmolLM(F32()) : RunSmolLM(F32());
             case "qwen":
                 if (useSilk)
                 {
@@ -814,21 +824,21 @@ class Program
                         if (plain) return Qwen.RunPlainSilk(tensorsBf16, modelDir, text);
                         return Qwen.RunToolsSilk(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
                     }
-                    if (mode == "distill") return Qwen.RunDistillSilk(tensors, modelDir, teacherExamples, force, seed);
-                    if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensors, modelDir);
-                    if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
-                    return Qwen.RunToolsSilk(tensors, modelDir, useKvCache: !noKvCache, text);
+                    if (mode == "distill") return Qwen.RunDistillSilk(F32(), modelDir, teacherExamples, force, seed);
+                    if (mode == "benchmark") return Qwen.RunBenchmarkSilk(F32(), modelDir);
+                    if (plain) return Qwen.RunPlainSilk(F32(), modelDir, text);
+                    return Qwen.RunToolsSilk(F32(), modelDir, useKvCache: !noKvCache, text);
                 }
                 if (mode == "distill")
-                    return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
+                    return Qwen.RunDistill(F32(), modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")
                 {
                     if (bf16) return plain ? Qwen.RunPlainBenchmark(tensorsBf16, modelDir) : Qwen.RunBenchmark(tensorsBf16, modelDir);
-                    return plain ? Qwen.RunPlainBenchmark(tensors, modelDir) : Qwen.RunBenchmark(tensors, modelDir);
+                    return plain ? Qwen.RunPlainBenchmark(F32(), modelDir) : Qwen.RunBenchmark(F32(), modelDir);
                 }
                 if (plain)
-                    return Qwen.RunPlain(tensors, modelDir, text);
-                return Qwen.RunTools(tensors, modelDir, useKvCache: !noKvCache, text);
+                    return Qwen.RunPlain(F32(), modelDir, text);
+                return Qwen.RunTools(F32(), modelDir, useKvCache: !noKvCache, text);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
