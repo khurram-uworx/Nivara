@@ -13,7 +13,7 @@ public static class RagEvalJudge
     const int BatchSize = 8;
 
     public static async Task<IReadOnlyDictionary<string, LabelResult>> GradeChunksAsync(
-        OllamaApiClient client,
+        IChatClient client,
         string query,
         IReadOnlyList<(string ChunkId, string Text)> passages,
         int runs,
@@ -59,7 +59,7 @@ public static class RagEvalJudge
     }
 
     static async Task<IReadOnlyDictionary<string, int>> GradeBatchAsync(
-        OllamaApiClient client,
+        IChatClient client,
         string query,
         IReadOnlyList<(string ChunkId, string Text)> batch,
         double temperature,
