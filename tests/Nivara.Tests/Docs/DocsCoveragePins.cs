@@ -45,8 +45,11 @@ internal static class DocsCoveragePins
     /// #1064 adds <c>docs/adr/009-metrics-mergeable-accumulator.md</c>: 57 + 1 = 58.
     /// #1077 adds <c>docs/adr/010-chunk-count-growth-policy-on-concat.md</c>: 58 + 1 = 59.
     /// The 2026-11-12 library review adds <c>docs/REVIEW-2026-11-12.md</c>: 59 + 1 = 60.
+    /// Release prep for v1.5.1 adds <c>docs/RELEASE1.5.1-REVIEW.md</c>: 60 + 1 = 61.
+    /// Deleted <c>docs/RELEASE15-REVIEW.md</c> and <c>docs/REVIEW-2026-11-12.md</c> (superseded by
+    /// GitHub issues and the v1.5.1 review): 61 - 2 = 59.
     /// </remarks>
-    internal const int ExpectedDocumentCount = 60;
+    internal const int ExpectedDocumentCount = 59;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -90,6 +93,11 @@ internal static class DocsCoveragePins
     /// Issue #1178 widens markdown reference discovery to root-relative/bare <c>.md</c> targets used as
     /// link targets/backticked paths across the scanned scope and resolves bare names relative to the
     /// containing document/root/docs (so root-doc links are gate-checked): 266 + 230 = 496.
+    /// Release prep for v1.5.1 adds one backticked <c>docs/AUTODIFF.md</c> reference in the doc-refresh
+    /// checklist of <c>RELEASING.md</c>: 496 + 1 = 497.
+    /// <c>docs/RELEASE1.5.1-REVIEW.md</c> adds five backticked <c>.md</c> references
+    /// (<c>RELEASING.md</c>, <c>CHANGELOG.md</c>, <c>PackageVersion</c> is not a doc; the five are
+    /// <c>RELEASING.md</c> x3 and <c>CHANGELOG.md</c> x2): 497 + 5 = 502.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 496;
+    internal const int ExpectedDocumentReferenceCount = 492;
 }

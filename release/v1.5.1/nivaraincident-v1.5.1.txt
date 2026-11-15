@@ -1,0 +1,16 @@
+Scenario: A - Database degradation
+Dataset: E:\khurram-uworx\Nivara\samples\data\incident-lab
+
+=== Benchmark: Nivara (1 iterations, median) ===
+
+  Degradation Ordering:
+    Rows: 6,666,665 returned
+    Diagnostics: 8,340,000 read, 6 cols, 20505.5ms exec, 3165.83 MB allocated
+    GC peak: 3174.82 MB
+    Median: 20516.6 ms  (6,666,665 rows)
+
+  Deployment Correlation   22041.3 ms  (6,666,665 rows)
+  Saturation Ordering        130.0 ms  (8 rows)
+  Regional Partitioning    26297.1 ms  (10 rows)
+  Grouped Aggregation      11501.7 ms  (8 rows)
+  Typed LINQ Grouped Agg   27986.6 ms  (8 rows)

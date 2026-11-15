@@ -1,0 +1,174 @@
+Nivara Fine-Tuning Benchmark 
+Sun 11/15/2026 20:42:10.11 
+examples=100 batch_size=2 epochs=1 
+Machine: THINKPAD Intel64 Family 6 Model 197 Stepping 2, GenuineIntel 
+ 
+ 
+=== PyTorch === 
+device=cpu, batch_size=2, epochs=1, max_examples=100, warmup=2, seed=0
+machine=Windows-11-10.0.26300-SP0 | cpu=16 | python=3.12.10 | torch=2.13.0+cpu | torch_threads=16
+params=66,955,010
+loading E:\khurram-uworx\Nivara\samples\NivaraFineTuning\Python\..\..\data\sst2\train-00000-of-00001.parquet
+train_examples=100
+total_batches_per_epoch=50
+epoch 1: 24.2s (483.2ms/batch, 50 batches), avg_loss=0.6644
+
+=== RESULTS ===
+Per-epoch time (50 batches): 24.2s (483.2ms/batch)
+Extrapolated full epoch (33674 batches): ~16270s (271.2min)
+Total measured: 24.2s
+NIVARA_BENCHMARK ms_per_batch=483.2 params=66955010 seed=0 warmup=2
+ 
+======================== 
+ 
+=== Nivara === 
+Loading DistilBERT config from E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data/distilbert...
+  dim=768, layers=6, heads=12
+Loading SafeTensors weights...
+  Loaded 105 tensors
+Building model (numClasses=2)...
+  Model built, encoder weights loaded, classifier head random-initialized.
+Loading tokenizer from E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data/distilbert/vocab.txt...
+Loading SST-2 dataset from E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data...
+Tokenizing training set...
+  (limited to 100 examples by --max-examples)
+  100 examples, seqLen=128
+Tokenizing dev set...
+  872 examples
+  Optimizer: AdamW(lr=2E-05, weightDecay=0.01)
+
+=== Epoch 1/1 ===
+  Batch 1/50 [3.4s] - loss: 1.3820
+  Batch 2/50 [2.3s] - loss: 1.0103
+  Batch 3/50 [2.4s] - loss: 0.9116
+  Batch 4/50 [2.3s] - loss: 0.8532
+  Batch 5/50 [2.2s] - loss: 0.8363
+  Batch 6/50 [2.2s] - loss: 0.7442
+  Batch 7/50 [2.2s] - loss: 0.8031
+  Batch 8/50 [2.2s] - loss: 0.8192
+  Batch 9/50 [2.2s] - loss: 0.8343
+  Batch 10/50 [1.5s] - loss: 0.8556
+  Batch 11/50 [1.5s] - loss: 0.8388
+  Batch 12/50 [1.5s] - loss: 0.8657
+  Batch 13/50 [1.5s] - loss: 0.8686
+  Batch 14/50 [1.6s] - loss: 0.8343
+  Batch 15/50 [1.5s] - loss: 0.8190
+  Batch 16/50 [1.5s] - loss: 0.8207
+  Batch 17/50 [1.5s] - loss: 0.8088
+  Batch 18/50 [1.8s] - loss: 0.7900
+  Batch 19/50 [2.3s] - loss: 0.7696
+  Batch 20/50 [2.0s] - loss: 0.7951
+  Batch 21/50 [2.3s] - loss: 0.7780
+  Batch 22/50 [2.1s] - loss: 0.7627
+  Batch 23/50 [1.9s] - loss: 0.7555
+  Batch 24/50 [2.2s] - loss: 0.7578
+  Batch 25/50 [2.2s] - loss: 0.7593
+  Batch 26/50 [2.2s] - loss: 0.7653
+  Batch 27/50 [2.2s] - loss: 0.7468
+  Batch 28/50 [2.3s] - loss: 0.7629
+  Batch 29/50 [1.6s] - loss: 0.7675
+  Batch 30/50 [2.2s] - loss: 0.7674
+  Batch 31/50 [2.1s] - loss: 0.7555
+  Batch 32/50 [2.2s] - loss: 0.7593
+  Batch 33/50 [2.1s] - loss: 0.7507
+  Batch 34/50 [2.2s] - loss: 0.7605
+  Batch 35/50 [2.2s] - loss: 0.7606
+  Batch 36/50 [2.3s] - loss: 0.7655
+  Batch 37/50 [2.2s] - loss: 0.7674
+  Batch 38/50 [2.0s] - loss: 0.7586
+  Batch 39/50 [1.5s] - loss: 0.7633
+  Batch 40/50 [1.6s] - loss: 0.7604
+  Batch 41/50 [1.5s] - loss: 0.7567
+  Batch 42/50 [1.5s] - loss: 0.7491
+  Batch 43/50 [1.9s] - loss: 0.7616
+  Batch 44/50 [1.7s] - loss: 0.7487
+  Batch 45/50 [1.4s] - loss: 0.7569
+  Batch 46/50 [1.6s] - loss: 0.7511
+  Batch 47/50 [1.5s] - loss: 0.7430
+  Batch 48/50 [1.4s] - loss: 0.7354
+  Batch 49/50 [1.4s] - loss: 0.7287
+  Batch 50/50 [1.5s] - loss: 0.7281
+Epoch 1 training complete. Avg loss: 0.7281
+  Steady-state ms/batch: 1906.3
+Dev - loss: 0.5249, accuracy: 76.15%
+
+Saving fine-tuned model to E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data/distilbert\finetuned_model.json...
+Done.
+ 
+======================== 
+ 
+=== Nivara (Silk/OpenCL) === 
+Loading DistilBERT config from E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data/distilbert...
+  dim=768, layers=6, heads=12
+Loading SafeTensors weights...
+  Loaded 105 tensors
+Building CPU model (numClasses=2)...
+  Model built, encoder weights loaded, classifier head random-initialized.
+Initializing OpenCL device (Silk)...
+  Device: Intel(R) Graphics, classes=2
+Loading tokenizer from E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data/distilbert/vocab.txt...
+Loading SST-2 dataset from E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data...
+Tokenizing training set...
+  (limited to 100 examples by --max-examples)
+  100 examples, seqLen=128
+Tokenizing dev set...
+  872 examples
+
+=== Epoch 1/1 ===
+  Batch 1/50 [0.3s] - loss: 1.2709
+  Batch 2/50 [0.2s] - loss: 0.9436
+  Batch 3/50 [0.2s] - loss: 0.8435
+  Batch 4/50 [0.2s] - loss: 0.8095
+  Batch 5/50 [0.2s] - loss: 0.7323
+  Batch 6/50 [0.2s] - loss: 0.7311
+  Batch 7/50 [0.2s] - loss: 0.8315
+  Batch 8/50 [0.2s] - loss: 0.8293
+  Batch 9/50 [0.2s] - loss: 0.7688
+  Batch 10/50 [0.2s] - loss: 0.7663
+  Batch 11/50 [0.2s] - loss: 0.7518
+  Batch 12/50 [0.3s] - loss: 0.7082
+  Batch 13/50 [0.2s] - loss: 0.7709
+  Batch 14/50 [0.2s] - loss: 0.7501
+  Batch 15/50 [0.2s] - loss: 0.7485
+  Batch 16/50 [0.2s] - loss: 0.7461
+  Batch 17/50 [0.2s] - loss: 0.7476
+  Batch 18/50 [0.2s] - loss: 0.7469
+  Batch 19/50 [0.2s] - loss: 0.7643
+  Batch 20/50 [0.2s] - loss: 0.7736
+  Batch 21/50 [0.2s] - loss: 0.7673
+  Batch 22/50 [0.2s] - loss: 0.7579
+  Batch 23/50 [0.3s] - loss: 0.7485
+  Batch 24/50 [0.2s] - loss: 0.7453
+  Batch 25/50 [0.2s] - loss: 0.7392
+  Batch 26/50 [0.2s] - loss: 0.7300
+  Batch 27/50 [0.3s] - loss: 0.7355
+  Batch 28/50 [0.2s] - loss: 0.7374
+  Batch 29/50 [0.2s] - loss: 0.7372
+  Batch 30/50 [0.2s] - loss: 0.7275
+  Batch 31/50 [0.2s] - loss: 0.7245
+  Batch 32/50 [0.2s] - loss: 0.7162
+  Batch 33/50 [0.2s] - loss: 0.7194
+  Batch 34/50 [0.2s] - loss: 0.7136
+  Batch 35/50 [0.2s] - loss: 0.7035
+  Batch 36/50 [0.2s] - loss: 0.6949
+  Batch 37/50 [0.3s] - loss: 0.6952
+  Batch 38/50 [0.2s] - loss: 0.6956
+  Batch 39/50 [0.2s] - loss: 0.6852
+  Batch 40/50 [0.2s] - loss: 0.6965
+  Batch 41/50 [0.2s] - loss: 0.6979
+  Batch 42/50 [0.2s] - loss: 0.7101
+  Batch 43/50 [0.2s] - loss: 0.7008
+  Batch 44/50 [0.2s] - loss: 0.7087
+  Batch 45/50 [0.2s] - loss: 0.7130
+  Batch 46/50 [0.2s] - loss: 0.7185
+  Batch 47/50 [0.2s] - loss: 0.7137
+  Batch 48/50 [0.3s] - loss: 0.7108
+  Batch 49/50 [0.2s] - loss: 0.7086
+  Batch 50/50 [0.2s] - loss: 0.7033
+Epoch 1 training complete. Avg loss: 0.7033
+  Steady-state ms/batch: 245.4
+Dev - loss: 0.5873, accuracy: 75.11%
+
+Saving fine-tuned model to E:\khurram-uworx\Nivara\samples\NivaraFineTuning\bin\Release\net11.0\..\..\..\..\..\samples\data/distilbert\finetuned_model.json...
+Done.
+ 

@@ -120,17 +120,50 @@ AC-power-only and require the OpenCL device/driver to be recorded alongside the
 machine line. Do not skip this line item; if an OpenCL device is unavailable,
 record the reason in the PR.
 
-**Capture output for review:** when a human runs these benchmarks on behalf of
-an agent (or for later re-measurement), put every command in a temporary
+**Capture output for review:** a committed, reusable runner exists at
+`release/run-benchmarks.cmd <version>` (see "Canonical runner" below). For a
+one-off re-measurement, put every benchmark command in a temporary
 `release.cmd` at the repository root that redirects each command's console
-output to a working file, run it, and delete the script afterwards (it is
-commit noise and must never be committed). Hand back the file paths
-rather than pasting output into chat. Example lines inside `release.cmd`:
-`dotnet run --project <proj> -c Release -- ... > release\\vX.Y.Z\\<name>-vX.Y.Z.txt 2>&1`
+output to a working file under `release/vX.Y.Z/`, then run that script and
+delete it afterwards (it is commit noise and must never be committed). Hand
+back the file paths rather than pasting output into chat. Example lines
+inside `release.cmd`:
+
+```
+@echo off
+cd /d <repo-root>
+dotnet run --project tests\Nivara.PerformanceTests -c Release -- --json release\vX.Y.Z\nivara-perf-vX.Y.Z.json --runs 3 > release\vX.Y.Z\core.txt 2>&1
+dotnet run --project samples\NivaraInference -c Release -- minilm benchmark > release\vX.Y.Z\minilm.txt 2>&1
+```
+
+**Running benchmarks as an agent (exact procedure):** long-running benchmarks
+must NOT be run as a blocking foreground agent command — tool timeouts will
+kill them. The required procedure is:
+
+1. Ask the human for approval to run the benchmarks. If approval is granted,
+   do not skip a runnable benchmark and record "deferred".
+2. Create `release.cmd` at the repository root containing every benchmark
+   command, each redirected to `release\vX.Y.Z\<name>-vX.Y.Z.txt` (and the
+   core harness to `release\vX.Y.Z\nivara-perf-vX.Y.Z.json`).
+3. Launch the script in the background with no timeout, e.g. a backgrounded
+   shell command with timeout disabled (do not pass a finite timeout).
+4. Wait for the completion notification; do not poll or sleep-wait.
+5. Parse the resulting files and update the README tables from them.
+6. Delete `release.cmd` before committing.
+
+**Canonical runner:** `release/run-benchmarks.cmd <version>` is committed and
+contains the full command set (core harness, NivaraIncident, NivaraInference
+CPU/Silk/BLAS, PyTorch references, NivaraFineTuning) writing to
+`release/<version>/`. Run it from the repo root in the background with no
+timeout, e.g. `cmd /c release\run-benchmarks.cmd 1.5.1` launched as a
+backgrounded command. It is the preferred entry point for both humans and
+agents; keep it updated when benchmark commands change. See `release/README.md`
+for full usage and the table-regeneration helper workflow.
+
 The core harness JSON file should be committed as canonical evidence under
-`release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy" below); a
-`%TEMP%` copy may also be kept as staging during active prep and cleaned up
-manually afterwards. The script may `cd` into sample
+`release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy"
+below); a `%TEMP%` copy may also be kept as staging during active prep and
+cleaned up manually afterwards. The script may `cd` into sample
 directories, but it must end back at the repository root.
 
 **Regenerating benchmark tables safely (hidden-tag technique):** wrap each
@@ -184,6 +217,10 @@ The PR description must include:
   permanent) and, optionally, the PR attachments used for review.
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
 - The CD test results (3200+ tests passing).
+- A doc-refresh confirmation listing each of README.md, GETTING-STARTED.md,
+  ARCHITECTURE.md, docs/AUTODIFF.md, EXAMPLES.md, samples/README.md, AGENTS.md,
+  RELEASING.md and the docs/adr/ records as reviewed or explicitly out of scope,
+  with named owner per file.
 
 The PR must show a green CI check before merging. Do not merge with `--admin`
 until CI passes, and do not merge a docs-only PR without confirming `dotnet build
@@ -213,6 +250,21 @@ publishes `Nivara` and `Nivara.Extensions` to NuGet using OIDC trusted publishin
 Watch the CD run under the repo's Actions tab. The workflow packs with the tag-derived
 version (tag name minus the leading `v`) and pushes both the `.nupkg` and `.snupkg` for
 each package.
+
+### Step 10 — Reset the working tree to the next dev line (post-tag)
+
+After the tag is pushed and CI confirms the publish, reset the version on `main` to the
+next development line so local packs do not report the just-released version:
+
+```powershell
+# On main, after the release tag:
+# edit src/Nivara/Nivara.csproj and src/Nivara.Extensions/Nivara.Extensions.csproj
+# <PackageVersion>1.6.0-preview</PackageVersion>   (or 2.0.0-preview, per the preview line in use)
+git commit -m "chore: reset version to next dev line"
+```
+
+Document the chosen preview line in this file's release notes so the next release does
+not have to rediscover it.
 
 ## Manual publish (fallback)
 

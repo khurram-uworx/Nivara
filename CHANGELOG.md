@@ -2,7 +2,7 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
-## [Unreleased]
+## [1.5.1] - 2026-11-15
 
 ### Breaking changes (migration)
 

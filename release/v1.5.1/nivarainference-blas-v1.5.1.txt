@@ -1,0 +1,116 @@
+=== NivaraInference BLAS === 
+=== Nivara HuggingFace Inference ===
+
+BLAS: enabled (2 row-blocks, 1 OpenBLAS thread)
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 86 ms (104 tensors)
+
+=== MiniLM Benchmark ===
+Device: CPU (.NET 11.0.0)  Precision: F32
+
+Parameters: 22,713,728
+Weights: 86.6 MB
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 98.9 ms
+  Min:     75 ms
+  Max:     127 ms
+
+=== Nivara HuggingFace Inference ===
+
+BLAS: enabled (2 row-blocks, 1 OpenBLAS thread)
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 250 ms (105 tensors)
+
+=== DistilBERT Benchmark ===
+Device: CPU (.NET 11.0.0)  Precision: F32
+
+Model build: 815 ms
+Parameters: 66,985,530
+Weights: 255.5 MB
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 184.2 ms
+  Min:     127 ms
+  Max:     239 ms
+
+=== Nivara HuggingFace Inference ===
+
+BLAS: enabled (2 row-blocks, 1 OpenBLAS thread)
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 254 ms (104 tensors)
+
+=== DistilBERT SST-2 Benchmark ===
+Device: CPU (.NET 11.0.0)  Precision: F32
+
+Model build: 805 ms
+Parameters: 66,955,010
+Weights: 255.4 MB
+
+Input text length: 26 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 152.3 ms
+  Min:     89 ms
+  Max:     177 ms
+
+Last pass sentiment: NEGATIVE (99.3%)
+
+=== Nivara HuggingFace Inference ===
+
+BLAS: enabled (4 row-blocks, 1 OpenBLAS thread)
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 1626 ms (173 tensors)
+
+=== ModernBERT-large Benchmark ===
+Device: CPU (.NET 11.0.0), precision F32
+
+Config: dim=1024, layers=28, heads=16, headDim=64, intermediate=2624, vocab=50368
+Attention: 10 full + 18 sliding, local_attention=128 (inclusive band 64), rope theta 160000 full / 10000 sliding
+Norm: bias-free LayerNorm, eps=1E-05, activation=gelu
+
+Load weights: 3311 ms
+
+1 warmup + 3 timed passes, median reported.
+The published CPU rows are compared against Python/modernbert_benchmark.py, which warms
+up 3 passes; --warmup 3 matches that protocol.
+
+seq= 128 (valid  26)  median    952.7 ms  min    899.6 ms       27.3 tok/s  ~34.02 ms/layer
+seq= 256 (valid  26)  median   1498.1 ms  min   1453.8 ms       17.4 tok/s  ~53.50 ms/layer
+
+Each pass encodes the full padded sequence — this mode has no KV cache, since an encoder re-reads the whole sequence every time.
+=== Nivara HuggingFace Inference ===
+
+BLAS: enabled (2 row-blocks, 1 OpenBLAS thread)
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 995 ms (206 tensors)
+
+=== Laya Benchmark ===
+Device: CPU (.NET 11.0.0), precision F32
+
+Encoder: ModernBERT-large, 28 layers, d=1024, 16 heads, intermediate 2624
+Head: 2 layers, 16 heads, max_len 512, head_max_len 192
+Temperature per type: 1.6369, 1.2514, 1.9834
+
+Load weights: 2454 ms
+
+1 warmup + 3 timed passes at max_len 512, median reported.
+
+  question   valid markers     median      min      max
+  choice2       40       2     6170 ms   5890 ms   6328 ms
+  choice13     119      13     6691 ms   6106 ms   6838 ms
+  score4        48       4     6697 ms   4562 ms   6872 ms
+  noul          39       2     5730 ms   4424 ms   5938 ms
+
+The encoder is the cost; the head is a few percent on top of it. See docs/LAYA.md
+for the probe numbers behind that split.

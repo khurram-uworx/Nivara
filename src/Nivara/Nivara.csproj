@@ -7,11 +7,14 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara</PackageId>
-    <PackageVersion>1.5.0</PackageVersion>
+    <PackageVersion>1.5.1</PackageVersion>
     <Description>High-performance columnar DataFrame library for .NET</Description>
-    <PackageReleaseNotes>v1.5.0: Promoted Silk (OpenCL) backend and BERT-family model layer into Nivara.Extensions; added embeddings frame convention and Microsoft.Extensions.AI glue (NivaraEmbeddingExtensions); real opt-in zero-copy Arrow export for flat primitive columns with validity-bitmap rebuild for null-bearing columns; mask-based nullable column storage (ElementType is now the underlying type); reachable streaming memory budget via AsStream(NivaraExecutionContext); modernbert benchmark selectable lengths/pass counts; qwen distillation on Silk and fused per-token decoder with batched prefill; seedable AutoDiff initializers and constructor-level initializer overrides across conv/VAE/linear modules; documentation citation and snippet gates plus ADR index gate. Core columnar engine unchanged: LINQ-like query engine, tensor-accelerated kernels, lazy/eager/streaming/parallel execution, explicit null masks. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.1: Resource-management and OpenBLAS improvements — removed the internal abandoned-resource tracking subsystem in favour of explicit Dispose/Release, source-disposal failures now propagate from QueryFrame/ParquetLazySource, OpenBLAS registration honours an explicit path and surfaces real failure diagnostics, and added differentiable Laya choice logits plus the --rag-adaptive-eval loop. See CHANGELOG.md for the full list.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
+    <!-- NU5104: this stable package transitively depends on prerelease packages
+         (Parquet.Net 6.1.1-pre.1 and the .NET 11 RC dependency set). Suppressed so
+         `dotnet pack` succeeds; revert once those dependencies ship stable. See ADR-003-style note. -->
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU5104</WarningsNotAsErrors>
   </PropertyGroup>
 
