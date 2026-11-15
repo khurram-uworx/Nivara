@@ -321,6 +321,10 @@ See the per-model docs for full capability tables:
 
 Run this during release prep (step 5 of `RELEASING.md`). Requires Python, PyTorch, and HuggingFace model weights (see Quick start for `hf download` commands).
 
+The full command set is available as the canonical runner `release/run-benchmarks.cmd <version>`
+(see `release/README.md`); run it in the background with no timeout rather than typing the
+commands below by hand.
+
 Run both sides in the same session for fair comparison:
 
 ```powershell
