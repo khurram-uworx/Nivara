@@ -374,6 +374,7 @@ class Program
             Console.WriteLine("                     'distilbert' / 'distilbert_sst' / 'modernbert' / 'laya', F32-only,");
             Console.WriteLine("                     default/benchmark/compare modes; 'qwen' adds tools/distill. Competing");
             Console.WriteLine("                     BF16 weights on ModernBERT; fp16 supported there too. (Issue #1019)");
+            Console.WriteLine("                     'smollm' / 'qwen' default to BF16 storage / F32 compute on Silk (native).");
             Console.WriteLine();
             Console.WriteLine("BLAS (all models):");
             Console.WriteLine("  --blas             Register the OpenBLAS GEMM provider (opt-in). Default off;");
@@ -408,11 +409,11 @@ class Program
             Console.WriteLine("                    shipped and every kernel widens them in-register. Default for smollm (BF16");
             Console.WriteLine("                    weights, ~269 MB resident instead of ~1.05 GB), qwen (BF16) and laya (F16,");
             Console.WriteLine("                    ~843 MB resident instead of ~1.69 GB); rejected for every other model.");
-            Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
+            Console.WriteLine("  --precision f32   Full float32 weights (qwen widened-at-load path; Silk F32 device path with --precision f32).");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
             Console.WriteLine("                    (rejected for qwen fp16 - Half range/precision insufficient for Qwen2.5-0.5B;");
-            Console.WriteLine("                     rejected for qwen bf16 outside 'benchmark' / --synthetic-weights;");
+            Console.WriteLine("                     qwen bf16 on Silk is the BF16 device path (BF16 storage / F32 compute);");
             Console.WriteLine("                     laya's default is now F16 storage / F32 compute, so fp16 stays the pure-Half");
             Console.WriteLine("                     compute opt-in; rejected where the run is F32-only: the vision models)");
             Console.WriteLine();
@@ -636,7 +637,8 @@ class Program
 
         // Qwen distill builds gradients (GradientUtils.Grad()); mixed BF16-storage/F32-compute is
         // inference-only (LlamaForCausalLM.ThrowIfMixedDtypeTraining), so distill requires widened F32.
-        if (isQwen && mode == "distill" && native)
+        // On the Silk path bf16 and native are the same BF16 device path, so bf16 there is also blocked.
+        if (isQwen && mode == "distill" && (native || (useSilk && bf16)))
         {
             Console.Error.WriteLine("Qwen2.5 precision error: 'qwen distill' requires widened F32 weights (--precision f32); mixed BF16-storage/F32-compute is inference-only and cannot build gradients.");
             return 1;
@@ -873,22 +875,17 @@ class Program
             case "qwen":
                 if (useSilk)
                 {
-                    // #1219 (OPEN): BF16 cached decode crashes in the shared BF16 quartet. Keep qwen
-                    // Silk on the known-good F32 device path whenever precision resolves to native/
-                    // default (which now loads BF16 tensors), with an explicit diagnostic. Only an
-                    // explicit --precision bf16 opts into the BF16 device path.
-                    if (bf16 && !native)
+                    // Native (default) and explicit bf16 both keep BF16 weights on the device and
+                    // widen in-register (F32 activations) -- the same BF16 device path (#1222).
+                    // Distill builds gradients and needs widened F32 weights (see guard above).
+                    if (mode == "distill")
+                        return Qwen.RunDistillSilk(F32(), modelDir, teacherExamples, force, seed);
+                    if (bf16 || native)
                     {
-                        if (mode == "distill") return Qwen.RunDistillSilk(tensorsBf16, modelDir, teacherExamples, force, seed);
                         if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensorsBf16, modelDir);
                         if (plain) return Qwen.RunPlainSilk(tensorsBf16, modelDir, text);
                         return Qwen.RunToolsSilk(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
                     }
-                    if (native)
-                    {
-                        Console.WriteLine("Note: qwen --silk with native/default precision runs the F32 device path (BF16 cached decode is blocked by issue #1219); use --precision bf16 to opt into BF16 Silk.");
-                    }
-                    if (mode == "distill") return Qwen.RunDistillSilk(F32(), modelDir, teacherExamples, force, seed);
                     if (mode == "benchmark") return Qwen.RunBenchmarkSilk(F32(), modelDir);
                     if (plain) return Qwen.RunPlainSilk(F32(), modelDir, text);
                     return Qwen.RunToolsSilk(F32(), modelDir, useKvCache: !noKvCache, text);

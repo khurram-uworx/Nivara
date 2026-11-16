@@ -59,12 +59,8 @@ public static class QwenMode
         var loadSw = Stopwatch.StartNew();
         if (options.UseSilk)
         {
-            // #1219 (OPEN): BF16 cached decode crashes in the shared BF16 quartet. Keep qwen
-            // Silk on the known-good F32 device path while native/default loads BF16 tensors,
-            // with an explicit diagnostic. Only an explicit --precision bf16 would opt into BF16 Silk.
-            Console.WriteLine("Note: qwen --silk runs the F32 device path (BF16 cached decode is blocked by issue #1219).");
-            var tensorsF32 = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
-            await ExecuteSilk<float>(config, tokenizer, modelDir, tensorsF32, options);
+            var tensorsBf16 = SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelDir, "model.safetensors"));
+            await ExecuteSilk<BFloat16>(config, tokenizer, modelDir, tensorsBf16, options);
         }
         else
         {
@@ -379,13 +375,9 @@ public static class QwenMode
             RopeTheta = config.RopeTheta,
         };
 
-        SilkQwenSession session;
-        if (typeof(T) == typeof(float))
-            session = SilkQwenSession.Open(silkConfig, (dynamic)tensors);
-        else if (typeof(T) == typeof(BFloat16))
-            session = SilkQwenSession.Open(silkConfig, (dynamic)tensors);
-        else
+        if (typeof(T) != typeof(float) && typeof(T) != typeof(BFloat16))
             throw new NotSupportedException($"Silk Qwen chat does not support compute type {typeof(T).Name}.");
+        SilkQwenSession session = SilkQwenSession.Open(silkConfig, (dynamic)tensors);
 
         if (options.Mode == "tools-weather")
         {
