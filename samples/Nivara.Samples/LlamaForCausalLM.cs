@@ -5,6 +5,7 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Buffers;
 using System.Numerics;
+using System.Runtime.InteropServices;
 namespace Nivara.Samples;
 
 /// <summary>
@@ -13,23 +14,27 @@ namespace Nivara.Samples;
 /// vocabulary. Inference-by-default: running outside a <c>GradientUtils.Grad()</c> scope
 /// builds no graph nodes. Matches the <c>LlamaForCausalLM</c> structure used by SmolLM.
 /// </summary>
-public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+/// <typeparam name="TModel">The compute (activation) floating-point type.</typeparam>
+/// <typeparam name="TWeight">The storage (weight) floating-point type; the checkpoint dtype.</typeparam>
+public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
+    where TModel : struct, IFloatingPointIeee754<TModel>
+    where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     /// <summary>Gets the configured maximum number of positions for this model.</summary>
     public int MaxPositionEmbeddings => maxPositionEmbeddings;
 
     /// <summary>Gets the token embedding table (reused as the tied LM head).</summary>
-    public Embedding<T> Embed { get; }
-    internal readonly LlamaDecoderBlock<T>[] layers;
-    internal readonly RMSNorm<T> finalNorm;
+    public Embedding<TModel, TWeight> Embed { get; }
+    internal readonly LlamaDecoderBlock<TModel, TWeight>[] layers;
+    internal readonly RMSNorm<TModel> finalNorm;
     internal readonly int vocabSize;
     internal readonly int maxPositionEmbeddings;
     internal readonly bool tieWordEmbeddings;
     internal readonly bool qkvBias;
 
     // Fused decode ping-pong scratch (inference-only; not registered with the module system).
-    T[]? fusedH0;
-    T[]? fusedH1;
+    TModel[]? fusedH0;
+    TModel[]? fusedH1;
 
     /// <summary>Gets the model's vocabulary size.</summary>
     public int VocabSize => vocabSize;
@@ -59,15 +64,15 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         this.tieWordEmbeddings = tieWordEmbeddings;
         this.qkvBias = qkvBias;
 
-        Embed = new Embedding<T>(vocabSize, hiddenSize);
-        layers = new LlamaDecoderBlock<T>[numHiddenLayers];
+        Embed = new Embedding<TModel, TWeight>(vocabSize, hiddenSize);
+        layers = new LlamaDecoderBlock<TModel, TWeight>[numHiddenLayers];
         for (int i = 0; i < numHiddenLayers; i++)
-            layers[i] = new LlamaDecoderBlock<T>(
+            layers[i] = new LlamaDecoderBlock<TModel, TWeight>(
                 hiddenSize, numHeads, numKeyValueHeads, intermediateSize,
                 rmsNormEps, maxPositionEmbeddings, ropeTheta, qkvBias);
-        finalNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
+        finalNorm = new RMSNorm<TModel>(hiddenSize, rmsNormEps);
 
-        var modules = new Module<T>[layers.Length + 2];
+        var modules = new Module<TModel>[layers.Length + 2];
         modules[0] = Embed;
         modules[^1] = finalNorm;
         for (int i = 0; i < layers.Length; i++)
@@ -81,9 +86,10 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     /// </summary>
     /// <param name="inputIds">Token IDs (length L)</param>
     /// <returns>Logits with shape <c>[L, vocabSize]</c></returns>
-    public ReverseGradTensor<T> Forward(int[] inputIds)
+    public ReverseGradTensor<TModel> Forward(int[] inputIds)
     {
         if (inputIds == null) throw new ArgumentNullException(nameof(inputIds));
+        ThrowIfMixedDtypeTraining();
 
         var h = Embed.Forward(inputIds); // [L, hidden]
 
@@ -93,31 +99,32 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         h = finalNorm.Forward(h); // [L, hidden]
 
         // Tied LM head: logits = h @ embedWeight^T, producing [L, vocab].
-        var logits = ReverseGradOperations.MatMulTransposedB(h, Embed.Weight!.Tensor);
+        var logits = TiedHead(h);
         logits.Reshape(h.Shape[0], vocabSize);
         return logits;
     }
 
-    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
         => throw new NotImplementedException("Use Forward(int[] inputIds) for LlamaForCausalLM.");
 
     /// <summary>
     /// Runs the causal-LM stack for a <em>single</em> token during cached inference, returning
     /// logits <c>[1, vocabSize]</c>. The token's hidden state is embedded and passed through every
-    /// layer's <see cref="LlamaDecoderBlock{T}.ForwardCached"/>, which appends the new key/value to
-    /// the supplied <see cref="LlamaKVCache{T}"/> and attends against the cached prefix. Numerically
-    /// identical to processing the token as the final position of a full
+    /// layer's <see cref="LlamaDecoderBlock{TModel, TWeight}.ForwardCached"/>, which appends the new
+    /// key/value to the supplied <see cref="LlamaKVCache{TModel}"/> and attends against the cached
+    /// prefix. Numerically identical to processing the token as the final position of a full
     /// <see cref="Forward(int[])"/> call.
     /// </summary>
     /// <param name="tokenId">The new token id</param>
     /// <param name="positionOffset">Absolute position of this token</param>
     /// <param name="cache">The shared KV cache (positions 0..<paramref name="positionOffset"/>-1)</param>
     /// <returns>Logits with shape <c>[1, vocabSize]</c></returns>
-    public ReverseGradTensor<T> ForwardCached(int tokenId, int positionOffset, LlamaKVCache<T> cache)
+    public ReverseGradTensor<TModel> ForwardCached(int tokenId, int positionOffset, LlamaKVCache<TModel> cache)
     {
         if (tokenId < 0 || tokenId >= vocabSize) throw new ArgumentOutOfRangeException(nameof(tokenId));
         if (positionOffset < 0) throw new ArgumentOutOfRangeException(nameof(positionOffset));
         ArgumentNullException.ThrowIfNull(cache);
+        ThrowIfMixedDtypeTraining();
 
         cache.Ensure(positionOffset + 1);
 
@@ -136,7 +143,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
 
         h = finalNorm.Forward(h); // [1, hidden]
 
-        var logits = ReverseGradOperations.MatMulTransposedB(h, Embed.Weight!.Tensor);
+        var logits = TiedHead(h);
         logits.Reshape(1, vocabSize);
         return logits;
     }
@@ -155,11 +162,12 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     /// <param name="inputIds">Prompt token IDs (length L ≥ 1)</param>
     /// <param name="cache">The shared KV cache to seed (positions <c>[0, L)</c>)</param>
     /// <returns>Logits with shape <c>[1, vocabSize]</c> for the last prompt position</returns>
-    public ReverseGradTensor<T> ForwardPrefill(int[] inputIds, LlamaKVCache<T> cache)
+    public ReverseGradTensor<TModel> ForwardPrefill(int[] inputIds, LlamaKVCache<TModel> cache)
     {
         if (inputIds == null) throw new ArgumentNullException(nameof(inputIds));
         if (inputIds.Length == 0) throw new ArgumentException("Prefill requires at least one token.", nameof(inputIds));
         ArgumentNullException.ThrowIfNull(cache);
+        ThrowIfMixedDtypeTraining();
         for (int i = 0; i < inputIds.Length; i++)
             if (inputIds[i] < 0 || inputIds[i] >= vocabSize)
                 throw new ArgumentOutOfRangeException(nameof(inputIds), inputIds[i], $"Token id {inputIds[i]} out of range 0..{vocabSize - 1}.");
@@ -182,14 +190,14 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         // Tied LM head on the last hidden row only: [1, hidden] @ [vocab, hidden]^T -> [1, vocab].
         int hidden = h.Shape[1];
         int rows = h.Shape[0];
-        var lastRow = new T[hidden];
+        var lastRow = new TModel[hidden];
         if (h.Data.TryGetSpan(out var hSpan))
             hSpan.Slice((rows - 1) * hidden, hidden).CopyTo(lastRow);
         else
             for (int i = 0; i < hidden; i++) lastRow[i] = h[(rows - 1) * hidden + i];
-        var last = ReverseGradTensor<T>.FromMatrix(lastRow, 1, hidden, requiresGrad: false);
+        var last = ReverseGradTensor<TModel>.FromMatrix(lastRow, 1, hidden, requiresGrad: false);
 
-        var logits = ReverseGradOperations.MatMulTransposedB(last, Embed.Weight!.Tensor);
+        var logits = TiedHead(last);
         logits.Reshape(1, vocabSize);
         return logits;
     }
@@ -199,24 +207,72 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
     /// using dynamic growth, so later decode steps do not reallocate. Caches constructed with an
     /// explicit maximum capacity are left unchanged.
     /// </summary>
-    public void PrepareCache(LlamaKVCache<T> cache)
+    public void PrepareCache(LlamaKVCache<TModel> cache)
     {
         ArgumentNullException.ThrowIfNull(cache);
         if (cache.MaxCapacity == 0)
             cache.Ensure(MaxPositionEmbeddings);
     }
 
-    ReverseGradTensor<T> ForwardCachedFusedCore(int tokenId, int positionOffset, LlamaKVCache<T> cache)
+    /// <summary>
+    /// Tied LM head. Matching dtypes keep the autograd matmul (identical arithmetic to before the
+    /// storage/compute split); mixed dtypes run the span kernel and return a plain tensor, because
+    /// a narrow weight cannot participate in a same-type backward node.
+    /// </summary>
+    ReverseGradTensor<TModel> TiedHead(ReverseGradTensor<TModel> h)
+    {
+        if (typeof(TModel) == typeof(TWeight))
+            return ReverseGradOperations.MatMulTransposedB(h, (ReverseGradTensor<TModel>)(object)Embed.Weight!.Tensor);
+
+        if (!h.Data.TryGetSpan(out var hSpan))
+            throw new InvalidOperationException("Tied-head input must be null-free.");
+
+        return TiedHead(hSpan, h.Shape[0]);
+    }
+
+    ReverseGradTensor<TModel> TiedHead(ReadOnlySpan<TModel> rows, int rowCount)
+    {
+        if (!Embed.Weight!.Tensor.Data.TryGetSpan(out var weightSpan))
+            throw new InvalidOperationException("Embedding weight must be null-free.");
+
+        int hidden = Embed.EmbeddingDim;
+        var logits = new TModel[rowCount * vocabSize];
+        LlamaFusedKernels.MixedMatMulTransposedB(rows, weightSpan, logits, rowCount, hidden, vocabSize);
+        return ReverseGradTensor<TModel>.FromMatrix(logits, rowCount, vocabSize, requiresGrad: false);
+    }
+
+    void ThrowIfMixedDtypeTraining()
+    {
+        if (GradientUtils.IsGradEnabled && typeof(TModel) != typeof(TWeight))
+            throw new InvalidOperationException(
+                $"LlamaForCausalLM<{typeof(TModel).Name}, {typeof(TWeight).Name}> is inference-only when the " +
+                "compute and weight dtypes differ: the narrow weights have no same-type backward node. " +
+                "Use identical dtypes inside GradientUtils.Grad().");
+    }
+
+    static void CopyEmbeddingRow(ReadOnlySpan<TWeight> weights, int tokenId, int hidden, Span<TModel> destination)
+    {
+        var row = weights.Slice(tokenId * hidden, hidden);
+        if (typeof(TWeight) == typeof(TModel))
+        {
+            MemoryMarshal.Cast<TWeight, TModel>(row).CopyTo(destination);
+            return;
+        }
+        for (int j = 0; j < hidden; j++)
+            destination[j] = TModel.CreateChecked(row[j]);
+    }
+
+    ReverseGradTensor<TModel> ForwardCachedFusedCore(int tokenId, int positionOffset, LlamaKVCache<TModel> cache)
     {
         int hidden = Embed.EmbeddingDim;
         if (fusedH0 is null || fusedH0.Length != hidden)
         {
-            fusedH0 = new T[hidden];
-            fusedH1 = new T[hidden];
+            fusedH0 = new TModel[hidden];
+            fusedH1 = new TModel[hidden];
         }
 
         Embed.Weight!.Tensor.Data.TryGetSpan(out var embedSpan);
-        embedSpan.Slice(tokenId * hidden, hidden).CopyTo(fusedH0);
+        CopyEmbeddingRow(embedSpan, tokenId, hidden, fusedH0);
 
         var cur = fusedH0!;
         var alt = fusedH1!;
@@ -230,24 +286,24 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         // [1, vocab] logits buffer — the required return value (allocated per decode step).
         finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
         LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, 1, hidden, double.CreateChecked(finalNorm.Eps));
-        var logits = new T[vocabSize];
-        LlamaFusedKernels.MatMulTransposedB(cur, embedSpan, logits, 1, hidden, vocabSize);
-        return ReverseGradTensor<T>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
+        var logits = new TModel[vocabSize];
+        LlamaFusedKernels.MixedMatMulTransposedB(cur, embedSpan, logits, 1, hidden, vocabSize);
+        return ReverseGradTensor<TModel>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
     }
 
-    ReverseGradTensor<T> ForwardPrefillFusedCore(int[] inputIds, LlamaKVCache<T> cache)
+    ReverseGradTensor<TModel> ForwardPrefillFusedCore(int[] inputIds, LlamaKVCache<TModel> cache)
     {
         int L = inputIds.Length;
         int hidden = Embed.EmbeddingDim;
         int chunk = L * hidden;
 
-        var h0 = ArrayPool<T>.Shared.Rent(Math.Max(chunk, 1));
-        var h1 = ArrayPool<T>.Shared.Rent(Math.Max(chunk, 1));
+        var h0 = ArrayPool<TModel>.Shared.Rent(Math.Max(chunk, 1));
+        var h1 = ArrayPool<TModel>.Shared.Rent(Math.Max(chunk, 1));
         try
         {
             Embed.Weight!.Tensor.Data.TryGetSpan(out var embedSpan);
             for (int t = 0; t < L; t++)
-                embedSpan.Slice(inputIds[t] * hidden, hidden).CopyTo(h0.AsSpan(t * hidden, hidden));
+                CopyEmbeddingRow(embedSpan, inputIds[t], hidden, h0.AsSpan(t * hidden, hidden));
 
             var cur = h0;
             var alt = h1;
@@ -261,15 +317,40 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
             // the last hidden row only, into a fresh [1, vocab] logits buffer (the required return value).
             finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
             LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, L, hidden, double.CreateChecked(finalNorm.Eps));
-            var logits = new T[vocabSize];
-            LlamaFusedKernels.MatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
-            return ReverseGradTensor<T>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
+            var logits = new TModel[vocabSize];
+            LlamaFusedKernels.MixedMatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
+            return ReverseGradTensor<TModel>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(h0);
-            ArrayPool<T>.Shared.Return(h1);
+            ArrayPool<TModel>.Shared.Return(h0);
+            ArrayPool<TModel>.Shared.Return(h1);
         }
+    }
+}
+
+/// <summary>
+/// Same-dtype convenience alias: <c>LlamaForCausalLM&lt;T&gt;</c> is
+/// <see cref="LlamaForCausalLM{TModel, TWeight}"/> with one dtype for both storage and compute.
+/// </summary>
+public sealed class LlamaForCausalLM<T> : LlamaForCausalLM<T, T>
+    where T : struct, IFloatingPointIeee754<T>
+{
+    public LlamaForCausalLM(
+        int vocabSize,
+        int hiddenSize,
+        int numHiddenLayers,
+        int numHeads,
+        int numKeyValueHeads,
+        int intermediateSize,
+        float rmsNormEps = 1e-5f,
+        int maxPositionEmbeddings = 2048,
+        float ropeTheta = 10000f,
+        bool tieWordEmbeddings = true,
+        bool qkvBias = false)
+        : base(vocabSize, hiddenSize, numHiddenLayers, numHeads, numKeyValueHeads, intermediateSize,
+            rmsNormEps, maxPositionEmbeddings, ropeTheta, tieWordEmbeddings, qkvBias)
+    {
     }
 }
 
@@ -435,14 +516,14 @@ public sealed record LlamaConfig : LLamaConfigLike
 }
 
 /// <summary>/// Loads Llama/SmolLM safetensors (or a pre-read tensor dictionary) into a
-/// <see cref="LlamaForCausalLM{TModel}"/>. Key layout follows the HF Llama convention
+/// <see cref="LlamaForCausalLM{TModel, TWeight}"/>. Key layout follows the HF Llama convention
 /// (<c>model.embed_tokens.weight</c>, <c>model.layers.{i}.self_attn.{q,k,v,o}_proj.weight</c>,
 /// <c>model.layers.{i}.mlp.{gate,up,down}_proj.weight</c>, <c>model.norm.weight</c>), and the
 /// embedding weight is reused for the tied LM head.
 /// </summary>
 public static class LlamaLoader
 {
-    public static LlamaForCausalLM<TModel> Load<TModel, TWeight>(
+    public static LlamaForCausalLM<TModel, TWeight> Load<TModel, TWeight>(
         LLamaConfigLike config,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors)
         where TModel : struct, IFloatingPointIeee754<TModel>
@@ -455,7 +536,7 @@ public static class LlamaLoader
         // authoritative.
         bool qkvBias = config.AttentionBias || tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
 
-        var model = new LlamaForCausalLM<TModel>(
+        var model = new LlamaForCausalLM<TModel, TWeight>(
             config.VocabSize,
             config.HiddenSize,
             config.NumHiddenLayers,
@@ -468,7 +549,7 @@ public static class LlamaLoader
             config.TieWordEmbeddings,
             qkvBias);
 
-        StateDictLoader.LoadEmbedWidened(model.Embed, tensors, "model.embed_tokens.weight");
+        StateDictLoader.LoadEmbed(model.Embed, tensors, "model.embed_tokens.weight");
         StateDictLoader.LoadRMSNorm(model.finalNorm, tensors, "model.norm");
 
         for (int i = 0; i < model.layers.Length; i++)
@@ -477,13 +558,13 @@ public static class LlamaLoader
             var p = $"model.layers.{i}";
             StateDictLoader.LoadRMSNorm(layer.InputNorm, tensors, $"{p}.input_layernorm");
             StateDictLoader.LoadRMSNorm(layer.PostNorm, tensors, $"{p}.post_attention_layernorm");
-            StateDictLoader.LoadLinearWidened(layer.Attention.QProj, tensors, $"{p}.self_attn.q_proj");
-            StateDictLoader.LoadLinearWidened(layer.Attention.KProj, tensors, $"{p}.self_attn.k_proj");
-            StateDictLoader.LoadLinearWidened(layer.Attention.VProj, tensors, $"{p}.self_attn.v_proj");
-            StateDictLoader.LoadLinearWidened(layer.Attention.OProj, tensors, $"{p}.self_attn.o_proj");
-            StateDictLoader.LoadLinearWidened(layer.GateProj, tensors, $"{p}.mlp.gate_proj");
-            StateDictLoader.LoadLinearWidened(layer.UpProj, tensors, $"{p}.mlp.up_proj");
-            StateDictLoader.LoadLinearWidened(layer.DownProj, tensors, $"{p}.mlp.down_proj");
+            StateDictLoader.LoadLinear(layer.Attention.QProj, tensors, $"{p}.self_attn.q_proj");
+            StateDictLoader.LoadLinear(layer.Attention.KProj, tensors, $"{p}.self_attn.k_proj");
+            StateDictLoader.LoadLinear(layer.Attention.VProj, tensors, $"{p}.self_attn.v_proj");
+            StateDictLoader.LoadLinear(layer.Attention.OProj, tensors, $"{p}.self_attn.o_proj");
+            StateDictLoader.LoadLinear(layer.GateProj, tensors, $"{p}.mlp.gate_proj");
+            StateDictLoader.LoadLinear(layer.UpProj, tensors, $"{p}.mlp.up_proj");
+            StateDictLoader.LoadLinear(layer.DownProj, tensors, $"{p}.mlp.down_proj");
         }
 
         model.Eval();

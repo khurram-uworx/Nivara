@@ -28,8 +28,9 @@ dotnet run --project samples/NivaraInference -c Release -- resnet18
 dotnet run --project samples/NivaraInference -c Release -- minilm
 dotnet run --project samples/NivaraInference -c Release -- distilbert
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst
-dotnet run --project samples/NivaraInference -c Release -- smollm                 # greedy causal-LM generation (F32)
-dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # native BF16 (256.6 MB)
+dotnet run --project samples/NivaraInference -c Release -- smollm                 # BF16 weights as shipped + F32 compute (native, 256.6 MB)
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision f32   # widened to F32 weights (513.1 MB)
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # BF16 weights + BF16 compute
 dotnet run --project samples/NivaraInference -c Release -- qwen tools            # function calling (KV cache on)
 dotnet run --project samples/NivaraInference -c Release -- qwen distill --teacher-examples 12  # teacher distillation
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk distill --teacher-examples 12  # same, teacher on the OpenCL GPU
@@ -160,6 +161,7 @@ dotnet run --project samples/NivaraInference -- distilbert
 dotnet run --project samples/NivaraInference -- distilbert benchmark
 dotnet run --project samples/NivaraInference -- distilbert_sst
 dotnet run --project samples/NivaraInference -- smollm
+dotnet run --project samples/NivaraInference -- smollm --precision f32
 dotnet run --project samples/NivaraInference -- smollm --precision bf16
 dotnet run --project samples/NivaraInference -- qwen tools
 dotnet run --project samples/NivaraInference -- qwen distill --teacher-examples 12
@@ -178,10 +180,13 @@ particular:
 
 - Each model accepts a fixed mode set — `minilm` `benchmark`/`similarity`, `qwen` `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through to the model's default runner.
 - `--precision f32|bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya`; `qwen` for `benchmark`). `f32` is always accepted. The vision models reject bf16/fp16: they have no narrow path. Even where a bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16.
+- `--precision native` is SmolLM's default and is rejected for every other model. It names the shape of the whole run rather than a compute dtype: storage stays the checkpoint's own BF16 and compute is F32, so the widened weight array never exists at rest. `smollm ab` rejects it because the A/B compares the scalar and widen kernels *within* one narrow dtype; use `--precision bf16` for that.
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16          # accepted (narrow runner)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 --precision bf16    # rejected: no narrow path
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision native        # accepted (SmolLM's default)
+dotnet run --project samples/NivaraInference -c Release -- minilm --precision native        # rejected: smollm only
 ```
 
 ### Python (PyTorch reference)
@@ -206,7 +211,7 @@ python generate_input.py
 The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the HuggingFace SafeTensors binary format directly:
 
 - **Memory-mapped file loading** (`MemoryMappedFile` + `CreateViewAccessor` + `AcquirePointer`): the string-path loads memory-map the safetensors file and read each tensor's bytes directly from the mapped view — no full-file `byte[]` is materialized, so peak managed memory is just the widened tensors (~1.88 GB for Qwen, ~0.94 GB below the old copy-into-`byte[]` load). Parses the JSON header from the first 8 bytes + offset table via `System.Text.Json`.
-- **Dtype support** — loads **F32** (native `float`), **F16** (`System.Numerics.Half`), and **BF16** (`System.Numerics.BFloat16`) tensors, converting each to the requested result type `T` via `T.CreateChecked`. Narrow on-disk dtypes are widened when `T` is wider (e.g. a BF16 checkpoint read as `float[]` widens losslessly), and a wider on-disk dtype is narrowed when `T` is `BFloat16` (e.g. the `bf16` run mode reads the on-disk F32 weights as `BFloat16`, truncating to genuine 7-bit mantissa). Any other dtype raises `NotSupportedException` with guidance.
+- **Dtype support** — loads **F32** (native `float`), **F16** (`System.Numerics.Half`), and **BF16** (`System.Numerics.BFloat16`) tensors. `Read<BFloat16>()` on a BF16 checkpoint is **zero-hop**: the payload bytes are reinterpreted as `BFloat16` with no F32 intermediate. Reading a narrow checkpoint as `float[]` widens losslessly at load, and narrowing a wider on-disk dtype to `BFloat16` truncates to a genuine 7-bit mantissa. A run that keeps the snapshot dtype instead (SmolLM's default) widens **inside the dot kernels**, so the widened array never exists at rest. `SafeTensorsLoader.ReadDtypes(path)` reports the header's declared dtype per tensor without materialising any data. Any other dtype raises `NotSupportedException` with guidance.
 
 See [docs/SAFETENSORS.md](../../docs/SAFETENSORS.md) for additional format details.
 
@@ -259,12 +264,12 @@ Nivara CPU and Nivara BLAS for MiniLM, DistilBERT, SST-2, and ModernBERT are one
 | **MiniLM-L6** | 128 tokens | 11.0 ms | 54.0 ms | — | 119.5 ms (2t 1bt) | — | 24.1 ms | **~2.2x** |
 | **DistilBERT** | 128 tokens | 26.9 ms | 267.2 ms | — | 134.4 ms (4t 1bt) | — | 63.3 ms | **~2.4x** |
 | **DistilBERT SST-2** | 128 tokens | 32.8 ms | 281.2 ms | — | 148.6 ms (4t 1bt) | — | 63.8 ms | **~1.9x** |
-| **SmolLM-135M** (F32 greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** | — | — |  |  |
-| **SmolLM-135M** (BF16 greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** | — | — |  |  |
+| **SmolLM-135M** (F32 weights, greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** | — | — |  |  |
+| **SmolLM-135M** (BF16 weights + BF16 compute, greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** | — | — |  |  |
 | **ModernBERT-large** | 128 tokens | 312.4 ms | 1234.5 ms | — | 522.3 ms (4t 1bt) | — |  |  |
 | **ModernBERT-large** | 256 tokens | 574.4 ms | 1748.7 ms | — | 1023.1 ms (4t 1bt) | — |  |  |
 
-*Nivara CPU / BLAS* = 2026-11-12 AC. *PyTorch / GPU / vision / SmolLM* = 2026-11-07, except PyTorch MobileNetV2/ResNet-18/SST-2 carried from 2026-09-27. Do not divide a 2026-11-12 Nivara cell by a 2026-11-07 PyTorch cell. SmolLM rows report 32 generated tokens (median of 3 runs). SmolLM F32 = BF16 checkpoint widened to F32 (513.1 MB); SmolLM BF16 = BF16-native on disk (256.6 MB).
+*Nivara CPU / BLAS* = 2026-11-12 AC. *PyTorch / GPU / vision / SmolLM* = 2026-11-07, except PyTorch MobileNetV2/ResNet-18/SST-2 carried from 2026-09-27. Do not divide a 2026-11-12 Nivara cell by a 2026-11-07 PyTorch cell. SmolLM rows report 32 generated tokens (median of 3 runs) and are the two explicit precisions: F32 weights (BF16 checkpoint widened to F32, 513.1 MB) and BF16 weights with BF16 compute (256.6 MB). A bare `smollm` run now defaults to `--precision native` — BF16 weights as shipped with F32 compute — which has no PyTorch leg in this capture; its footprint and CPU figures are in [docs/SMOLLM.md](../../docs/SMOLLM.md).
 
 `--seq N[,N...]` times a chosen subset of the benchmark's lengths (`--warmup N` and `--iters N` set the pass counts) on both C# paths, and the PyTorch script takes the same `--seq N[,N...]` (default `128,256`), so one row can be re-measured on both sides of the CPU comparison; the defaults reproduce the tables above unchanged. The CPU path no longer builds a dense `[L, L]` mask (#476), so `--seq` is not capped at 2048 on the CPU side.
 
@@ -334,8 +339,9 @@ dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
-dotnet run --project samples/NivaraInference -c Release -- smollm benchmark                     # F32
-dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark   # native BF16
+dotnet run --project samples/NivaraInference -c Release -- smollm benchmark                     # native: BF16 weights + F32 compute (default)
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision f32 benchmark     # F32 weights (widened at load)
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark    # BF16 weights + BF16 compute
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark                      # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark                 # seq 128 + 256
 
@@ -347,7 +353,7 @@ dotnet run --project samples/NivaraInference -c Release -- laya --silk benchmark
 dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark             # seq 128 + 512 + 2048 + 4096; --seq selects a subset
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark                  # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk --plain benchmark          # plain-prompt decode path
-dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark                # F32 generation
+dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark                # BF16 weights on device (native default); --precision f32 for the F32 device path
 
 # PyTorch (Python) — run immediately after on the same machine
 cd samples/NivaraInference/Python
@@ -358,7 +364,7 @@ python smollm_generate_reference.py --dtype float32
 python smollm_generate_reference.py --dtype bfloat16
 ```
 
-Keep both dtype pairs same-dtype on CPU so the ratio and the F32-vs-BF16 memory/performance tradeoff are meaningful.
+Keep both sides same-dtype on CPU: `--precision f32` is the leg to compare against `smollm_generate_reference.py --dtype float32`, and both the native default and `--precision bf16` compare against `--dtype bfloat16` (the native default keeps BF16 weights and computes in F32, so it is diffed against the BF16 fixture).
 
 **Update the tables:**
 1. CPU tables: shift existing **Current** values to **Prev**, place fresh measurements in

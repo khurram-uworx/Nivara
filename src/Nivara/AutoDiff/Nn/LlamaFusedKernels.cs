@@ -85,4 +85,15 @@ public static class LlamaFusedKernels
     /// <summary>Mixed-precision Half-weight variant.</summary>
     public static void MatMulTransposedB(ReadOnlySpan<float> a, ReadOnlySpan<Half> b, float[] output, int aRows, int aCols, int bCols)
         => GradKernels.MatMulTransposedB(a, b, output, aRows, aCols, bCols);
+
+    /// <summary>
+    /// Mixed-precision <c>[aRows, aCols] @ [bCols, aCols]^T -> [aRows, bCols]</c> for independent
+    /// compute and weight dtypes. Same types take the plain kernel; <c>float</c> activations over
+    /// BF16/Half weights widen in-register. Exposes the internal kernel to the Llama samples.
+    /// </summary>
+    public static void MixedMatMulTransposedB<TModel, TWeight>(
+        ReadOnlySpan<TModel> a, ReadOnlySpan<TWeight> b, TModel[] output, int aRows, int aCols, int bCols)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => GradKernels.MixedMatMulTransposedB(a, b, output, aRows, aCols, bCols);
 }

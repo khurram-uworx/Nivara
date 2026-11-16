@@ -249,14 +249,23 @@ pipeline directly. What actually happens depends on the *on-disk* dtype:
   genuine **F32 → BF16 truncation** (23-bit → 7-bit mantissa) — exactly what the
   `NivaraInference` sample's `bf16` mode does to run real BFloat16 inference.
 
-Why the F32 default: float32 is a strict superset of BF16's value set (same
-8-bit exponent), so widening never loses information and feeds full-precision
-F32 compute. This is a **deliberate precision/compatibility default, not a
-workaround** — on .NET 11 `BFloat16` is a native type with `TensorPrimitives`
-support, so the non-widening path (`Read<BFloat16>` + `Module<BFloat16>`) is
-fully available and exercised by the sample's `bf16` mode. Flipping the default
-to track the on-disk dtype would break the `float[]` API contract the F32 model
-builders depend on.
+Why the F32 default in the loader: float32 is a strict superset of BF16's value
+set (same 8-bit exponent), so widening never loses information and feeds
+full-precision F32 compute. This is a **deliberate precision/compatibility
+default, not a workaround** — on .NET 11 `BFloat16` is a native type with
+`TensorPrimitives` support, so the non-widening path (`Read<BFloat16>` +
+`Module<BFloat16>`) is fully available and exercised by the sample's `bf16`
+mode. Flipping the loader's default to track the on-disk dtype would break the
+`float[]` API contract the F32 model builders depend on.
+
+The sample is no longer forced through that default, though: a bare `smollm`
+run reads the checkpoint's own dtype (`Read<BFloat16>`, zero-hop), keeps those
+arrays resident, and computes in F32 by widening inside the dot kernels.
+`LlamaForCausalLM<TModel, TWeight>` and `Linear<TModel, TWeight>` carry the
+storage and compute dtypes separately, so no widened copy of the weights exists
+at rest; `--precision f32` still takes the widened read described above. The
+resident-byte and parity gates for the native path are in
+[`SMOLLM.md`](SMOLLM.md).
 
 ### Fused BF16 read path (`Read<float>`) + SIMD widening
 
@@ -352,6 +361,6 @@ inference-default graph guard.
 - **Non-nullable at the AutoDiff boundary (ADR-001).** Resolve nulls
   (`FillNull` / `DropNulls`) before converting a `BFloat16` column to a gradient
   tensor.
-- **SIMD / Vector Lane Support (empirical, .NET 11, net11 `System.Numerics.Tensors` 11.0.0-preview.7)**: `BFloat16` and `Half` are scalar-first-class but SIMD-second-class. `Vector<BFloat16>`.IsSupported = false (all widths 64/128/256); `Vector.Create<BFloat16>` throws `NotSupportedException`. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only `float`/`double` to SIMD row-dot kernels; by default `BFloat16`/`Half` use the widen path above its length gate (and the scalar `MultiplyRowScalar` path when the gate is missed or widen is disabled — that scalar path is ~26× slower in the disabled case, verified via `NivaraInference` benchmark). **Auto-widened SIMD path (shipped, default on):** `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels` that bit-reinterpret `ushort` lanes, widen to `float`, run in `float`, and narrow back for element-wise `Add/Sub/Mul/Div` (`NumericTensorKernels`) and matmul row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Now on by default in current builds; the opt-out is the hidden AppContext switch `Nivara.Primitives.DisableWidenSimd`. `ShouldWiden<T>` also applies a length gate (`Vector<byte>.Count * 4`) + `Vector.IsHardwareAccelerated` check (per-op, no temp `float` buffer — fused per-vector). **Phase 3 A/B (SmolLM-135M, 32 greedy tokens, `samples/NivaraInference smollm ab`):** BF16 scalar ~225 s vs BF16 widen **median 22.6 s** (~10× faster) and vs F32 native ~10.7 s — so BF16+widen is roughly 1.5–2× slower than F32 native (widen does F32 compute plus widen/narrow conversion; the exact ratio varies with machine load), making BF16 a memory-halving convenience rather than a compute win on this workload. The toggle is transparent to F32 (identical token streams). Correctness unchanged: SmolLM BF16 22/32 greedy argmax vs BF16 PyTorch, and ~1.0 cosine on the dtype-matched reference sequence (max abs 0.625); `distilbert_sst --precision bf16` argmax 8/8.
+- **SIMD / Vector Lane Support (empirical, .NET 11, net11 `System.Numerics.Tensors` 11.0.0-preview.7)**: `BFloat16` and `Half` are scalar-first-class but SIMD-second-class. `Vector<BFloat16>`.IsSupported = false (all widths 64/128/256); `Vector.Create<BFloat16>` throws `NotSupportedException`. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only `float`/`double` to SIMD row-dot kernels; by default `BFloat16`/`Half` use the widen path above its length gate (and the scalar `MultiplyRowScalar` path when the gate is missed or widen is disabled — that scalar path is ~26× slower in the disabled case, verified via `NivaraInference` benchmark). **Auto-widened SIMD path (shipped, default on):** `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels` that bit-reinterpret `ushort` lanes, widen to `float`, run in `float`, and narrow back for element-wise `Add/Sub/Mul/Div` (`NumericTensorKernels`) and matmul row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Now on by default in current builds; the opt-out is the hidden AppContext switch `Nivara.Primitives.DisableWidenSimd`. `ShouldWiden<T>` also applies a length gate (`Vector<byte>.Count * 4`) + `Vector.IsHardwareAccelerated` check (per-op, no temp `float` buffer — fused per-vector). **Phase 3 A/B (SmolLM-135M, 32 greedy tokens, `samples/NivaraInference smollm --precision bf16 ab`):** narrow storage with narrow compute widens and narrows around each dot, so it pays conversion on both sides; the A/B runs that against the scalar fallback and the current figures live in the A/B table in the Performance section of [`SMOLLM.md`](SMOLLM.md). Narrow storage with **F32 compute** is the shape the sample's default uses — F32 activations, each weight element widened once per dot into F32 registers, no per-token weight materialisation — and that path is gated and measured in the same document. The toggle is transparent to F32 (identical token streams). Correctness: the default native run reaches 25/32 greedy argmax vs the BF16 PyTorch fixture with cosine 0.99999 on the dtype-matched reference sequence; `distilbert_sst --precision bf16` argmax 8/8.
 
 ---

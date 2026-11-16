@@ -15,7 +15,8 @@ namespace Nivara.Tests.Inference;
 /// (#479), the <c>--teacher-examples</c>/<c>--seed</c>/
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
-/// scope (#591), and the <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
+/// scope (#591), the <c>native</c> precision's <c>smollm</c>-only scope, and the
+/// <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
 /// scopes (#580), the <c>--blas</c>/<c>--threads</c>/<c>--blas-threads</c> rejects (#1119), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
 /// and the <c>--url</c>, <c>--model</c>, engine-positional and benchmark scope). The <c>typesafe</c>
 /// happy path is
@@ -156,7 +157,7 @@ public class InferenceCliArgumentTests
     [Test]
     public void Precision_UnparseableValue_Rejected() =>
         AssertRejected(Run("minilm", "--precision", "foo"),
-            "--precision expects f32, bf16 or fp16; got 'foo'.");
+            "--precision expects f32, bf16, fp16 or native; got 'foo'.");
 
     [Test]
     public void Precision_MissingValue_Rejected() =>
@@ -278,6 +279,57 @@ public class InferenceCliArgumentTests
             "bf16 supports only the 'benchmark' mode");
         AssertRejected(Run("qwen", "--precision", "fp16"),
             "fp16 is not supported for the qwen mode - Half's range/precision");
+    }
+
+    /// <summary>
+    /// <c>native</c> is not a compute dtype but the shape of a whole run (storage dtype stays the
+    /// checkpoint's, compute is F32), so it is defined only for the checkpoint it was written
+    /// against. SmolLM-135M is that model; every other run rejects the spelling before the weight
+    /// load, so the message — not just the exit code — names the scope.
+    /// </summary>
+    [Test]
+    public void NativePrecision_OnNonSmolLMModel_Rejected()
+    {
+        Assert.Multiple(() =>
+        {
+            AssertRejected(Run("qwen", "--precision", "native"), "--precision native is a 'smollm' option only");
+            AssertRejected(Run("minilm", "--precision", "native"), "--precision native is a 'smollm' option only");
+            AssertRejected(Run("laya", "--precision", "native"), "--precision native is a 'smollm' option only");
+            AssertRejected(Run("mobilenet_v2", "--precision", "native"), "--precision native is a 'smollm' option only");
+        });
+    }
+
+    /// <summary>
+    /// <c>smollm ab</c> exists to compare the scalar and SIMD widen kernels inside one narrow dtype,
+    /// which needs a single dtype for storage and compute. Native storage has no such pair, so the
+    /// mode names its own dtype rather than silently running a different model shape than asked for.
+    /// </summary>
+    [Test]
+    public void NativePrecision_AbMode_Rejected() =>
+        AssertRejected(Run("smollm", "ab", "--precision", "native"),
+            "--precision native has no 'ab' mode");
+
+    /// <summary>
+    /// The accepted side of the same surface: a bare <c>smollm</c> now means native (BF16 storage,
+    /// F32 compute), and every spelling that keeps a documented meaning still reaches the weight
+    /// load. The gate runs outside the repository, so "Model file not found" is the deepest point it
+    /// can observe — the assertion is that no precision guard fires first.
+    /// </summary>
+    [Test]
+    public void SmolLMAcceptedPrecisions_ReachTheModelFileLookup()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach (string[] args in AcceptedSmolLMCases)
+            {
+                CliResult result = Run(args);
+                string label = string.Join(' ', args);
+                Assert.That(result.StdErr, Does.Contain(ModelLookupMessage),
+                    $"'{label}' should reach the weight load; stderr:{Environment.NewLine}{result.StdErr}");
+                Assert.That(result.StdErr, Does.Not.Contain("precision"),
+                    $"'{label}' should not be rejected by a precision guard; stderr:{Environment.NewLine}{result.StdErr}");
+            }
+        });
     }
 
     /// <summary>
@@ -493,6 +545,18 @@ public class InferenceCliArgumentTests
         ["qwen", "--precision", "bf16", "benchmark"],
         ["qwen", "--silk", "distill"],
         ["qwen", "--silk", "benchmark", "--precision", "bf16"],
+    ];
+
+    static readonly string[][] AcceptedSmolLMCases =
+    [
+        ["smollm"],
+        ["smollm", "generate"],
+        ["smollm", "--precision", "native"],
+        ["smollm", "--precision", "f32"],
+        ["smollm", "--precision", "bf16"],
+        ["smollm", "--precision", "fp16"],
+        ["smollm", "benchmark", "--precision", "native"],
+        ["smollm", "--silk", "--precision", "native"],
     ];
 
     static void AssertRejected(CliResult result, string message)

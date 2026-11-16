@@ -3,6 +3,7 @@ using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Operations;
 
@@ -848,6 +849,78 @@ internal static class GradKernels
         ReadOnlySpan<float> a, ReadOnlySpan<Half> b, float[] output,
         int aRows, int aCols, int bCols)
         => NarrowFloatKernels.MatMulTransposedB(a, b, output.AsSpan(), aRows, aCols, bCols);
+
+    /// <summary>
+    /// <c>A[aRows,aCols] @ B[bCols,aCols]^T -> C[aRows,bCols]</c> with independent compute
+    /// (<typeparamref name="TModel"/>) and weight (<typeparamref name="TWeight"/>) types. Same
+    /// types take the plain kernel; <c>float</c> activations over BF16/Half weights widen
+    /// in-register; any other pairing widens the weight block once into a temporary. The output
+    /// stays in the compute dtype, so a narrow weight never widens the activations.
+    /// </summary>
+    public static void MixedMatMulTransposedB<TModel, TWeight>(
+        ReadOnlySpan<TModel> a, ReadOnlySpan<TWeight> b, TModel[] output,
+        int aRows, int aCols, int bCols)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        if (typeof(TWeight) == typeof(TModel))
+        {
+            MatMulTransposedB<TModel>(a, MemoryMarshal.Cast<TWeight, TModel>(b), output, aRows, aCols, bCols);
+            return;
+        }
+        if (typeof(TWeight) == typeof(BFloat16) && typeof(TModel) == typeof(float))
+        {
+            NarrowFloatKernels.MatMulTransposedB(
+                MemoryMarshal.Cast<TModel, float>(a),
+                MemoryMarshal.Cast<TWeight, BFloat16>(b),
+                MemoryMarshal.Cast<TModel, float>(output.AsSpan()),
+                aRows, aCols, bCols);
+            return;
+        }
+        if (typeof(TWeight) == typeof(Half) && typeof(TModel) == typeof(float))
+        {
+            NarrowFloatKernels.MatMulTransposedB(
+                MemoryMarshal.Cast<TModel, float>(a),
+                MemoryMarshal.Cast<TWeight, Half>(b),
+                MemoryMarshal.Cast<TModel, float>(output.AsSpan()),
+                aRows, aCols, bCols);
+            return;
+        }
+
+        var widened = Array.ConvertAll(b.ToArray(), x => TModel.CreateChecked(x));
+        MatMulTransposedB<TModel>(a, widened, output, aRows, aCols, bCols);
+    }
+
+    /// <summary>
+    /// <c>A[aRows,aCols] @ B[aCols,bCols] -> C[aRows,bCols]</c> with independent compute and
+    /// weight dtypes. Mirrors <see cref="MixedMatMulTransposedB{TModel,TWeight}"/>: same types
+    /// take the plain kernel, <c>float</c> activations over BF16 weights widen in-register, and
+    /// any other pairing (including Half) widens the weight block once.
+    /// </summary>
+    public static void MixedMatMul<TModel, TWeight>(
+        ReadOnlySpan<TModel> a, ReadOnlySpan<TWeight> b, TModel[] output,
+        int aRows, int aCols, int bCols)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        if (typeof(TWeight) == typeof(TModel))
+        {
+            MatMul<TModel>(a, MemoryMarshal.Cast<TWeight, TModel>(b), output, aRows, aCols, bCols);
+            return;
+        }
+        if (typeof(TWeight) == typeof(BFloat16) && typeof(TModel) == typeof(float))
+        {
+            NarrowFloatKernels.MatMul(
+                MemoryMarshal.Cast<TModel, float>(a),
+                MemoryMarshal.Cast<TWeight, BFloat16>(b),
+                MemoryMarshal.Cast<TModel, float>(output.AsSpan()),
+                aRows, aCols, bCols);
+            return;
+        }
+
+        var widened = Array.ConvertAll(b.ToArray(), x => TModel.CreateChecked(x));
+        MatMul<TModel>(a, widened, output, aRows, aCols, bCols);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  Matrix operations

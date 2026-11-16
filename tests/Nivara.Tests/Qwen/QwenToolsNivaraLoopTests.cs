@@ -20,7 +20,7 @@ public class QwenToolsNivaraLoopTests
             "samples", "data", "nivarachat");
 
     static readonly Gpt2BpeTokenizer? CachedTokenizer;
-    static readonly (LlamaForCausalLM<float> Model, LlamaConfig Config)? CachedModel;
+    static readonly (LlamaForCausalLM<float, float> Model, LlamaConfig Config)? CachedModel;
     static readonly (TextClassifierModel<float> Sentiment, TextTokenizer SentTok)? CachedSentiment;
 
     static QwenToolsNivaraLoopTests()

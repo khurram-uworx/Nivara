@@ -2,7 +2,7 @@
 
 ## Model overview
 
-The **first causal LM / generative model** in the sample and the primary driver for the BF16 widening work ([docs/BFLOAT16.md](BFLOAT16.md)). It is a **BF16-native** Llama-family causal LM — all 272 on-disk tensors are `BF16` (269 MB), exercising the native `SafeTensorsLoader.Read<BFloat16>` zero-hop path (unlike the other 4 models, which are F32 on disk). The Nivara side runs the full stack in Nivara's AutoDiff engine over the model ops below and greedily decodes a response.
+The **first causal LM / generative model** in the sample and the primary driver for the BF16 work ([docs/BFLOAT16.md](BFLOAT16.md)). It is a **BF16-native** Llama-family causal LM — all 272 on-disk tensors are `BF16` (269 MB) — and it is the model whose **default run keeps that dtype**: a bare `smollm` reads the checkpoint's own bytes through `SafeTensorsLoader.Read<BFloat16>` (zero-hop, no F32 intermediate), holds them as BF16 in memory, and computes in F32 by widening inside the dot kernels (`--precision native`). `--precision f32` is the widened-at-load run and `--precision bf16` is BF16 storage with BF16 compute. The Nivara side runs the full stack in Nivara's AutoDiff engine over the model ops below and greedily decodes a response.
 
 - **Config**: `hidden_size=576`, `intermediate_size=1536`, 30 layers, `num_attention_heads=9`, **`num_key_value_heads=3` (GQA)**, `hidden_act=silu` (gated FFN), RMSNorm (`eps=1e-5`), RoPE (`theta=10000`), `max_position_embeddings=2048`, `vocab_size=49152`, `tie_word_embeddings=true`
 - **Tokenizer**: **GPT-2 byte-level BPE** (not SentencePiece — see the note below), chat variant (`<|im_start|>`/`<|im_end|>` template; bos `<|im_start|>`, eos/pad `<|im_end|>`), 49152-token vocab built from `vocab.json` + `merges.txt`
@@ -28,7 +28,7 @@ Adding a causal-LM path surfaced capabilities the Nivara core library did not ye
 - **New core module — `LlamaCausalAttention<T>`** (`src/Nivara/AutoDiff/Nn/LlamaCausalAttention.cs`): **GQA** (9 Q / 3 KV heads) via KV-repeat — `ReverseGradOperations.GqaRepeatKV` (VJP with `GradKernels.HeadRepeat`/`HeadRepeatBackward`) and `ForwardGradOperations.GqaRepeatKV` (JVP) — feeding a fused, causal-masked per-head attention loop.
 - **New core module — `LlamaDecoderBlock<T>`** (`src/Nivara/AutoDiff/Nn/LlamaDecoderBlock.cs`): pre-norm self-attention + residual, then pre-norm **gated SiLU FFN** (`down(silu(gate)⊙up)`) + residual.
 
-**Sample-scoped additions** (not core library — `samples/Nivara.Samples` / `Program.cs`): `LlamaForCausalLM<T>` (embed → 30 blocks → final RMSNorm → tied-embedding LM head), `LlamaConfig : LLamaConfigLike`, `LlamaLoader.Load<TModel,TWeight>`, the `StateDictLoader.LoadRMSNorm/LoadLinear` binding helpers, the `Gpt2BpeTokenizer` byte-level BPE reader (see the tokenizer-correction note above), and the widen path is on by default for the BF16/Half narrow runs (see the BF16 section above).
+**Sample-scoped additions** (not core library — `samples/Nivara.Samples` / `Program.cs`): `LlamaForCausalLM<TModel, TWeight>` (embed → 30 blocks → final RMSNorm → tied-embedding LM head, with storage and compute dtypes carried separately and `LlamaForCausalLM<T> : LlamaForCausalLM<T, T>` keeping the same-dtype call sites), `LlamaConfig : LLamaConfigLike`, `LlamaLoader.Load<TModel,TWeight>`, the `StateDictLoader.LoadRMSNorm/LoadLinear` binding helpers (the mixed overloads reference the checkpoint array in place), the `Gpt2BpeTokenizer` byte-level BPE reader (see the tokenizer-correction note above), and the mid-kernel widen path used by the narrow compute modes (see the BF16 section above).
 
 ## Library features used
 
@@ -39,49 +39,67 @@ Adding a causal-LM path surfaced capabilities the Nivara core library did not ye
 | `RotaryEmbedding<T>` (RoPE, `rotate_half`) | Q/K rotary position embeddings |
 | `LlamaCausalAttention<T>` + `GqaRepeatKV` | GQA self-attention (9 Q / 3 KV) |
 | `LlamaDecoderBlock<T>` | Pre-norm attention + gated SiLU FFN + residuals |
-| `LlamaForCausalLM<T>` + tied LM head | Embed → blocks → final norm → `hidden @ embed^T` |
+| `LlamaForCausalLM<TModel,TWeight>` + tied LM head | Embed → blocks → final norm → `hidden @ embed^T`, storage dtype kept separate from compute dtype |
 | `Gpt2BpeTokenizer` | Sample-local GPT-2 byte-level BPE tokenization |
-| `NivaraPrimitives.DisableWidenSimd` | SIMD widen-compute-narrow BF16 matmul (default on; switch disables) |
+| `Linear<TModel,TWeight>` / `LlamaFusedKernels.MixedMatMulTransposedB` | BF16 snapshot weights stay resident; each projection widens in-register into F32 activations |
+| `NivaraPrimitives.DisableWidenSimd` | SIMD widen-compute-narrow BF16 matmul for the narrow compute (`--precision bf16`) run (default on; switch disables) |
 | Greedy generation (inference-default) | 32-token decode, no `GradientUtils.Grad()` scope |
 | `smollm ab` A/B + `smollm benchmark` | Scalar-vs-widen comparison; median-of-3 generation timing |
 
 ## Verification
 
-Greedy argmax agreement with the PyTorch reference (32-token generation):
+Greedy argmax agreement with the PyTorch reference (32-token generation). "Native" is the default run: BF16 weights exactly as shipped, F32 activations; it is diffed against the dtype-matched (BF16) PyTorch fixture.
 
-| Metric | F32 vs F32 Ref | BFloat16 vs BF16 Ref | Half (fp16) vs Ref |
-|---|---|---|---|
-| generated-token argmax match | **32/32** | **22/32** | 0/32 |
-| final-position logits (reference sequence) cosine | **1.0000** | **1.0000** | NaN |
-| final-position logits (reference sequence) max abs diff | 1.7e-5 | 0.625 | NaN |
+| Metric | F32 weights vs F32 Ref | **Native: BF16 weights + F32 compute vs BF16 Ref** | BF16 weights + BF16 compute vs BF16 Ref | Half (fp16) vs Ref |
+|---|---|---|---|---|
+| generated-token argmax match | **32/32** | **25/32** | 22/32 | 0/32 |
+| final-position logits (reference sequence) cosine | **1.0000** | **0.99999** | 0.99997 | NaN |
+| final-position logits (reference sequence) max abs diff | 1.7e-5 | 0.313 | 0.625 | NaN |
 
-The earlier "F32 25/32, cosine 0.24" row was a **cross-dtype, cross-sequence artifact**: the default reference fixture is BF16 PyTorch while the run was F32, and final-position logits were computed on each side's own generated stream. Once greedy decoding diverges (token 25) the two logits are for different inputs, so cosine/max-abs are not meaningful parity numbers. After switching to dtype-matched fixtures and computing the final logits on the PyTorch reference token stream, F32 is bit-clean against F32 PyTorch (32/32, cosine ~1.0) and BF16 is within 0.625 max abs (cosine ~1.0). **Half is unusable for SmolLM**: a merely 10-bit mantissa cannot hold the accumulating attention geometry across 30 layers, so the final logits go NaN and the decode collapses to all-pad tokens (0/32). In short: pick BF16 (native) or F32 — never Half — for SmolLM generation.
+The native default wins two tokens over BF16 compute because only the weights are narrow: activations, accumulation and the tied head all run in F32, and each weight element is widened to F32 once per dot. `--precision bf16` also narrows the arithmetic, so it pays a widen/narrow round trip per dot and compounds more rounding across 30 layers.
+
+The earlier "F32 25/32, cosine 0.24" row was a **cross-dtype, cross-sequence artifact**: the default reference fixture is BF16 PyTorch while the run was F32, and final-position logits were computed on each side's own generated stream. Once greedy decoding diverges (token 25) the two logits are for different inputs, so cosine/max-abs are not meaningful parity numbers. After switching to dtype-matched fixtures and computing the final logits on the PyTorch reference token stream, F32 is bit-clean against F32 PyTorch (32/32, cosine ~1.0), the native default is within 0.313 max abs (cosine 0.99999), and BF16 compute is within 0.625 (cosine 0.99997). **Half is unusable for SmolLM**: a merely 10-bit mantissa cannot hold the accumulating attention geometry across 30 layers, so the final logits go NaN and the decode collapses to all-pad tokens (0/32). In short: use the native default, or `--precision f32` when you want the fully-widened run — never Half — for SmolLM generation.
+
+`SmolLMNativeCheckpointTests` (`tests/Nivara.Tests/Inference/`) gates the default against the file rather than against numbers this code produced: every loaded tensor must be byte-identical to the safetensors payload and BF16 throughout, every projection/embedding parameter must be the loader's *same array instance* (so no widened copy exists at rest), and a 32-token greedy run must stay at ≥22/32 tokens with cosine ≥0.999 on the reference prefix. The same file pins the other half of the switch: `--precision f32` must reproduce the F32 fixture's whole token stream (32/32).
 
 See [docs/BFLOAT16.md](BFLOAT16.md) for engine-level BF16 details.
 
 ## Performance
 
-| Precision | Weights | Nivara (AC) | vs F32 |
-|---|---|---|---|
-| F32 (widened) | 513.1 MB | 7404 ms | — |
-| BF16 (native on disk) | 256.6 MB | 11499 ms | **~1.55× slower** |
+**Resident weight memory is the property the default changes, and it is deterministic:**
 
-BF16 halves the weight memory (256.6 MB vs 513.1 MB), but on CPU it is **not** faster — the F32 path runs fully-optimized native `float` SIMD kernels while BF16 still pays the widen/widen-back overhead, so F32 is ~1.55× *faster* for generation here. The ratio is strikingly stable across power states (1.53× on battery, 1.55× on AC), because it is a same-session Nivara-internal comparison and therefore never crosses frameworks. The takeaway: on CPU, use BF16 only when you need the halved memory footprint; if you have the ~513 MB headroom, F32 gives both faster generation and better numerical fidelity. (The BF16 native load also skips the F32→BF16 truncation the other models' narrow modes do — on disk SmolLM is already BF16.) Tracked as **#363** / **#391**.
+| Mode | Weights resident | Notes |
+|---|---|---|
+| `smollm` / `--precision native` (default) | 256.6 MB | the snapshot payload read as `BFloat16` and kept; only the 61 RMSNorm gammas widen once (140,544 B), so parameter storage is 269,100,288 B |
+| `--precision f32` | 513.1 MB | the same payload widened to F32 at load |
+| `--precision bf16` | 256.6 MB | the snapshot bytes kept, with BF16 compute |
 
-**BF16 scalar-fallback vs widen SIMD A/B** (`smollm --precision bf16 ab`, re-measured 2026-09-27 on AC, same machine):
+Generation time at 32 tokens was **not separable** from machine noise in this capture. Nine benchmark sessions (three per mode, from two sweeps with the modes run in opposite orders, each session one warmup plus a median of 3) gave:
+
+| Mode | Session medians (ms) | Median |
+|---|---|---|
+| native | 4975, 5340, 3627 | 4975 |
+| `--precision f32` | 5172, 3652, 3306 | 3652 |
+| `--precision bf16` | 3992, 5265, 4669 | 4669 |
+
+Intra-session spread was as wide as 42% (native: 3526 / 4975 / 5021 ms in one session), and the mode medians overlap from sweep to sweep — f32's best session (3306 ms) sits below native's best (3627 ms), while native's median sits above f32's. A single number per mode would be a claim about the machine's power/thermal state rather than about the path, so none is quoted as a ratio. What does survive is the footprint: the default holds 256.6 MB of weights instead of 513.1 MB, byte-identical to the snapshot.
+
+The takeaway is **footprint, not CPU speed**. On this machine all three modes are the same order of speed at 32 tokens; the default halves the resident weights without touching a byte of the checkpoint, and `--precision f32` remains available when the widest arithmetic matters more than the 257 MB. Tracked as **#363** / **#391**.
+
+**BF16 scalar-fallback vs widen SIMD A/B** (`smollm --precision bf16 ab`, recorded 2026-09-27 on AC, same machine):
 
 | Mode | ms/token prev | ms/token cur | Full gen prev | Full gen cur | vs (cur) |
 |---|---|---|---|---|---|
 | BF16 scalar fallback (`DisableWidenSimd = on`) | 7,032 | 2,667 | 225,037 ms | 85,368 ms | — |
 | BF16 widen (`DisableWidenSimd = off`, default for narrow) | 705 | 374 | 22,591 ms | 11,972 ms | **7.13× faster** |
-| F32 native (control) | 333 | 231 | 10,660–10,926 ms | 7,404 ms | widen transparent |
+| F32 weights (control) | 333 | 231 | 10,660–10,926 ms | 7,404 ms | widen transparent |
 
-The `smollm` BF16/Half runs enable the widen path automatically (without it, BF16 matmul falls back to the scalar dot) — use `smollm --precision bf16 ab`, which runs scalar and widen side by side, to measure the lever. The F32 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading the table together with the memory-vs-performance table above: BF16 **widen** is 7.1× faster than BF16 **scalar** and ~1.6× slower than F32 native.
+The `smollm` BF16/Half runs enable the widen path automatically (without it, BF16 matmul falls back to the scalar dot) — use `smollm --precision bf16 ab`, which runs scalar and widen side by side, to measure the lever *within* one narrow dtype. The F32 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). This branch leaves that same-dtype path verbatim — `GradKernels.MatMulTransposedB<T>` is still the same-type branch, and `LlamaForCausalLMPrefillTests` pins it bit-exact — so the 2026-09-27 A/B still describes `--precision bf16`. A 2026-11-16 sanity check of the same command on this branch recorded two sessions: scalar 106,329 / 105,119 ms against widen 5,945 / 6,811 ms (**15.4×** and **17.9×**). That agrees on direction and order of magnitude but not on the multiple — the widen leg alone moved 15% between the two sessions — so the 2026-09-27 three-session record stays the published baseline rather than being replaced by a single capture.
 
-Two things changed on AC and are worth recording rather than smoothing over:
+Two things changed in that session and are worth recording rather than smoothing over:
 
-- **The scalar path gained the most (2.6×) and the widen path the least (1.9×)**, so the widen advantage narrowed from ~10× to **7.13×**. The absolute win is unchanged in character — the scalar fallback is still unusable — but "~10×" is no longer the right headline number. The earlier figure was inflated by a power state that penalised the scalar path's long serial dependency chain harder than the widen path's vectorizable work.
-- **The F32-vs-BF16 ratio is ~1.6× here and ~1.55× in the memory table above**, so that conclusion held across power states. It is a Nivara-internal comparison and never crosses frameworks, which is why it is stable where the cross-framework rows were not.
+- **The scalar path gained the most (2.6×) and the widen path the least (1.9×) in that session**, so its widen advantage read **7.13×** rather than the earlier ~10×. The 2026-11-16 check read 15.4–17.9× instead, so the exact multiple is not stable: it tracks machine state. What is stable is the ranking and the magnitude — the scalar fallback runs at 0.30 tok/s (~105 s for 32 tokens) and is not usable for generation, so widen is the only viable narrow-dtype path on CPU.
+- **The A/B's F32 control was a different run shape from the default this branch introduces.** That control is F32 weights with F32 compute (`--precision f32`); the default is BF16 weights with F32 compute, whose footprint and timings are the two tables above. The old cross-table "BF16 is ~1.55× slower than F32" ratio is therefore retired: it compared two compute dtypes the run no longer picks by itself, on a session whose spread could not support the number.
 
 See the [NivaraInference README](../samples/NivaraInference/README.md) for full benchmark tables.
 
@@ -91,7 +109,7 @@ Status: **Completed — probe answers recorded. No production code.**
 
 ### Problem
 
-SmolLM-135M-instruct inference in `samples/NivaraInference` is CPU-only and its `smollm` mode still decodes **cache-free** (`model.Forward(sequence)` per token). We want GPU branches in the fused inference kernels to accelerate decode and prefill. Before choosing a backend (Level Zero SPIR-V vs DX12/ComputeSharp) and a precision strategy (F32 / native BF16 / widened BF16), we must **verify on the actual Arc 140T iGPU and current driver** what the Level Zero stack can really do.
+SmolLM-135M-instruct inference in `samples/NivaraInference` is CPU-only. At the time of this probe its `smollm` mode still decoded **cache-free** (`model.Forward(sequence)` per token); it now runs batched prefill plus a KV cache, the same loop Qwen uses, which is what the follow-up GPU work below builds on. We want GPU branches in the fused inference kernels to accelerate decode and prefill. Before choosing a backend (Level Zero SPIR-V vs DX12/ComputeSharp) and a precision strategy (F32 / native BF16 / widened BF16), we must **verify on the actual Arc 140T iGPU and current driver** what the Level Zero stack can really do.
 
 `tests/Nivara.GpuProbe` already proves real iGPU compute and documents a wall: the current Intel driver's IGC (OpenCL/Level Zero frontend) crashes on `OpAccessChain` (IGCIT #1144 bug class) and mis-links private variables, which today rules out indexed tensor kernels (GEMV/GEMM/attention). Whether that still holds, whether BF16 is natively usable, and what the fallback options are — those are the questions this branch answers with the probe itself.
 

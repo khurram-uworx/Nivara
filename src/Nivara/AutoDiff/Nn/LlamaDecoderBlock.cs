@@ -178,7 +178,8 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
     /// Runs the fused single-token decoder block for cached inference with zero steady-state
     /// heap allocations (scratch arrays are reused across calls). Replicates
     /// <see cref="ForwardCached(ReverseGradTensor{TModel}, int, TModel[], TModel[], int)"/> using the shared
-    /// span kernels directly — GEMV fast-path matmuls (<see cref="GradKernels.MatMulTransposedB{TModel}"/>),
+    /// span kernels directly — GEMV fast-path matmuls (<see cref="GradKernels.MixedMatMulTransposedB{TModel, TWeight}"/>,
+    /// which widens narrow weights in-register instead of copying them),
     /// <see cref="AttentionKernels{TModel}.DecodeAttention"/>, the per-row RMS kernel, RoPE in place,
     /// and elementwise tensor primitives — so the values match the per-op chain bit-for-bit.
     /// The block output is written to <paramref name="output"/> (length ≥ <c>hiddenSize</c>) and
@@ -234,18 +235,18 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         // InputNorm (in-place kernel then gamma multiply, same math as RMSNorm.ForwardInference).
         input.CopyTo(normBuf);
         RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(normBuf, normBuf, 1, hiddenSize, double.CreateChecked(InputNorm.Eps));
-        var iGamma = WeightSpan(InputNorm.Weight);
+        var iGamma = ParamSpan(InputNorm.Weight);
         TensorPrimitives.Multiply(normBuf.AsSpan(0, hiddenSize), iGamma, normBuf.AsSpan(0, hiddenSize));
 
         // Q/K/V projections (B = W^TModel for a 1-row a is the GEMV fast path) plus bias.
-        GradKernels.MatMulTransposedB(normBuf.AsSpan(0, hiddenSize), WeightSpan(Attention.QProj.Weight), qBuf, 1, hiddenSize, qWidth);
-        GradKernels.MatMulTransposedB(normBuf.AsSpan(0, hiddenSize), WeightSpan(Attention.KProj.Weight), kBuf, 1, hiddenSize, kvWidth);
-        GradKernels.MatMulTransposedB(normBuf.AsSpan(0, hiddenSize), WeightSpan(Attention.VProj.Weight), vBuf, 1, hiddenSize, kvWidth);
+        GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.QProj.Weight), qBuf, 1, hiddenSize, qWidth);
+        GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.KProj.Weight), kBuf, 1, hiddenSize, kvWidth);
+        GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.VProj.Weight), vBuf, 1, hiddenSize, kvWidth);
         if (Attention.QProj.Bias is { } qBiasParam)
         {
-            var qBias = WeightSpan(qBiasParam);
-            var kBias = WeightSpan(Attention.KProj.Bias);
-            var vBias = WeightSpan(Attention.VProj.Bias);
+            var qBias = ParamSpan(qBiasParam);
+            var kBias = ParamSpan(Attention.KProj.Bias);
+            var vBias = ParamSpan(Attention.VProj.Bias);
             TensorPrimitives.Add(qBuf.AsSpan(0, qWidth), qBias, qBuf.AsSpan(0, qWidth));
             TensorPrimitives.Add(kBuf.AsSpan(0, kvWidth), kBias, kBuf.AsSpan(0, kvWidth));
             TensorPrimitives.Add(vBuf.AsSpan(0, kvWidth), vBias, vBuf.AsSpan(0, kvWidth));
@@ -269,23 +270,23 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
 
         // Output projection into h, then the attention residual in place; the residual is also
         // preserved for the final output add because PostNorm below writes h in place.
-        GradKernels.MatMulTransposedB(attnBuf.AsSpan(0, qWidth), WeightSpan(Attention.OProj.Weight), hBuf, 1, qWidth, hiddenSize);
+        GradKernels.MixedMatMulTransposedB(attnBuf.AsSpan(0, qWidth), ParamSpan(Attention.OProj.Weight), hBuf, 1, qWidth, hiddenSize);
         TensorPrimitives.Add(input, hBuf.AsSpan(0, hiddenSize), hBuf.AsSpan(0, hiddenSize));
         if (residual is not null) hBuf.AsSpan(0, hiddenSize).CopyTo(residual);
 
         // PostNorm (in place), then the gated SiLU feed-forward.
         RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(hBuf, hBuf, 1, hiddenSize, double.CreateChecked(PostNorm.Eps));
-        var pGamma = WeightSpan(PostNorm.Weight);
+        var pGamma = ParamSpan(PostNorm.Weight);
         TensorPrimitives.Multiply(hBuf.AsSpan(0, hiddenSize), pGamma, hBuf.AsSpan(0, hiddenSize));
 
-        GradKernels.MatMulTransposedB(hBuf.AsSpan(0, hiddenSize), WeightSpan(GateProj.Weight), gateBuf, 1, hiddenSize, intermediateSize);
+        GradKernels.MixedMatMulTransposedB(hBuf.AsSpan(0, hiddenSize), ParamSpan(GateProj.Weight), gateBuf, 1, hiddenSize, intermediateSize);
         GradKernels.Silu(gateBuf.AsSpan(0, intermediateSize), gateOutBuf.AsSpan(0, intermediateSize));
-        GradKernels.MatMulTransposedB(hBuf.AsSpan(0, hiddenSize), WeightSpan(UpProj.Weight), upBuf, 1, hiddenSize, intermediateSize);
+        GradKernels.MixedMatMulTransposedB(hBuf.AsSpan(0, hiddenSize), ParamSpan(UpProj.Weight), upBuf, 1, hiddenSize, intermediateSize);
         TensorPrimitives.Multiply(gateOutBuf.AsSpan(0, intermediateSize), upBuf.AsSpan(0, intermediateSize), upBuf.AsSpan(0, intermediateSize));
 
         // Down projection (into the spent attn buffer) + residual from the preserved buffer into
         // the caller's output.
-        GradKernels.MatMulTransposedB(upBuf.AsSpan(0, intermediateSize), WeightSpan(DownProj.Weight), attnBuf, 1, intermediateSize, hiddenSize);
+        GradKernels.MixedMatMulTransposedB(upBuf.AsSpan(0, intermediateSize), ParamSpan(DownProj.Weight), attnBuf, 1, intermediateSize, hiddenSize);
         TensorPrimitives.Add(residual!.AsSpan(0, hiddenSize), attnBuf.AsSpan(0, hiddenSize), output);
     }
 
@@ -347,20 +348,20 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
             // InputNorm over the whole chunk.
             input.CopyTo(normArr);
             RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(normArr, normArr, qLen, hiddenSize, double.CreateChecked(InputNorm.Eps));
-            var iGamma = WeightSpan(InputNorm.Weight);
+            var iGamma = ParamSpan(InputNorm.Weight);
             for (int r = 0; r < qLen; r++)
                 TensorPrimitives.Multiply(normArr.AsSpan(r * hiddenSize, hiddenSize), iGamma, normArr.AsSpan(r * hiddenSize, hiddenSize));
 
             // Q/K/V projections + per-row bias broadcast.
             var rowSpan = normArr.AsSpan(0, qLen * hiddenSize);
-            GradKernels.MatMulTransposedB(rowSpan, WeightSpan(Attention.QProj.Weight), qArr, qLen, hiddenSize, qWidth);
-            GradKernels.MatMulTransposedB(rowSpan, WeightSpan(Attention.KProj.Weight), kArr, qLen, hiddenSize, kvWidth);
-            GradKernels.MatMulTransposedB(rowSpan, WeightSpan(Attention.VProj.Weight), vArr, qLen, hiddenSize, kvWidth);
+            GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.QProj.Weight), qArr, qLen, hiddenSize, qWidth);
+            GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.KProj.Weight), kArr, qLen, hiddenSize, kvWidth);
+            GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.VProj.Weight), vArr, qLen, hiddenSize, kvWidth);
             if (Attention.QProj.Bias is { } qBiasParam)
             {
-                var qBias = WeightSpan(qBiasParam);
-                var kBias = WeightSpan(Attention.KProj.Bias);
-                var vBias = WeightSpan(Attention.VProj.Bias);
+                var qBias = ParamSpan(qBiasParam);
+                var kBias = ParamSpan(Attention.KProj.Bias);
+                var vBias = ParamSpan(Attention.VProj.Bias);
                 for (int r = 0; r < qLen; r++)
                 {
                     TensorPrimitives.Add(qArr.AsSpan(r * qWidth, qWidth), qBias, qArr.AsSpan(r * qWidth, qWidth));
@@ -391,26 +392,26 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
                 kCache.AsSpan(positionOffset * kvWidth, rowBytes),
                 vCache.AsSpan(positionOffset * kvWidth, rowBytes),
                 attnArr.AsSpan(0, qLen * qWidth), qLen, numHeads, numKvHeads, headDim, scale);
-            GradKernels.MatMulTransposedB(attnArr.AsSpan(0, qLen * qWidth), WeightSpan(Attention.OProj.Weight), hArr, qLen, qWidth, hiddenSize);
+            GradKernels.MixedMatMulTransposedB(attnArr.AsSpan(0, qLen * qWidth), ParamSpan(Attention.OProj.Weight), hArr, qLen, qWidth, hiddenSize);
             TensorPrimitives.Add(input, hArr.AsSpan(0, qLen * hiddenSize), hArr.AsSpan(0, qLen * hiddenSize));
             // Preserve the residual for the final output add (PostNorm below writes hArr in place).
             hArr.AsSpan(0, qLen * hiddenSize).CopyTo(residualArr);
 
             // PostNorm, then the gated SiLU feed-forward.
             RMSNormKernel<TModel>.PerRowRMSNormForwardKernel(hArr, hArr, qLen, hiddenSize, double.CreateChecked(PostNorm.Eps));
-            var pGamma = WeightSpan(PostNorm.Weight);
+            var pGamma = ParamSpan(PostNorm.Weight);
             for (int r = 0; r < qLen; r++)
                 TensorPrimitives.Multiply(hArr.AsSpan(r * hiddenSize, hiddenSize), pGamma, hArr.AsSpan(r * hiddenSize, hiddenSize));
 
             var hSpan = hArr.AsSpan(0, qLen * hiddenSize);
-            GradKernels.MatMulTransposedB(hSpan, WeightSpan(GateProj.Weight), gateArr, qLen, hiddenSize, intermediateSize);
+            GradKernels.MixedMatMulTransposedB(hSpan, ParamSpan(GateProj.Weight), gateArr, qLen, hiddenSize, intermediateSize);
             GradKernels.Silu(gateArr.AsSpan(0, qLen * intermediateSize), gateOutArr.AsSpan(0, qLen * intermediateSize));
-            GradKernels.MatMulTransposedB(hSpan, WeightSpan(UpProj.Weight), upArr, qLen, hiddenSize, intermediateSize);
+            GradKernels.MixedMatMulTransposedB(hSpan, ParamSpan(UpProj.Weight), upArr, qLen, hiddenSize, intermediateSize);
             TensorPrimitives.Multiply(gateOutArr.AsSpan(0, qLen * intermediateSize), upArr.AsSpan(0, qLen * intermediateSize), upArr.AsSpan(0, qLen * intermediateSize));
 
             // Down projection into the spent attn buffer + residual from the preserved buffer into
             // the caller's output.
-            GradKernels.MatMulTransposedB(upArr.AsSpan(0, qLen * intermediateSize), WeightSpan(DownProj.Weight), mlpArr, qLen, intermediateSize, hiddenSize);
+            GradKernels.MixedMatMulTransposedB(upArr.AsSpan(0, qLen * intermediateSize), ParamSpan(DownProj.Weight), mlpArr, qLen, intermediateSize, hiddenSize);
             TensorPrimitives.Add(residualArr.AsSpan(0, qLen * hiddenSize), mlpArr.AsSpan(0, qLen * hiddenSize), output);
         }
         finally
@@ -443,20 +444,11 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         up = new TModel[intermediateSize];
     }
 
-    static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
+    static ReadOnlySpan<TValue> ParamSpan<TValue>(Parameter<TValue>? parameter) where TValue : struct, IFloatingPointIeee754<TValue>
     {
-        if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
-        if (typeof(TParam) == typeof(TModel))
-        {
-            if (!weight.Tensor.Data.TryGetSpan(out var narrowSpan))
-                throw new InvalidOperationException("Parameter data must be null-free.");
-            return System.Runtime.InteropServices.MemoryMarshal.Cast<TParam, TModel>(narrowSpan);
-        }
-        if (!weight.Tensor.Data.TryGetSpan(out var sourceSpan))
+        if (parameter is null) throw new InvalidOperationException("Expected a non-null parameter.");
+        if (!parameter.Tensor.Data.TryGetSpan(out var span))
             throw new InvalidOperationException("Parameter data must be null-free.");
-        var widened = new TModel[sourceSpan.Length];
-        for (int i = 0; i < widened.Length; i++)
-            widened[i] = TModel.CreateChecked(sourceSpan[i]);
-        return widened.AsSpan();
+        return span;
     }
 }

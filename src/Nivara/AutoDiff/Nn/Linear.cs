@@ -1,10 +1,8 @@
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Primitives;
 using System.Buffers;
 using System.Numerics;
-using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -180,60 +178,12 @@ public class Linear<TModel, TWeight> : Module<TModel>
     static void MixedMatMulTransposedB(
         ReadOnlySpan<TModel> a, ReadOnlySpan<TWeight> b, TModel[] output,
         int aRows, int aCols, int bCols)
-    {
-        if (typeof(TWeight) == typeof(TModel))
-        {
-            GradKernels.MatMulTransposedB<TModel>(a, MemoryMarshal.Cast<TWeight, TModel>(b), output, aRows, aCols, bCols);
-            return;
-        }
-        if (typeof(TWeight) == typeof(BFloat16) && typeof(TModel) == typeof(float))
-        {
-            var aF = MemoryMarshal.Cast<TModel, float>(a);
-            var bBf = MemoryMarshal.Cast<TWeight, BFloat16>(b);
-            var oF = MemoryMarshal.Cast<TModel, float>(output.AsSpan());
-            NarrowFloatKernels.MatMulTransposedB(aF, bBf, oF, aRows, aCols, bCols);
-            return;
-        }
-        if (typeof(TWeight) == typeof(Half) && typeof(TModel) == typeof(float))
-        {
-            var aF = MemoryMarshal.Cast<TModel, float>(a);
-            var bH = MemoryMarshal.Cast<TWeight, Half>(b);
-            var oF = MemoryMarshal.Cast<TModel, float>(output.AsSpan());
-            NarrowFloatKernels.MatMulTransposedB(aF, bH, oF, aRows, aCols, bCols);
-            return;
-        }
-
-        var widened = Array.ConvertAll(b.ToArray(), x => TModel.CreateChecked(x));
-        GradKernels.MatMulTransposedB<TModel>(a, widened, output, aRows, aCols, bCols);
-    }
+        => GradKernels.MixedMatMulTransposedB(a, b, output, aRows, aCols, bCols);
 
     static void MixedMatMul(
         ReadOnlySpan<TModel> a, ReadOnlySpan<TWeight> b, TModel[] output,
         int aRows, int aCols, int bCols)
-    {
-        if (typeof(TWeight) == typeof(TModel))
-        {
-            GradKernels.MatMul<TModel>(a, MemoryMarshal.Cast<TWeight, TModel>(b), output, aRows, aCols, bCols);
-            return;
-        }
-        if (typeof(TWeight) == typeof(BFloat16) && typeof(TModel) == typeof(float))
-        {
-            var aF = MemoryMarshal.Cast<TModel, float>(a);
-            var bBf = MemoryMarshal.Cast<TWeight, BFloat16>(b);
-            var oF = MemoryMarshal.Cast<TModel, float>(output.AsSpan());
-            NarrowFloatKernels.MatMul(aF, bBf, oF, aRows, aCols, bCols);
-            return;
-        }
-        if (typeof(TWeight) == typeof(Half) && typeof(TModel) == typeof(float))
-        {
-            var widened = Array.ConvertAll(b.ToArray(), x => TModel.CreateChecked(x));
-            GradKernels.MatMul<TModel>(a, widened, output, aRows, aCols, bCols);
-            return;
-        }
-
-        var w = Array.ConvertAll(b.ToArray(), x => TModel.CreateChecked(x));
-        GradKernels.MatMul<TModel>(a, w, output, aRows, aCols, bCols);
-    }
+        => GradKernels.MixedMatMul(a, b, output, aRows, aCols, bCols);
 }
 
 public sealed class Linear<T> : Linear<T, T>

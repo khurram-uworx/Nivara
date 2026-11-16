@@ -215,7 +215,7 @@ public static class Qwen
     // Model / tokenizer loading (shared by all sub-modes)
     // ----------------------------------------------------------------------------------
 
-    public static (LlamaForCausalLM<T> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadModel<T>(
+    public static (LlamaForCausalLM<T, T> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadModel<T>(
         Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -335,7 +335,7 @@ public static class Qwen
     /// Qwen stop id BEFORE appending it — matching the Torch reference <c>_greedy</c>, so the
     /// returned ids exclude the eos token (tool turn = 19 non-eos ids).</summary>
     public static List<int> Generate<T>(
-        LlamaForCausalLM<T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
+        LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
         where T : struct, IFloatingPointIeee754<T>
     {
         int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
@@ -347,7 +347,7 @@ public static class Qwen
     /// split-timing driver. Pure benchmark-facility change; <see cref="Generate{T}"/> keeps its exact
     /// public behavior.</summary>
     static List<int> GenerateCore<T>(
-        LlamaForCausalLM<T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens,
+        LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens,
         bool useKvCache, LlamaKVCache<T> cache, out double prefillMs, out double decodeMs)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -627,7 +627,7 @@ public static class Qwen
 
     /// <summary>Last-row logits of the model over the full prefix (no cache), for numeric diffing
     /// against the Torch reference on the FIXED trajectory.</summary>
-    static float[] ForwardLastLogits(LlamaForCausalLM<float> model, IReadOnlyList<int> prefixIds, int vocab)
+    static float[] ForwardLastLogits(LlamaForCausalLM<float, float> model, IReadOnlyList<int> prefixIds, int vocab)
     {
         var logits = model.Forward(prefixIds.ToArray());
         logits.Data.TryGetSpan(out var span);
@@ -855,7 +855,7 @@ public static class Qwen
 
     /// <summary>Shared decode-timing body: cached vs full forward, 3 runs each, median-of-3.
     /// <paramref name="scenario"/> names the prompt surface in the status line.</summary>
-    static int RunDecodeBenchmark<T>(LlamaForCausalLM<T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, string scenario = "the tool call turn")
+    static int RunDecodeBenchmark<T>(LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, string scenario = "the tool call turn")
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine($"Prompt tokens: {promptIds.Count}. Decoding {scenario} 3 times each path...");
@@ -895,7 +895,7 @@ public static class Qwen
         public int Tokens;
     }
 
-    static TimeResult TimeGeneration<T>(LlamaForCausalLM<T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
+    static TimeResult TimeGeneration<T>(LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
         where T : struct, IFloatingPointIeee754<T>
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -1185,7 +1185,7 @@ public static class Qwen
     }
 
     static string RunTeacherClassify(
-        LlamaForCausalLM<float> model, LlamaConfig config, Gpt2BpeTokenizer tokenizer, string sentence)
+        LlamaForCausalLM<float, float> model, LlamaConfig config, Gpt2BpeTokenizer tokenizer, string sentence)
     {
         var turnIds = Generate(model, config, BuildClassifyTurnIds(tokenizer, sentence), MaxNewTokens, useKvCache: true);
         return ParseClassification(tokenizer.Decode(turnIds));

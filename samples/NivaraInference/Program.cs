@@ -114,6 +114,7 @@ class Program
             _ => modelType
         };
         string precision = "f32";
+        bool precisionSet = false;
         string mode = "";
         bool noKvCache = false;
         bool force = false;
@@ -148,7 +149,7 @@ class Program
             {
                 if (i + 1 >= args.Length)
                 {
-                    Console.Error.WriteLine("--precision needs a value (f32|bf16|fp16).");
+                    Console.Error.WriteLine("--precision needs a value (f32|bf16|fp16|native).");
                     return 1;
                 }
 
@@ -157,23 +158,27 @@ class Program
                     "f32" or "float" => "f32",
                     "bf16" or "bfloat16" => "bf16",
                     "fp16" or "f16" or "half" => "fp16",
+                    "native" => "native",
                     var other => other
                 };
 
-                if (precision is not ("f32" or "bf16" or "fp16"))
+                if (precision is not ("f32" or "bf16" or "fp16" or "native"))
                 {
-                    Console.Error.WriteLine($"--precision expects f32, bf16 or fp16; got '{args[i + 1]}'.");
+                    Console.Error.WriteLine($"--precision expects f32, bf16, fp16 or native; got '{args[i + 1]}'.");
                     return 1;
                 }
+                precisionSet = true;
                 i++;
             }
             else if (args[i] is "bf16" or "bfloat16")
             {
                 precision = "bf16";
+                precisionSet = true;
             }
             else if (args[i] is "fp16" or "f16" or "half")
             {
                 precision = "fp16";
+                precisionSet = true;
             }
             else if (args[i] == "--no-kv-cache")
                 noKvCache = true;
@@ -325,9 +330,15 @@ class Program
                 mode = args[i];
         }
 
+        // SmolLM's default is its snapshot dtype: the BF16 weights stay BF16 in memory and the
+        // kernels widen them in-register, so a bare 'smollm' run never holds a widened F32 copy of
+        // the checkpoint. Every other model keeps its existing default (F32 unless stated).
+        if (isSmolLM && !precisionSet)
+            precision = "native";
+
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16] [benchmark|similarity|predict|generate|tools|distill|verify|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|modernbert|laya|smollm|qwen|typesafe> [--precision f32|bf16|fp16|native] [benchmark|similarity|predict|generate|tools|distill|verify|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed passes and report median timing");
@@ -392,6 +403,10 @@ class Program
             Console.WriteLine("  (--plain / --text / --no-kv-cache are 'qwen' options only; --no-kv-cache is the 'qwen tools' path only)");
             Console.WriteLine();
             Console.WriteLine("Precision (narrow-float models only — the vision models have no bf16/fp16 path):");
+            Console.WriteLine("  --precision native  The checkpoint's own dtype with F32 compute: the weights stay exactly as");
+            Console.WriteLine("                    shipped and every kernel widens them in-register. Default for smollm (BF16");
+            Console.WriteLine("                    weights, F32 activations, ~269 MB resident instead of ~1.05 GB); rejected");
+            Console.WriteLine("                    for every other model, whose checkpoints differ or whose default is F32.");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
@@ -601,6 +616,27 @@ class Program
         bool compareDiag = mode == "compare_diag";
         bool fp16 = precision == "fp16";
         bool bf16 = precision == "bf16";
+        bool native = precision == "native";
+
+        // 'native' names the shape of the whole run (storage dtype == snapshot dtype, F32 compute),
+        // not a compute dtype on its own, so it is only meaningful for the checkpoint it was defined
+        // against. SmolLM-135M is the model whose snapshot is BF16 and whose default this is; the
+        // other narrow-float models either differ (Laya ships F16 weights, Qwen's default is F32
+        // compute over widened BF16) or are F32-on-disk.
+        if (native && !isSmolLM)
+        {
+            Console.Error.WriteLine($"--precision native is a 'smollm' option only: SmolLM keeps its BF16 snapshot weights and computes in F32; got '{got}'.");
+            return 1;
+        }
+
+        // The 'ab' mode compares the scalar and SIMD widen kernels *inside* one narrow dtype, which
+        // needs a single dtype for both storage and compute. Native storage has no scalar/widen pair
+        // to compare, so name the mode's own dtype instead of silently picking another run.
+        if (native && mode == "ab")
+        {
+            Console.Error.WriteLine("--precision native has no 'ab' mode: 'smollm ab' compares the scalar and SIMD widen kernels within one narrow dtype; use --precision bf16 for the A/B.");
+            return 1;
+        }
 
         if (isQwen && fp16)
         {
@@ -654,14 +690,24 @@ class Program
         }
 
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
-        var loadSw = Stopwatch.StartNew();
-        var tensors = SafeTensorsLoader.Read(modelPath);
-        loadSw.Stop();
-        Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
-        Console.WriteLine();
+
+        // Exactly one dtype is read per run. The F32 map is loaded on first use, so a run that
+        // consumes bf16/Half weights never holds a widened duplicate of the same checkpoint.
+        Dictionary<string, (float[] Data, int[] Shape)>? tensorsF32 = null;
+        Dictionary<string, (float[] Data, int[] Shape)> F32()
+        {
+            if (tensorsF32 is not null) return tensorsF32;
+
+            var loadSwF32 = Stopwatch.StartNew();
+            tensorsF32 = SafeTensorsLoader.Read(modelPath);
+            loadSwF32.Stop();
+            Console.WriteLine($"  SafeTensors parse (F32): {loadSwF32.ElapsedMilliseconds} ms ({tensorsF32.Count} tensors)");
+            Console.WriteLine();
+            return tensorsF32;
+        }
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
-        if (bf16)
+        if (bf16 || native)
         {
             var loadSwBf16 = Stopwatch.StartNew();
             tensorsBf16 = SafeTensorsLoader.Read<BFloat16>(modelPath);
@@ -685,31 +731,31 @@ class Program
             case "mobilenet_v2":
                 if (useSilk)
                 {
-                    var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (benchmark) return RunMobileNetV2SilkBenchmark(mobSilkTensors);
                     if (compare) return RunMobileNetV2SilkCompare(mobSilkTensors);
-                    if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "mobilenet_v2");
+                    if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "mobilenet_v2");
                     return RunMobileNetV2SilkInference(mobSilkTensors, mode);
                 }
-                if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "mobilenet_v2");
-                if (compare) return InferenceCompare.VisionCompare(tensors, "mobilenet_v2");
-                return benchmark ? RunMobileNetV2Benchmark(tensors) : RunMobileNetV2Inference(tensors, mode);
+                if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "mobilenet_v2");
+                if (compare) return InferenceCompare.VisionCompare(F32(), "mobilenet_v2");
+                return benchmark ? RunMobileNetV2Benchmark(F32()) : RunMobileNetV2Inference(F32(), mode);
             case "resnet18":
                 if (useSilk)
                 {
-                    var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (benchmark) return RunResNet18SilkBenchmark(resSilkTensors);
                     if (compare) return RunResNet18SilkCompare(resSilkTensors);
-                    if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "resnet18");
+                    if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "resnet18");
                     return RunResNet18SilkInference(resSilkTensors, mode);
                 }
-                if (compareDiag) return InferenceCompare.VisionCompareDiag(tensors, "resnet18");
-                if (compare) return InferenceCompare.VisionCompare(tensors, "resnet18");
-                return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
+                if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "resnet18");
+                if (compare) return InferenceCompare.VisionCompare(F32(), "resnet18");
+                return benchmark ? RunResNet18Benchmark(F32()) : RunResNet18Inference(F32(), mode);
             case "minilm":
                 if (useSilk)
                 {
-                    var miniSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var miniSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (mode == "similarity") return RunMiniLmSilkSimilarity(miniSilkTensors);
                     if (benchmark) return BenchmarkMiniLmSilk(miniSilkTensors);
                     if (compare) return RunMiniLmSilkCompare(miniSilkTensors);
@@ -717,23 +763,23 @@ class Program
                 }
                 if (bf16) return benchmark ? BenchmarkMiniLM(tensorsBf16, "BFloat16") : RunMiniLMBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkMiniLM(tensorsHalf, "Half") : RunMiniLMHalf(tensorsHalf);
-                if (compare) return RunMiniLMCompare(tensors);
-                return mode == "similarity" ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
+                if (compare) return RunMiniLMCompare(F32());
+                return mode == "similarity" ? RunMiniLMSimilarity(F32()) : benchmark ? BenchmarkMiniLM(F32(), "F32") : RunMiniLMInference(F32());
             case "distilbert":
                 if (useSilk)
                 {
-                    var distSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var distSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (compare) return RunDistilBertSilkCompare(distSilkTensors);
                     return benchmark ? BenchmarkDistilBertSilk(distSilkTensors) : RunDistilBertSilkInference(distSilkTensors);
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBert(tensorsBf16, "BFloat16") : RunDistilBertBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBert(tensorsHalf, "Half") : RunDistilBertHalf(tensorsHalf);
-                if (compare) return RunDistilBertCompare(tensors);
-                return benchmark ? BenchmarkDistilBert(tensors, "F32") : RunDistilBertInference(tensors);
+                if (compare) return RunDistilBertCompare(F32());
+                return benchmark ? BenchmarkDistilBert(F32(), "F32") : RunDistilBertInference(F32());
             case "distilbert_sst":
                 if (useSilk)
                 {
-                    var sstSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : tensors;
+                    var sstSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
                     if (mode == "predict") return RunDistilBertSstSilkPredict(sstSilkTensors);
                     if (benchmark) return BenchmarkDistilBertSstSilk(sstSilkTensors);
                     if (compare) return RunDistilBertSstSilkCompare(sstSilkTensors);
@@ -741,9 +787,9 @@ class Program
                 }
                 if (bf16) return benchmark ? BenchmarkDistilBertSst(tensorsBf16, "BFloat16") : RunDistilBertSstBFloat16(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkDistilBertSst(tensorsHalf, "Half") : RunDistilBertSstHalf(tensorsHalf);
-                if (compare) return RunDistilBertSstCompare(tensors);
-                if (mode == "predict") return RunDistilBertSstPredict(tensors);
-                return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
+                if (compare) return RunDistilBertSstCompare(F32());
+                if (mode == "predict") return RunDistilBertSstPredict(F32());
+                return benchmark ? BenchmarkDistilBertSst(F32(), "F32") : RunDistilBertSstInference(F32());
             case "laya":
                 if (useSilk)
                 {
@@ -754,14 +800,14 @@ class Program
                         return Laya.RunGpu(tensorsBf16, modelDir);
                     }
                     Nivara.AI.OpenLayaSession open = Nivara.AI.GpuSeamFactories.Laya;
-                    if (benchmark) return Laya.RunBenchmarkGpu(tensors, modelDir, open);
-                    if (compare) return Laya.CompareGpu(tensors, modelDir, open);
-                    return Laya.RunGpu(tensors, modelDir, open);
+                    if (benchmark) return Laya.RunBenchmarkGpu(F32(), modelDir, open);
+                    if (compare) return Laya.CompareGpu(F32(), modelDir, open);
+                    return Laya.RunGpu(F32(), modelDir, open);
                 }
-                if (compare) return Laya.Compare(tensors, modelDir);
+                if (compare) return Laya.Compare(F32(), modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
                 if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
-                return Laya.Run<float, float>(tensors, modelDir, mode, "F32");
+                return Laya.Run<float, float>(F32(), modelDir, mode, "F32");
             case "modernbert":
                 if (useSilk)
                 {
@@ -769,41 +815,42 @@ class Program
                     {
                         if (benchmark) return ModernBert.BenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, seqLengths, warmup, iterations, Nivara.AI.GpuSeamFactories.ModernBert);
                         if (compare) return ModernBert.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.ModernBert);
-                        if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
+                        if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                         return ModernBert.RunGpu(tensorsBf16, modelDir);
                     }
                     OpenModernBertSession open = Nivara.AI.GpuSeamFactories.ModernBert;
-                    var mbSilkTensors = tensors;
+                    var mbSilkTensors = F32();
                     if (benchmark) return ModernBert.BenchmarkGpu(mbSilkTensors, modelDir, seqLengths, warmup, iterations, open);
                     if (compare) return ModernBert.CompareGpu(mbSilkTensors, modelDir, open);
-                    if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
+                    if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                     return ModernBert.RunGpu(mbSilkTensors, modelDir, open);
                 }
-                if (compareDiag) return ModernBert.CompareDiag(tensors, modelDir);
-                if (compare) return ModernBert.Compare(tensors, modelDir);
+                if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
+                if (compare) return ModernBert.Compare(F32(), modelDir);
                 if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16", seqLengths, warmup, iterations);
                 if (fp16) return ModernBert.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half", seqLengths, warmup, iterations);
-                return ModernBert.Run<float, float>(tensors, modelDir, mode, "F32", seqLengths, warmup, iterations);
+                return ModernBert.Run<float, float>(F32(), modelDir, mode, "F32", seqLengths, warmup, iterations);
             case "smollm":
                 if (useSilk)
                 {
-                    if (bf16)
+                    if (bf16 || native)
                     {
                         if (benchmark) return BenchmarkSmolLMSilk(tensorsBf16);
                         return RunSmolLMSilk(tensorsBf16);
                     }
-                    if (benchmark) return BenchmarkSmolLMSilk(tensors);
-                    return RunSmolLMSilk(tensors);
+                    if (benchmark) return BenchmarkSmolLMSilk(F32());
+                    return RunSmolLMSilk(F32());
                 }
                 if (mode == "ab")
                 {
                     if (bf16) return SmolLMAb(tensorsBf16);
                     if (fp16) return SmolLMAb(tensorsHalf);
-                    return SmolLMAb(tensors);
+                    return SmolLMAb(F32());
                 }
+                if (native) return benchmark ? BenchmarkSmolLMNative(tensorsBf16) : RunSmolLMNative(tensorsBf16);
                 if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16) : RunSmolLM(tensorsBf16);
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf) : RunSmolLM(tensorsHalf);
-                return benchmark ? BenchmarkSmolLM(tensors) : RunSmolLM(tensors);
+                return benchmark ? BenchmarkSmolLM(F32()) : RunSmolLM(F32());
             case "qwen":
                 if (useSilk)
                 {
@@ -814,21 +861,21 @@ class Program
                         if (plain) return Qwen.RunPlainSilk(tensorsBf16, modelDir, text);
                         return Qwen.RunToolsSilk(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
                     }
-                    if (mode == "distill") return Qwen.RunDistillSilk(tensors, modelDir, teacherExamples, force, seed);
-                    if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensors, modelDir);
-                    if (plain) return Qwen.RunPlainSilk(tensors, modelDir, text);
-                    return Qwen.RunToolsSilk(tensors, modelDir, useKvCache: !noKvCache, text);
+                    if (mode == "distill") return Qwen.RunDistillSilk(F32(), modelDir, teacherExamples, force, seed);
+                    if (mode == "benchmark") return Qwen.RunBenchmarkSilk(F32(), modelDir);
+                    if (plain) return Qwen.RunPlainSilk(F32(), modelDir, text);
+                    return Qwen.RunToolsSilk(F32(), modelDir, useKvCache: !noKvCache, text);
                 }
                 if (mode == "distill")
-                    return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
+                    return Qwen.RunDistill(F32(), modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")
                 {
                     if (bf16) return plain ? Qwen.RunPlainBenchmark(tensorsBf16, modelDir) : Qwen.RunBenchmark(tensorsBf16, modelDir);
-                    return plain ? Qwen.RunPlainBenchmark(tensors, modelDir) : Qwen.RunBenchmark(tensors, modelDir);
+                    return plain ? Qwen.RunPlainBenchmark(F32(), modelDir) : Qwen.RunBenchmark(F32(), modelDir);
                 }
                 if (plain)
-                    return Qwen.RunPlain(tensors, modelDir, text);
-                return Qwen.RunTools(tensors, modelDir, useKvCache: !noKvCache, text);
+                    return Qwen.RunPlain(F32(), modelDir, text);
+                return Qwen.RunTools(F32(), modelDir, useKvCache: !noKvCache, text);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -2786,27 +2833,33 @@ class Program
     }
 
     static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+        => RunSmolLMCore<float, float>(tensors, PrecisionName(typeof(float)));
 
     static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+        => RunSmolLMCore<BFloat16, BFloat16>(tensors, PrecisionName(typeof(BFloat16)));
 
     static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+        => RunSmolLMCore<Half, Half>(tensors, PrecisionName(typeof(Half)));
+
+    /// <summary>SmolLM's default run: BF16 weights exactly as shipped, F32 activations.</summary>
+    static int RunSmolLMNative(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore<float, BFloat16>(tensors, NativeSmolLMPrecision);
+
+    /// <summary>Display name for a native SmolLM run: the storage dtype and the compute dtype both appear.</summary>
+    const string NativeSmolLMPrecision = "BFloat16 storage / F32 compute";
 
     static string PrecisionName(Type t)
         => t == typeof(BFloat16) ? "BFloat16"
          : t == typeof(Half) ? "Half"
          : "F32";
 
-    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
-        where T : struct, IFloatingPointIeee754<T>
+    static int RunSmolLMCore<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        string precisionName = PrecisionName(typeof(T));
-
         // The narrow 16-bit paths (BFloat16/Half) run through the Phase-1 SIMD widen-compute-narrow
         // kernels by default; the scalar A/B is the 'ab' mode's own business, not this run's.
-        RunSmolLMGenerate(tensors, precisionName);
+        RunSmolLMGenerate<TModel, TWeight>(tensors, precisionName);
         return 0;
     }
 
@@ -3158,12 +3211,16 @@ class Program
 
     static int BenchmarkSmolLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
         where T : struct, IFloatingPointIeee754<T>
-        => BenchmarkSmolLMCore(tensors);
+        => BenchmarkSmolLMCore<T, T>(tensors, PrecisionName(typeof(T)));
 
-    static int BenchmarkSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
-        where T : struct, IFloatingPointIeee754<T>
+    /// <summary>SmolLM's default benchmark: BF16 weights exactly as shipped, F32 activations.</summary>
+    static int BenchmarkSmolLMNative(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => BenchmarkSmolLMCore<float, BFloat16>(tensors, NativeSmolLMPrecision);
+
+    static int BenchmarkSmolLMCore<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        string precisionName = PrecisionName(typeof(T));
         Console.WriteLine($"=== SmolLM-135M Benchmark ({precisionName}) ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}" +
                           $"  SIMD-widen: {(NivaraPrimitives.DisableWidenSimd ? "off" : "on")}");
@@ -3173,12 +3230,12 @@ class Program
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
 
         var buildSw = Stopwatch.StartNew();
-        var model = LlamaLoader.Load<T, T>(config, tensors);
+        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
-        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        int bytesPerWeight = typeof(TWeight) == typeof(BFloat16) || typeof(TWeight) == typeof(Half) ? 2 : 4;
         double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
         Console.WriteLine($"Parameters: {totalParams:N0}");
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
@@ -3324,14 +3381,15 @@ class Program
         return 0;
     }
 
-    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGeneration<T>(
-        LlamaForCausalLM<T> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
-        where T : struct, IFloatingPointIeee754<T>
+    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGeneration<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         int headDim = config.HiddenSize / config.NumAttentionHeads;
         int kvWidth = config.NumKeyValueHeads * headDim;
         int cacheCapacity = Math.Max(16, promptIds.Count + maxNewTokens);
-        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth, cacheCapacity);
+        using var cache = new LlamaKVCache<TModel>(config.NumHiddenLayers, kvWidth, cacheCapacity);
         var sequence = new List<int>(promptIds);
         int generated = 0;
         var genSw = Stopwatch.StartNew();
@@ -3351,8 +3409,9 @@ class Program
         return (generated, genSw.ElapsedMilliseconds, sequence);
     }
 
-    static void RunSmolLMGenerate<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precisionName)
-        where T : struct, IFloatingPointIeee754<T>
+    static void RunSmolLMGenerate<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine($"=== SmolLM-135M Causal LM ({precisionName}) ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
@@ -3362,7 +3421,7 @@ class Program
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
 
         var buildSw = Stopwatch.StartNew();
-        var model = LlamaLoader.Load<T, T>(config, tensors);
+        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
         buildSw.Stop();
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +
@@ -3370,7 +3429,7 @@ class Program
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
-        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        int bytesPerWeight = typeof(TWeight) == typeof(BFloat16) || typeof(TWeight) == typeof(Half) ? 2 : 4;
         double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
         Console.WriteLine($"Parameters: {totalParams:N0}");
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
@@ -3387,13 +3446,14 @@ class Program
     /// final-position logits. Inference-by-default: never enters a <c>GradientUtils.Grad()</c>
     /// scope, so no graph nodes are built.
     /// </summary>
-    static void ConsumeGenerated<T>(
-        LlamaForCausalLM<T> model,
+    static void ConsumeGenerated<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model,
         string modelDir,
         Gpt2BpeTokenizer tokenizer,
         LlamaConfig config,
         string precisionName)
-        where T : struct, IFloatingPointIeee754<T>
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         const string Prompt = "The capital of France is";
         const int MaxNewTokens = 32;
@@ -3445,12 +3505,20 @@ class Program
         return best;
     }
 
+    /// <summary>
+    /// Maps a run's precision label to the PyTorch fixture tag: the F32 run is compared against the
+    /// F32 fixture and every BFloat16-backed run (including native, whose label names both dtypes)
+    /// against the BF16 fixture. Half has no tagged fixture and falls back to the untagged one.
+    /// </summary>
+    static string? SmolLMPyTorchFixtureTag(string precisionName)
+        => precisionName.Contains("BFloat16", StringComparison.Ordinal) ? "bf16"
+         : precisionName == "F32" ? "f32"
+         : null;
+
     /// <summary>Loads the PyTorch reference token stream for the given run dtype, if present.</summary>
     static int[]? TryLoadSmolLMReferenceTokenStream(string modelDir, string precisionName)
     {
-        string? tag = precisionName == "F32" ? "f32"
-                   : precisionName == "BFloat16" ? "bf16"
-                   : null;
+        string? tag = SmolLMPyTorchFixtureTag(precisionName);
         string[] candidates = tag != null
             ? new[] { $"compare_smollm_py_{tag}.bin", "compare_smollm_py.bin" }
             : new[] { "compare_smollm_py.bin" };
@@ -3476,9 +3544,10 @@ class Program
     }
 
     /// <summary>Runs the full prefix through the model and returns the last-row logits as float[].</summary>
-    static float[] LastPositionLogits<T>(
-        LlamaForCausalLM<T> model, IReadOnlyList<int> sequence, int vocab)
-        where T : struct, IFloatingPointIeee754<T>
+    static float[] LastPositionLogits<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model, IReadOnlyList<int> sequence, int vocab)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var prefix = new int[sequence.Count - 1];
         for (int i = 0; i < prefix.Length; i++)
@@ -3498,9 +3567,7 @@ class Program
     static void CompareSmolLmFixtures(
         string modelDir, int inputLen, IReadOnlyList<int> fullPrefix, float[] lastLogits, string precisionName)
     {
-        string? tag = precisionName == "F32" ? "f32"
-                   : precisionName == "BFloat16" ? "bf16"
-                   : null;
+        string? tag = SmolLMPyTorchFixtureTag(precisionName);
         string tokenName = (tag != null && File.Exists(Path.Combine(modelDir, "..", $"compare_smollm_py_{tag}.bin")))
             ? $"compare_smollm_py_{tag}.bin" : "compare_smollm_py.bin";
         string logitsName = (tag != null && File.Exists(Path.Combine(modelDir, "..", $"compare_smollm_logits_py_{tag}.bin")))

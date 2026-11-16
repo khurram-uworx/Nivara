@@ -59,7 +59,7 @@ public class SilkQwenToolsWeatherLoopTests
         Assert.That(output, Does.Contain("partly cloudy"));
     }
 
-    static (LlamaForCausalLM<float> Model, LlamaConfig Config) LoadConfig()
+    static (LlamaForCausalLM<float, float> Model, LlamaConfig Config) LoadConfig()
     {
         var tensors = CachedTensors!;
         var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(ModelDir, "config.json")));

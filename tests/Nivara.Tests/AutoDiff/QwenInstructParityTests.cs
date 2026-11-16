@@ -40,9 +40,9 @@ public class QwenInstructParityTests
         }
     }
 
-    static (LlamaForCausalLM<float> Model, LlamaConfig Config)? cachedModel;
+    static (LlamaForCausalLM<float, float> Model, LlamaConfig Config)? cachedModel;
 
-    static (LlamaForCausalLM<float> Model, LlamaConfig Config) Model
+    static (LlamaForCausalLM<float, float> Model, LlamaConfig Config) Model
     {
         get
         {
@@ -369,7 +369,7 @@ public class QwenInstructParityTests
 
     /// <summary>Greedily decodes with a KV cache (numeric-identical to full forward), stopping on
     /// the Qwen eos id 151645 exactly as the reference <c>_greedy</c> does.</summary>
-    static List<int> Greedy(LlamaForCausalLM<float> model, LlamaConfig config, int[] promptIds, int maxNewTokens)
+    static List<int> Greedy(LlamaForCausalLM<float, float> model, LlamaConfig config, int[] promptIds, int maxNewTokens)
     {
         int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
         using var cache = new LlamaKVCache<float>(config.NumHiddenLayers, kvWidth);

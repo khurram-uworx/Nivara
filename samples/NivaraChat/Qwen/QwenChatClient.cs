@@ -27,7 +27,7 @@ namespace NivaraChat.Qwen;
 internal sealed class QwenChatClient<T> : IChatClient
     where T : struct, IFloatingPointIeee754<T>
 {
-    readonly LlamaForCausalLM<T> model;
+    readonly LlamaForCausalLM<T, T> model;
     readonly Gpt2BpeTokenizer tokenizer;
     readonly LlamaConfig config;
     readonly int maxNewTokens;
@@ -47,7 +47,7 @@ internal sealed class QwenChatClient<T> : IChatClient
     public int TokenizeCacheHits => tokenizeCache.Hits;
 
     public QwenChatClient(
-        LlamaForCausalLM<T> model,
+        LlamaForCausalLM<T, T> model,
         Gpt2BpeTokenizer tokenizer,
         LlamaConfig config,
         int maxNewTokens = 128,

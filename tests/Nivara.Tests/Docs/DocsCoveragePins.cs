@@ -35,5 +35,13 @@ internal static class DocsCoveragePins
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 493;
+    /// <remarks>
+    /// 2026-11-16 (native SmolLM default): 493 + 6 = 499. Three markdown links were added and each is
+    /// discovered twice by <c>DocumentPattern</c> — once for the backticked name or link label and once
+    /// for the link target: two <c>SMOLLM.md</c> pointers from <c>docs/BFLOAT16.md</c> (the loader-default
+    /// paragraph and the A/B paragraph) and one <c>docs/SMOLLM.md</c> pointer from the SmolLM footnote in
+    /// <c>samples/NivaraInference/README.md</c>. The rewritten overview line in <c>docs/SMOLLM.md</c> kept
+    /// its existing <c>docs/BFLOAT16.md</c> pair, so it contributes no net change.
+    /// </remarks>
+    internal const int ExpectedDocumentReferenceCount = 499;
 }
