@@ -261,11 +261,11 @@ public static class StateDictLoader
                 $"Row block of {prefix}.weight is [{rowCount}, {inFeatures}] but the target linear is " +
                 $"[{linear.OutFeatures}, {linear.InFeatures}].");
 
-        var slice = new TWeight[rowCount * inFeatures];
-        Array.Copy(w.Data, rowOffset * inFeatures, slice, 0, slice.Length);
+        var column = NivaraColumn<TWeight>.CreateFromOwnedArray(w.Data)
+            .Slice(rowOffset * inFeatures, rowCount * inFeatures);
 
         var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
-        linear.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(slice, rowCount, inFeatures, requiresGrad);
+        linear.Weight!.Tensor = new ReverseGradTensor<TWeight>(column, requiresGrad, new[] { rowCount, inFeatures });
     }
 
     public static void LoadFusedLinearSlice<TModel, TWeight>(
@@ -292,13 +292,14 @@ public static class StateDictLoader
         if (inFeatures != linear.InFeatures || rowCount != linear.OutFeatures)
             throw new InvalidOperationException($"Row block shape mismatch.");
 
-        var weightSlice = new TWeight[rowCount * inFeatures];
-        Array.Copy(w.Data, rowOffset * inFeatures, weightSlice, 0, weightSlice.Length);
+        var weightColumn = NivaraColumn<TWeight>.CreateFromOwnedArray(w.Data)
+            .Slice(rowOffset * inFeatures, rowCount * inFeatures);
+
         var biasSlice = new TWeight[rowCount];
         Array.Copy(b.Data, rowOffset, biasSlice, 0, rowCount);
 
         var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
-        linear.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(weightSlice, rowCount, inFeatures, requiresGrad);
+        linear.Weight!.Tensor = new ReverseGradTensor<TWeight>(weightColumn, requiresGrad, new[] { rowCount, inFeatures });
 
         var state = new Dictionary<string, ReverseGradTensor<TModel>>
         {
