@@ -6,18 +6,6 @@ namespace NivaraInference;
 
 public static partial class Laya
 {
-    static string ParameterLine(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
-    {
-        long parameters = tensors.Values.Sum(t => (long)t.Data.Length);
-        return $"Parameters: {parameters:N0} ({parameters * 2.0 / (1024.0 * 1024.0):F1} MB as BFloat16)";
-    }
-
-    static string ParameterLine(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
-    {
-        long parameters = tensors.Values.Sum(t => (long)t.Data.Length);
-        return $"Parameters: {parameters:N0} ({parameters * 2.0 / (1024.0 * 1024.0):F1} MB as Half)";
-    }
-
     public static int RunGpu(
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
         string modelDir)
