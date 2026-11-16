@@ -28,6 +28,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 - `LayerNorm.Forward` now tracks gradients when only its affine parameters require grad,
   even on a constant input (previously it took the inference path and left `Weight`/`Bias`
   without gradients). Inference outside `GradientUtils.Grad()` is unchanged.
+- `RMSNorm.Forward` and `BatchNorm1d`/`BatchNorm2d.Forward` (train and eval paths) now
+  track gradients when only their affine parameters require grad, even on a constant
+  input, mirroring the LayerNorm fix (#1240). `AccumulateGradient` calls are now guarded
+  on the receiving tensor's `RequiresGrad` in `LayerNorm`, `RMSNorm`, `BatchNorm` and
+  `Linear`, so frozen parameters no longer receive gradients. `LayerNorm` and `Linear`
+  route their gate through `GradientUtils.ShouldTrackGrad` (single source of truth);
+  `TransformerBlock`'s per-row norms own no parameters, so its six projections already
+  trained on a constant input via `Linear`'s own gate (pinned by a new test).
 - Laya `LoadWeights` no longer allocates the ~1.57 GB of short-lived ctor garbage
   (measured via `GC.GetAllocatedBytesForCurrentThread`); the allocation gate in
   `LayaNativeCheckpointTests` pins it below 16 MB.
