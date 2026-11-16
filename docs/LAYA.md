@@ -23,7 +23,7 @@ The sample exposes Laya in-process through the `typesafe nivara` engine (see
 
 ## Model overview
 
-A ModernBERT-large encoder — the same architecture as [docs/MODERNBERT.md](MODERNBERT.md), nested under the `encoder.` prefix — plus a typed decision head. The checkpoint is **842.6 MB of F16** (206 tensors, 421,293,830 parameters), widened to F32 at load, so the resident set is about 1.7 GB.
+A ModernBERT-large encoder — the same architecture as [docs/MODERNBERT.md](MODERNBERT.md), nested under the `encoder.` prefix — plus a typed decision head. The checkpoint is **842.6 MB of F16** (206 tensors, 421,293,830 parameters). A bare `laya` run now keeps those F16 weights resident and computes in F32 (native default, ~843 MB instead of ~1.69 GB); `--precision f32` still widens everything to F32 at load.
 
 - **Encoder**: ModernBERT-large (28 layers, d=1024, fused input|gate `Wi`=5248, ffn=2624), loaded under the `encoder.` prefix via `ModernBertEncoder<T>.LoadWeights`
 - **Head**: 2 pre-norm layers (`nn.TransformerEncoderLayer` defaults: biased LayerNorm eps 1e-5, biased fused QKV, **ReLU** feed-forward at `4 * d`, no final norm, no positional encoding). The scorer and the act head use exact-erf GELU. The two defaults disagree, and the shapes do not say which is which.
@@ -43,7 +43,7 @@ samples/data/laya/
   encoder/config.json        ModernBERT-large, layer_types + rope_parameters
   tokenizer/tokenizer.json   not at the model root — loading the root fails
   rl_agent_config.json       max_len, head_max_len, head_layers, temperature tables
-    → SafeTensorsLoader.Read<float>          F16 widened to F32 at load
+    → SafeTensorsLoader.Read<Half>           native default (F16 storage, F32 compute); Read<float> under --precision f32
     → ModernBertEncoder<T>.LoadWeights(..., prefix: "encoder")
     → LayaDecisionHead<T>.LoadWeights        head.*, scorer.*, act_head.*, type_emb
     → Gpt2BpeTokenizer.LoadFromTokenizerJson (NFC on)

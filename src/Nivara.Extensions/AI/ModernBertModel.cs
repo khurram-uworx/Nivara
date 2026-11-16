@@ -478,8 +478,8 @@ public class ModernBertLayer<TModel, TWeight> : Module<TModel> where TModel : st
             // 1. Attention norm (or identity on layer 0).
             if (attnNorm != null)
             {
-                var gamma = WeightSpan(attnNorm.Weight);
-                var beta = attnNorm.Bias != null ? WeightSpan(attnNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+                var gamma = ModelSpan(attnNorm.Weight);
+                var beta = attnNorm.Bias != null ? ModelSpan(attnNorm.Bias) : ReadOnlySpan<TModel>.Empty;
                 var lnOut = LayerNormKernel<TModel>.ForwardInference(input, seqLen, hiddenSize, gamma, beta, attnNorm.Eps);
                 lnOut.AsSpan(0, seqLen * hiddenSize).CopyTo(normSpan);
             }
@@ -491,12 +491,12 @@ public class ModernBertLayer<TModel, TWeight> : Module<TModel> where TModel : st
 
             var mQkv = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 2. Q/K/V projections.
-            var wQ = WeightSpan(attn.qProj.Weight);
-            var wK = WeightSpan(attn.kProj.Weight);
-            var wV = WeightSpan(attn.vProj.Weight);
-            GradKernels.MatMulTransposedB(normSpan, wQ, qBuf, seqLen, hiddenSize, qWidth);
-            GradKernels.MatMulTransposedB(normSpan, wK, kBuf, seqLen, hiddenSize, qWidth);
-            GradKernels.MatMulTransposedB(normSpan, wV, vBuf, seqLen, hiddenSize, qWidth);
+            var wQ = ParamSpan(attn.qProj.Weight);
+            var wK = ParamSpan(attn.kProj.Weight);
+            var wV = ParamSpan(attn.vProj.Weight);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(normSpan, wQ, qBuf, seqLen, hiddenSize, qWidth);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(normSpan, wK, kBuf, seqLen, hiddenSize, qWidth);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(normSpan, wV, vBuf, seqLen, hiddenSize, qWidth);
             if (diag) mQkv.Record("CPU-Encoder-QKV", global::Nivara.KernelSelector.DetermineKernelType<TModel>(3 * seqLen * hiddenSize), 3 * seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mRope = diag ? DiagnosticsTracker.StartMeasurement() : default;
@@ -577,30 +577,30 @@ public class ModernBertLayer<TModel, TWeight> : Module<TModel> where TModel : st
 
             var mOProj = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 5. Output projection + residual.
-            var wO = WeightSpan(attn.oProj.Weight);
-            GradKernels.MatMulTransposedB(contextSpan, wO, attnOut, seqLen, hiddenSize, hiddenSize);
+            var wO = ParamSpan(attn.oProj.Weight);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(contextSpan, wO, attnOut, seqLen, hiddenSize, hiddenSize);
             input.CopyTo(residualSpan);
             TensorPrimitives.Add(residualSpan, attnOutSpan, residualSpan);
             if (diag) mOProj.Record("CPU-Encoder-OProj", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mLpNorm = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 6. MLP norm.
-            var mlpGamma = WeightSpan(mlpNorm.Weight);
-            var mlpBeta = mlpNorm.Bias != null ? WeightSpan(mlpNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+            var mlpGamma = ModelSpan(mlpNorm.Weight);
+            var mlpBeta = mlpNorm.Bias != null ? ModelSpan(mlpNorm.Bias) : ReadOnlySpan<TModel>.Empty;
             var lnMlp = LayerNormKernel<TModel>.ForwardInference(residualSpan, seqLen, hiddenSize, mlpGamma, mlpBeta, mlpNorm.Eps);
             lnMlp.AsSpan(0, seqLen * hiddenSize).CopyTo(mlpNormSpan);
             if (diag) mLpNorm.Record("CPU-Encoder-MlpNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
 
             var mGeGlu = diag ? DiagnosticsTracker.StartMeasurement() : default;
             // 7. GeGLU.
-            var wIn = WeightSpan(mlp.inputProj.Weight);
-            var wGate = WeightSpan(mlp.gateProj.Weight);
-            var wDown = WeightSpan(mlp.downProj.Weight);
-            GradKernels.MatMulTransposedB(mlpNormSpan, wIn, actBuf, seqLen, hiddenSize, intermediateSize);
+            var wIn = ParamSpan(mlp.inputProj.Weight);
+            var wGate = ParamSpan(mlp.gateProj.Weight);
+            var wDown = ParamSpan(mlp.downProj.Weight);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(mlpNormSpan, wIn, actBuf, seqLen, hiddenSize, intermediateSize);
             GradKernels.GeluExact(actSpan, actSpan);
-            GradKernels.MatMulTransposedB(mlpNormSpan, wGate, gateBuf, seqLen, hiddenSize, intermediateSize);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(mlpNormSpan, wGate, gateBuf, seqLen, hiddenSize, intermediateSize);
             TensorPrimitives.Multiply(actSpan, gateSpan, gateSpan);
-            GradKernels.MatMulTransposedB(gateSpan, wDown, mlpOut, seqLen, intermediateSize, hiddenSize);
+            GradKernels.MixedMatMulTransposedB<TModel, TWeight>(gateSpan, wDown, mlpOut, seqLen, intermediateSize, hiddenSize);
             if (diag) mGeGlu.Record("CPU-Encoder-GeGLU", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * intermediateSize), seqLen * intermediateSize * 3, typeof(TModel), false, null);
 
             var mResid = diag ? DiagnosticsTracker.StartMeasurement() : default;
@@ -625,21 +625,20 @@ public class ModernBertLayer<TModel, TWeight> : Module<TModel> where TModel : st
         }
     }
 
-    static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
+    static ReadOnlySpan<TModel> ModelSpan(Parameter<TModel>? weight)
     {
         if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
-        if (typeof(TParam) == typeof(TModel))
-        {
-            if (!weight.Tensor.Data.TryGetSpan(out var narrowSpan))
-                throw new InvalidOperationException("Parameter data must be null-free.");
-            return System.Runtime.InteropServices.MemoryMarshal.Cast<TParam, TModel>(narrowSpan);
-        }
-        if (!weight.Tensor.Data.TryGetSpan(out var sourceSpan))
+        if (!weight.Tensor.Data.TryGetSpan(out var span))
             throw new InvalidOperationException("Parameter data must be null-free.");
-        var widened = new TModel[sourceSpan.Length];
-        for (int i = 0; i < widened.Length; i++)
-            widened[i] = TModel.CreateChecked(sourceSpan[i]);
-        return widened.AsSpan();
+        return span;
+    }
+
+    static ReadOnlySpan<TWeight> ParamSpan(Parameter<TWeight>? weight)
+    {
+        if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
+        if (!weight.Tensor.Data.TryGetSpan(out var span))
+            throw new InvalidOperationException("Parameter data must be null-free.");
+        return span;
     }
 }
 
@@ -712,21 +711,20 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
         // Inference-only fused path.
         int hiddenSize = config.HiddenSize;
         bool diag = InferenceDiagnostics.IsEnabled;
-        var weightData = tokenEmbedding.Weight != null
-            ? WeightSpan(tokenEmbedding.Weight)
-            : throw new InvalidOperationException("tokenEmbedding has no weight.");
+        if (tokenEmbedding.Weight is null)
+            throw new InvalidOperationException("tokenEmbedding has no weight.");
         var hiddenBuf = new TModel[seqLen * hiddenSize];
         for (int i = 0; i < seqLen; i++)
         {
             int id = tokenIds[i];
             if (id < 0 || id >= config.VocabSize)
                 throw new ArgumentOutOfRangeException(nameof(tokenIds), $"Token ID {id} out of range.");
-            weightData.Slice(id * hiddenSize, hiddenSize).CopyTo(hiddenBuf.AsSpan(i * hiddenSize, hiddenSize));
         }
+        tokenEmbedding.GatherRows(tokenIds, hiddenBuf.AsSpan());
 
         var mEmbed = diag ? DiagnosticsTracker.StartMeasurement() : default;
-        var embedGamma = WeightSpan(embedNorm.Weight);
-        var embedBeta = embedNorm.Bias != null ? WeightSpan(embedNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+        var embedGamma = ModelSpan(embedNorm.Weight);
+        var embedBeta = embedNorm.Bias != null ? ModelSpan(embedNorm.Bias) : ReadOnlySpan<TModel>.Empty;
         var embedOut = LayerNormKernel<TModel>.ForwardInference(hiddenBuf, seqLen, hiddenSize, embedGamma, embedBeta, embedNorm.Eps);
         embedOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
         if (diag) mEmbed.Record("CPU-Encoder-EmbedNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
@@ -743,8 +741,8 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
             bufA.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
 
         var mFinal = diag ? DiagnosticsTracker.StartMeasurement() : default;
-        var finalGamma = WeightSpan(finalNorm.Weight);
-        var finalBeta = finalNorm.Bias != null ? WeightSpan(finalNorm.Bias) : ReadOnlySpan<TModel>.Empty;
+        var finalGamma = ModelSpan(finalNorm.Weight);
+        var finalBeta = finalNorm.Bias != null ? ModelSpan(finalNorm.Bias) : ReadOnlySpan<TModel>.Empty;
         var finalOut = LayerNormKernel<TModel>.ForwardInference(hiddenBuf, seqLen, hiddenSize, finalGamma, finalBeta, finalNorm.Eps);
         finalOut.AsSpan(0, seqLen * hiddenSize).CopyTo(hiddenBuf);
         if (diag) mFinal.Record("CPU-Encoder-FinalNorm", global::Nivara.KernelSelector.DetermineKernelType<TModel>(seqLen * hiddenSize), seqLen * hiddenSize, typeof(TModel), false, null);
@@ -797,20 +795,19 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
         return encoder;
     }
 
-    static ReadOnlySpan<TModel> WeightSpan<TParam>(Parameter<TParam>? weight) where TParam : struct, IFloatingPointIeee754<TParam>
+    static ReadOnlySpan<TModel> ModelSpan(Parameter<TModel>? weight)
     {
         if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
-        if (typeof(TParam) == typeof(TModel))
-        {
-            if (!weight.Tensor.Data.TryGetSpan(out var narrowSpan))
-                throw new InvalidOperationException("Parameter data must be null-free.");
-            return System.Runtime.InteropServices.MemoryMarshal.Cast<TParam, TModel>(narrowSpan);
-        }
-        if (!weight.Tensor.Data.TryGetSpan(out var sourceSpan))
+        if (!weight.Tensor.Data.TryGetSpan(out var span))
             throw new InvalidOperationException("Parameter data must be null-free.");
-        var widened = new TModel[sourceSpan.Length];
-        for (int i = 0; i < widened.Length; i++)
-            widened[i] = TModel.CreateChecked(sourceSpan[i]);
-        return widened.AsSpan();
+        return span;
+    }
+
+    static ReadOnlySpan<TWeight> ParamSpan(Parameter<TWeight>? weight)
+    {
+        if (weight is null) throw new InvalidOperationException("Expected a non-null parameter.");
+        if (!weight.Tensor.Data.TryGetSpan(out var span))
+            throw new InvalidOperationException("Parameter data must be null-free.");
+        return span;
     }
 }

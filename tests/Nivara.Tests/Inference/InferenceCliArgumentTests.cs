@@ -15,7 +15,7 @@ namespace Nivara.Tests.Inference;
 /// (#479), the <c>--teacher-examples</c>/<c>--seed</c>/
 /// <c>--force</c> scope (#571), the unknown model and the per-model mode allow-list (#587), the
 /// narrow <c>--precision</c> consumed by the selected run (#586), the strict <c>--simd-widen</c>
-/// scope (#591), the <c>native</c> precision's <c>smollm</c>-only scope, and the
+/// scope (#591), the <c>native</c> precision's <c>smollm</c>/<c>qwen</c>/<c>laya</c> scope, and the
 /// <c>--plain</c>/<c>--text</c>/<c>--no-kv-cache</c>/<c>--synthetic-weights</c>
 /// scopes (#580), the <c>--blas</c>/<c>--threads</c>/<c>--blas-threads</c> rejects (#1119), plus the <c>typesafe</c> surface (mode allow-list, GPU scope, F32-only precision,
 /// and the <c>--url</c>, <c>--model</c>, engine-positional and benchmark scope). The <c>typesafe</c>
@@ -297,10 +297,18 @@ public class InferenceCliArgumentTests
     {
         Assert.Multiple(() =>
         {
-            AssertRejected(Run("minilm", "--precision", "native"), "--precision native is a 'smollm'/'qwen' option only");
-            AssertRejected(Run("laya", "--precision", "native"), "--precision native is a 'smollm'/'qwen' option only");
-            AssertRejected(Run("mobilenet_v2", "--precision", "native"), "--precision native is a 'smollm'/'qwen' option only");
+            AssertRejected(Run("minilm", "--precision", "native"), "--precision native is a 'smollm'/'qwen'/'laya' option only");
+            AssertRejected(Run("mobilenet_v2", "--precision", "native"), "--precision native is a 'smollm'/'qwen'/'laya' option only");
+            AssertRejected(Run("modernbert", "--precision", "native"), "--precision native is a 'smollm'/'qwen'/'laya' option only");
         });
+
+        // laya now accepts native: reaches the weight load.
+        CliResult layaNative = Run("laya", "--precision", "native");
+        Assert.That(layaNative.StdErr, Does.Contain(ModelLookupMessage));
+
+        // laya --silk with default precision prints the F32 device-path note.
+        CliResult layaSilk = Run("laya", "--silk");
+        Assert.That(layaSilk.StdOut + layaSilk.StdErr, Does.Contain("laya --silk with native/default precision runs the F32 device path"));
     }
 
     /// <summary>

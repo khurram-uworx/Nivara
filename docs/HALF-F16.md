@@ -266,3 +266,10 @@ dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp
 - [`AUTODIFF.md`](AUTODIFF.md) — AutoDiff operations and domain.
 - [`TENSORS.md`](TENSORS.md) — type-support note for tensors.
 - [`SAFETENSORS.md`](SAFETENSORS.md) — dtype handling.
+
+## MixedMatMul (Laya)
+
+`GradKernels.MixedMatMul` now has the same `Half` fast arm as `MixedMatMulTransposedB`, so
+mixed-dtype backward (`float × Half`) widens in-register instead of via `Array.ConvertAll`.
+Rule: widen in-register, never at load and never per call. Laya before/after: fused forward
+dropped from 196 weight-sized allocs (~1.37 GB/forward) to zero.

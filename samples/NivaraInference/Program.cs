@@ -143,6 +143,7 @@ class Program
         string? itersArg = null;
         bool isQwen = modelType == "qwen";
         bool isSmolLM = modelType == "smollm";
+        bool isLaya = modelType == "laya";
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--precision")
@@ -333,7 +334,7 @@ class Program
         // SmolLM and Qwen default to their snapshot dtype: BF16 weights stay BF16 in memory and the
         // kernels widen them in-register, so a bare run never holds a widened F32 copy of the
         // checkpoint. Qwen distill is the exception (gradients need widened F32; see guard below).
-        if ((isSmolLM || isQwen) && !precisionSet)
+        if ((isSmolLM || isQwen || isLaya) && !precisionSet)
             precision = "native";
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
@@ -405,14 +406,15 @@ class Program
             Console.WriteLine("Precision (narrow-float models only — the vision models have no bf16/fp16 path):");
             Console.WriteLine("  --precision native  The checkpoint's own dtype with F32 compute: the weights stay exactly as");
             Console.WriteLine("                    shipped and every kernel widens them in-register. Default for smollm (BF16");
-            Console.WriteLine("                    weights, F32 activations, ~269 MB resident instead of ~1.05 GB); rejected");
-            Console.WriteLine("                    for every other model, whose checkpoints differ or whose default is F32.");
+            Console.WriteLine("                    weights, ~269 MB resident instead of ~1.05 GB), qwen (BF16) and laya (F16,");
+            Console.WriteLine("                    ~843 MB resident instead of ~1.69 GB); rejected for every other model.");
             Console.WriteLine("  --precision f32   Full float32 weights (qwen default: BF16-on-disk, SIMD-widened to F32 at load).");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
             Console.WriteLine("                    (rejected for qwen fp16 - Half range/precision insufficient for Qwen2.5-0.5B;");
             Console.WriteLine("                     rejected for qwen bf16 outside 'benchmark' / --synthetic-weights;");
-            Console.WriteLine("                     rejected where the run is F32-only: the vision models and laya/modernbert 'compare')");
+            Console.WriteLine("                     laya's default is now F16 storage / F32 compute, so fp16 stays the pure-Half");
+            Console.WriteLine("                     compute opt-in; rejected where the run is F32-only: the vision models)");
             Console.WriteLine();
             Console.WriteLine("SIMD (narrow-float models: minilm / distilbert / distilbert_sst / modernbert / laya):");
             Console.WriteLine("  Narrow runs (bf16/fp16) are auto-widened to F32 SIMD; no toggle required.");
@@ -623,11 +625,14 @@ class Program
         // against. SmolLM-135M is the model whose snapshot is BF16 and whose default this is; the
         // other narrow-float models either differ (Laya ships F16 weights, Qwen's default is F32
         // compute over widened BF16) or are F32-on-disk.
-        if (native && !(isSmolLM || isQwen))
+        if (native && !(isSmolLM || isQwen || isLaya))
         {
-            Console.Error.WriteLine($"--precision native is a 'smollm'/'qwen' option only: these keep their BF16 snapshot weights and compute in F32; got '{got}'.");
+            Console.Error.WriteLine($"--precision native is a 'smollm'/'qwen'/'laya' option only: smollm and qwen keep their BF16 snapshot weights and compute in F32; laya keeps its F16 snapshot weights and computes in F32; got '{got}'.");
             return 1;
         }
+
+        bool layaNative = native && isLaya;
+        bool layaNativeCpu = layaNative && !useSilk;
 
         // Qwen distill builds gradients (GradientUtils.Grad()); mixed BF16-storage/F32-compute is
         // inference-only (LlamaForCausalLM.ThrowIfMixedDtypeTraining), so distill requires widened F32.
@@ -657,6 +662,11 @@ class Program
         {
             Console.Error.WriteLine("--silk is F32-only: fp16 shows no measured speedup at current shapes (0.97–1.07×), so bf16 is preferred; use --precision bf16 or drop --silk.");
             return 1;
+        }
+
+        if (useSilk && isLaya && native)
+        {
+            Console.WriteLine("Note: laya --silk with native/default precision runs the F32 device path (no Half device path); use --precision bf16 for BF16 Silk.");
         }
 
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
@@ -715,7 +725,7 @@ class Program
         }
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
-        if (bf16 || native)
+        if (bf16 || (native && !layaNative))
         {
             var loadSwBf16 = Stopwatch.StartNew();
             tensorsBf16 = SafeTensorsLoader.Read<BFloat16>(modelPath);
@@ -725,7 +735,7 @@ class Program
         }
 
         Dictionary<string, (Half[] Data, int[] Shape)> tensorsHalf = null!;
-        if (fp16)
+        if (fp16 || layaNativeCpu)
         {
             var loadSwFp16 = Stopwatch.StartNew();
             tensorsHalf = SafeTensorsLoader.Read<Half>(modelPath);
@@ -814,6 +824,7 @@ class Program
                 }
                 if (compare) return Laya.Compare(F32(), modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
+                if (layaNativeCpu) return Laya.Run<float, Half>(tensorsHalf, modelDir, mode, "native (F16 storage, F32 compute)");
                 if (fp16) return Laya.Run<Half, Half>(tensorsHalf, modelDir, mode, "Half");
                 return Laya.Run<float, float>(F32(), modelDir, mode, "F32");
             case "modernbert":

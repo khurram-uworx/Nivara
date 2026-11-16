@@ -2,6 +2,7 @@ using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -185,6 +186,37 @@ public class Embedding<TModel, TWeight> : Module<TModel>
             resultTensor.Reshape(originalShape.Append(embeddingDim).ToArray());
 
         return resultTensor;
+    }
+
+    /// <summary>
+    /// Gathers embedding rows for the given token ids into <paramref name="destination"/> in the
+    /// compute dtype, reading the weight storage dtype and converting per element. For
+    /// <typeparamref name="TWeight"/> == <typeparamref name="TModel"/> this degenerates to a
+    /// <see cref="Span{T}.CopyTo"/> per row (no conversion). Used by the encoder's inference
+    /// path so it never widens the whole embedding table to read a handful of rows.
+    /// </summary>
+    internal void GatherRows(int[] tokenIds, Span<TModel> destination)
+    {
+        if (tokenIds == null) throw new ArgumentNullException(nameof(tokenIds));
+        if (destination.Length < tokenIds.Length * embeddingDim)
+            throw new ArgumentException("Destination span is too small.", nameof(destination));
+
+        weight.Tensor.Data.TryGetSpan(out var wSpan);
+        int stride = embeddingDim;
+        if (typeof(TWeight) == typeof(TModel))
+        {
+            var wModel = MemoryMarshal.Cast<TWeight, TModel>(wSpan);
+            for (int i = 0; i < tokenIds.Length; i++)
+                wModel.Slice(tokenIds[i] * stride, stride).CopyTo(destination.Slice(i * stride, stride));
+            return;
+        }
+        for (int i = 0; i < tokenIds.Length; i++)
+        {
+            int srcOffset = tokenIds[i] * stride;
+            int dstOffset = i * stride;
+            for (int j = 0; j < stride; j++)
+                destination[dstOffset + j] = TModel.CreateChecked(wSpan[srcOffset + j]);
+        }
     }
 
     bool ShouldTrack() => GradientUtils.IsGradEnabled && weight.Tensor.RequiresGrad;
