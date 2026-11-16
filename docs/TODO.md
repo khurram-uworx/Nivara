@@ -85,7 +85,5 @@ unconditionally.
 ## GitHub issues log
 
 - [ ] #1238 — DistilBert: ForwardBatched backward produces no parameter gradients (pre-existing) (working on this)
-- [ ] (create during execution) follow-up: `RMSNorm`, `BatchNorm`, `TransformerBlock` share the same
-  `input.RequiresGrad`-only gate as `LayerNorm` and should be fixed consistently.
-- [ ] (create during execution) follow-up: `StateDictLoader` loaders skip missing keys silently, so a
-  partial checkpoint produces partially-random trainable weights with no diagnostic.
+- [ ] #1240 — AutoDiff: RMSNorm/BatchNorm/TransformerBlock share LayerNorm's input-only tracking gate (created while working on #1238)
+- [ ] #1241 — AutoDiff/StateDictLoader: silently skip missing keys on partial checkpoint load (created while working on #1238)
