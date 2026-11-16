@@ -4,6 +4,8 @@ Native function calling with **Qwen2.5-0.5B-Instruct** served as a plain `Micros
 
 The code lives in `samples/NivaraChat/Qwen/`; the tests in `tests/Nivara.Tests/Qwen/`.
 
+The chat host (`NivaraChat --qwen`) loads native weights only (BF16 storage / F32 compute) and exposes no `--precision` flag: `SafeTensorsLoader.Read<BFloat16>` then `LlamaLoader.Load<float, BFloat16>`. `--silk` coerces to the F32 device path while issue #1219 is open.
+
 Related Qwen work, tracked separately: #384 (qkvBias loader gap), #386 (Qwen distillation), #387 (BF16-in-memory SIMD-dot), #388 (fused BF16→F32 read), #390 (GGUF backend), #391 (revisit BF16 workarounds), #399 (backlog: `DecodeAttention` per-dot loop at large `kvLen`), #402 (P2: float single-pass sampling + REPL tokenize-prefix cache), #411 (backlog: RMSNorm gamma via `TensorPrimitives.Multiply`), #413/#414 (P2: fuse final RMSNorm + tied LM head), #416 (stretch: INT8 block-quantized weights — blocked on integer support in AutoDiff, see `docs/INTEGERS.md`).
 
 ## Model overview

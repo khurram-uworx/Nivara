@@ -4,6 +4,8 @@
 
 The **first causal LM / generative model** in the sample and the primary driver for the BF16 work ([docs/BFLOAT16.md](BFLOAT16.md)). It is a **BF16-native** Llama-family causal LM — all 272 on-disk tensors are `BF16` (269 MB) — and it is the model whose **default run keeps that dtype**: a bare `smollm` reads the checkpoint's own bytes through `SafeTensorsLoader.Read<BFloat16>` (zero-hop, no F32 intermediate), holds them as BF16 in memory, and computes in F32 by widening inside the dot kernels (`--precision native`). `--precision f32` is the widened-at-load run and `--precision bf16` is BF16 storage with BF16 compute. The Nivara side runs the full stack in Nivara's AutoDiff engine over the model ops below and greedily decodes a response.
 
+The chat host (`NivaraChat --smollm`) uses the same native load path (BF16 storage / F32 compute) and exposes no `--precision` flag: `SafeTensorsLoader.Read<BFloat16>` then `LlamaLoader.Load<float, BFloat16>`.
+
 - **Config**: `hidden_size=576`, `intermediate_size=1536`, 30 layers, `num_attention_heads=9`, **`num_key_value_heads=3` (GQA)**, `hidden_act=silu` (gated FFN), RMSNorm (`eps=1e-5`), RoPE (`theta=10000`), `max_position_embeddings=2048`, `vocab_size=49152`, `tie_word_embeddings=true`
 - **Tokenizer**: **GPT-2 byte-level BPE** (not SentencePiece — see the note below), chat variant (`<|im_start|>`/`<|im_end|>` template; bos `<|im_start|>`, eos/pad `<|im_end|>`), 49152-token vocab built from `vocab.json` + `merges.txt`
 - **Tied LM head**: the input embedding weight is reused as the output projection — the checkpoint has no separate LM-head tensors

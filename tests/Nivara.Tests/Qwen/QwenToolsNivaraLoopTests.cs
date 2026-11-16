@@ -68,7 +68,7 @@ public class QwenToolsNivaraLoopTests
         var (sentimentModel, sentimentTok) = CachedSentiment.Value;
         var tool = NivaraAIFunctions.CreateSentimentTool(sentimentModel, sentimentTok);
 
-        using var inner = new QwenChatClient<float>(
+        using var inner = new QwenChatClient<float, float>(
             model, CachedTokenizer, config,
             maxNewTokens: 128,
             knownToolNames: [tool.Name]);

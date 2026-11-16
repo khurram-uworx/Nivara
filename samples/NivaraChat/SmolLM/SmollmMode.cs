@@ -10,7 +10,7 @@ namespace NivaraChat.SmolLM;
 
 /// <summary>
 /// The <c>--smollm</c> mode (Stage A): loads the pretrained SmolLM-135M-Instruct causal LM and
-/// serves it as an <see cref="IChatClient"/> via <see cref="SmolLMChatClient{T}"/>. Two sub-modes:
+/// serves it as an <see cref="IChatClient"/> via <see cref="SmolLMChatClient{TModel, TWeight}"/>. Two sub-modes:
 /// <c>chat</c> (interactive REPL or single prompt) and <c>plain</c> (single-shot, no REPL).
 /// Plain-chat only in Stage A (no tools).
 /// </summary>
@@ -77,13 +77,6 @@ public static class SmollmMode
             switch (args[i])
             {
                 case "--model-dir": options.ModelDir = args[++i]; break;
-                case "--precision":
-                    options.Precision = args[++i].ToLowerInvariant() switch
-                    {
-                        "bf16" or "bfloat16" => "bf16",
-                        _ => "f32",
-                    };
-                    break;
                 case "--max-new-tokens": options.MaxNewTokens = int.Parse(args[++i]); break;
                 case "--temperature": options.Temperature = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--top-p":
@@ -98,7 +91,15 @@ public static class SmollmMode
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
                 default:
-                    if (options.Mode.Length == 0) options.Mode = args[i];
+                    if (args[i].StartsWith("-", StringComparison.Ordinal))
+                    {
+                        Console.Error.WriteLine($"Unknown option: {args[i]}");
+                        options.ShowHelp = true;
+                    }
+                    else if (options.Mode.Length == 0)
+                    {
+                        options.Mode = args[i];
+                    }
                     break;
             }
         }
@@ -126,67 +127,40 @@ public static class SmollmMode
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
 
-        Console.WriteLine($"Loading SmolLM-135M-Instruct ({options.Precision}){(options.UseSilk ? " via Silk/OpenCL" : "")}...");
+        Console.WriteLine($"Loading SmolLM-135M-Instruct (BFloat16 storage / F32 compute){(options.UseSilk ? " via Silk/OpenCL" : "")}...");
         var loadSw = Stopwatch.StartNew();
         if (options.UseSilk)
-        {
-            if (options.Precision == "bf16")
-                await RunSilkBFloat16(config, tokenizer, modelDir, options);
-            else
-                await RunSilkFloat(config, tokenizer, modelDir, options);
-        }
-        else if (options.Precision == "bf16")
-            await Run<BFloat16>(config, tokenizer, modelDir, options);
+            await RunSilk(config, tokenizer, modelDir, options);
         else
-            await Run<float>(config, tokenizer, modelDir, options);
+            await Run(config, tokenizer, modelDir, options);
         loadSw.Stop();
         Console.WriteLine($"Model ready in {loadSw.ElapsedMilliseconds} ms.");
     }
 
-    static async Task Run<T>(
+    static async Task Run(
         LlamaConfig config,
         Gpt2BpeTokenizer tokenizer,
         string modelDir,
         SmollmOptions options)
-        where T : struct, IFloatingPointIeee754<T>
     {
-        bool widenSimd = EnableWidenSimdIfNarrow<T>();
-        try
+        var tensors = SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelDir, "model.safetensors"));
+        var model = LlamaLoader.Load<float, BFloat16>(config, tensors);
+
+        using var client = new SmolLMChatClient<float, BFloat16>(
+            model, tokenizer, config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache);
+
+        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
         {
-            var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
-            var model = LlamaLoader.Load<T, T>(config, tensors);
-
-            using var client = new SmolLMChatClient<T>(
-                model, tokenizer, config,
-                maxNewTokens: options.MaxNewTokens,
-                temperature: options.Temperature,
-                topP: options.HasTopP ? options.TopP : null,
-                seed: options.Seed,
-                useKvCache: options.UseKvCache);
-
-            if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
-            {
-                await RunSingleTurn(client, options.Text ?? "The capital of France is");
-                return;
-            }
-
-            await RunRepl(client);
+            await RunSingleTurn(client, options.Text ?? "The capital of France is");
+            return;
         }
-        finally
-        {
-            // widen is on by default now.
-        }
-    }
 
-    /// <summary>Narrow compute types (BFloat16/Half) run their dots through the
-    /// widen-compute-narrow SIMD kernels only while <see cref="NivaraPrimitives.UseWidenSimd"/> is
-    /// enabled — without it they fall to the ~26× slower scalar BCL dot. Enabling for the narrow
-    /// session (and restoring afterwards) keeps the BF16 chat host fast by construction.</summary>
-    static bool EnableWidenSimdIfNarrow<T>()
-        where T : struct
-    {
-        // widen is on by default now.
-        return false;
+        await RunRepl(client);
     }
 
     static async Task RunSingleTurn(IChatClient client, string text)
@@ -252,35 +226,7 @@ public static class SmollmMode
         }
     }
 
-    static async Task RunSilkFloat(
-        LlamaConfig config,
-        Gpt2BpeTokenizer tokenizer,
-        string modelDir,
-        SmollmOptions options)
-    {
-        var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
-        var session = SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
-        Console.WriteLine($"  Device:    {session.DeviceName}");
-        using var client = new SilkSmolLMChatClient(
-            session,
-            tokenizer,
-            config,
-            maxNewTokens: options.MaxNewTokens,
-            temperature: options.Temperature,
-            topP: options.HasTopP ? options.TopP : null,
-            seed: options.Seed,
-            useKvCache: options.UseKvCache);
-
-        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
-        {
-            await RunSingleTurn(client, options.Text ?? "The capital of France is");
-            return;
-        }
-
-        await RunRepl(client);
-    }
-
-    static async Task RunSilkBFloat16(
+    static async Task RunSilk(
         LlamaConfig config,
         Gpt2BpeTokenizer tokenizer,
         string modelDir,
@@ -340,7 +286,6 @@ public static class SmollmMode
 
             Options:
               --model-dir <path>     Model directory (default samples/data/smollm-135m)
-              --precision f32|bf16   Compute precision (default f32)
               --max-new-tokens <n>   Max tokens to generate (default 64)
               --temperature <t>      Sampling temperature; >0 enables sampling (default 0 = greedy)
               --top-p <p>            Nucleus (top-p) cutoff for sampling, 0-1 (default 1 = off)
@@ -357,7 +302,6 @@ public static class SmollmMode
     {
         public string Mode { get; set; } = "";
         public string? ModelDir { get; set; }
-        public string Precision { get; set; } = "f32";
         public int MaxNewTokens { get; set; } = 64;
         public float? Temperature { get; set; }
         public float TopP { get; set; } = 1f;

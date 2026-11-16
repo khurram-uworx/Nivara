@@ -10,7 +10,7 @@ namespace NivaraChat.Qwen;
 
 /// <summary>
 /// An <see cref="IChatClient"/> backed by Qwen2.5-0.5B-Instruct running as a
-/// <see cref="LlamaForCausalLM{T}"/> (BF16-on-disk weights upcast to F32), served over the
+/// <see cref="LlamaForCausalLM{TModel, TWeight}"/> (BF16-on-disk weights), served over the
 /// Microsoft.Extensions.AI content model. Inference is the default path: the model is run
 /// outside a <c>GradientUtils.Grad()</c> scope, so no graph nodes are built (per ADR-001 /
 /// ADR-002 inference-default direction).
@@ -24,10 +24,11 @@ namespace NivaraChat.Qwen;
 /// them; plain turns become <see cref="TextContent"/>. <paramref name="turnCallback"/> observes
 /// every generated assistant turn (used by the demo to print live progress).
 /// </summary>
-internal sealed class QwenChatClient<T> : IChatClient
-    where T : struct, IFloatingPointIeee754<T>
+internal sealed class QwenChatClient<TModel, TWeight> : IChatClient
+    where TModel : struct, IFloatingPointIeee754<TModel>
+    where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
-    readonly LlamaForCausalLM<T, T> model;
+    readonly LlamaForCausalLM<TModel, TWeight> model;
     readonly Gpt2BpeTokenizer tokenizer;
     readonly LlamaConfig config;
     readonly int maxNewTokens;
@@ -47,7 +48,7 @@ internal sealed class QwenChatClient<T> : IChatClient
     public int TokenizeCacheHits => tokenizeCache.Hits;
 
     public QwenChatClient(
-        LlamaForCausalLM<T, T> model,
+        LlamaForCausalLM<TModel, TWeight> model,
         Gpt2BpeTokenizer tokenizer,
         LlamaConfig config,
         int maxNewTokens = 128,
@@ -116,7 +117,7 @@ internal sealed class QwenChatClient<T> : IChatClient
         var prompt = QwenChatTemplate.Render(messages, addGenerationPrompt: true);
         var ids = new List<int>(tokenizeCache.Encode(prompt, p => tokenizer.Encode(p)));
 
-        using var cache = useKvCache ? new LlamaKVCache<T>(numLayers, kvWidth) : null;
+        using var cache = useKvCache ? new LlamaKVCache<TModel>(numLayers, kvWidth) : null;
 
         bool greedy = temperature <= 0f;
         var generated = new List<int>();
@@ -161,11 +162,11 @@ internal sealed class QwenChatClient<T> : IChatClient
 
     /// <summary>Runs the prompt tokens through a single batched prefill to seed the per-layer cache
     /// and produce the logits predicting the first generated token.</summary>
-    ReverseGradTensor<T> SeedCache(List<int> ids, LlamaKVCache<T> cache)
+    ReverseGradTensor<TModel> SeedCache(List<int> ids, LlamaKVCache<TModel> cache)
         => model.ForwardPrefill(ids.ToArray(), cache);
 
     /// <summary>Returns the model's final-position logits (<c>[vocab]</c>) as a span.</summary>
-    static ReadOnlySpan<T> LastRow(ReverseGradTensor<T> logits)
+    static ReadOnlySpan<TModel> LastRow(ReverseGradTensor<TModel> logits)
     {
         logits.Data.TryGetSpan(out var span);
         int vocab = logits.Shape[^1];
@@ -176,7 +177,7 @@ internal sealed class QwenChatClient<T> : IChatClient
 
     /// <summary>Selects the next token: argmax when greedy, otherwise temperature softmax with
     /// optional top-p filtering, drawn from the shared seeded RNG.</summary>
-    int Select(ReadOnlySpan<T> lastRow)
+    int Select(ReadOnlySpan<TModel> lastRow)
     {
         int vocab = config.VocabSize;
         if (lastRow.Length < vocab)

@@ -46,5 +46,5 @@ internal static class DocsCoveragePins
     /// <c>docs/plan/LAYA-HONEST-WEIGHTS.md</c> in backticks; that path is excluded from the document
     /// scan but the backticked mention is still discovered by <c>DocumentPattern</c>.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 500;
+    internal const int ExpectedDocumentReferenceCount = 499;
 }

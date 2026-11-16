@@ -341,5 +341,5 @@ void PrintUsage()
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
-    Console.WriteLine("  --smollm options:    --model-dir --precision --text --max-new-tokens --help");
+    Console.WriteLine("  --smollm options:    --model-dir --text --max-new-tokens --help");
 }

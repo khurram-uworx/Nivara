@@ -54,7 +54,7 @@ public class QwenToolsWeatherLoopTests
         var (model, config) = CachedModel.Value;
         var weather = QwenSampleTools.CreateWeatherTool();
 
-        using var inner = new QwenChatClient<float>(
+        using var inner = new QwenChatClient<float, float>(
             model, CachedTokenizer, config,
             maxNewTokens: 128,
             knownToolNames: [QwenSampleTools.WeatherToolName]);

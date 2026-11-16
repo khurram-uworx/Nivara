@@ -13,7 +13,7 @@ namespace NivaraChat.Qwen;
 
 /// <summary>
 /// The <c>--qwen</c> mode (issue #382 Phase 3): serves Qwen2.5-0.5B-Instruct as an
-/// <see cref="IChatClient"/> via <see cref="QwenChatClient{T}"/>. Sub-modes:
+/// <see cref="IChatClient"/> via <see cref="QwenChatClient{TModel, TWeight}"/>. Sub-modes:
 /// <c>tools-weather</c> runs the native function-calling loop (<c>&lt;tool_call&gt;</c> emitted by
 /// the model, executed by <c>FunctionInvokingChatClient</c>, result fed back as
 /// <c>&lt;tool_response&gt;</c>, capped at <see cref="MaxToolLoopIterations"/>), while
@@ -55,123 +55,108 @@ public static class QwenMode
             Path.Combine(modelDir, "merges.txt"),
             tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
 
-        Console.WriteLine($"Loading Qwen2.5-0.5B-Instruct ({options.Precision})...");
+        Console.WriteLine($"Loading Qwen2.5-0.5B-Instruct (BFloat16 storage / F32 compute){(options.UseSilk ? " via Silk/OpenCL" : "")}...");
         var loadSw = Stopwatch.StartNew();
-        if (options.Precision == "bf16")
-            await Execute<BFloat16>(config, tokenizer, modelDir, options);
+        if (options.UseSilk)
+        {
+            // #1219 (OPEN): BF16 cached decode crashes in the shared BF16 quartet. Keep qwen
+            // Silk on the known-good F32 device path while native/default loads BF16 tensors,
+            // with an explicit diagnostic. Only an explicit --precision bf16 would opt into BF16 Silk.
+            Console.WriteLine("Note: qwen --silk runs the F32 device path (BF16 cached decode is blocked by issue #1219).");
+            var tensorsF32 = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
+            await ExecuteSilk<float>(config, tokenizer, modelDir, tensorsF32, options);
+        }
         else
-            await Execute<float>(config, tokenizer, modelDir, options);
+        {
+            await Execute<float, BFloat16>(config, tokenizer, modelDir, options);
+        }
         loadSw.Stop();
         Console.WriteLine($"Model ready in {loadSw.ElapsedMilliseconds} ms.");
     }
 
-    static async Task Execute<T>(
+    static async Task Execute<TModel, TWeight>(
         LlamaConfig config,
         Gpt2BpeTokenizer tokenizer,
         string modelDir,
         QwenOptions options)
-        where T : struct, IFloatingPointIeee754<T>
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        bool widenSimd = EnableWidenSimdIfNarrow<T>();
-        try
+        var tensors = SafeTensorsLoader.Read<TWeight>(Path.Combine(modelDir, "model.safetensors"));
+
+        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
+
+        string[]? knownNames = null;
+        List<AIFunction>? nivaraTools = null;
+        TextClassifierModel<float>? nivaraSentimentModel = null;
+        TextTokenizer? nivaraSentimentTok = null;
+        TokenClassifierModel<float>? nivaraEntityModel = null;
+        TextTokenizer? nivaraEntityTok = null;
+        TextClassifierModel<float>? nivaraValidatorModel = null;
+        TextTokenizer? nivaraValidatorTok = null;
+
+        if (options.Mode == "tools-weather")
         {
-            var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
-
-            if (options.UseSilk)
-            {
-                await ExecuteSilk(config, tokenizer, modelDir, tensors, options);
-                return;
-            }
-
-            var model = LlamaLoader.Load<T, T>(config, tensors);
-
-            string[]? knownNames = null;
-            List<AIFunction>? nivaraTools = null;
-            TextClassifierModel<float>? nivaraSentimentModel = null;
-            TextTokenizer? nivaraSentimentTok = null;
-            TokenClassifierModel<float>? nivaraEntityModel = null;
-            TextTokenizer? nivaraEntityTok = null;
-            TextClassifierModel<float>? nivaraValidatorModel = null;
-            TextTokenizer? nivaraValidatorTok = null;
-
-            if (options.Mode == "tools-weather")
-            {
-                knownNames = [QwenSampleTools.WeatherToolName];
-            }
-            else if (options.Mode == "tools-nivara")
-            {
-                var nivaraModelsDir = Path.Combine(GetRepoRoot(), "samples", "data", "nivarachat");
-                if (!File.Exists(Path.Combine(nivaraModelsDir, "sentiment_model.json")))
-                {
-                    Console.WriteLine($"Nivara models not found in '{nivaraModelsDir}'. Run --train first.");
-                    return;
-                }
-                (nivaraSentimentModel, nivaraSentimentTok) = ModeHelpers.LoadSentimentModel(nivaraModelsDir);
-                (nivaraEntityModel, nivaraEntityTok) = ModeHelpers.LoadEntityModel(nivaraModelsDir);
-                (nivaraValidatorModel, nivaraValidatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
-                NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok);
-
-                nivaraTools = NivaraAIFunctions.CreateRegistered(
-                    nivaraSentimentModel, nivaraSentimentTok,
-                    nivaraEntityModel, nivaraEntityTok,
-                    nivaraValidatorModel, nivaraValidatorTok,
-                    options.NivaraTools ?? "all").ToList();
-                knownNames = nivaraTools.Select(t => t.Name).ToArray();
-            }
-
-            using var client = new QwenChatClient<T>(
-                model, tokenizer, config,
-                maxNewTokens: options.MaxNewTokens,
-                temperature: options.Temperature,
-                topP: options.HasTopP ? options.TopP : null,
-                seed: options.Seed,
-                useKvCache: options.UseKvCache,
-                knownToolNames: knownNames);
-
-            if (options.Mode == "tools-weather")
-            {
-                await RunToolsWeather(client, options.Text);
-                return;
-            }
-
-            if (options.Mode == "tools-nivara")
-            {
-                try
-                {
-                    await RunToolsNivara(client, options.Text, nivaraTools!);
-                }
-                finally
-                {
-                    nivaraSentimentModel?.Dispose();
-                    nivaraEntityModel?.Dispose();
-                    nivaraValidatorModel?.Dispose();
-                }
-                return;
-            }
-
-            if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
-            {
-                await RunSingleTurn(client, options.Text ?? "The capital of France is");
-                return;
-            }
-
-            await RunRepl(client);
+            knownNames = [QwenSampleTools.WeatherToolName];
         }
-        finally
+        else if (options.Mode == "tools-nivara")
         {
-            // widen is on by default now.
-        }
-    }
+            var nivaraModelsDir = Path.Combine(GetRepoRoot(), "samples", "data", "nivarachat");
+            if (!File.Exists(Path.Combine(nivaraModelsDir, "sentiment_model.json")))
+            {
+                Console.WriteLine($"Nivara models not found in '{nivaraModelsDir}'. Run --train first.");
+                return;
+            }
+            (nivaraSentimentModel, nivaraSentimentTok) = ModeHelpers.LoadSentimentModel(nivaraModelsDir);
+            (nivaraEntityModel, nivaraEntityTok) = ModeHelpers.LoadEntityModel(nivaraModelsDir);
+            (nivaraValidatorModel, nivaraValidatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
+            NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok);
 
-    /// <summary>Narrow compute types (BFloat16/Half) run their dots through the
-    /// widen-compute-narrow SIMD kernels only while <see cref="NivaraPrimitives.UseWidenSimd"/> is
-    /// enabled — without it they fall to the ~26× slower scalar BCL dot. Enabling for the narrow
-    /// session (and restoring afterwards) keeps the BF16 chat host fast by construction.</summary>
-    static bool EnableWidenSimdIfNarrow<T>()
-        where T : struct
-    {
-        // widen is on by default now.
-        return false;
+            nivaraTools = NivaraAIFunctions.CreateRegistered(
+                nivaraSentimentModel, nivaraSentimentTok,
+                nivaraEntityModel, nivaraEntityTok,
+                nivaraValidatorModel, nivaraValidatorTok,
+                options.NivaraTools ?? "all").ToList();
+            knownNames = nivaraTools.Select(t => t.Name).ToArray();
+        }
+
+        using var client = new QwenChatClient<TModel, TWeight>(
+            model, tokenizer, config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache,
+            knownToolNames: knownNames);
+
+        if (options.Mode == "tools-weather")
+        {
+            await RunToolsWeather(client, options.Text);
+            return;
+        }
+
+        if (options.Mode == "tools-nivara")
+        {
+            try
+            {
+                await RunToolsNivara(client, options.Text, nivaraTools!);
+            }
+            finally
+            {
+                nivaraSentimentModel?.Dispose();
+                nivaraEntityModel?.Dispose();
+                nivaraValidatorModel?.Dispose();
+            }
+            return;
+        }
+
+        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+        {
+            await RunSingleTurn(client, options.Text ?? "The capital of France is");
+            return;
+        }
+
+        await RunRepl(client);
     }
 
     /// <summary>
@@ -485,7 +470,6 @@ public static class QwenMode
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--model-dir" && i + 1 < args.Length) options.ModelDir = args[++i];
-            else if (args[i] == "--precision" && i + 1 < args.Length) options.Precision = args[++i];
             else if (args[i] == "--max-new-tokens" && i + 1 < args.Length) options.MaxNewTokens = int.Parse(args[++i]);
             else if (args[i] == "--temperature" && i + 1 < args.Length) options.Temperature = float.Parse(args[++i]);
             else if (args[i] == "--top-p" && i + 1 < args.Length) { options.TopP = float.Parse(args[++i]); options.HasTopP = true; }
@@ -496,6 +480,11 @@ public static class QwenMode
             else if (args[i] == "--nivara-tools" && i + 1 < args.Length) options.NivaraTools = args[++i];
             else if (args[i] == "--silk") options.UseSilk = true;
             else if (args[i] is "-h" or "--help") options.ShowHelp = true;
+            else if (args[i].StartsWith("-", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"Unknown option: {args[i]}");
+                options.ShowHelp = true;
+            }
         }
         options.Mode = args.Length > 0 ? args[0] : "";
         return options;
@@ -522,7 +511,6 @@ public static class QwenMode
 
             Options:
               --model-dir <path>     Model directory (default samples/data/qwen2.5-0.5b-instruct)
-              --precision f32|bf16   Compute precision (default f32; BF16 weights upcast to F32)
               --max-new-tokens <n>   Max tokens to generate per turn (default 128)
               --temperature <t>      Sampling temperature; >0 enables sampling (default 0 = greedy)
               --top-p <p>            Nucleus (top-p) cutoff for sampling, 0-1 (default 1 = off)
@@ -539,7 +527,6 @@ public static class QwenMode
     {
         public string Mode { get; set; } = "";
         public string? ModelDir { get; set; }
-        public string Precision { get; set; } = "f32";
         public int MaxNewTokens { get; set; } = 128;
         public float? Temperature { get; set; }
         public float TopP { get; set; } = 1f;
