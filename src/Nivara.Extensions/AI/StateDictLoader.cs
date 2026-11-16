@@ -207,8 +207,8 @@ public static class StateDictLoader
         if (!tensors.TryGetValue(key, out var t))
             throw new KeyNotFoundException($"Missing tensor: {key}");
 
-        var requiresGrad = embed.Weight != null && embed.Weight.Tensor.RequiresGrad;
-        embed.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(t.Data, t.Shape[0], t.Shape[1], requiresGrad);
+        var requiresGrad = embed.Weight?.Tensor.RequiresGrad ?? true;
+        embed.BindWeight(ReverseGradTensor<TWeight>.FromMatrix(t.Data, t.Shape[0], t.Shape[1], requiresGrad));
     }
 
     public static void LoadLinear<TModel, TWeight>(
@@ -223,8 +223,8 @@ public static class StateDictLoader
 
         if (tensors.TryGetValue($"{prefix}.weight", out var w))
         {
-            var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
-            linear.Weight!.Tensor = ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1], requiresGrad);
+            var requiresGrad = linear.Weight?.Tensor.RequiresGrad ?? true;
+            linear.BindWeight(ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1], requiresGrad));
         }
 
         if (tensors.TryGetValue($"{prefix}.bias", out var b))
@@ -264,8 +264,8 @@ public static class StateDictLoader
         var column = NivaraColumn<TWeight>.CreateFromOwnedArray(w.Data)
             .Slice(rowOffset * inFeatures, rowCount * inFeatures);
 
-        var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
-        linear.Weight!.Tensor = new ReverseGradTensor<TWeight>(column, requiresGrad, new[] { rowCount, inFeatures });
+        var requiresGrad = linear.Weight?.Tensor.RequiresGrad ?? true;
+        linear.BindWeight(new ReverseGradTensor<TWeight>(column, requiresGrad, new[] { rowCount, inFeatures }));
     }
 
     public static void LoadFusedLinearSlice<TModel, TWeight>(
@@ -298,8 +298,8 @@ public static class StateDictLoader
         var biasSlice = new TWeight[rowCount];
         Array.Copy(b.Data, rowOffset, biasSlice, 0, rowCount);
 
-        var requiresGrad = linear.Weight != null && linear.Weight.Tensor.RequiresGrad;
-        linear.Weight!.Tensor = new ReverseGradTensor<TWeight>(weightColumn, requiresGrad, new[] { rowCount, inFeatures });
+        var requiresGrad = linear.Weight?.Tensor.RequiresGrad ?? true;
+        linear.BindWeight(new ReverseGradTensor<TWeight>(weightColumn, requiresGrad, new[] { rowCount, inFeatures }));
 
         var state = new Dictionary<string, ReverseGradTensor<TModel>>
         {

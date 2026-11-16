@@ -55,6 +55,11 @@ public class LayaHeadLayer<TModel, TWeight> : Module<TModel> where TModel : stru
     public readonly Linear<TModel, TWeight> linear2;
 
     public LayaHeadLayer(int hiddenSize, int intermediateSize, int numHeads, float eps)
+        : this(hiddenSize, intermediateSize, numHeads, eps, false)
+    {
+    }
+
+    internal LayaHeadLayer(int hiddenSize, int intermediateSize, int numHeads, float eps, bool skipWeightInitialization)
     {
         if (hiddenSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(hiddenSize), hiddenSize, "hiddenSize must be positive");
@@ -68,10 +73,18 @@ public class LayaHeadLayer<TModel, TWeight> : Module<TModel> where TModel : stru
                 $"hiddenSize {hiddenSize} does not divide into {numHeads} heads");
 
         norm1 = new LayerNorm<TModel>(hiddenSize, eps);
-        attn = new BertSelfAttention<TModel, TWeight>(hiddenSize, numHeads);
+        attn = new BertSelfAttention<TModel, TWeight>(hiddenSize, numHeads, skipWeightInitialization);
         norm2 = new LayerNorm<TModel>(hiddenSize, eps);
-        linear1 = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: true);
-        linear2 = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: true);
+        if (skipWeightInitialization)
+        {
+            linear1 = Linear<TModel, TWeight>.Uninitialized(hiddenSize, intermediateSize, true);
+            linear2 = Linear<TModel, TWeight>.Uninitialized(intermediateSize, hiddenSize, true);
+        }
+        else
+        {
+            linear1 = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: true);
+            linear2 = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: true);
+        }
         RegisterModules(norm1, attn, norm2, linear1, linear2);
     }
 
@@ -227,6 +240,11 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
     public IReadOnlyList<TModel> CheckpointTemperature => checkpointTemperature;
 
     public LayaDecisionHead(int hiddenSize, int headLayerCount = 2, int actClassCount = 2, float eps = 1e-5f)
+        : this(hiddenSize, headLayerCount, actClassCount, eps, false)
+    {
+    }
+
+    internal LayaDecisionHead(int hiddenSize, int headLayerCount, int actClassCount, float eps, bool skipWeightInitialization)
     {
         if (hiddenSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(hiddenSize), hiddenSize, "hiddenSize must be positive");
@@ -244,16 +262,28 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
             throw new ArgumentException(
                 $"hiddenSize {hiddenSize} does not divide into {NumHeads} heads at {HeadDimTarget} wide");
 
-        typeEmb = new Embedding<TModel, TWeight>(QuestionTypeCount, hiddenSize);
+        typeEmb = skipWeightInitialization
+            ? Embedding<TModel, TWeight>.Uninitialized(QuestionTypeCount, hiddenSize)
+            : new Embedding<TModel, TWeight>(QuestionTypeCount, hiddenSize);
         scorerNorm = new LayerNorm<TModel>(hiddenSize, eps);
-        scorerHidden = new Linear<TModel, TWeight>(hiddenSize, hiddenSize, bias: true);
-        scorerOut = new Linear<TModel, TWeight>(hiddenSize, 1, bias: true);
-        actInput = new Linear<TModel, TWeight>(hiddenSize + LayaHeadOutput.FeatureCount, ActHeadHidden, bias: true);
-        actOut = new Linear<TModel, TWeight>(ActHeadHidden, actClassCount, bias: true);
+        if (skipWeightInitialization)
+        {
+            scorerHidden = Linear<TModel, TWeight>.Uninitialized(hiddenSize, hiddenSize, true);
+            scorerOut = Linear<TModel, TWeight>.Uninitialized(hiddenSize, 1, true);
+            actInput = Linear<TModel, TWeight>.Uninitialized(hiddenSize + LayaHeadOutput.FeatureCount, ActHeadHidden, true);
+            actOut = Linear<TModel, TWeight>.Uninitialized(ActHeadHidden, actClassCount, true);
+        }
+        else
+        {
+            scorerHidden = new Linear<TModel, TWeight>(hiddenSize, hiddenSize, bias: true);
+            scorerOut = new Linear<TModel, TWeight>(hiddenSize, 1, bias: true);
+            actInput = new Linear<TModel, TWeight>(hiddenSize + LayaHeadOutput.FeatureCount, ActHeadHidden, bias: true);
+            actOut = new Linear<TModel, TWeight>(ActHeadHidden, actClassCount, bias: true);
+        }
 
         headLayers = new LayaHeadLayer<TModel, TWeight>[headLayerCount];
         for (int i = 0; i < headLayerCount; i++)
-            headLayers[i] = new LayaHeadLayer<TModel, TWeight>(hiddenSize, 4 * hiddenSize, NumHeads, eps);
+            headLayers[i] = new LayaHeadLayer<TModel, TWeight>(hiddenSize, 4 * hiddenSize, NumHeads, eps, skipWeightInitialization);
 
         // The reference registers torch.ones(3); a checkpoint overrides it. The value is kept
         // unloaded-as-one rather than left at a silent identity.
@@ -419,7 +449,7 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
                 "Missing tensor: type_emb.weight. A stock encoder checkpoint is not a Laya decision " +
                 "model; the head is what makes it one.");
 
-        var head = new LayaDecisionHead<TModel, TWeight>(typeWeight.Shape[1], headLayerCount, actClassCount);
+        var head = new LayaDecisionHead<TModel, TWeight>(typeWeight.Shape[1], headLayerCount, actClassCount, 1e-5f, true);
         int hidden = head.HiddenSize;
 
         StateDictLoader.LoadEmbed(head.typeEmb, tensors, "type_emb.weight");

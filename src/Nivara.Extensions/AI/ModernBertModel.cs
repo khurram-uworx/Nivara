@@ -292,11 +292,26 @@ public class ModernBertAttention<TModel, TWeight> : Module<TModel> where TModel 
     public int HeadDim => rope.HeadDim;
 
     public ModernBertAttention(ModernBertConfig config, float ropeTheta)
+        : this(config, ropeTheta, false)
     {
-        qProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
-        kProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
-        vProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
-        oProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+    }
+
+    internal ModernBertAttention(ModernBertConfig config, float ropeTheta, bool skipWeightInitialization)
+    {
+        if (skipWeightInitialization)
+        {
+            qProj = Linear<TModel, TWeight>.Uninitialized(config.HiddenSize, config.HiddenSize, false);
+            kProj = Linear<TModel, TWeight>.Uninitialized(config.HiddenSize, config.HiddenSize, false);
+            vProj = Linear<TModel, TWeight>.Uninitialized(config.HiddenSize, config.HiddenSize, false);
+            oProj = Linear<TModel, TWeight>.Uninitialized(config.HiddenSize, config.HiddenSize, false);
+        }
+        else
+        {
+            qProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+            kProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+            vProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+            oProj = new Linear<TModel, TWeight>(config.HiddenSize, config.HiddenSize, bias: false);
+        }
 
         rope = new RotaryEmbedding<TModel>(config.HeadDim, config.MaxPositionEmbeddings, ropeTheta);
         numHeads = config.NumAttentionHeads;
@@ -350,10 +365,24 @@ public class ModernBertMlp<TModel, TWeight> : Module<TModel> where TModel : stru
     public readonly Linear<TModel, TWeight> downProj;
 
     public ModernBertMlp(ModernBertConfig config)
+        : this(config, false)
     {
-        inputProj = new Linear<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, bias: false);
-        gateProj = new Linear<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, bias: false);
-        downProj = new Linear<TModel, TWeight>(config.IntermediateSize, config.HiddenSize, bias: false);
+    }
+
+    internal ModernBertMlp(ModernBertConfig config, bool skipWeightInitialization)
+    {
+        if (skipWeightInitialization)
+        {
+            inputProj = Linear<TModel, TWeight>.Uninitialized(config.HiddenSize, config.IntermediateSize, false);
+            gateProj = Linear<TModel, TWeight>.Uninitialized(config.HiddenSize, config.IntermediateSize, false);
+            downProj = Linear<TModel, TWeight>.Uninitialized(config.IntermediateSize, config.HiddenSize, false);
+        }
+        else
+        {
+            inputProj = new Linear<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, bias: false);
+            gateProj = new Linear<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, bias: false);
+            downProj = new Linear<TModel, TWeight>(config.IntermediateSize, config.HiddenSize, bias: false);
+        }
         RegisterModules(inputProj, gateProj, downProj);
     }
 
@@ -386,13 +415,18 @@ public class ModernBertLayer<TModel, TWeight> : Module<TModel> where TModel : st
     public int HiddenSize => hiddenSize;
 
     public ModernBertLayer(ModernBertConfig config, int layerIndex)
+        : this(config, layerIndex, false)
+    {
+    }
+
+    internal ModernBertLayer(ModernBertConfig config, int layerIndex, bool skipWeightInitialization)
     {
         hiddenSize = config.HiddenSize;
         if (layerIndex != 0)
             attnNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
-        attn = new ModernBertAttention<TModel, TWeight>(config, config.RopeTheta(layerIndex));
+        attn = new ModernBertAttention<TModel, TWeight>(config, config.RopeTheta(layerIndex), skipWeightInitialization);
         mlpNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
-        mlp = new ModernBertMlp<TModel, TWeight>(config);
+        mlp = new ModernBertMlp<TModel, TWeight>(config, skipWeightInitialization);
 
         if (attnNorm != null)
             RegisterModules(attnNorm);
@@ -656,15 +690,22 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
     public readonly LayerNorm<TModel> finalNorm;
 
     public ModernBertEncoder(ModernBertConfig config)
+        : this(config, false)
+    {
+    }
+
+    internal ModernBertEncoder(ModernBertConfig config, bool skipWeightInitialization)
     {
         ArgumentNullException.ThrowIfNull(config);
 
         this.config = config;
-        tokenEmbedding = new Embedding<TModel, TWeight>(config.VocabSize, config.HiddenSize);
+        tokenEmbedding = skipWeightInitialization
+            ? Embedding<TModel, TWeight>.Uninitialized(config.VocabSize, config.HiddenSize)
+            : new Embedding<TModel, TWeight>(config.VocabSize, config.HiddenSize);
         embedNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
         layers = new ModernBertLayer<TModel, TWeight>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
-            layers[i] = new ModernBertLayer<TModel, TWeight>(config, i);
+            layers[i] = new ModernBertLayer<TModel, TWeight>(config, i, skipWeightInitialization);
         finalNorm = new LayerNorm<TModel>(config.HiddenSize, config.NormEps, bias: false);
 
         RegisterModules(tokenEmbedding, embedNorm, finalNorm);
@@ -764,7 +805,7 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
     {
         ArgumentNullException.ThrowIfNull(tensors);
 
-        var encoder = new ModernBertEncoder<TModel, TWeight>(config);
+        var encoder = new ModernBertEncoder<TModel, TWeight>(config, true);
 
         StateDictLoader.LoadEmbed(encoder.tokenEmbedding, tensors, $"{prefix}.embeddings.tok_embeddings.weight");
         StateDictLoader.LoadLayerNorm(encoder.embedNorm, tensors, $"{prefix}.embeddings.norm");
