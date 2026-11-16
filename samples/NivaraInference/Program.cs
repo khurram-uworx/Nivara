@@ -659,7 +659,8 @@ class Program
             return 1;
         }
 
-        bool silkNarrowModel = modelType is "modernbert" or "laya";
+        bool silkNarrowModel = modelType is "modernbert" or "laya"
+            || (modelType == "qwen" && mode != "distill");
         if (useSilk && fp16)
         {
             Console.Error.WriteLine("--silk is F32-only: fp16 shows no measured speedup at current shapes (0.97–1.07×), so bf16 is preferred; use --precision bf16 or drop --silk.");
