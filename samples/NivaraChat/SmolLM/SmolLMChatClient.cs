@@ -10,7 +10,7 @@ namespace NivaraChat.SmolLM;
 
 /// <summary>
 /// An <see cref="IChatClient"/> backed by a pretrained SmolLM/Llama causal LM
-/// (<see cref="LlamaForCausalLM{T}"/>). Renders the conversation with
+/// (<see cref="LlamaForCausalLM{TModel, TWeight}"/>). Renders the conversation with
 /// <see cref="SmollmChatTemplate"/>, generates autoregressively, and streams the plain-text
 /// reply token-by-token. Greedy (argmax) by default; when <paramref name="temperature"/> is
 /// greater than 0, tokens are drawn from the temperature-scaled softmax with optional top-p
@@ -19,8 +19,9 @@ namespace NivaraChat.SmolLM;
 /// The model runs in eval mode; each call builds its own tensors, so concurrent requests are
 /// safe (re-entrant). Plain-chat only in Stage A.
 /// </summary>
-internal sealed class SmolLMChatClient<T> : IChatClient
-    where T : struct, IFloatingPointIeee754<T>
+internal sealed class SmolLMChatClient<TModel, TWeight> : IChatClient
+    where TModel : struct, IFloatingPointIeee754<TModel>
+    where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     static readonly string[] SpecialTokens =
     [
@@ -29,7 +30,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         "<|endoftext|>",
     ];
 
-    readonly LlamaForCausalLM<T, T> model;
+    readonly LlamaForCausalLM<TModel, TWeight> model;
     readonly Gpt2BpeTokenizer tokenizer;
     readonly LlamaConfig config;
     readonly int maxNewTokens;
@@ -42,7 +43,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
     readonly int kvWidth;
 
     public SmolLMChatClient(
-        LlamaForCausalLM<T, T> model,
+        LlamaForCausalLM<TModel, TWeight> model,
         Gpt2BpeTokenizer tokenizer,
         LlamaConfig config,
         int maxNewTokens = 64,
@@ -93,7 +94,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         var ids = new List<int>(tokenizeCache.Encode(prompt, p => EncodePrompt(p)));
 
         using var cache = useKvCache
-            ? new LlamaKVCache<T>(numLayers, kvWidth)
+            ? new LlamaKVCache<TModel>(numLayers, kvWidth)
             : null;
 
         bool isGreedy = temperature <= 0f;
@@ -138,7 +139,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         var ids = new List<int>(tokenizeCache.Encode(prompt, p => EncodePrompt(p)));
 
         using var cache = useKvCache
-            ? new LlamaKVCache<T>(numLayers, kvWidth)
+            ? new LlamaKVCache<TModel>(numLayers, kvWidth)
             : null;
 
         bool isGreedy = temperature <= 0f;
@@ -181,12 +182,12 @@ internal sealed class SmolLMChatClient<T> : IChatClient
 
     /// <summary>Runs the prompt tokens through a single batched prefill to seed the per-layer cache
     /// and produce the logits predicting the first generated token.</summary>
-    ReverseGradTensor<T> SeedCache(List<int> ids, LlamaKVCache<T> cache)
+    ReverseGradTensor<TModel> SeedCache(List<int> ids, LlamaKVCache<TModel> cache)
         => model.ForwardPrefill(ids.ToArray(), cache);
 
     /// <summary>Selects the next token: argmax when greedy, otherwise temperature softmax with
     /// optional top-p filtering, drawn from the shared seeded RNG.</summary>
-    int Select(ReadOnlySpan<T> lastRow, int vocab, bool isGreedy)
+    int Select(ReadOnlySpan<TModel> lastRow, int vocab, bool isGreedy)
     {
         if (lastRow.Length < vocab)
             lastRow = lastRow[..vocab];
@@ -195,7 +196,7 @@ internal sealed class SmolLMChatClient<T> : IChatClient
     }
 
     /// <summary>Returns the model's final-position logits (<c>[vocab]</c>) as a span.</summary>
-    static ReadOnlySpan<T> LastRow(ReverseGradTensor<T> logits)
+    static ReadOnlySpan<TModel> LastRow(ReverseGradTensor<TModel> logits)
     {
         logits.Data.TryGetSpan(out var span);
         int vocab = logits.Shape[^1];
