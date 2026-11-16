@@ -179,6 +179,24 @@ public class LayaNativeCheckpointTests
         Assert.That(alloc, Is.LessThan(10 * 1024 * 1024),
             $"Forward allocated {alloc} bytes; a weight widen would be >= 1.37 GB.");
     }
+    [Test]
+    public void LoadWeights_AllocatesLessThanOneWeightCopy()
+    {
+        LayaCheckpoint.RequireCheckpoint();
+        var ts = TensorsHalf;
+        var cfg = Config;
+        var hl = HeadLayers;
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var enc = ModernBertEncoder<float, Half>.LoadWeights(ts, cfg, "encoder");
+        var head = LayaDecisionHead<float, Half>.LoadWeights(ts, hl);
+        long alloc = GC.GetAllocatedBytesForCurrentThread() - before;
+        enc.Dispose();
+        head.Dispose();
+
+        Assert.That(alloc, Is.LessThan(16 * 1024 * 1024),
+            $"LoadWeights allocated {alloc} bytes; expect < 16 MB once ctor garbage is removed.");
+    }
 }
 
 static class LayaCheckpoint
