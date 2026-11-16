@@ -3089,7 +3089,7 @@ class Program
         var buildSw = Stopwatch.StartNew();
         using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
         buildSw.Stop();
-        Console.WriteLine($"Device: {session.DeviceName}  Precision: BFloat16");
+        Console.WriteLine($"Device: {session.DeviceName}  Precision: BFloat16 storage / F32 compute");
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +
                           $"intermediate={config.IntermediateSize}");
