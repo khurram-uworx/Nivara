@@ -2,6 +2,29 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
+## [1.5.2] - 2026-11-16
+
+### Added
+
+- `Linear<TModel, TWeight>.Uninitialized(...)` / `Embedding<TModel, TWeight>.Uninitialized(...)`
+  and `BindWeight(...)` — construct a module whose weight is left unallocated so a
+  checkpoint can be bound without the load-time transient (the constructor previously
+  allocated the weight twice: placeholder plus initialiser array). `Weight` is null until
+  bound; `Forward`/`StateDict`/`GatherRows`/`ExportToOnnx` throw "… has not been loaded"
+  rather than reading an empty tensor. `LoadStateDict` materialises the parameter when
+  the module was constructed this way. `ModernBertEncoder`, `LayaDecisionHead`, and
+  `LlamaForCausalLM` (and their layer/attention submodules) load this way internally.
+- Follow-up #1237 tracks the same treatment for `MiniLMDistilled` / `DistilBert`.
+
+### Changed
+
+- `StateDictLoader` mixed-target bind sites now use `BindWeight(...)` and default the
+  bound tensor's `RequiresGrad` to `true` when the module was deferred (previously it
+  silently became `false`).
+- Laya `LoadWeights` no longer allocates the ~1.57 GB of short-lived ctor garbage
+  (measured via `GC.GetAllocatedBytesForCurrentThread`); the allocation gate in
+  `LayaNativeCheckpointTests` pins it below 16 MB.
+
 ## [1.5.1] - 2026-11-15
 
 ### Breaking changes (migration)

@@ -19,7 +19,7 @@ public class Embedding<TModel, TWeight> : Module<TModel>
 {
     readonly int numEmbeddings;
     readonly int embeddingDim;
-    readonly Parameter<TWeight> weight;
+    Parameter<TWeight>? weight;
 
     /// <summary>Gets the size of the vocabulary (number of embedding rows).</summary>
     public int NumEmbeddings => numEmbeddings;
@@ -28,12 +28,12 @@ public class Embedding<TModel, TWeight> : Module<TModel>
     /// <summary>Gets the weight parameter (shape <c>[numEmbeddings, embeddingDim]</c>).</summary>
     public Parameter<TWeight>? Weight => weight;
 
-    /// <summary>
-    /// Creates an embedding table.
-    /// </summary>
-    /// <param name="numEmbeddings">Size of the vocabulary (must be positive)</param>
-    /// <param name="embeddingDim">Dimension of each embedding vector (must be positive)</param>
     public Embedding(int numEmbeddings, int embeddingDim)
+        : this(numEmbeddings, embeddingDim, false)
+    {
+    }
+
+    internal Embedding(int numEmbeddings, int embeddingDim, bool skipWeightInitialization)
     {
         if (numEmbeddings <= 0) throw new ArgumentOutOfRangeException(nameof(numEmbeddings));
         if (embeddingDim <= 0) throw new ArgumentOutOfRangeException(nameof(embeddingDim));
@@ -41,16 +41,60 @@ public class Embedding<TModel, TWeight> : Module<TModel>
         this.numEmbeddings = numEmbeddings;
         this.embeddingDim = embeddingDim;
 
-        var data = new TWeight[numEmbeddings * embeddingDim];
-        var tensor = ReverseGradTensor<TWeight>.FromMatrix(data, numEmbeddings, embeddingDim, requiresGrad: true);
-        weight = new Parameter<TWeight>("Weight", tensor);
-        if (typeof(TWeight) == typeof(TModel))
-            RegisterParameterObject(weight);
-        else
-            RegisterMixedParameters(weight);
+        if (!skipWeightInitialization)
+        {
+            var data = new TWeight[numEmbeddings * embeddingDim];
+            var tensor = ReverseGradTensor<TWeight>.FromMatrix(data, numEmbeddings, embeddingDim, requiresGrad: true);
+            weight = new Parameter<TWeight>("Weight", tensor);
+            if (typeof(TWeight) == typeof(TModel))
+                RegisterParameterObject(weight);
+            else
+                RegisterMixedParameters(weight);
 
-        var init = new NormalInitializer<TWeight>(TWeight.Zero, TWeight.CreateChecked(0.02));
-        init.Initialize(weight);
+            var init = new NormalInitializer<TWeight>(TWeight.Zero, TWeight.CreateChecked(0.02));
+            init.Initialize(weight);
+        }
+    }
+
+    /// <summary>
+    /// Creates an <see cref="Embedding{TModel, TWeight}"/> whose weight is left uninitialised
+    /// so that a checkpoint can be bound into it without allocating the weight-sized placeholder.
+    /// Use <see cref="BindWeight"/> or <see cref="Module{T}.LoadStateDict"/> to supply the
+    /// weight before use.
+    /// </summary>
+    public static Embedding<TModel, TWeight> Uninitialized(int numEmbeddings, int embeddingDim)
+    {
+        if (numEmbeddings <= 0) throw new ArgumentOutOfRangeException(nameof(numEmbeddings));
+        if (embeddingDim <= 0) throw new ArgumentOutOfRangeException(nameof(embeddingDim));
+        return new Embedding<TModel, TWeight>(numEmbeddings, embeddingDim, true);
+    }
+
+    /// <summary>
+    /// Binds a weight tensor into this module, creating the weight parameter if it has not
+    /// been initialised yet (the <see cref="Uninitialized"/> load path). A subsequent call
+    /// replaces the bound tensor. The supplied tensor must have shape
+    /// <c>[numEmbeddings, embeddingDim]</c>.
+    /// </summary>
+    public void BindWeight(ReverseGradTensor<TWeight> weightTensor)
+    {
+        ArgumentNullException.ThrowIfNull(weightTensor);
+        if (weightTensor.Shape.Length != 2 || weightTensor.Shape[0] != numEmbeddings || weightTensor.Shape[1] != embeddingDim)
+            throw new ArgumentException(
+                $"Weight shape must be [{numEmbeddings}, {embeddingDim}], but was [{string.Join(", ", weightTensor.Shape)}].",
+                nameof(weightTensor));
+
+        if (weight is null)
+        {
+            weight = new Parameter<TWeight>("Weight", weightTensor);
+            if (typeof(TWeight) == typeof(TModel))
+                RegisterParameterObject(weight);
+            else
+                RegisterMixedParameters(weight);
+        }
+        else
+        {
+            weight.Tensor = weightTensor;
+        }
     }
 
     /// <summary>
@@ -62,6 +106,7 @@ public class Embedding<TModel, TWeight> : Module<TModel>
     public override ReverseGradTensor<TModel> Forward(ReverseGradTensor<TModel> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
 
         if (input.Length == 0)
             throw new ArgumentException("Embedding.Forward input tensor is empty.", nameof(input));
@@ -99,6 +144,7 @@ public class Embedding<TModel, TWeight> : Module<TModel>
     public ReverseGradTensor<TModel> Forward(int[] tokenIds)
     {
         if (tokenIds == null) throw new ArgumentNullException(nameof(tokenIds));
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
         if (tokenIds.Length == 0)
             throw new ArgumentException("Embedding.Forward input is empty.", nameof(tokenIds));
 
@@ -123,17 +169,20 @@ public class Embedding<TModel, TWeight> : Module<TModel>
     {
         if (tokenId < 0 || tokenId >= numEmbeddings)
             throw new ArgumentOutOfRangeException(nameof(tokenId));
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
 
         return ForwardCore(new[] { tokenId }, null, false);
     }
 
     ReverseGradTensor<TModel> ForwardCore(int[] tokenIds, int[]? originalShape, bool reshape)
     {
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
+
         int stride = embeddingDim;
         int totalTokens = tokenIds.Length;
         var resultArr = new TModel[totalTokens * stride];
 
-        weight.Tensor.Data.TryGetSpan(out var wSpan);
+        weight!.Tensor.Data.TryGetSpan(out var wSpan);
 
         for (int i = 0; i < totalTokens; i++)
         {
@@ -154,12 +203,12 @@ public class Embedding<TModel, TWeight> : Module<TModel>
             var savedTokenIds = (int[])tokenIds.Clone();
             var nodeInputs = typeof(TWeight) == typeof(TModel)
                 ? (IReadOnlyList<ReverseGradTensor<TModel>>)
-                    new[] { (ReverseGradTensor<TModel>)(object)weight.Tensor }
+                    new[] { (ReverseGradTensor<TModel>)(object)weight!.Tensor }
                 : (IReadOnlyList<ReverseGradTensor<TModel>>)Array.Empty<ReverseGradTensor<TModel>>();
             var gradFn = new OpNode<TModel>("EmbeddingMixed", nodeInputs, (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gradSpan);
-                if (!weight.Tensor.RequiresGrad)
+                if (!weight!.Tensor.RequiresGrad)
                     return;
 
                 var gAcc = new TModel[numEmbeddings * embeddingDim];
@@ -176,7 +225,7 @@ public class Embedding<TModel, TWeight> : Module<TModel>
                     narrowed[i] = TWeight.CreateChecked(gAcc[i]);
 
                 ReverseGradOperations.AccumulateGradient(
-                    weight.Tensor,
+                    weight!.Tensor,
                     NivaraColumn<TWeight>.CreateFromOwnedArray(narrowed));
             });
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -198,10 +247,11 @@ public class Embedding<TModel, TWeight> : Module<TModel>
     internal void GatherRows(int[] tokenIds, Span<TModel> destination)
     {
         if (tokenIds == null) throw new ArgumentNullException(nameof(tokenIds));
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
         if (destination.Length < tokenIds.Length * embeddingDim)
             throw new ArgumentException("Destination span is too small.", nameof(destination));
 
-        weight.Tensor.Data.TryGetSpan(out var wSpan);
+        weight!.Tensor.Data.TryGetSpan(out var wSpan);
         int stride = embeddingDim;
         if (typeof(TWeight) == typeof(TModel))
         {
@@ -219,13 +269,17 @@ public class Embedding<TModel, TWeight> : Module<TModel>
         }
     }
 
-    bool ShouldTrack() => GradientUtils.IsGradEnabled && weight.Tensor.RequiresGrad;
+    bool ShouldTrack() => GradientUtils.IsGradEnabled && weight!.Tensor.RequiresGrad;
 
     public override string ExportToOnnx(IOnnxExportContext<TModel> context, string inputName)
-        => context.Embedding<TWeight>(inputName, this);
+    {
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
+        return context.Embedding<TWeight>(inputName, this);
+    }
 
     public override Dictionary<string, ReverseGradTensor<TModel>> StateDict()
     {
+        if (weight is null) throw new InvalidOperationException("Embedding weight has not been loaded.");
         var state = base.StateDict();
         var weightTensor = TypeConverter.Convert<TWeight, TModel>(weight.Tensor, weight.Tensor.RequiresGrad);
         state["Weight"] = Module<TModel>.CloneTensor(weightTensor);
@@ -239,39 +293,47 @@ public class Embedding<TModel, TWeight> : Module<TModel>
         ArgumentNullException.ThrowIfNull(stateDict);
 
         var remaining = new Dictionary<string, ReverseGradTensor<TModel>>();
+        bool weightSeen = false;
 
         foreach (var (name, source) in stateDict)
         {
-            if (name == "Weight" && typeof(TWeight) != typeof(TModel))
+            if (name == "Weight")
             {
-                ValidateShape(name, source.Shape, weight.Shape);
-                var converted = TypeConverter.Convert<TModel, TWeight>(source, weight.Tensor.RequiresGrad);
-                var values = new TWeight[converted.Length];
-                converted.Data.CopyTo(values, TWeight.Zero);
-                var data = NivaraColumn<TWeight>.Create(values);
-                weight.Tensor = new ReverseGradTensor<TWeight>(data, converted.RequiresGrad, converted.Shape);
+                if (source.Shape.Length != 2 || source.Shape[0] != numEmbeddings || source.Shape[1] != embeddingDim)
+                    throw new InvalidOperationException(
+                        $"Parameter 'Weight' shape mismatch: " +
+                        $"state has [{string.Join(", ", source.Shape)}], " +
+                        $"model has [{numEmbeddings}, {embeddingDim}].");
+                if (typeof(TWeight) == typeof(TModel))
+                {
+                    var cloned = Module<TModel>.CloneTensor(source);
+                    BindWeight((ReverseGradTensor<TWeight>)(object)cloned);
+                }
+                else
+                {
+                    var converted = TypeConverter.Convert<TModel, TWeight>(source, weight?.Tensor.RequiresGrad ?? true);
+                    var values = new TWeight[converted.Length];
+                    converted.Data.CopyTo(values, TWeight.Zero);
+                    var data = NivaraColumn<TWeight>.Create(values);
+                    BindWeight(new ReverseGradTensor<TWeight>(data, converted.RequiresGrad, converted.Shape));
+                }
+                weightSeen = true;
+                continue;
             }
-            else
-                remaining[name] = source;
+            remaining[name] = source;
         }
 
-        base.LoadStateDict(remaining, strict);
-    }
+        base.LoadStateDict(remaining, false);
 
-    static void ValidateShape(string name, int[] sourceShape, int[] targetShape)
-    {
-        if (sourceShape.Length != targetShape.Length)
-            throw new InvalidOperationException(
-                $"Parameter '{name}' shape rank mismatch: " +
-                $"state has {sourceShape.Length}D, model has {targetShape.Length}D.");
-
-        for (int i = 0; i < sourceShape.Length; i++)
+        if (strict)
         {
-            if (sourceShape[i] != targetShape[i])
+            var modelParameters = GetParameters();
+            var missing = modelParameters.Keys
+                .Where(k => !(k == "Weight" ? weightSeen : remaining.ContainsKey(k)))
+                .ToArray();
+            if (missing.Length > 0)
                 throw new InvalidOperationException(
-                    $"Parameter '{name}' shape mismatch: " +
-                    $"state has [{string.Join(", ", sourceShape)}], " +
-                    $"model has [{string.Join(", ", targetShape)}].");
+                    $"State dictionary is missing model parameters: [{string.Join(", ", missing)}]");
         }
     }
 }
@@ -283,6 +345,14 @@ public sealed class Embedding<T> : Embedding<T, T>
         : base(numEmbeddings, embeddingDim)
     {
     }
+
+    internal Embedding(int numEmbeddings, int embeddingDim, bool skipWeightInitialization)
+        : base(numEmbeddings, embeddingDim, skipWeightInitialization)
+    {
+    }
+
+    public new static Embedding<T> Uninitialized(int numEmbeddings, int embeddingDim)
+        => new Embedding<T>(numEmbeddings, embeddingDim, true);
 
     public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
         => context.Embedding(inputName, this);

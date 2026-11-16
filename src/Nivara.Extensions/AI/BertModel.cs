@@ -53,11 +53,26 @@ public class BertSelfAttention<TModel, TWeight> : Module<TModel> where TModel : 
     readonly TModel _scale;
 
     public BertSelfAttention(int embedDim, int numHeads)
+        : this(embedDim, numHeads, false)
     {
-        qProj = new Linear<TModel, TWeight>(embedDim, embedDim);
-        kProj = new Linear<TModel, TWeight>(embedDim, embedDim);
-        vProj = new Linear<TModel, TWeight>(embedDim, embedDim);
-        oProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+    }
+
+    internal BertSelfAttention(int embedDim, int numHeads, bool skipWeightInitialization)
+    {
+        if (skipWeightInitialization)
+        {
+            qProj = Linear<TModel, TWeight>.Uninitialized(embedDim, embedDim);
+            kProj = Linear<TModel, TWeight>.Uninitialized(embedDim, embedDim);
+            vProj = Linear<TModel, TWeight>.Uninitialized(embedDim, embedDim);
+            oProj = Linear<TModel, TWeight>.Uninitialized(embedDim, embedDim);
+        }
+        else
+        {
+            qProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+            kProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+            vProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+            oProj = new Linear<TModel, TWeight>(embedDim, embedDim);
+        }
         this.embedDim = embedDim;
         _numHeads = numHeads;
         _scale = TModel.CreateChecked(1.0 / Math.Sqrt(embedDim / numHeads));
