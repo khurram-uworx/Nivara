@@ -1,6 +1,7 @@
 using Nivara.AI;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace NivaraInference;
@@ -138,6 +139,7 @@ public static partial class Laya
 
         var (encoder, head, buildMs) = LoadModels<TModel, TWeight>(tensors, config, agent);
         Console.WriteLine($"Load weights: {buildMs} ms");
+        Console.WriteLine(ParameterLine(tensors, precisionLabel.StartsWith("native")));
         Console.WriteLine();
 
         var tokenizer = LoadTokenizer(modelDir);
@@ -187,6 +189,7 @@ public static partial class Laya
 
         var (encoder, head, buildMs) = LoadModels<TModel, TWeight>(tensors, config, agent);
         Console.WriteLine($"Load weights: {buildMs} ms");
+        Console.WriteLine(ParameterLine(tensors, precisionLabel.StartsWith("native")));
         Console.WriteLine();
 
         var tokenizer = LoadTokenizer(modelDir);
@@ -515,10 +518,27 @@ public static partial class Laya
         return (beyond == 0 && actOk, clampOk, Math.Max(maxScaled, actScaled));
     }
 
-    static string ParameterLine(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    static string ParameterLine<TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        bool includeF32Equivalent = false)
+        where TWeight : struct
     {
         long parameters = tensors.Values.Sum(t => (long)t.Data.Length);
-        return $"Parameters: {parameters:N0} ({parameters * 4.0 / (1024.0 * 1024.0):F1} MB as F32)";
+        double bytesPerElement = Unsafe.SizeOf<TWeight>();
+        string label = typeof(TWeight) switch
+        {
+            _ when typeof(TWeight) == typeof(float) => "F32",
+            _ when typeof(TWeight) == typeof(Half) => "Half",
+            _ when typeof(TWeight) == typeof(BFloat16) => "BFloat16",
+            _ => typeof(TWeight).Name,
+        };
+        string mb = (parameters * bytesPerElement / (1024.0 * 1024.0)).ToString("F1");
+        if (includeF32Equivalent && typeof(TWeight) != typeof(float))
+        {
+            double f32Mb = parameters * 4.0 / (1024.0 * 1024.0);
+            return $"Parameters: {parameters:N0} ({mb} MB as {label} / {f32Mb:F1} MB as F32)";
+        }
+        return $"Parameters: {parameters:N0} ({mb} MB as {label})";
     }
 
     static int CountNonFinite(ReadOnlySpan<float> values)

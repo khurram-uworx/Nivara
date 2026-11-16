@@ -175,6 +175,39 @@ Semantics:
 
 ## Verification
 
+### Regenerating Qwen parity fixtures (issue #1223)
+
+The parity tests below depend on PyTorch-generated fixtures in the (gitignored) checkpoint
+directory. They are now committed for `qwen2.5-0.5b-instruct` (see `.gitignore` exceptions),
+so a clean checkout that also has the checkpoint runs the gates instead of skipping. To
+regenerate them (or to refresh after a tokenizer/model change), run both reference
+generators from the repo root against a Python 3.12 + PyTorch 2.13 + transformers 5.14
+environment with the checkpoint already at `samples/data/qwen2.5-0.5b-instruct/`:
+
+```bash
+python samples/NivaraInference/Python/qwen_tool_reference.py
+python samples/NivaraInference/Python/qwen_plain_reference.py
+```
+
+Both scripts write their outputs in place. Expected files and byte sizes:
+
+| File | Bytes | Notes |
+|---|---:|---|
+| `qwen_tool_prompt.txt` | 870 | rendered tools prompt (LF) |
+| `qwen_tool_prompt_ids.bin` | 824 | 206 int32 |
+| `qwen_tool_final_prompt.txt` | 1097 | rendered final prompt with tool result |
+| `qwen_tool_final_prompt_ids.bin` | 1032 | 258 int32 |
+| `qwen_tool_ids_py.bin` | 168 | 42 int32 (19 tool + 23 final) |
+| `qwen_tool_logits_py.bin` | 607744 | 151936 float32 (final position) |
+| `qwen_plain_prompt.txt` | 178 | rendered plain prompt (LF) |
+| `qwen_plain_prompt_ids.bin` | 144 | 36 int32 |
+| `qwen_plain_ids_py.bin` | 28 | 7 int32 |
+| `qwen_plain_logits_py.bin` | 607744 | 151936 float32 (final position) |
+
+The gates (`QwenInstructParityTests`, and the new native checks in
+`QwenNativeCheckpointTests`) skip with an explicit reason when any of these (or the
+checkpoint) are absent.
+
 ### Torch parity (`QwenInstructParityTests`, 13 tests)
 
 - The model/tokenizer load through `LlamaLoader` / `Gpt2BpeTokenizer` with zero *caller* changes (10 tensor names, `tie_word_embeddings`, q/k/v bias variant).

@@ -70,6 +70,20 @@ public class QwenNativeCheckpointTests
         }
     }
 
+    static Gpt2BpeTokenizer? cachedTokenizer;
+    static Gpt2BpeTokenizer Tokenizer
+    {
+        get
+        {
+            if (cachedTokenizer != null) return cachedTokenizer;
+            QwenCheckpoint.RequireCheckpoint();
+            cachedTokenizer = new Gpt2BpeTokenizer(
+                QwenCheckpoint.VocabPath, QwenCheckpoint.MergesPath,
+                tokenizerJsonPath: QwenCheckpoint.TokenizerJsonPath);
+            return cachedTokenizer;
+        }
+    }
+
     [OneTimeTearDown]
     public void ReleaseModel()
     {
@@ -205,6 +219,93 @@ public class QwenNativeCheckpointTests
         {
             f32Model.Dispose();
         }
+    }
+
+    [Test]
+    public void NativeModel_GreedyToolLoop_MatchesTorchGeneratedIds()
+    {
+        var idsPath = Path.Combine(QwenCheckpoint.ModelDir, "qwen_tool_ids_py.bin");
+        var promptIdsPath = Path.Combine(QwenCheckpoint.ModelDir, "qwen_tool_prompt_ids.bin");
+        if (!File.Exists(idsPath) || !File.Exists(promptIdsPath))
+            Assert.Ignore("Qwen tool greedy fixtures absent; skipping native tool-loop parity verification.");
+
+        var expected = ReadInt32(idsPath);
+        Assert.That(expected.Length, Is.EqualTo(42), "fixture must contain tool turn (19) + final answer (23) ids");
+
+        var promptIds = ReadInt32(promptIdsPath);
+
+        var toolTurn = NivaraInference.Qwen.Generate(Model, Config, promptIds, 160, useKvCache: true);
+        Assert.That(toolTurn.Count, Is.EqualTo(19), "tool-call turn must be 19 tokens");
+        for (int i = 0; i < toolTurn.Count; i++)
+            Assert.That(toolTurn[i], Is.EqualTo(expected[i]), $"tool turn token[{i}] differs (expected {expected[i]}, got {toolTurn[i]})");
+    }
+
+    [Test]
+    public void NativeModel_GreedyFinalAnswer_SemanticParityAndFinalLogitsWithinTolerance()
+    {
+        var idsPath = Path.Combine(QwenCheckpoint.ModelDir, "qwen_tool_ids_py.bin");
+        var finalPromptIdsPath = Path.Combine(QwenCheckpoint.ModelDir, "qwen_tool_final_prompt_ids.bin");
+        var logitsPath = Path.Combine(QwenCheckpoint.ModelDir, "qwen_tool_logits_py.bin");
+        if (!File.Exists(idsPath) || !File.Exists(finalPromptIdsPath) || !File.Exists(logitsPath))
+            Assert.Ignore("Qwen tool fixtures absent; skipping native final-answer parity verification.");
+
+        var expected = ReadInt32(idsPath);
+        Assert.That(expected.Length, Is.EqualTo(42), "fixture must contain tool turn (19) + final answer (23) ids");
+        var torchFinalTurn = expected.Skip(19).ToArray();
+
+        var finalPromptIds = ReadInt32(finalPromptIdsPath);
+
+        var finalTurn = NivaraInference.Qwen.Generate(Model, Config, finalPromptIds, 160, useKvCache: true);
+        TestContext.Out.WriteLine("native final-turn ids: " + string.Join(",", finalTurn));
+        TestContext.Out.WriteLine("Py final-turn ids:     " + string.Join(",", torchFinalTurn));
+
+        var answer = Tokenizer.Decode(finalTurn).ToLowerInvariant();
+        TestContext.Out.WriteLine("native final answer: " + answer);
+        Assert.That(answer, Does.Contain("partly cloudy"), "final answer must reflect the weather result");
+        Assert.That(answer, Does.Contain("northwest"), "final answer must reuse the tool observation");
+
+        var fullIds = finalPromptIds.Concat(torchFinalTurn).ToArray();
+        var logits = Model.Forward(fullIds);
+        var torchLogits = ReadFloat32(logitsPath);
+        Assert.That(logits.Shape[1], Is.EqualTo(torchLogits.Length));
+
+        int vocab = torchLogits.Length;
+        int offset = logits.Length - vocab;
+        float maxAbsDiff = 0f;
+        float maxAbsLogit = 0f;
+        int argmax = -1;
+        float best = float.NegativeInfinity;
+        for (int i = 0; i < torchLogits.Length; i++)
+        {
+            float cSharp = logits[offset + i];
+            maxAbsDiff = Math.Max(maxAbsDiff, Math.Abs(cSharp - torchLogits[i]));
+            maxAbsLogit = Math.Max(maxAbsLogit, Math.Abs(torchLogits[i]));
+            if (cSharp > best) { best = cSharp; argmax = i; }
+        }
+        TestContext.Out.WriteLine(
+            $"native final-position logits: maxAbsDiff={maxAbsDiff:F6}, refMaxAbs={maxAbsLogit:F3}, argmax={argmax}");
+
+        Assert.That(argmax, Is.EqualTo(151645), "final-row argmax must predict cía");
+        Assert.That(maxAbsDiff, Is.LessThan(0.03f * maxAbsLogit + 0.5f),
+            "final-position logits must be within BF16-reference relative tolerance");
+    }
+
+    static int[] ReadInt32(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var result = new int[bytes.Length / 4];
+        for (int i = 0; i < result.Length; i++)
+            result[i] = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(i * 4, 4));
+        return result;
+    }
+
+    static float[] ReadFloat32(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var result = new float[bytes.Length / 4];
+        for (int i = 0; i < result.Length; i++)
+            result[i] = BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(i * 4, 4));
+        return result;
     }
 
     static bool IsWidened(string name)
