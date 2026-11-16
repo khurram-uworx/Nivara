@@ -49,14 +49,14 @@ Fix: `Gpt2BpeTokenizer` now reads the declared `Split` regex from a `tokenizer.j
 
 ```
 config.json + model.safetensors + vocab.json + merges.txt + tokenizer.json
-  → SafeTensorsLoader.Read<T> (BF16-on-disk, fused SIMD WidenBf16ToF32 → F32, #388)
-  → LlamaLoader.Load + LlamaConfig.FromJson → LlamaForCausalLM<T>
+  → SafeTensorsLoader.Read<BFloat16> (BF16-on-disk, native storage; or Read<float> with --precision f32)
+  → LlamaLoader.Load<float, BFloat16> + LlamaConfig.FromJson → LlamaForCausalLM<float, BFloat16>
   → Gpt2BpeTokenizer  (Qwen Split-regex pretokenizer + added tokens)
 ```
 
-> **Why we widen to F32 at load (and don't run BF16 compute)** — Qwen is BF16-on-disk (~1 GB), but Nivara **widens to F32 once at load time** and runs a pure-F32 loop. The reason: `Vector<BFloat16>` is **unsupported** on .NET 11 (`IsSupported == false` at every width), so BF16 compute falls back to a scalar BCL path that is radically slower than F32 SIMD, while the widen is **lossless** (BF16 *is* the top 16 bits of float32) and costs only a one-time pass. This is Nivara's current recommendation; its full rationale, the A/B numbers, and the `WidenBf16ToF32` mechanics live in **[`docs/BFLOAT16.md`](BFLOAT16.md)**.
+> **Native default (issue #1217).** Qwen now defaults to **native** loading: BF16 weights stay BF16 at rest (~942 MB) and compute runs in F32, widening in-register via the mixed-dtype kernels (`LlamaForCausalLM<float,BFloat16>`, `Linear<float,BFloat16>`, `MixedMatMul*`). No second full-checkpoint copy is held. `--precision f32` is the explicit widened-on-load path (the previous default, ~1.88 GB resident). `--precision bf16` keeps uniform BF16 storage/compute for benchmark/plain runs; `fp16` stays rejected (Half's range/precision is insufficient for Qwen2.5-0.5B). `qwen distill` requires gradients and therefore stays on the widened F32 path — passing `--precision native` there is rejected with a named guard ("requires widened F32 weights"). `qwen --silk` stays on the F32 device path while issue #1219 (BF16 cached-decode crash) is open; an explicit `--precision bf16` opts into the (currently broken) BF16 device path.
 >
-> Qwen-fast item **#407** added an opt-in alternative for benchmark/synthetic modes only: `--precision bf16` keeps the weights native `BFloat16` (~942 MB) and widens each lane in-register inside the dot kernel (`NarrowFloatKernels.DotBf16Core` — F32 FMA math on bf16 storage at rest, results rounded back to bf16 for the next layer). This halves weight memory and traffic but measured **uniformly slower** on the i5-1135G7 AVX2/LPDDR4x box used for the P1 verdict (per-lane widen-narrow overhead exceeds the traffic saving); the win is expected on AVX-512 / HBM-class hardware. Full tradeoff and numbers in *Making Qwen fast* below. Tools/distill stay float; fp16 stays rejected (Half's range/precision is insufficient for Qwen2.5-0.5B; use f32 or bf16).
+> **Why native is the default now** — `Vector<BFloat16>` is still **unsupported** on .NET 11 (`IsSupported == false` at every width), so BF16 *compute* would fall back to a scalar BCL path; but storage stays BF16 and the dot kernels widen each lane in-register (F32 FMA math on bf16 storage at rest, results rounded back to bf16 for the next layer) — the same mechanism as `--precision bf16` (#407), now the default for storage. The widen is **lossless** (BF16 *is* the top 16 bits of float32). Full rationale, A/B numbers, and `WidenBf16ToF32` mechanics live in **[`docs/BFLOAT16.md`](BFLOAT16.md)**; *Making Qwen fast* below retains the benchmark tradeoff.
 
 ### The renderer: `QwenChatTemplate` (byte-exact vs Torch)
 

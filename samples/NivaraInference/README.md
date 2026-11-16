@@ -32,7 +32,7 @@ dotnet run --project samples/NivaraInference -c Release -- smollm               
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision f32   # widened to F32 weights (513.1 MB)
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # BF16 weights + BF16 compute
 dotnet run --project samples/NivaraInference -c Release -- qwen tools            # function calling (KV cache on)
-dotnet run --project samples/NivaraInference -c Release -- qwen distill --teacher-examples 12  # teacher distillation
+dotnet run --project samples/NivaraInference -c Release -- qwen distill --precision f32 --teacher-examples 12  # teacher distillation (F32-only; gradients)
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk distill --teacher-examples 12  # same, teacher on the OpenCL GPU
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark        # KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- modernbert            # ModernBERT-large forward (28-layer hybrid)
@@ -179,14 +179,15 @@ read exits `1` with a message naming the requirement instead of silently running
 particular:
 
 - Each model accepts a fixed mode set — `minilm` `benchmark`/`similarity`, `qwen` `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through to the model's default runner.
-- `--precision f32|bf16|fp16` is accepted only where the dispatch selects a BFloat16/Half runner (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya`; `qwen` for `benchmark`). `f32` is always accepted. The vision models reject bf16/fp16: they have no narrow path. Even where a bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16.
-- `--precision native` is SmolLM's default and is rejected for every other model. It names the shape of the whole run rather than a compute dtype: storage stays the checkpoint's own BF16 and compute is F32, so the widened weight array never exists at rest. `smollm ab` rejects it because the A/B compares the scalar and widen kernels *within* one narrow dtype; use `--precision bf16` for that.
+- `--precision f32|bf16|fp16|native` is accepted where the dispatch selects a BFloat16/Half runner (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya`; `qwen` for `benchmark` and `native` for the default/tools/plain/benchmark paths). `f32` is always accepted. The vision models reject bf16/fp16: they have no narrow path. Even where a bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16. `native` is SmolLM/Qwen only.
+- `--precision native` is the default for SmolLM and Qwen: storage stays the checkpoint's own BF16 and compute is F32, so the widened weight array never exists at rest. It is rejected for every other model. `qwen distill` rejects it (gradients need widened F32; use `--precision f32`). `smollm ab` rejects it because the A/B compares the scalar and widen kernels *within* one narrow dtype; use `--precision bf16` for that. `qwen --silk` with native runs the F32 device path while issue #1219 (BF16 cached-decode crash) is open.
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16          # accepted (narrow runner)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 --precision bf16    # rejected: no narrow path
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision native        # accepted (SmolLM's default)
-dotnet run --project samples/NivaraInference -c Release -- minilm --precision native        # rejected: smollm only
+dotnet run --project samples/NivaraInference -c Release -- qwen --precision native          # accepted (Qwen's default; BF16 storage / F32 compute)
+dotnet run --project samples/NivaraInference -c Release -- minilm --precision native        # rejected: smollm/qwen only
 ```
 
 ### Python (PyTorch reference)
