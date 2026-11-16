@@ -29,7 +29,7 @@ public static class GradientUtils
         return new GradScope();
     }
 
-    internal static bool ShouldTrackGrad<T>(params ReverseGradTensor<T>[] tensors)
+    internal static bool ShouldTrackGrad<T>(params ReverseGradTensor<T>?[] tensors)
         where T : struct, IFloatingPointIeee754<T>
     {
         if (!IsGradEnabled)

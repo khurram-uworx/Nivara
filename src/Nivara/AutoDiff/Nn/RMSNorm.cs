@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 using System.Numerics.Tensors;
 
@@ -68,7 +69,9 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
         var inputData = ModuleHelpers<T>.GetSpan(input);
         int rows = input.Length / normalizedShape;
 
-        if (!input.RequiresGrad)
+        var shouldTrack = GradientUtils.ShouldTrackGrad(input, weight.Tensor);
+
+        if (!shouldTrack)
         {
             var output = ForwardInference(inputData, rows, normalizedShape, gamma, eps);
             return new ReverseGradTensor<T>(
@@ -88,25 +91,25 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
 
         var resultTensor = new ReverseGradTensor<T>(
             NivaraColumn<T>.CreateFromOwnedArray(outputData),
-            input.RequiresGrad, input.Shape);
+            true, input.Shape);
 
-        if (input.RequiresGrad)
+        var savedInput = ToArray(inputData);
+        var savedGamma = gamma.ToArray();
+        int savedRows = rows;
+        int savedNormShape = normalizedShape;
+        double savedEps = double.CreateChecked(eps);
+
+        var gradFn = new OpNode<T>("RMSNorm",
+            ModuleHelpers<T>.NodeInputs(input, weight.Tensor),
+            (typedGradOutput) =>
         {
-            var savedInput = ToArray(inputData);
-            var savedGamma = gamma.ToArray();
-            int savedRows = rows;
-            int savedNormShape = normalizedShape;
-            double savedEps = double.CreateChecked(eps);
+            var gradOutData = new T[typedGradOutput.Length];
+            typedGradOutput.CopyTo(gradOutData, default(T)!);
 
-            var gradFn = new OpNode<T>("RMSNorm",
-                ModuleHelpers<T>.NodeInputs(input, weight.Tensor),
-                (typedGradOutput) =>
+            // dL/dgamma[j] = sum_i y[i,j] * dL/dOut[i,j]
+            // Runs first: consumes raw gradOutData before the in-place gamma multiply below.
+            if (weight.Tensor.RequiresGrad)
             {
-                var gradOutData = new T[typedGradOutput.Length];
-                typedGradOutput.CopyTo(gradOutData, default(T)!);
-
-                // dL/dgamma[j] = sum_i y[i,j] * dL/dOut[i,j]
-                // Runs first: consumes raw gradOutData before the in-place gamma multiply below.
                 var gradWeightData = new T[normalizedShape];
                 var yData = new T[gradOutData.Length];
                 RMSNormKernel<T>.PerRowRMSNormForwardKernel(
@@ -119,22 +122,25 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
                     TensorPrimitives.Add(rowProduct, gradWeightData, gradWeightData);
                 }
                 ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.CreateFromOwnedArray(gradWeightData));
+            }
 
-                // dL/dy = dL/dOut * gamma  (since out = y * gamma) — in-place, aliasing identical to #411
-                for (int i = 0; i < rows; i++)
-                {
-                    int baseIdx = i * normalizedShape;
-                    TensorPrimitives.Multiply(gradOutData.AsSpan(baseIdx, normalizedShape), savedGamma, gradOutData.AsSpan(baseIdx, normalizedShape));
-                }
+            // dL/dy = dL/dOut * gamma  (since out = y * gamma) - in-place, aliasing identical to #411
+            for (int i = 0; i < rows; i++)
+            {
+                int baseIdx = i * normalizedShape;
+                TensorPrimitives.Multiply(gradOutData.AsSpan(baseIdx, normalizedShape), savedGamma, gradOutData.AsSpan(baseIdx, normalizedShape));
+            }
 
+            if (input.RequiresGrad)
+            {
                 var gradInputData = new T[gradOutData.Length];
                 RMSNormKernel<T>.PerRowRMSNormBackwardKernel(
                     savedInput, gradOutData, gradInputData, savedRows, savedNormShape, savedEps);
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.CreateFromOwnedArray(gradInputData));
-            });
+            }
+        });
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+        ComputationGraph.AddNode(resultTensor, gradFn);
 
         return resultTensor;
     }
