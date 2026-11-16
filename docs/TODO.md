@@ -162,6 +162,7 @@ Docs (optional, pin-neutral):
 ## GitHub issues log
 
 - [ ] #1237 — AutoDiff: defer Linear/Embedding init on MiniLM/DistilBERT load path (#1226 follow-up) (created while working on #1226)
+- [ ] #1238 — DistilBert: ForwardBatched backward produces no parameter gradients (pre-existing) (created while working on #1226)
 
 ## Decisions (Gate G1 — awaiting human clearance)
 
