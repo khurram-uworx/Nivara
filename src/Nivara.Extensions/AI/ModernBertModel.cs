@@ -801,15 +801,16 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
     public static ModernBertEncoder<TModel, TWeight> LoadWeights(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         ModernBertConfig config,
-        string prefix = "model")
+        string prefix = "model",
+        bool strict = false)
     {
         ArgumentNullException.ThrowIfNull(tensors);
 
         var encoder = new ModernBertEncoder<TModel, TWeight>(config, true);
 
         StateDictLoader.LoadEmbed(encoder.tokenEmbedding, tensors, $"{prefix}.embeddings.tok_embeddings.weight");
-        StateDictLoader.LoadLayerNorm(encoder.embedNorm, tensors, $"{prefix}.embeddings.norm");
-        StateDictLoader.LoadLayerNorm(encoder.finalNorm, tensors, $"{prefix}.final_norm");
+        StateDictLoader.LoadLayerNorm(encoder.embedNorm, tensors, $"{prefix}.embeddings.norm", strict);
+        StateDictLoader.LoadLayerNorm(encoder.finalNorm, tensors, $"{prefix}.final_norm", strict);
 
         int hidden = config.HiddenSize;
         for (int i = 0; i < config.NumHiddenLayers; i++)
@@ -818,18 +819,18 @@ public class ModernBertEncoder<TModel, TWeight> : Module<TModel> where TModel : 
             string layerPrefix = $"{prefix}.layers.{i}";
 
             if (layer.attnNorm != null)
-                StateDictLoader.LoadLayerNorm(layer.attnNorm, tensors, $"{layerPrefix}.attn_norm");
+                StateDictLoader.LoadLayerNorm(layer.attnNorm, tensors, $"{layerPrefix}.attn_norm", strict);
 
             StateDictLoader.LoadLinearSlice(layer.attn.qProj, tensors, $"{layerPrefix}.attn.Wqkv", 0, hidden);
             StateDictLoader.LoadLinearSlice(layer.attn.kProj, tensors, $"{layerPrefix}.attn.Wqkv", hidden, hidden);
             StateDictLoader.LoadLinearSlice(layer.attn.vProj, tensors, $"{layerPrefix}.attn.Wqkv", 2 * hidden, hidden);
-            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"{layerPrefix}.attn.Wo");
+            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"{layerPrefix}.attn.Wo", strict);
 
             StateDictLoader.LoadLinearSlice(layer.mlp.inputProj, tensors, $"{layerPrefix}.mlp.Wi", 0, config.IntermediateSize);
             StateDictLoader.LoadLinearSlice(layer.mlp.gateProj, tensors, $"{layerPrefix}.mlp.Wi", config.IntermediateSize, config.IntermediateSize);
-            StateDictLoader.LoadLinear(layer.mlp.downProj, tensors, $"{layerPrefix}.mlp.Wo");
+            StateDictLoader.LoadLinear(layer.mlp.downProj, tensors, $"{layerPrefix}.mlp.Wo", strict);
 
-            StateDictLoader.LoadLayerNorm(layer.mlpNorm, tensors, $"{layerPrefix}.mlp_norm");
+            StateDictLoader.LoadLayerNorm(layer.mlpNorm, tensors, $"{layerPrefix}.mlp_norm", strict);
         }
 
         encoder.Eval();

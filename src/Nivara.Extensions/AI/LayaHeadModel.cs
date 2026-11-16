@@ -440,7 +440,8 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
     public static LayaDecisionHead<TModel, TWeight> LoadWeights(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         int headLayerCount = 2,
-        int actClassCount = 2)
+        int actClassCount = 2,
+        bool strict = false)
     {
         ArgumentNullException.ThrowIfNull(tensors);
 
@@ -459,8 +460,8 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
             var layer = head.headLayers[i];
             string prefix = $"head.layers.{i}";
 
-            StateDictLoader.LoadLayerNorm(layer.norm1, tensors, $"{prefix}.norm1");
-            StateDictLoader.LoadLayerNorm(layer.norm2, tensors, $"{prefix}.norm2");
+            StateDictLoader.LoadLayerNorm(layer.norm1, tensors, $"{prefix}.norm1", strict);
+            StateDictLoader.LoadLayerNorm(layer.norm2, tensors, $"{prefix}.norm2", strict);
 
             // nn.MultiheadAttention fuses q, k and v into one [3 * d, d] weight and one [3 * d] bias,
             // named in_proj_weight / in_proj_bias. The blocks are contiguous and in q, k, v order.
@@ -471,21 +472,21 @@ public class LayaDecisionHead<TModel, TWeight> : Module<TModel> where TModel : s
                 $"{attnPrefix}.in_proj_weight", $"{attnPrefix}.in_proj_bias", hidden, hidden);
             StateDictLoader.LoadFusedLinearSlice(layer.attn.vProj, tensors,
                 $"{attnPrefix}.in_proj_weight", $"{attnPrefix}.in_proj_bias", 2 * hidden, hidden);
-            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"{attnPrefix}.out_proj");
+            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"{attnPrefix}.out_proj", strict);
 
-            StateDictLoader.LoadLinear(layer.linear1, tensors, $"{prefix}.linear1");
-            StateDictLoader.LoadLinear(layer.linear2, tensors, $"{prefix}.linear2");
+            StateDictLoader.LoadLinear(layer.linear1, tensors, $"{prefix}.linear1", strict);
+            StateDictLoader.LoadLinear(layer.linear2, tensors, $"{prefix}.linear2", strict);
         }
 
         // nn.Sequential indices: scorer = [LayerNorm, Linear, GELU, Linear], so the two Linear layers
         // are at 1 and 3 and the GELU occupies the gap at 2.
-        StateDictLoader.LoadLayerNorm(head.scorerNorm, tensors, "scorer.0");
-        StateDictLoader.LoadLinear(head.scorerHidden, tensors, "scorer.1");
-        StateDictLoader.LoadLinear(head.scorerOut, tensors, "scorer.3");
+        StateDictLoader.LoadLayerNorm(head.scorerNorm, tensors, "scorer.0", strict);
+        StateDictLoader.LoadLinear(head.scorerHidden, tensors, "scorer.1", strict);
+        StateDictLoader.LoadLinear(head.scorerOut, tensors, "scorer.3", strict);
 
         // act_head = [Linear, GELU, Linear] → indices 0 and 2.
-        StateDictLoader.LoadLinear(head.actInput, tensors, "act_head.0");
-        StateDictLoader.LoadLinear(head.actOut, tensors, "act_head.2");
+        StateDictLoader.LoadLinear(head.actInput, tensors, "act_head.0", strict);
+        StateDictLoader.LoadLinear(head.actOut, tensors, "act_head.2", strict);
 
         if (tensors.TryGetValue("temperature", out var temperature))
         {
