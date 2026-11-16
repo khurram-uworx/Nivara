@@ -66,6 +66,10 @@ Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates shor
 
 #476/#642 removed the dense `[L, L]` mask allocation from the CPU path; the attention kernel now carries `band` and `validLength` as metadata bounds. The expected gain is bounded by a 0.9% ceiling at L=128 (attention is 2.1%/4.1% of attn+GEMM MACs at L=128/256), so the rows above should be read as "no regression", not as a speedup. The CPU path now has no dense-mask cap and runs up to the model's position limit.
 
+## Native loading (Laya)
+
+`ModernBertLayer.ForwardFused` is now `TWeight`-generic: weights are read through `ParamSpan`/`ModelSpan` (no widening) and the seven projections use `GradKernels.MixedMatMulTransposedB<TModel, TWeight>`, so F32 compute over F16/BF16 storage widens in-register. `ModernBertEncoder.Forward` gathers embedding rows in the storage dtype via `Embedding.GatherRows`. See `docs/plan/LAYA-HONEST-WEIGHTS.md`.
+
 ## GPU path
 
 `ModernBertGpuRunner` was originally the GPU runner (issue #449; backend removed in 1.5.0). `modernbert --silk` is the same contract on the hand-authored OpenCL backend: F32 only, modes `default` / `benchmark`, the band inside the kernel, and the same 4096 benchmark lengths. Detail is [SILK.md §13a](SILK.md). The first GPU runner that shares no structure with DistilBERT or MiniLM: rotary instead of learned positions, gated FFN, pre-norm, and per-layer attention geometry. The Silk-vs-CPU compare (`InferenceCompare.ModernBertCompareGpu`, an entry point rather than a CLI mode — see [SILK.md](SILK.md)) passes (AC, 2026-10-13) at maxAbs 2.861E-005 / maxRel 5.577E-004 / cosine 1.0000001 — the same figures as the ILGPU gate.

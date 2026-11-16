@@ -42,6 +42,9 @@ internal static class DocsCoveragePins
     /// paragraph and the A/B paragraph) and one <c>docs/SMOLLM.md</c> pointer from the SmolLM footnote in
     /// <c>samples/NivaraInference/README.md</c>. The rewritten overview line in <c>docs/SMOLLM.md</c> kept
     /// its existing <c>docs/BFLOAT16.md</c> pair, so it contributes no net change.
+    /// 2026-11-16 (#1218): +1 = 500. The new native-loading note in <c>docs/MODERNBERT.md</c> references
+    /// <c>docs/plan/LAYA-HONEST-WEIGHTS.md</c> in backticks; that path is excluded from the document
+    /// scan but the backticked mention is still discovered by <c>DocumentPattern</c>.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 499;
+    internal const int ExpectedDocumentReferenceCount = 500;
 }

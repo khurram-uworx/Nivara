@@ -370,6 +370,9 @@ sets (see §14); the BERT-family models use `default` / `benchmark`. Narrow prec
 tokEmb matrices for ModernBERT and Laya) as BF16 and widens in-register; activations stay f32.
 MiniLM/DistilBERT/DistilBERT+SST-2 still widen BF16 to f32 before upload. `--precision fp16` is
 rejected at the sample CLI (measured 0.97–1.07× vs f32): use bf16 or drop `--silk`.
+Laya's default is now native (F16 storage, F32 compute) on CPU; on the Silk path it stays F32 (or
+explicit `--precision bf16`), because there is no Half device path. `laya --silk` with default/native
+precision prints a one-line note and runs F32.
 
 **Bottom line for fine-tuning (issue #1003):** on the integrated Intel Graphics the Silk path is
 **6.2-8.6x faster than the CPU reverse-mode path** at B=2/4/8, L=128, even at the
