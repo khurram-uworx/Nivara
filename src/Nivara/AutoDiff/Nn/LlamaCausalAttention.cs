@@ -63,6 +63,18 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
         int maxPositionEmbeddings = 2048,
         float ropeTheta = 10000f,
         bool qkvBias = false)
+        : this(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta, qkvBias, false)
+    {
+    }
+
+    internal LlamaCausalAttention(
+        int hiddenSize,
+        int numHeads,
+        int numKeyValueHeads,
+        int maxPositionEmbeddings,
+        float ropeTheta,
+        bool qkvBias,
+        bool skipWeightInitialization)
     {
         if (hiddenSize <= 0) throw new ArgumentOutOfRangeException(nameof(hiddenSize));
         if (numHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
@@ -79,10 +91,20 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
         headDim = hiddenSize / numHeads;
         attnScale = TModel.CreateChecked(1.0 / Math.Sqrt(headDim));
 
-        QProj = new Linear<TModel, TWeight>(hiddenSize, numHeads * headDim, bias: qkvBias);
-        KProj = new Linear<TModel, TWeight>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
-        VProj = new Linear<TModel, TWeight>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
-        OProj = new Linear<TModel, TWeight>(hiddenSize, hiddenSize, bias: false);
+        if (skipWeightInitialization)
+        {
+            QProj = Linear<TModel, TWeight>.Uninitialized(hiddenSize, numHeads * headDim, qkvBias);
+            KProj = Linear<TModel, TWeight>.Uninitialized(hiddenSize, numKeyValueHeads * headDim, qkvBias);
+            VProj = Linear<TModel, TWeight>.Uninitialized(hiddenSize, numKeyValueHeads * headDim, qkvBias);
+            OProj = Linear<TModel, TWeight>.Uninitialized(hiddenSize, hiddenSize, false);
+        }
+        else
+        {
+            QProj = new Linear<TModel, TWeight>(hiddenSize, numHeads * headDim, bias: qkvBias);
+            KProj = new Linear<TModel, TWeight>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
+            VProj = new Linear<TModel, TWeight>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
+            OProj = new Linear<TModel, TWeight>(hiddenSize, hiddenSize, bias: false);
+        }
         rotary = new RotaryEmbedding<TModel>(headDim, maxPositionEmbeddings, ropeTheta);
 
         RegisterModules(QProj, KProj, VProj, OProj, rotary);

@@ -70,6 +70,20 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         int maxPositionEmbeddings = 2048,
         float ropeTheta = 10000f,
         bool qkvBias = false)
+        : this(hiddenSize, numHeads, numKeyValueHeads, intermediateSize, rmsNormEps, maxPositionEmbeddings, ropeTheta, qkvBias, false)
+    {
+    }
+
+    internal LlamaDecoderBlock(
+        int hiddenSize,
+        int numHeads,
+        int numKeyValueHeads,
+        int intermediateSize,
+        float rmsNormEps,
+        int maxPositionEmbeddings,
+        float ropeTheta,
+        bool qkvBias,
+        bool skipWeightInitialization)
     {
         if (hiddenSize <= 0) throw new ArgumentOutOfRangeException(nameof(hiddenSize));
         if (intermediateSize <= 0) throw new ArgumentOutOfRangeException(nameof(intermediateSize));
@@ -78,11 +92,20 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         this.intermediateSize = intermediateSize;
 
         InputNorm = new RMSNorm<TModel>(hiddenSize, rmsNormEps);
-        Attention = new LlamaCausalAttention<TModel, TWeight>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta, qkvBias);
+        Attention = new LlamaCausalAttention<TModel, TWeight>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta, qkvBias, skipWeightInitialization);
         PostNorm = new RMSNorm<TModel>(hiddenSize, rmsNormEps);
-        GateProj = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: false);
-        UpProj = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: false);
-        DownProj = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: false);
+        if (skipWeightInitialization)
+        {
+            GateProj = Linear<TModel, TWeight>.Uninitialized(hiddenSize, intermediateSize, false);
+            UpProj = Linear<TModel, TWeight>.Uninitialized(hiddenSize, intermediateSize, false);
+            DownProj = Linear<TModel, TWeight>.Uninitialized(intermediateSize, hiddenSize, false);
+        }
+        else
+        {
+            GateProj = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: false);
+            UpProj = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: false);
+            DownProj = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: false);
+        }
 
         RegisterModules(InputNorm, Attention, PostNorm, GateProj, UpProj, DownProj);
     }
