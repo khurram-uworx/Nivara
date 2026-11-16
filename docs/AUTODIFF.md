@@ -540,6 +540,7 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
 - Forward transposes weight, applies MatMul, then broadcasts bias via `ones @ bias`
 - Inference (outside `GradientUtils.Grad()`) passes the raw weight straight to the kernel's transposed-B matmul (`MatMulTransposedB`) — zero transposes
 - Training (inside `GradientUtils.Grad()`) records a grad-tracking `MatMulTransposedB` op: `Linear` passes its raw `[outFeatures, inFeatures]` weight to the transposed-B matmul, so weights are never transposed per forward or per backward (the earlier version-stamped transpose cache, issue #87, was removed)
+- **Load path:** `Linear<TModel, TWeight>.Uninitialized(...)` / `Embedding<TModel, TWeight>.Uninitialized(...)` skip allocating and initialising the weight (which would otherwise be thrown away when a checkpoint replaces it), leaving `Weight` null until `BindWeight(...)` or `LoadStateDict(...)` supplies it. `Weight`-dependent operations throw `InvalidOperationException` ("... weight has not been loaded") rather than reading an empty tensor. Useful for model loaders; ordinary construction still initialises normally.
 
 ### Sequential\<T\>
 
