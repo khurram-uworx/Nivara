@@ -16,12 +16,25 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
     public int NumClasses { get; }
 
     public DistilBertForSequenceClassification(BertConfig config, int numClasses)
+        : this(config, numClasses, false)
+    {
+    }
+
+    internal DistilBertForSequenceClassification(BertConfig config, int numClasses, bool skipWeightInitialization)
     {
         NumClasses = numClasses;
         hiddenDim = config.HiddenSize;
-        encoder = new BertEncoder<T>(config, includeTokenTypeEmbedding: false);
-        preClassifier = new Linear<T>(hiddenDim, hiddenDim, bias: true);
-        classifier = new Linear<T>(hiddenDim, numClasses, bias: true);
+        encoder = new BertEncoder<T>(config, includeTokenTypeEmbedding: false, skipWeightInitialization);
+        if (skipWeightInitialization)
+        {
+            preClassifier = Linear<T>.Uninitialized(hiddenDim, hiddenDim, bias: true);
+            classifier = Linear<T>.Uninitialized(hiddenDim, numClasses, bias: true);
+        }
+        else
+        {
+            preClassifier = new Linear<T>(hiddenDim, hiddenDim, bias: true);
+            classifier = new Linear<T>(hiddenDim, numClasses, bias: true);
+        }
         RegisterModules(encoder, preClassifier, classifier);
     }
 
@@ -209,7 +222,7 @@ public static class DistilBertLoader
     public static BertEncoder<float> LoadEncoder(
         Dictionary<string, (float[] Data, int[] Shape)> tensors, BertConfig config)
     {
-        var encoder = new BertEncoder<float>(config, includeTokenTypeEmbedding: false);
+        var encoder = new BertEncoder<float>(config, includeTokenTypeEmbedding: false, true);
         LoadEncoderWeights<float, float>(encoder, tensors, "distilbert");
         encoder.Eval();
         return encoder;
