@@ -1585,6 +1585,138 @@ public class NnTests
     }
 
     [Test]
+    public void BatchNorm1d_TrainMode_TrainableParamsOnConstantInput_ProducesParameterGradients()
+    {
+        using var bn = new BatchNorm1d<float>(2);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(2, 2, 2);
+
+        using (GradientUtils.Grad())
+        {
+            var y = bn.Forward(input);
+            var loss = ReverseGradOperations.Sum(y);
+            loss.Backward();
+        }
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
+    }
+
+    [Test]
+    public void BatchNorm1d_EvalMode_TrainableParamsOnConstantInput_ProducesParameterGradients()
+    {
+        using var bn = new BatchNorm1d<float>(2);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = ReverseGradTensor<float>.FromArray(new[] { 1.25f, -0.75f }),
+            ["Bias"] = ReverseGradTensor<float>.FromArray(new[] { 0.05f, -0.15f }),
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.3f, -0.8f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 2.0f, 0.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(2, 2, 2);
+
+        using (GradientUtils.Grad())
+        {
+            var y = bn.Forward(input);
+            var loss = ReverseGradOperations.Sum(y);
+            loss.Backward();
+        }
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
+    }
+
+    [Test]
+    public void BatchNorm2d_TrainMode_TrainableParamsOnConstantInput_ProducesParameterGradients()
+    {
+        using var bn = new BatchNorm2d<float>(2);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(1, 2, 2, 2);
+
+        using (GradientUtils.Grad())
+        {
+            var y = bn.Forward(input);
+            var loss = ReverseGradOperations.Sum(y);
+            loss.Backward();
+        }
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
+    }
+
+    [Test]
+    public void BatchNorm2d_EvalMode_TrainableParamsOnConstantInput_ProducesParameterGradients()
+    {
+        using var bn = new BatchNorm2d<float>(2);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = ReverseGradTensor<float>.FromArray(new[] { 1.25f, -0.75f }),
+            ["Bias"] = ReverseGradTensor<float>.FromArray(new[] { 0.05f, -0.15f }),
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.3f, -0.8f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 2.0f, 0.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(1, 2, 2, 2);
+
+        using (GradientUtils.Grad())
+        {
+            var y = bn.Forward(input);
+            var loss = ReverseGradOperations.Sum(y);
+            loss.Backward();
+        }
+
+        Assert.That(bn.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(bn.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
+    }
+
+    [Test]
+    public void BatchNorm2d_EvalMode_AffineFalse_ConstantInput_DoesNotTrack()
+    {
+        using var bn = new BatchNorm2d<float>(2, affine: false);
+        bn.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["running_mean"] = ReverseGradTensor<float>.FromArray(new[] { 0.3f, -0.8f }),
+            ["running_var"] = ReverseGradTensor<float>.FromArray(new[] { 2.0f, 0.5f }),
+        });
+        bn.Eval();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(1, 2, 2, 2);
+
+        ReverseGradTensor<float> y;
+        using (GradientUtils.Grad())
+        {
+            y = bn.Forward(input);
+        }
+
+        Assert.That(y.RequiresGrad, Is.False);
+        Assert.That(y.IsLeaf, Is.True);
+    }
+
+    [Test]
     public void BatchNorm2d_Backward_GradientsFlow()
     {
         using var bn = new BatchNorm2d<float>(2);
@@ -4046,6 +4178,33 @@ public class NnTests
         float[] gradVals = new float[input.Grad!.Length];
         input.Grad.CopyTo(gradVals, default(float)!);
         Assert.That(gradVals.All(v => !float.IsNaN(v)), Is.True);
+    }
+
+    [Test]
+    public void TransformerBlock_ConstantInput_InsideGrad_StillTrainsAllProjections()
+    {
+        // The per-row norms in TransformerBlock own no parameters, so even on a
+        // constant (detached) input the six Linear projections keep tracking
+        // through their own weights. This pins that contract (#1240 outcome B):
+        // no code change is needed in TransformerBlock for params to train.
+        using var block = new TransformerBlock<float>(nEmbd: 16, nHead: 4, dropout: 0.0, maxSeqLen: 8, normType: NormType.RMSNorm);
+        var input = ReverseGradTensor<float>.FromArray(new float[4 * 16], requiresGrad: false);
+        input.Reshape(4, 16);
+
+        using (GradientUtils.Grad())
+        {
+            var output = block.Forward(input);
+            var loss = ReverseGradOperations.Sum(output);
+            loss.Backward();
+        }
+
+        Assert.That(block.QProj.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(block.KProj.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(block.VProj.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(block.OProj.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(block.MlpFc1.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(block.MlpFc2.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
     }
 
     [Test]
