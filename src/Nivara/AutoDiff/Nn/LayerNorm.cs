@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -103,7 +104,10 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
         var inputData = GetInputSpan(input);
         int rows = input.Length / normalizedShape;
 
-        if (!input.RequiresGrad)
+        var shouldTrack = GradientUtils.IsGradEnabled &&
+            (input.RequiresGrad || (weight?.Tensor.RequiresGrad ?? false) || (bias?.Tensor.RequiresGrad ?? false));
+
+        if (!shouldTrack)
         {
             var output = LayerNormKernel<T>.ForwardInference(inputData, rows, normalizedShape, gamma, beta, eps);
             return new ReverseGradTensor<T>(
@@ -115,46 +119,44 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
 
         var resultTensor = new ReverseGradTensor<T>(
             NivaraColumn<T>.Create(result.Output),
-            input.RequiresGrad, input.Shape);
+            true, input.Shape);
 
-        if (input.RequiresGrad)
+        var savedXHat = result.XHat;
+        var savedInvStd = result.InvStd;
+        var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
+        int savedRows = rows;
+        int savedNormShape = normalizedShape;
+
+        var gradFn = new OpNode<T>("LayerNorm",
+            ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor),
+            (typedGradOutput) =>
         {
-            var savedXHat = result.XHat;
-            var savedInvStd = result.InvStd;
-            var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
-            int savedRows = rows;
-            int savedNormShape = normalizedShape;
+            var gradOutData = new T[typedGradOutput.Length];
+            typedGradOutput.CopyTo(gradOutData, default(T)!);
 
-            var gradFn = new OpNode<T>("LayerNorm",
-                ModuleHelpers<T>.NodeInputs(input, weight?.Tensor, bias?.Tensor),
-                (typedGradOutput) =>
-            {
-                var gradOutData = new T[typedGradOutput.Length];
-                typedGradOutput.CopyTo(gradOutData, default(T)!);
+            var gradInputData = LayerNormKernel<T>.BackwardInput(
+                gradOutData, savedXHat, savedGamma, savedInvStd,
+                savedRows, savedNormShape);
 
-                var gradInputData = LayerNormKernel<T>.BackwardInput(
-                    gradOutData, savedXHat, savedGamma, savedInvStd,
-                    savedRows, savedNormShape);
-
+            if (input.RequiresGrad)
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
-                if (weight != null)
-                {
-                    var gradGammaData = LayerNormKernel<T>.BackwardWeight(
-                        gradOutData, savedXHat, savedRows, savedNormShape);
-                    ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
-                }
+            if (weight != null)
+            {
+                var gradGammaData = LayerNormKernel<T>.BackwardWeight(
+                    gradOutData, savedXHat, savedRows, savedNormShape);
+                ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
+            }
 
-                if (bias != null)
-                {
-                    var gradBetaData = LayerNormKernel<T>.BackwardBias(
-                        gradOutData, savedRows, savedNormShape);
-                    ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
-                }
-            });
+            if (bias != null)
+            {
+                var gradBetaData = LayerNormKernel<T>.BackwardBias(
+                    gradOutData, savedRows, savedNormShape);
+                ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
+            }
+        });
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+        ComputationGraph.AddNode(resultTensor, gradFn);
 
         return resultTensor;
     }

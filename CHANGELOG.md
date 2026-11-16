@@ -21,6 +21,13 @@ All notable changes to Nivara are documented here. Released versions are publish
 - `StateDictLoader` mixed-target bind sites now use `BindWeight(...)` and default the
   bound tensor's `RequiresGrad` to `true` when the module was deferred (previously it
   silently became `false`).
+- Same-dtype `Linear.LoadStateDict` / `Embedding.LoadStateDict` now preserve the target
+  parameter's `RequiresGrad` instead of inheriting the (non-tracking) source's flag, so a
+  checkpoint loaded into a trainable model keeps it trainable and a frozen parameter stays
+  frozen. Closes #1238.
+- `LayerNorm.Forward` now tracks gradients when only its affine parameters require grad,
+  even on a constant input (previously it took the inference path and left `Weight`/`Bias`
+  without gradients). Inference outside `GradientUtils.Grad()` is unchanged.
 - Laya `LoadWeights` no longer allocates the ~1.57 GB of short-lived ctor garbage
   (measured via `GC.GetAllocatedBytesForCurrentThread`); the allocation gate in
   `LayaNativeCheckpointTests` pins it below 16 MB.

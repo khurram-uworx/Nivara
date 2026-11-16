@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
@@ -339,5 +340,42 @@ public class LayerNormTests
                 "the registered weight is disposed with the module");
             Assert.That(norm.Bias, Is.Null);
         });
+    }
+
+    [Test]
+    public void LayerNorm_TrainableParamsOnConstantInput_ProducesParameterGradients()
+    {
+        const int Rows = 2;
+        const int Cols = 4;
+        var norm = new LayerNorm<float>(Cols, 1e-5f);
+        var input = ReverseGradTensor<float>.FromMatrix(new float[Rows * Cols], Rows, Cols, requiresGrad: false);
+
+        using (GradientUtils.Grad())
+        {
+            var y = norm.Forward(input);
+            var loss = ReverseGradOperations.Sum(y);
+            loss.Backward();
+        }
+
+        Assert.That(norm.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(norm.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
+    }
+
+    [Test]
+    public void LayerNorm_FrozenParams_ConstantInput_DoesNotTrack()
+    {
+        const int Rows = 2;
+        const int Cols = 4;
+        var norm = new LayerNorm<float>(Cols, 1e-5f);
+        norm.GetParameters()["Weight"].Tensor =
+            ReverseGradTensor<float>.FromMatrix(new float[Cols], 1, Cols, requiresGrad: false);
+        norm.GetParameters()["Bias"].Tensor =
+            ReverseGradTensor<float>.FromMatrix(new float[Cols], 1, Cols, requiresGrad: false);
+        var input = ReverseGradTensor<float>.FromMatrix(new float[Rows * Cols], Rows, Cols, requiresGrad: false);
+
+        var y = norm.Forward(input);
+        Assert.That(y.RequiresGrad, Is.False);
+        Assert.That(norm.Weight!.Tensor.Grad, Is.Null);
     }
 }

@@ -306,7 +306,7 @@ public class Embedding<TModel, TWeight> : Module<TModel>
                         $"model has [{numEmbeddings}, {embeddingDim}].");
                 if (typeof(TWeight) == typeof(TModel))
                 {
-                    var cloned = Module<TModel>.CloneTensor(source);
+                    var cloned = Module<TModel>.CloneTensor(source, weight?.Tensor.RequiresGrad ?? true);
                     BindWeight((ReverseGradTensor<TWeight>)(object)cloned);
                 }
                 else
