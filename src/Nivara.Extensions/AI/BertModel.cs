@@ -177,12 +177,25 @@ public class BertLayer<TModel, TWeight> : Module<TModel> where TModel : struct, 
     public readonly Linear<TModel, TWeight> fc2;
 
     public BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps)
+        : this(hiddenSize, intermediateSize, numHeads, eps, false)
+    {
+    }
+
+    internal BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps, bool skipWeightInitialization)
     {
         ln1 = new LayerNorm<TModel>(hiddenSize, eps);
-        attn = new BertSelfAttention<TModel, TWeight>(hiddenSize, numHeads);
+        attn = new BertSelfAttention<TModel, TWeight>(hiddenSize, numHeads, skipWeightInitialization);
         ln2 = new LayerNorm<TModel>(hiddenSize, eps);
-        fc1 = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: true);
-        fc2 = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: true);
+        if (skipWeightInitialization)
+        {
+            fc1 = Linear<TModel, TWeight>.Uninitialized(hiddenSize, intermediateSize, true);
+            fc2 = Linear<TModel, TWeight>.Uninitialized(intermediateSize, hiddenSize, true);
+        }
+        else
+        {
+            fc1 = new Linear<TModel, TWeight>(hiddenSize, intermediateSize, bias: true);
+            fc2 = new Linear<TModel, TWeight>(intermediateSize, hiddenSize, bias: true);
+        }
         RegisterModules(ln1, attn, ln2, fc1, fc2);
     }
 
@@ -240,16 +253,27 @@ public class BertEncoder<TModel, TWeight> : Module<TModel> where TModel : struct
     readonly bool _includeTokenTypeEmbedding;
 
     public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding = true)
+        : this(config, includeTokenTypeEmbedding, false)
+    {
+    }
+
+    public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding, bool skipWeightInitialization)
     {
         _includeTokenTypeEmbedding = includeTokenTypeEmbedding;
-        wordEmbed = new Embedding<TModel, TWeight>(config.VocabSize, config.HiddenSize);
-        posEmbed = new Embedding<TModel, TWeight>(config.MaxPositionEmbeddings, config.HiddenSize);
+        wordEmbed = skipWeightInitialization
+            ? Embedding<TModel, TWeight>.Uninitialized(config.VocabSize, config.HiddenSize)
+            : new Embedding<TModel, TWeight>(config.VocabSize, config.HiddenSize);
+        posEmbed = skipWeightInitialization
+            ? Embedding<TModel, TWeight>.Uninitialized(config.MaxPositionEmbeddings, config.HiddenSize)
+            : new Embedding<TModel, TWeight>(config.MaxPositionEmbeddings, config.HiddenSize);
         if (includeTokenTypeEmbedding)
-            tokenTypeEmbed = new Embedding<TModel, TWeight>(2, config.HiddenSize);
+            tokenTypeEmbed = skipWeightInitialization
+                ? Embedding<TModel, TWeight>.Uninitialized(2, config.HiddenSize)
+                : new Embedding<TModel, TWeight>(2, config.HiddenSize);
         embedLn = new LayerNorm<TModel>(config.HiddenSize, config.LayerNormEps);
         layers = new BertLayer<TModel, TWeight>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
-            layers[i] = new BertLayer<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, config.NumAttentionHeads, config.LayerNormEps);
+            layers[i] = new BertLayer<TModel, TWeight>(config.HiddenSize, config.IntermediateSize, config.NumAttentionHeads, config.LayerNormEps, skipWeightInitialization);
 
         RegisterModules(wordEmbed, posEmbed, embedLn);
         if (includeTokenTypeEmbedding)
@@ -422,9 +446,14 @@ public class MiniLMDistilled<TModel, TWeight> : Module<TModel> where TModel : st
     public readonly BertConfig config;
 
     public MiniLMDistilled(BertConfig config)
+        : this(config, false)
+    {
+    }
+
+    internal MiniLMDistilled(BertConfig config, bool skipWeightInitialization)
     {
         this.config = config;
-        encoder = new BertEncoder<TModel, TWeight>(config);
+        encoder = new BertEncoder<TModel, TWeight>(config, true, skipWeightInitialization);
         RegisterModules(encoder);
     }
 
@@ -524,7 +553,7 @@ public class MiniLMDistilled<TModel, TWeight> : Module<TModel> where TModel : st
         BertConfig config,
         bool strict = false)
     {
-        var model = new MiniLMDistilled<TModel, TWeight>(config);
+        var model = new MiniLMDistilled<TModel, TWeight>(config, true);
         var enc = model.encoder;
 
         StateDictLoader.LoadEmbed(enc.wordEmbed, tensors, "embeddings.word_embeddings.weight");
@@ -697,19 +726,23 @@ public static class MiniLMEmbeddingGenerator
 public sealed class BertSelfAttention<T> : BertSelfAttention<T, T> where T : struct, IFloatingPointIeee754<T>
 {
     public BertSelfAttention(int embedDim, int numHeads) : base(embedDim, numHeads) { }
+    internal BertSelfAttention(int embedDim, int numHeads, bool skipWeightInitialization) : base(embedDim, numHeads, skipWeightInitialization) { }
 }
 
 public sealed class BertLayer<T> : BertLayer<T, T> where T : struct, IFloatingPointIeee754<T>
 {
     public BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps) : base(hiddenSize, intermediateSize, numHeads, eps) { }
+    internal BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps, bool skipWeightInitialization) : base(hiddenSize, intermediateSize, numHeads, eps, skipWeightInitialization) { }
 }
 
 public sealed class BertEncoder<T> : BertEncoder<T, T> where T : struct, IFloatingPointIeee754<T>
 {
     public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding = true) : base(config, includeTokenTypeEmbedding) { }
+    public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding, bool skipWeightInitialization) : base(config, includeTokenTypeEmbedding, skipWeightInitialization) { }
 }
 
 public sealed class MiniLMDistilled<T> : MiniLMDistilled<T, T> where T : struct, IFloatingPointIeee754<T>
 {
     public MiniLMDistilled(BertConfig config) : base(config) { }
+    internal MiniLMDistilled(BertConfig config, bool skipWeightInitialization) : base(config, skipWeightInitialization) { }
 }

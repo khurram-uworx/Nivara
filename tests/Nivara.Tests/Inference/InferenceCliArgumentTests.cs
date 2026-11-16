@@ -544,6 +544,14 @@ public class InferenceCliArgumentTests
         AssertRejected(Run("qwen", "--text"), "--text needs a value.");
 
     [Test]
+    public void SyntheticWeights_OnNonQwenModel_Rejected() =>
+        AssertRejected(Run("minilm", "--synthetic-weights"), "is a 'qwen' option only");
+
+    [Test]
+    public void SyntheticWeights_OnQwenBeyondBenchmarkMode_Rejected() =>
+        AssertRejected(Run("qwen", "tools", "--synthetic-weights"), "is only valid with the default single-shot run or 'benchmark'");
+
+    [Test]
     public void PlainAndPromptFlags_OutsideScope_Rejected()
     {
         AssertRejected(Run("minilm", "--plain"), "is a 'qwen' option only");

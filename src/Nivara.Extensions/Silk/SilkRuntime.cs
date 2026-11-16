@@ -436,8 +436,9 @@ public sealed unsafe class SilkRuntime : IDisposable
 
     public void Release(nint buffer)
     {
-        if (buffer != 0)
-            cl.ReleaseMemObject(buffer);
+        if (disposed || buffer == 0)
+            return;
+        cl.ReleaseMemObject(buffer);
     }
 
     nint Kernel(string name)

@@ -5,6 +5,8 @@ public sealed class SilkQwenSession : IDisposable
     readonly SilkRuntime runtime;
     readonly SilkQwenGpuRunner runner;
 
+    bool disposed;
+
     public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         runtime = new SilkRuntime();
@@ -37,5 +39,11 @@ public sealed class SilkQwenSession : IDisposable
     public float[] ForwardCached(int tokenId, int position) => runner.ForwardCached(tokenId, position);
     public int ForwardCachedArgmax(int tokenId, int position) => runner.ForwardCachedArgmax(tokenId, position);
     public void ResetCache() => runner.ResetCache();
-    public void Dispose() { runner.Dispose(); runtime.Dispose(); }
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        runner.Dispose();
+        runtime.Dispose();
+    }
 }
