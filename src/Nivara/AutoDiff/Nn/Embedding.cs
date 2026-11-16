@@ -293,6 +293,7 @@ public class Embedding<TModel, TWeight> : Module<TModel>
         ArgumentNullException.ThrowIfNull(stateDict);
 
         var remaining = new Dictionary<string, ReverseGradTensor<TModel>>();
+        bool weightSeen = false;
 
         foreach (var (name, source) in stateDict)
         {
@@ -316,12 +317,24 @@ public class Embedding<TModel, TWeight> : Module<TModel>
                     var data = NivaraColumn<TWeight>.Create(values);
                     BindWeight(new ReverseGradTensor<TWeight>(data, converted.RequiresGrad, converted.Shape));
                 }
+                weightSeen = true;
                 continue;
             }
             remaining[name] = source;
         }
 
-        base.LoadStateDict(remaining, strict);
+        base.LoadStateDict(remaining, false);
+
+        if (strict)
+        {
+            var modelParameters = GetParameters();
+            var missing = modelParameters.Keys
+                .Where(k => !(k == "Weight" ? weightSeen : remaining.ContainsKey(k)))
+                .ToArray();
+            if (missing.Length > 0)
+                throw new InvalidOperationException(
+                    $"State dictionary is missing model parameters: [{string.Join(", ", missing)}]");
+        }
     }
 }
 
