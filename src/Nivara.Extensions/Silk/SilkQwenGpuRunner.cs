@@ -61,6 +61,8 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     nint partialArgmaxVal;
     int argmaxGroups;
 
+    bool disposed;
+
     public SilkQwenGpuRunner(
         SilkRuntime runtime,
         QwenSilkConfig config,
@@ -625,6 +627,9 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
+
         foreach (var l in layers ?? Array.Empty<LayerWeights>()) l.Dispose(runtime);
         if (kCache != null) foreach (var b in kCache) runtime.Release(b);
         if (vCache != null) foreach (var b in vCache) runtime.Release(b);
