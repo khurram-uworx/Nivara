@@ -713,7 +713,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
             var us = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(data.AsSpan());
             var arr = new ushort[us.Length];
             us.CopyTo(arr);
-            nint buf = owner.runtime.Allocate(arr.Length);
+            nint buf = owner.runtime.AllocateBFloat16(arr.Length);
             owner.runtime.Upload(buf, arr.AsSpan());
             return buf;
         }
