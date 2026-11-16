@@ -396,7 +396,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormGemv(runtime, x.Handle, finalNormW,
+        RmsNormGemv(x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
@@ -544,7 +544,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        SilkLauncher.RmsNormGemv(runtime, x.Handle, finalNormW,
+        RmsNormGemv(x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         var logits = runtime.Download(logitsBuf, vocabSize);
