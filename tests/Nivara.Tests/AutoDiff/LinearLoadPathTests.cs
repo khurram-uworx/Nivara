@@ -32,7 +32,7 @@ public class LinearLoadPathTests
         var input = ReverseGradTensor<float>.FromArray(new float[4 * 4]);
         input.Reshape(4, 4);
         var ex = Assert.Throws<InvalidOperationException>(() => linear.Forward(input));
-        Assert.That(ex!.Message, Does.Contain("not loaded"));
+        Assert.That(ex!.Message, Does.Contain("not been loaded"));
     }
 
     [Test]

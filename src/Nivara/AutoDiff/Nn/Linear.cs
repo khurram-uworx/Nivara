@@ -274,5 +274,8 @@ public sealed class Linear<T> : Linear<T, T>
     }
 
     public override string ExportToOnnx(IOnnxExportContext<T> context, string inputName)
-        => context.Linear(inputName, this);
+    {
+        if (Weight is null) throw new InvalidOperationException("Linear weight has not been loaded.");
+        return context.Linear(inputName, this);
+    }
 }

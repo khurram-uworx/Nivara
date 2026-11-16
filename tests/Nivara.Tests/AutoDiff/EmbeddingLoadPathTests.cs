@@ -30,7 +30,7 @@ public class EmbeddingLoadPathTests
         var emb = Embedding<float>.Uninitialized(5, 4);
         var input = ReverseGradTensor<float>.FromArray(new float[] { 0, 1, 2 });
         var ex = Assert.Throws<InvalidOperationException>(() => emb.Forward(input));
-        Assert.That(ex!.Message, Does.Contain("not loaded"));
+        Assert.That(ex!.Message, Does.Contain("not been loaded"));
     }
 
     [Test]
