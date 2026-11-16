@@ -29,7 +29,7 @@ This document plans the expansion of (2) and (3) to the other supported models.
 
 ## 3. Phased plan
 
-### Phase 1 — Qwen (highest value, lowest risk)
+### Phase 1 — Qwen (highest value, lowest risk) — implemented on branch `khurram/1217` (#1217)
 
 Qwen is BF16 on disk and Llama-family. Work:
 

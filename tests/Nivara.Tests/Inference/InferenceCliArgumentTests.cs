@@ -197,7 +197,7 @@ public class InferenceCliArgumentTests
     [Test]
     public void QwenDistill_WithAllThreeFlags_PassesValidation()
     {
-        CliResult result = Run("qwen", "distill", "--seed", "7", "--teacher-examples", "3", "--force");
+        CliResult result = Run("qwen", "distill", "--precision", "f32", "--seed", "7", "--teacher-examples", "3", "--force");
 
         // Validation passed: the run reached the weight load, which is the deepest point observable
         // without a real Qwen checkpoint (distill determinism is #577).
@@ -275,10 +275,15 @@ public class InferenceCliArgumentTests
     [Test]
     public void QwenPrecision_Rejected()
     {
+        // bf16/fp16 keep their existing (narrow) restrictions; native is now a documented
+        // qwen precision (BF16 storage / F32 compute) and reaches the weight load instead.
         AssertRejected(Run("qwen", "--precision", "bf16"),
             "bf16 supports only the 'benchmark' mode");
         AssertRejected(Run("qwen", "--precision", "fp16"),
             "fp16 is not supported for the qwen mode - Half's range/precision");
+        // distill builds gradients and cannot run on mixed (inference-only) weights.
+        AssertRejected(Run("qwen", "distill", "--precision", "native"),
+            "requires widened F32 weights");
     }
 
     /// <summary>
@@ -292,10 +297,9 @@ public class InferenceCliArgumentTests
     {
         Assert.Multiple(() =>
         {
-            AssertRejected(Run("qwen", "--precision", "native"), "--precision native is a 'smollm' option only");
-            AssertRejected(Run("minilm", "--precision", "native"), "--precision native is a 'smollm' option only");
-            AssertRejected(Run("laya", "--precision", "native"), "--precision native is a 'smollm' option only");
-            AssertRejected(Run("mobilenet_v2", "--precision", "native"), "--precision native is a 'smollm' option only");
+            AssertRejected(Run("minilm", "--precision", "native"), "--precision native is a 'smollm'/'qwen' option only");
+            AssertRejected(Run("laya", "--precision", "native"), "--precision native is a 'smollm'/'qwen' option only");
+            AssertRejected(Run("mobilenet_v2", "--precision", "native"), "--precision native is a 'smollm'/'qwen' option only");
         });
     }
 
@@ -540,11 +544,16 @@ public class InferenceCliArgumentTests
     [
         ["qwen"],
         ["qwen", "tools"],
-        ["qwen", "distill"],
+        ["qwen", "distill", "--precision", "f32"],
         ["qwen", "benchmark"],
+        ["qwen", "--precision", "native"],
+        ["qwen", "tools", "--precision", "native"],
+        ["qwen", "benchmark", "--precision", "native"],
+        ["qwen", "--plain", "--precision", "native"],
         ["qwen", "--precision", "bf16", "benchmark"],
-        ["qwen", "--silk", "distill"],
+        ["qwen", "--silk", "distill", "--precision", "f32"],
         ["qwen", "--silk", "benchmark", "--precision", "bf16"],
+        ["qwen", "--silk", "--precision", "native"],
     ];
 
     static readonly string[][] AcceptedSmolLMCases =
