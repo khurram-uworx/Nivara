@@ -330,10 +330,10 @@ class Program
                 mode = args[i];
         }
 
-        // SmolLM's default is its snapshot dtype: the BF16 weights stay BF16 in memory and the
-        // kernels widen them in-register, so a bare 'smollm' run never holds a widened F32 copy of
-        // the checkpoint. Every other model keeps its existing default (F32 unless stated).
-        if (isSmolLM && !precisionSet)
+        // SmolLM and Qwen default to their snapshot dtype: BF16 weights stay BF16 in memory and the
+        // kernels widen them in-register, so a bare run never holds a widened F32 copy of the
+        // checkpoint. Qwen distill is the exception (gradients need widened F32; see guard below).
+        if ((isSmolLM || isQwen) && !precisionSet)
             precision = "native";
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
@@ -623,9 +623,17 @@ class Program
         // against. SmolLM-135M is the model whose snapshot is BF16 and whose default this is; the
         // other narrow-float models either differ (Laya ships F16 weights, Qwen's default is F32
         // compute over widened BF16) or are F32-on-disk.
-        if (native && !isSmolLM)
+        if (native && !(isSmolLM || isQwen))
         {
-            Console.Error.WriteLine($"--precision native is a 'smollm' option only: SmolLM keeps its BF16 snapshot weights and computes in F32; got '{got}'.");
+            Console.Error.WriteLine($"--precision native is a 'smollm'/'qwen' option only: these keep their BF16 snapshot weights and compute in F32; got '{got}'.");
+            return 1;
+        }
+
+        // Qwen distill builds gradients (GradientUtils.Grad()); mixed BF16-storage/F32-compute is
+        // inference-only (LlamaForCausalLM.ThrowIfMixedDtypeTraining), so distill requires widened F32.
+        if (isQwen && mode == "distill" && native)
+        {
+            Console.Error.WriteLine("Qwen2.5 precision error: 'qwen distill' requires widened F32 weights (--precision f32); mixed BF16-storage/F32-compute is inference-only and cannot build gradients.");
             return 1;
         }
 
@@ -657,7 +665,7 @@ class Program
         if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, synthetic: false))
         {
             Console.Error.WriteLine(isQwen
-                ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' mode; tools/distill run F32."
+                ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' mode; tools/distill run F32 or native."
                 : $"--precision {precision} is not supported for '{got}': the selected run is F32-only. Narrow-float models: {NarrowFloatModels} ('modernbert' / 'laya' compare are F32-only).");
             return 1;
         }
@@ -854,12 +862,20 @@ class Program
             case "qwen":
                 if (useSilk)
                 {
-                    if (bf16)
+                    // #1219 (OPEN): BF16 cached decode crashes in the shared BF16 quartet. Keep qwen
+                    // Silk on the known-good F32 device path whenever precision resolves to native/
+                    // default (which now loads BF16 tensors), with an explicit diagnostic. Only an
+                    // explicit --precision bf16 opts into the BF16 device path.
+                    if (bf16 && !native)
                     {
                         if (mode == "distill") return Qwen.RunDistillSilk(tensorsBf16, modelDir, teacherExamples, force, seed);
                         if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensorsBf16, modelDir);
                         if (plain) return Qwen.RunPlainSilk(tensorsBf16, modelDir, text);
                         return Qwen.RunToolsSilk(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
+                    }
+                    if (native)
+                    {
+                        Console.WriteLine("Note: qwen --silk with native/default precision runs the F32 device path (BF16 cached decode is blocked by issue #1219); use --precision bf16 to opt into BF16 Silk.");
                     }
                     if (mode == "distill") return Qwen.RunDistillSilk(F32(), modelDir, teacherExamples, force, seed);
                     if (mode == "benchmark") return Qwen.RunBenchmarkSilk(F32(), modelDir);
@@ -870,12 +886,19 @@ class Program
                     return Qwen.RunDistill(F32(), modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")
                 {
-                    if (bf16) return plain ? Qwen.RunPlainBenchmark(tensorsBf16, modelDir) : Qwen.RunBenchmark(tensorsBf16, modelDir);
-                    return plain ? Qwen.RunPlainBenchmark(F32(), modelDir) : Qwen.RunBenchmark(F32(), modelDir);
+                    if (native) return plain ? Qwen.RunPlainBenchmark<float, BFloat16>(tensorsBf16, modelDir) : Qwen.RunBenchmark<float, BFloat16>(tensorsBf16, modelDir);
+                    if (bf16) return plain ? Qwen.RunPlainBenchmark<BFloat16, BFloat16>(tensorsBf16, modelDir) : Qwen.RunBenchmark<BFloat16, BFloat16>(tensorsBf16, modelDir);
+                    return plain ? Qwen.RunPlainBenchmark<float, float>(F32(), modelDir) : Qwen.RunBenchmark<float, float>(F32(), modelDir);
                 }
                 if (plain)
-                    return Qwen.RunPlain(F32(), modelDir, text);
-                return Qwen.RunTools(F32(), modelDir, useKvCache: !noKvCache, text);
+                {
+                    if (native) return Qwen.RunPlain<float, BFloat16>(tensorsBf16, modelDir, text);
+                    if (bf16) return Qwen.RunPlain<BFloat16, BFloat16>(tensorsBf16, modelDir, text);
+                    return Qwen.RunPlain<float, float>(F32(), modelDir, text);
+                }
+                if (native) return Qwen.RunTools<float, BFloat16>(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
+                if (bf16) return Qwen.RunTools<BFloat16, BFloat16>(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
+                return Qwen.RunTools<float, float>(F32(), modelDir, useKvCache: !noKvCache, text);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;

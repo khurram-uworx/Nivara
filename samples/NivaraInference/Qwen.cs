@@ -215,12 +215,13 @@ public static class Qwen
     // Model / tokenizer loading (shared by all sub-modes)
     // ----------------------------------------------------------------------------------
 
-    public static (LlamaForCausalLM<T, T> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadModel<T>(
-        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
-        where T : struct, IFloatingPointIeee754<T>
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadModel<TModel, TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
-        var model = LlamaLoader.Load<T, T>(config, tensors);
+        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
         return (model, config, tokenizer);
     }
 
@@ -334,25 +335,27 @@ public static class Qwen
     /// then decodes one token at a time; without it each step re-runs the full prefix. Stops on a
     /// Qwen stop id BEFORE appending it — matching the Torch reference <c>_greedy</c>, so the
     /// returned ids exclude the eos token (tool turn = 19 non-eos ids).</summary>
-    public static List<int> Generate<T>(
-        LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
-        where T : struct, IFloatingPointIeee754<T>
+    public static List<int> Generate<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
-        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth);
+        using var cache = new LlamaKVCache<TModel>(config.NumHiddenLayers, kvWidth);
         return GenerateCore(model, config, promptIds, maxNewTokens, useKvCache, cache, out _, out _);
     }
 
     /// <summary>Shared generate body with per-phase timing (seed/prefill vs decode) — the plan's
     /// split-timing driver. Pure benchmark-facility change; <see cref="Generate{T}"/> keeps its exact
     /// public behavior.</summary>
-    static List<int> GenerateCore<T>(
-        LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens,
-        bool useKvCache, LlamaKVCache<T> cache, out double prefillMs, out double decodeMs)
-        where T : struct, IFloatingPointIeee754<T>
+    static List<int> GenerateCore<TModel, TWeight>(
+        LlamaForCausalLM<TModel, TWeight> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens,
+        bool useKvCache, LlamaKVCache<TModel> cache, out double prefillMs, out double decodeMs)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var prefillSw = System.Diagnostics.Stopwatch.StartNew();
-        ReverseGradTensor<T> logits;
+        ReverseGradTensor<TModel> logits;
         if (useKvCache)
         {
             logits = model.ForwardPrefill(promptIds.ToArray(), cache);
@@ -536,7 +539,7 @@ public static class Qwen
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
-        var (_, config, tokenizer) = Qwen.LoadModel(tensors, modelDir);
+        var (_, config, tokenizer) = Qwen.LoadModel<T, T>(tensors, modelDir);
         var prompt = QwenChatTemplate.RenderPlain(PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
 
@@ -610,8 +613,8 @@ public static class Qwen
         return seq;
     }
 
-    static int ArgMaxLastRow<T>(ReverseGradTensor<T> logits, int vocab)
-        where T : struct, IFloatingPointIeee754<T>
+    static int ArgMaxLastRow<TModel>(ReverseGradTensor<TModel> logits, int vocab)
+        where TModel : struct, IFloatingPointIeee754<TModel>
     {
         logits.Data.TryGetSpan(out var span);
         int offset = span.Length - vocab;
@@ -627,13 +630,15 @@ public static class Qwen
 
     /// <summary>Last-row logits of the model over the full prefix (no cache), for numeric diffing
     /// against the Torch reference on the FIXED trajectory.</summary>
-    static float[] ForwardLastLogits(LlamaForCausalLM<float, float> model, IReadOnlyList<int> prefixIds, int vocab)
+    static float[] ForwardLastLogits<TModel, TWeight>(LlamaForCausalLM<TModel, TWeight> model, IReadOnlyList<int> prefixIds, int vocab)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var logits = model.Forward(prefixIds.ToArray());
         logits.Data.TryGetSpan(out var span);
         int offset = span.Length - vocab;
         var result = new float[vocab];
-        for (int i = 0; i < vocab; i++) result[i] = span[offset + i];
+        for (int i = 0; i < vocab; i++) result[i] = float.CreateChecked(span[offset + i]);
         return result;
     }
 
@@ -641,17 +646,19 @@ public static class Qwen
     // RunTools — native weather function calling + fixture diff
     // ----------------------------------------------------------------------------------
 
-    public static int RunTools(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+    public static int RunTools<TModel, TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
         string modelDir,
         bool useKvCache,
         string text)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Native Function Calling (getWeather) ===");
-        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)  KV cache: {(useKvCache ? "on" : "off")}");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
 
-        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, vocab={config.VocabSize}");
         Console.WriteLine();
@@ -771,46 +778,49 @@ public static class Qwen
         return "unknown CPU";
     }
 
-    public static int RunBenchmark<T>(
-        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
-        where T : struct, IFloatingPointIeee754<T>
+    public static int RunBenchmark<TModel, TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark ===");
-        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<T>()}");
-        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
+        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
 
         string toolJson = QwenChatTemplate.ToolJson(
             WeatherToolName, WeatherToolDesc, [("city", "string", CityParamDesc, true)]);
         string systemMessage = QwenChatTemplate.BuildToolsSystemMessage(toolJson);
         var promptIds = tokenizer.Encode(QwenChatTemplate.RenderFirstTurn(systemMessage, "What's the weather in Paris?"));
 
-        return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens));
+        return NarrowWidenScope<TModel>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens));
     }
 
     /// <summary>KV-cache decode benchmark over the plain no-tools prompt (default: capital of
     /// France). Same cached-vs-full split as the tools benchmark; shares the batched prefill path
     /// so the #403 fused attention gates this surface too.</summary>
-    public static int RunPlainBenchmark<T>(
-        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
-        where T : struct, IFloatingPointIeee754<T>
+    public static int RunPlainBenchmark<TModel, TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain-prompt KV-cache decode benchmark ===");
-        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<T>()}");
-        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
+        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
 
         var promptIds = tokenizer.Encode(QwenChatTemplate.RenderPlain(PlainPrompt));
-        return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens, "the plain prompt"));
+        return NarrowWidenScope<TModel>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens, "the plain prompt"));
     }
 
     /// <summary>Plain (no-tools) single-shot demo: renders the no-tools prompt, generates with the
     /// KV cache, prints the reply and timing. Returns 0 on success.</summary>
-    public static int RunPlain<T>(
-        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir, string? userText)
-        where T : struct, IFloatingPointIeee754<T>
+    public static int RunPlain<TModel, TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir, string? userText)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) ===");
-        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<T>()}");
-        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
+        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
 
         var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
@@ -831,18 +841,19 @@ public static class Qwen
     /// pool is narrowed once so the two precisions measure the same weight values. When
     /// <paramref name="plain"/> is set the same shapes are labeled as the plain-prompt surface
     /// (ids stay random — the synthetic benchmark measures the decode loop, not the prompt).</summary>
-    public static int RunSyntheticBenchmark<T>(bool plain = false)
-        where T : struct, IFloatingPointIeee754<T>
+    public static int RunSyntheticBenchmark<TModel, TWeight>(bool plain = false)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): " +
             (plain ? "plain-prompt " : "") + "KV-cache decode benchmark ===");
-        string syntheticPrecision = typeof(T) == typeof(BFloat16) ? "BF16 (native, widen-SIMD)" : "F32 (synthetic)";
+        string syntheticPrecision = typeof(TWeight) == typeof(BFloat16) ? "BF16 (native, widen-SIMD)" : "F32 (synthetic)";
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {syntheticPrecision}");
         var tensorsF32 = SynthesizeTensors(QwenSyntheticConfig);
-        var tensors = NarrowTo<T>(tensorsF32);
+        var tensors = NarrowTo<TWeight>(tensorsF32);
         long mb = tensorsF32.Values.Sum(t => (long)t.Data.Length) * sizeof(float) / (1024 * 1024);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
-        var model = LlamaLoader.Load<T, T>(QwenSyntheticConfig, tensors);
+        var model = LlamaLoader.Load<TModel, TWeight>(QwenSyntheticConfig, tensors);
         buildSw.Stop();
         Console.WriteLine($"  Model build ({syntheticPrecision}): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB f32 pool)");
         Console.WriteLine();
@@ -850,19 +861,20 @@ public static class Qwen
         var promptIds = new int[64];
         for (int i = 0; i < promptIds.Length; i++)
             promptIds[i] = (int)(SyntheticRng() % (uint)QwenSyntheticConfig.VocabSize);
-        return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic, "the synthetic prompt"));
+        return NarrowWidenScope<TModel>(() => RunDecodeBenchmark(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic, "the synthetic prompt"));
     }
 
     /// <summary>Shared decode-timing body: cached vs full forward, 3 runs each, median-of-3.
     /// <paramref name="scenario"/> names the prompt surface in the status line.</summary>
-    static int RunDecodeBenchmark<T>(LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, string scenario = "the tool call turn")
-        where T : struct, IFloatingPointIeee754<T>
+    static int RunDecodeBenchmark<TModel, TWeight>(LlamaForCausalLM<TModel, TWeight> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, string scenario = "the tool call turn")
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         Console.WriteLine($"Prompt tokens: {promptIds.Count}. Decoding {scenario} 3 times each path...");
         Console.WriteLine();
 
-        TimeResult Cached() => TimeGeneration(model, config, promptIds, maxNewTokens, useKvCache: true);
-        TimeResult Full() => TimeGeneration(model, config, promptIds, maxNewTokens, useKvCache: false);
+        TimeResult Cached() => TimeGeneration<TModel, TWeight>(model, config, promptIds, maxNewTokens, useKvCache: true);
+        TimeResult Full() => TimeGeneration<TModel, TWeight>(model, config, promptIds, maxNewTokens, useKvCache: false);
 
         // Warmup.
         Cached();
@@ -895,13 +907,14 @@ public static class Qwen
         public int Tokens;
     }
 
-    static TimeResult TimeGeneration<T>(LlamaForCausalLM<T, T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
-        where T : struct, IFloatingPointIeee754<T>
+    static TimeResult TimeGeneration<TModel, TWeight>(LlamaForCausalLM<TModel, TWeight> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
-        using var cache = new LlamaKVCache<T>(config.NumHiddenLayers, kvWidth);
-        var ids = GenerateCore(model, config, promptIds, maxNewTokens, useKvCache, cache, out double prefillMs, out double decodeMs);
+        using var cache = new LlamaKVCache<TModel>(config.NumHiddenLayers, kvWidth);
+        var ids = GenerateCore<TModel, TWeight>(model, config, promptIds, maxNewTokens, useKvCache, cache, out double prefillMs, out double decodeMs);
         sw.Stop();
         double totalMs = sw.Elapsed.TotalMilliseconds;
         return new TimeResult
@@ -914,17 +927,22 @@ public static class Qwen
         };
     }
 
-    static string PrecisionLabel<T>()
-        where T : struct
-        => typeof(T) == typeof(BFloat16) ? "BF16 (native, widen-SIMD)"
-        : typeof(T) == typeof(Half) ? "F16"
-        : "F32 (BF16-upcast)";
+    static string PrecisionLabel<TModel, TWeight>()
+        where TModel : struct
+        where TWeight : struct
+        => (typeof(TModel), typeof(TWeight)) switch
+        {
+            (var m, var w) when m == typeof(float) && w == typeof(BFloat16) => "BFloat16 storage / F32 compute (native)",
+            (var m, var w) when m == typeof(BFloat16) && w == typeof(BFloat16) => "BF16",
+            (var m, var w) when m == typeof(Half) && w == typeof(Half) => "F16",
+            _ => typeof(TWeight) == typeof(BFloat16) ? "BF16 (native, widen-SIMD)" : "F32 (BF16-upcast)",
+        };
 
     /// <summary>Narrow compute types (BFloat16/Half) only reach the widen-compute-narrow SIMD
     /// dots while <see cref="NivaraPrimitives.UseWidenSimd"/> is on; without it they fall to the
     /// ~26× slower scalar BCL dot. Enable for the whole measurement, restore afterwards.</summary>
-    static int NarrowWidenScope<T>(Func<int> body)
-        where T : struct
+    static int NarrowWidenScope<TModel>(Func<int> body)
+        where TModel : struct
     {
         // Narrow types are auto-widened by default; no toggle needed.
         return body();
@@ -942,7 +960,7 @@ public static class Qwen
         int seed)
     {
         PrintDistillHeader($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
-        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+        var (model, config, tokenizer) = LoadModel<float, float>(tensors, modelDir);
         return RunDistillCore(config, modelDir, teacherExamples, force, seed,
             sentence => RunTeacherClassify(model, config, tokenizer, sentence));
     }
