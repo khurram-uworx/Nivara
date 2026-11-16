@@ -91,15 +91,43 @@ public class EmbeddingLoadPathTests
     }
 
     [Test]
-    public void LoadStateDict_MixedDtype_DefaultsRequiresGradTrue()
+    public void LoadStateDict_SameDtype_PreservesTargetRequiresGrad()
     {
-        var emb = Embedding<float, Half>.Uninitialized(5, 4);
-        var source = ReverseGradTensor<float>.FromMatrix(new float[5 * 4], 5, 4); // requiresGrad defaults false
+        var emb = new Embedding<float>(5, 4); // requiresGrad defaults to true
+        var source = ReverseGradTensor<float>.FromMatrix(new float[5 * 4], 5, 4); // requiresGrad defaults to false
         emb.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
         {
             ["Weight"] = source,
         });
         Assert.That(emb.Weight, Is.Not.Null);
         Assert.That(emb.Weight!.Tensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void LoadStateDict_OnUninitialized_SameDtype_DefaultsRequiresGradTrue()
+    {
+        var emb = Embedding<float>.Uninitialized(5, 4);
+        var source = ReverseGradTensor<float>.FromMatrix(new float[5 * 4], 5, 4); // requiresGrad defaults to false
+        emb.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = source,
+        });
+        Assert.That(emb.Weight, Is.Not.Null);
+        Assert.That(emb.Weight!.Tensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void LoadStateDict_SameDtype_PreservesFrozenTarget()
+    {
+        var emb = new Embedding<float>(5, 4);
+        emb.GetParameters()["Weight"].Tensor =
+            ReverseGradTensor<float>.FromMatrix(new float[5 * 4], 5, 4, requiresGrad: false);
+        var source = ReverseGradTensor<float>.FromMatrix(Enumerable.Range(1, 20).Select(i => (float)i).ToArray(), 5, 4);
+        emb.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = source,
+        });
+        Assert.That(emb.Weight, Is.Not.Null);
+        Assert.That(emb.Weight!.Tensor.RequiresGrad, Is.False);
     }
 }

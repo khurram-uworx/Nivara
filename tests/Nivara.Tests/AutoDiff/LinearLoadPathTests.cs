@@ -114,14 +114,43 @@ public class LinearLoadPathTests
     }
 
     [Test]
-    public void LoadStateDict_ShapeMismatch_Throws()
+    public void LoadStateDict_SameDtype_PreservesTargetRequiresGrad()
+    {
+        var linear = new Linear<float>(4, 3); // requiresGrad defaults to true
+        var source = ReverseGradTensor<float>.FromMatrix(new float[4 * 3], 3, 4); // requiresGrad defaults to false
+        linear.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = source,
+        });
+        Assert.That(linear.Weight, Is.Not.Null);
+        Assert.That(linear.Weight!.Tensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void LoadStateDict_OnUninitialized_SameDtype_DefaultsRequiresGradTrue()
     {
         var linear = Linear<float>.Uninitialized(4, 3);
-        var source = ReverseGradTensor<float>.FromMatrix(new float[2 * 2], 2, 2);
-        Assert.Throws<InvalidOperationException>(() =>
-            linear.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
-            {
-                ["Weight"] = source,
-            }));
+        var source = ReverseGradTensor<float>.FromMatrix(new float[4 * 3], 3, 4); // requiresGrad defaults to false
+        linear.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = source,
+        });
+        Assert.That(linear.Weight, Is.Not.Null);
+        Assert.That(linear.Weight!.Tensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void LoadStateDict_SameDtype_PreservesFrozenTarget()
+    {
+        var linear = new Linear<float>(4, 3);
+        linear.GetParameters()["Weight"].Tensor =
+            ReverseGradTensor<float>.FromMatrix(new float[4 * 3], 3, 4, requiresGrad: false);
+        var source = ReverseGradTensor<float>.FromMatrix(Enumerable.Range(1, 12).Select(i => (float)i).ToArray(), 3, 4);
+        linear.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>>
+        {
+            ["Weight"] = source,
+        });
+        Assert.That(linear.Weight, Is.Not.Null);
+        Assert.That(linear.Weight!.Tensor.RequiresGrad, Is.False);
     }
 }

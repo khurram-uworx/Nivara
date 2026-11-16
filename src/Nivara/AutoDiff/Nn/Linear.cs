@@ -205,7 +205,7 @@ public class Linear<TModel, TWeight> : Module<TModel>
                 ValidateShapePublic(name, source.Shape, new[] { outFeatures, inFeatures });
                 if (typeof(TWeight) == typeof(TModel))
                 {
-                    var cloned = Module<TModel>.CloneTensor(source);
+                    var cloned = Module<TModel>.CloneTensor(source, weight?.Tensor.RequiresGrad ?? true);
                     BindWeight((ReverseGradTensor<TWeight>)(object)cloned);
                 }
                 else
