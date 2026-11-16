@@ -356,9 +356,12 @@ public class InferenceCliArgumentTests
         CliResult layaNative = Run("laya", "--precision", "native");
         Assert.That(layaNative.StdErr, Does.Contain(ModelLookupMessage));
 
-        // laya --silk with default precision prints the F32 device-path note.
+        // laya now accepts native on Silk: runs the F16 device path, no F32 note.
         CliResult layaSilk = Run("laya", "--silk");
-        Assert.That(layaSilk.StdOut + layaSilk.StdErr, Does.Contain("laya --silk with native/default precision runs the F32 device path"));
+        Assert.That(layaSilk.StdErr, Does.Contain(ModelLookupMessage),
+            $"'laya --silk' should reach the weight load; stderr:{Environment.NewLine}{layaSilk.StdErr}");
+        Assert.That(layaSilk.StdOut + layaSilk.StdErr, Does.Not.Contain("runs the F32 device path"),
+            $"'laya --silk' should no longer print the F32 device-path note; output:{Environment.NewLine}{layaSilk.StdOut}{layaSilk.StdErr}");
     }
 
     /// <summary>

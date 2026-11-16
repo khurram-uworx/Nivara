@@ -373,9 +373,11 @@ the vision models expose their own mode sets (see §14); the BERT-family models 
 BF16 and widens in-register; activations stay f32. On the Silk device path native and explicit
 `--precision bf16` are the same run for SmolLM/Qwen. MiniLM/DistilBERT/DistilBERT+SST-2 still widen
 BF16 to f32 before upload. `--precision fp16` is rejected at the sample CLI (measured 0.97–1.07×
-vs f32): use bf16 or drop `--silk`. Laya's default is now native (F16 storage, F32 compute) on CPU;
-on the Silk path it stays F32 (or explicit `--precision bf16`), because there is no Half device path.
-`laya --silk` with default/native precision prints a one-line note and runs F32.
+vs f32): use bf16 or drop `--silk`. Laya's default is now native (F16 storage, F32 compute) on CPU
+and on the Silk device path: `laya --silk` with default/native precision stores weights as F16 on
+the device and widens in-register (issue #1225); an explicit `--precision bf16` keeps the BF16 Silk
+path, and `--precision f32` runs the F32 device path. `--silk --precision fp16` stays rejected
+(pure-Half compute remains CPU-only).
 
 **Bottom line for fine-tuning (issue #1003):** on the integrated Intel Graphics the Silk path is
 **6.2-8.6x faster than the CPU reverse-mode path** at B=2/4/8, L=128, even at the

@@ -667,11 +667,6 @@ class Program
             return 1;
         }
 
-        if (useSilk && isLaya && native)
-        {
-            Console.WriteLine("Note: laya --silk with native/default precision runs the F32 device path (no Half device path); use --precision bf16 for BF16 Silk.");
-        }
-
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
@@ -738,7 +733,7 @@ class Program
         }
 
         Dictionary<string, (Half[] Data, int[] Shape)> tensorsHalf = null!;
-        if (fp16 || layaNativeCpu)
+        if (fp16 || layaNative)
         {
             var loadSwFp16 = Stopwatch.StartNew();
             tensorsHalf = SafeTensorsLoader.Read<Half>(modelPath);
@@ -819,6 +814,12 @@ class Program
                         if (benchmark) return Laya.RunBenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.Laya);
                         if (compare) return Laya.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.Laya);
                         return Laya.RunGpu(tensorsBf16, modelDir);
+                    }
+                    if (native)
+                    {
+                        if (benchmark) return Laya.RunBenchmarkGpu(tensorsHalf, modelDir, Nivara.AI.GpuSeamFactories.LayaFp16);
+                        if (compare) return Laya.CompareGpu(tensorsHalf, modelDir, Nivara.AI.GpuSeamFactories.LayaFp16);
+                        return Laya.RunGpu(tensorsHalf, modelDir);
                     }
                     Nivara.AI.OpenLayaSession open = Nivara.AI.GpuSeamFactories.Laya;
                     if (benchmark) return Laya.RunBenchmarkGpu(F32(), modelDir, open);
