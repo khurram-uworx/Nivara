@@ -119,6 +119,7 @@ class Program
         bool noKvCache = false;
         bool force = false;
         bool plain = false;
+        bool syntheticWeights = false;
         bool useSilk = false;
         bool useBlas = false;
         int blasThreads = 1;
@@ -210,6 +211,8 @@ class Program
             }
             else if (args[i] == "--plain")
                 plain = true;
+            else if (args[i] == "--synthetic-weights")
+                syntheticWeights = true;
             else if (args[i] == "--silk")
                 useSilk = true;
             else if (args[i] == "--blas")
@@ -398,7 +401,7 @@ class Program
             Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
 
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
-            Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
+            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen only)."); Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
             Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
             Console.WriteLine("  (--teacher-examples / --seed / --force are 'qwen distill' only; any other model or mode rejects them)");
@@ -539,9 +542,21 @@ class Program
             return 1;
         }
 
+        if (syntheticWeights && !isQwen)
+        {
+            Console.Error.WriteLine("--synthetic-weights is a 'qwen' option only: no other model has a synthetic-weights path.");
+            return 1;
+        }
+
         if (plain && isQwen && mode.Length > 0 && mode != "benchmark")
         {
             Console.Error.WriteLine($"--plain is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
+            return 1;
+        }
+
+        if (syntheticWeights && isQwen && mode.Length > 0 && mode != "benchmark")
+        {
+            Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
             return 1;
         }
 
@@ -670,7 +685,7 @@ class Program
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
-        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, synthetic: false))
+        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, synthetic: syntheticWeights))
         {
             Console.Error.WriteLine(isQwen
                 ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' mode; tools/distill run F32 or native."
@@ -695,6 +710,18 @@ class Program
                 "verify" => TypeSafe.Verify(engine, urlArg, modelArg).GetAwaiter().GetResult(),
                 _ => TypeSafe.Run(engine, urlArg, modelArg).GetAwaiter().GetResult(),
             };
+
+        if (isQwen && syntheticWeights)
+        {
+            if (useSilk)
+                return Qwen.RunSyntheticBenchmarkSilk(plain);
+
+            if (native)
+                return Qwen.RunSyntheticBenchmark<float, BFloat16>(plain);
+            if (bf16)
+                return Qwen.RunSyntheticBenchmark<BFloat16, BFloat16>(plain);
+            return Qwen.RunSyntheticBenchmark<float, float>(plain);
+        }
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");
