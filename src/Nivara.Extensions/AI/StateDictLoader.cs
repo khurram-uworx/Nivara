@@ -24,15 +24,30 @@ public static class StateDictLoader
     public static void LoadLinear<TModel, TWeight>(
         Linear<TModel> linear,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
-        string prefix)
+        string prefix,
+        bool strict = false)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
+        var weightKey = $"{prefix}.weight";
+        var biasKey = $"{prefix}.bias";
+
+        bool hasWeight = tensors.TryGetValue(weightKey, out var w);
+        bool hasBias = tensors.TryGetValue(biasKey, out var b);
+
+        if (strict)
+        {
+            if (!hasWeight)
+                throw new KeyNotFoundException($"Missing tensor: {weightKey}");
+            if (linear.Bias != null && !hasBias)
+                throw new KeyNotFoundException($"Missing tensor: {biasKey}");
+        }
+
         var dict = new Dictionary<string, ReverseGradTensor<TModel>>();
-        if (tensors.TryGetValue($"{prefix}.weight", out var w))
+        if (hasWeight)
             dict["Weight"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1]));
-        if (tensors.TryGetValue($"{prefix}.bias", out var b))
+        if (hasBias)
             dict["Bias"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromMatrix(b.Data, 1, b.Shape[0]));
         if (dict.Count > 0) linear.LoadStateDict(dict);
@@ -167,15 +182,30 @@ public static class StateDictLoader
     public static void LoadLayerNorm<TModel, TWeight>(
         LayerNorm<TModel> ln,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
-        string prefix)
+        string prefix,
+        bool strict = false)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
+        var weightKey = $"{prefix}.weight";
+        var biasKey = $"{prefix}.bias";
+
+        bool hasWeight = tensors.TryGetValue(weightKey, out var w);
+        bool hasBias = tensors.TryGetValue(biasKey, out var b);
+
+        if (strict)
+        {
+            if (ln.Weight != null && !hasWeight)
+                throw new KeyNotFoundException($"Missing tensor: {weightKey}");
+            if (ln.Bias != null && !hasBias)
+                throw new KeyNotFoundException($"Missing tensor: {biasKey}");
+        }
+
         var dict = new Dictionary<string, ReverseGradTensor<TModel>>();
-        if (tensors.TryGetValue($"{prefix}.weight", out var w))
+        if (hasWeight)
             dict["Weight"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromArray(w.Data));
-        if (tensors.TryGetValue($"{prefix}.bias", out var b))
+        if (hasBias)
             dict["Bias"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromArray(b.Data));
         if (dict.Count > 0) ln.LoadStateDict(dict);
@@ -214,20 +244,35 @@ public static class StateDictLoader
     public static void LoadLinear<TModel, TWeight>(
         Linear<TModel, TWeight> linear,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
-        string prefix)
+        string prefix,
+        bool strict = false)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         ArgumentNullException.ThrowIfNull(linear);
-        var state = new Dictionary<string, ReverseGradTensor<TModel>>();
 
-        if (tensors.TryGetValue($"{prefix}.weight", out var w))
+        var weightKey = $"{prefix}.weight";
+        var biasKey = $"{prefix}.bias";
+
+        bool hasWeight = tensors.TryGetValue(weightKey, out var w);
+        bool hasBias = tensors.TryGetValue(biasKey, out var b);
+
+        if (strict)
+        {
+            if (!hasWeight)
+                throw new KeyNotFoundException($"Missing tensor: {weightKey}");
+            if (linear.Bias != null && !hasBias)
+                throw new KeyNotFoundException($"Missing tensor: {biasKey}");
+        }
+
+        if (hasWeight)
         {
             var requiresGrad = linear.Weight?.Tensor.RequiresGrad ?? true;
             linear.BindWeight(ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1], requiresGrad));
         }
 
-        if (tensors.TryGetValue($"{prefix}.bias", out var b))
+        var state = new Dictionary<string, ReverseGradTensor<TModel>>();
+        if (hasBias)
             state["Bias"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromMatrix(b.Data, 1, b.Shape[0]));
 
@@ -325,15 +370,30 @@ public static class StateDictLoader
     public static void LoadLinearWidened<TModel, TWeight>(
         Linear<TModel, TModel> linear,
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
-        string prefix)
+        string prefix,
+        bool strict = false)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
+        var weightKey = $"{prefix}.weight";
+        var biasKey = $"{prefix}.bias";
+
+        bool hasWeight = tensors.TryGetValue(weightKey, out var w);
+        bool hasBias = tensors.TryGetValue(biasKey, out var b);
+
+        if (strict)
+        {
+            if (!hasWeight)
+                throw new KeyNotFoundException($"Missing tensor: {weightKey}");
+            if (linear.Bias != null && !hasBias)
+                throw new KeyNotFoundException($"Missing tensor: {biasKey}");
+        }
+
         var dict = new Dictionary<string, ReverseGradTensor<TModel>>();
-        if (tensors.TryGetValue($"{prefix}.weight", out var w))
+        if (hasWeight)
             dict["Weight"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1]));
-        if (tensors.TryGetValue($"{prefix}.bias", out var b))
+        if (hasBias)
             dict["Bias"] = TypeConverter.Convert<TWeight, TModel>(
                 ReverseGradTensor<TWeight>.FromMatrix(b.Data, 1, b.Shape[0]));
         if (dict.Count > 0) linear.LoadStateDict(dict);

@@ -521,7 +521,8 @@ public class MiniLMDistilled<TModel, TWeight> : Module<TModel> where TModel : st
 
     public static MiniLMDistilled<TModel, TWeight> LoadWeights(
         Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
-        BertConfig config)
+        BertConfig config,
+        bool strict = false)
     {
         var model = new MiniLMDistilled<TModel, TWeight>(config);
         var enc = model.encoder;
@@ -530,19 +531,19 @@ public class MiniLMDistilled<TModel, TWeight> : Module<TModel> where TModel : st
         StateDictLoader.LoadEmbed(enc.posEmbed, tensors, "embeddings.position_embeddings.weight");
         if (enc.tokenTypeEmbed != null)
             StateDictLoader.LoadEmbed(enc.tokenTypeEmbed, tensors, "embeddings.token_type_embeddings.weight");
-        StateDictLoader.LoadLayerNorm(enc.embedLn, tensors, "embeddings.LayerNorm");
+        StateDictLoader.LoadLayerNorm(enc.embedLn, tensors, "embeddings.LayerNorm", strict);
 
         for (int i = 0; i < config.NumHiddenLayers; i++)
         {
             var layer = enc.layers[i];
-            StateDictLoader.LoadLayerNorm(layer.ln1, tensors, $"encoder.layer.{i}.attention.output.LayerNorm");
-            StateDictLoader.LoadLinear(layer.attn.qProj, tensors, $"encoder.layer.{i}.attention.self.query");
-            StateDictLoader.LoadLinear(layer.attn.kProj, tensors, $"encoder.layer.{i}.attention.self.key");
-            StateDictLoader.LoadLinear(layer.attn.vProj, tensors, $"encoder.layer.{i}.attention.self.value");
-            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"encoder.layer.{i}.attention.output.dense");
-            StateDictLoader.LoadLayerNorm(layer.ln2, tensors, $"encoder.layer.{i}.output.LayerNorm");
-            StateDictLoader.LoadLinear(layer.fc1, tensors, $"encoder.layer.{i}.intermediate.dense");
-            StateDictLoader.LoadLinear(layer.fc2, tensors, $"encoder.layer.{i}.output.dense");
+            StateDictLoader.LoadLayerNorm(layer.ln1, tensors, $"encoder.layer.{i}.attention.output.LayerNorm", strict);
+            StateDictLoader.LoadLinear(layer.attn.qProj, tensors, $"encoder.layer.{i}.attention.self.query", strict);
+            StateDictLoader.LoadLinear(layer.attn.kProj, tensors, $"encoder.layer.{i}.attention.self.key", strict);
+            StateDictLoader.LoadLinear(layer.attn.vProj, tensors, $"encoder.layer.{i}.attention.self.value", strict);
+            StateDictLoader.LoadLinear(layer.attn.oProj, tensors, $"encoder.layer.{i}.attention.output.dense", strict);
+            StateDictLoader.LoadLayerNorm(layer.ln2, tensors, $"encoder.layer.{i}.output.LayerNorm", strict);
+            StateDictLoader.LoadLinear(layer.fc1, tensors, $"encoder.layer.{i}.intermediate.dense", strict);
+            StateDictLoader.LoadLinear(layer.fc2, tensors, $"encoder.layer.{i}.output.dense", strict);
         }
 
         model.Eval();
