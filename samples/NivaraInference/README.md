@@ -180,7 +180,7 @@ particular:
 
 - Each model accepts a fixed mode set — `minilm` `benchmark`/`similarity`, `qwen` `tools`/`distill`/`benchmark`, and so on; a vision model also accepts the path of an existing image. Anything else (e.g. `minilm garbag`, `qwen garbag`) is rejected rather than falling through to the model's default runner.
 - `--precision f32|bf16|fp16|native` is accepted where the dispatch selects a BFloat16/Half runner (`minilm`, `distilbert`, `distilbert_sst`, `smollm`, `modernbert`, `laya`; `qwen` for `benchmark` and `native` for the default/tools/plain/benchmark paths). `f32` is always accepted. The vision models reject bf16/fp16: they have no narrow path. Even where a bf16 runner exists, `--silk --precision fp16` is rejected (no measured speedup); use bf16. `native` is SmolLM/Qwen only.
-- `--precision native` is the default for SmolLM and Qwen: storage stays the checkpoint's own BF16 and compute is F32, so the widened weight array never exists at rest. It is rejected for every other model. `qwen distill` rejects it (gradients need widened F32; use `--precision f32`). `smollm ab` rejects it because the A/B compares the scalar and widen kernels *within* one narrow dtype; use `--precision bf16` for that. `qwen --silk` with native runs the F32 device path while issue #1219 (BF16 cached-decode crash) is open.
+- `--precision native` is the default for SmolLM and Qwen: storage stays the checkpoint's own BF16 and compute is F32, so the widened weight array never exists at rest. It is rejected for every other model. `qwen distill` rejects it (gradients need widened F32; use `--precision f32`). `smollm ab` rejects it because the A/B compares the scalar and widen kernels *within* one narrow dtype; use `--precision bf16` for that. `qwen --silk` with native now runs the BF16 device path (BF16 storage / F32 compute, issue #1222); use `--precision f32` for the F32 device path.
 
 ```bash
 dotnet run --project samples/NivaraInference -c Release -- minilm --precision bf16          # accepted (narrow runner)
@@ -352,7 +352,7 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert --silk ben
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --silk benchmark
 dotnet run --project samples/NivaraInference -c Release -- laya --silk benchmark
 dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark             # seq 128 + 512 + 2048 + 4096; --seq selects a subset
-dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark                  # KV-cached vs full re-forward
+dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark                  # KV-cached vs full re-forward (BF16 storage / F32 compute; --precision f32 for F32)
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk --plain benchmark          # plain-prompt decode path
 dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark                # BF16 weights on device (native default); --precision f32 for the F32 device path
 

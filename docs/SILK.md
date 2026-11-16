@@ -364,15 +364,18 @@ this backend. ILGPU stays in `samples/Nivara.Samples/Gpu/`.
 `--silk` runs encoders, causal decoders, and vision convolution through hand-authored OpenCL C
 (`Silk.NET.OpenCL` 2.23.0, the same version pin as the probe leg). It is a vendor-neutral route on
 real models. Scope today: **MiniLM, DistilBERT, DistilBERT+SST-2, ModernBERT, Laya, SmolLM,
-Qwen, MobileNetV2, and ResNet-18**. F32 is the default. Qwen and the vision models expose their own mode
-sets (see §14); the BERT-family models use `default` / `benchmark`. Narrow precision on the silk path:
-`--precision bf16` stores selected weights (tokEmb/tied LM head for SmolLM/Qwen; the QKV, FFN and
-tokEmb matrices for ModernBERT and Laya) as BF16 and widens in-register; activations stay f32.
-MiniLM/DistilBERT/DistilBERT+SST-2 still widen BF16 to f32 before upload. `--precision fp16` is
-rejected at the sample CLI (measured 0.97–1.07× vs f32): use bf16 or drop `--silk`.
-Laya's default is now native (F16 storage, F32 compute) on CPU; on the Silk path it stays F32 (or
-explicit `--precision bf16`), because there is no Half device path. `laya --silk` with default/native
-precision prints a one-line note and runs F32.
+Qwen, MobileNetV2, and ResNet-18**. F32 is the default for the BERT-family, Laya and the vision
+models. SmolLM and Qwen default to BF16 storage / F32 compute on the Silk path (native): BF16
+weights stay on device and widen in-register; activations stay f32 (issue #1222 for Qwen). Qwen and
+the vision models expose their own mode sets (see §14); the BERT-family models use `default` /
+`benchmark`. Narrow precision on the silk path: `--precision bf16` stores selected weights
+(tokEmb/tied LM head for SmolLM/Qwen; the QKV, FFN and tokEmb matrices for ModernBERT and Laya) as
+BF16 and widens in-register; activations stay f32. On the Silk device path native and explicit
+`--precision bf16` are the same run for SmolLM/Qwen. MiniLM/DistilBERT/DistilBERT+SST-2 still widen
+BF16 to f32 before upload. `--precision fp16` is rejected at the sample CLI (measured 0.97–1.07×
+vs f32): use bf16 or drop `--silk`. Laya's default is now native (F16 storage, F32 compute) on CPU;
+on the Silk path it stays F32 (or explicit `--precision bf16`), because there is no Half device path.
+`laya --silk` with default/native precision prints a one-line note and runs F32.
 
 **Bottom line for fine-tuning (issue #1003):** on the integrated Intel Graphics the Silk path is
 **6.2-8.6x faster than the CPU reverse-mode path** at B=2/4/8, L=128, even at the
@@ -661,8 +664,9 @@ The CLI sees `IModernBertGpuSession` / `ILayaGpuSession`. `HiddenOnDevice` stays
 encoder. They use the same `SilkRuntime`, plus `rms_norm`, `swiglu`, `causal_gqa_attention`,
 `decode_gqa_attention`, `decode_gqa_attention_oproj_fused`, `mlp_block`, `gemm_gemv_add`, and `argmax`.
 Qwen exposes `benchmark`, plain, tools, and KV-cache modes through `SilkQwenSession`; SmolLM exposes
-`benchmark` and `generate`. `NivaraChat --smollm --silk` now also serves the same SmolLM decoder as an
-`IChatClient` for chat/plain generation through `SilkSmolLMChatClient`.
+`benchmark` and `generate`. Both default to BF16 storage / F32 compute on the device (native); an
+explicit `--precision f32` keeps the F32 device path, and `distill` stays F32. `NivaraChat --smollm
+--silk` and `NivaraChat --qwen --silk` now serve the same decoders as `IChatClient`s.
 
 `SilkMobileNetV2GpuRunner` and `SilkResNet18GpuRunner` run the vision stack: `conv2d`, `batchnorm_eval`,
 `relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side

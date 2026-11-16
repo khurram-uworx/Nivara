@@ -434,7 +434,7 @@ public static class Qwen
         string text)
         where T : struct, IFloatingPointIeee754<T>
     {
-        string prec = typeof(T) == typeof(BFloat16) ? "BFloat16" : "F32";
+        string prec = typeof(T) == typeof(BFloat16) ? "BFloat16 storage / F32 compute" : "F32";
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Native Function Calling (getWeather) -- Silk ===");
         Console.WriteLine($"Device: GPU (Silk)  Precision: {prec}  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
@@ -539,7 +539,12 @@ public static class Qwen
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
-        var (_, config, tokenizer) = Qwen.LoadModel<T, T>(tensors, modelDir);
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"),
+            Path.Combine(modelDir, "merges.txt"),
+            unkToken: "<|endoftext|>",
+            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
         var prompt = QwenChatTemplate.RenderPlain(PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
 
