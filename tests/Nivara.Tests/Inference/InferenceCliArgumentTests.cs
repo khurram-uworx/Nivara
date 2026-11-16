@@ -287,6 +287,56 @@ public class InferenceCliArgumentTests
     }
 
     /// <summary>
+    /// #1222: qwen --silk now runs the BF16 device path on native/default instead of coercing to
+    /// the F32 device path. These cases pin the new routing at the CLI seam (no GPU/checkpoint).
+    /// </summary>
+    [Test]
+    public void QwenSilk_NativeDefault_RunsBf16DevicePath()
+    {
+        CliResult result = Run("qwen", "--silk");
+        Assert.That(result.StdErr, Does.Contain("Model file not found"),
+            $"'qwen --silk' should reach the weight load; stderr:{Environment.NewLine}{result.StdErr}");
+        Assert.That(result.StdOut + result.StdErr, Does.Not.Contain("1219"),
+            $"'qwen --silk' should no longer print the #1219 coercion note; output:{Environment.NewLine}{result.StdOut}{result.StdErr}");
+        Assert.That(result.StdOut, Does.Contain("Loading weights (native)"),
+            $"'qwen --silk' default should load native (BF16) weights; stdout:{Environment.NewLine}{result.StdOut}");
+    }
+
+    [Test]
+    public void QwenSilk_Bf16Precision_AcceptedForNonDistillModes()
+    {
+        Assert.Multiple(() =>
+        {
+            foreach (string[] args in new[] { new[] { "qwen", "--silk", "--precision", "bf16" },
+                                             new[] { "qwen", "--silk", "--precision", "bf16", "tools" },
+                                             new[] { "qwen", "--silk", "--precision", "bf16", "benchmark" } })
+            {
+                CliResult result = Run(args);
+                string label = string.Join(' ', args);
+                Assert.That(result.StdErr, Does.Contain("Model file not found"),
+                    $"'{label}' should reach the weight load; stderr:{Environment.NewLine}{result.StdErr}");
+                Assert.That(result.StdErr, Does.Not.Contain("precision"),
+                    $"'{label}' should not be rejected by a precision guard; stderr:{Environment.NewLine}{result.StdErr}");
+            }
+        });
+    }
+
+    [Test]
+    public void QwenSilk_Bf16Distill_Rejected()
+    {
+        AssertRejected(Run("qwen", "--silk", "--precision", "bf16", "distill"),
+            "requires widened F32 weights");
+    }
+
+    [Test]
+    public void QwenSilk_F32Precision_Unchanged()
+    {
+        CliResult result = Run("qwen", "--silk", "--precision", "f32", "tools");
+        Assert.That(result.StdErr, Does.Contain("Model file not found"),
+            $"'qwen --silk --precision f32 tools' should reach the weight load; stderr:{Environment.NewLine}{result.StdErr}");
+    }
+
+    /// <summary>
     /// <c>native</c> is not a compute dtype but the shape of a whole run (storage dtype stays the
     /// checkpoint's, compute is F32), so it is defined only for the checkpoint it was written
     /// against. SmolLM-135M is that model; every other run rejects the spelling before the weight
