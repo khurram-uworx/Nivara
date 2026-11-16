@@ -68,7 +68,7 @@ Cold load (safetensors parse 1.85 s + weight load 4.85 s = 6.7 s) dominates shor
 
 ## Native loading (Laya)
 
-`ModernBertLayer.ForwardFused` is now `TWeight`-generic: weights are read through `ParamSpan`/`ModelSpan` (no widening) and the seven projections use `GradKernels.MixedMatMulTransposedB<TModel, TWeight>`, so F32 compute over F16/BF16 storage widens in-register. `ModernBertEncoder.Forward` gathers embedding rows in the storage dtype via `Embedding.GatherRows`. See `docs/plan/LAYA-HONEST-WEIGHTS.md`.
+`ModernBertLayer.ForwardFused` is now `TWeight`-generic: weights are read through `ParamSpan`/`ModelSpan` (no widening) and the seven projections use `GradKernels.MixedMatMulTransposedB<TModel, TWeight>`, so F32 compute over F16/BF16 storage widens in-register. `ModernBertEncoder.Forward` gathers embedding rows in the storage dtype via `Embedding.GatherRows`. See issue #1218.
 
 ## GPU path
 
