@@ -917,6 +917,15 @@ internal static class GradKernels
                 aRows, aCols, bCols);
             return;
         }
+        if (typeof(TWeight) == typeof(Half) && typeof(TModel) == typeof(float))
+        {
+            NarrowFloatKernels.MatMul(
+                MemoryMarshal.Cast<TModel, float>(a),
+                MemoryMarshal.Cast<TWeight, Half>(b),
+                MemoryMarshal.Cast<TModel, float>(output.AsSpan()),
+                aRows, aCols, bCols);
+            return;
+        }
 
         var widened = Array.ConvertAll(b.ToArray(), x => TModel.CreateChecked(x));
         MatMul<TModel>(a, widened, output, aRows, aCols, bCols);
