@@ -104,8 +104,7 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
         var inputData = GetInputSpan(input);
         int rows = input.Length / normalizedShape;
 
-        var shouldTrack = GradientUtils.IsGradEnabled &&
-            (input.RequiresGrad || (weight?.Tensor.RequiresGrad ?? false) || (bias?.Tensor.RequiresGrad ?? false));
+        var shouldTrack = GradientUtils.ShouldTrackGrad(input, weight?.Tensor, bias?.Tensor);
 
         if (!shouldTrack)
         {
@@ -141,14 +140,14 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
             if (input.RequiresGrad)
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
-            if (weight != null)
+            if (weight != null && weight.Tensor.RequiresGrad)
             {
                 var gradGammaData = LayerNormKernel<T>.BackwardWeight(
                     gradOutData, savedXHat, savedRows, savedNormShape);
                 ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
             }
 
-            if (bias != null)
+            if (bias != null && bias.Tensor.RequiresGrad)
             {
                 var gradBetaData = LayerNormKernel<T>.BackwardBias(
                     gradOutData, savedRows, savedNormShape);
