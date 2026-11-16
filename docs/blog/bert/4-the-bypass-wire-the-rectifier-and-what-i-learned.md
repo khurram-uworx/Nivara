@@ -129,7 +129,7 @@ for (int i = 0; i < input.Length; i++)
   activation → `classifier (768→2)`. HuggingFace's architecture uses **ReLU** there; a
   naive port used exact GELU. Result: logits drifted by ~**0.05**, and argmax flipped on
   borderline sentences. Documented at `samples/NivaraInference/README.md:192`; the fixed
-  head in `samples/Nivara.Samples/DistilBertModel.cs::DistilBertForSequenceClassification`:
+  head in `samples/Nivara.Samples/DistilBertModel.cs::DistilBertForSequenceClassification(BertConfig,int)`:
 
 ```csharp
 var encoded = encoder.ForwardBatched(inputIds, attentionMask, batchSize, seqLen);
@@ -185,7 +185,7 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 ```
 
   In a batched classifier head it's the same idea: `Gather(encoded, [0, seqLen, 2·seqLen, …])`
-  (`DistilBertModel.cs::DistilBertForSequenceClassification`). Analogy: pin 0 of the bus — the convention is that the
+  (`DistilBertModel.cs::DistilBertForSequenceClassification(BertConfig,int)`). Analogy: pin 0 of the bus — the convention is that the
   first token's row carries the sentence summary. Why row 0 specifically? Because during
   training the model was *told* the `[CLS]` position must summarize the whole sentence, so
   it learned to route the useful bits there. A designated output pin — by contract, not by
