@@ -74,10 +74,13 @@ public class RMSNormTests
     }
 
     [Test]
-    public void InferencePath_BuildsNoGraphNodes()
+    public void FrozenWeight_ConstantInput_BuildsNoGraphNodes()
     {
         const float eps = 1e-5f;
         using var rmsnorm = new RMSNorm<float>(4, eps);
+        // Freeze the only parameter so neither input nor params require grad.
+        rmsnorm.Weight!.Tensor = Module<float>.CloneTensor(
+            ReverseGradTensor<float>.FromArray(new float[4], requiresGrad: false));
 
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
@@ -87,13 +90,52 @@ public class RMSNormTests
         ReverseGradTensor<float> outside;
         using (GradientUtils.Grad())
         {
-            // Even inside Grad() scope, a requiresGrad:false input must not build a graph.
             outside = rmsnorm.Forward(input);
         }
 
         Assert.That(outside.RequiresGrad, Is.False);
         Assert.That(outside.IsLeaf, Is.True,
-            "RMSNorm with requiresGrad:false input should create no graph node even inside Grad() scope");
+            "RMSNorm with a frozen weight and constant input should create no graph node even inside Grad() scope");
+    }
+
+    [Test]
+    public void TrainableWeightOnConstantInput_ProducesWeightGradient()
+    {
+        const float eps = 1e-5f;
+        using var rmsnorm = new RMSNorm<float>(4, eps);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(2, 4);
+
+        using (GradientUtils.Grad())
+        {
+            var y = rmsnorm.Forward(input);
+            var loss = ReverseGradOperations.Sum(y);
+            loss.Backward();
+        }
+
+        Assert.That(rmsnorm.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(input.Grad, Is.Null, "constant input should not receive a gradient");
+    }
+
+    [Test]
+    public void FrozenWeight_ConstantInput_DoesNotTrack()
+    {
+        const float eps = 1e-5f;
+        using var rmsnorm = new RMSNorm<float>(4, eps);
+        rmsnorm.Weight!.Tensor = Module<float>.CloneTensor(
+            ReverseGradTensor<float>.FromArray(new float[4], requiresGrad: false));
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }),
+            requiresGrad: false);
+        input.Reshape(2, 4);
+
+        var y = rmsnorm.Forward(input);
+        Assert.That(y.RequiresGrad, Is.False);
+        Assert.That(rmsnorm.Weight!.Tensor.Grad, Is.Null);
     }
 
     [Test]
