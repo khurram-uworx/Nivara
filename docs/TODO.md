@@ -118,9 +118,10 @@ silently default distill to f32 — the issue asks for a named guard, not a sile
 
 ## 8. GitHub issues log
 
-- [ ] #1231 ships the #1219 (Silk SmolLM BF16 cached-decode) fix with no regression test — create an issue to track adding `ForwardCachedArgmax` coverage for SmolLM, so the fix is pinned.
-- [ ] `--synthetic-weights` is documented (help + two error messages) but not parsed; `ConsumesNarrow(..., synthetic:)` is dead and `Qwen.RunSyntheticBenchmarkSilk` is unreachable. Track as a separate cleanup issue.
+- [x] #1232 — Silk SmolLM BF16 cached-decode: add `ForwardCachedArgmax` regression test (#1219 follow-up) (created while working on #1222).
+- [x] #1233 — NivaraInference: `--synthetic-weights` is documented but not implemented (created while working on #1222).
 - [ ] Published Silk row (130 ms/token, 2026-10-17) is not reproducible today on either dtype (~517 ms/token F32, ~567 ms/token BF16); needs a human-run `data\qwen-bench` capture before quoting new numbers.
+- [x] #1234 — NivaraChat `--qwen --silk` access violation in `ReleaseMemObject` during cleanup (pre-existing, not caused by #1222) (created while working on #1222).
 
 ## 9. Decisions resolved (G1)
 

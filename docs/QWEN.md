@@ -4,7 +4,7 @@ Native function calling with **Qwen2.5-0.5B-Instruct** served as a plain `Micros
 
 The code lives in `samples/NivaraChat/Qwen/`; the tests in `tests/Nivara.Tests/Qwen/`.
 
-The chat host (`NivaraChat --qwen`) loads native weights only (BF16 storage / F32 compute) and exposes no `--precision` flag: `SafeTensorsLoader.Read<BFloat16>` then `LlamaLoader.Load<float, BFloat16>`. `--silk` coerces to the F32 device path while issue #1219 is open.
+The chat host (`NivaraChat --qwen`) loads native weights only (BF16 storage / F32 compute) and exposes no `--precision` flag: `SafeTensorsLoader.Read<BFloat16>` then `LlamaLoader.Load<float, BFloat16>`. `--silk` now runs the BF16 device path (BF16 storage / F32 compute) on the same native tensors; there is no separate F32-coercion note anymore (issue #1222).
 
 Related Qwen work, tracked separately: #384 (qkvBias loader gap), #386 (Qwen distillation), #387 (BF16-in-memory SIMD-dot), #388 (fused BF16→F32 read), #390 (GGUF backend), #391 (revisit BF16 workarounds), #399 (backlog: `DecodeAttention` per-dot loop at large `kvLen`), #402 (P2: float single-pass sampling + REPL tokenize-prefix cache), #411 (backlog: RMSNorm gamma via `TensorPrimitives.Multiply`), #413/#414 (P2: fuse final RMSNorm + tied LM head), #416 (stretch: INT8 block-quantized weights — blocked on integer support in AutoDiff, see `docs/INTEGERS.md`).
 
@@ -56,7 +56,7 @@ config.json + model.safetensors + vocab.json + merges.txt + tokenizer.json
   → Gpt2BpeTokenizer  (Qwen Split-regex pretokenizer + added tokens)
 ```
 
-> **Native default (issue #1217).** Qwen now defaults to **native** loading: BF16 weights stay BF16 at rest (~942 MB) and compute runs in F32, widening in-register via the mixed-dtype kernels (`LlamaForCausalLM<float,BFloat16>`, `Linear<float,BFloat16>`, `MixedMatMul*`). No second full-checkpoint copy is held. `--precision f32` is the explicit widened-on-load path (the previous default, ~1.88 GB resident). `--precision bf16` keeps uniform BF16 storage/compute for benchmark/plain runs; `fp16` stays rejected (Half's range/precision is insufficient for Qwen2.5-0.5B). `qwen distill` requires gradients and therefore stays on the widened F32 path — passing `--precision native` there is rejected with a named guard ("requires widened F32 weights"). `qwen --silk` stays on the F32 device path while issue #1219 (BF16 cached-decode crash) is open; an explicit `--precision bf16` opts into the (currently broken) BF16 device path.
+> **Native default (issue #1217).** Qwen now defaults to **native** loading: BF16 weights stay BF16 at rest (~942 MB) and compute runs in F32, widening in-register via the mixed-dtype kernels (`LlamaForCausalLM<float,BFloat16>`, `Linear<float,BFloat16>`, `MixedMatMul*`). No second full-checkpoint copy is held. `--precision f32` is the explicit widened-on-load path (the previous default, ~1.88 GB resident). `--precision bf16` keeps uniform BF16 storage/compute for benchmark/plain runs; `fp16` stays rejected (Half's range/precision is insufficient for Qwen2.5-0.5B). `qwen distill` requires gradients and therefore stays on the widened F32 path — passing `--precision native` there is rejected with a named guard ("requires widened F32 weights"). `qwen --silk` now runs the BF16 device path on native/default (BF16 storage / F32 compute, issue #1222); an explicit `--precision f32` keeps the F32 device path. On the Silk device path native and explicit `--precision bf16` are the same run (BF16 weights on device, F32 activations).
 >
 > **Why native is the default now** — `Vector<BFloat16>` is still **unsupported** on .NET 11 (`IsSupported == false` at every width), so BF16 *compute* would fall back to a scalar BCL path; but storage stays BF16 and the dot kernels widen each lane in-register (F32 FMA math on bf16 storage at rest, results rounded back to bf16 for the next layer) — the same mechanism as `--precision bf16` (#407), now the default for storage. The widen is **lossless** (BF16 *is* the top 16 bits of float32). Full rationale, A/B numbers, and `WidenBf16ToF32` mechanics live in **[`docs/BFLOAT16.md`](BFLOAT16.md)**; *Making Qwen fast* below retains the benchmark tradeoff.
 
@@ -271,14 +271,14 @@ A future `--qwen gguf` sub-mode would load the Qwen checkpoint as GGUF through a
 
 ## GPU path
 
-Qwen now has an F32 Silk runner (`--qwen ... --silk`: tools, plain, benchmark, distill). The first GPU backend is no longer available (removed in 1.5.0). The teacher pass in `distill` runs on either backend through one shared prompt-and-parse seam, so the two paths can only differ in the generation call. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
+Qwen now has a Silk runner (`--qwen ... --silk`: tools, plain, benchmark, distill). Native/default keeps BF16 weights on the device and widens in-register (BF16 storage / F32 compute, issue #1222); an explicit `--precision f32` runs the F32 device path. `distill` stays on the F32 device path (gradients). The first GPU backend is no longer available (removed in 1.5.0). The teacher pass in `distill` runs on either backend through one shared prompt-and-parse seam, so the two paths can only differ in the generation call. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
 
 ## Benchmark protocol (Qwen)
 
 Commands:
 - Python CPU reference: `python samples/NivaraInference/Python/qwen_benchmark.py`
 - Nivara CPU: `qwen benchmark` / `qwen benchmark --plain`
-- Nivara GPU (Silk): `qwen --silk benchmark` / `qwen --silk benchmark --plain` (real checkpoint required)
+- Nivara GPU (Silk): `qwen --silk benchmark` / `qwen --silk benchmark --plain` (BF16 storage / F32 compute by default; add `--precision f32` for the F32 device path) (real checkpoint required)
 
 Status: measured on 2026-10-17 (see *Measured Qwen results* below).
 
@@ -308,6 +308,7 @@ dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen benc
 
 # 4. Real-checkpoint Silk/OpenCL GPU run (requires samples/data/qwen2.5-0.5b-instruct and an OpenCL GPU)
 dotnet samples/NivaraInference/bin/Release/net11.0/NivaraInference.dll qwen --silk benchmark > data\qwen-bench\silk_plain.txt 2>&1
+# (native/BF16 device path; append --precision f32 for the F32 device path)
 ```
 
 Synthetic-weight runs (`qwen --synthetic-weights ...`) are only useful when `samples/data/qwen2.5-0.5b-instruct` is unavailable; when the real checkpoint is present they should be skipped.
@@ -341,12 +342,12 @@ All runs were executed in **Release** (`dotnet run -c Release`) with one warm-up
 | Python (PyTorch / HF) `generate`, plain prompt | 36 | 8 (incl. EOS) | 1137 | 142.1 | 7.04 | (inside `generate`) | (inside `generate`) | n/a |
 | Nivara CPU, tools prompt (`qwen benchmark`) | 206 | 19 | 8828 | 449.6 | 2.2 | 3895 | 259.6 | 11.6x |
 | Nivara CPU, plain prompt (`qwen benchmark --plain`) | 36 | 7 | 1585 | 227.7 | 4.4 | 782 | 114.7 | 7.2x |
-| Nivara Silk (OpenCL GPU), plain prompt (`qwen --silk benchmark`) | 36 | 7 | 915 | ~130 (median run) | ~7.7 (per generated token) | (not reported) | (not reported) | n/a (KV-cache path only) |
+| Nivara Silk (OpenCL GPU), plain prompt (`qwen --silk benchmark`, F32 device path, `--precision f32`) | 36 | 7 | 915 | ~130 (median run) | ~7.7 (per generated token) | (not reported) | (not reported) | n/a (KV-cache path only) |
 
 Notes:
 - PyTorch and the Nivara plain run share the same 36 rendered prompt tokens.
 - Nivara CPU plain decode (cached path) cost 227.7 ms/token averaged over the whole run and 114.7 ms/token on the decode phase alone; the full re-forward path cost 1,393.5 ms/token on the decode phase.
-- Silk measures only the KV-cached decode loop and has no full-forward comparison. Per-run: run 1 7 tokens in 0.94 s (134 ms/token), run 2 0.91 s (130 ms/token), run 3 0.92 s (130 ms/token); median 915 ms total. Model build took 5,178 ms.
+- Silk measures only the KV-cached decode loop and has no full-forward comparison. Per-run: run 1 7 tokens in 0.94 s (134 ms/token), run 2 0.91 s (130 ms/token), run 3 0.92 s (130 ms/token); median 915 ms total. Model build took 5,178 ms. Dated 2026-10-17, F32 device path. A same-session 2026-11-16 capture on the same box gave ~517 ms/token (F32, `--precision f32`) and ~567 ms/token (native/BF16 default) over 3 timed passes; the machine/driver state differs from 2026-10-17, so the 2026-10-17 figure is retained as the historical F32 number. A human-run `data\qwen-bench` capture is needed before quoting new published numbers.
 
 ### Synthetic-weight validation (no checkpoint required)
 

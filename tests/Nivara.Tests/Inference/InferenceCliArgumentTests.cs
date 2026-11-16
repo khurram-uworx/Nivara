@@ -298,8 +298,8 @@ public class InferenceCliArgumentTests
             $"'qwen --silk' should reach the weight load; stderr:{Environment.NewLine}{result.StdErr}");
         Assert.That(result.StdOut + result.StdErr, Does.Not.Contain("1219"),
             $"'qwen --silk' should no longer print the #1219 coercion note; output:{Environment.NewLine}{result.StdOut}{result.StdErr}");
-        Assert.That(result.StdOut, Does.Contain("Loading weights (native)"),
-            $"'qwen --silk' default should load native (BF16) weights; stdout:{Environment.NewLine}{result.StdOut}");
+        Assert.That(result.StdOut + result.StdErr, Does.Not.Contain("runs the F32 device path"),
+            $"'qwen --silk' should no longer coerce native to the F32 device path; output:{Environment.NewLine}{result.StdOut}{result.StdErr}");
     }
 
     [Test]

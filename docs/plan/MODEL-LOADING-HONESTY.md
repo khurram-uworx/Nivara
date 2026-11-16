@@ -36,7 +36,7 @@ Qwen is BF16 on disk and Llama-family. Work:
 - Add `LlamaForCausalLM<float, BFloat16>` (F32 compute, BF16 storage) variants of `Run`, `RunPlain`, `RunTools`, `RunBenchmark` in `samples/NivaraInference/Qwen.cs`, mirroring `RunSmolLMCore<TModel,TWeight>` / `RunSmolLMNative`. `LoadModel` already calls `LlamaLoader.Load<T,T>`; add a native variant `LoadModelNative` calling `LlamaLoader.Load<float, BFloat16>`.
 - `RunDistill` stays F32 (teacher generation only; the student is a tiny BOW classifier, so the memory win is small). Document this exception.
 - CLI: allow `--precision native` for `qwen`, default to `native` (like `smollm`), reject `native` where the run is F32-only (e.g. distill, vision). Update `InferenceCliArgumentTests` accordingly.
-- Silk: Qwen already has a BF16 Silk path (`SilkQwenSession` with BFloat16 tensors). Verify it end-to-end before making native the default there. **Blocked by issue #1219** (Silk SmolLM BF16 decode crash) — the same latent bug may affect Qwen's BF16 Silk decode. Until #1219 is resolved, keep Qwen Silk defaulting to F32 (override the native default when `--silk` is set).
+- Silk: Qwen already has a BF16 Silk path (`SilkQwenSession` with BFloat16 tensors). #1219's crash was SmolLM-only; Qwen's BF16 cached decode was already correct. Resolved by #1222: `qwen --silk` now runs the BF16 device path on native/default (BF16 storage / F32 compute); an explicit `--precision f32` keeps the F32 device path. `distill` stays F32.
 - NivaraChat: `QwenChatClient` loads via the same dispatch; ensure the native default propagates. Silk chat client is session-based and dtype-agnostic, so it inherits once dispatch changes.
 
 ### Phase 2 — Laya
