@@ -58,18 +58,38 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
         float ropeTheta = 10000f,
         bool tieWordEmbeddings = true,
         bool qkvBias = false)
+        : this(vocabSize, hiddenSize, numHiddenLayers, numHeads, numKeyValueHeads, intermediateSize,
+              rmsNormEps, maxPositionEmbeddings, ropeTheta, tieWordEmbeddings, qkvBias, false)
+    {
+    }
+
+    internal LlamaForCausalLM(
+        int vocabSize,
+        int hiddenSize,
+        int numHiddenLayers,
+        int numHeads,
+        int numKeyValueHeads,
+        int intermediateSize,
+        float rmsNormEps,
+        int maxPositionEmbeddings,
+        float ropeTheta,
+        bool tieWordEmbeddings,
+        bool qkvBias,
+        bool skipWeightInitialization)
     {
         this.vocabSize = vocabSize;
         this.maxPositionEmbeddings = maxPositionEmbeddings;
         this.tieWordEmbeddings = tieWordEmbeddings;
         this.qkvBias = qkvBias;
 
-        Embed = new Embedding<TModel, TWeight>(vocabSize, hiddenSize);
+        Embed = skipWeightInitialization
+            ? Embedding<TModel, TWeight>.Uninitialized(vocabSize, hiddenSize)
+            : new Embedding<TModel, TWeight>(vocabSize, hiddenSize);
         layers = new LlamaDecoderBlock<TModel, TWeight>[numHiddenLayers];
         for (int i = 0; i < numHiddenLayers; i++)
             layers[i] = new LlamaDecoderBlock<TModel, TWeight>(
                 hiddenSize, numHeads, numKeyValueHeads, intermediateSize,
-                rmsNormEps, maxPositionEmbeddings, ropeTheta, qkvBias);
+                rmsNormEps, maxPositionEmbeddings, ropeTheta, qkvBias, skipWeightInitialization);
         finalNorm = new RMSNorm<TModel>(hiddenSize, rmsNormEps);
 
         var modules = new Module<TModel>[layers.Length + 2];
@@ -547,7 +567,8 @@ public static class LlamaLoader
             config.MaxPositionEmbeddings,
             config.RopeTheta,
             config.TieWordEmbeddings,
-            qkvBias);
+            qkvBias,
+            true);
 
         StateDictLoader.LoadEmbed(model.Embed, tensors, "model.embed_tokens.weight");
         StateDictLoader.LoadRMSNorm(model.finalNorm, tensors, "model.norm");
