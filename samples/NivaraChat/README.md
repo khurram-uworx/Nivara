@@ -534,7 +534,7 @@ config.json + model.safetensors + vocab.json + merges.txt
 - `--smollm plain --text "..."` — single-shot reply, no REPL.
 - `--smollm chat [--text "..."]` — interactive multi-turn REPL (default when no `--text`); a prompt skips straight to one turn. In the interactive menu (`RunInteractive`), generation options are prompted with sensible defaults.
 
-Options after `--smollm`: `chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--precision f32|bf16` (default `f32`), `--max-new-tokens <n>` (default 64), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed for reproducible sampling), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--smollm --help` for the full list.
+Options after `--smollm`: `chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--max-new-tokens <n>` (default 64), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed for reproducible sampling), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--smollm --help` for the full list.
 
 Model files must be present under `samples/data/smollm-135m` (already downloaded in this repo). To re-download:
 
@@ -546,10 +546,9 @@ Tested examples:
 
 | Command | Precision | Result |
 |---------|-----------|--------|
-| `--smollm plain --text "The capital of France is" --max-new-tokens 12` | f32 | Streams "The capital of France is Paris, which is the largest city" |
-| `--smollm chat` | f32 | Interactive multi-turn REPL; reply streamed token-by-token (KV-cached by default) |
-| `--smollm chat --temperature 0.6` | f32 | Interactive REPL with sampling; varied replies across turns |
-| `--smollm plain --text "The capital of France is" --precision bf16` | bf16 | Same reply, ~half the memory footprint |
+| `--smollm plain --text "The capital of France is" --max-new-tokens 12` | bf16 (native) | Streams "The capital of France is Paris, which is the largest city" |
+| `--smollm chat` | bf16 (native) | Interactive multi-turn REPL; reply streamed token-by-token (KV-cached by default) |
+| `--smollm chat --temperature 0.6` | bf16 (native) | Interactive REPL with sampling; varied replies across turns |
 
 This is **Stage A** of the SmolLM two-demo plan: plain causal-LM chat only. Tool calling (the SmolLM2 Hermes `<tool_call>`/`<tool_response>` format wiring Nivara's trained models as `AIFunction` tools) is a later stage and is intentionally not included here.
 
@@ -570,7 +569,7 @@ config.json + model.safetensors + vocab.json + merges.txt + tokenizer.json
 - `--qwen tools-nivara --text "Analyze the sentiment of: 'I absolutely love this product!'"` — real Nivara-backed tools (`NivaraAIFunctions` building blocks: `analyzeSentiment`, `extractEntities`, `validateResponse`) invoked by the Qwen loop; subset via `--nivara-tools`. Interactive REPL when `--text` is omitted.
 - `--qwen chat` / `--qwen plain` — interactive multi-turn REPL / single-shot plain-text reply, token-streamed.
 
-Options after `--qwen`: `tools-weather|tools-nivara|chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/qwen2.5-0.5b-instruct`), `--nivara-tools <csv>` (subset for tools-nivara: sentiment,entities,validate,all; default all), `--precision f32|bf16` (default `f32`; bf16 keeps the BF16 weights native — BF16-on-disk is read as BFloat16 with no widen), `--max-new-tokens <n>` (default 128), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--qwen --help` for the full list.
+Options after `--qwen`: `tools-weather|tools-nivara|chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/qwen2.5-0.5b-instruct`), `--nivara-tools <csv>` (subset for tools-nivara: sentiment,entities,validate,all; default all), `--max-new-tokens <n>` (default 128), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--qwen --help` for the full list.
 
 Model files must be present under `samples/data/qwen2.5-0.5b-instruct`:
 
@@ -582,8 +581,8 @@ Tested examples:
 
 | Command | Precision | Result |
 |---------|-----------|--------|
-| `--qwen tools-weather --text "What's the weather in Paris?"` | f32 | `[assistant → getWeather(city: Paris)]` → `[tool] Partly cloudy, 18°C. …` → "The weather in Paris is partly cloudy with a temperature of 18°C. …" (loop closes inside the cap) |
-| `--qwen plain --text "The capital of France is" --max-new-tokens 24` | f32 | Streams "The capital of France is Paris." then stops on `<\|im_end\|>` |
+| `--qwen tools-weather --text "What's the weather in Paris?"` | bf16 (native) | `[assistant → getWeather(city: Paris)]` → `[tool] Partly cloudy, 18°C. …` → "The weather in Paris is partly cloudy with a temperature of 18°C. …" (loop closes inside the cap) |
+| `--qwen plain --text "The capital of France is" --max-new-tokens 24` | bf16 (native) | Streams "The capital of France is Paris." then stops on `<\|im_end\|>` |
 
 Ground truth, the format findings, the BF16 loader benchmark, the PyTorch
 parity evidence, and the full performance work (Qwen-fast: batched prefill,
