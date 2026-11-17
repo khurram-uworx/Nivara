@@ -7,15 +7,17 @@ namespace NivaraChat.Models;
 internal sealed class ValidatorTextModel : ITextModel
 {
     private readonly TextClassifierModel<float> _model;
+    private readonly SilkTextClassifier? _silk;
     private readonly TextTokenizer _tokenizer;
     private readonly int _maxSeqLen;
 
     public string Name => "NivaraValidator";
 
-    public ValidatorTextModel(TextClassifierModel<float> model, TextTokenizer tokenizer, int maxSeqLen = 40)
+    public ValidatorTextModel(TextClassifierModel<float> model, TextTokenizer tokenizer, int maxSeqLen = 40, SilkTextClassifier? silk = null)
     {
         _model = model;
         _model.Eval();
+        _silk = silk;
         _tokenizer = tokenizer;
         _maxSeqLen = maxSeqLen;
     }
@@ -32,11 +34,21 @@ internal sealed class ValidatorTextModel : ITextModel
 
     public string Process(string input)
     {
-        var tensorInput = ModelInferenceHelper.ToTensor(_tokenizer, input, _maxSeqLen);
-        var logits = _model.Forward(tensorInput);
+        float[] logitsArr;
+        if (_silk is not null)
+        {
+            var toks = _tokenizer.Encode(input, fixedLength: _maxSeqLen);
+            logitsArr = _silk.ForwardLogits(toks);
+        }
+        else
+        {
+            var tensorInput = ModelInferenceHelper.ToTensor(_tokenizer, input, _maxSeqLen);
+            var logits = _model.Forward(tensorInput);
+            logitsArr = logits.Data.ToArray();
+        }
 
-        float validScore = logits.Data[0];
-        float invalidScore = logits.Data[1];
+        float validScore = logitsArr[0];
+        float invalidScore = logitsArr[1];
         float confidence = MathF.Exp(validScore) / (MathF.Exp(validScore) + MathF.Exp(invalidScore));
         bool isValid = validScore > invalidScore;
         var label = isValid ? "VALID" : "INVALID";

@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using NivaraChat.Helpers;
 using NivaraChat.Shared;
 using NivaraChat.Tools;
 
@@ -31,6 +32,8 @@ public static class ToolsMode
         var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(ctx.ModelsDir);
         var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(ctx.ModelsDir);
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir);
+        SilkTextClassifier? sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
+        SilkTextClassifier? validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
         Console.WriteLine("Models loaded.\n");
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
@@ -42,7 +45,7 @@ public static class ToolsMode
         }
         Console.WriteLine("Ollama connected.\n");
 
-        NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok);
+        NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok, sentimentSilk, validatorSilk);
 
         var tools = new AITool[]
         {
@@ -97,6 +100,8 @@ cleanup:
         sentimentModel.Dispose();
         entityModel.Dispose();
         validatorModel.Dispose();
+        sentimentSilk?.Dispose();
+        validatorSilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }

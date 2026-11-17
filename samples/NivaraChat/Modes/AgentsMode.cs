@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using NivaraChat.Helpers;
 using NivaraChat.Models;
 using NivaraChat.Shared;
 
@@ -25,11 +26,13 @@ public static class AgentsMode
         var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(ctx.ModelsDir);
         var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(ctx.ModelsDir);
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir, useAgentsFormat: true);
+        var sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
+        var validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
         Console.WriteLine("Models loaded.\n");
 
-        var sentimentText = new SentimentTextModel(sentimentModel, sentimentTok);
+        var sentimentText = new SentimentTextModel(sentimentModel, sentimentTok, silk: sentimentSilk);
         var entityText = new EntityTextModel(entityModel, entityTok);
-        var validatorText = new ValidatorTextModel(validatorModel, validatorTok);
+        var validatorText = new ValidatorTextModel(validatorModel, validatorTok, silk: validatorSilk);
 
         var sentimentAgent = new NivaraChatClient(sentimentText).AsAIAgent("NivaraSentiment");
         var entityAgent = new NivaraChatClient(entityText).AsAIAgent("NivaraEntity");
@@ -44,6 +47,8 @@ public static class AgentsMode
                 sentimentModel.Dispose();
                 entityModel.Dispose();
                 validatorModel.Dispose();
+                sentimentSilk?.Dispose();
+                validatorSilk?.Dispose();
                 Console.WriteLine("Error: failed to connect to Ollama.");
                 return;
             }
@@ -89,6 +94,8 @@ public static class AgentsMode
         sentimentModel.Dispose();
         entityModel.Dispose();
         validatorModel.Dispose();
+        sentimentSilk?.Dispose();
+        validatorSilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }

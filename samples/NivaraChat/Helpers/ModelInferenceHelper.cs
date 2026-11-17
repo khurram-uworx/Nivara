@@ -24,6 +24,25 @@ internal static class ModelInferenceHelper
         return best;
     }
 
+    public static int ArgMax(float[] logits, int offset, int count)
+    {
+        int best = 0;
+        for (int i = 1; i < count; i++)
+            if (logits[offset + i] > logits[offset + best]) best = i;
+        return best;
+    }
+
+    public static float SoftmaxConfidence(float[] logits, int offset, int count, int predClass)
+    {
+        var slice = new float[count];
+        for (int i = 0; i < count; i++) slice[i] = logits[offset + i];
+        float maxVal = TensorPrimitives.Max(slice.AsSpan());
+        TensorPrimitives.Add(slice.AsSpan(), -maxVal, slice);
+        TensorPrimitives.Exp(slice.AsSpan(), slice);
+        float sumExp = TensorPrimitives.Sum(slice.AsSpan());
+        return slice[predClass] / sumExp;
+    }
+
     public static float SoftmaxConfidence(NivaraColumn<float> logits, int offset, int count, int predClass)
     {
         var slice = new float[count];
@@ -54,6 +73,17 @@ internal static class ModelInferenceHelper
         var logits = model.Forward(tensorInput);
         int bestClass = ArgMax(logits.Data, 0, numClasses);
         float confidence = SoftmaxConfidence(logits.Data, 0, numClasses, bestClass);
+        return (bestClass, confidence);
+    }
+
+    public static (int bestClass, float confidence) RunClassifierWithConfidence(
+        SilkTextClassifier model, TextTokenizer tokenizer,
+        string input, int maxSeqLen, int numClasses, bool addBosEos = true)
+    {
+        var tokens = tokenizer.Encode(input, fixedLength: maxSeqLen, addBosEos: addBosEos);
+        var logits = model.ForwardLogits(tokens);
+        int bestClass = ArgMax(logits, 0, numClasses);
+        float confidence = SoftmaxConfidence(logits, 0, numClasses, bestClass);
         return (bestClass, confidence);
     }
 

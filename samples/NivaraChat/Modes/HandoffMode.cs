@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Executors;
+using NivaraChat.Helpers;
 using NivaraChat.Shared;
 
 namespace NivaraChat.Modes;
@@ -23,6 +24,7 @@ public static class HandoffMode
         Console.WriteLine("Loading trained models...");
         var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(ctx.ModelsDir);
         var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(ctx.ModelsDir);
+        var sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
         Console.WriteLine("Models loaded.\n");
 
         if (!ctx.UseOllama)
@@ -45,7 +47,7 @@ public static class HandoffMode
         Console.WriteLine("Ollama connected.\n");
 
         var router = new TextRouter();
-        var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok);
+        var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok, silk: sentimentSilk);
         var entityExtractor = new EntityExtractor(entityModel, entityTok);
         var confidenceRouter = new ConfidenceRouter(ctx.ConfidenceThreshold, chatClient);
 
@@ -109,6 +111,7 @@ public static class HandoffMode
 
         sentimentModel.Dispose();
         entityModel.Dispose();
+        sentimentSilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }

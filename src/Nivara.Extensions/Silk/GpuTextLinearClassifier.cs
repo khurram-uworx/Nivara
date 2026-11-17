@@ -17,6 +17,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
     readonly int vocabSize;
     readonly int embeddingDim;
     readonly int hiddenDim;
+    readonly int numClasses;
     readonly Random rng;
 
     readonly float[] embedding;
@@ -60,19 +61,21 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
     public string DeviceName => runtime.DeviceName;
 
-    public GpuTextLinearClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seed = 42)
+    public GpuTextLinearClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seed = 42, int numClasses = 2)
     {
+        if (numClasses < 2) throw new ArgumentOutOfRangeException(nameof(numClasses));
         this.vocabSize = vocabSize;
         this.embeddingDim = embeddingDim;
         this.hiddenDim = hiddenDim;
+        this.numClasses = numClasses;
         rng = new Random(seed);
 
         runtime = new SilkRuntime();
         embedding = new float[vocabSize * embeddingDim];
         fc1Weight = new float[embeddingDim * hiddenDim];
         fc1Bias = new float[hiddenDim];
-        fc2Weight = new float[hiddenDim * 2];
-        fc2Bias = new float[2];
+        fc2Weight = new float[hiddenDim * numClasses];
+        fc2Bias = new float[numClasses];
 
         InitWeights();
 
@@ -137,17 +140,17 @@ public sealed class GpuTextLinearClassifier : IDisposable
             throw new ArgumentException("Shape mismatch with the classifier's configured dimensions.");
         if (fc1WeightsCpu is null || fc1WeightsCpu.Length != hiddenDim * embeddingDim)
             throw new ArgumentException("FC1 weight shape mismatch.", nameof(fc1WeightsCpu));
-        if (fc2WeightsCpu is null || fc2WeightsCpu.Length != 2 * hiddenDim)
+        if (fc2WeightsCpu is null || fc2WeightsCpu.Length != numClasses * hiddenDim)
             throw new ArgumentException("FC2 weight shape mismatch.", nameof(fc2WeightsCpu));
 
         var fc1Gpu = new float[embeddingDim * hiddenDim];
         for (int e = 0; e < embeddingDim; e++)
             for (int h = 0; h < hiddenDim; h++)
                 fc1Gpu[e * hiddenDim + h] = fc1WeightsCpu[h * embeddingDim + e];
-        var fc2Gpu = new float[hiddenDim * 2];
+        var fc2Gpu = new float[hiddenDim * numClasses];
         for (int h = 0; h < hiddenDim; h++)
-            for (int c = 0; c < 2; c++)
-                fc2Gpu[h * 2 + c] = fc2WeightsCpu[c * hiddenDim + h];
+            for (int c = 0; c < numClasses; c++)
+                fc2Gpu[h * numClasses + c] = fc2WeightsCpu[c * hiddenDim + h];
 
         ValidateShapes(embeddingWeights, fc1Gpu, fc1Biases, fc2Gpu, fc2Biases);
         CopyWeights(embeddingWeights, fc1Gpu, fc1Biases, fc2Gpu, fc2Biases);
@@ -193,10 +196,10 @@ public sealed class GpuTextLinearClassifier : IDisposable
         for (int e = 0; e < embeddingDim; e++)
             for (int h = 0; h < hiddenDim; h++)
                 fc1Cpu[h * embeddingDim + e] = fc1Weight[e * hiddenDim + h];
-        var fc2Cpu = new float[2 * hiddenDim];
+        var fc2Cpu = new float[numClasses * hiddenDim];
         for (int h = 0; h < hiddenDim; h++)
-            for (int c = 0; c < 2; c++)
-                fc2Cpu[c * hiddenDim + h] = fc2Weight[h * 2 + c];
+            for (int c = 0; c < numClasses; c++)
+                fc2Cpu[c * hiddenDim + h] = fc2Weight[h * numClasses + c];
         return (ExportEmbedding(), fc1Cpu, ExportFc1Bias(), fc2Cpu, ExportFc2Bias());
     }
 
@@ -228,7 +231,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
         pooledBuf = runtime.Ensure(pooledBuf, batchSize * embeddingDim);
         hBuf = runtime.Ensure(hBuf, batchSize * hiddenDim);
-        logitsBuf = runtime.Ensure(logitsBuf, batchSize * 2);
+        logitsBuf = runtime.Ensure(logitsBuf, batchSize * numClasses);
 
         EnsureTokenBuffer(batchSize * seqLen);
         runtime.Upload(tokenIdBuf, tokenIds.AsSpan());
@@ -240,7 +243,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
             batchSize, embeddingDim, hiddenDim);
         SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmBias,
             hBuf.Handle, fc2Buf, logitsBuf.Handle, fc2BiasBuf,
-            batchSize, hiddenDim, 2);
+            batchSize, hiddenDim, numClasses);
     }
 
     public float[] Forward(int[] tokenIds, int batchSize, int seqLen,
@@ -251,14 +254,14 @@ public sealed class GpuTextLinearClassifier : IDisposable
         pooledOut = runtime.Download(pooledBuf.Handle, batchSize * embeddingDim);
         pooled = pooledOut;
         hiddenOut = runtime.Download(hBuf.Handle, batchSize * hiddenDim);
-        return runtime.Download(logitsBuf.Handle, batchSize * 2);
+        return runtime.Download(logitsBuf.Handle, batchSize * numClasses);
     }
 
     public float[] Forward(int[] tokenIds, int batchSize, int seqLen)
     {
         ThrowIfDisposed();
         ForwardCore(tokenIds, batchSize, seqLen);
-        return runtime.Download(logitsBuf.Handle, batchSize * 2);
+        return runtime.Download(logitsBuf.Handle, batchSize * numClasses);
     }
 
     public int[] Predict(int[] tokenIds, int seqLen)
@@ -331,11 +334,11 @@ public sealed class GpuTextLinearClassifier : IDisposable
                 }
 
                 ForwardCore(batchTokens, n, seqLen);
-                var logits = runtime.Download(logitsBuf.Handle, n * 2);
+                var logits = runtime.Download(logitsBuf.Handle, n * numClasses);
                 Backward(logits, batchTokens, batchLabels, n, seqLen);
                 AdamUpdateAll(learningRate);
 
-                lossSum += SilkLoss.CrossEntropy(logits, batchLabels, n);
+                lossSum += SilkLoss.CrossEntropy(logits, batchLabels, n, numClasses);
                 lossBatches++;
             }
 
@@ -356,7 +359,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
     internal void Backward(float[] logits, int[] tokens, int[] labels, int batch, int seqLen)
     {
         ThrowIfDisposed();
-        if (logits is null || logits.Length != batch * 2)
+        if (logits is null || logits.Length != batch * numClasses)
             throw new ArgumentException("Logit count mismatch.", nameof(logits));
         if (tokens is null || tokens.Length != batch * seqLen)
             throw new ArgumentException("Token array size mismatch.", nameof(tokens));
@@ -365,7 +368,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
         int hidLen = batch * hiddenDim;
 
-        dzBuf = runtime.Ensure(dzBuf, batch * 2);
+        dzBuf = runtime.Ensure(dzBuf, batch * numClasses);
         dHBuf = runtime.Ensure(dHBuf, hidLen);
         dPooledBuf = runtime.Ensure(dPooledBuf, batch * embeddingDim);
         dW1Buf = runtime.Ensure(dW1Buf, fc1Weight.Length);
@@ -373,15 +376,15 @@ public sealed class GpuTextLinearClassifier : IDisposable
         dW2Buf = runtime.Ensure(dW2Buf, fc2Weight.Length);
         db2Buf = runtime.Ensure(db2Buf, fc2Bias.Length);
 
-        var dz = new float[batch * 2];
-        SilkLoss.InputGradient(logits, labels, batch, 1f / batch, dz);
+        var dz = new float[batch * numClasses];
+        SilkLoss.InputGradient(logits, labels, batch, numClasses, 1f / batch, dz);
         runtime.Upload(dzBuf.Handle, dz);
 
-        SilkLauncher.ColSum(runtime, dzBuf.Handle, db2Buf.Handle, batch, 2, 1f);
+        SilkLauncher.ColSum(runtime, dzBuf.Handle, db2Buf.Handle, batch, numClasses, 1f);
         SilkLauncher.GemmTn(runtime, hBuf.Handle, dzBuf.Handle, dW2Buf.Handle,
-            aRows: hiddenDim, aCols: batch, bCols: 2);
+            aRows: hiddenDim, aCols: batch, bCols: numClasses);
         SilkLauncher.GemmNt(runtime, dzBuf.Handle, fc2Buf, dHBuf.Handle,
-            aRows: batch, aCols: 2, bCols: hiddenDim);
+            aRows: batch, aCols: numClasses, bCols: hiddenDim);
         SilkLauncher.ReluBackward(runtime, dHBuf.Handle, hBuf.Handle, dHBuf.Handle, hidLen);
         SilkLauncher.ColSum(runtime, dHBuf.Handle, db1Buf.Handle, batch, hiddenDim, 1f);
         SilkLauncher.GemmTn(runtime, pooledBuf.Handle, dHBuf.Handle, dW1Buf.Handle,
