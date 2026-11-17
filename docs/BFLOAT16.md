@@ -364,3 +364,59 @@ inference-default graph guard.
 - **SIMD / Vector Lane Support (empirical, .NET 11, net11 `System.Numerics.Tensors` 11.0.0-preview.7)**: `BFloat16` and `Half` are scalar-first-class but SIMD-second-class. `Vector<BFloat16>`.IsSupported = false (all widths 64/128/256); `Vector.Create<BFloat16>` throws `NotSupportedException`. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only `float`/`double` to SIMD row-dot kernels; by default `BFloat16`/`Half` use the widen path above its length gate (and the scalar `MultiplyRowScalar` path when the gate is missed or widen is disabled — that scalar path is ~26× slower in the disabled case, verified via `NivaraInference` benchmark). **Auto-widened SIMD path (shipped, default on):** `src/Nivara/Primitives/` provides `WidenPrimitives` + `NarrowFloatKernels` that bit-reinterpret `ushort` lanes, widen to `float`, run in `float`, and narrow back for element-wise `Add/Sub/Mul/Div` (`NumericTensorKernels`) and matmul row-dot (`TensorsHelper.MultiplyCore`, lifts AutoDiff). Now on by default in current builds; the opt-out is the hidden AppContext switch `Nivara.Primitives.DisableWidenSimd`. `ShouldWiden<T>` also applies a length gate (`Vector<byte>.Count * 4`) + `Vector.IsHardwareAccelerated` check (per-op, no temp `float` buffer — fused per-vector). **Phase 3 A/B (SmolLM-135M, 32 greedy tokens, `samples/NivaraInference smollm --precision bf16 ab`):** narrow storage with narrow compute widens and narrows around each dot, so it pays conversion on both sides; the A/B runs that against the scalar fallback and the current figures live in the A/B table in the Performance section of [`SMOLLM.md`](SMOLLM.md). Narrow storage with **F32 compute** is the shape the sample's default uses — F32 activations, each weight element widened once per dot into F32 registers, no per-token weight materialisation — and that path is gated and measured in the same document. The toggle is transparent to F32 (identical token streams). Correctness: the default native run reaches 25/32 greedy argmax vs the BF16 PyTorch fixture with cosine 0.99999 on the dtype-matched reference sequence; `distilbert_sst --precision bf16` argmax 8/8.
 
 ---
+
+
+## Model loading honesty (cross-model)
+
+This section consolidates the model-loading policy that the sample's dispatch
+tables implement; per-model details live in `docs/SMOLLM.md`, `docs/QWEN.md`,
+`docs/LAYA.md` and `docs/MODERNBERT.md`.
+
+### What "honesty" means
+
+1. **Load exactly one dtype.** A run never holds both an F32 map and a narrow
+   map of the same checkpoint. `samples/NivaraInference/Program.cs` uses a lazy
+   `F32()` accessor so the F32 map is materialized only on first use.
+2. **Keep weights in their checkpoint (storage) dtype** when compute runs in a
+   wider dtype, widening in-register instead of holding a widened copy. SmolLM's
+   default is `native` = BF16 storage / F32 compute (~256.6 MB vs ~513.1 MB
+   resident weights).
+3. **Default to the snapshot dtype** for models whose checkpoint is narrow,
+   instead of silently widening to F32 at load.
+
+The mechanism is generic: `LlamaForCausalLM<TModel, TWeight>`,
+`Linear<TModel, TWeight>`, `Bert*<TModel,TWeight>`,
+`ModernBert*<TModel,TWeight>` and `Laya*<TModel,TWeight>` accept independent
+compute (`TModel`) and storage (`TWeight`) types, and `GradKernels.MixedMatMul*`
+/ `NarrowFloatKernels` widen in-register. `SafeTensorsLoader.Read<T>` translates
+on-disk dtypes to `T` at load.
+
+### Checkpoint dtypes
+
+| Model | On-disk dtype | Native default? |
+|---|---|---|
+| SmolLM-135M | BF16 (all 272 tensors) | Yes (PR #1215) |
+| Qwen2.5-0.5B | BF16 (all 290 tensors) | Yes (#1217, Silk #1222) |
+| Laya (ModernBERT-large + decision head) | F16 (205 tensors) + 1 F32 (`temperature`) | Yes (#1218, Silk #1225) |
+| ModernBERT-large | F32 | No — already honest |
+| MiniLM / DistilBERT / DistilBERT-SST | F32 | No — already honest |
+| MobileNetV2 / ResNet-18 | F32 (+ int64 indices) | No — no narrow path |
+
+### What is deliberately NOT expanded
+
+- ModernBERT / MiniLM / DistilBERT are F32 on disk, so "native" == F32. No
+  default change; already honest.
+- Vision models are F32 + int64; no narrow path exists, and
+  `--silk --precision fp16` is rejected.
+- Pure-Half compute (`Laya.Run<Half,Half>`) stays an opt-in `--precision fp16`;
+  do not make it the default. The memory win comes from storage, not compute,
+  and F32 compute is far better.
+- Do not refactor Laya/ModernBERT to per-tensor mixed storage dtypes; the single
+  `TWeight` suffices because Laya's checkpoint is effectively uniform F16.
+- Laya native runs on Silk via the F16 device path (`GpuSeamFactories.LayaFp16`,
+  #1225); pure `--precision fp16` (Half/Half compute) is still rejected on Silk
+  and stays F32/bf16 widened. Laya's single F32 `temperature` scalar is narrowed
+  to `Half` on the native path and re-widened in `LayaDecisionHead`
+  (documented in `docs/LAYA.md`).
+- NivaraChat's Laya decision engine stays F32 (`float,float`) because adaptive
+  head training needs float; it does not consume the native Half path.
