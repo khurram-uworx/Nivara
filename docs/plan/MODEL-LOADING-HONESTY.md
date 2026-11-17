@@ -101,7 +101,7 @@ Synthetic weights (fabricated, deterministic tensors shaped like a real checkpoi
 - Work: wire the flag (default + `benchmark`), route to the runners for CPU (f32/bf16/native) and Silk, honor `ConsumesNarrow`/precision, update the CLI gate. Uses `SynthesizeTensors<T>` directly in storage dtype (BF16 native).
 - Silk: SmolLM BF16 path is CPU-only `ab` historically; confirm Silk synthetic uses BF16 device path where supported.
 
-### 8.3 Laya — gap (issue #1255)
+### 8.3 Laya — done (#1255)
 
 - No synthetic generator exists for Laya/ModernBERT. Needs fabrication of both ModernBERT encoder tensors (prefix `encoder`) and decision-head tensors, directly in storage dtype (Half for native).
 - Needs a self-contained minimal encoder + agent config (or embedded defaults) so the run needs no model directory/tokenizer.
