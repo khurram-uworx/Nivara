@@ -83,3 +83,34 @@ Qwen only, CPU, behind `--precision native` (opt-in, not default yet), with `Loa
 - `src/Nivara/AutoDiff/Nn/Linear.cs`, `LlamaDecoderBlock.cs`, `LlamaFusedKernels.cs` — mixed-dtype matmul surface.
 - `src/Nivara.Extensions/AI/SafeTensorsLoader.cs` — `Read<T>` dtype translation.
 - `samples/NivaraInference/Program.cs` — dispatch tables (`SupportedModes`, `SilkModes`, `ConsumesNarrow`), `F32()` lazy accessor.
+
+## 8. Synthetic weights (checkpoint-free runs)
+
+Synthetic weights (fabricated, deterministic tensors shaped like a real checkpoint) let every supported scenario — CPU/Silk, native and explicit precisions, single-shot and `benchmark` — run without a multi-GB checkpoint. This is the same honesty property as (2)/(3): a run should be reproducible on a clean checkout, and "no checkpoint present" must not be a special case.
+
+### 8.1 Qwen — done (#1217/#1222 + consistency commit)
+
+- `Qwen.SynthesizeTensors(LlamaConfig)` fabricates the exact tensor keys `LlamaLoader.Load<TModel,TWeight>` expects, gating q/k/v biases on `AttentionBias` (Qwen-style vs SmolLM/Llama-style). Generic variant `SynthesizeTensors<T>` (PR consistency work, commit `db9d5e0d`) generates directly in the storage dtype, so no widened F32 pool is held alongside the storage map.
+- CLI: `--synthetic-weights` accepted for `qwen` in the default single-shot run and `benchmark`; routes to `RunSyntheticBenchmark<float,float>`, `<BFloat16,BFloat16>`, `<float,BFloat16>` (native), and `RunSyntheticBenchmarkSilk(plain, bf16||native)`.
+- Honors `--precision` (f32 / bf16 / native) and `--silk`; Silk uses BF16 device path when `bf16 || native`, F32 otherwise.
+- Tests: `InferenceCliArgumentTests` pins scope; `SynthesizeTensorsBiasGatingTests` pins bias gating; Silk BF16 cached-decode parity covered.
+
+### 8.2 SmolLM — gap (issue #1254)
+
+- Synthetic benchmark helpers already exist (`RunSmolLMSyntheticBenchmark`, `RunSmolLMSyntheticAb`, `RunSmolLMSyntheticBenchmarkSilk`) and call `Qwen.SynthesizeTensors(SmolLMSyntheticConfig)`, but are **dead code**: no CLI mode reaches them, and `--synthetic-weights` is rejected for `smollm`.
+- Work: wire the flag (default + `benchmark`), route to the runners for CPU (f32/bf16/native) and Silk, honor `ConsumesNarrow`/precision, update the CLI gate. Uses `SynthesizeTensors<T>` directly in storage dtype (BF16 native).
+- Silk: SmolLM BF16 path is CPU-only `ab` historically; confirm Silk synthetic uses BF16 device path where supported.
+
+### 8.3 Laya — gap (issue #1255)
+
+- No synthetic generator exists for Laya/ModernBERT. Needs fabrication of both ModernBERT encoder tensors (prefix `encoder`) and decision-head tensors, directly in storage dtype (Half for native).
+- Needs a self-contained minimal encoder + agent config (or embedded defaults) so the run needs no model directory/tokenizer.
+- Silk: Laya has no native Half Silk path (fp16 rejected on Silk; only bf16), so synthetic on Silk stays F32/bf16 (widened); document the asymmetry.
+- The single F32 `temperature` scalar needs special-casing (keep as float or narrow to Half and document).
+
+### 8.4 Follow-ups
+
+- Issue #1254 — SmolLM synthetic weights wiring.
+- Issue #1255 — Laya synthetic weights support.
+- After both land, update `InferenceCliArgumentTests` coverage comment and `docs/QWEN.md`/`docs/SMOLLM.md`/`docs/LAYA.md` synthetic-weight sections.
+
