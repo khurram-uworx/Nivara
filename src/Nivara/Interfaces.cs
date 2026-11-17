@@ -1,3 +1,5 @@
+using System.Numerics.Tensors;
+
 namespace Nivara;
 
 /// <summary>
@@ -171,6 +173,15 @@ internal interface IColumnStorage<T> : IDisposable
     /// <param name="span">When this method returns, contains the read-only span if successful</param>
     /// <returns>true if a span was obtained (no nulls present), false otherwise</returns>
     internal bool TryGetSpan(out ReadOnlySpan<T> span);
+
+    /// <summary>
+    /// Attempts to get a read-only tensor span view over the underlying data when the storage
+    /// is flat, contiguous, null-free and the element type is unmanaged. Returns false otherwise.
+    /// The span is a true zero-copy view over the storage array; callers must treat it as read-only.
+    /// </summary>
+    /// <param name="span">When this method returns, contains the read-only tensor span if successful</param>
+    /// <returns>true if a view was obtained; false otherwise</returns>
+    internal bool TryGetReadOnlyTensorSpan(out ReadOnlyTensorSpan<T> span);
 
     /// <summary>
     /// Gets a writable span for scenarios requiring data mutation.

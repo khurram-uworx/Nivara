@@ -318,6 +318,49 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
         return true;
     }
 
+    /// <summary>
+    /// Attempts to get a read-only tensor span view over this storage's data when it is
+    /// flat, contiguous, null-free and the element type is unmanaged. Returns false otherwise.
+    /// Reuses the cached zero-copy <see cref="Tensor{T}"/> view; no copy is made.
+    /// </summary>
+    public bool TryGetReadOnlyTensorSpan(out ReadOnlyTensorSpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (HasNulls)
+        {
+            span = default;
+            return false;
+        }
+
+        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>())
+        {
+            span = default;
+            return false;
+        }
+
+        if (dataLength == 0)
+        {
+            span = default;
+            return true;
+        }
+
+        try
+        {
+            var view = AsTensor();
+            span = view.AsReadOnlyTensorSpan();
+            return true;
+        }
+        catch
+        {
+            span = default;
+            return false;
+        }
+    }
+
+    bool IColumnStorage<T>.TryGetReadOnlyTensorSpan(out ReadOnlyTensorSpan<T> span)
+        => TryGetReadOnlyTensorSpan(out span);
+
     /// <inheritdoc />
     Span<T> IColumnStorage<T>.AsWritableSpan()
     {
