@@ -51,6 +51,8 @@ internal static class DocsCoveragePins
     /// `docs/BFLOAT16.md` references `docs/SMOLLM.md`, `docs/QWEN.md`, `docs/LAYA.md`,
     /// `docs/MODERNBERT.md` and `docs/LAYA.md` (temperature note), each discovered once by
     /// `DocumentPattern`.
+    /// 2026-11-17 (#1293): +1 = 507. New "Verification" section in `docs/ONNX.md` references one test
+    /// file path in backticks discovered by `DocumentPattern`.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 506;
+    internal const int ExpectedDocumentReferenceCount = 507;
 }

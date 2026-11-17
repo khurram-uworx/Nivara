@@ -15,8 +15,9 @@ public sealed class OnnxExportOptions
     public string ProducerVersion { get; set; } = "2.0.0";
     public string GraphName { get; set; } = "main_graph";
     /// <summary>
-    /// When true, attempt to preserve the module's native element type in the exported
-    /// graph instead of the F32 default. Default false (F32-friendly widening).
+    /// Reserved for future use. The exported graph's element type always follows the
+    /// module's element type <typeparamref name="T"/> (float/double/Half/BFloat16); mixed-precision
+    /// weights are widened to <typeparamref name="T"/>. Setting this property has no effect.
     /// </summary>
     public bool NativeDtype
     {
@@ -753,8 +754,8 @@ public static class OnnxExporter
         {
             var __m = (DiagnosticsTracker.IsEnabled || OnnxExportDiagnostics.Enabled) ? DiagnosticsTracker.StartMeasurement() : default;
             {
-                RecordOnnxExportDiagnostic(__m, "MultiheadAttention", "Unsupported", 0, true, "MultiheadAttention export not yet enabled");
-                throw new NotSupportedException("MultiheadAttention export not yet enabled");
+                RecordOnnxExportDiagnostic(__m, "MultiheadAttention", "Unsupported", 0, true, "MultiheadAttention export is not supported; use TransformerBlock (which inlines multi-head attention) instead.");
+                throw new NotSupportedException("MultiheadAttention export is not supported; use TransformerBlock (which inlines multi-head attention) instead.");
             }
         }
 

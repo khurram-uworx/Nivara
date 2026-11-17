@@ -6,6 +6,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- ONNX export (Phase 1) supported-subset verification: documented supported/unsupported modules and option constraints in `docs/ONNX.md`; parity against ONNX Runtime pinned by `tests/Nivara.Tests/Onnx/` (MLP, TransformerBlock, classifiers, conv, norms, mixed precision) plus unsupported-export throw tests.
 - `Linear<TModel, TWeight>.Uninitialized(...)` / `Embedding<TModel, TWeight>.Uninitialized(...)`
   and `BindWeight(...)` — construct a module whose weight is left unallocated so a
   checkpoint can be bound without the load-time transient (the constructor previously
