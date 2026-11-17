@@ -577,7 +577,7 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark")
+        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark" && mode != "train")
         {
             Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
             return 1;
