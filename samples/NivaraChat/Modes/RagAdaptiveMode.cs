@@ -29,7 +29,7 @@ public static class RagAdaptiveMode
         var modelDir = Path.Combine(ModeHelpers.GetRepoRoot(), "samples", "data", "laya");
         LayaRetrievalDecisionHead.LayaDecisionEngine? engine = null;
         if (Directory.Exists(modelDir) && File.Exists(Path.Combine(modelDir, "model.safetensors")))
-            engine = new LayaRetrievalDecisionHead.LayaDecisionEngine(modelDir);
+            engine = new LayaRetrievalDecisionHead.LayaDecisionEngine(modelDir, useSilk: ctx.UseSilk);
 
         IChatClient? chatClient = LlmClientFactory.Create(ctx);
         if (chatClient is not null)

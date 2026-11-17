@@ -61,7 +61,11 @@ public static class RagAdaptiveEvalMode
         var existedBefore = File.Exists(headWeightsPath);
 
         var engine = new LayaRetrievalDecisionHead.LayaDecisionEngine(
-            modelDir, loadAdaptiveWeights: ctx.Resume, adaptiveWeightsPath: headWeightsPath);
+            modelDir, loadAdaptiveWeights: ctx.Resume, adaptiveWeightsPath: headWeightsPath, useSilk: ctx.UseSilk);
+        LayaRetrievalDecisionHead.LayaDecisionEngine? cpuLayaEngine = null;
+        if (ctx.UseSilk)
+            cpuLayaEngine = new LayaRetrievalDecisionHead.LayaDecisionEngine(
+                modelDir, loadAdaptiveWeights: ctx.Resume, adaptiveWeightsPath: headWeightsPath, useSilk: false);
 
         var collector = new AdaptiveFeedbackCollector(
             engine.Head, headWeightsPath, updateBatch, headEpochs, headLr, persist: !ctx.NoPersist);
@@ -85,6 +89,30 @@ public static class RagAdaptiveEvalMode
                 silkParity = AdaptiveSilkParity.Compare(
                     index.Metadata, silkIndex.Metadata,
                     ["VectorContent", "VectorTitle", "VectorSection", "VectorCode"]);
+            }
+        }
+
+        double layaMaxAbs = 0d;
+        bool layaWithin = true;
+        bool layaAvailable = false;
+        if (ctx.UseSilk && cpuLayaEngine is not null && index.Chunks.Count > 0)
+        {
+            try
+            {
+                var sampleChunk = index.Chunks[0];
+                var cpuFeatures = cpuLayaEngine.ExtractFeatures("laya-parity", sampleChunk);
+                var silkFeatures = engine.ExtractFeatures("laya-parity", sampleChunk);
+                if (cpuFeatures.Values.Length == silkFeatures.Values.Length && cpuFeatures.Values.Length > 0)
+                {
+                    for (int i = 0; i < cpuFeatures.Values.Length; i++)
+                        layaMaxAbs = Math.Max(layaMaxAbs, Math.Abs(cpuFeatures.Values[i] - silkFeatures.Values[i]));
+                    layaWithin = layaMaxAbs <= AdaptiveSilkParity.Tolerance;
+                    layaAvailable = true;
+                }
+            }
+            catch
+            {
+                layaAvailable = false;
             }
         }
 
@@ -246,7 +274,10 @@ public static class RagAdaptiveEvalMode
             silkBuildMs,
             cpuFromCache,
             silkFromCache,
-            ctx.UseSilk && silkIndex is not null);
+            ctx.UseSilk && silkIndex is not null,
+            layaMaxAbs,
+            layaWithin,
+            layaAvailable);
 
         var input = new AdaptiveReportInput
         {
@@ -311,6 +342,7 @@ public static class RagAdaptiveEvalMode
         Console.WriteLine("Adaptive evaluation complete.");
 
         engine.Dispose();
+        cpuLayaEngine?.Dispose();
         silkIndex?.Dispose();
     }
 

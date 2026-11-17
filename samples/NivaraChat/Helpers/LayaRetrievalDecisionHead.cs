@@ -201,7 +201,10 @@ public static class LayaRetrievalDecisionHead
 
     public sealed class LayaDecisionEngine : IDisposable
     {
-        readonly ModernBertEncoder<float, float> encoder;
+        readonly bool useSilk;
+        readonly ModernBertEncoder<float, float>? encoder;
+        readonly ILayaGpuSession? silkSession;
+        readonly Dictionary<string, (float[] Data, int[] Shape)>? silkTensors;
         readonly LayaDecisionHead<float, float> head;
         readonly Gpt2BpeTokenizer tokenizer;
         readonly LayaCalibration calibration;
@@ -212,14 +215,20 @@ public static class LayaRetrievalDecisionHead
         public LayaDecisionEngine(
             string modelDir,
             bool loadAdaptiveWeights = true,
-            string? adaptiveWeightsPath = null)
+            string? adaptiveWeightsPath = null,
+            bool useSilk = false)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(modelDir);
+            this.useSilk = useSilk;
             var config = LoadEncoderConfig(modelDir);
             agent = LoadAgentConfig(modelDir);
             var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
-            var loadedEncoder = ModernBertEncoder<float, float>.LoadWeights(tensors, config, prefix: "encoder");
+            tokenizer = Gpt2BpeTokenizer.LoadFromTokenizerJson(Path.Combine(modelDir, "tokenizer", "tokenizer.json"), "[UNK]");
+            calibration = new LayaCalibration(agent.Temperature, agent.TemperatureByOptions);
+
             LayaDecisionHead<float, float>? loadedHead = null;
+            ModernBertEncoder<float, float>? loadedEncoder = null;
+            ILayaGpuSession? loadedSession = null;
             try
             {
                 loadedHead = LayaDecisionHead<float, float>.LoadWeights(tensors, agent.HeadLayers);
@@ -229,17 +238,27 @@ public static class LayaRetrievalDecisionHead
                         loadedHead,
                         adaptiveWeightsPath ?? AdaptiveHeadPersistence.DefaultPath(ModeHelpers.GetRepoRoot()));
                 }
-                tokenizer = Gpt2BpeTokenizer.LoadFromTokenizerJson(Path.Combine(modelDir, "tokenizer", "tokenizer.json"), "[UNK]");
-                calibration = new LayaCalibration(agent.Temperature, agent.TemperatureByOptions);
+
+                if (useSilk)
+                {
+                    loadedSession = Nivara.AI.GpuSeamFactories.Laya(config, tensors, agent.HeadLayers);
+                }
+                else
+                {
+                    loadedEncoder = ModernBertEncoder<float, float>.LoadWeights(tensors, config, prefix: "encoder");
+                }
             }
             catch
             {
-                loadedEncoder.Dispose();
+                loadedEncoder?.Dispose();
+                loadedSession?.Dispose();
                 loadedHead?.Dispose();
                 throw;
             }
-            encoder = loadedEncoder;
             head = loadedHead;
+            encoder = loadedEncoder;
+            silkSession = loadedSession;
+            silkTensors = useSilk ? tensors : null;
         }
 
         public LayaDecisionHead<float, float> Head => head;
@@ -252,7 +271,13 @@ public static class LayaRetrievalDecisionHead
             ArgumentNullException.ThrowIfNull(chunk);
             var (_, sequence) = BuildPrompt(
                 tokenizer, query, chunk.ChunkId, chunk.Content, agent.MaxLen, agent.HeadMaxLen);
-            var hidden = encoder.Forward(sequence.Ids, sequence.Length);
+            if (useSilk)
+            {
+                var hiddenArr = silkSession!.Encode(sequence.Ids, sequence.Length);
+                return new AdaptiveFrozenFeatures(
+                    hiddenArr, sequence.Length, hiddenArr.Length / sequence.Length, sequence.Markers);
+            }
+            var hidden = encoder!.Forward(sequence.Ids, sequence.Length);
             if (!hidden.Data.TryGetSpan(out var span))
                 throw new InvalidOperationException("ModernBERT encoder output is not available as a contiguous span.");
             return new AdaptiveFrozenFeatures(
@@ -272,7 +297,8 @@ public static class LayaRetrievalDecisionHead
             if (disposed)
                 return;
             disposed = true;
-            encoder.Dispose();
+            encoder?.Dispose();
+            silkSession?.Dispose();
             if (ownsHead)
                 head.Dispose();
         }
@@ -287,7 +313,12 @@ public static class LayaRetrievalDecisionHead
                 agent.MaxLen,
                 agent.HeadMaxLen);
 
-            var hidden = encoder.Forward(sequence.Ids, sequence.Length);
+            if (useSilk)
+            {
+                var silkOutput = silkSession!.Forward(sequence.Ids, sequence.Length, question.Type, sequence.Markers);
+                return calibration.Decode(question, silkOutput.Logits, silkOutput.ActionProbability);
+            }
+            var hidden = encoder!.Forward(sequence.Ids, sequence.Length);
             var output = head.Forward(hidden, question.Type, sequence.Markers, sequence.Length);
             var decision = calibration.Decode(question, output.Logits, output.ActionProbability);
             return decision;
