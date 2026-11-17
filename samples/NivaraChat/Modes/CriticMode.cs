@@ -38,7 +38,7 @@ public static class CriticMode
         if (nullAbleChatClient is null)
         {
             validatorModel.Dispose();
-        validatorSilk?.Dispose();
+            validatorSilk?.Dispose();
             Console.WriteLine("Error: failed to connect to LLM.");
             return;
         }

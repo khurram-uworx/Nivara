@@ -47,8 +47,8 @@ public static class AgentsMode
                 sentimentModel.Dispose();
                 entityModel.Dispose();
                 validatorModel.Dispose();
-            sentimentSilk?.Dispose();
-            validatorSilk?.Dispose();
+                sentimentSilk?.Dispose();
+                validatorSilk?.Dispose();
                 Console.WriteLine("Error: failed to connect to Ollama.");
                 return;
             }
