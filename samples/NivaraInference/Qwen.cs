@@ -239,16 +239,6 @@ public static class Qwen
         return (config, tokenizer);
     }
 
-    /// <summary>Narrows synthetic float weights to compute type <typeparamref name="T"/> so the
-    /// synthetic benchmark can run the identical weight pool as BF16-native (Plan P1: on-the-fly
-    /// BF16 weights with F32 compute). For T == float this is an identity copy.</summary>
-    static Dictionary<string, (T[] Data, int[] Shape)> NarrowTo<T>(
-        Dictionary<string, (float[] Data, int[] Shape)> src)
-        where T : struct, IFloatingPointIeee754<T>
-        => src.ToDictionary(
-            kv => kv.Key,
-            kv => (Array.ConvertAll(kv.Value.Data, static f => T.CreateChecked(f)), kv.Value.Shape));
-
     // ----------------------------------------------------------------------------------
     // Synthetic weights (--synthetic-weights): Qwen2.5-0.5B-shaped random tensors so the
     // benchmark runs without the ~2 GB checkpoint. Timing is shape-driven; the values are
@@ -297,34 +287,51 @@ public static class Qwen
         tensors[name] = (data, shape);
     }
 
+    static void AddSynthetic<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string name, params int[] shape)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int count = 1;
+        foreach (var d in shape) count *= d;
+        var data = new T[count];
+        for (int i = 0; i < data.Length; i++)
+            data[i] = T.CreateChecked((SyntheticRng() / (float)uint.MaxValue - 0.5f) * 0.1f);
+        tensors[name] = (data, shape);
+    }
+
     /// <summary>Fabricates the exact tensor keys <see cref="LlamaLoader.Load{TModel, TWeight}"/>
     /// expects. q/k/v biases are emitted only when <see cref="LlamaConfig.AttentionBias"/>
     /// is true (Qwen-style); SmolLM/Llama checkpoints have none.</summary>
     public static Dictionary<string, (float[] Data, int[] Shape)> SynthesizeTensors(LlamaConfig config)
+        => SynthesizeTensors<float>(config);
+
+    /// <summary>Generic variant: fabricates tensors directly in storage dtype <typeparamref name="T"/>,
+    /// so no widened F32 pool is held alongside the storage map (MODEL-LOADING-HONESTY).</summary>
+    public static Dictionary<string, (T[] Data, int[] Shape)> SynthesizeTensors<T>(LlamaConfig config)
+        where T : struct, IFloatingPointIeee754<T>
     {
-        var tensors = new Dictionary<string, (float[] Data, int[] Shape)>();
+        var tensors = new Dictionary<string, (T[] Data, int[] Shape)>();
         int h = config.HiddenSize;
         int kvHidden = config.NumKeyValueHeads * (h / config.NumAttentionHeads);
-        AddSynthetic(tensors, "model.embed_tokens.weight", config.VocabSize, h);
-        AddSynthetic(tensors, "model.norm.weight", h);
+        AddSynthetic<T>(tensors, "model.embed_tokens.weight", config.VocabSize, h);
+        AddSynthetic<T>(tensors, "model.norm.weight", h);
         for (int i = 0; i < config.NumHiddenLayers; i++)
         {
             var p = $"model.layers.{i}";
-            AddSynthetic(tensors, $"{p}.input_layernorm.weight", h);
-            AddSynthetic(tensors, $"{p}.post_attention_layernorm.weight", h);
-            AddSynthetic(tensors, $"{p}.self_attn.q_proj.weight", h, h);
-            AddSynthetic(tensors, $"{p}.self_attn.k_proj.weight", kvHidden, h);
-            AddSynthetic(tensors, $"{p}.self_attn.v_proj.weight", kvHidden, h);
+            AddSynthetic<T>(tensors, $"{p}.input_layernorm.weight", h);
+            AddSynthetic<T>(tensors, $"{p}.post_attention_layernorm.weight", h);
+            AddSynthetic<T>(tensors, $"{p}.self_attn.q_proj.weight", h, h);
+            AddSynthetic<T>(tensors, $"{p}.self_attn.k_proj.weight", kvHidden, h);
+            AddSynthetic<T>(tensors, $"{p}.self_attn.v_proj.weight", kvHidden, h);
             if (config.AttentionBias)
             {
-                AddSynthetic(tensors, $"{p}.self_attn.q_proj.bias", h);
-                AddSynthetic(tensors, $"{p}.self_attn.k_proj.bias", kvHidden);
-                AddSynthetic(tensors, $"{p}.self_attn.v_proj.bias", kvHidden);
+                AddSynthetic<T>(tensors, $"{p}.self_attn.q_proj.bias", h);
+                AddSynthetic<T>(tensors, $"{p}.self_attn.k_proj.bias", kvHidden);
+                AddSynthetic<T>(tensors, $"{p}.self_attn.v_proj.bias", kvHidden);
             }
-            AddSynthetic(tensors, $"{p}.self_attn.o_proj.weight", h, h);
-            AddSynthetic(tensors, $"{p}.mlp.gate_proj.weight", config.IntermediateSize, h);
-            AddSynthetic(tensors, $"{p}.mlp.up_proj.weight", config.IntermediateSize, h);
-            AddSynthetic(tensors, $"{p}.mlp.down_proj.weight", h, config.IntermediateSize);
+            AddSynthetic<T>(tensors, $"{p}.self_attn.o_proj.weight", h, h);
+            AddSynthetic<T>(tensors, $"{p}.mlp.gate_proj.weight", config.IntermediateSize, h);
+            AddSynthetic<T>(tensors, $"{p}.mlp.up_proj.weight", config.IntermediateSize, h);
+            AddSynthetic<T>(tensors, $"{p}.mlp.down_proj.weight", h, config.IntermediateSize);
         }
         return tensors;
     }    // ----------------------------------------------------------------------------------
@@ -572,29 +579,42 @@ public static class Qwen
         return 0;
     }
 
-    public static int RunSyntheticBenchmarkSilk(bool plain = false)
+    public static int RunSyntheticBenchmarkSilk(bool plain = false, bool bf16 = false)
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark -- Silk ===");
         var config = QwenSyntheticConfig;
-        var tensors = SynthesizeTensors(config);
+        Console.WriteLine($"Precision: {(bf16 ? "BF16 (synthetic)" : "F32 (synthetic)")}");
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
-        using var session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
-        buildSw.Stop();
-        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
-        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        SilkQwenSession session;
+        if (bf16)
+        {
+            var tensors = SynthesizeTensors<System.Numerics.BFloat16>(config);
+            session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        }
+        else
+        {
+            var tensors = SynthesizeTensors(config);
+            session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        }
+        using (session)
+        {
+            buildSw.Stop();
+            Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+            Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
-        var promptIds = new int[64];
-        for (int i = 0; i < promptIds.Length; i++)
-            promptIds[i] = (int)((SyntheticRng()) % (uint)config.VocabSize);
+            var promptIds = new int[64];
+            for (int i = 0; i < promptIds.Length; i++)
+                promptIds[i] = (int)((SyntheticRng()) % (uint)config.VocabSize);
 
-        // Warmup.
-        GenerateSilk(session, config, promptIds, 8, useKvCache: true);
+            // Warmup.
+            GenerateSilk(session, config, promptIds, 8, useKvCache: true);
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
-        sw.Stop();
-        Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
-        return 0;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+            sw.Stop();
+            Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
+            return 0;
+        }
     }
 
     static Nivara.Silk.QwenSilkConfig ToSilkConfig(LlamaConfig config) => new()
@@ -852,15 +872,16 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): " +
             (plain ? "plain-prompt " : "") + "KV-cache decode benchmark ===");
-        string syntheticPrecision = typeof(TWeight) == typeof(BFloat16) ? "BF16 (native, widen-SIMD)" : "F32 (synthetic)";
+        string syntheticPrecision = typeof(TWeight) == typeof(BFloat16)
+            ? (typeof(TModel) == typeof(BFloat16) ? "BF16 (synthetic)" : "BF16 (native, widen-SIMD)")
+            : "F32 (synthetic)";
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {syntheticPrecision}");
-        var tensorsF32 = SynthesizeTensors(QwenSyntheticConfig);
-        var tensors = NarrowTo<TWeight>(tensorsF32);
-        long mb = tensorsF32.Values.Sum(t => (long)t.Data.Length) * sizeof(float) / (1024 * 1024);
+        var tensors = SynthesizeTensors<TWeight>(QwenSyntheticConfig);
+        long mb = tensors.Values.Sum(t => (long)t.Data.Length) * System.Runtime.InteropServices.Marshal.SizeOf<TWeight>() / (1024 * 1024);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(QwenSyntheticConfig, tensors);
         buildSw.Stop();
-        Console.WriteLine($"  Model build ({syntheticPrecision}): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB f32 pool)");
+        Console.WriteLine($"  Model build ({syntheticPrecision}): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB storage pool)");
         Console.WriteLine();
 
         var promptIds = new int[64];
