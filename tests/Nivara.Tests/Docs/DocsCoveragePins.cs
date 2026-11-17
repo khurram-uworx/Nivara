@@ -47,6 +47,10 @@ internal static class DocsCoveragePins
     /// scan but the backticked mention is still discovered by <c>DocumentPattern</c>.
     /// 2026-11-17 (#1229): +2 = 501. New subsection in `docs/LAYA.md` references two test file paths
     /// in backticks, both discovered by `DocumentPattern`.
+    /// 2026-11-17 (honest-weights cleanup): +5 = 506. New "Model loading honesty (cross-model)" section in
+    /// `docs/BFLOAT16.md` references `docs/SMOLLM.md`, `docs/QWEN.md`, `docs/LAYA.md`,
+    /// `docs/MODERNBERT.md` and `docs/LAYA.md` (temperature note), each discovered once by
+    /// `DocumentPattern`.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 501;
+    internal const int ExpectedDocumentReferenceCount = 506;
 }
