@@ -15,10 +15,19 @@ namespace Nivara.Tests.AutoDiff;
 /// reference is the wheel rather than a transcription: a transcription would agree with this code
 /// for the wrong reason.
 /// <para>
-/// Skipped when the model directory is absent, following the same convention as
-/// <c>Gpt2BpeTokenizerTests</c> (the 822 MB checkpoint is gitignored, so this runs locally and on a
-/// provisioned machine, not in a clean CI checkout). The synthetic-tokenizer fixtures in
-/// <c>LayaPromptBuilderTests</c> always run and cover the same layout and budget logic.
+/// Environment-gated (decision recorded in <c>docs/LAYA.md</c>, issue #1229): this fixture is
+/// <b>local / provisioned-machine only</b>. It skips with an explicit reason when
+/// <c>samples/data/laya/tokenizer/tokenizer.json</c> is absent, which is the normal state of a
+/// clean CI checkout (the Laya inputs are gitignored). It is <em>not</em> expected to run in CI, and
+/// its absence there is not a coverage gap. The authoritative parity check for Laya is the wheel
+/// gate <c>dotnet run -c Release --project tests/Nivara.PerformanceTests -- --inference-compare laya</c>,
+/// which runs wherever the <c>laya==0.3.20</c> wheel and tokenizer are provisioned. The Laya inputs
+/// (including the tokenizer) are obtainable by the documented, automatable step in
+/// <c>samples/NivaraInference/README.md</c> (<c>hf download convaiinnovations/laya ...</c>).
+/// </para>
+/// <para>
+/// The synthetic-tokenizer fixtures in <c>LayaPromptBuilderTests</c> always run and cover the same
+/// layout and budget logic, so the core prompt-building behaviour is exercised in every CI run.
 /// </para>
 /// </remarks>
 [TestFixture]

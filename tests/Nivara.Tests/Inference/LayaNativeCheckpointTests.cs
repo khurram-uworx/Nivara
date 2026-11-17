@@ -8,6 +8,22 @@ using System.Runtime.InteropServices;
 
 namespace Nivara.Tests.Inference;
 
+/// <summary>
+/// Checkpoint-level gate for the native Laya path: F16 weights stay resident and every kernel
+/// widens them in-register, so the run holds one copy of the snapshot payload.
+/// </summary>
+/// <remarks>
+/// Environment-gated (decision recorded in <c>docs/LAYA.md</c>, issue #1229): this fixture is
+/// <b>local / provisioned-machine only</b>. It reads the real checkpoint, so it skips with an
+/// explicit reason when <c>samples/data/laya/model.safetensors</c> and
+/// <c>samples/data/laya/encoder/config.json</c> are absent, which is the normal state of a clean CI
+/// checkout (the Laya inputs are gitignored). It is <em>not</em> expected to run in CI, and its
+/// absence there is not a coverage gap. The authoritative parity check for Laya is the wheel gate
+/// <c>dotnet run -c Release --project tests/Nivara.PerformanceTests -- --inference-compare laya</c>,
+/// which runs wherever the <c>laya==0.3.20</c> wheel and tokenizer are provisioned. The Laya inputs
+/// are obtainable by the documented, automatable step in
+/// <c>samples/NivaraInference/README.md</c> (<c>hf download convaiinnovations/laya ...</c>).
+/// </remarks>
 [TestFixture]
 [Category("Performance")]
 public class LayaNativeCheckpointTests
