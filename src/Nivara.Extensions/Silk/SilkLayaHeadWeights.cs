@@ -249,10 +249,10 @@ internal sealed class SilkLayaHeadWeights : IDisposable
 
         var wqkvSlot = new SilkWeightSlot(
             $"{prefix}.Wqkv", [$"{attn}.in_proj_weight"],
-            SilkWeightLayout.PackedQkvWeight, [outDim, inDim]);
+            SilkWeightLayout.Transposed, [3 * hidden, hidden], NarrowMatrix: false);
         var bqkvSlot = new SilkWeightSlot(
             $"{prefix}.Bqkv", [$"{attn}.in_proj_bias"],
-            SilkWeightLayout.PackedQkvBias, [outDim]);
+            SilkWeightLayout.Plain, [3 * hidden], NarrowMatrix: false);
 
         // Norms
         var norm1W = Plain($"{prefix}.norm1W", $"{prefix}.norm1.weight");
@@ -333,10 +333,10 @@ internal sealed class SilkLayaHeadWeights : IDisposable
 
         var wqkvSlot = new SilkWeightSlot(
             $"{prefix}.Wqkv", [$"{attn}.in_proj_weight"],
-            SilkWeightLayout.PackedQkvWeight, [outDim, inDim], NarrowMatrix: true);
+            SilkWeightLayout.Transposed, [3 * hidden, hidden], NarrowMatrix: true);
         var bqkvSlot = new SilkWeightSlot(
             $"{prefix}.Bqkv", [$"{attn}.in_proj_bias"],
-            SilkWeightLayout.PackedQkvBias, [outDim], NarrowMatrix: false);
+            SilkWeightLayout.Plain, [3 * hidden], NarrowMatrix: false);
 
         var norm1W = PlainUshort($"{prefix}.norm1W", $"{prefix}.norm1.weight", widen);
         var norm1B = PlainUshort($"{prefix}.norm1B", $"{prefix}.norm1.bias", widen);

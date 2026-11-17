@@ -258,7 +258,7 @@ public sealed partial class SilkLayaHeadTrainer : IDisposable
         var features = LayaHeadScoring.BuildFeatures(probabilities);
 
         // fill features into actRow
-        float[] actRowHost = runtime.Download(actRow, hiddenDim);
+        float[] actRowHost = runtime.Download(actRow, hiddenDim + LayaHeadOutput.FeatureCount);
         for (int i = 0; i < features.Length; i++) actRowHost[hiddenDim + i] = (float)features[i];
         runtime.Upload(actRow, actRowHost);
 
