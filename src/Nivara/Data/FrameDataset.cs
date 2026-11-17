@@ -82,12 +82,15 @@ internal static class FrameDatasetCore
         var trainIndices = indices.Take(trainCount).ToArray();
         var testIndices = indices.Skip(trainCount).Take(testCount).ToArray();
 
-        var trainFrame = trainCount == 0
-            ? frame.Slice(0, 0)
-            : frame.ReorderByIndices(trainIndices);
-        var testFrame = testCount == 0
-            ? frame.Slice(0, 0)
-            : frame.ReorderByIndices(testIndices);
+        if (trainCount == 0 && testCount == 0)
+        {
+            return new TrainTestSplit(frame.Slice(0, 0), frame.Slice(0, 0));
+        }
+
+        // ReorderByIndices requires a full-length permutation; build one and slice.
+        var permuted = frame.ReorderByIndices(indices);
+        var trainFrame = trainCount == 0 ? frame.Slice(0, 0) : permuted.Slice(0, trainCount);
+        var testFrame = testCount == 0 ? frame.Slice(0, 0) : permuted.Slice(trainCount, testCount);
 
         return new TrainTestSplit(trainFrame, testFrame);
     }
@@ -188,12 +191,15 @@ internal static class FrameDatasetCore
         trainIndices.Sort();
         testIndices.Sort();
 
-        var trainFrame = trainIndices.Count == 0
-            ? frame.Slice(0, 0)
-            : frame.ReorderByIndices(trainIndices.ToArray());
-        var testFrame = testIndices.Count == 0
-            ? frame.Slice(0, 0)
-            : frame.ReorderByIndices(testIndices.ToArray());
+        if (trainIndices.Count == 0 && testIndices.Count == 0)
+        {
+            return new TrainTestSplit(frame.Slice(0, 0), frame.Slice(0, 0));
+        }
+
+        var allIndices = trainIndices.Concat(testIndices).ToArray();
+        var permuted = frame.ReorderByIndices(allIndices);
+        var trainFrame = trainIndices.Count == 0 ? frame.Slice(0, 0) : permuted.Slice(0, trainIndices.Count);
+        var testFrame = testIndices.Count == 0 ? frame.Slice(0, 0) : permuted.Slice(trainIndices.Count, testIndices.Count);
 
         return new TrainTestSplit(trainFrame, testFrame);
     }
