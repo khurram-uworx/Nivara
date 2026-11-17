@@ -1550,6 +1550,21 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable, I
     }
 
     /// <summary>
+    /// Attempts to get a zero-copy <see cref="ReadOnlyTensorSpan{T}"/> view over the column data.
+    /// Returns <c>true</c> (with a view sharing the backing array) when the column is flat, contiguous,
+    /// null-free and the element type is unmanaged; returns <c>false</c> otherwise, leaving
+    /// <paramref name="span"/> as <c>default</c> so callers can fall back to <see cref="ToTensor()"/>.
+    /// The view is read-only; callers must not mutate it.
+    /// </summary>
+    /// <param name="span">When this method returns, contains the read-only tensor span view if successful</param>
+    /// <returns><c>true</c> if a view was obtained; <c>false</c> otherwise</returns>
+    public bool TryGetReadOnlyTensorSpan(out ReadOnlyTensorSpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return storage.TryGetReadOnlyTensorSpan(out span);
+    }
+
+    /// <summary>
     /// Gets a writable span view of the underlying data.
     /// Provides zero-copy write-through access for scenarios requiring data mutation;
     /// mutations are immediately visible to all views of the column.

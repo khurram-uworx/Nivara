@@ -1,3 +1,5 @@
+using System.Numerics.Tensors;
+
 namespace Nivara.Storage;
 
 /// <summary>
@@ -213,6 +215,14 @@ sealed class ChunkedColumn<T> : IColumnStorage<T>
 
     /// <inheritdoc />
     bool IColumnStorage<T>.TryGetSpan(out ReadOnlySpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        span = default;
+        return false;
+    }
+
+    /// <inheritdoc />
+    bool IColumnStorage<T>.TryGetReadOnlyTensorSpan(out ReadOnlyTensorSpan<T> span)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         span = default;

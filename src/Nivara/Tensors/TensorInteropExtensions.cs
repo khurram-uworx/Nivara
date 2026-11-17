@@ -91,6 +91,17 @@ public static class TensorInteropExtensions
     }
 
     /// <summary>
+    /// Attempts to get a zero-copy <see cref="ReadOnlyTensorSpan{T}"/> view over a series when its
+    /// underlying column is flat, contiguous, null-free and the element type is unmanaged.
+    /// Returns <c>false</c> otherwise (caller falls back to <see cref="ToTensorSpan{T}"/>).
+    /// </summary>
+    public static bool TryGetReadOnlyTensorSpan<T>(this NivaraSeries<T> series, out ReadOnlyTensorSpan<T> span)
+    {
+        ArgumentNullException.ThrowIfNull(series);
+        return series.TryGetReadOnlyTensorSpan(out span);
+    }
+
+    /// <summary>
     /// Creates a NivaraSeries from a TensorSpan&lt;T&gt;.
     /// Only supports 1D tensor spans. For multi-dimensional spans, use FlattenFromTensorSpan.
     /// </summary>

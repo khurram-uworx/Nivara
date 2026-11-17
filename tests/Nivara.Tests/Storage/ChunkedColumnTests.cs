@@ -145,6 +145,17 @@ public class ChunkedColumnTests
     }
 
     [Test]
+    public void TryGetReadOnlyTensorSpan_AlwaysReturnsFalse()
+    {
+        var storage = Chunked(Flat(1, 2), Flat(3, 4));
+
+        bool result = ((IColumnStorage<int>)storage).TryGetReadOnlyTensorSpan(out var span);
+
+        Assert.That(result, Is.False);
+        Assert.That((int)span.FlattenedLength, Is.EqualTo(0));
+    }
+
+    [Test]
     public void AsWritableSpan_Throws()
     {
         var storage = Chunked(Flat(1, 2), Flat(3, 4));
