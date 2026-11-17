@@ -2,9 +2,8 @@
 
 ## Status
 
-Nivara does **not** currently ship a Silk trainer for the Laya decision head. The head trains
-on CPU via AutoDiff (`LayaHeadModel` / `LayaHeadLayer`) on frozen ModernBERT features. This
-document captures the design for a future Silk implementation so it is not lost.
+Nivara now ships `SilkLayaHeadTrainer` for the Laya decision head (issue #1148). The head
+trains on device via Silk; the CPU AutoDiff path remains the reference for parity gates.
 
 Issue #1148 is the execution ticket. It was split out of #1103, whose BERT-family half shipped
 on `SilkDistilBertTrainer`'s existing naming-driven path; see also #982 (training a
