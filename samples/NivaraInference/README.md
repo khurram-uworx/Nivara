@@ -90,7 +90,7 @@ dotnet run --project samples/NivaraInference -c Release -- minilm bf16
 | SmolLM-135M-Instruct | Text (causal LM) | 269 MB | 272 | 134.5M | token ids (generation) |
 | Qwen2.5-0.5B-Instruct | Text (causal LM + function calling) | 989 MB | 290 | ~494M | token ids (tool-assisted generation) |
 | ModernBERT-large | Text (hybrid encoder) | 1510 MB | 170 of 173 | 394.8M | `[seqLen, 1024]` hidden states |
-| Laya | Text (decision head on ModernBERT-large) | 843 MB F16 | 206 | 421.3M | typed answer per question |
+| Laya | Text (decision head on ModernBERT-large) | 843 MB (native F16; ~1.69 GB under --precision f32) | 206 | 421.3M | typed answer per question |
 
 ## Model details
 
