@@ -383,3 +383,17 @@ Silk-vs-CPU `LayaCompareGpu` correctness verdict ran separately and passes at 1.
 - Gate: `python samples/NivaraInference/Python/laya_compare.py` (writes the wheel fixtures) then `dotnet run -c Release --project tests/Nivara.PerformanceTests -- --inference-compare laya`.
 - Upstream limitation, not ours: [NandhaKishorM/laya#185](https://github.com/NandhaKishorM/laya/issues/185).
 - Encoder GPU path and the GEMM argument: [docs/ACCELERATION.md](ACCELERATION.md) §1 and [docs/ILGPU.md](ILGPU.md) §10–§11, issues #449, #440, #448, #447.
+
+## Synthetic weights (checkpoint-free)
+
+`laya --synthetic-weights` (and `laya benchmark --synthetic-weights`) fabricates a tiny
+ModernBERT encoder + decision head in the storage dtype and runs end-to-end without a
+checkpoint, on CPU (native F16 storage / F32 compute) and Silk (F32/bf16 widened, or the
+native fp16 device path).
+
+- Honors `--precision` (f32 / bf16 / fp16 / native) and `--silk`.
+- The single F32 `temperature` scalar is narrowed to Half on the native (F16 storage) path;
+  precision impact is negligible and is documented here rather than special-cased.
+- Silk has no native Half device path for Laya's F16 checkpoint (fp16 is rejected on Silk
+  except via the native fp16 path), so a Silk synthetic run stays F32/bf16 widened unless
+  `--precision native` selects the fp16 device path.
