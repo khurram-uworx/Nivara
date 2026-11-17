@@ -2131,7 +2131,6 @@ class Program
         Console.WriteLine($"Silk forward: {fwdSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
-        Console.WriteLine($"GATE: OK");
         return 0;
     }
 
