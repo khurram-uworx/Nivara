@@ -21,7 +21,7 @@ Export a Nivara-trained `Module<T>` to a `.onnx` file and run it anywhere ONNX R
 - `Module<T>.ExportToOnnx(IOnnxExportContext<T>, string inputName)` implemented by your model
 - Context emitters: `Linear`, `Linear<TWeight>`, `Conv1d`, `Conv2d`, `Embedding`, `Embedding<TWeight>`, `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `RMSNorm`, `TransformerBlock`, `MultiheadAttention`, `Sequential`, `Relu`, `Gelu`, `Sigmoid`, `Tanh`, `Add`, `TransposeAxes`, `Reshape`, `Concat`, `ReduceMean`
 
-ONNX element type follows the module element type: `float`, `double`, `Half`, or `BFloat16`. By default weights are widened to F32 for runtime compatibility; set native dtype to preserve `Half`/`BFloat16`.
+ONNX element type follows the module element type: `float`, `double`, `Half`, or `BFloat16`. Mixed-precision weights (e.g. `Linear<T, TWeight>`) are widened to the module element type `T` during export. `NativeDtype`/`UseNativeDtype`/`ExportNativeDtype` are reserved for future use and currently have no effect.
 
 ## Workflow
 
@@ -67,22 +67,43 @@ Emitters used: `Embedding`, `TransposeAxes`, `Conv1d`, `Relu`, `Reshape`, `Conca
 
 | Operator | Status | Notes |
 | --- | --- | --- |
-| Embedding/Gather | Supported | Input indices cast to int64 if needed |
+| Embedding/Gather | Supported | Input indices cast to int64 if needed (float inputs are truncated toward zero) |
 | Linear/Gemm | Supported | Weights/biases exported as initializers |
-| Conv1d/Conv2d | Supported | Grouped and asymmetric Conv2d validated during export |
+| Conv1d | Supported | Group=1 only; symmetric kernel/stride; non-negative padding |
+| Conv2d | Supported | Grouped + asymmetric padding validated during export; square kernel, single stride for both axes; channels divisible by groups |
 | TransposeAxes | Supported | Used by conv classifier models |
 | Reshape | Supported | Used by conv classifier models |
 | Concat | Supported | Used by multi-branch conv models |
 | ReduceMean | Supported | Used for mean pooling in linear classifier |
 | Relu/Gelu/Sigmoid/Tanh | Supported | Activation functions |
-| BatchNorm1d/BatchNorm2d | Supported | Requires `trackRunningStats` |
-| LayerNorm/RMSNorm | Supported | Normalization layers |
-| MultiheadAttention/TransformerBlock | Supported | Covered by parity tests |
+| BatchNorm1d/BatchNorm2d | Supported | Requires `trackRunningStats`; epsilon exported as a float attribute |
+| LayerNorm | Supported | Normalized (last) dimension must match `NormalizedShape`; epsilon exported as a float attribute; affine optional |
+| RMSNorm | Supported | Normalization layer |
+| TransformerBlock | Supported | Inlines multi-head self-attention; 2D input `[seqLen, embdDim]` (no batch dimension); dropout ignored (Eval mode assumed). Covered by parity tests |
+| MultiheadAttention | Not supported | Standalone module; export throws `NotSupportedException`. Use `TransformerBlock` instead |
 | Dropout | Supported (identity) | Passes through unchanged; omitted in Eval/export by design |
 | Add | Supported | Element-wise addition (used by residuals) |
 | MaxPool/AvgPool | Not supported | Not present in `IOnnxExportContext`; would need to be added for future conv variants |
 
 Any unsupported operator desired by future models should be recorded as a linked issue rather than silently missing. Export fails loudly for unsupported operations.
+
+## Constraints and unsupported operations
+
+- `MultiheadAttention`, `ConvTranspose2d`, and any module without an `ExportToOnnx` override are **not** exportable and throw `NotSupportedException` during export (no silent fallback).
+- `Conv1d` is group=1 only. `Conv2d` requires groups > 0 with channels divisible by groups, positive kernel size and stride, and non-negative per-side padding.
+- `BatchNorm1d`/`BatchNorm2d` require `TrackRunningStats`.
+- `TransformerBlock` assumes a 2D input `[seqLen, embdDim]` (no batch dimension) and is exported in Eval mode (dropout ignored).
+- `Embedding` inputs are treated as integer indices; non-integer floats are truncated toward zero by the ONNX `Cast`.
+- Epsilon for `BatchNormalization` and `LayerNormalization` is exported as a float attribute (ONNX spec).
+
+## Verification
+
+Parity against ONNX Runtime (which also backs ML.NET's `ApplyOnnxModel`/`OnnxTransformer`) is covered by:
+- `tests/Nivara.Tests/Onnx/OnnxExportMlpTests.cs` — `Linear -> ReLU -> Linear`, tolerance 1e-4
+- `tests/Nivara.Tests/Onnx/OnnxExportTransformerTests.cs` — `TransformerBlock`, tolerance 5e-4
+- `tests/Nivara.Tests/Onnx/OnnxExportUnsupportedTests.cs` — unsupported modules throw
+
+Run: `dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Onnx"`
 
 ## Diagnostics
 
