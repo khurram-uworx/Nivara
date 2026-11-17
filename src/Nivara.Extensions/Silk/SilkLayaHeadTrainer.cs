@@ -1,5 +1,4 @@
 using Nivara.AI;
-using System.Diagnostics;
 
 namespace Nivara.Silk;
 
@@ -297,19 +296,19 @@ public sealed partial class SilkLayaHeadTrainer : IDisposable
         int actInDim = hiddenDim + LayaHeadOutput.FeatureCount;
         SilkLauncher.GemmTn(runtime, actHiddenBuf, actLogitsBuf, weights.ActOutW.Gradient.Handle, actHidden, 1, actClassCount);
         SilkLauncher.ColSum(runtime, actLogitsBuf, weights.ActOutB.Gradient.Handle, 1, actClassCount, 1f);
-        GemmNtW( actLogitsBuf, weights.ActOutW.Handle, dActTmp, 1, actClassCount, actHidden);
+        GemmNtW(actLogitsBuf, weights.ActOutW.Handle, dActTmp, 1, actClassCount, actHidden);
         SilkLauncher.GeluBackward(runtime, dActTmp, actHiddenPre, dActTmp, actHidden);
         SilkLauncher.GemmTn(runtime, actRow, dActTmp, weights.ActInW.Gradient.Handle, actInDim, 1, actHidden);
         SilkLauncher.ColSum(runtime, dActTmp, weights.ActInB.Gradient.Handle, 1, actHidden, 1f);
 
         SilkLauncher.GemmTn(runtime, markerScoredOut, scorerLogitsBuf, weights.ScorerOutW.Gradient.Handle, hiddenDim, k, 1);
         SilkLauncher.ColSum(runtime, scorerLogitsBuf, weights.ScorerOutB.Gradient.Handle, k, 1, 1f);
-        GemmNtW( scorerLogitsBuf, weights.ScorerOutW.Handle, dScorerHidden, k, 1, hiddenDim);
+        GemmNtW(scorerLogitsBuf, weights.ScorerOutW.Handle, dScorerHidden, k, 1, hiddenDim);
         SilkLauncher.GeluBackward(runtime, dScorerHidden, markerScoredPre, dScorerHidden, k * hiddenDim);
 
         SilkLauncher.GemmTn(runtime, markerScored, dScorerHidden, weights.ScorerHiddenW.Gradient.Handle, hiddenDim, k, hiddenDim);
         SilkLauncher.ColSum(runtime, dScorerHidden, weights.ScorerHiddenB.Gradient.Handle, k, hiddenDim, 1f);
-        GemmNtW( dScorerHidden, weights.ScorerHiddenW.Handle, dMarkerHidden, k, hiddenDim, hiddenDim);
+        GemmNtW(dScorerHidden, weights.ScorerHiddenW.Handle, dMarkerHidden, k, hiddenDim, hiddenDim);
 
         SilkLauncher.LayerNormBackward(runtime, dMarkerHidden, markerRows, weights.ScorerNormW.Handle, dMarkerHidden, dLnA, dLnB, k, hiddenDim, eps);
         SilkLauncher.ColSum(runtime, dLnA, weights.ScorerNormW.Gradient.Handle, k, hiddenDim, 1f);
@@ -346,12 +345,12 @@ public sealed partial class SilkLayaHeadTrainer : IDisposable
 
             SilkLauncher.GemmTn(runtime, f1Post[li], dCur, w.W2.Gradient.Handle, intermediateDim, seqLen, hiddenDim);
             SilkLauncher.ColSum(runtime, dCur, w.B2.Gradient.Handle, seqLen, hiddenDim, 1f);
-            GemmNtW( dCur, w.W2.Handle, dInterm, seqLen, hiddenDim, intermediateDim);
+            GemmNtW(dCur, w.W2.Handle, dInterm, seqLen, hiddenDim, intermediateDim);
             SilkLauncher.ReluBackward(runtime, dInterm, f1Pre[li], dInterm, intermLen);
 
             SilkLauncher.GemmTn(runtime, normed2[li], dInterm, w.W1.Gradient.Handle, hiddenDim, seqLen, intermediateDim);
             SilkLauncher.ColSum(runtime, dInterm, w.B1.Gradient.Handle, seqLen, intermediateDim, 1f);
-            GemmNtW( dInterm, w.W1.Handle, dTmp, seqLen, intermediateDim, hiddenDim);
+            GemmNtW(dInterm, w.W1.Handle, dTmp, seqLen, intermediateDim, hiddenDim);
 
             SilkLauncher.LayerNormBackward(runtime, dTmp, postAttnHidden[li], w.Norm2W.Handle, dTmp2, dLnA, dLnB, seqLen, hiddenDim, eps);
             SilkLauncher.ColSum(runtime, dLnA, w.Norm2W.Gradient.Handle, seqLen, hiddenDim, 1f);
@@ -361,7 +360,7 @@ public sealed partial class SilkLayaHeadTrainer : IDisposable
 
             SilkLauncher.GemmTn(runtime, attn[li], dTmp2, w.Wo.Gradient.Handle, hiddenDim, seqLen, hiddenDim);
             SilkLauncher.ColSum(runtime, dTmp2, w.Bo.Gradient.Handle, seqLen, hiddenDim, 1f);
-            GemmNtW( dTmp2, w.Wo.Handle, dAttn, seqLen, hiddenDim, hiddenDim);
+            GemmNtW(dTmp2, w.Wo.Handle, dAttn, seqLen, hiddenDim, hiddenDim);
 
             SilkLauncher.AttentionBackwardPrep(runtime, qkv[li], maskBuf, dAttn, probsBuf, deltaBuf, 1, seqLen, numHeads, headDim, SilkKernels.GlobalAttentionBand, scale);
             SilkLauncher.AttentionBackwardDq(runtime, qkv[li], probsBuf, deltaBuf, dAttn, dQkv, 1, seqLen, numHeads, headDim, scale);
@@ -369,7 +368,7 @@ public sealed partial class SilkLayaHeadTrainer : IDisposable
 
             SilkLauncher.GemmTn(runtime, normed1[li], dQkv, w.Wqkv.Gradient.Handle, hiddenDim, seqLen, 3 * hiddenDim);
             SilkLauncher.ColSum(runtime, dQkv, w.Bqkv.Gradient.Handle, seqLen, 3 * hiddenDim, 1f);
-            GemmNtW( dQkv, w.Wqkv.Handle, dTmp, seqLen, 3 * hiddenDim, hiddenDim);
+            GemmNtW(dQkv, w.Wqkv.Handle, dTmp, seqLen, 3 * hiddenDim, hiddenDim);
 
             SilkLauncher.LayerNormBackward(runtime, dTmp, layerInput[li], w.Norm1W.Handle, dTmp2, dLnA, dLnB, seqLen, hiddenDim, eps);
             SilkLauncher.ColSum(runtime, dLnA, w.Norm1W.Gradient.Handle, seqLen, hiddenDim, 1f);
