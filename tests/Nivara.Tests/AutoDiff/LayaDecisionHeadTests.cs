@@ -478,4 +478,37 @@ public class LayaDecisionHeadTests
         // and the choice cannot be ambiguous.
         Assert.That(span[0], Is.EqualTo(196.50403f).Within(1e-3));
     }
+
+    [Test]
+    public void ForwardActLogits_PreservesInferenceValuesAndTracksOnlyActionPath()
+    {
+        var head = NewHead(headLayers: 1);
+        var hidden = AsTensor(HiddenState(12), 12, Hidden);
+        var expected = head.Forward(hidden, LayaQuestionType.Choice, [2, 5], 12);
+        float[] actual;
+
+        using (GradientUtils.Grad())
+        {
+            var logits = head.ForwardActLogits(hidden, LayaQuestionType.Choice, [2, 5], 12);
+            Assert.That(logits.Shape, Is.EqualTo(new[] { 1, 2 }));
+            logits.Data.TryGetSpan(out var span);
+            actual = span.ToArray();
+            new CrossEntropyLoss<float>().Forward(logits, new[] { 0 }).Backward();
+        }
+
+        Assert.Multiple(() =>
+        {
+            var p = LayaCalibration.SoftmaxAtTemperature(
+                [actual[0], actual[1]], 2, 1.0);
+            Assert.That(p[0], Is.EqualTo(expected.ActionProbability).Within(1e-5),
+                "action logits reproduce the inference action probability");
+            Assert.That(head.typeEmb.Weight!.Tensor.Grad, Is.Null, "the choice path is not evaluated");
+            Assert.That(head.HeadLayers[0].Parameters().Values.Any(parameter => parameter.Grad is not null), Is.False,
+                "the choice path is not evaluated");
+            Assert.That(head.scorerHidden.Weight!.Tensor.Grad, Is.Null, "the choice path is not evaluated");
+            Assert.That(head.scorerOut.Weight!.Tensor.Grad, Is.Null, "the choice path is not evaluated");
+            Assert.That(head.actInput.Weight!.Tensor.Grad, Is.Not.Null, "the action path is evaluated");
+            Assert.That(head.actOut.Weight!.Tensor.Grad, Is.Not.Null, "the action path is evaluated");
+        });
+    }
 }

@@ -220,4 +220,148 @@ public static class AdaptiveTraining
         if (holdoutExamples.Any(example => queries.Contains(example.Query)))
             throw new ArgumentException("Training and holdout examples must use disjoint queries.", nameof(holdoutExamples));
     }
+
+    public static void UpdateAct(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> examples,
+        int epochs = DefaultEpochs,
+        float learningRate = DefaultLearningRate)
+        => UpdateAction(head, examples, epochs, learningRate);
+
+    public static void UpdateAction(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> examples,
+        int epochs = DefaultEpochs,
+        float learningRate = DefaultLearningRate)
+    {
+        ArgumentNullException.ThrowIfNull(head);
+        ArgumentNullException.ThrowIfNull(examples);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(epochs);
+        if (!float.IsFinite(learningRate) || learningRate <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(learningRate));
+        if (GradientUtils.IsGradEnabled)
+            throw new InvalidOperationException("AdaptiveTraining.UpdateAct owns its GradientUtils.Grad() scope.");
+        if (examples.Count == 0)
+            throw new ArgumentException("At least one example is required for an adaptive update.", nameof(examples));
+
+        foreach (var example in examples)
+            ValidateExample(head, example);
+
+        using var optimizer = new Adam<float>(learningRate);
+        optimizer.AddParameterGroup(ActParameters(head));
+        var loss = new CrossEntropyLoss<float>();
+
+        for (var epoch = 0; epoch < epochs; epoch++)
+        {
+            optimizer.ZeroGrad();
+            using (GradientUtils.Grad())
+            {
+                ReverseGradTensor<float>? batchLoss = null;
+                foreach (var example in examples)
+                {
+                    var hidden = ReverseGradTensor<float>.FromMatrix(
+                        (float[])example.Features.Clone(), example.SequenceLength, example.HiddenSize);
+                    var logits = head.ForwardActLogits(
+                        hidden, LayaQuestionType.Choice, example.MarkerPositions, example.SequenceLength);
+                    var exampleLoss = loss.Forward(logits, [example.Target]);
+                    batchLoss = batchLoss is null
+                        ? exampleLoss
+                        : ReverseGradOperations.Add(batchLoss, exampleLoss);
+                }
+
+                ReverseGradOperations.DivideScalar(batchLoss!, examples.Count).Backward();
+            }
+
+            optimizer.Step();
+        }
+    }
+
+    public static AdaptiveTrainingReport TrainActAndCompare(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> trainingExamples,
+        IReadOnlyList<AdaptiveTrainingExample> holdoutExamples,
+        int epochs = DefaultEpochs,
+        float learningRate = DefaultLearningRate)
+        => TrainActionAndCompare(head, trainingExamples, holdoutExamples, epochs, learningRate);
+
+    public static AdaptiveTrainingReport TrainActionAndCompare(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> trainingExamples,
+        IReadOnlyList<AdaptiveTrainingExample> holdoutExamples,
+        int epochs = DefaultEpochs,
+        float learningRate = DefaultLearningRate)
+    {
+        ArgumentNullException.ThrowIfNull(head);
+        ArgumentNullException.ThrowIfNull(trainingExamples);
+        ArgumentNullException.ThrowIfNull(holdoutExamples);
+        EnsureQueryDisjoint(trainingExamples, holdoutExamples);
+
+        var baseline = EvaluateAct(head, holdoutExamples);
+        UpdateAct(head, trainingExamples, epochs, learningRate);
+        var trained = EvaluateAct(head, holdoutExamples);
+        return new AdaptiveTrainingReport(baseline, trained, trainingExamples.Count, holdoutExamples.Count);
+    }
+
+    public static AdaptiveChoiceMetrics EvaluateAct(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> examples)
+        => EvaluateAction(head, examples);
+
+    public static AdaptiveChoiceMetrics EvaluateAction(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> examples)
+    {
+        ArgumentNullException.ThrowIfNull(head);
+        ArgumentNullException.ThrowIfNull(examples);
+        if (GradientUtils.IsGradEnabled)
+            throw new InvalidOperationException("Adaptive action evaluation must run outside GradientUtils.Grad().");
+        if (examples.Count == 0)
+            throw new ArgumentException("At least one example is required for adaptive evaluation.", nameof(examples));
+
+        var correct = 0;
+        var predictedProceed = 0;
+        var trueProceed = 0;
+        var truePositive = 0;
+        foreach (var example in examples)
+        {
+            ValidateExample(head, example);
+            var hidden = ReverseGradTensor<float>.FromMatrix(
+                (float[])example.Features.Clone(), example.SequenceLength, example.HiddenSize);
+            var logits = head.ForwardActLogits(
+                hidden, LayaQuestionType.Choice, example.MarkerPositions, example.SequenceLength);
+            logits.Data.TryGetSpan(out var values);
+            var predicted = values[0] >= values[1] ? 0 : 1;
+            if (predicted == example.Target)
+                correct++;
+            if (predicted == 0)
+                predictedProceed++;
+            if (example.Target == 0)
+            {
+                trueProceed++;
+                if (predicted == 0)
+                    truePositive++;
+            }
+        }
+
+        var precision = predictedProceed == 0 ? 0d : (double)truePositive / predictedProceed;
+        var recall = trueProceed == 0 ? 0d : (double)truePositive / trueProceed;
+        var f1 = precision + recall == 0d ? 0d : 2d * precision * recall / (precision + recall);
+        return new AdaptiveChoiceMetrics(
+            examples.Count,
+            correct,
+            predictedProceed,
+            trueProceed,
+            (double)correct / examples.Count,
+            precision,
+            recall,
+            f1);
+    }
+
+    static IReadOnlyList<Parameter<float>> ActParameters(LayaDecisionHead<float, float> head)
+    {
+        var parameters = new List<Parameter<float>>();
+        parameters.AddRange(head.actInput.GetParameters().Values);
+        parameters.AddRange(head.actOut.GetParameters().Values);
+        return parameters;
+    }
 }
