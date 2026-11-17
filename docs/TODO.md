@@ -67,4 +67,4 @@ Update `docs/LAYA.md` to distinguish base-checkpoint act_head saturation from a 
 ## GitHub issues log
 
 - [ ] #1205 — train and calibrate the Laya action head from routing feedback (this issue)
-- [ ] Follow-up: joint representation learning for act + choice paths (opt-in) — to be created during execution
+- [ ] #1260 — optional joint representation learning for Laya act + choice paths (created during #1205 execution)
