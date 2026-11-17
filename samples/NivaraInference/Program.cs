@@ -3077,26 +3077,26 @@ class Program
         buildSw.Stop();
         using (session)
         {
-        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
-        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+            Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+            Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
-        uint rng = 0x9E3779B9;
-        var promptIds = new int[64];
-        for (int i = 0; i < promptIds.Length; i++)
-        {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
-            promptIds[i] = (int)(rng % (uint)config.VocabSize);
-        }
+            uint rng = 0x9E3779B9;
+            var promptIds = new int[64];
+            for (int i = 0; i < promptIds.Length; i++)
+            {
+                rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+                promptIds[i] = (int)(rng % (uint)config.VocabSize);
+            }
 
-        // Warmup.
-        RunSmolLMGenerationSilk(session, promptIds, config, 8);
+            // Warmup.
+            RunSmolLMGenerationSilk(session, promptIds, config, 8);
 
-        var sw = Stopwatch.StartNew();
-        var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
-        sw.Stop();
-        Console.WriteLine($"{ids.Generated} tokens in {sw.Elapsed.TotalSeconds:F2}s " +
-                          $"({(ids.Generated > 0 ? sw.ElapsedMilliseconds / ids.Generated : 0)} ms/token)");
-        return 0;
+            var sw = Stopwatch.StartNew();
+            var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
+            sw.Stop();
+            Console.WriteLine($"{ids.Generated} tokens in {sw.Elapsed.TotalSeconds:F2}s " +
+                              $"({(ids.Generated > 0 ? sw.ElapsedMilliseconds / ids.Generated : 0)} ms/token)");
+            return 0;
         }
     }
 
