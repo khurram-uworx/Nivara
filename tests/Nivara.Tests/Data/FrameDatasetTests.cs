@@ -153,7 +153,7 @@ public class FrameDatasetTests
         Assert.That(split.Train.RowCount + split.Test.RowCount, Is.EqualTo(6));
         var shuffled = NivaraDataset.Shuffle(frame, 3);
         Assert.That(shuffled.RowCount, Is.EqualTo(6));
-        var batches = Nivara.Data.Dataset.Batch(frame, 2);
+        var batches = Dataset.Batch(frame, 2);
         Assert.That(batches.Count, Is.EqualTo(3));
     }
 
