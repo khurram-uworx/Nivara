@@ -539,4 +539,28 @@ public class TypeSafetyTests
             "NivaraSeries.AsTensorView() must share the underlying column's backing array");
     }
 
+    [Test]
+    public void NivaraSeries_TryGetReadOnlyTensorSpan_NullFree_ReturnsTrue()
+    {
+        var series = new NivaraSeries<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }));
+
+        var result = series.TryGetReadOnlyTensorSpan(out var span);
+
+        Assert.That(result, Is.True);
+        Assert.That((int)span.FlattenedLength, Is.EqualTo(3));
+        Assert.That(span[0], Is.EqualTo(1f));
+    }
+
+    [Test]
+    public void NivaraSeries_TryGetReadOnlyTensorSpan_WithNulls_ReturnsFalse()
+    {
+        var series = new NivaraSeries<float>(
+            NivaraColumnFactory.CreateFromNullable(new float?[] { 1f, null, 3f }));
+
+        var result = series.TryGetReadOnlyTensorSpan(out var span);
+
+        Assert.That(result, Is.False);
+    }
+
 }
