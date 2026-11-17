@@ -82,7 +82,7 @@ public sealed class GpuTextConvClassifier : IDisposable
     int KernelSize(int branch) => kernelSizes[branch];
     int ConvWeightLen(int k) => BranchChannels * embeddingDim * k;
 
-    public GpuTextConvClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seqLen, int numClasses = 2, int seed = 42)
+    public GpuTextConvClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seqLen, int seed = 42, int numClasses = 2)
     {
         if (numClasses < 2) throw new ArgumentOutOfRangeException(nameof(numClasses));
         this.vocabSize = vocabSize;

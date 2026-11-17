@@ -36,7 +36,7 @@ public static class IntentTrainer
         if (useSilk)
         {
             GpuTextLinearClassifier? silk = null;
-            try { silk = new GpuTextLinearClassifier(tokenizer.VocabSize, 32, 64, 5, seed); }
+            try { silk = new GpuTextLinearClassifier(tokenizer.VocabSize, 32, 64, seed, 5); }
             catch (InvalidOperationException ex) { Console.WriteLine($"  Silk/OpenCL unavailable ({ex.Message}); using CPU trainer."); }
             if (silk is not null)
             {

@@ -61,7 +61,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
 
     public string DeviceName => runtime.DeviceName;
 
-    public GpuTextLinearClassifier(int vocabSize, int embeddingDim, int hiddenDim, int numClasses = 2, int seed = 42)
+    public GpuTextLinearClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seed = 42, int numClasses = 2)
     {
         if (numClasses < 2) throw new ArgumentOutOfRangeException(nameof(numClasses));
         this.vocabSize = vocabSize;
@@ -254,14 +254,14 @@ public sealed class GpuTextLinearClassifier : IDisposable
         pooledOut = runtime.Download(pooledBuf.Handle, batchSize * embeddingDim);
         pooled = pooledOut;
         hiddenOut = runtime.Download(hBuf.Handle, batchSize * hiddenDim);
-        return runtime.Download(logitsBuf.Handle, batchSize * 2);
+        return runtime.Download(logitsBuf.Handle, batchSize * numClasses);
     }
 
     public float[] Forward(int[] tokenIds, int batchSize, int seqLen)
     {
         ThrowIfDisposed();
         ForwardCore(tokenIds, batchSize, seqLen);
-        return runtime.Download(logitsBuf.Handle, batchSize * 2);
+        return runtime.Download(logitsBuf.Handle, batchSize * numClasses);
     }
 
     public int[] Predict(int[] tokenIds, int seqLen)
@@ -334,7 +334,7 @@ public sealed class GpuTextLinearClassifier : IDisposable
                 }
 
                 ForwardCore(batchTokens, n, seqLen);
-                var logits = runtime.Download(logitsBuf.Handle, n * 2);
+                var logits = runtime.Download(logitsBuf.Handle, n * numClasses);
                 Backward(logits, batchTokens, batchLabels, n, seqLen);
                 AdamUpdateAll(learningRate);
 

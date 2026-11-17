@@ -56,7 +56,7 @@ public sealed class SilkTextClassifier : IDisposable
                 for (int c = 0; c < numClasses; c++)
                     gpuFc2[h * numClasses + c] = fc2wCpu[c * hidden + h];
 
-            var gpu = new GpuTextLinearClassifier(cpuModel.VocabSize, embed, hidden, numClasses, seed);
+            var gpu = new GpuTextLinearClassifier(cpuModel.VocabSize, embed, hidden, seed, numClasses);
             gpu.SetWeights(emb, gpuFc1, fc1b, gpuFc2, fc2b);
             return new SilkTextClassifier(gpu, maxSeqLen, numClasses);
         }
