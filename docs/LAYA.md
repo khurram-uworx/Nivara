@@ -433,3 +433,21 @@ native fp16 device path).
 - Silk has no native Half device path for Laya's F16 checkpoint (fp16 is rejected on Silk
   except via the native fp16 path), so a Silk synthetic run stays F32/bf16 widened unless
   `--precision native` selects the fp16 device path.
+
+## Head training (Silk)
+
+The decision head can be trained on the Silk (OpenCL) backend via `SilkLayaHeadTrainer`
+(`src/Nivara.Extensions/Silk/SilkLayaHeadTrainer.cs`), which ships F32 and true BF16
+(`CreateTrueBf16`) variants. The encoder stays frozen; only the head parameters train.
+
+Reachable from the sample:
+
+```
+dotnet run --project samples/NivaraInference -c Release -- laya --synthetic-weights --silk train
+```
+
+This runs one forward / backward / Adam step on a seeded fixture, exports the checkpoint, and
+reloads it through `LayaDecisionHead.LoadWeights(tensors, headLayerCount, actClassCount)`.
+
+Parity gates: `SilkLayaHeadTrainerTests` (F32 vs CPU AutoDiff head) and
+`SilkLayaHeadTrainerBf16ParityTests` (BF16 vs F32).

@@ -70,7 +70,7 @@ class Program
         ["minilm"] = ["", "benchmark", "similarity"],
         ["distilbert"] = ["", "benchmark"],
         ["distilbert_sst"] = ["", "benchmark", "predict"],
-        ["laya"] = ["", "benchmark"],
+        ["laya"] = ["", "benchmark", "train"],
         ["modernbert"] = ["", "benchmark"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
@@ -88,7 +88,7 @@ class Program
         ["distilbert"] = ["", "benchmark"],
         ["distilbert_sst"] = ["", "benchmark", "predict"],
         ["modernbert"] = ["", "benchmark"],
-        ["laya"] = ["", "benchmark"],
+        ["laya"] = ["", "benchmark", "train"],
         ["smollm"] = ["", "benchmark", "generate"],
         ["qwen"] = ["", "benchmark", "tools", "distill"],
         ["mobilenet_v2"] = ["", "benchmark"],
@@ -577,7 +577,7 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark")
+        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark" && mode != "train")
         {
             Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
             return 1;
@@ -760,6 +760,12 @@ class Program
 
         if (isLaya && syntheticWeights)
         {
+            if (mode == "train")
+            {
+                if (!useSilk) { Console.Error.WriteLine("laya train requires --silk."); return 1; }
+                var synthTensors = Laya.SynthesizeTensors<float>(LayaSyntheticConfig, LayaSyntheticAgent);
+                return Laya.RunTrainGpu(synthTensors, Laya.CreateSyntheticModelDir(LayaSyntheticConfig, LayaSyntheticAgent));
+            }
             string syntheticModelDir = Laya.CreateSyntheticModelDir(LayaSyntheticConfig, LayaSyntheticAgent);
 
             if (useSilk)
@@ -914,6 +920,8 @@ class Program
             case "laya":
                 if (useSilk)
                 {
+                    if (mode == "train")
+                        return Laya.RunTrainGpu(F32(), modelDir);
                     if (bf16)
                     {
                         if (benchmark) return Laya.RunBenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.Laya);
@@ -931,6 +939,7 @@ class Program
                     if (compare) return Laya.CompareGpu(F32(), modelDir, open);
                     return Laya.RunGpu(F32(), modelDir, open);
                 }
+                if (mode == "train") { Console.Error.WriteLine("laya train requires --silk."); return 1; }
                 if (compare) return Laya.Compare(F32(), modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
                 if (layaNativeCpu) return Laya.Run<float, Half>(tensorsHalf, modelDir, mode, "native (F16 storage, F32 compute)");
