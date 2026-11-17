@@ -10,6 +10,7 @@ public static class TrainingMode
     public static void RunTrain(ModeContext ctx, bool fromCli)
     {
         Console.WriteLine("=== NivaraChat Model Training ===\n");
+        Console.WriteLine($"Backend: {(ctx.UseSilk ? "Silk (OpenCL) for sentiment/validator/agents-validator/intent; CPU for entity" : "CPU")}\n");
         Directory.CreateDirectory(ctx.ModelsDir);
 
         Console.WriteLine("[1/4] Training sentiment classifier...");
