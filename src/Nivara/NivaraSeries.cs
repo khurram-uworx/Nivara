@@ -649,6 +649,19 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable, IEquatable<Ni
     }
 
     /// <summary>
+    /// Attempts to get a zero-copy <see cref="ReadOnlyTensorSpan{T}"/> view over the series data.
+    /// Returns <c>true</c> when the underlying column is flat, contiguous, null-free and the element
+    /// type is unmanaged; returns <c>false</c> otherwise. The view is read-only.
+    /// </summary>
+    /// <param name="span">When this method returns, contains the read-only tensor span view if successful</param>
+    /// <returns><c>true</c> if a view was obtained; <c>false</c> otherwise</returns>
+    public bool TryGetReadOnlyTensorSpan(out ReadOnlyTensorSpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return values.TryGetReadOnlyTensorSpan(out span);
+    }
+
+    /// <summary>
     /// Converts this series to a Tensor&lt;T&gt;, replacing null values with the specified default.
     /// </summary>
     /// <param name="defaultValue">Value to use in place of nulls</param>
