@@ -130,6 +130,32 @@ The head, prompt builder, calibration and state-dict slice now ship from `Nivara
 
 Prompt parity runs **first** and returns before any forward if an id or a marker disagrees. A different prompt still produces logits, and a numeric diff would blame the wrong thing.
 
+### Environment-gated tests (issue #1229)
+
+Two NUnit fixtures in `tests/Nivara.Tests` read the real Laya inputs and are therefore
+environment-gated rather than fixture-gated:
+
+- `LayaGoldenPromptTests` (`tests/Nivara.Tests/AutoDiff/LayaGoldenPromptTests.cs`) — requires
+  `samples/data/laya/tokenizer/tokenizer.json`.
+- `LayaNativeCheckpointTests` (`tests/Nivara.Tests/Inference/LayaNativeCheckpointTests.cs`) — requires
+  `samples/data/laya/model.safetensors` and `samples/data/laya/encoder/config.json`.
+
+Decision: both are **local / provisioned-machine only**. They are not expected to run in CI, and their
+skip there is not a coverage gap. The Laya inputs are large and gitignored, and no reduced checkpoint
+subset and no shipped `.bin` parity fixture is provided for them (none is needed). Each skips with an
+explicit reason when its inputs are absent.
+
+The authoritative parity check for Laya remains the wheel gate
+`dotnet run -c Release --project tests/Nivara.PerformanceTests -- --inference-compare laya` (see
+References), which runs wherever the `laya==0.3.20` wheel and tokenizer are provisioned. The
+underlying prompt-building and head-loading behaviour these fixtures exercise is still covered in
+every CI run by the always-on suites (`LayaPromptBuilderTests` and the synthetic-weight Laya path).
+
+The Laya inputs are obtainable by the documented, automatable step in
+`samples/NivaraInference/README.md`:
+
+`hf download convaiinnovations/laya model.safetensors encoder/config.json rl_agent_config.json tokenizer/tokenizer.json tokenizer/tokenizer_config.json rl_common.py README.md --local-dir samples/data/laya`
+
 ## Performance
 
 `laya benchmark`, AC power, Release, F32, .NET 11. Padded to `max_len` 512 so the four questions are the same forward; the valid-token counts are how long the prompt actually is, not how long the forward was. Protocol is the mode's own: one untimed encoder pass, then three timed encoder-plus-head passes, median reported. The head's first call falls inside the timed loop, which is the likely source of the high sample on `noul`.
