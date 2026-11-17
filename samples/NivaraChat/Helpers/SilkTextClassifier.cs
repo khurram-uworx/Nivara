@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.AutoDiff.Nn;
 using Nivara.Silk;
 

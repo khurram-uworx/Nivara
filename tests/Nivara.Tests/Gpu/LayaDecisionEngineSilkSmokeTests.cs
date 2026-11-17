@@ -1,4 +1,3 @@
-using Nivara.AI;
 using Nivara.Silk;
 using NivaraChat.Helpers;
 using NUnit.Framework;
