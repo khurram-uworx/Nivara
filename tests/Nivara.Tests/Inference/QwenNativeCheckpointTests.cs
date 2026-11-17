@@ -1,8 +1,6 @@
 using Nivara.AI;
-using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.Samples;
-using NivaraInference;
 using NUnit.Framework;
 using System.Buffers.Binary;
 using System.Numerics;

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.AutoDiff.Nn;
-using Nivara.Primitives;
 using Nivara.Samples;
 using Nivara.Silk;
 using NivaraChat.Modes;

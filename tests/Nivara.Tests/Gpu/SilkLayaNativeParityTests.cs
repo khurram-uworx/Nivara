@@ -1,7 +1,6 @@
 using Nivara.AI;
 using Nivara.Silk;
 using NUnit.Framework;
-using System.Numerics;
 using System.Text.Json;
 
 namespace Nivara.Tests.Gpu;

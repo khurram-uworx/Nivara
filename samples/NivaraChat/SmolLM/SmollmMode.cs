@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using Nivara.AI;
-using Nivara.Primitives;
 using Nivara.Samples;
 using Nivara.Silk;
 using System.Diagnostics;
