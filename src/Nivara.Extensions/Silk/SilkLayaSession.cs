@@ -63,6 +63,8 @@ public sealed class SilkLayaSession : ILayaGpuSession
     public SilkLayaHeadGpuRunner Head => head;
     public SilkModernBertGpuRunner Encoder => encoder;
 
+    public float[] Encode(int[] tokenIds, int validLength) => encoder.Forward(tokenIds, validLength);
+
     public string DeviceName => runtime.DeviceName;
     public LayaHeadOutput Forward(int[] ids, int validLength, LayaQuestionType type, IReadOnlyList<int> markers)
     {

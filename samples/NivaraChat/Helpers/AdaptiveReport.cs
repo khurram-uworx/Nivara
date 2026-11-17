@@ -67,7 +67,10 @@ public sealed record AdaptiveReportTiming(string Stage, int Count, long Millisec
 public sealed record AdaptiveReportSilk(
     string Backend, double MaxAbsoluteDifference, int MismatchedRows,
     bool WithinTolerance, long CpuBuildMs, long SilkBuildMs,
-    bool CpuFromCache, bool SilkFromCache, bool Available);
+    bool CpuFromCache, bool SilkFromCache, bool Available,
+    double LayaMaxAbsoluteDifference = 0d,
+    bool LayaWithinTolerance = true,
+    bool LayaAvailable = false);
 
 public sealed record AdaptiveReportPersistence(
     string Path, bool ExistedBefore, int Saves, long BytesWritten, long FinalSize, bool Verified, bool Disabled = false);
@@ -201,6 +204,12 @@ public static class AdaptiveReport
             c.AppendLine($"- CPU index build: {input.Silk.CpuBuildMs} ms (cache hit: {input.Silk.CpuFromCache})");
             c.AppendLine($"- Silk index build: {input.Silk.SilkBuildMs} ms (cache hit: {input.Silk.SilkFromCache})");
         }
+        c.AppendLine();
+        c.AppendLine("### Laya (decision head)");
+        if (!input.Silk.LayaAvailable)
+            c.AppendLine("- Laya parity: not run (pass --silk to enable, or OpenCL unavailable).");
+        else
+            c.AppendLine($"- Laya encoder parity max |cpu - silk|: {input.Silk.LayaMaxAbsoluteDifference.ToString("0.0000000", inv)} (within tolerance: {input.Silk.LayaWithinTolerance})");
         c.AppendLine("- Scope: MiniLM embedding generation only. ModernBERT feature extraction, decisions and head training are CPU in both runs. Hand-written Silk weight steps are a follow-up.");
         c.AppendLine();
         c.AppendLine("## Persistence");
@@ -290,7 +299,10 @@ public static class AdaptiveReport
                 cpuBuildMs = input.Silk.CpuBuildMs,
                 silkBuildMs = input.Silk.SilkBuildMs,
                 cpuFromCache = input.Silk.CpuFromCache,
-                silkFromCache = input.Silk.SilkFromCache
+                silkFromCache = input.Silk.SilkFromCache,
+                layaAvailable = input.Silk.LayaAvailable,
+                layaMaxAbs = input.Silk.LayaMaxAbsoluteDifference,
+                layaWithinTolerance = input.Silk.LayaWithinTolerance
             },
             persistence = new
             {

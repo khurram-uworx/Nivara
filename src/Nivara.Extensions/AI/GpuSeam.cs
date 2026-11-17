@@ -42,6 +42,12 @@ public interface ILayaGpuSession : IDisposable
 {
     string DeviceName { get; }
 
+    /// <summary>
+    /// Runs only the ModernBERT encoder and returns the hidden state (row-major, validLength x hidden).
+    /// Used for feature extraction where the decision head runs separately.
+    /// </summary>
+    float[] Encode(int[] tokenIds, int validLength);
+
     /// <summary>Encode (ModernBERT) time of the most recent <see cref="Forward"/> call, in milliseconds.</summary>
     long LastEncodeMilliseconds { get; }
 
