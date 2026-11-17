@@ -45,6 +45,8 @@ internal static class DocsCoveragePins
     /// 2026-11-16 (#1218): +1 = 500. The new native-loading note in <c>docs/MODERNBERT.md</c> references
     /// <c>docs/plan/LAYA-HONEST-WEIGHTS.md</c> in backticks; that path is excluded from the document
     /// scan but the backticked mention is still discovered by <c>DocumentPattern</c>.
+    /// 2026-11-17 (#1229): +2 = 501. New subsection in `docs/LAYA.md` references two test file paths
+    /// in backticks, both discovered by `DocumentPattern`.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 499;
+    internal const int ExpectedDocumentReferenceCount = 501;
 }
