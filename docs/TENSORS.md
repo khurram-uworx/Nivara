@@ -129,6 +129,16 @@ This is the intended way to hand a dense, non-null, contiguous column to
 mutate it. Reserve `Tensor.FlattenTo` for non-contiguous/multi-dim tensors — a contiguous column
 already *is* its `Tensor<T>`.
 
+### Fallible read-only span view: `TryGetReadOnlyTensorSpan`
+
+For callers that want a `ReadOnlyTensorSpan<T>` rather than a `Tensor<T>` (and that prefer a
+`false` result over an exception), `NivaraColumn<T>.TryGetReadOnlyTensorSpan(out span)` and
+`NivaraSeries<T>.TryGetReadOnlyTensorSpan(out span)` return a zero-copy read-only view when the
+column is flat, contiguous, null-free and unmanaged; they return `false` (with `span = default`)
+for null-bearing, reference-typed, chunked or otherwise incompatible columns, so callers can fall
+back to the copy path (`ToTensor()` / `ToTensorSpan()`). The view is `ReadOnlyTensorSpan<T>` and
+never exposes a writable `TensorSpan<T>`, preserving column immutability.
+
 **Aliasing invariant (#536).** `AsTensor()` memoises the view, so the same `Tensor<T>` is handed
 to every caller for the lifetime of the storage, and `Tensor<T>` exposes a writable `Span<T>`
 indexer. Anything that writes the column's `data` array in place would therefore corrupt every
