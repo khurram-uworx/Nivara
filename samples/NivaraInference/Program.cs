@@ -724,6 +724,18 @@ class Program
             return Qwen.RunSyntheticBenchmark<float, float>(plain);
         }
 
+        if (isSmolLM && syntheticWeights)
+        {
+            if (useSilk)
+                return RunSmolLMSyntheticBenchmarkSilk(plain, bf16 || native);
+
+            if (native)
+                return RunSmolLMSyntheticBenchmark<float, BFloat16>();
+            if (bf16)
+                return RunSmolLMSyntheticBenchmark<BFloat16, BFloat16>();
+            return RunSmolLMSyntheticBenchmark<float, float>();
+        }
+
         string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");
 
