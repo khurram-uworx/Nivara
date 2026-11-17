@@ -29,6 +29,7 @@ public static class CriticMode
 
         Console.WriteLine("Loading trained models...");
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir);
+        var validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
         Console.WriteLine("Models loaded.\n");
 
         Console.WriteLine($"Connecting to LLM at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
@@ -37,6 +38,7 @@ public static class CriticMode
         if (nullAbleChatClient is null)
         {
             validatorModel.Dispose();
+        validatorSilk?.Dispose();
             Console.WriteLine("Error: failed to connect to LLM.");
             return;
         }
@@ -44,7 +46,7 @@ public static class CriticMode
         Console.WriteLine("LLM connected.\n");
         IChatClient chatClient = nullAbleChatClient;
 
-        var critic = new CriticExecutor(validatorModel, validatorTok);
+        var critic = new CriticExecutor(validatorModel, validatorTok, silk: validatorSilk);
         var loop = new WriterCriticLoop(chatClient, critic);
 
         Console.WriteLine("Writer (Ollama) → Critic (Nivara validator) → pass/fail → retry if needed\n");
@@ -73,6 +75,7 @@ public static class CriticMode
         }
 
         validatorModel.Dispose();
+        validatorSilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }

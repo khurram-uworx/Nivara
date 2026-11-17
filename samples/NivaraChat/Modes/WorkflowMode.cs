@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using NivaraChat.Executors;
+using NivaraChat.Helpers;
 using NivaraChat.Shared;
 
 namespace NivaraChat.Modes;
@@ -23,10 +24,11 @@ public static class WorkflowMode
         Console.WriteLine("Loading trained models...");
         var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(ctx.ModelsDir);
         var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(ctx.ModelsDir);
+        var sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
         Console.WriteLine("Models loaded.\n");
 
         var router = new TextRouter();
-        var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok);
+        var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok, silk: sentimentSilk);
         var entityExtractor = new EntityExtractor(entityModel, entityTok);
         var validator = new ValidatorExecutor();
 
@@ -112,6 +114,7 @@ public static class WorkflowMode
 
         sentimentModel.Dispose();
         entityModel.Dispose();
+        sentimentSilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }

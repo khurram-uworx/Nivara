@@ -13,6 +13,8 @@ public static class NivaraToolFunctions
     private static TextTokenizer? _entityTokenizer;
     private static TextClassifierModel<float>? _validatorModel;
     private static TextTokenizer? _validatorTokenizer;
+    private static SilkTextClassifier? _sentimentSilk;
+    private static SilkTextClassifier? _validatorSilk;
 
     private static readonly string[] SentimentClasses = ["negative", "neutral", "positive"];
     private static readonly string[] EntityClasses = ["O", "B-person", "B-org", "B-date", "B-location"];
@@ -20,7 +22,8 @@ public static class NivaraToolFunctions
     public static void Initialize(
         TextClassifierModel<float> sentimentModel, TextTokenizer sentimentTok,
         TokenClassifierModel<float> entityModel, TextTokenizer entityTok,
-        TextClassifierModel<float> validatorModel, TextTokenizer validatorTok)
+        TextClassifierModel<float> validatorModel, TextTokenizer validatorTok,
+        SilkTextClassifier? sentimentSilk = null, SilkTextClassifier? validatorSilk = null)
     {
         _sentimentModel = sentimentModel;
         _sentimentTokenizer = sentimentTok;
@@ -28,6 +31,8 @@ public static class NivaraToolFunctions
         _entityTokenizer = entityTok;
         _validatorModel = validatorModel;
         _validatorTokenizer = validatorTok;
+        _sentimentSilk = sentimentSilk;
+        _validatorSilk = validatorSilk;
     }
 
     [Description("Analyze sentiment of text. Returns positive/negative/neutral with confidence score.")]
@@ -35,8 +40,13 @@ public static class NivaraToolFunctions
         [Description("The text to analyze")] string text)
     {
         EnsureSentimentModel();
-        var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
-            _sentimentModel!, _sentimentTokenizer!, text, maxSeqLen: 20, numClasses: 3);
+        (int bestClass, float confidence) r;
+        if (_sentimentSilk is not null)
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_sentimentSilk, _sentimentTokenizer!, text, maxSeqLen: 20, numClasses: 3);
+        else
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_sentimentModel!, _sentimentTokenizer!, text, maxSeqLen: 20, numClasses: 3);
+        var bestClass = r.bestClass;
+        var confidence = r.confidence;
         return JsonSerializer.Serialize(new { label = SentimentClasses[bestClass], confidence });
     }
 
@@ -59,9 +69,12 @@ public static class NivaraToolFunctions
     {
         EnsureValidatorModel();
         var input = $"{original} || {response}";
-        var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
-            _validatorModel!, _validatorTokenizer!, input, maxSeqLen: 40, numClasses: 2);
-        return JsonSerializer.Serialize(new { consistent = bestClass == 1, confidence });
+        (int bestClass, float confidence) r;
+        if (_validatorSilk is not null)
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_validatorSilk, _validatorTokenizer!, input, maxSeqLen: 40, numClasses: 2);
+        else
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_validatorModel!, _validatorTokenizer!, input, maxSeqLen: 40, numClasses: 2);
+        return JsonSerializer.Serialize(new { consistent = r.bestClass == 1, confidence = r.confidence });
     }
 
     private static void EnsureSentimentModel()

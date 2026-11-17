@@ -7,26 +7,31 @@ namespace NivaraChat.Executors;
 
 internal sealed class SentimentExecutor : Executor<string, string>
 {
-    private readonly TextClassifierModel<float> _model;
+    private readonly TextClassifierModel<float>? _model;
+    private readonly SilkTextClassifier? _silk;
     private readonly TextTokenizer _tokenizer;
     private readonly int _maxSeqLen;
 
     private static readonly string[] Classes = ["negative", "neutral", "positive"];
 
-    public SentimentExecutor(TextClassifierModel<float> model, TextTokenizer tokenizer, int maxSeqLen = 20)
+    public SentimentExecutor(TextClassifierModel<float> model, TextTokenizer tokenizer, int maxSeqLen = 20, SilkTextClassifier? silk = null)
         : base("Sentiment")
     {
         _model = model;
         _model.Eval();
+        _silk = silk;
         _tokenizer = tokenizer;
         _maxSeqLen = maxSeqLen;
     }
 
     public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
-            _model, _tokenizer, text, _maxSeqLen, numClasses: 3);
-        var result = JsonSerializer.Serialize(new { label = Classes[bestClass], confidence });
+        (int bestClass, float confidence) r;
+        if (_silk is not null)
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_silk, _tokenizer, text, _maxSeqLen, numClasses: 3);
+        else
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_model!, _tokenizer, text, _maxSeqLen, numClasses: 3);
+        var result = JsonSerializer.Serialize(new { label = Classes[r.bestClass], confidence = r.confidence });
         return ValueTask.FromResult(result);
     }
 }

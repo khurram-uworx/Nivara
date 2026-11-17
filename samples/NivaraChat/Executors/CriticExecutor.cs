@@ -7,15 +7,17 @@ namespace NivaraChat.Executors;
 
 internal sealed class CriticExecutor : Executor<string, string>
 {
-    private readonly TextClassifierModel<float> _model;
+    private readonly TextClassifierModel<float>? _model;
+    private readonly SilkTextClassifier? _silk;
     private readonly TextTokenizer _tokenizer;
     private readonly int _maxSeqLen;
 
-    public CriticExecutor(TextClassifierModel<float> model, TextTokenizer tokenizer, int maxSeqLen = 40)
+    public CriticExecutor(TextClassifierModel<float> model, TextTokenizer tokenizer, int maxSeqLen = 40, SilkTextClassifier? silk = null)
         : base("Critic")
     {
         _model = model;
         _model.Eval();
+        _silk = silk;
         _tokenizer = tokenizer;
         _maxSeqLen = maxSeqLen;
     }
@@ -27,14 +29,17 @@ internal sealed class CriticExecutor : Executor<string, string>
 
     public ValueTask<string> ScoreAsync(string input, CancellationToken cancellationToken = default)
     {
-        var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
-            _model, _tokenizer, input, _maxSeqLen, numClasses: 2);
+        (int bestClass, float confidence) r;
+        if (_silk is not null)
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_silk, _tokenizer, input, _maxSeqLen, numClasses: 2);
+        else
+            r = ModelInferenceHelper.RunClassifierWithConfidence(_model!, _tokenizer, input, _maxSeqLen, numClasses: 2);
 
         var result = JsonSerializer.Serialize(new
         {
-            score = confidence,
-            verdict = bestClass == 1 ? "GOOD" : "POOR",
-            acceptable = bestClass == 1 && confidence >= 0.8f
+            score = r.confidence,
+            verdict = r.bestClass == 1 ? "GOOD" : "POOR",
+            acceptable = r.bestClass == 1 && r.confidence >= 0.8f
         });
         return ValueTask.FromResult(result);
     }

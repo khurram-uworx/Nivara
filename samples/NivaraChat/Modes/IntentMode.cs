@@ -26,6 +26,7 @@ public static class IntentMode
 
         Console.WriteLine("Loading intent model...");
         var (intentModel, intentTok) = ModeHelpers.LoadIntentModel(ctx.ModelsDir);
+        SilkTextClassifier? intentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(intentModel, 20, 5) : null;
         Console.WriteLine("Intent model loaded.\n");
 
         if (!ctx.UseOllama)
@@ -82,7 +83,7 @@ public static class IntentMode
             AIFunctionFactory.Create(NivaraToolFunctions.ValidateResponse),
         };
 
-        var intentClassifier = new IntentClassifier(intentModel, intentTok);
+        var intentClassifier = new IntentClassifier(intentModel, intentTok, silk: intentSilk);
         Executor<string, string> factualExecutor = vectorStore != null
             ? new FactualExecutor(vectorStore, chatClient)
             : new LlmExecutor(chatClient);

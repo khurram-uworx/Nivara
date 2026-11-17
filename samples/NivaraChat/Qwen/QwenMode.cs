@@ -3,6 +3,7 @@ using Nivara.AI;
 using Nivara.AutoDiff.Nn;
 using Nivara.Samples;
 using Nivara.Silk;
+using NivaraChat.Helpers;
 using NivaraChat.Modes;
 using NivaraChat.Tools;
 using System.Diagnostics;
@@ -105,7 +106,9 @@ public static class QwenMode
             (nivaraSentimentModel, nivaraSentimentTok) = ModeHelpers.LoadSentimentModel(nivaraModelsDir);
             (nivaraEntityModel, nivaraEntityTok) = ModeHelpers.LoadEntityModel(nivaraModelsDir);
             (nivaraValidatorModel, nivaraValidatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
-            NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok);
+            var sentimentSilk = options.UseSilk ? SilkTextClassifier.TryCreate(nivaraSentimentModel, 20, 3) : null;
+            var validatorSilk = options.UseSilk ? SilkTextClassifier.TryCreate(nivaraValidatorModel, 40, 2) : null;
+            NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok, sentimentSilk, validatorSilk);
 
             nivaraTools = NivaraAIFunctions.CreateRegistered(
                 nivaraSentimentModel, nivaraSentimentTok,
@@ -406,7 +409,9 @@ public static class QwenMode
             var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(nivaraModelsDir);
             var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(nivaraModelsDir);
             var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
-            NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok);
+            var sentimentSilk = options.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
+            var validatorSilk = options.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
+            NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok, sentimentSilk, validatorSilk);
 
             var tools = NivaraAIFunctions.CreateRegistered(
                 sentimentModel, sentimentTok,
