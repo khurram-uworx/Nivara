@@ -401,7 +401,7 @@ class Program
             Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
 
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
-            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen only).");
+            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen/smollm).");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
             Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
@@ -543,9 +543,9 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && !isQwen)
+        if (syntheticWeights && !isQwen && !isSmolLM)
         {
-            Console.Error.WriteLine("--synthetic-weights is a 'qwen' option only: no other model has a synthetic-weights path.");
+            Console.Error.WriteLine("--synthetic-weights is a 'qwen'/'smollm' option only: no other model has a synthetic-weights path.");
             return 1;
         }
 
@@ -555,7 +555,7 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && isQwen && mode.Length > 0 && mode != "benchmark")
+        if (syntheticWeights && (isQwen || isSmolLM) && mode.Length > 0 && mode != "benchmark")
         {
             Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
             return 1;
