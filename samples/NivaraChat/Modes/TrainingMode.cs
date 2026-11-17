@@ -13,16 +13,16 @@ public static class TrainingMode
         Directory.CreateDirectory(ctx.ModelsDir);
 
         Console.WriteLine("[1/4] Training sentiment classifier...");
-        SentimentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir);
+        SentimentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir, useSilk: ctx.UseSilk);
 
-        Console.WriteLine("\n[2/4] Training entity extractor...");
+        Console.WriteLine("\n[2/4] Training entity extractor (CPU only)...");
         EntityTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir);
 
         Console.WriteLine("\n[3/4] Training workflow validator...");
-        ValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir);
+        ValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir, useSilk: ctx.UseSilk);
 
         Console.WriteLine("\n[4/4] Training agents validator...");
-        AgentsValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir);
+        AgentsValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir, useSilk: ctx.UseSilk);
 
         Console.WriteLine("\n=== Training complete! ===");
         if (fromCli)
@@ -35,7 +35,7 @@ public static class TrainingMode
     {
         Console.WriteLine("=== NivaraChat Intent Classifier Training ===\n");
         Directory.CreateDirectory(ctx.ModelsDir);
-        IntentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir);
+        IntentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ctx.ModelsDir, useSilk: ctx.UseSilk);
         Console.WriteLine("\n=== Intent training complete! ===");
         if (fromCli)
             Console.WriteLine("Run with --intent to test the intent routing.");

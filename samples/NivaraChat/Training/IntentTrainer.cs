@@ -6,6 +6,7 @@ using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
 using Nivara.Metrics;
 using Nivara.Samples;
+using Nivara.Silk;
 using NivaraChat.Data;
 
 namespace NivaraChat.Training;
@@ -13,7 +14,7 @@ namespace NivaraChat.Training;
 public static class IntentTrainer
 {
     public static (TextClassifierModel<float> model, TextTokenizer tokenizer) Train(
-        int epochs = 20, int batchSize = 32, int numSamples = 1000, string saveDir = "models", int seed = 42)
+        int epochs = 20, int batchSize = 32, int numSamples = 1000, string saveDir = "models", int seed = 42, bool useSilk = false)
     {
         var (texts, labels) = IntentDataGenerator.GenerateIntentData(numSamples, seed);
         var tokenizer = TextTokenizer.FromDocuments(texts, maxVocabSize: 5000);
@@ -30,6 +31,45 @@ public static class IntentTrainer
         {
             var encoded = tokenizer.Encode(trainTexts[i], fixedLength: maxSeqLen);
             Array.Copy(encoded, 0, trainTokens, i * maxSeqLen, maxSeqLen);
+        }
+
+        if (useSilk)
+        {
+            GpuTextLinearClassifier? silk = null;
+            try { silk = new GpuTextLinearClassifier(tokenizer.VocabSize, 32, 64, 5, seed); }
+            catch (InvalidOperationException ex) { Console.WriteLine($"  Silk/OpenCL unavailable ({ex.Message}); using CPU trainer."); }
+            if (silk is not null)
+            {
+                Console.WriteLine("  Training intent classifier on Silk (device forward/backward)...");
+                var silkEpochs = silk.Train(trainTokens, trainLabels, batchSize, maxSeqLen, epochs, 0.001f, seed);
+                foreach (var e in silkEpochs) Console.WriteLine($"    epoch {e.Epoch}: loss={e.Loss:F4} ({e.Elapsed.TotalSeconds:F1}s)");
+
+                var layout = silk.ExportCpuLayout();
+                using var silkModel = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen);
+                silkModel.SetWeights(layout.Embedding, layout.Fc1W, layout.Fc1B, layout.Fc2W, layout.Fc2B);
+
+                var silkPredicted = new int[testLabels.Length];
+                var silkActual = (int[])testLabels.Clone();
+                for (int i = 0; i < testLabels.Length; i++)
+                {
+                    var encoded = tokenizer.Encode(testTexts[i], fixedLength: maxSeqLen);
+                    var preds = silkModel.Predict(encoded);
+                    silkPredicted[i] = preds[0];
+                }
+                var silkPerClass = NivaraMetrics.PerClassMetricsFrame(
+                    NivaraColumn<int>.Create(silkPredicted),
+                    NivaraColumn<int>.Create(silkActual));
+                long silkCorrect = 0;
+                for (int r = 0; r < silkPerClass.RowCount; r++) silkCorrect += silkPerClass.GetColumn<long>("Tp")[r];
+                Console.WriteLine($"  Test accuracy: {(double)silkCorrect / testLabels.Length:P1}");
+
+                Directory.CreateDirectory(saveDir);
+                ModelSerializer.Save(silkModel, Path.Combine(saveDir, "intent_model.json"));
+                tokenizer.Save(Path.Combine(saveDir, "intent_tokenizer.json"));
+                Console.WriteLine($"  Saved to {saveDir}/");
+                silk.Dispose();
+                return (silkModel, tokenizer);
+            }
         }
 
         using var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen);
