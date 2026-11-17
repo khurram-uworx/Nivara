@@ -38,6 +38,28 @@ class Program
         AttentionBias = false,
     };
 
+    /// <summary>Small ModernBERT-shaped config for the Laya synthetic (fabricated-weights) run.</summary>
+    static readonly ModernBertConfig LayaSyntheticConfig = new()
+    {
+        HiddenSize = 128,
+        NumAttentionHeads = 4,
+        NumHiddenLayers = 2,
+        IntermediateSize = 256,
+        VocabSize = 8,
+        MaxPositionEmbeddings = 64,
+        PadTokenId = 3,
+        ClsTokenId = 1,
+        SepTokenId = 2,
+        MaskTokenId = 4,
+    };
+
+    static readonly Laya.AgentConfig LayaSyntheticAgent = new(
+        MaxLen: 64,
+        HeadMaxLen: 32,
+        HeadLayers: 1,
+        Temperature: [1.0, 1.0, 1.0],
+        TemperatureByOptions: new Dictionary<string, double>());
+
     // The CLI surface, in one place. Every guard below and the dispatch switch read these tables, and
     // tests/Nivara.Tests/Inference/InferenceCliArgumentTests.cs pins the (model, mode) pairs: a model
     // whose dispatch gains or loses a path must be updated here, or the gate fails.
@@ -401,7 +423,7 @@ class Program
             Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
 
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
-            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen/smollm).");
+            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen/smollm/laya).");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
             Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
@@ -543,9 +565,9 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && !isQwen && !isSmolLM)
+        if (syntheticWeights && !isQwen && !isSmolLM && !isLaya)
         {
-            Console.Error.WriteLine("--synthetic-weights is a 'qwen'/'smollm' option only: no other model has a synthetic-weights path.");
+            Console.Error.WriteLine("--synthetic-weights is a 'qwen'/'smollm'/'laya' option only: no other model has a synthetic-weights path.");
             return 1;
         }
 
@@ -555,7 +577,7 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && (isQwen || isSmolLM) && mode.Length > 0 && mode != "benchmark")
+        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark")
         {
             Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
             return 1;
@@ -734,6 +756,49 @@ class Program
             if (bf16)
                 return RunSmolLMSyntheticBenchmark<BFloat16, BFloat16>();
             return RunSmolLMSyntheticBenchmark<float, float>();
+        }
+
+        if (isLaya && syntheticWeights)
+        {
+            string syntheticModelDir = Laya.CreateSyntheticModelDir(LayaSyntheticConfig, LayaSyntheticAgent);
+
+            if (useSilk)
+            {
+                if (native)
+                {
+                    var t = Laya.SynthesizeTensors<Half>(LayaSyntheticConfig, LayaSyntheticAgent);
+                    if (mode == "benchmark") return Laya.RunBenchmarkGpu(t, syntheticModelDir, Nivara.AI.GpuSeamFactories.LayaFp16);
+                    return Laya.RunGpu(t, syntheticModelDir);
+                }
+                if (bf16)
+                {
+                    var t = Laya.SynthesizeTensors<System.Numerics.BFloat16>(LayaSyntheticConfig, LayaSyntheticAgent);
+                    var widened = WidenBFloat16Tensors(t);
+                    if (mode == "benchmark") return Laya.RunBenchmarkGpu(widened, syntheticModelDir, Nivara.AI.GpuSeamFactories.Laya);
+                    return Laya.RunGpu(widened, syntheticModelDir, Nivara.AI.GpuSeamFactories.Laya);
+                }
+                var ft = Laya.SynthesizeTensors<float>(LayaSyntheticConfig, LayaSyntheticAgent);
+                if (mode == "benchmark") return Laya.RunBenchmarkGpu(ft, syntheticModelDir, Nivara.AI.GpuSeamFactories.Laya);
+                return Laya.RunGpu(ft, syntheticModelDir, Nivara.AI.GpuSeamFactories.Laya);
+            }
+
+            if (native)
+            {
+                var t = Laya.SynthesizeTensors<Half>(LayaSyntheticConfig, LayaSyntheticAgent);
+                return Laya.Run<float, Half>(t, syntheticModelDir, mode, "native (F16 storage, F32 compute)");
+            }
+            if (bf16)
+            {
+                var t = Laya.SynthesizeTensors<System.Numerics.BFloat16>(LayaSyntheticConfig, LayaSyntheticAgent);
+                return Laya.Run<System.Numerics.BFloat16, System.Numerics.BFloat16>(t, syntheticModelDir, mode, "BFloat16");
+            }
+            if (fp16)
+            {
+                var t = Laya.SynthesizeTensors<Half>(LayaSyntheticConfig, LayaSyntheticAgent);
+                return Laya.Run<Half, Half>(t, syntheticModelDir, mode, "Half");
+            }
+            var f32t = Laya.SynthesizeTensors<float>(LayaSyntheticConfig, LayaSyntheticAgent);
+            return Laya.Run<float, float>(f32t, syntheticModelDir, mode, "F32");
         }
 
         string modelDir = Path.Combine("samples", "data", resolvedType);

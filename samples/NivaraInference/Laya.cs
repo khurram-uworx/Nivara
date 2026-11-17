@@ -969,6 +969,163 @@ public static partial class Laya
         return values;
     }
 
+    /// <summary>Fabricates the exact tensor keys <see cref="ModernBertEncoder{TModel,TWeight}.LoadWeights"/>
+    /// (prefix <c>encoder</c>) and <see cref="LayaDecisionHead{TModel,TWeight}.LoadWeights"/> expect.
+    /// Weights are generated directly in storage dtype <typeparamref name="T"/>, so no widened F32 pool
+    /// is held alongside the storage map (MODEL-LOADING-HONESTY).</summary>
+    public static Dictionary<string, (T[] Data, int[] Shape)> SynthesizeTensors<T>(ModernBertConfig config)
+        where T : struct, IFloatingPointIeee754<T>
+        => SynthesizeTensors<T>(config, 2);
+
+    /// <summary>Overload that takes the agent config (uses <see cref="AgentConfig.HeadLayers"/>).</summary>
+    internal static Dictionary<string, (T[] Data, int[] Shape)> SynthesizeTensors<T>(ModernBertConfig config, AgentConfig agent)
+        where T : struct, IFloatingPointIeee754<T>
+        => SynthesizeTensors<T>(config, agent.HeadLayers);
+
+    public static Dictionary<string, (T[] Data, int[] Shape)> SynthesizeTensors<T>(ModernBertConfig config, int headLayerCount)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var tensors = new Dictionary<string, (T[] Data, int[] Shape)>();
+        int h = config.HiddenSize;
+        int inter = config.IntermediateSize;
+        int vocab = config.VocabSize;
+
+        // Encoder (prefix "encoder").
+        AddSynthetic<T>(tensors, "encoder.embeddings.tok_embeddings.weight", vocab, h);
+        AddSynthetic<T>(tensors, "encoder.embeddings.norm.weight", h);
+        AddSynthetic<T>(tensors, "encoder.final_norm.weight", h);
+
+        for (int i = 0; i < config.NumHiddenLayers; i++)
+        {
+            string lp = $"encoder.layers.{i}";
+            if (i != 0)
+                AddSynthetic<T>(tensors, $"{lp}.attn_norm.weight", h);
+            AddSynthetic<T>(tensors, $"{lp}.attn.Wqkv.weight", 3 * h, h);
+            AddSynthetic<T>(tensors, $"{lp}.attn.Wo.weight", h, h);
+            AddSynthetic<T>(tensors, $"{lp}.mlp.Wi.weight", 2 * inter, h);
+            AddSynthetic<T>(tensors, $"{lp}.mlp.Wo.weight", h, inter);
+            AddSynthetic<T>(tensors, $"{lp}.mlp_norm.weight", h);
+        }
+
+        // Decision head.
+        AddSynthetic<T>(tensors, "type_emb.weight", 3, h);
+
+        for (int i = 0; i < headLayerCount; i++)
+        {
+            string hp = $"head.layers.{i}";
+            AddSynthetic<T>(tensors, $"{hp}.norm1.weight", h);
+            AddSynthetic<T>(tensors, $"{hp}.norm1.bias", h);
+            AddSynthetic<T>(tensors, $"{hp}.norm2.weight", h);
+            AddSynthetic<T>(tensors, $"{hp}.norm2.bias", h);
+
+            AddSynthetic<T>(tensors, $"{hp}.self_attn.in_proj_weight", 3 * h, h);
+            AddSynthetic<T>(tensors, $"{hp}.self_attn.in_proj_bias", 3 * h);
+            AddSynthetic<T>(tensors, $"{hp}.self_attn.out_proj.weight", h, h);
+            AddSynthetic<T>(tensors, $"{hp}.self_attn.out_proj.bias", h);
+
+            int intermediate = 4 * h;
+            AddSynthetic<T>(tensors, $"{hp}.linear1.weight", intermediate, h);
+            AddSynthetic<T>(tensors, $"{hp}.linear1.bias", intermediate);
+            AddSynthetic<T>(tensors, $"{hp}.linear2.weight", h, intermediate);
+            AddSynthetic<T>(tensors, $"{hp}.linear2.bias", h);
+        }
+
+        AddSynthetic<T>(tensors, "scorer.0.weight", h);
+        AddSynthetic<T>(tensors, "scorer.0.bias", h);
+        AddSynthetic<T>(tensors, "scorer.1.weight", h, h);
+        AddSynthetic<T>(tensors, "scorer.1.bias", h);
+        AddSynthetic<T>(tensors, "scorer.3.weight", 1, h);
+        AddSynthetic<T>(tensors, "scorer.3.bias", 1);
+
+        int actHidden = LayaDecisionHead<T, T>.ActHeadHidden;
+        AddSynthetic<T>(tensors, "act_head.0.weight", actHidden, h + LayaHeadOutput.FeatureCount);
+        AddSynthetic<T>(tensors, "act_head.0.bias", actHidden);
+        AddSynthetic<T>(tensors, "act_head.2.weight", 2, actHidden);
+        AddSynthetic<T>(tensors, "act_head.2.bias", 2);
+
+        // Single F32 temperature scalar narrowed to storage dtype T on native (Half); documented.
+        AddSynthetic<T>(tensors, "temperature", 3);
+
+        return tensors;
+    }
+
+    static void AddSynthetic<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string name, params int[] shape)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int count = 1;
+        foreach (var d in shape) count *= d;
+        var data = new T[count];
+        uint state = 0x9E3779B9;
+        for (int i = 0; i < data.Length; i++)
+        {
+            uint x = state;
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            state = x;
+            data[i] = T.CreateChecked((x / (float)uint.MaxValue - 0.5f) * 0.1f);
+        }
+        tensors[name] = (data, shape);
+    }
+
+    /// <summary>Creates a self-contained model directory (config + agent config + minimal tokenizer)
+    /// so synthetic Laya runs need no checkpoint. Returns the directory path.</summary>
+    internal static string CreateSyntheticModelDir(ModernBertConfig config, AgentConfig agent)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nivara-laya-synthetic");
+        Directory.CreateDirectory(dir);
+        Directory.CreateDirectory(Path.Combine(dir, "encoder"));
+        Directory.CreateDirectory(Path.Combine(dir, "tokenizer"));
+
+        File.WriteAllText(Path.Combine(dir, "encoder", "config.json"), SerializeEncoderConfig(config));
+        File.WriteAllText(Path.Combine(dir, "rl_agent_config.json"), SerializeAgentConfig(agent));
+        File.WriteAllText(Path.Combine(dir, "tokenizer", "tokenizer.json"), SyntheticTokenizerJson);
+        return dir;
+    }
+
+    static string SerializeEncoderConfig(ModernBertConfig c)
+    {
+        return "{" +
+            $"\"hidden_size\":{c.HiddenSize}," +
+            $"\"num_attention_heads\":{c.NumAttentionHeads}," +
+            $"\"num_hidden_layers\":{c.NumHiddenLayers}," +
+            $"\"intermediate_size\":{c.IntermediateSize}," +
+            $"\"vocab_size\":{c.VocabSize}," +
+            $"\"max_position_embeddings\":{c.MaxPositionEmbeddings}," +
+            $"\"norm_eps\":{c.NormEps.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}," +
+            $"\"local_attention\":{c.LocalAttention}," +
+            $"\"global_attn_every_n_layers\":{c.GlobalAttnEveryNLayers}," +
+            $"\"hidden_activation\":\"{c.HiddenActivation}\"," +
+            $"\"pad_token_id\":{c.PadTokenId}," +
+            $"\"cls_token_id\":{c.ClsTokenId}," +
+            $"\"sep_token_id\":{c.SepTokenId}," +
+            $"\"mask_token_id\":{c.MaskTokenId}" +
+            "}";
+    }
+
+    static string SerializeAgentConfig(AgentConfig a)
+    {
+        string temps = string.Join(",", a.Temperature.Select(t => t.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+        string byOpts = a.TemperatureByOptions.Count == 0
+            ? "{}"
+            : "{" + string.Join(",", a.TemperatureByOptions.Select(kv => $"\"{kv.Key}\":{kv.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}")) + "}";
+        return "{" +
+            $"\"max_len\":{a.MaxLen}," +
+            $"\"head_max_len\":{a.HeadMaxLen}," +
+            $"\"head_layers\":{a.HeadLayers}," +
+            $"\"temperature\":[{temps}]," +
+            $"\"temperature_by_options\":{byOpts}" +
+            "}";
+    }
+
+    const string SyntheticTokenizerJson =
+        "{\"model\":{\"type\":\"BPE\",\"vocab\":{\"<unk>\":0},\"merges\":[]}," +
+        "\"added_tokens\":[" +
+        "{\"id\":0,\"content\":\"[UNK]\",\"special\":true}," +
+        "{\"id\":1,\"content\":\"[CLS]\",\"special\":true}," +
+        "{\"id\":2,\"content\":\"[SEP]\",\"special\":true}," +
+        "{\"id\":3,\"content\":\"[PAD]\",\"special\":true}," +
+        "{\"id\":4,\"content\":\"[MASK]\",\"special\":true}" +
+        "]}";
+
     static string Truncate(string text, int width)
         => text.Length <= width ? text : string.Concat(text.AsSpan(0, width - 1), "…");
 }

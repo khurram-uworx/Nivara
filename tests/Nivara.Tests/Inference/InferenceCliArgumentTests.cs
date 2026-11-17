@@ -545,7 +545,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SyntheticWeights_OnNonQwenModel_Rejected() =>
-        AssertRejected(Run("minilm", "--synthetic-weights"), "is a 'qwen'/'smollm' option only");
+        AssertRejected(Run("minilm", "--synthetic-weights"), "is a 'qwen'/'smollm'/'laya' option only");
 
     [Test]
     public void SyntheticWeights_OnSmolLMBeyondBenchmarkMode_Rejected() =>
