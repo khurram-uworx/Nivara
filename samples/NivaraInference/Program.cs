@@ -401,7 +401,8 @@ class Program
             Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
 
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
-            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen only)."); Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
+            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen only).");
+            Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
             Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
             Console.WriteLine("  (--teacher-examples / --seed / --force are 'qwen distill' only; any other model or mode rejects them)");
@@ -714,7 +715,7 @@ class Program
         if (isQwen && syntheticWeights)
         {
             if (useSilk)
-                return Qwen.RunSyntheticBenchmarkSilk(plain);
+                return Qwen.RunSyntheticBenchmarkSilk(plain, bf16 || native);
 
             if (native)
                 return Qwen.RunSyntheticBenchmark<float, BFloat16>(plain);
@@ -2937,9 +2938,7 @@ class Program
             Console.WriteLine("=== SmolLM-135M (synthetic weights): KV-cache decode benchmark ===");
             Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
 
-            var tensorsF32 = Qwen.SynthesizeTensors(SmolLMSyntheticConfig);
-            var tensors = tensorsF32.ToDictionary(kv => kv.Key,
-                kv => (Array.ConvertAll(kv.Value.Data, static f => T.CreateChecked(f)), kv.Value.Shape));
+            var tensors = Qwen.SynthesizeTensors<T>(SmolLMSyntheticConfig);
 
             var buildSw = Stopwatch.StartNew();
             var model = LlamaLoader.Load<T, T>(SmolLMSyntheticConfig, tensors);
@@ -2989,9 +2988,7 @@ class Program
             Console.WriteLine("Note: F32 widening is transparent (no-op). Timing differences are noise.");
         Console.WriteLine();
 
-        var tensorsF32 = Qwen.SynthesizeTensors(SmolLMSyntheticConfig);
-        var tensors = tensorsF32.ToDictionary(kv => kv.Key,
-            kv => (Array.ConvertAll(kv.Value.Data, static f => T.CreateChecked(f)), kv.Value.Shape));
+        var tensors = Qwen.SynthesizeTensors<T>(SmolLMSyntheticConfig);
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<T, T>(SmolLMSyntheticConfig, tensors);
