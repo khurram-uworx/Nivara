@@ -401,7 +401,7 @@ class Program
             Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
 
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
-            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen only).");
+            Console.WriteLine("  --synthetic-weights  Run the synthetic (fabricated-weights) decode benchmark without a checkpoint (qwen/smollm).");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
             Console.WriteLine("  --seed N           Distill: init seed, default 42 (same seed reproduces the run)");
@@ -543,9 +543,9 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && !isQwen)
+        if (syntheticWeights && !isQwen && !isSmolLM)
         {
-            Console.Error.WriteLine("--synthetic-weights is a 'qwen' option only: no other model has a synthetic-weights path.");
+            Console.Error.WriteLine("--synthetic-weights is a 'qwen'/'smollm' option only: no other model has a synthetic-weights path.");
             return 1;
         }
 
@@ -555,7 +555,7 @@ class Program
             return 1;
         }
 
-        if (syntheticWeights && isQwen && mode.Length > 0 && mode != "benchmark")
+        if (syntheticWeights && (isQwen || isSmolLM) && mode.Length > 0 && mode != "benchmark")
         {
             Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
             return 1;
@@ -722,6 +722,18 @@ class Program
             if (bf16)
                 return Qwen.RunSyntheticBenchmark<BFloat16, BFloat16>(plain);
             return Qwen.RunSyntheticBenchmark<float, float>(plain);
+        }
+
+        if (isSmolLM && syntheticWeights)
+        {
+            if (useSilk)
+                return RunSmolLMSyntheticBenchmarkSilk(plain, bf16 || native);
+
+            if (native)
+                return RunSmolLMSyntheticBenchmark<float, BFloat16>();
+            if (bf16)
+                return RunSmolLMSyntheticBenchmark<BFloat16, BFloat16>();
+            return RunSmolLMSyntheticBenchmark<float, float>();
         }
 
         string modelDir = Path.Combine("samples", "data", resolvedType);
@@ -2928,20 +2940,26 @@ class Program
     // Synthetic (fabricated-weights) SmolLM benchmark — no checkpoint required.
     // ----------------------------------------------------------------------------------
 
-    static int RunSmolLMSyntheticBenchmark<T>() where T : struct, IFloatingPointIeee754<T>
+    static int RunSmolLMSyntheticBenchmark<TModel, TWeight>()
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
+        bool narrow = typeof(TWeight) == typeof(BFloat16) || typeof(TWeight) == typeof(Half);
         bool priorDisable = NivaraPrimitives.DisableWidenSimd;
         try
         {
-            string precisionName = PrecisionName(typeof(T));
+            string precisionName = (typeof(TModel), typeof(TWeight)) switch
+            {
+                (var m, var w) when m == typeof(float) && w == typeof(BFloat16) => NativeSmolLMPrecision,
+                _ => PrecisionName(typeof(TWeight)),
+            };
             Console.WriteLine("=== SmolLM-135M (synthetic weights): KV-cache decode benchmark ===");
             Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
 
-            var tensors = Qwen.SynthesizeTensors<T>(SmolLMSyntheticConfig);
+            var tensors = Qwen.SynthesizeTensors<TWeight>(SmolLMSyntheticConfig);
 
             var buildSw = Stopwatch.StartNew();
-            var model = LlamaLoader.Load<T, T>(SmolLMSyntheticConfig, tensors);
+            var model = LlamaLoader.Load<TModel, TWeight>(SmolLMSyntheticConfig, tensors);
             buildSw.Stop();
             Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
             Console.WriteLine();
@@ -3039,35 +3057,47 @@ class Program
         return 0;
     }
 
-    static int RunSmolLMSyntheticBenchmarkSilk()
+    static int RunSmolLMSyntheticBenchmarkSilk(bool plain = false, bool bf16 = false)
     {
         Console.WriteLine("=== SmolLM-135M (synthetic weights): KV-cache decode benchmark -- Silk ===");
+        Console.WriteLine($"Precision: {(bf16 ? "BF16 (synthetic)" : "F32 (synthetic)")}");
         var config = SmolLMSyntheticConfig;
-        var tensors = Qwen.SynthesizeTensors(config);
-
         var buildSw = Stopwatch.StartNew();
-        using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
-        buildSw.Stop();
-        Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
-        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
-
-        uint rng = 0x9E3779B9;
-        var promptIds = new int[64];
-        for (int i = 0; i < promptIds.Length; i++)
+        Nivara.Silk.SilkSmolLMSession session;
+        if (bf16)
         {
-            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
-            promptIds[i] = (int)(rng % (uint)config.VocabSize);
+            var tensors = Qwen.SynthesizeTensors<System.Numerics.BFloat16>(config);
+            session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
         }
+        else
+        {
+            var tensors = Qwen.SynthesizeTensors(config);
+            session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        }
+        buildSw.Stop();
+        using (session)
+        {
+            Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+            Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
-        // Warmup.
-        RunSmolLMGenerationSilk(session, promptIds, config, 8);
+            uint rng = 0x9E3779B9;
+            var promptIds = new int[64];
+            for (int i = 0; i < promptIds.Length; i++)
+            {
+                rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+                promptIds[i] = (int)(rng % (uint)config.VocabSize);
+            }
 
-        var sw = Stopwatch.StartNew();
-        var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
-        sw.Stop();
-        Console.WriteLine($"{ids.Generated} tokens in {sw.Elapsed.TotalSeconds:F2}s " +
-                          $"({(ids.Generated > 0 ? sw.ElapsedMilliseconds / ids.Generated : 0)} ms/token)");
-        return 0;
+            // Warmup.
+            RunSmolLMGenerationSilk(session, promptIds, config, 8);
+
+            var sw = Stopwatch.StartNew();
+            var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
+            sw.Stop();
+            Console.WriteLine($"{ids.Generated} tokens in {sw.Elapsed.TotalSeconds:F2}s " +
+                              $"({(ids.Generated > 0 ? sw.ElapsedMilliseconds / ids.Generated : 0)} ms/token)");
+            return 0;
+        }
     }
 
     static Nivara.Silk.SmolLMConfig ToSilkConfig(LlamaConfig config) => new()
