@@ -184,3 +184,22 @@ Produce a documented recommendation (in this file):
 ### GitHub issues log
 
 - (empty — no issues created yet)
+
+## Synthetic weights (checkpoint-free)
+
+`smollm --synthetic-weights` (and `smollm benchmark --synthetic-weights`) fabricates
+SmolLM-135M-shaped random tensors in the storage dtype and runs end-to-end without a
+checkpoint, on CPU (native BF16 storage / F32 compute) and Silk (BF16 device path
+where supported).
+
+- Honors `--precision` (f32 / bf16 / native) and `--silk`; uses
+  `Qwen.SynthesizeTensors<T>` directly in the storage dtype, so no widened F32 pool
+  is held alongside the storage map. The `ab` mode compares the scalar and SIMD
+  widen kernels within one narrow dtype (`smollm --precision bf16 ab`).
+- Silk uses the BF16 device path when `bf16 || native`, F32 otherwise.
+- The synthetic runners (`RunSmolLMSyntheticBenchmark`,
+  `RunSmolLMSyntheticAb`, `RunSmolLMSyntheticBenchmarkSilk`) were dead code until
+  #1254 wired them through the CLI; `--synthetic-weights` is rejected outside the
+  default single-shot run and `benchmark`.
+- Tests: `InferenceCliArgumentTests` pins the CLI scope; bias gating is shared with
+  Qwen via `SynthesizeTensors<T>`.
