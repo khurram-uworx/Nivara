@@ -100,16 +100,6 @@ internal sealed class SilkBatchedChatClient : IChatClient
                 logits = session.ForwardPrefill(window.ToArray());
                 ids = new List<int>(window);
                 position = window.Count;
-
-                if (ids.Count > maxSeqLen)
-                {
-                    int keep = maxSeqLen;
-                    var w = ids.GetRange(ids.Count - keep, keep);
-                    session.ResetCache();
-                    logits = session.ForwardPrefill(w.ToArray());
-                    ids = new List<int>(w);
-                    position = w.Count;
-                }
             }
 
             while (generated < maxNewTokens)
