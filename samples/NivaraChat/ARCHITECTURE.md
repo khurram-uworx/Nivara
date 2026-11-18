@@ -264,7 +264,6 @@ defaults.
 --n-layer <int>         Transformer layers (default: 2)
 --block-size <int>      Context window (default: 64)
 --n-head <int>          Attention heads (default: 4)
---dropout <float>       Dropout probability (default: 0.1)
 --epochs <int>          Training epochs (default: 20)
 --batch-size <int>      Batch size (default: 32)
 --lr <float>            Learning rate (default: 3e-3)

@@ -71,7 +71,6 @@ public static class TransformerMode
                 case "--n-layer": options.NLayer = int.Parse(args[++i]); break;
                 case "--block-size": options.BlockSize = int.Parse(args[++i]); break;
                 case "--n-head": options.NHead = int.Parse(args[++i]); break;
-                case "--dropout": options.Dropout = double.Parse(args[++i]); break;
                 case "--epochs": options.Epochs = int.Parse(args[++i]); break;
                 case "--batch-size": options.BatchSize = int.Parse(args[++i]); break;
                 case "--lr": options.LearningRate = double.Parse(args[++i]); break;
@@ -113,7 +112,7 @@ public static class TransformerMode
         }
 
         using var model = new BatchedTransformer<float>(
-            tokenizer.VocabSize, options.NEmbd, options.NLayer, options.NHead, options.BlockSize, dropout: options.Dropout);
+            tokenizer.VocabSize, options.NEmbd, options.NLayer, options.NHead, options.BlockSize);
 
         if (!string.IsNullOrWhiteSpace(options.LoadPath))
         {
@@ -125,7 +124,7 @@ public static class TransformerMode
             int totalParams = 0;
             foreach (var p in model.GetParameters().Values)
                 totalParams += p.Length;
-            Console.WriteLine($"model: {options.NLayer}L x {options.NEmbd}D, {options.NHead} heads, block={options.BlockSize}, dropout={options.Dropout}");
+            Console.WriteLine($"model: {options.NLayer}L x {options.NEmbd}D, {options.NHead} heads, block={options.BlockSize}");
             Console.WriteLine($"params: {totalParams}");
 
             Train(model, tokenizer, docs!, options);
@@ -294,7 +293,6 @@ Options:
   --n-layer <int>         Number of transformer layers (default: 2)
   --block-size <int>      Context window / max sequence length (default: 64)
   --n-head <int>          Number of attention heads (default: 4)
-  --dropout <float>       Dropout probability (default: 0.1)
   --epochs <int>          Training epochs (default: 20)
   --batch-size <int>      Batch size (default: 32)
   --lr <float>            Learning rate (default: 3e-3)
@@ -327,7 +325,6 @@ Options:
         public double LearningRate = 3e-3;
         public double Beta1 = 0.9;
         public double Beta2 = 0.95;
-        public double Dropout = 0.1;
         public int RngSeed = 42;
         public int MaxVocabSize = 8000;
         public int MaxNewTokens = 96;
