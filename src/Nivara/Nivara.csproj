@@ -7,9 +7,9 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara</PackageId>
-    <PackageVersion>1.5.1</PackageVersion>
+    <PackageVersion>1.5.2</PackageVersion>
     <Description>High-performance columnar DataFrame library for .NET</Description>
-    <PackageReleaseNotes>v1.5.1: Resource-management and OpenBLAS improvements — removed the internal abandoned-resource tracking subsystem in favour of explicit Dispose/Release, source-disposal failures now propagate from QueryFrame/ParquetLazySource, OpenBLAS registration honours an explicit path and surfaces real failure diagnostics, and added differentiable Laya choice logits plus the --rag-adaptive-eval loop. See CHANGELOG.md for the full list.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.2: Deferred Linear/Embedding weight init on model load paths, ONNX export Phase 1 supported-subset verification, frame-level dataset operations, public TryGetReadOnlyTensorSpan, Silk native F16/BF16 paths and Laya head training, plus gradient-tracking fixes for LayerNorm/RMSNorm/BatchNorm on constant inputs. See CHANGELOG.md for the full list.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
     <!-- NU5104: this stable package transitively depends on prerelease packages

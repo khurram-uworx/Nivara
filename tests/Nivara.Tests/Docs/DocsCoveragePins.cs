@@ -24,7 +24,7 @@ internal static class DocsCoveragePins
     /// Documents in scope: the <c>*.md</c> files at the repository root plus the reader-facing
     /// documents under <c>docs/</c>.
     /// </summary>
-    internal const int ExpectedDocumentCount = 60;
+    internal const int ExpectedDocumentCount = 61;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -53,6 +53,8 @@ internal static class DocsCoveragePins
     /// `DocumentPattern`.
     /// 2026-11-17 (#1293): +1 = 507. New "Verification" section in `docs/ONNX.md` references one test
     /// file path in backticks discovered by `DocumentPattern`.
+    /// 2026-11-18 (v1.5.2 review doc): +9 = 516. `docs/RELEASE1.5.2-REVIEW.md` references nine
+    /// backticked `.md` paths in its doc-refresh confirmation list.
     /// </remarks>
-    internal const int ExpectedDocumentReferenceCount = 507;
+    internal const int ExpectedDocumentReferenceCount = 516;
 }

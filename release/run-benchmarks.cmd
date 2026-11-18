@@ -6,13 +6,13 @@ REM release folder's artefacts unless you delete it first (see RELEASING.md).
 
 setlocal
 if "%~1"=="" (
-  echo Usage: %~nx0 ^<version^>  (e.g. 1.5.1) 1>&2
+  echo Usage: %~nx0 ^<version^>  ^(e.g. 1.5.1^) 1>&2
   exit /b 2
 )
 set "VERSION=%~1"
 set "ROOT=%~dp0.."
 cd /d "%ROOT%"
-set "OUT=release\%VERSION%"
+set "OUT=release\v%VERSION%"
 if not exist "%OUT%" mkdir "%OUT%"
 
 echo === Core perf harness ===
