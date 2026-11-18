@@ -314,6 +314,8 @@ directly. The remaining gaps were closed by this work:
 
 ### Not doing (stretch / future)
 
+- Rank-3 (batched) MatMul in core (ADR-003, backlog #118) — attention uses
+  `BatchedMultiHeadAttention`; shared-weight projections flatten batch×seq.
 - Batched KV cache — generation uses a simple autoregressive loop without caching.
 - Top-p/top-k sampling, beam search — temperature + random sampling only.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
@@ -330,4 +332,75 @@ directly. The remaining gaps were closed by this work:
 - Load requires matching architecture flags; the strict shape validation in
   `LoadStateDict` fails loudly on a mismatch, and the matching
   `<model>.tokenizer.json` is auto-restored.
+
+## Decisions
+
+Compressed log migrated from `samples/SHAKESPEARE.md` (kept there for now; this
+section is the durable, code-anchored summary). Each entry: decision + where to
+rebuild context. Full rationale/measurements live in the source file or the
+cited code.
+
+- **D-001 — No rank-3 (batched) MatMul in core now.** Capability already exists
+  via reshape + shared-weight `Linear<T>`; attention is the only true batched-B
+  case and is fused. Principle = ADR-003
+  (`docs/adr/003-batch-fused-ops-not-rank-n-primitives.md`). Backlog candidate
+  (rank-3 `BatchedMatMul`) — not yet filed as an issue (intended #118 never
+  created); #119 closed (rank-2 MatMul backward transients now pooled). Hint:
+  `src/Nivara/AutoDiff/ReverseGradOperations.cs::MatMul` (rank-2 backward
+  closure allocates `bTArr`/`aTArr`).
+- **D-002 — Batched attention is a separate op**, not an overload:
+  `ReverseGradOperations.BatchedMultiHeadAttention<T>(query,key,value,nHead,attnScale,mask?)`
+  on rank-3 `[B,L,D]` + optional `[B,qLen,kvLen]` mask. `Parallel.For` over B
+  only when `ShouldParallelizeBatch` (B≥4 and B·work≥2²¹); all buffers pooled.
+  Single-sequence `MultiHeadAttention` stays bit-identical. Hint:
+  `src/Nivara/AutoDiff/ReverseGradOperations.cs::BatchedMultiHeadAttention`,
+  `AttentionKernels`.
+- **D-003 — Parity fixture RNG.** Batched cases appended at end of `run()`,
+  use dedicated `attn_rng` (seed 303) drawn after existing attention cases so
+  seed-42 fixtures stay bit-identical. Tests:
+  `tests/Nivara.Tests/NivaraTorch/BatchedAttentionTests.cs` (3 cases).
+- **D-004 — Perf gate (no further kernel changes this cycle).** Idea A defaults
+  `B=16,L=128,D=64,H=4`, causal, Release, 16 cores, medians 3+×12:
+
+  | Scenario | per-seq loop | batched op | gain |
+  |---|---|---|---|
+  | fwd time/op | ~20.5 ms | ~7.5 ms | ~2.7× |
+  | fwd B/op | ~2.14 MB | ~0.53 MB | ~4.0× |
+  | fwd+bwd time/op | ~72 ms | ~23 ms | ~3.1× |
+  | fwd+bwd gen0/op | ~1.1 | ~0.33 | ~3.3× |
+
+  `ShouldParallelizeBatch` held; gen0/op is the reliable signal (worker-thread
+  allocs aren't attributed to the calling thread). #119 closed (rank-2 MatMul
+  backward transients now pooled in `finally`). Hint:
+  `ReverseGradOperations.cs::DivideScalar`.
+- **D-005 — CLI deltas from NEXT.md spec.** Dropped `--train`/`--interactive`;
+  default = train-when-not-loaded then generate `--samples` + DI demo;
+  `--load` skips training; `--seq-len` → `--block-size`; added
+  `--max-new-tokens`,`--vocab-size`,`--data`,`--no-di-demo`,`--beta1`,`--beta2`.
+- **D-006 — `IChatClient` does not own the model.** `BatchedChatClient` is a
+  view; `Dispose()` is a no-op; ownership with caller/DI. `Module<T>.Dispose()`
+  idempotent. Hint: `Transformer/BatchedChatClient.cs`.
+- **D-007 — Word-vocab LM-head cost accepted.** ~1M short dot-calls/batch over
+  ~8k vocab (~730 tok/s at D=32,B=8); smoke/CI use `--vocab-size 1200`.
+  Hint: `TensorsHelper.MultiplyCore`.
+- **D-008 — Tokenizer persistence.** `<model>.tokenizer.json` beside model JSON;
+  `--save` writes, `--load` auto-restores; arch flags must match
+  (`LoadStateDict` strict shapes). Hint: `Transformer/TinyShakespeare.cs`,
+  `ModelSerializer`.
+- **D-009 — DI via `AddChatClient(factory)`.** No generic
+  `AddChatClient<T>()` in M.E.AI 10.8.3; use factory overload with model +
+  tokenizer singletons. Hint: `Transformer/TransformerMode.cs`.
+- **D-010 — Attention softmax stays inside the fused kernels.** Attention
+  softmax is applied over the last dim inside MHA/`BatchedMultiHeadAttention`
+  (`AttentionKernels.SoftmaxRows`); attention code does not need a public
+  `Softmax(dim)`. (Note: a general `Softmax<T>(a, dim=-1)` now exists in
+  `ReverseGradOperations`/`Activation` for other callers.) Hint:
+  `src/Nivara/AutoDiff/ReverseGradOperations.cs::Slice`.
+- **D-011/D-013 — Retired `docs/SHAKESPEARE.md`/`docs/SHAKESPEARE2.md`**;
+  durable content here or ADR-003. (Historical; no code impact.)
+- **D-012 — Consolidated `NivaraChatClient` into `--tinyshakespeare` mode**
+  under `Transformer/` namespace; menu option 4. Hint:
+  `Modes/TransformerMode.cs`.
+- **Resolved open questions:** Route B chosen; batched attention shipped before
+  the sample.
 

@@ -59,8 +59,6 @@ static partial class DocReferenceExtractor
         ("docs/plan/ARROW-ROADMAP.md", "docs/IDEA.md"),
         ("docs/plan/POLARS-REVIEW.md", "docs/IDEA.md"),
         ("docs/plan/POLARS-ROADMAP.md", "docs/IDEA.md"),
-        ("samples/SHAKESPEARE.md", "docs/SHAKESPEARE.md"),
-        ("samples/SHAKESPEARE.md", "docs/SHAKESPEARE2.md"),
     ];
 
     /// <summary>Every unresolvable reference in one document, both reference forms.</summary>
