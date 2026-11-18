@@ -270,6 +270,7 @@ defaults.
 --beta1/--beta2 <float> Adam betas (default: 0.9/0.95)
 --vocab-size <int>      Max word-vocab size (default: 8000)
 --temperature <float>   Sampling temperature (default: 0.8)
+--top-p <float>         Nucleus (top-p) cutoff for sampling (default: 1.0)
 --max-new-tokens <int>  Max tokens per reply (default: 96)
 --samples <int>         Generated samples (default: 5)
 --seed <int>            RNG seed (default: 42)

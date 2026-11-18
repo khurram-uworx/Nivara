@@ -79,6 +79,7 @@ public static class TransformerMode
                 case "--vocab-size": options.MaxVocabSize = int.Parse(args[++i]); break;
                 case "--seed": options.RngSeed = int.Parse(args[++i]); break;
                 case "--temperature": options.Temperature = float.Parse(args[++i]); break;
+                case "--top-p": options.TopP = float.Parse(args[++i]); break;
                 case "--max-new-tokens": options.MaxNewTokens = int.Parse(args[++i]); break;
                 case "--samples": options.SampleCount = int.Parse(args[++i]); break;
                 case "--data": options.DataPath = args[++i]; break;
@@ -249,7 +250,7 @@ public static class TransformerMode
         string prompt, TransformerOptions options)
     {
         Console.WriteLine($"\n--- samples (prompt: {prompt}) ---");
-        using var client = new BatchedChatClient(model, tokenizer, options.Temperature, options.MaxNewTokens);
+        using var client = new BatchedChatClient(model, tokenizer, options.Temperature, options.MaxNewTokens, options.TopP);
 
         for (int i = 0; i < options.SampleCount; i++)
         {
@@ -270,7 +271,8 @@ public static class TransformerMode
             sp.GetRequiredService<BatchedTransformer<float>>(),
             sp.GetRequiredService<TextTokenizer>(),
             options.Temperature,
-            options.MaxNewTokens));
+            options.MaxNewTokens,
+            options.TopP));
 
         using var provider = services.BuildServiceProvider();
         using var client = provider.GetRequiredService<IChatClient>();
@@ -300,6 +302,7 @@ Options:
   --beta2 <float>         Adam beta2 (default: 0.95)
   --vocab-size <int>      Max word-vocab size (default: 8000)
   --temperature <float>   Sampling temperature (default: 0.8)
+  --top-p <float>         Nucleus (top-p) cutoff for sampling (default: 1.0)
   --max-new-tokens <int>  Max tokens per generated reply (default: 96)
   --samples <int>         Number of generated samples (default: 5)
   --seed <int>            RNG seed (default: 42)
@@ -329,6 +332,7 @@ Options:
         public int MaxVocabSize = 8000;
         public int MaxNewTokens = 96;
         public float Temperature = 0.8f;
+        public float TopP = 1.0f;
         public int SampleCount = 5;
         public string? SavePath = null;
         public string? LoadPath = null;
