@@ -646,7 +646,7 @@ Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensors
 
 ## Limitations
 
-- **Word-level tokenization** — no subword (BPE) support. Out-of-vocabulary words map to UNK. Sufficient for synthetic data.
+- **Word-level tokenization for `--tinyshakespeare`** — the transformer uses a word-level `TextTokenizer` (~8k vocab, tied LM head) rather than subword/BPE. This is a deliberate decision (D-014, issue #1311): it keeps the sample close to the classic TinyShakespeare educational framing so reviewers recognize the familiar concept, and avoids breaking saved `*.tokenizer.json` files / golden fixtures. Out-of-vocabulary words map to UNK; the tied LM head over ~8k vocab dominates cost (smoke runs use `--vocab-size 1200`; Silk absorbs it in #1313). Migration to `Gpt2BpeTokenizer` (Option B) is deferred as a separate, model-breaking follow-up. Other modes (SmolLM, Qwen) use `Gpt2BpeTokenizer`.
 - **Synthetic training data** — entity extraction and validation use template-based synthetic data. Real applications would use annotated corpora.
 - **No LLM streaming** — the workflow runs non-streaming. The LLM response is collected in full before validation.
 - **Sequential agents** — the agents pipeline runs sequentially (Sentiment → Entity → Validator). Fan-out parallelism is only available in `--workflow` mode.
