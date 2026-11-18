@@ -279,7 +279,7 @@ defaults.
 --save <path>           Save trained model to JSON (+ <path>.tokenizer.json)
 --load <path>           Load model from JSON (pass the same architecture flags used at save time)
 --no-di-demo            Skip the DI + IChatClient demo
---kv-cache              Use the cached generation path (default: off)
+--kv-cache / --no-kv-cache  Use the KV cache (default: on)
 --silk                 Use the Silk/OpenCL backend for generation (default: off)
 --help, -h              Show this help
 ```
