@@ -279,6 +279,8 @@ defaults.
 --save <path>           Save trained model to JSON (+ <path>.tokenizer.json)
 --load <path>           Load model from JSON (pass the same architecture flags used at save time)
 --no-di-demo            Skip the DI + IChatClient demo
+--kv-cache              Use the cached generation path (default: off)
+--silk                 Use the Silk/OpenCL backend for generation (default: off)
 --help, -h              Show this help
 ```
 
@@ -316,8 +318,8 @@ directly. The remaining gaps were closed by this work:
 
 - Rank-3 (batched) MatMul in core (ADR-003, backlog #118) — attention uses
   `BatchedMultiHeadAttention`; shared-weight projections flatten batch×seq.
-- Batched KV cache — generation uses a simple autoregressive loop without caching.
-- Top-p/top-k sampling, beam search — temperature + random sampling only.
+- Batched KV cache — now available via `--kv-cache` (`TransformerKVCache` + `BatchedTransformer.ForwardCached`); the non-cached path retains its growing context window.
+- Top-p sampling — now available via `--top-p` (`TokenSampling`); top-k and beam search remain out of scope.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
   Nivara's scope.
 - BPE/subword tokenization for `--tinyshakespeare` — **deferred** (decision
@@ -422,6 +424,21 @@ cited code.
   golden fixtures and ship its own issues. Hint: `Transformer/TinyShakespeare.cs`,
   `Transformer/TransformerMode.cs`, `src/Nivara/AutoDiff/Nn/TextTokenizer.cs`,
   `src/Nivara.Extensions/AI/Gpt2BpeTokenizer.cs`.
+- **D-015 — KV cache for TinyShakespeare generation.** `--kv-cache` switches
+  `BatchedChatClient`/`RunSilk` to the cached path (`TransformerKVCache` +
+  `BatchedTransformer.ForwardCached` with position offsets via
+  `PositionEncoding`), with a growing-window fallback when the context exceeds
+  `--block-size`. Hint: `Transformer/TransformerKVCache.cs`,
+  `Transformer/BatchedTransformer.cs::ForwardCached`,
+  `Transformer/TransformerMode.cs::RunSilk`.
+- **D-016 — Silk/OpenCL backend for TinyShakespeare.** `--silk` exports weights
+  via `BatchedTransformer.ToSilkWeights()` and runs generation through
+  `SilkTinyShakespeareSession` (prefill + cached decode), F32-only. Hint:
+  `Transformer/BatchedTransformer.cs::ToSilkWeights`,
+  `src/Nivara.Extensions/Silk/SilkTinyShakespeareSession.cs`.
+- **D-017 — Top-p (nucleus) sampling.** `--top-p` (default 1.0) is consumed by
+  `TokenSampling.Sample` in both the CPU and Silk generation paths. Hint:
+  `Shared/TokenSampling.cs`, `Transformer/BatchedChatClient.cs`.
 - **Resolved open questions:** Route B chosen; batched attention shipped before
   the sample. (Tokenizer strategy now resolved by D-014.)
 

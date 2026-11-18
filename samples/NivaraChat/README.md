@@ -151,7 +151,7 @@ dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of F
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
 | `--docs-dir <path>` | `docs/` | Documents directory for `--rag`, `--rag-agent`, `--rag-multiview` and `--rag-learn` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
-| `--silk` | — | Use Silk OpenCL backend for `--rag`/`--rag-agent`/`--rag-multiview`/`--rag-learn` (MiniLM embeddings plus, with #915 follow-up, the fusion training loop and Adam step via `SilkFusionTrainer`) and for `--smollm` / `--qwen` chat/plain/tools generation |
+| `--silk` | — | Use Silk OpenCL backend for `--rag`/`--rag-agent`/`--rag-multiview`/`--rag-learn` (MiniLM embeddings plus, with #915 follow-up, the fusion training loop and Adam step via `SilkFusionTrainer`), for `--smollm` / `--qwen` chat/plain/tools generation, and for `--tinyshakespeare` generation (Silk path via `SilkTinyShakespeareSession`) |
 | `--acl-group <name>` | — | ACL filter for `--rag`/`--rag-agent`/`--rag-multiview` (e.g. `adr`, `docs`, `plan`) |
 | `--roundtrip` | — | Show embedding round-trip details for `--rag` |
 | `--store <frame\|inmemory>` | `frame` | Retrieval backend for `--rag`/`--rag-agent` |
@@ -518,8 +518,9 @@ Tested examples:
 | `--tinyshakespeare --vocab-size 1200 --prompt "ROMEO:"` | 2L × 96D, 4 heads, vocab 1200 | Smoke run, ~3x faster; generates Shakespeare-style continuations for the prompt |
 | `--tinyshakespeare --data <small.txt> --vocab-size 800 --n-embd 32 --n-layer 1 --block-size 32 --n-head 2 --epochs 1 --samples 2 --prompt "ROMEO:"` | 1L × 32D, 2 heads, vocab 592 (31584 params) | Trained a 249-line slice in 1.3s (1350 tok/s, loss 6.17) and replied via `IChatClient` |
 | `--tinyshakespeare --load models/ts.json --prompt "KING LEAR:" --no-di-demo` | Matches saved model | Skips training, loads weights + tokenizer, generates directly |
+| `--tinyshakespeare --silk --kv-cache --top-p 0.9 --prompt "ROMEO:"` | 2L × 96D, 4 heads, vocab 8000 (defaults) | Silk/OpenCL generation with KV cache and nucleus (top-p) sampling |
 
-Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`.
+Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`, `SilkTinyShakespeareSession`, `TransformerKVCache`, `TokenSampling` (top-p).
 
 ### SmolLM (`--smollm`)
 Serves the **pretrained SmolLM-135M-Instruct causal LM** through the standard `Microsoft.Extensions.AI.IChatClient` interface — no training, no LLM server, no Python runtime. The model runs in-process on Nivara's zero-dependency tensor engine: `LlamaForCausalLM<T>` (autoregressive) + the GPT-2 byte-level BPE tokenizer. The conversation is rendered into SmolLM's Hermes/ChatML format (`<|im_start|>role\n...<|im_end|>`) and the reply is **token-streamed** via `GetStreamingResponseAsync`. Two sub-modes:

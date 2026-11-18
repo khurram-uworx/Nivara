@@ -424,6 +424,7 @@ Options:
                           the matching <path>.tokenizer.json is loaded too)
   --no-di-demo            Skip the DI + IChatClient demo at the end
   --kv-cache              Use the cached generation path (default: off)
+  --silk                  Use the Silk/OpenCL backend for generation (default: off)
   --help, -h              Show this help
 """);
     }
