@@ -16,6 +16,21 @@ All notable changes to Nivara are documented here. Released versions are publish
   the module was constructed this way. `ModernBertEncoder`, `LayaDecisionHead`, and
   `LlamaForCausalLM` (and their layer/attention submodules) load this way internally.
 - Follow-up #1237 tracks the same treatment for `MiniLMDistilled` / `DistilBert`.
+- Frame-level dataset operations on `NivaraFrame`/`QueryFrame`: `Split`, `Shuffle`, `Batch`, and
+  `StratifiedSplit` (with subset frames materialised via a full permutation slice), plus
+  `FrameDatasetTests`.
+- Public `TryGetReadOnlyTensorSpan` on `IColumnStorage<T>` and `NivaraSeries<T>` (and the
+  `NivaraColumn` surface) exposing a zero-copy read-only tensor view when the column is
+  contiguous and null-free, with parity/edge-case coverage.
+- Native-by-default model loading for SmolLM, Qwen, Laya, and ModernBERT: each model loads
+  at exactly one dtype (its checkpoint dtype), with zero-hop narrow reads, resident-weight
+  byte reporting, and `--synthetic-weights` for reproducible testing. `MiniLM`/`DistilBERT`
+  gained the same deferred-init treatment.
+- Silk/OpenCL native paths: Qwen and SmolLM route their native/default path to BF16 on Silk;
+  Laya routes to F16; Laya decision-head training runs on Silk (incl. BF16 narrow lane);
+  NivaraChat gained Silk training and inference paths.
+- Qwen parity fixtures (torch-generated) with native checkpoint and CLI argument coverage;
+  `NivaraChat` updated to native-only load surface.
 
 ### Changed
 
@@ -40,6 +55,11 @@ All notable changes to Nivara are documented here. Released versions are publish
 - Laya `LoadWeights` no longer allocates the ~1.57 GB of short-lived ctor garbage
   (measured via `GC.GetAllocatedBytesForCurrentThread`); the allocation gate in
   `LayaNativeCheckpointTests` pins it below 16 MB.
+- Removed the internal `Nivara.Data` mirror (type-name collision gate); callers use
+  `Nivara.Dataset`. Stratified/split subset frames now go through a full permutation slice.
+- Qwen/Silk native and BF16 default routing; SmolLM native-by-default loading; ModernBERT
+  `TWeight`-generic mixed matmuls and fused-block views in `StateDictLoader`.
+- `InferenceCliArgumentTests` coverage extended for the new modes and their guards.
 
 ## [1.5.1] - 2026-11-15
 

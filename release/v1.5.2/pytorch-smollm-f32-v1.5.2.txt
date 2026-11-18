@@ -1,0 +1,11 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/272 [00:00<?, ?it/s]Loading weights:  96%|#########5| 260/272 [00:00<00:00, 2578.09it/s]Loading weights: 100%|##########| 272/272 [00:00<00:00, 2630.51it/s]
+Parameters: 134,515,008   weights (~float32): 513.1 MB
+Prompt: 'The capital of France is'
+Input token ids (5): [504, 3575, 282, 4649, 314]
+Generated 32 tokens in 892 ms (35.87 tok/s) [PyTorch float32 CPU]
+Generated token ids (32): [7042, 28, 260, 3995, 2240, 281, 4649, 284, 260, 2642, 284, 2536, 14157, 282, 260, 1798, 30, 198, 198, 828, 21681, 1903, 198, 198, 26, 4649, 314, 253, 1798, 351, 253, 3384]
+Decoded: 'The capital of France is Paris, the largest city in France and the cultural and economic hub of the country.\n\n** Geography **\n\n* France is a country with a diverse'
+Saved token-id stream (5 prompt + 32 generated) to E:\khurram-uworx\Nivara\samples\data\compare_smollm_py_f32.bin
+Saved final-position logits (49152 floats) to E:\khurram-uworx\Nivara\samples\data\compare_smollm_logits_py_f32.bin
+Logits argmax: 3384  top-5: [3384, 986, 2719, 2116, 1035]

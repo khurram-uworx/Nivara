@@ -1,0 +1,17 @@
+=== HuggingFace MiniLM Inference (same weights as C#) ===
+
+Loading tokenizer and model from E:\khurram-uworx\Nivara\samples\data\minilm...
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|##########| 103/103 [00:00<?, ?it/s]
+  Parameters: 22,713,216
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 10.0 ms
+  Min:     10 ms
+  Max:     12 ms
+
+Output embedding dim: 384
+L2 norm: 1.000000

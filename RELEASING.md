@@ -154,11 +154,17 @@ kill them. The required procedure is:
 **Canonical runner:** `release/run-benchmarks.cmd <version>` is committed and
 contains the full command set (core harness, NivaraIncident, NivaraInference
 CPU/Silk/BLAS, PyTorch references, NivaraFineTuning) writing to
-`release/<version>/`. Run it from the repo root in the background with no
-timeout, e.g. `cmd /c release\run-benchmarks.cmd 1.5.1` launched as a
+`release/v<version>/` (the runner adds the `v` prefix; pass the bare version,
+e.g. `1.5.2`). Run it from the repo root in the background with no
+timeout, e.g. `cmd /c release\run-benchmarks.cmd 1.5.2` launched as a
 backgrounded command. It is the preferred entry point for both humans and
 agents; keep it updated when benchmark commands change. See `release/README.md`
 for full usage and the table-regeneration helper workflow.
+
+Note: `.cmd`/`.bat` files are forced to CRLF by `.gitattributes` (`*.cmd text eol=crlf`)
+because `cmd.exe` does not parse LF-only batch files; do not override that rule. Keep
+any `echo`/`if` text inside parenthesised blocks free of unescaped `)` (escape as `^)`),
+or the block terminates early.
 
 The core harness JSON file should be committed as canonical evidence under
 `release/vX.Y.Z/nivara-perf-vX.Y.Z.json` (see "Benchmark artefact policy"

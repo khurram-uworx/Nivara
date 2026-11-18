@@ -1,0 +1,13 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/272 [00:00<?, ?it/s]Loading weights: 100%|##########| 272/272 [00:00<00:00, 27983.29it/s]
+Parameters: 134,515,008   weights (~bfloat16): 256.6 MB
+Prompt: 'The capital of France is'
+Input token ids (5): [504, 3575, 282, 4649, 314]
+Generated 32 tokens in 751 ms (42.63 tok/s) [PyTorch bfloat16 CPU]
+Generated token ids (32): [7042, 28, 260, 3995, 2240, 281, 4649, 284, 260, 2642, 284, 2536, 14157, 282, 260, 1798, 30, 198, 198, 828, 21681, 1903, 198, 198, 26, 378, 1798, 314, 32273, 411, 260, 10834]
+Decoded: 'The capital of France is Paris, the largest city in France and the cultural and economic hub of the country.\n\n** Geography **\n\n* The country is bounded by the Mediterranean'
+Saved token-id stream (5 prompt + 32 generated) to E:\khurram-uworx\Nivara\samples\data\compare_smollm_py_bf16.bin
+Saved token-id stream (5 prompt + 32 generated) to E:\khurram-uworx\Nivara\samples\data\compare_smollm_py.bin
+Saved final-position logits (49152 floats) to E:\khurram-uworx\Nivara\samples\data\compare_smollm_logits_py_bf16.bin
+Saved final-position logits (49152 floats) to E:\khurram-uworx\Nivara\samples\data\compare_smollm_logits_py.bin
+Logits argmax: 10834  top-5: [10834, 4429, 8464, 2321, 1268]

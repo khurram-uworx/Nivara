@@ -268,13 +268,14 @@ and must be recalibrated against measured Silk timings before use.
 
 | Analysis | Prev (ms) | Current (ms) | Ratio (Current/Prev) | Δ% | Notes |
 |----------|-----------|--------------|----------------------|----|-------|
-| Degradation ordering | 11900 | 9291.3 | 0.78x | -21.9% | Filter → Sort → RollingMean → Shift |
-| Deployment correlation | 18200 | 14456.5 | 0.79x | -20.6% | Filter → Sort → manual join |
-| Saturation ordering | 100 | 91.8 | 0.92x | -8.2% | Filter → Sort → RollingMax (fixed: instances now span timeline) |
-| Regional partitioning | 24400 | 14725.1 | 0.60x | -39.7% | Filter → Collect → typed LINQ GroupBy → rank |
-| Grouped aggregation (manual) | 8600 | 7049.2 | 0.82x | -18.0% | Collect → dictionary loop |
+| Degradation ordering | 9291.3 | 14839.8 | 1.60x | +59.7% | Filter → Sort → RollingMean → Shift |
+| Deployment correlation | 14456.5 | 26141.0 | 1.81x | +80.8% | Filter → Sort → manual join |
+| Saturation ordering | 91.8 | 145.3 | 1.58x | +58.3% | Filter → Sort → RollingMax (fixed: instances now span timeline) |
+| Regional partitioning | 14725.1 | 26300.2 | 1.79x | +78.6% | Filter → Collect → typed LINQ GroupBy → rank |
+| Grouped aggregation (manual) | 7049.2 | 10772.7 | 1.53x | +52.8% | Collect → dictionary loop |
+| Typed LINQ grouped aggregation | — | 20415.9 | — | — | `NivaraQuery<T>.GroupBy().Select()`; no prior same-machine reading |
 
-*Recorded 2026-11-07 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0, 6,666,665 rows, scenario A (quick single pass, `--benchmark --iterations 1`). Prev baseline recorded 2026-08-21 on the same machine.*
+*Recorded 2026-11-18 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0, Windows 11, 6,666,665 rows, scenario A (quick single pass, `--benchmark --iterations 1`). Prev baseline recorded 2026-11-07 on the same machine. Run-to-run variance is ~±10% per `tests/Nivara.PerformanceTests/README.md`; the +53–81% shifts are larger than that floor, but no code change was isolated in this capture.*
 
 
 ## Performance: Nivara vs Polars
