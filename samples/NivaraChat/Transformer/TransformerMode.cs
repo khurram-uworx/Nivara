@@ -86,10 +86,12 @@ public static class TransformerMode
                 case "--samples": options.SampleCount = int.Parse(args[++i]); break;
                 case "--data": options.DataPath = args[++i]; break;
                 case "--prompt": options.Prompt = args[++i]; break;
+                case "--text": options.Text = args[++i]; break;
                 case "--save": options.SavePath = args[++i]; break;
                 case "--load": options.LoadPath = args[++i]; break;
                 case "--no-di-demo": options.ShowDiDemo = false; break;
                 case "--kv-cache": options.UseKvCache = true; break;
+                case "--no-kv-cache": options.UseKvCache = false; break;
                 case "--silk": options.UseSilk = true; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
@@ -146,7 +148,7 @@ public static class TransformerMode
 
         if (options.UseSilk)
         {
-            RunSilk(model, tokenizer, options);
+            RunSilkChat(model, tokenizer, options);
         }
         else
         {
@@ -355,6 +357,102 @@ public static class TransformerMode
         Console.WriteLine($"\n[generated {generated} tokens in {sw.ElapsedMilliseconds} ms]");
     }
 
+    static void RunSilkChat(BatchedTransformer<float> model, TextTokenizer tokenizer, TransformerOptions options)
+    {
+        var config = new TinyShakespeareConfig
+        {
+            HiddenSize = options.NEmbd,
+            NumHiddenLayers = options.NLayer,
+            NumAttentionHeads = options.NHead,
+            VocabSize = tokenizer.VocabSize,
+            MaxSeqLen = options.BlockSize,
+        };
+
+        var weights = model.ToSilkWeights();
+        using var session = SilkTinyShakespeareSession.Open(config, weights);
+        Console.WriteLine($"  Device:    {session.DeviceName}");
+
+        using var client = new SilkBatchedChatClient(
+            session,
+            tokenizer,
+            model.MaxSeqLen,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.TopP,
+            seed: options.RngSeed,
+            useKvCache: options.UseKvCache);
+
+        if (!string.IsNullOrEmpty(options.Text))
+        {
+            RunSingleTurn(client, options.Text!);
+            return;
+        }
+
+        string prompt = options.Prompt ?? "ROMEO:";
+
+        Console.WriteLine($"\n--- samples (prompt: {prompt}) ---");
+        for (int i = 0; i < options.SampleCount; i++)
+        {
+            var response = client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)])
+                .GetAwaiter().GetResult();
+            Console.WriteLine($"\nsample {i}: {response.Text?.Trim()}");
+        }
+
+        if (options.ShowDiDemo)
+        {
+            RunDiDemoSilk(session, tokenizer, model.MaxSeqLen, prompt, options);
+        }
+    }
+
+    static void RunSingleTurn(IChatClient client, string text)
+    {
+        Console.WriteLine($"\nYou: {text}");
+        Console.Write("TinyShakespeare: ");
+        var sw = Stopwatch.StartNew();
+        int tokens = 0;
+        var enumerator = client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, text)]).GetAsyncEnumerator();
+        try
+        {
+            while (enumerator.MoveNextAsync().GetAwaiter().GetResult())
+            {
+                var update = enumerator.Current;
+                if (update.Text is not null)
+                {
+                    Console.Write(update.Text);
+                    tokens++;
+                }
+            }
+        }
+        finally
+        {
+            enumerator.DisposeAsync().GetAwaiter().GetResult();
+        }
+        sw.Stop();
+        Console.WriteLine($"\n\n[streamed {tokens} tokens in {sw.ElapsedMilliseconds} ms]\n");
+    }
+
+    static void RunDiDemoSilk(SilkTinyShakespeareSession session, TextTokenizer tokenizer, int maxSeqLen, string prompt, TransformerOptions options)
+    {
+        Console.WriteLine("\n--- DI demo (IChatClient via Microsoft.Extensions.AI) ---");
+        var services = new ServiceCollection();
+        services.AddChatClient(sp => new SilkBatchedChatClient(
+            session,
+            tokenizer,
+            maxSeqLen,
+            options.MaxNewTokens,
+            options.Temperature,
+            options.TopP,
+            options.RngSeed,
+            options.UseKvCache));
+
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IChatClient>();
+
+        var response = client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)])
+            .GetAwaiter().GetResult();
+        Console.WriteLine($"reply: {response.Text?.Trim()}");
+    }
+
     static void RunSamples(BatchedTransformer<float> model, TextTokenizer tokenizer,
         string prompt, TransformerOptions options)
     {
@@ -424,6 +522,7 @@ Options:
                           the matching <path>.tokenizer.json is loaded too)
   --no-di-demo            Skip the DI + IChatClient demo at the end
   --kv-cache              Use the cached generation path (default: off)
+  --no-kv-cache           Disable the KV cache (re-project full window)
   --silk                  Use the Silk/OpenCL backend for generation (default: off)
   --help, -h              Show this help
 """);
@@ -450,6 +549,7 @@ Options:
         public string? LoadPath = null;
         public string? DataPath = null;
         public string? Prompt = null;
+        public string? Text = null;
         public bool ShowDiDemo = true;
         public bool UseKvCache = false;
         public bool UseSilk = false;
