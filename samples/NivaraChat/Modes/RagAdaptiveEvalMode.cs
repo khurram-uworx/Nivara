@@ -104,9 +104,10 @@ public static class RagAdaptiveEvalMode
                 var silkFeatures = engine.ExtractFeatures("laya-parity", sampleChunk);
                 if (cpuFeatures.Values.Length == silkFeatures.Values.Length && cpuFeatures.Values.Length > 0)
                 {
-                    for (int i = 0; i < cpuFeatures.Values.Length; i++)
-                        layaMaxAbs = Math.Max(layaMaxAbs, Math.Abs(cpuFeatures.Values[i] - silkFeatures.Values[i]));
-                    layaWithin = layaMaxAbs <= AdaptiveSilkParity.Tolerance;
+                    var report = AdaptiveSilkParity.CompareLaya(
+                        cpuFeatures.Values, silkFeatures.Values);
+                    layaMaxAbs = report.MaxAbsoluteDifference;
+                    layaWithin = report.WithinTolerance;
                     layaAvailable = true;
                 }
             }

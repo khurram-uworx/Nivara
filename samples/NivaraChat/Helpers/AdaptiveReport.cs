@@ -70,7 +70,21 @@ public sealed record AdaptiveReportSilk(
     bool CpuFromCache, bool SilkFromCache, bool Available,
     double LayaMaxAbsoluteDifference = 0d,
     bool LayaWithinTolerance = true,
-    bool LayaAvailable = false);
+    bool LayaAvailable = false)
+{
+    /// <summary>Optional explicit statement of which components were compared.</summary>
+    public string? ComponentsCompared { get; init; }
+
+    public string ComparedComponents =>
+        ComponentsCompared ?? (Available ? (LayaAvailable ? "embeddings, Laya" : "embeddings") : "none");
+
+    public string Components => ComparedComponents;
+    public string Compared => ComparedComponents;
+    public bool EmbeddingsCompared => Available;
+    public bool LayaCompared => LayaAvailable;
+    public bool ComparedEmbeddings => Available;
+    public bool ComparedLaya => LayaAvailable;
+}
 
 public sealed record AdaptiveReportPersistence(
     string Path, bool ExistedBefore, int Saves, long BytesWritten, long FinalSize, bool Verified, bool Disabled = false);
@@ -194,6 +208,7 @@ public static class AdaptiveReport
         c.AppendLine();
         c.AppendLine($"- Backend used for embeddings: {input.Silk.Backend}");
         c.AppendLine($"- Available: {(input.Silk.Available ? "yes" : "no")}");
+        c.AppendLine($"- Components compared: {input.Silk.ComparedComponents}");
         if (!input.Silk.Available)
             c.AppendLine("- Embedding parity: not run (pass --silk to enable).");
         else
@@ -210,7 +225,7 @@ public static class AdaptiveReport
             c.AppendLine("- Laya parity: not run (pass --silk to enable, or OpenCL unavailable).");
         else
             c.AppendLine($"- Laya encoder parity max |cpu - silk|: {input.Silk.LayaMaxAbsoluteDifference.ToString("0.0000000", inv)} (within tolerance: {input.Silk.LayaWithinTolerance})");
-        c.AppendLine("- Scope: MiniLM embedding generation only. ModernBERT feature extraction, decisions and head training are CPU in both runs. Hand-written Silk weight steps are a follow-up.");
+        c.AppendLine("- Scope note: embedding parity uses the 1e-5 tolerance; ModernBERT feature extraction parity is reported under Laya when available. Decisions and head training remain CPU in both runs.");
         c.AppendLine();
         c.AppendLine("## Persistence");
         c.AppendLine();
@@ -302,7 +317,8 @@ public static class AdaptiveReport
                 silkFromCache = input.Silk.SilkFromCache,
                 layaAvailable = input.Silk.LayaAvailable,
                 layaMaxAbs = input.Silk.LayaMaxAbsoluteDifference,
-                layaWithinTolerance = input.Silk.LayaWithinTolerance
+                layaWithinTolerance = input.Silk.LayaWithinTolerance,
+                componentsCompared = input.Silk.ComparedComponents
             },
             persistence = new
             {

@@ -60,4 +60,97 @@ public static class AdaptiveSilkParity
 
         return new SilkParityReport(worst, cpu.RowCount, mismatched, worst <= tolerance);
     }
+
+    /// <summary>
+    /// Compares two flat Laya feature/score vectors element by element, in the same
+    /// max-abs style as <see cref="Compare(NivaraFrame, NivaraFrame, IReadOnlyList{string}, double)"/>.
+    /// </summary>
+    public static SilkParityReport CompareLaya(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport CompareLayaScores(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport CompareLayaFeatures(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport CompareScores(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport CompareFeatures(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport CompareHidden(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport CompareDecisionHead(
+        ReadOnlySpan<float> cpu,
+        ReadOnlySpan<float> silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    /// <summary>Overload accepting arrays for convenience.</summary>
+    public static SilkParityReport Compare(
+        float[] cpu,
+        float[] silk,
+        double tolerance = Tolerance)
+        => CompareFloats(cpu, silk, tolerance);
+
+    public static SilkParityReport Compare(
+        ReadOnlySpan<double> cpu,
+        ReadOnlySpan<double> silk,
+        double tolerance = Tolerance)
+        => CompareDoubles(cpu, silk, tolerance);
+
+    private static SilkParityReport CompareFloats(ReadOnlySpan<float> cpu, ReadOnlySpan<float> silk, double tolerance)
+    {
+        if (cpu.Length != silk.Length)
+            throw new ArgumentException(
+                $"Vector lengths differ: {cpu.Length} vs {silk.Length}.", nameof(silk));
+
+        var worst = 0d;
+        var mismatched = 0;
+        for (var i = 0; i < cpu.Length; i++)
+        {
+            var diff = Math.Abs(cpu[i] - silk[i]);
+            if (diff > worst) worst = diff;
+            if (diff > tolerance) mismatched++;
+        }
+        return new SilkParityReport(worst, cpu.Length, mismatched, worst <= tolerance);
+    }
+
+    private static SilkParityReport CompareDoubles(ReadOnlySpan<double> cpu, ReadOnlySpan<double> silk, double tolerance)
+    {
+        if (cpu.Length != silk.Length)
+            throw new ArgumentException(
+                $"Vector lengths differ: {cpu.Length} vs {silk.Length}.", nameof(silk));
+
+        var worst = 0d;
+        var mismatched = 0;
+        for (var i = 0; i < cpu.Length; i++)
+        {
+            var diff = Math.Abs(cpu[i] - silk[i]);
+            if (diff > worst) worst = diff;
+            if (diff > tolerance) mismatched++;
+        }
+        return new SilkParityReport(worst, cpu.Length, mismatched, worst <= tolerance);
+    }
 }
