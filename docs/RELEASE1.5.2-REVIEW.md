@@ -74,8 +74,9 @@ Benchmarks were launched with explicit human approval via the (now-fixed) canoni
 runner `release/run-benchmarks.cmd 1.5.2` in the background with no timeout, writing
 to `release/v1.5.2/` (renamed from the runner's `release/1.5.2/` output). Artefacts
 expected: core perf harness (`nivara-perf-v1.5.2.json`), NivaraIncident, NivaraInference
-CPU/Silk/BLAS plus PyTorch references, and NivaraFineTuning. README table regen
-(Prev/Current shift) to be completed from these captures before tagging.
+CPU/Silk/BLAS plus PyTorch references, and NivaraFineTuning. The core harness results table
+was regenerated from the captured JSON (Prev/Current shift, header restored, `Δ%` corrected);
+the sample README tables will be refreshed from the remaining captures before tagging.
 
 ### 7. CI / local verification during prep
 
@@ -93,6 +94,15 @@ CPU/Silk/BLAS plus PyTorch references, and NivaraFineTuning. README table regen
   required a post-run folder rename; fixed in the runner for next time.
 - Background benchmark runs are long; the canonical runner remains the preferred entry
   point.
+- The canonical `regen_perf_table.py` copy (three identical copies under `samples/*/Python/`)
+  has two defects: it drops the `| Scenario | Prev | … |` header and separator on regen,
+  and it computes `Δ%` against the *old* Prev instead of the shifted Prev, so the column
+  does not match the Prev/Current pair. The core harness table for v1.5.2 was regenerated
+  with a one-off corrected routine (header restored, `Δ% = (Current − Prev)/Prev`), and the
+  three regen scripts should be fixed before the next release. Troubleshooting the core
+  harness JSON also showed three new scenarios (`AutoDiff RMSNormModule fwd+bwd`,
+  `Qwen decode block`, `Qwen decode fwd`) that had never been added as table rows; they
+  are now present with `Prev = —`.
 
 ---
 
