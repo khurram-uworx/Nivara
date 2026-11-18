@@ -31,14 +31,28 @@ public static class PositionEncoding
 
     /// <summary>
     /// Builds a [B, seqLen, embedDim] encoding by tiling the cached [1, seqLen, embedDim]
-    /// table across the batch dimension (the encoding is position-only).
+    /// table across the batch dimension (the encoding is position-only), starting at position 0.
     /// </summary>
     public static ReverseGradTensor<T> Build<T>(int batch, int seqLen, int embedDim)
         where T : struct, IFloatingPointIeee754<T>
+        => Build<T>(batch, 0, seqLen, embedDim);
+
+    /// <summary>
+    /// Builds a [B, seqLen, embedDim] encoding for absolute positions
+    /// <c>startPosition..startPosition+seqLen-1</c>, tiled across the batch dimension.
+    /// </summary>
+    public static ReverseGradTensor<T> Build<T>(int batch, int startPosition, int seqLen, int embedDim)
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (batch <= 0) throw new ArgumentOutOfRangeException(nameof(batch));
+        if (seqLen <= 0) throw new ArgumentOutOfRangeException(nameof(seqLen));
+        if (embedDim <= 0) throw new ArgumentOutOfRangeException(nameof(embedDim));
+        if (startPosition < 0) throw new ArgumentOutOfRangeException(nameof(startPosition));
 
-        var data = GetData<T>(seqLen, embedDim);
+        var data = startPosition == 0
+            ? GetData<T>(seqLen, embedDim)
+            : GetOffsetData<T>(startPosition, seqLen, embedDim);
+
         var tiled = new T[batch * seqLen * embedDim];
         for (int b = 0; b < batch; b++)
             Array.Copy(data, 0, tiled, b * seqLen * embedDim, seqLen * embedDim);
@@ -47,6 +61,25 @@ public static class PositionEncoding
         var tensor = new ReverseGradTensor<T>(column, requiresGrad: false);
         tensor.Reshape(batch, seqLen, embedDim);
         return tensor;
+    }
+
+    static T[] GetOffsetData<T>(int startPosition, int seqLen, int embedDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var data = new T[seqLen * embedDim];
+        for (int pos = 0; pos < seqLen; pos++)
+        {
+            int absolute = startPosition + pos;
+            for (int i = 0; i < embedDim; i++)
+            {
+                double exponent = 2.0 * (i / 2) / embedDim;
+                double angle = absolute / Math.Pow(10000.0, exponent);
+                data[pos * embedDim + i] = i % 2 == 0
+                    ? T.CreateChecked(Math.Sin(angle))
+                    : T.CreateChecked(Math.Cos(angle));
+            }
+        }
+        return data;
     }
 
     static T[] GetData<T>(int seqLen, int embedDim) where T : struct, IFloatingPointIeee754<T>
