@@ -114,4 +114,34 @@ public class SilkRetrievalTrainerTests
         foreach (var epoch in report.History)
             Assert.That(double.IsFinite(epoch.TrainLoss), Is.True);
     }
+
+    [Test]
+    public void Global_TrainsPairwise_WithoutFallback()
+    {
+        using var device = TryDevice();
+        if (device is null) Assert.Ignore("No OpenCL GPU available; skipping Silk retrieval verification.");
+
+        var query = MakeQuery();
+        using var silk = SilkRetrievalTrainer.CreateGlobal(0.05f, 0.01f, query.RowCount);
+        var report = silk.Train([query], [], new TrainingOptions(Epochs: 2, LearningRate: 0.05f, Loss: LossKind.Pairwise), topK: 2);
+
+        Assert.That(report.History.Count, Is.EqualTo(2));
+        foreach (var epoch in report.History)
+            Assert.That(double.IsFinite(epoch.TrainLoss), Is.True);
+    }
+
+    [Test]
+    public void GatedStats_TrainsPairwise_WithoutFallback()
+    {
+        using var device = TryDevice();
+        if (device is null) Assert.Ignore("No OpenCL GPU available; skipping Silk retrieval verification.");
+
+        var query = MakeQuery();
+        using var silk = SilkRetrievalTrainer.CreateForStats(0.05f, 0.01f, query.RowCount);
+        var report = silk.Train([query], [], new TrainingOptions(Epochs: 2, LearningRate: 0.05f, Loss: LossKind.Pairwise), topK: 2);
+
+        Assert.That(report.History.Count, Is.EqualTo(2));
+        foreach (var epoch in report.History)
+            Assert.That(double.IsFinite(epoch.TrainLoss), Is.True);
+    }
 }
