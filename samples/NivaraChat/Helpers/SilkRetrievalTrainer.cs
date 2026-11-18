@@ -250,7 +250,8 @@ internal sealed class SilkRetrievalTrainer : IDisposable
             var lossCount = 0;
             foreach (var q in shuffled)
             {
-                var f = ForwardAndGradient(q, options.LearningRate, options.WeightDecay, out var trainLoss);
+                var hasLoss = ForwardAndGradient(q, options.LearningRate, options.WeightDecay, options.Loss, out var trainLoss);
+                if (!hasLoss) continue;
                 lossSum += trainLoss;
                 lossCount++;
                 steps++;
@@ -323,7 +324,7 @@ internal sealed class SilkRetrievalTrainer : IDisposable
         }
     }
 
-    double ForwardAndGradient(TrainingQuery query, float lr, float weightDecay, out double trainLoss)
+    bool ForwardAndGradient(TrainingQuery query, float lr, float weightDecay, LossKind loss, out double trainLoss)
     {
         var c = query.RowCount;
         runtime.Upload(Sbuf, query.Scores.AsSpan());
@@ -334,7 +335,8 @@ internal sealed class SilkRetrievalTrainer : IDisposable
         if (!hasGate)
         {
             var gradTheta = new[] { 0f, 0f, 0f, 0f };
-            ForwardAndGradientGlobal(query, c, gradTheta, out trainLoss);
+            if (!ForwardAndGradientGlobal(query, c, gradTheta, loss, out trainLoss))
+                return false;
             ApplyGlobalUpdate(lr, weightDecay, gradTheta, trainLoss);
         }
         else
@@ -344,13 +346,14 @@ internal sealed class SilkRetrievalTrainer : IDisposable
             var x = GateFeatures(gate, features, query);
             var gradW = new float[gateWeight.Length];
             var gradB = new float[gateBias.Length];
-            ForwardAndGradientGated(query, c, x, gradW, gradB, out trainLoss);
+            if (!ForwardAndGradientGated(query, c, x, gradW, gradB, loss, out trainLoss))
+                return false;
             ApplyGateUpdate(lr, weightDecay, gradW, gradB, trainLoss);
         }
-        return trainLoss;
+        return true;
     }
 
-    void ForwardAndGradientGlobal(TrainingQuery query, int c, float[] gradTheta, out double trainLoss)
+    bool ForwardAndGradientGlobal(TrainingQuery query, int c, float[] gradTheta, LossKind loss, out double trainLoss)
     {
         var w = MaskedFusion.Weights(theta.AsSpan());
         runtime.Upload(Wbuf, w.AsSpan());
@@ -365,11 +368,45 @@ internal sealed class SilkRetrievalTrainer : IDisposable
         var f = runtime.Download(Fbuf, c);
         var d = runtime.Download(Dbuf, c);
 
-        var target = query.LossTarget;
         var g = new float[c];
-        var softmaxF = MaskedFusion.Weights(f.AsSpan());
-        for (var i = 0; i < c; i++) g[i] = softmaxF[i] - target[i];
-        trainLoss = ListwiseLoss(f, target);
+        if (loss == LossKind.Pairwise)
+        {
+            var pairs = new List<(int Better, int Worse)>();
+            for (var better = 0; better < query.RowCount; better++)
+                for (var worse = 0; worse < query.RowCount; worse++)
+                    if (query.Candidates[better].Grade > query.Candidates[worse].Grade)
+                        pairs.Add((better, worse));
+
+            if (pairs.Count == 0)
+            {
+                trainLoss = double.NaN;
+                return false;
+            }
+
+            var pCount = pairs.Count;
+            var lossSum = 0d;
+            foreach (var (better, worse) in pairs)
+            {
+                var delta = f[better] - f[worse];
+                var s = 1f / (1f + MathF.Exp(-delta));
+                g[better] += (s - 1f) / pCount;
+                g[worse] += (1f - s) / pCount;
+
+                var diff = f[worse] - f[better];
+                float sp;
+                if (diff > 0f) sp = diff + MathF.Log(1f + MathF.Exp(-diff));
+                else sp = MathF.Log(1f + MathF.Exp(diff));
+                lossSum += sp;
+            }
+            trainLoss = lossSum / pCount;
+        }
+        else
+        {
+            var target = query.LossTarget;
+            var softmaxF = MaskedFusion.Weights(f.AsSpan());
+            for (var i = 0; i < c; i++) g[i] = softmaxF[i] - target[i];
+            trainLoss = ListwiseLoss(f, target);
+        }
 
         runtime.Upload(Gbuf, g.AsSpan());
         runtime.SetBuffer("fusion_wgrad", 0, Sbuf);
@@ -392,9 +429,10 @@ internal sealed class SilkRetrievalTrainer : IDisposable
         var dot = 0f;
         for (var i = 0; i < dW.Length; i++) dot += w[i] * dW[i];
         for (var i = 0; i < gradTheta.Length; i++) gradTheta[i] = w[i] * (dW[i] - dot);
+        return true;
     }
 
-    void ForwardAndGradientGated(TrainingQuery query, int c, float[] x, float[] gradW, float[] gradB, out double trainLoss)
+    bool ForwardAndGradientGated(TrainingQuery query, int c, float[] x, float[] gradW, float[] gradB, LossKind loss, out double trainLoss)
     {
         var thetaHost = gateBias; // placeholder shell; still need gate weight transform
         // Use the gate's raw bias as the fusion weight initializer for the scalar path.
@@ -426,11 +464,45 @@ internal sealed class SilkRetrievalTrainer : IDisposable
         var d = runtime.Download(Dbuf, c);
         for (var i = 0; i < c; i++) if (d[i] == 0f) throw new DivideByZeroException($"Fusion denominator zero at row {i}.");
 
-        var target = query.LossTarget;
         var g = new float[c];
-        var softmaxF = MaskedFusion.Weights(f.AsSpan());
-        for (var i = 0; i < c; i++) g[i] = softmaxF[i] - target[i];
-        trainLoss = ListwiseLoss(f, target);
+        if (loss == LossKind.Pairwise)
+        {
+            var pairs = new List<(int Better, int Worse)>();
+            for (var better = 0; better < query.RowCount; better++)
+                for (var worse = 0; worse < query.RowCount; worse++)
+                    if (query.Candidates[better].Grade > query.Candidates[worse].Grade)
+                        pairs.Add((better, worse));
+
+            if (pairs.Count == 0)
+            {
+                trainLoss = double.NaN;
+                return false;
+            }
+
+            var pCount = pairs.Count;
+            var lossSum = 0d;
+            foreach (var (better, worse) in pairs)
+            {
+                var delta = f[better] - f[worse];
+                var s = 1f / (1f + MathF.Exp(-delta));
+                g[better] += (s - 1f) / pCount;
+                g[worse] += (1f - s) / pCount;
+
+                var diff = f[worse] - f[better];
+                float sp;
+                if (diff > 0f) sp = diff + MathF.Log(1f + MathF.Exp(-diff));
+                else sp = MathF.Log(1f + MathF.Exp(diff));
+                lossSum += sp;
+            }
+            trainLoss = lossSum / pCount;
+        }
+        else
+        {
+            var target = query.LossTarget;
+            var softmaxF = MaskedFusion.Weights(f.AsSpan());
+            for (var i = 0; i < c; i++) g[i] = softmaxF[i] - target[i];
+            trainLoss = ListwiseLoss(f, target);
+        }
 
         runtime.Upload(Gbuf, g.AsSpan());
         runtime.SetBuffer("fusion_wgrad", 0, Sbuf);
@@ -453,6 +525,7 @@ internal sealed class SilkRetrievalTrainer : IDisposable
             gradB[k] += dlGate[k];
             for (var j = 0; j < features; j++) gradW[k * features + j] += dlGate[k] * x[j];
         }
+        return true;
     }
 
     void ApplyGlobalUpdate(float lr, float weightDecay, float[] gradTheta, double trainLoss)

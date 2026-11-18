@@ -114,4 +114,58 @@ public class SilkRetrievalTrainerTests
         foreach (var epoch in report.History)
             Assert.That(double.IsFinite(epoch.TrainLoss), Is.True);
     }
+
+    [Test]
+    public void Global_TrainsPairwise_WithoutFallback()
+    {
+        using var device = TryDevice();
+        if (device is null) Assert.Ignore("No OpenCL GPU available; skipping Silk retrieval verification.");
+
+        var query = MakeQuery();
+        using var silk = SilkRetrievalTrainer.CreateGlobal(0.05f, 0.01f, query.RowCount);
+        var report = silk.Train([query], [], new TrainingOptions(Epochs: 2, LearningRate: 0.05f, Loss: LossKind.Pairwise), topK: 2);
+
+        Assert.That(report.History.Count, Is.EqualTo(2));
+        foreach (var epoch in report.History)
+            Assert.That(double.IsFinite(epoch.TrainLoss), Is.True);
+    }
+
+    [Test]
+    public void GatedStats_TrainsPairwise_WithoutFallback()
+    {
+        using var device = TryDevice();
+        if (device is null) Assert.Ignore("No OpenCL GPU available; skipping Silk retrieval verification.");
+
+        var query = MakeQuery();
+        using var silk = SilkRetrievalTrainer.CreateForStats(0.05f, 0.01f, query.RowCount);
+        var report = silk.Train([query], [], new TrainingOptions(Epochs: 2, LearningRate: 0.05f, Loss: LossKind.Pairwise), topK: 2);
+
+        Assert.That(report.History.Count, Is.EqualTo(2));
+        foreach (var epoch in report.History)
+            Assert.That(double.IsFinite(epoch.TrainLoss), Is.True);
+    }
+
+    [Test]
+    public void Global_Pairwise_ParityWithCpu()
+    {
+        using var device = TryDevice();
+        if (device is null) Assert.Ignore("No OpenCL GPU available; skipping Silk retrieval verification.");
+
+        var query = MakeQuery();
+        var options = new TrainingOptions(Epochs: 1, LearningRate: 0.05f, Loss: LossKind.Pairwise);
+
+        var cpu = new FusionModel();
+        var cpuReport = RetrievalTrainer.Train(cpu, [query], [], options, topK: 2);
+
+        using var silk = SilkRetrievalTrainer.CreateGlobal(0.05f, 0.01f, query.RowCount);
+        var silkReport = silk.Train([query], [], options, topK: 2);
+
+        Assert.That(silkReport.History.Count, Is.EqualTo(1));
+        Assert.That(silkReport.History[0].TrainLoss, Is.EqualTo(cpuReport.History[0].TrainLoss).Within(1e-4));
+
+        var cpuWeights = cpu.Weights;
+        var silkWeights = silk.Weights;
+        for (var i = 0; i < cpuWeights.Length; i++)
+            Assert.That(silkWeights[i], Is.EqualTo(cpuWeights[i]).Within(1e-4f));
+    }
 }

@@ -928,8 +928,8 @@ is requested, reusing the existing kernels rather than a new model runner:
 - **Gate** combines a CPU feature vector (8 stats features or the 384-dim MiniLM embedding) with
   a hand-written GEMM and reuses the same fusion path.
 - **Parity** is the mode's printed `Init parity: max |learned − fixed|` (target ~1e-7) and the
-  held-out comparison; `--loss pairwise` deliberately falls back to the CPU `FusionModel` because
-  the Silk trainer is listwise-only.
+  held-out comparison; both `--loss listwise` and `--loss pairwise` run fully on the device via
+  `SilkRetrievalTrainer` (pairwise accumulates grade-ordered pair gradients).
 
 ## 13d. Wiring coverage (user-facing entry points)
 
@@ -941,7 +941,7 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
   - `--rag* --silk`, `--rag-multiview --silk` — RAG ingestion/search embeddings
     (already wired via `MiniLMEmbedder.Create`).
   - `--rag-learn --silk` — differentiable retrieval fusion training via
-    `SilkRetrievalTrainer` (listwise loss; pairwise falls back to CPU).
+    `SilkRetrievalTrainer` (listwise and pairwise loss, both on device).
   - `--smollm --silk` (and `--smollm --precision bf16 --silk`) — SmolLM chat/plain
     generation on `SilkSmolLMChatClient`.
   - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.

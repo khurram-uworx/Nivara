@@ -94,7 +94,7 @@ public static class RagLearnMode
         double parity;
         TrainingReport fusionReport;
         var trainingBackend = "CPU";
-        if (ctx.UseSilk && options.Loss == LossKind.Listwise)
+        if (ctx.UseSilk)
         {
             try
             {
@@ -103,7 +103,7 @@ public static class RagLearnMode
                 parity = InitialParity(fusion, test, topK);
                 fusionReport = silkGlobal.Train(train, validation, options, topK);
                 trainingBackend = $"Silk/OpenCL ({silkGlobal.DeviceName})";
-                Console.WriteLine($"  Fusion training: Silk/OpenCL ({silkGlobal.DeviceName}), listwise per-query");
+                Console.WriteLine($"  Fusion training: Silk/OpenCL ({silkGlobal.DeviceName}), {options.Loss.ToString().ToLowerInvariant()} per-query");
             }
             catch (Exception ex)
             {
@@ -117,13 +117,11 @@ public static class RagLearnMode
         }
         else
         {
-            if (ctx.UseSilk && options.Loss != LossKind.Listwise)
-                Console.WriteLine("  (pairwise loss trains on CPU; the Silk fusion trainer is listwise-only)");
             var cpuFusion = new FusionModel();
             fusion = cpuFusion;
             parity = InitialParity(fusion, test, topK);
             fusionReport = RetrievalTrainer.Train(cpuFusion, train, validation, options, topK);
-            trainingBackend = ctx.UseSilk ? "CPU (pairwise loss on Silk deferred)" : "CPU";
+            trainingBackend = "CPU";
         }
 
 
@@ -139,7 +137,7 @@ public static class RagLearnMode
         }
         else
         {
-            if (ctx.UseSilk && options.Loss == LossKind.Listwise)
+            if (ctx.UseSilk)
             {
                 try
                 {
