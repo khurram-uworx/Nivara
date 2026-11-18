@@ -431,9 +431,9 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
     /// Runs the reverse chain over the activations the last <see cref="Forward"/> left resident and
     /// leaves every parameter gradient in its device buffer. <paramref name="dLogits"/> is the
     /// already batch-averaged <c>[batch, numClasses]</c> softmax-cross-entropy gradient, so no pass
-    /// here scales by the batch size. Exposed internally for the gradient-parity tests.
+    /// here scales by the batch size.
     /// </summary>
-    internal void Backward(int batch, int seqLen, ReadOnlySpan<float> dLogitsSpan)
+    public void Backward(int batch, int seqLen, ReadOnlySpan<float> dLogitsSpan)
     {
         ThrowIfDisposed();
         if (batch <= 0 || batch > maxBatch)
@@ -616,8 +616,8 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
     }
 
     /// <summary>One AdamW step over every parameter, with the caller's weight decay and the shared
-    /// step count's bias correction. Internal for the parity tests.</summary>
-    internal void AdamUpdateAll(float learningRate, float weightDecay)
+    /// step count's bias correction.</summary>
+    public void AdamUpdateAll(float learningRate, float weightDecay)
     {
         ThrowIfDisposed();
         adamStep++;
@@ -643,7 +643,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
 
     /// <summary>Downloads every parameter gradient in the checkpoint's own key and shape, matching
     /// what <see cref="ExportCheckpoint"/> produces for the weights.</summary>
-    internal Dictionary<string, (float[] Data, int[] Shape)> ExportGradients() => weights.ExportGradients();
+    public Dictionary<string, (float[] Data, int[] Shape)> ExportGradients() => weights.ExportGradients();
 
     /// <summary>
     /// Materializes the trained weights into the checkpoint layout
@@ -769,7 +769,7 @@ public sealed partial class SilkDistilBertTrainer : IDisposable
         => SilkLauncher.LayerNormBackward(runtime, d, x, gamma.Handle, dx, dLnA, dLnB, rows, hiddenDim, eps);
 
     /// <summary>Runs the backward chain assuming <c>dLogits</c> is already populated on the device.</summary>
-    internal void Backward(int batch, int seqLen)
+    public void Backward(int batch, int seqLen)
     {
         BackwardChain(batch, seqLen);
     }
