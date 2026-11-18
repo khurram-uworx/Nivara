@@ -26,7 +26,13 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
 
     public int MaxSeqLen => maxSeqLen;
     public int VocabSize => vocabSize;
+    public int NumLayers => blocks.Length;
+    public int NEmbd => nEmbd;
     public Embedding<T> TokenEmbedding => tokenEmb;
+
+    public TransformerKVCache<T>? KVCache { get; private set; }
+    public TransformerKVCache<T>? Cache => KVCache;
+    public TransformerKVCache<T>? LastKVCache => KVCache;
 
     public BatchedTransformer(
         int vocabSize,
@@ -86,6 +92,116 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
 
         var wteT = ReverseGradOperations.Transpose(tokenEmb.Weight!.Tensor); // [D, V]
         return ReverseGradOperations.MatMul(x, wteT);               // [B*L, V]
+    }
+
+    public ReverseGradTensor<T> ForwardPrefill(ReverseGradTensor<T> tokens)
+        => ForwardPrefill(tokens, null);
+
+    public ReverseGradTensor<T> ForwardPrefill(ReverseGradTensor<T> tokens, TransformerKVCache<T>? cache)
+    {
+        if (tokens == null) throw new ArgumentNullException(nameof(tokens));
+
+        var workingTokens = tokens;
+        if (tokens.Rank == 1)
+        {
+            workingTokens = new ReverseGradTensor<T>(tokens.Data, tokens.RequiresGrad);
+            workingTokens.Reshape(1, tokens.Shape[0]);
+        }
+        if (workingTokens.Rank != 2)
+            throw new ArgumentException($"Expected [B, L] input, got {workingTokens.Rank}D.");
+        int batch = workingTokens.Shape[0];
+        int length = workingTokens.Shape[1];
+        if (batch != 1)
+            throw new ArgumentException("Cached path supports batch size 1 only.");
+        if (length <= 0 || length > maxSeqLen)
+            throw new ArgumentException($"Sequence length {length} exceeds maxSeqLen {maxSeqLen}.");
+
+        if (cache == null) cache = new TransformerKVCache<T>(blocks.Length, maxSeqLen, nEmbd);
+        KVCache = cache;
+        cache.Ensure(length);
+
+        var x = tokenEmb.Forward(workingTokens);                // [1, L, D]
+        var positions = PositionEncoding.Build<T>(1, length, nEmbd);
+        x = ReverseGradOperations.Add(x, positions);
+
+        var mask = BuildCausalMask(batch, length);
+        for (int i = 0; i < blocks.Length; i++)
+            x = blocks[i].ForwardPrefill(x, cache.keys[i], cache.values[i], 0); // [1, L, D]
+
+        x = finalNorm.Forward(x);                               // [1, L, D]
+
+        var lastRow = new T[nEmbd];
+        if (x.Data.TryGetSpan(out var xSpan))
+            xSpan.Slice((length - 1) * nEmbd, nEmbd).CopyTo(lastRow);
+        else
+            for (int d = 0; d < nEmbd; d++) lastRow[d] = x[(length - 1) * nEmbd + d];
+
+        var last = ReverseGradTensor<T>.FromMatrix(lastRow, 1, nEmbd, requiresGrad: false);
+        var wteT = ReverseGradOperations.Transpose(tokenEmb.Weight!.Tensor); // [D, V]
+        return ReverseGradOperations.MatMul(last, wteT);               // [1, V]
+    }
+
+    public ReverseGradTensor<T> ForwardPrefill(int[] tokenIds, TransformerKVCache<T>? cache = null)
+    {
+        if (tokenIds == null) throw new ArgumentNullException(nameof(tokenIds));
+        var data = new T[tokenIds.Length];
+        for (int i = 0; i < tokenIds.Length; i++) data[i] = T.CreateChecked(tokenIds[i]);
+        var column = NivaraColumn<T>.Create(data);
+        var t = new ReverseGradTensor<T>(column, requiresGrad: false);
+        t.Reshape(1, tokenIds.Length);
+        return ForwardPrefill(t, cache);
+    }
+
+    public ReverseGradTensor<T> ForwardPrefill(float[] tokenIds, TransformerKVCache<T>? cache = null)
+    {
+        if (tokenIds == null) throw new ArgumentNullException(nameof(tokenIds));
+        var data = new T[tokenIds.Length];
+        for (int i = 0; i < tokenIds.Length; i++) data[i] = T.CreateChecked(tokenIds[i]);
+        var column = NivaraColumn<T>.Create(data);
+        var t = new ReverseGradTensor<T>(column, requiresGrad: false);
+        t.Reshape(1, tokenIds.Length);
+        return ForwardPrefill(t, cache);
+    }
+
+    public ReverseGradTensor<T> ForwardCached(int tokenId, int position)
+    {
+        if (KVCache == null)
+            throw new InvalidOperationException("No KV cache available. Call ForwardPrefill first or pass a cache.");
+        return ForwardCached(tokenId, position, KVCache);
+    }
+
+    public ReverseGradTensor<T> ForwardCached(int tokenId, int position, TransformerKVCache<T> cache)
+    {
+        if (cache == null) throw new ArgumentNullException(nameof(cache));
+        if (position < 0 || position >= maxSeqLen)
+            throw new ArgumentOutOfRangeException(nameof(position));
+
+        KVCache = cache;
+        cache.Ensure(position + 1);
+
+        var data = new T[] { T.CreateChecked(tokenId) };
+        var column = NivaraColumn<T>.Create(data);
+        var input = new ReverseGradTensor<T>(column, requiresGrad: false);
+        input.Reshape(1, 1);
+
+        var x = tokenEmb.Forward(input);                        // [1, 1, D]
+        var positions = PositionEncoding.Build<T>(1, position, 1, nEmbd);
+        x = ReverseGradOperations.Add(x, positions);
+
+        for (int i = 0; i < blocks.Length; i++)
+            x = blocks[i].ForwardCached(x, position, cache.keys[i], cache.values[i], position); // [1, 1, D]
+
+        x = finalNorm.Forward(x);                               // [1, 1, D]
+
+        var lastRow = new T[nEmbd];
+        if (x.Data.TryGetSpan(out var xSpan))
+            xSpan.Slice(0, nEmbd).CopyTo(lastRow);
+        else
+            for (int d = 0; d < nEmbd; d++) lastRow[d] = x[d];
+
+        var last = ReverseGradTensor<T>.FromMatrix(lastRow, 1, nEmbd, requiresGrad: false);
+        var wteT = ReverseGradOperations.Transpose(tokenEmb.Weight!.Tensor); // [D, V]
+        return ReverseGradOperations.MatMul(last, wteT);               // [1, V]
     }
 
     internal static ReverseGradTensor<T> BuildCausalMask(int batch, int length)
@@ -194,6 +310,130 @@ public sealed class BatchedTransformerBlock<T> : Module<T> where T : struct, IFl
         hidden = Activation.Gelu(hidden);
         hidden = mlpFc2.Forward(hidden);
         hidden.Reshape(batch, length, nEmbd);               // [B, L, D]
+
+        return ReverseGradOperations.Add(hidden, residual);
+    }
+
+    public ReverseGradTensor<T> ForwardPrefill(ReverseGradTensor<T> input, T[] kCache, T[] vCache, int positionOffset = 0)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (input.Rank != 3)
+            throw new ArgumentException($"Expected [B, L, D] input, got {input.Rank}D.");
+
+        int batch = input.Shape[0];
+        int length = input.Shape[1];
+        int D = nEmbd;
+        if (batch != 1)
+            throw new ArgumentException("Cached path supports batch size 1 only.");
+
+        var mask = BatchedTransformer<T>.BuildCausalMask(batch, length);
+
+        var residual = input;
+
+        var normed = ln1.Forward(input);                    // [B, L, D]
+        var flat = normed;
+        flat.Reshape(batch * length, nEmbd);                // [B*L, D]
+
+        var q = qProj.Forward(flat);                        // [B*L, D]
+        var k = kProj.Forward(flat);
+        var v = vProj.Forward(flat);
+        q.Reshape(batch, length, nEmbd);
+        k.Reshape(batch, length, nEmbd);
+        v.Reshape(batch, length, nEmbd);
+
+        // Capture K/V into the cache.
+        if (k.Data.TryGetSpan(out var kSpan) && v.Data.TryGetSpan(out var vSpan))
+        {
+            for (int p = 0; p < length; p++)
+            {
+                for (int d = 0; d < D; d++)
+                {
+                    kCache[(positionOffset + p) * D + d] = kSpan[p * D + d];
+                    vCache[(positionOffset + p) * D + d] = vSpan[p * D + d];
+                }
+            }
+        }
+
+        var attn = ReverseGradOperations.BatchedMultiHeadAttention(q, k, v, nHead, attnScale, mask);
+        attn.Reshape(batch * length, nEmbd);                // [B*L, D]
+        var attnOut = oProj.Forward(attn);
+        attnOut.Reshape(batch, length, nEmbd);              // [B, L, D]
+
+        var x = ReverseGradOperations.Add(attnOut, residual);
+
+        residual = x;
+        var normed2 = ln2.Forward(x);
+        var hidden = normed2;
+        hidden.Reshape(batch * length, nEmbd);              // [B*L, D]
+        hidden = mlpFc1.Forward(hidden);
+        hidden = Activation.Gelu(hidden);
+        hidden = mlpFc2.Forward(hidden);
+        hidden.Reshape(batch, length, nEmbd);               // [B, L, D]
+
+        return ReverseGradOperations.Add(hidden, residual);
+    }
+
+    public ReverseGradTensor<T> ForwardCached(ReverseGradTensor<T> input, int position, T[] kCache, T[] vCache, int cacheLen)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (input.Rank != 3)
+            throw new ArgumentException($"Expected [B, L, D] input, got {input.Rank}D.");
+
+        int batch = input.Shape[0];
+        int length = input.Shape[1];
+        int D = nEmbd;
+        if (batch != 1 || length != 1)
+            throw new ArgumentException("Cached decode expects a single token [1, 1, D].");
+
+        var residual = input;
+
+        var normed = ln1.Forward(input);                    // [1, 1, D]
+        var flat = normed;
+        flat.Reshape(batch * length, nEmbd);                // [1, D]
+
+        var q = qProj.Forward(flat);                        // [1, D]
+        var k = kProj.Forward(flat);
+        var v = vProj.Forward(flat);
+        q.Reshape(batch, length, nEmbd);                    // [1, 1, D]
+        k.Reshape(batch, length, nEmbd);
+        v.Reshape(batch, length, nEmbd);
+
+        // Append new K/V at position.
+        if (k.Data.TryGetSpan(out var kSpan) && v.Data.TryGetSpan(out var vSpan))
+        {
+            for (int d = 0; d < D; d++)
+            {
+                kCache[position * D + d] = kSpan[d];
+                vCache[position * D + d] = vSpan[d];
+            }
+        }
+
+        int kvLen = position + 1;
+        var kArr = new T[kvLen * D];
+        var vArr = new T[kvLen * D];
+        Array.Copy(kCache, 0, kArr, 0, kvLen * D);
+        Array.Copy(vCache, 0, vArr, 0, kvLen * D);
+
+        var kTensor = ReverseGradTensor<T>.FromMatrix(kArr, 1, kvLen * D, requiresGrad: false);
+        kTensor.Reshape(1, kvLen, D);
+        var vTensor = ReverseGradTensor<T>.FromMatrix(vArr, 1, kvLen * D, requiresGrad: false);
+        vTensor.Reshape(1, kvLen, D);
+
+        var attn = ReverseGradOperations.BatchedMultiHeadAttention(q, kTensor, vTensor, nHead, attnScale, null);
+        attn.Reshape(batch * length, nEmbd);                // [1, D]
+        var attnOut = oProj.Forward(attn);
+        attnOut.Reshape(batch, length, nEmbd);              // [1, 1, D]
+
+        var x = ReverseGradOperations.Add(attnOut, residual);
+
+        residual = x;
+        var normed2 = ln2.Forward(x);
+        var hidden = normed2;
+        hidden.Reshape(batch * length, nEmbd);              // [1, D]
+        hidden = mlpFc1.Forward(hidden);
+        hidden = Activation.Gelu(hidden);
+        hidden = mlpFc2.Forward(hidden);
+        hidden.Reshape(batch, length, nEmbd);               // [1, 1, D]
 
         return ReverseGradOperations.Add(hidden, residual);
     }
