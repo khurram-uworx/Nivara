@@ -1,4 +1,4 @@
-# SHAKESPEAR2 — TinyShakespeare Silk/GPU port plan
+# TinyShakespeare Silk/GPU port plan
 
 Umbrella issue: **#1270** (NivaraChat: TinyShakespeare transformer has no Silk/GPU path).
 
