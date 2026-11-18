@@ -7,6 +7,8 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Silk;
+using NivaraChat.Shared;
 using System.Diagnostics;
 
 namespace NivaraChat.Transformer;
@@ -88,6 +90,7 @@ public static class TransformerMode
                 case "--load": options.LoadPath = args[++i]; break;
                 case "--no-di-demo": options.ShowDiDemo = false; break;
                 case "--kv-cache": options.UseKvCache = true; break;
+                case "--silk": options.UseSilk = true; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
             }
@@ -141,11 +144,18 @@ public static class TransformerMode
             Console.WriteLine($"Saved tokenizer: {tokenizerPath}");
         }
 
-        RunSamples(model, tokenizer, options.Prompt ?? "ROMEO:", options);
-
-        if (options.ShowDiDemo)
+        if (options.UseSilk)
         {
-            RunDiDemo(model, tokenizer, options.Prompt ?? "ROMEO:", options);
+            RunSilk(model, tokenizer, options);
+        }
+        else
+        {
+            RunSamples(model, tokenizer, options.Prompt ?? "ROMEO:", options);
+
+            if (options.ShowDiDemo)
+            {
+                RunDiDemo(model, tokenizer, options.Prompt ?? "ROMEO:", options);
+            }
         }
     }
 
@@ -247,6 +257,103 @@ public static class TransformerMode
         Console.WriteLine($"\ntime: {sw.Elapsed.TotalSeconds:F2}s");
     }
 
+    static void RunSilk(BatchedTransformer<float> model, TextTokenizer tokenizer, TransformerOptions options)
+    {
+        var config = new TinyShakespeareConfig
+        {
+            HiddenSize = options.NEmbd,
+            NumHiddenLayers = options.NLayer,
+            NumAttentionHeads = options.NHead,
+            VocabSize = tokenizer.VocabSize,
+            MaxSeqLen = options.BlockSize,
+        };
+
+        var weights = model.ToSilkWeights();
+        using var session = SilkTinyShakespeareSession.Open(config, weights);
+        Console.WriteLine($"  Device:    {session.DeviceName}");
+
+        string prompt = options.Prompt ?? "ROMEO:";
+        var promptTokens = tokenizer.Encode(prompt, addBosEos: true);
+        var ids = new List<int>(promptTokens);
+
+        var rng = new Random(1234);
+        bool greedy = options.Temperature <= 0f;
+        float temperature = greedy ? 0f : options.Temperature;
+        float topP = options.TopP;
+
+        var sw = Stopwatch.StartNew();
+        var sb = new System.Text.StringBuilder();
+        int generated = 0;
+
+        lock (rng)
+        {
+            if (options.UseKvCache)
+                session.ResetCache();
+
+            float[]? logits = options.UseKvCache
+                ? session.ForwardPrefill(ids.Take(Math.Min(ids.Count, model.MaxSeqLen)).ToArray())
+                : null;
+            int position = Math.Min(ids.Count, model.MaxSeqLen);
+
+            if (options.UseKvCache && ids.Count > model.MaxSeqLen)
+            {
+                // keep tail window
+                int keep = model.MaxSeqLen;
+                var window = ids.GetRange(ids.Count - keep, keep);
+                session.ResetCache();
+                logits = session.ForwardPrefill(window.ToArray());
+                ids = new List<int>(window);
+                position = window.Count;
+            }
+
+            while (generated < options.MaxNewTokens)
+            {
+                int next;
+                if (options.UseKvCache && logits is not null)
+                {
+                    int vocab = tokenizer.VocabSize;
+                    next = TokenSampling.Sample(logits.AsSpan(), vocab, greedy ? 0f : temperature, greedy ? 1f : topP, rng);
+                }
+                else
+                {
+                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
+                    var window = ids.GetRange(ids.Count - seqLen, seqLen);
+                    var full = session.ForwardPrefill(window.ToArray());
+                    int vocab = tokenizer.VocabSize;
+                    int offset = full.Length - vocab;
+                    var span = offset >= 0 && full.Length >= offset + vocab
+                        ? full.AsSpan(offset, vocab)
+                        : full.AsSpan(0, Math.Min(vocab, full.Length));
+                    next = TokenSampling.Sample(span, vocab, greedy ? 0f : temperature, greedy ? 1f : topP, rng);
+                }
+
+                if (next == tokenizer.EosToken)
+                    break;
+
+                ids.Add(next);
+                sb.Append(tokenizer.Decode([next]));
+                generated++;
+
+                if (options.UseKvCache)
+                {
+                    if (position >= model.MaxSeqLen)
+                    {
+                        int keep = model.MaxSeqLen - 1;
+                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
+                        session.ResetCache();
+                        session.ForwardPrefill(w.ToArray());
+                        position = keep;
+                    }
+                    logits = session.ForwardCached(next, position++);
+                }
+            }
+        }
+
+        sw.Stop();
+        Console.WriteLine($"\n{sb}");
+        Console.WriteLine($"\n[generated {generated} tokens in {sw.ElapsedMilliseconds} ms]");
+    }
+
     static void RunSamples(BatchedTransformer<float> model, TextTokenizer tokenizer,
         string prompt, TransformerOptions options)
     {
@@ -343,6 +450,7 @@ Options:
         public string? Prompt = null;
         public bool ShowDiDemo = true;
         public bool UseKvCache = false;
+        public bool UseSilk = false;
         public bool ShowHelp = false;
     }
 }
