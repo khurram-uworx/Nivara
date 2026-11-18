@@ -273,6 +273,7 @@ public static class TransformerMode
         Console.WriteLine($"  Device:    {session.DeviceName}");
 
         string prompt = options.Prompt ?? "ROMEO:";
+
         var promptTokens = tokenizer.Encode(prompt, addBosEos: true);
         var ids = new List<int>(promptTokens);
 

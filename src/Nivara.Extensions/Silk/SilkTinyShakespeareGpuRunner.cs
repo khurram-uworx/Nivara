@@ -117,8 +117,8 @@ public sealed class SilkTinyShakespeareGpuRunner : IDisposable
         runtime.Upload(idsBuf.Handle, tokenIds.AsSpan(0, seqLen));
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, seqLen));
 
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen, hiddenDim);
-        SilkLauncher.Gather(runtime, posEmb, posIdsBuf.Handle, posBuf.Handle, seqLen, hiddenDim);
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, seqLen * hiddenDim, hiddenDim);
+        SilkLauncher.Gather(runtime, posEmb, posIdsBuf.Handle, posBuf.Handle, seqLen * hiddenDim, hiddenDim);
         SilkLauncher.Add(runtime, x.Handle, posBuf.Handle, x.Handle, seqLen * hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
@@ -173,8 +173,8 @@ public sealed class SilkTinyShakespeareGpuRunner : IDisposable
         runtime.Upload(idsBuf.Handle, new int[] { tokenId });
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
 
-        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, 1, hiddenDim);
-        SilkLauncher.Gather(runtime, posEmb, posIdsBuf.Handle, posBuf.Handle, 1, hiddenDim);
+        SilkLauncher.Gather(runtime, tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
+        SilkLauncher.Gather(runtime, posEmb, posIdsBuf.Handle, posBuf.Handle, hiddenDim, hiddenDim);
         SilkLauncher.Add(runtime, x.Handle, posBuf.Handle, x.Handle, hiddenDim);
 
         for (int li = 0; li < layers.Length; li++)
@@ -214,6 +214,7 @@ public sealed class SilkTinyShakespeareGpuRunner : IDisposable
     public void ResetCache() => cachedLen = 0;
 
     public int CachedLength => cachedLen;
+
 
     void DecodeOproj(nint q, nint kCache, nint vCache, nint contextScratch, nint wo, nint residual, nint outBuf, int kvLen, int numHeads2, int numKvHeads2, int headDim2, int qDim2, int hiddenDim2, float scale2)
     {
