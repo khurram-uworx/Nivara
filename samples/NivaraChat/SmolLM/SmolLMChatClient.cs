@@ -9,17 +9,9 @@ using System.Runtime.CompilerServices;
 namespace NivaraChat.SmolLM;
 
 /// <summary>
-/// An <see cref="IChatClient"/> backed by a pretrained SmolLM/Llama causal LM
-/// (<see cref="LlamaForCausalLM{TModel, TWeight}"/>). Renders the conversation with
-/// <see cref="SmollmChatTemplate"/>, generates autoregressively, and streams the plain-text
-/// reply token-by-token. Greedy (argmax) by default; when <paramref name="temperature"/> is
-/// greater than 0, tokens are drawn from the temperature-scaled softmax with optional top-p
-/// (nucleus) filtering via a seeded RNG for reproducible, varied replies. KV-caching is used
-/// when <paramref name="useKvCache"/> is set, avoiding full-prefix re-projection per token.
-/// The model runs in eval mode; each call builds its own tensors, so concurrent requests are
-/// safe (re-entrant). Plain-chat only in Stage A.
+/// An <see cref="IChatClient"/> backed by a pretrained SmolLM/Llama causal LM.
 /// </summary>
-internal sealed class SmolLMChatClient<TModel, TWeight> : IChatClient
+internal sealed class SmolLMChatClient<TModel, TWeight> : CausalLmChatClientBase
     where TModel : struct, IFloatingPointIeee754<TModel>
     where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
@@ -33,11 +25,6 @@ internal sealed class SmolLMChatClient<TModel, TWeight> : IChatClient
     readonly LlamaForCausalLM<TModel, TWeight> model;
     readonly Gpt2BpeTokenizer tokenizer;
     readonly LlamaConfig config;
-    readonly int maxNewTokens;
-    readonly float temperature;
-    readonly float topP;
-    readonly bool useKvCache;
-    readonly Random rng;
     readonly TokenizePrefixCache tokenizeCache = new();
     readonly int numLayers;
     readonly int kvWidth;
@@ -51,6 +38,7 @@ internal sealed class SmolLMChatClient<TModel, TWeight> : IChatClient
         float? topP = null,
         int? seed = null,
         bool useKvCache = false)
+        : base(temperature ?? 0f, Math.Clamp(topP ?? 1f, 0f, 1f), maxNewTokens, useKvCache, new Random(seed ?? 0))
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -60,142 +48,54 @@ internal sealed class SmolLMChatClient<TModel, TWeight> : IChatClient
         this.model = model;
         this.tokenizer = tokenizer;
         this.config = config;
-        this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
-        this.temperature = temperature ?? 0f;
-        this.topP = Math.Clamp(topP ?? 1f, 0f, 1f);
-        this.useKvCache = useKvCache;
-        this.rng = new Random(seed ?? 0);
         this.numLayers = config.NumHiddenLayers;
         this.kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
     }
 
-    public ChatClientMetadata? Metadata { get; } =
+    public override ChatClientMetadata? Metadata { get; } =
         new ChatClientMetadata("Nivara", null, "SmolLM-135M-Instruct (LlamaForCausalLM + GPT-2 BPE)");
 
     public int TokenizeCacheHits => tokenizeCache.Hits;
 
-    public object? GetService(Type serviceType, object? key = null) => null;
+    protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
+        => SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
 
-    public Task<ChatResponse> GetResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        CancellationToken cancellationToken = default)
+    protected override IReadOnlyList<int> Encode(string prompt)
+        => tokenizeCache.Encode(prompt, p => EncodePrompt(p));
+
+    protected override string DecodeToken(int tokenId)
+        => tokenizer.Decode(new[] { tokenId });
+
+    protected override string DecodeAll(IReadOnlyList<int> ids)
+        => string.Concat(ids.Select(id => tokenizer.Decode(new[] { id })));
+
+    protected override CausalLmOps BuildOps()
     {
-        var text = Generate(messages, cancellationToken);
-        return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, text)]));
-    }
-
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(tokenizeCache.Encode(prompt, p => EncodePrompt(p)));
-
-        using var cache = useKvCache
-            ? new LlamaKVCache<TModel>(numLayers, kvWidth)
-            : null;
-
-        bool isGreedy = temperature <= 0f;
-        lock (rng)
-        {
-            // Seed the cache (or, without KV cache, run a full forward per token below).
-            var logits = useKvCache ? SeedCache(ids, cache!) : null;
-            int position = ids.Count;
-
-            for (int t = 0; t < maxNewTokens; t++)
+        LlamaKVCache<TModel>? cache = null;
+        return new CausalLmOps(
+            Prefill: w =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int next;
-                if (useKvCache)
-                {
-                    next = Select(LastRow(logits!), config.VocabSize, isGreedy);
-                }
-                else
-                {
-                    var full = model.Forward(ids.ToArray()); // [L, vocab]
-                    next = Select(LastRow(full), config.VocabSize, isGreedy);
-                }
-
-                if (next == config.EosTokenId)
-                    yield break;
-
-                ids.Add(next);
-                yield return new ChatResponseUpdate(ChatRole.Assistant, tokenizer.Decode([next]));
-
-                if (useKvCache)
-                    logits = model.ForwardCached(next, position++, cache!);
-            }
-        }
+                cache ??= new LlamaKVCache<TModel>(numLayers, kvWidth);
+                return ToFloat(model.ForwardPrefill(w, cache));
+            },
+            Cached: (t, p) => ToFloat(model.ForwardCached(t, p, cache!)),
+            LastLogits: w => ToFloat(model.Forward(w)),
+            ResetCache: () => cache = new LlamaKVCache<TModel>(numLayers, kvWidth),
+            IsStopToken: id => id == config.EosTokenId,
+            VocabSize: config.VocabSize,
+            EosTokenId: config.EosTokenId,
+            MaxSequenceLength: config.MaxPositionEmbeddings);
     }
 
-    public void Dispose() { }
-
-    string Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
+    static float[] ToFloat(ReverseGradTensor<TModel> logits)
     {
-        var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(tokenizeCache.Encode(prompt, p => EncodePrompt(p)));
-
-        using var cache = useKvCache
-            ? new LlamaKVCache<TModel>(numLayers, kvWidth)
-            : null;
-
-        bool isGreedy = temperature <= 0f;
-        var sb = new System.Text.StringBuilder();
-        int generated = 0;
-
-        lock (rng)
-        {
-            var logits = useKvCache ? SeedCache(ids, cache!) : null;
-            int position = ids.Count;
-
-            while (generated < maxNewTokens)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int next;
-                if (useKvCache)
-                {
-                    next = Select(LastRow(logits!), config.VocabSize, isGreedy);
-                }
-                else
-                {
-                    var full = model.Forward(ids.ToArray());
-                    next = Select(LastRow(full), config.VocabSize, isGreedy);
-                }
-
-                if (next == config.EosTokenId)
-                    break;
-
-                ids.Add(next);
-                sb.Append(tokenizer.Decode([next]));
-                generated++;
-
-                if (useKvCache)
-                    logits = model.ForwardCached(next, position++, cache!);
-            }
-        }
-        return sb.ToString();
+        var span = LastRow(logits);
+        var arr = new float[span.Length];
+        for (int i = 0; i < arr.Length; i++)
+            arr[i] = float.CreateChecked(span[i]);
+        return arr;
     }
 
-    /// <summary>Runs the prompt tokens through a single batched prefill to seed the per-layer cache
-    /// and produce the logits predicting the first generated token.</summary>
-    ReverseGradTensor<TModel> SeedCache(List<int> ids, LlamaKVCache<TModel> cache)
-        => model.ForwardPrefill(ids.ToArray(), cache);
-
-    /// <summary>Selects the next token: argmax when greedy, otherwise temperature softmax with
-    /// optional top-p filtering, drawn from the shared seeded RNG.</summary>
-    int Select(ReadOnlySpan<TModel> lastRow, int vocab, bool isGreedy)
-    {
-        if (lastRow.Length < vocab)
-            lastRow = lastRow[..vocab];
-
-        return TokenSampling.Sample(lastRow, vocab, isGreedy ? 0f : temperature, isGreedy ? 1f : topP, rng);
-    }
-
-    /// <summary>Returns the model's final-position logits (<c>[vocab]</c>) as a span.</summary>
     static ReadOnlySpan<TModel> LastRow(ReverseGradTensor<TModel> logits)
     {
         logits.Data.TryGetSpan(out var span);
@@ -205,13 +105,6 @@ internal sealed class SmolLMChatClient<TModel, TWeight> : IChatClient
         return offset >= 0 && span.Length >= offset + vocab ? span.Slice(offset, vocab) : span;
     }
 
-
-
-    /// <summary>
-    /// Encodes the rendered prompt into token ids, keeping special tokens (<c>&lt;|im_start|&gt;</c>,
-    /// <c>&lt;|im_end|&gt;</c>, <c>&lt;|endoftext|&gt;</c>) as single ids instead of splitting them
-    /// through byte-level BPE.
-    /// </summary>
     IReadOnlyList<int> EncodePrompt(string prompt)
     {
         var ids = new List<int>();
