@@ -223,6 +223,44 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
         tensor.Reshape(batch, length, length);
         return tensor;
     }
+
+    /// <summary>
+    /// Exports this transformer's parameters into the conventional Silk/OpenCL weight
+    /// dictionary shape (<c>tok_emb.weight</c>, <c>final_norm.weight/bias</c>, and
+    /// <c>layers.{l}.*</c>), copying data out of the AutoDiff tensors (no aliasing).
+    /// </summary>
+    public Dictionary<string, (float[] Data, int[] Shape)> ToSilkWeights()
+    {
+        var result = new Dictionary<string, (float[] Data, int[] Shape)>(StringComparer.Ordinal);
+
+        if (tokenEmb.Weight is null)
+            throw new InvalidOperationException("Token embedding weight has not been initialized.");
+        result["tok_emb.weight"] =
+            (TensorToFloatArray(tokenEmb.Weight.Tensor), (int[])tokenEmb.Weight.Tensor.Shape.Clone());
+
+        if (finalNorm.Weight is not null)
+            result["final_norm.weight"] =
+                (TensorToFloatArray(finalNorm.Weight.Tensor), (int[])finalNorm.Weight.Tensor.Shape.Clone());
+        if (finalNorm.Bias is not null)
+            result["final_norm.bias"] =
+                (TensorToFloatArray(finalNorm.Bias.Tensor), (int[])finalNorm.Bias.Tensor.Shape.Clone());
+
+        for (int i = 0; i < blocks.Length; i++)
+            blocks[i].PopulateSilkWeights(i, result);
+
+        return result;
+    }
+
+    internal static float[] TensorToFloatArray(ReverseGradTensor<T> tensor)
+    {
+        ArgumentNullException.ThrowIfNull(tensor);
+        var values = new T[tensor.Length];
+        tensor.Data.CopyTo(values, T.Zero);
+        var result = new float[values.Length];
+        for (int i = 0; i < result.Length; i++)
+            result[i] = float.CreateChecked(values[i]);
+        return result;
+    }
 }
 
 /// <summary>
@@ -436,5 +474,29 @@ public sealed class BatchedTransformerBlock<T> : Module<T> where T : struct, IFl
         hidden.Reshape(batch, length, nEmbd);               // [1, 1, D]
 
         return ReverseGradOperations.Add(hidden, residual);
+    }
+
+    internal void PopulateSilkWeights(int layerIndex, Dictionary<string, (float[] Data, int[] Shape)> dict)
+    {
+        string prefix = $"layers.{layerIndex}.";
+        void Add(string name, ReverseGradTensor<T>? tensor)
+        {
+            if (tensor is null) return;
+            dict[prefix + name] =
+                (BatchedTransformer<T>.TensorToFloatArray(tensor), (int[])tensor.Shape.Clone());
+        }
+
+        Add("ln1.weight", ln1.Weight?.Tensor);
+        Add("ln1.bias", ln1.Bias?.Tensor);
+        Add("ln2.weight", ln2.Weight?.Tensor);
+        Add("ln2.bias", ln2.Bias?.Tensor);
+        Add("q_proj.weight", qProj.Weight?.Tensor);
+        Add("k_proj.weight", kProj.Weight?.Tensor);
+        Add("v_proj.weight", vProj.Weight?.Tensor);
+        Add("o_proj.weight", oProj.Weight?.Tensor);
+        Add("mlp_fc1.weight", mlpFc1.Weight?.Tensor);
+        Add("mlp_fc1.bias", mlpFc1.Bias?.Tensor);
+        Add("mlp_fc2.weight", mlpFc2.Weight?.Tensor);
+        Add("mlp_fc2.bias", mlpFc2.Bias?.Tensor);
     }
 }
