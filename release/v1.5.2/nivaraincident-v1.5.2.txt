@@ -1,0 +1,17 @@
+C:\Program Files\dotnet\sdk\11.0.100\NuGet.Build.Tasks.Pack.targets(232,5): warning NU5104: A stable release of a package should not have a prerelease dependency. Either modify the version spec of dependency "Parquet.Net [6.1.1-pre.1, )" or update the version field in the nuspec. [E:\khurram-uworx\Nivara\src\Nivara.Extensions\Nivara.Extensions.csproj]
+Scenario: A - Database degradation
+Dataset: samples\data\incident-lab
+
+=== Benchmark: Nivara (1 iterations, median) ===
+
+  Degradation Ordering:
+    Rows: 6,666,665 returned
+    Diagnostics: 8,340,000 read, 6 cols, 14827.9ms exec, 4220.46 MB allocated
+    GC peak: 4229.44 MB
+    Median: 14839.8 ms  (6,666,665 rows)
+
+  Deployment Correlation   26141.0 ms  (6,666,665 rows)
+  Saturation Ordering        145.3 ms  (8 rows)
+  Regional Partitioning    26300.2 ms  (10 rows)
+  Grouped Aggregation      10772.7 ms  (8 rows)
+  Typed LINQ Grouped Agg   20415.9 ms  (8 rows)

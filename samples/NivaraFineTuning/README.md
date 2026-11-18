@@ -205,41 +205,33 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 
 By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
 backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
-unavailable). For `--max-examples 25 --batch-size 2 --epochs 1 -c Release` on CPU,
-expect **~1.2 s/batch** steady-state (see [Performance benchmarks](#performance-benchmarks));
-a full 67K-example epoch extrapolates to ~142 hours. With `--silk` the same shape
-runs at **~0.26 s/batch** (~24 hours per epoch) on the integrated GPU. Keep
+unavailable). For `--max-examples 100 --batch-size 2 --epochs 1 -c Release` on CPU,
+the v1.5.2 capture measured **1.238 s/batch** steady-state (see
+[Performance benchmarks](#performance-benchmarks)); a full 33,674-batch epoch
+extrapolates to **~11.6 hours**. With `--silk` the same shape ran at
+**0.247 s/batch** (**~2.3 hours per epoch**) on the integrated GPU. Keep
 `--max-len` at the default 128 and use `--max-examples` to validate the pipeline
 before committing to a full run.
 
 ## Performance benchmarks
 
-Measured on the same machine (Intel Core Ultra 7 255H). The PyTorch and Nivara (CPU)
-columns run on the CPU; the Nivara (Silk/OpenCL) column runs on the integrated
-Intel Graphics. Nivara runs in Release mode
-with Server GC + Tiered PGO (as configured in the sample project). PyTorch uses
-MKL-optimized kernels with `torch_threads = nproc`. Both sides fine-tune
-DistilBERT-base (67M params) on the first `--max-examples` rows of SST-2 at
-`--batch-size 2 --max-len 128` and report **steady-state ms/batch**: PyTorch
-runs 2 untimed warmup epochs before timing; Nivara excludes the first (JIT
-warmup) batch. `--seed 0` fixes the training shuffle so A/B comparisons are
-reproducible. Numbers vary with machine load — re-measure both sides in the
-same session when comparing (run-to-run variance ~±10% per
-`tests/Nivara.PerformanceTests/README.md`).
+Measured on the same machine (Intel Core Ultra 7 255H, 16 logical processors,
+Windows 11) in one AC-powered session. The PyTorch and Nivara (CPU) columns run on
+the CPU; the Nivara (Silk/OpenCL) column runs on `Intel(R) Graphics`. Nivara runs
+in Release mode with Server GC + Tiered PGO (as configured in the sample project).
+PyTorch uses MKL-optimized kernels with `torch_threads = 16`. Both sides fine-tune
+DistilBERT-base (67M params) on the first 100 SST-2 examples at
+`--batch-size 2 --max-len 128` and report **steady-state ms/batch**: PyTorch runs
+2 untimed warmup epochs before timing; Nivara excludes the first (JIT/OpenCL
+warmup) batch. `--seed 0` fixes the training shuffle. The runner did not record
+the OpenCL driver version, so none is quoted. Run-to-run variance is ~±10% per
+`tests/Nivara.PerformanceTests/README.md`.
 
-Recorded **2026-11-07** on an Intel Core Ultra 7 255H (16 logical processors,
-Windows 11, Python 3.12.10, PyTorch 2.13.0+cpu, `torch_threads=16`). Both sides
-fine-tuned DistilBERT-base (67M params) on 100 SST-2 examples at
-`--batch-size 2 --max-len 128`.
-
-The `Nivara (Silk/OpenCL)` column was measured on **2026-11-07** with the device
-plugged into AC power (thermal/battery throttling skews integrated-GPU results):
-**251.7 ms/batch** steady-state (first batch excluded), run on an Intel Core Ultra 7
-255H (Intel(R) Graphics OpenCL device), `--max-examples 100 --batch-size 2
---max-len 128`, 1 epoch. Run-to-run variance ~±10% (per
-`tests/Nivara.PerformanceTests/README.md`); record the OpenCL driver version
-alongside any re-measurement. The Silk path is **~1.5x faster than PyTorch CPU** at
-this shape, while the CPU Nivara path remains **~3.2x slower** than PyTorch.
+Recorded **2026-11-18** on Python 3.12.10, PyTorch 2.13.0+cpu,
+`torch_threads=16`, .NET 11.0.0, AC power. All three columns come from the same
+capture: PyTorch **338.4 ms/batch**, Nivara CPU **1238.1 ms/batch**, Nivara Silk
+**247.0 ms/batch**. The Silk path is **~1.4x faster than PyTorch CPU** at this
+shape, while the CPU Nivara path remains **~3.7x slower** than PyTorch.
 
 ### Paired CPU vs Silk (issue #1003)
 
@@ -264,9 +256,9 @@ should focus on the backward chain (especially attention backward / DKV, ~72-80%
 of Silk batch time) rather than reverting to the CPU path. A 48-example run is small,
 so the absolute figures vary ~±10% run-to-run (per `tests/Nivara.PerformanceTests/README.md`);   re-run on AC power before quoting an official number.
 
-| Config | PyTorch (CPU) | Nivara (.NET 10) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
+| Config | PyTorch (CPU) | Nivara (.NET 11) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
 |--------|---------------|-------------------|----------------------|----------------|-----------------|
-| Fine-tune B=2, L=128, 100 examples | 377.4 ms/batch | 1200 ms/batch | 251.7 ms/batch | **~3.2x** | **0.67x (1.5x faster)** |
+| Fine-tune B=2, L=128, 100 examples | 338.4 ms/batch | 1238.1 ms/batch | 247.0 ms/batch | **~3.7x** | **0.73x (1.4x faster)** |
 
 The ~3× gap is consistent with prior measurements on different hardware: at batch
 size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward
@@ -283,22 +275,19 @@ ms/batch (first batch excluded, as printed by `RunTrainSilk`).
 ### Estimated full-run wall-clock (approximate)
 
 > **Disclaimer:** the figures below are **estimates, not measurements.** They
-> extrapolate the 25-example per-batch numbers above to the full 67,349-example
-> train set and assume per-batch cost grows linearly with batch size — which is
-> approximate. Real runs drift with machine load, GC pressure, and thermals;
-> treat them as ballpark planning figures (±30%).
+> extrapolate the 100-example per-batch numbers from the 2026-11-18 capture to
+> the full 33,674 batches of a 67,349-example epoch and assume per-batch cost is
+> constant — which is approximate. Real runs drift with machine load, GC
+> pressure, and thermals; treat them as ballpark planning figures (±30%).
 
 | Config | Framework | 1 epoch (est.) | 3 epochs (est.) |
 |--------|-----------|----------------|-----------------|
-| B=2, L=128 | PyTorch (CPU) | ~46 h | ~138 h |
-| B=2, L=128 | Nivara (.NET 10) | ~142 h | ~427 h |
-| B=2, L=128 | Nivara (Silk/OpenCL) | ~24 h | ~71 h |
-| B=4, L=128 | PyTorch (CPU) | ~42 h | ~127 h |
-| B=4, L=128 | Nivara (.NET 10) | ~131 h | ~394 h |
+| B=2, L=128 | PyTorch (CPU) | ~3.2 h | ~9.5 h |
+| B=2, L=128 | Nivara (.NET 11) | ~11.6 h | ~34.7 h |
+| B=2, L=128 | Nivara (Silk/OpenCL) | ~2.3 h | ~6.9 h |
 
-B=4 figures are not benchmarked end-to-end — they're derived from the measured
-B=2 throughput. Batch cost grows sub-linearly in B (better kernel utilization),
-so the per-epoch times above are the same order of magnitude, not exact.
+B=4 was not captured in this session; its previous derived rows were removed
+rather than carried forward as if they were fresh measurements.
 
 ### Re-running
 
@@ -335,7 +324,9 @@ live in `tests/Nivara.PerformanceTests`.
 
 This sample is deliberately **validated on a tiny slice** of SST-2
 (`--max-examples 25`, batch size 2, one epoch). That was an explicit choice, and
-it deserves an explicit note.
+it deserves an explicit note. The numbers in this section describe that original
+correctness validation, not the 100-example release capture in
+[Performance benchmarks](#performance-benchmarks).
 
 **What we set out to prove.** That the entire fine-tuning pipeline works
 end-to-end in managed C# — SafeTensors weight loading, the frozen-encoder

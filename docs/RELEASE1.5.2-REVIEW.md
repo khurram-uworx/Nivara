@@ -72,19 +72,21 @@ is still recommended before tagging to catch any user-visible item missed.
 
 Benchmarks were launched with explicit human approval via the (now-fixed) canonical
 runner `release/run-benchmarks.cmd 1.5.2` in the background with no timeout, writing
-to `release/v1.5.2/` (renamed from the runner's `release/1.5.2/` output). Artefacts
-expected: core perf harness (`nivara-perf-v1.5.2.json`), NivaraIncident, NivaraInference
-CPU/Silk/BLAS plus PyTorch references, and NivaraFineTuning. The core harness results table
-was regenerated from the captured JSON (Prev/Current shift, header restored, `Δ%` corrected);
-the sample README tables will be refreshed from the remaining captures before tagging.
+to `release/v1.5.2/`. `status.txt` reads `DONE` and all expected artefacts are present:
+core perf harness (`nivara-perf-v1.5.2.json`), NivaraIncident, NivaraInference
+CPU/Silk/BLAS plus five PyTorch references, and NivaraFineTuning. The core harness
+results table was regenerated from the JSON (Prev/Current shift, header restored,
+`Δ%` corrected), and the NivaraIncident, NivaraInference and NivaraFineTuning README
+tables were refreshed from the remaining captures on 2026-11-18. Rows without a
+same-session comparison leg are marked `—` or `(carried)` rather than divided
+across captures.
 
 ### 7. CI / local verification during prep
 
-- `dotnet build Nivara.slnx` — passed (0 errors, 1 pre-existing NU5104 warning).
+- `dotnet build Nivara.slnx` — passed after the README refresh (0 errors, 1 pre-existing NU5104 warning).
 - `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` — passed.
-- `EveryGatedBlock_CompilesWithoutErrors` — passed (1 test, ~14 s).
-- `DocsCoverageTests` — passed (1 test).
-- Full suite (`dotnet test` with `Category!=Performance&...`) — to be run before tagging.
+- `dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~Nivara.Tests.Docs"` — 66/66 passed, including `EveryGatedBlock_CompilesWithoutErrors` and `DocsCoverageTests`; no doc-pin drift from the README edits.
+- Full filtered suite (`Category!=Performance&Category!=ReleaseReadiness&Category!=Gpu`) — 4,686 passed, 0 failed, 0 skipped (5 m 2 s).
 
 ### 8. Missed steps / process friction
 
@@ -103,6 +105,26 @@ the sample README tables will be refreshed from the remaining captures before ta
   core harness JSON also showed three new scenarios (`AutoDiff RMSNormModule fwd+bwd`,
   `Qwen decode block`, `Qwen decode fwd`) that had never been added as table rows; they
   are now present with `Prev = —`.
+
+### 9. Capture coverage gaps in the 2026-11-18 run
+
+**Status:** Documented in the README tables; no re-run in this release.
+
+- The canonical runner invokes BLAS with 2 row-blocks for DistilBERT / SST-2 /
+  Laya, while the older swept recommendation in the inference README was 4.
+  The tables record the setting actually captured; the 4-block sweep was not
+  repeated. Update the runner before the next release if 4 blocks are still the
+  intended default.
+- The inference sample does not print the OpenCL driver version, so no driver
+  string is quoted with the Silk rows.
+- PyTorch vision / SST-2 and the SmolLM F32 CPU/PyTorch pair were not rerun in
+  this session. Their cells are marked `(carried)` and no ratio crosses sessions.
+- The Qwen CPU leg used a 206-token tool prompt while the Silk legs used a
+  36-token synthetic prompt, so the artefacts are retained but no same-prompt
+  ratio is published.
+- The fine-tuning capture prints separate Nivara CPU and Nivara Silk steady-state
+  lines (1238.1 and 247.0 ms/batch). The README uses those printed values rather
+  than deriving a timing from individual batch lines.
 
 ---
 

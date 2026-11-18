@@ -232,45 +232,50 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark 
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --blas --threads 1 --blas-threads 4
 ```
 
-Recommended settings use `(Nt Nbt)`: `t` is `--threads` (Nivara row-blocks), `bt` is `--blas-threads` (OpenBLAS pool). Sentence forwards are GEMM, so the published recommendation is row-blocks plus one OpenBLAS thread.
+Captured settings use `(Nt Nbt)`: `t` is `--threads` (Nivara row-blocks), `bt` is `--blas-threads` (OpenBLAS pool). Both default to 1. The v1.5.2 runner used 2 row-blocks for MiniLM / DistilBERT / SST-2 / Laya and 4 for ModernBERT; the earlier 4-block sweep was not revalidated in this capture.
 
 | Model | Setting | This session |
 |-------|---------|--------------|
-| MiniLM (128 tok) | (2t 1bt) | slower than managed; skip BLAS |
-| DistilBERT / SST-2 | (4t 1bt) | 1.34x vs managed |
-| ModernBERT (seq=128) | (4t 1bt) | 2.36x vs managed |
-| Laya | (4t 1bt) | not remeasured 2026-11-12 |
+| MiniLM (128 tok) | (2t 1bt) | 1.12x vs managed |
+| DistilBERT / SST-2 | (2t 1bt) | 1.13x / 1.36x vs managed |
+| ModernBERT (seq=128/256) | (4t 1bt) | 2.44x / 2.04x vs managed |
+| Laya | (2t 1bt) | no managed CPU leg in this capture |
 
-End-to-end, same session, AC, 2026-11-12. MiniLM / DistilBERT / SST-2 are the printed average of 3 warmup + 10 timed. ModernBERT is the printed median of 1 warmup + 3 timed.
+End-to-end, same session, AC, 2026-11-18. MiniLM / DistilBERT / SST-2 are the printed average of 3 warmup + 10 timed. ModernBERT and Laya are the printed median of 1 warmup + 3 timed.
 
 | Model | managed | BLAS | Speedup |
 |-------|---------|------|---------|
-| MiniLM (128 tok) | 59.4 | 119.5 (2t 1bt) | 0.50x |
-| DistilBERT (128 tok) | 180.3 | 134.4 (4t 1bt) | 1.34x |
-| DistilBERT SST-2 (128 tok) | 198.8 | 148.6 (4t 1bt) | 1.34x |
-| ModernBERT (seq=128) | 1234.5 | 522.3 (4t 1bt) | 2.36x |
-| ModernBERT (seq=256) | 1748.7 | 1023.1 (4t 1bt) | 1.71x |
-| Laya (max_len=512) | not remeasured | not remeasured | — |
+| MiniLM (128 tok) | 108.4 | 96.4 (2t 1bt) | 1.12x |
+| DistilBERT (128 tok) | 182.5 | 161.2 (2t 1bt) | 1.13x |
+| DistilBERT SST-2 (128 tok) | 192.6 | 141.2 (2t 1bt) | 1.36x |
+| ModernBERT (seq=128) | 1388.3 | 568.3 (4t 1bt) | 2.44x |
+| ModernBERT (seq=256) | 1762.0 | 865.7 (4t 1bt) | 2.04x |
+| Laya (max_len=512) | not captured | 77,415 ms (2t 1bt) | — |
 
-Speedup is managed / BLAS. Above 1 means BLAS is faster. MiniLM at the previous recommendation is slower than managed on this capture. The ~6x GEMM-only win (docs/BLAS-MKL.md §5.1) is the kernel probe, not this end-to-end capture.
+Speedup is managed / BLAS. Above 1 means BLAS is faster. MiniLM is slightly faster on this capture (~1.12x), but that is close to the ~±10% run-to-run floor, so it is not a settled win. The ~6x GEMM-only win (docs/BLAS-MKL.md §5.1) is the kernel probe, not this end-to-end capture.
 
 ## Performance benchmarks
 
-Nivara CPU and Nivara BLAS for MiniLM, DistilBERT, SST-2, and ModernBERT are one AC session on 2026-11-12 (`Win32_Battery.BatteryStatus=2`), Release, same machine as the prior Ultra 7 255H line. `(Nt Nbt)` is `--threads` then `--blas-threads`. Those four models were not remeasured against PyTorch or the GPU in this session, so their slowdown cells are `—`. PyTorch, GPU, and the vision / SmolLM rows are the 2026-11-07 capture and are not a ratio against the new Nivara columns. MiniLM / DistilBERT / SST-2 print an average of 3 warmup + 10 timed passes. ModernBERT prints a median of 1 warmup + 3 timed passes.
+Nivara CPU / BLAS / Silk and the PyTorch MiniLM / DistilBERT / ModernBERT / SmolLM references are from one AC session on 2026-11-18 (Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0, Windows 11, `Intel(R) Graphics` OpenCL device). The runner did not record the OpenCL driver version, so none is quoted. `(Nt Nbt)` is `--threads` then `--blas-threads`. Values marked `(carried)` are from earlier captures and are not divided into 2026-11-18 numbers. MiniLM / DistilBERT / SST-2 print an average of 3 warmup + 10 timed passes on CPU/BLAS/Silk; ModernBERT, Laya and SmolLM print medians (ModernBERT / Laya: 1 warmup + 3 timed; SmolLM: 3 timed).
 
 | Model | Input | PyTorch | Nivara CPU | Slowdown (CPU) | Nivara BLAS | Slowdown (BLAS) | Nivara GPU | Slowdown (GPU) |
 |-------|-------|---------|------------|----------------|-------------|-----------------|------------|----------------|
-| **MobileNetV2** | 1x3x224x224 | 22.4 ms | 595.4 ms | **~26.6x** | — (conv) | — |  |  |
-| **ResNet-18** | 1x3x224x224 | 14.1 ms | 106.5 ms | **~7.6x** | — (conv) | — |  |  |
-| **MiniLM-L6** | 128 tokens | 11.0 ms | 54.0 ms | — | 119.5 ms (2t 1bt) | — | 24.1 ms | **~2.2x** |
-| **DistilBERT** | 128 tokens | 26.9 ms | 267.2 ms | — | 134.4 ms (4t 1bt) | — | 63.3 ms | **~2.4x** |
-| **DistilBERT SST-2** | 128 tokens | 32.8 ms | 281.2 ms | — | 148.6 ms (4t 1bt) | — | 63.8 ms | **~1.9x** |
-| **SmolLM-135M** (F32 weights, greedy gen) | 5 prompt + 32 new tokens | 881 ms | 814 ms | **~0.9x** | — | — |  |  |
-| **SmolLM-135M** (BF16 weights + BF16 compute, greedy gen) | 5 prompt + 32 new tokens | 757 ms | 1041 ms | **~1.4x** | — | — |  |  |
-| **ModernBERT-large** | 128 tokens | 312.4 ms | 1234.5 ms | — | 522.3 ms (4t 1bt) | — |  |  |
-| **ModernBERT-large** | 256 tokens | 574.4 ms | 1748.7 ms | — | 1023.1 ms (4t 1bt) | — |  |  |
+| **MobileNetV2** | 1x3x224x224 | 22.4 ms (carried) | 569.1 ms | — | — (conv) | — | — | — |
+| **ResNet-18** | 1x3x224x224 | 14.1 ms (carried) | 146.8 ms | — | — (conv) | — | — | — |
+| **MiniLM-L6** | 128 tokens | 10.0 ms | 108.4 ms | **~10.8x** | 96.4 ms (2t 1bt) | **~9.6x** | 38.1 ms | **~3.8x** |
+| **DistilBERT** | 128 tokens | 28.4 ms | 182.5 ms | **~6.4x** | 161.2 ms (2t 1bt) | **~5.7x** | 32.6 ms | **~1.1x** |
+| **DistilBERT SST-2** | 128 tokens | 32.8 ms (carried) | 192.6 ms | — | 141.2 ms (2t 1bt) | — | 32.8 ms | — |
+| **SmolLM-135M** (F32 weights, greedy gen) | 5 prompt + 32 new tokens | 881 ms (carried) | 814 ms (carried) | ~0.9x (carried) | — | — | — | — |
+| **SmolLM-135M** (native BF16 storage / F32 compute, greedy gen) | 5 prompt + 32 new tokens | 751 ms | 1037 ms | **~1.4x** | — | — | 4055 ms | **~5.4x** |
+| **SmolLM-135M** (BF16 weights + BF16 compute, greedy gen) | 5 prompt + 32 new tokens | 751 ms | 1118 ms | **~1.5x** | — | — | — | — |
+| **ModernBERT-large** | 128 tokens | 209.9 ms | 1388.3 ms | **~6.6x** | 568.3 ms (4t 1bt) | **~2.7x** | 236.9 ms | **~1.1x** |
+| **ModernBERT-large** | 256 tokens | 362.4 ms | 1762.0 ms | **~4.9x** | 865.7 ms (4t 1bt) | **~2.4x** | — | — |
+| **ModernBERT-large** | 512 tokens | — | — | — | — | — | 944.3 ms | — |
+| **ModernBERT-large** | 2048 tokens | — | — | — | — | — | 8846.8 ms | — |
+| **ModernBERT-large** | 4096 tokens | — | — | — | — | — | 31326.6 ms | — |
+| **Laya** (decision head) | max_len=512 | — | no CPU leg in this capture | — | 77,415 ms (2t 1bt) | — | 1,054–1,071 ms | — |
 
-*Nivara CPU / BLAS* = 2026-11-12 AC. *PyTorch / GPU / vision / SmolLM* = 2026-11-07, except PyTorch MobileNetV2/ResNet-18/SST-2 carried from 2026-09-27. Do not divide a 2026-11-12 Nivara cell by a 2026-11-07 PyTorch cell. SmolLM rows report 32 generated tokens (median of 3 runs) and are the two explicit precisions: F32 weights (BF16 checkpoint widened to F32, 513.1 MB) and BF16 weights with BF16 compute (256.6 MB). A bare `smollm` run now defaults to `--precision native` — BF16 weights as shipped with F32 compute — which has no PyTorch leg in this capture; its footprint and CPU figures are in [docs/SMOLLM.md](../../docs/SMOLLM.md).
+*2026-11-18 AC capture:* `release/v1.5.2/nivarainference-cpu-v1.5.2.txt`, `nivarainference-blas-v1.5.2.txt`, `nivarainference-silk-v1.5.2.txt`, and the five `pytorch-*-v1.5.2.txt` files under the same folder. PyTorch vision and SST-2 (2026-09-27) and the SmolLM F32 CPU/PyTorch pair (2026-11-07) were not rerun; their cells are marked `(carried)` and no ratio is computed across sessions. SmolLM rows report 32 generated tokens; the native default keeps BF16 weights with F32 compute (256.6 MB), while `--precision bf16` uses BF16 compute. Its footprint and CPU figures are in [docs/SMOLLM.md](../../docs/SMOLLM.md). Qwen CPU and Silk captures are also in the release folder, but the CPU leg used a 206-token tool prompt and the Silk legs a 36-token synthetic prompt, so no same-prompt ratio is reported here.
 
 `--seq N[,N...]` times a chosen subset of the benchmark's lengths (`--warmup N` and `--iters N` set the pass counts) on both C# paths, and the PyTorch script takes the same `--seq N[,N...]` (default `128,256`), so one row can be re-measured on both sides of the CPU comparison; the defaults reproduce the tables above unchanged. The CPU path no longer builds a dense `[L, L]` mask (#476), so `--seq` is not capped at 2048 on the CPU side.
 
@@ -280,18 +285,11 @@ dotnet run --project samples/NivaraInference -c Release -- modernbert --silk ben
 python modernbert_benchmark.py --seq 256
 ```
 
-GPU/OpenCL (`--silk`) rows: fill the Silk column from a same-session capture of the
-commands in `## Release Benchmark` above (AC power). Do not carry forward battery
-measurements or prior one-off numbers; if no capture is available, leave the cells
-as `—` and state the reason in the PR. See `docs/ACCELERATION.md` and `docs/SILK.md`
-for published iGPU baselines. Record the OpenCL device/vendor and driver version
-alongside the machine line.
+GPU/OpenCL (`--silk`) rows come from the 2026-11-18 AC capture on `Intel(R) Graphics`. The runner did not record the OpenCL driver version, so no driver string is quoted. Silk rows that were not captured (vision, SmolLM BF16 compute, ModernBERT seq=256) are left as `—`. See `docs/ACCELERATION.md` and `docs/SILK.md` for published iGPU baselines; record the driver version in future captures.
 
+MiniLM / DistilBERT / SST-2 CPU, BLAS and Silk rows run 3 warmup + 10 timed passes and report an **average**; ModernBERT, Laya and SmolLM report **medians**, so their rows are not directly comparable to them (the runs print this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
-
-These three run 3 warmup + 10 timed passes and report an **average**; `modernbert --silk benchmark` reports a **median** of 3, so its rows are not directly comparable to them (the run prints this too, and `--warmup 3 --iters 10` adopts their protocol). ModernBERT's own GPU rows are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
-
-The MiniLM row above is the AC-powered historical `` baseline (backend removed in 1.5.0). The second MiniLM backend (`--silk`) was compared to it **on battery, both legs in one session** (per-kernel in one process, whole forward back-to-back, same 3 + 10 protocol): no separation (whole forward ≈0.94×, per-kernel 0.79–1.19×). Battery numbers are not quotable rows — the figures and the caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
+The 1.5.0-era battery comparison between the removed backend and Silk is historical and is no longer represented in this table; the figures and caveat are in [docs/ACCELERATION.md](../../docs/ACCELERATION.md) §1.
 
 See [docs/ACCELERATION.md](../../docs/ACCELERATION.md) for full GPU details.
 

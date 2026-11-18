@@ -1,0 +1,57 @@
+C:\Program Files\dotnet\sdk\11.0.100\NuGet.Build.Tasks.Pack.targets(232,5): warning NU5104: A stable release of a package should not have a prerelease dependency. Either modify the version spec of dependency "Parquet.Net [6.1.1-pre.1, )" or update the version field in the nuspec. [E:\khurram-uworx\Nivara\src\Nivara.Extensions\Nivara.Extensions.csproj]
+Nivara storage plan benchmark
+  Runtime : 11.0.0
+  Machine : Intel64 Family 6 Model 197 Stepping 2, GenuineIntel · 16 logical processors · X64 · Microsoft Windows 10.0.26300
+
+Scenario                                              ops/s    ns/op         B/op gen0/op
+--------------------------------------------------------------------------------------------
+ColumnAdd 1M x float                                  1,465  682,450    4,000,200    0.24
+ColumnSigmoid 1M x float                                986 1,013,772            0    0.00
+Span chain 1M x 3 ops (raw)                             896 1,116,251            0    0.00
+Column chain 1M x 3 ops (wrapper)                       311 3,215,053   12,000,440    0.34
+Fused chain 1M x (Salary*1.1)+1000-Tax                  260 3,848,662   16,005,616    0.34
+Fused chain chunked 1M x 64k rows                       242 4,137,080   16,005,616    0.34
+Fused single-op TP 1M x (Salary*1.1)                    651 1,536,358    8,003,106    0.24
+Column mul-scalar 1M (wrapper)                          589 1,699,099    8,000,280    0.22
+Linear forward [32x256] -> [32x256]                     425 2,350,626       68,079    0.00
+Linear forward+backward [32x256]                        148 6,770,950      929,094    0.10
+TransformerBlock forward [32x64, 4 heads]               268 3,735,267      184,825    0.00
+Attn per-seq forward [B16 L128 D64 H4]                   86 11,648,258    2,128,003    0.17
+Attn batched forward [B16 L128 D64 H4]                  369 2,713,333      528,801    0.00
+Attn per-seq fwd+bwd [B16 L128 D64 H4]                   22 45,437,475    8,988,322    0.58
+Attn batched fwd+bwd [B16 L128 D64 H4]                  108 9,282,242    8,925,260    0.25
+RowScore per-row copy+dot [10k x 128]                   141 7,112,220            2    0.00
+Frame RowDot [10k x 128]                                295 3,384,600       51,714    0.00
+Frame Slice [10k x 128]                              15,882   62,963       98,368    0.01
+RowDot kernel raw [10k x 128]                           861 1,161,458            1    0.00
+RowCosineSimilarity kernel raw [10k x 128]              228 4,387,116            1    0.00
+RollingSum null-free 1M x int (w10)                     427 2,340,276    5,000,145    0.08
+RollingSum nulls 1M x int (w10)                          94 10,600,234   22,000,241    0.24
+RankKernel RowNumber 100k x int                          32 31,061,958    1,700,484    0.04
+GroupBy 1M rows x 1000 keys (typed)                      25 39,904,985    8,906,938    0.70
+GroupBy 1M rows x 100 string keys (typed)                18 55,095,210   69,188,498    5.50
+PartitionedWindow RollingSum 1M x 100 parts              15 68,843,165   92,217,804    6.70
+Row.Where nullable-element GetValue 100k                 80 12,493,930    9,336,034    0.55
+Streaming cancel mid-stream 200k rows x 10k chunk        5,365  186,387        5,722    0.00
+AutoDiff Pow(2.5) fwd+bwd 1M x float                     86 11,659,575    8,001,866    0.00
+AutoDiff Pow(2.5) scalar baseline 1M x float             32 30,845,860            2    0.00
+AutoDiff RMSNorm fwd+bwd 1M x float                     416 2,404,595    8,002,186    0.10
+AutoDiff RMSNorm scalar baseline 1M x float             731 1,368,645            2    0.00
+AutoDiff RMSNormModule fwd+bwd 1M x float               109 9,210,970   29,428,266    0.45
+Qwen LM head matmul [1x896 @ 151936x896]                 31 32,498,400            5    0.00
+Qwen FFN gate/up/down x3                                411 2,430,280            1    0.00
+Qwen attn Q/K/V/O proj                                5,313  188,220            1    0.00
+Qwen Linear fwd [1x896 -> 2688]                       3,617  276,493       22,369    0.00
+Qwen LM head fwd [1x896 -> 151936]                       34 29,272,988      608,157    0.00
+Qwen decode-attn fwd [1x896 @ kvLen=64]               4,393  227,627       25,129    0.00
+Qwen decode-attn fwd [1x896 @ kvLen=128]              3,264  306,353       25,129    0.00
+Qwen decode-attn fwd [1x896 @ kvLen=256]              2,679  373,265       25,130    0.00
+Qwen decode block [1x896 @ kvLen=64]                    297 3,368,803            1    0.00
+Qwen decode fwd [1 step]                                  9 117,289,417      608,023    0.00
+Qwen prefill seed [8 tok]                                 1 845,475,650      860,520    0.00
+Qwen prefill seed [16 tok]                                1 1,338,355,733      860,545    0.00
+Qwen prefill seed [64 tok]                                1 1,840,074,567      957,851    0.00
+Qwen prefill seed [256 tok]                               0 2,601,243,317    2,402,589    0.17
+Qwen full fwd [64 tok]                                    0 3,676,583,550  414,024,048    0.50
+Qwen full fwd [256 tok]                                   0 4,638,793,783 1,126,480,544    0.83
+Wrote release\v1.5.2\nivara-perf-v1.5.2.json

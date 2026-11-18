@@ -1,0 +1,238 @@
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 29 ms (314 tensors)
+
+=== MobileNetV2 Benchmark ===
+Device: CPU (.NET 11.0.0)
+
+Model build: 39 ms
+Parameters: 3,540,317
+
+Warmup (3 passes)...
+
+Benchmark: synthetic 224x224 input (10 passes)...
+  Run  1: 602.7 ms
+  Run  2: 434.6 ms
+  Run  3: 424.3 ms
+  Run  4: 464.6 ms
+  Run  5: 516.2 ms
+  Run  6: 486.6 ms
+  Run  7: 584.6 ms
+  Run  8: 610.4 ms
+  Run  9: 796.8 ms
+  Run 10: 770.5 ms
+  Average: 569.1 ms  (min=424.3, max=796.8)
+Top-5 predictions:
+  #1: class   609  score=10.417959
+  #2: class   912  score=8.475358
+  #3: class   534  score=7.391680
+  #4: class   113  score=4.914310
+  #5: class   729  score=4.720711
+
+Benchmark: real images (3 images)...
+  test_1_224x224.jpg (224x224): 858.3 ms
+Top-3 predictions:
+  #1: class   534  score=7.600531
+  #2: class   609  score=6.657532
+  #3: class   912  score=5.787375
+
+  test_2_640x480.jpg (640x480): 864.8 ms
+Top-3 predictions:
+  #1: class   534  score=6.560806
+  #2: class   912  score=5.953603
+  #3: class   609  score=5.362065
+
+  test_3_1920x1080.jpg (1920x1080): 752.2 ms
+Top-3 predictions:
+  #1: class   609  score=9.158761
+  #2: class   912  score=6.648057
+  #3: class   113  score=6.619020
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 53 ms (122 tensors)
+
+=== ResNet-18 Benchmark ===
+Device: CPU (.NET 11.0.0)
+
+Model build: 68 ms
+Parameters: 11,699,132
+
+Warmup (3 passes)...
+
+Benchmark: synthetic 224x224 input (10 passes)...
+  Run  1: 150.3 ms
+  Run  2: 155.0 ms
+  Run  3: 168.4 ms
+  Run  4: 138.1 ms
+  Run  5: 132.9 ms
+  Run  6: 134.1 ms
+  Run  7: 160.4 ms
+  Run  8: 128.9 ms
+  Run  9: 174.8 ms
+  Run 10: 124.9 ms
+  Average: 146.8 ms  (min=124.9, max=174.8)
+Top-5 predictions:
+  #1: class   845  score=5.113018
+  #2: class   111  score=4.344147
+  #3: class   644  score=4.242775
+  #4: class   107  score=4.004327
+  #5: class   852  score=3.734894
+
+Benchmark: real images (3 images)...
+  test_1_224x224.jpg (224x224): 178.4 ms
+Top-3 predictions:
+  #1: class   818  score=8.581445
+  #2: class   905  score=8.120543
+  #3: class   498  score=7.850278
+
+  test_2_640x480.jpg (640x480): 152.9 ms
+Top-3 predictions:
+  #1: class   807  score=9.493511
+  #2: class   906  score=7.957941
+  #3: class   545  score=7.681538
+
+  test_3_1920x1080.jpg (1920x1080): 166.8 ms
+Top-3 predictions:
+  #1: class   839  score=6.863528
+  #2: class   905  score=6.845363
+  #3: class   594  score=6.528734
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 104 ms (104 tensors)
+
+=== MiniLM Benchmark ===
+Device: CPU (.NET 11.0.0)  Precision: F32
+
+Parameters: 22,713,728
+Weights: 86.6 MB
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 108.4 ms
+  Min:     89 ms
+  Max:     134 ms
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 286 ms (105 tensors)
+
+=== DistilBERT Benchmark ===
+Device: CPU (.NET 11.0.0)  Precision: F32
+
+Model build: 820 ms
+Parameters: 66,985,530
+Weights: 255.5 MB
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 182.5 ms
+  Min:     166 ms
+  Max:     204 ms
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 259 ms (104 tensors)
+
+=== DistilBERT SST-2 Benchmark ===
+Device: CPU (.NET 11.0.0)  Precision: F32
+
+Model build: 813 ms
+Parameters: 66,955,010
+Weights: 255.4 MB
+
+Input text length: 26 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 192.6 ms
+  Min:     168 ms
+  Max:     248 ms
+
+Last pass sentiment: NEGATIVE (99.3%)
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (native) from model.safetensors...
+  SafeTensors parse (BFloat16): 329 ms (272 tensors)
+
+=== SmolLM-135M Benchmark (BFloat16 storage / F32 compute) ===
+Device: CPU (.NET 11.0.0)  Precision: BFloat16 storage / F32 compute  SIMD-widen: on
+
+Model build: 11 ms
+Parameters: 134,515,008
+Weights (BFloat16 storage / F32 compute): 256.6 MB
+
+Warmup: 1273 ms (32 tokens)
+Run 1: 1077 ms (32 tokens, 29.71 tok/s)
+Run 2: 1037 ms (32 tokens, 30.86 tok/s)
+Run 3: 1022 ms (32 tokens, 31.31 tok/s)
+
+Median: 1037 ms (32 tokens, 30.86 tok/s)
+=== Nivara HuggingFace Inference ===
+
+Loading weights (bf16) from model.safetensors...
+  SafeTensors parse (BFloat16): 184 ms (272 tensors)
+
+=== SmolLM-135M Benchmark (BFloat16) ===
+Device: CPU (.NET 11.0.0)  Precision: BFloat16  SIMD-widen: on
+
+Model build: 10 ms
+Parameters: 134,515,008
+Weights (BFloat16): 256.6 MB
+
+Warmup: 1585 ms (32 tokens)
+Run 1: 1149 ms (32 tokens, 27.85 tok/s)
+Run 2: 1118 ms (32 tokens, 28.62 tok/s)
+Run 3: 1100 ms (32 tokens, 29.09 tok/s)
+
+Median: 1118 ms (32 tokens, 28.62 tok/s)
+=== Nivara HuggingFace Inference ===
+
+Loading weights (native) from model.safetensors...
+  SafeTensors parse (BFloat16): 977 ms (290 tensors)
+
+=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark ===
+Device: CPU (Intel64 Family 6 Model 197 Stepping 2, GenuineIntel · 16 logical processors)  Runtime: .NET 11.0.0  Precision: BFloat16 storage / F32 compute (native)
+Prompt tokens: 206. Decoding the tool call turn 3 times each path...
+
+  KV cache:  median 11265 ms for 19 tokens (605.6 ms/token, 1.7 tok/s) | prefill 9262 ms, decode 105.4 ms/token
+  Full fwd:  median 322010 ms for 19 tokens (16731.3 ms/token, 0.1 tok/s) | prefill 16425 ms, decode 16083.5 ms/token
+  Speedup:   27.6x
+
+C:\Program Files\dotnet\sdk\11.0.100\NuGet.Build.Tasks.Pack.targets(232,5): warning NU5104: A stable release of a package should not have a prerelease dependency. Either modify the version spec of dependency "Parquet.Net [6.1.1-pre.1, )" or update the version field in the nuspec. [E:\khurram-uworx\Nivara\src\Nivara.Extensions\Nivara.Extensions.csproj]
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 1517 ms (173 tensors)
+
+=== ModernBERT-large Benchmark ===
+Device: CPU (.NET 11.0.0), precision F32
+
+Config: dim=1024, layers=28, heads=16, headDim=64, intermediate=2624, vocab=50368
+Attention: 10 full + 18 sliding, local_attention=128 (inclusive band 64), rope theta 160000 full / 10000 sliding
+Norm: bias-free LayerNorm, eps=1E-05, activation=gelu
+
+Load weights: 18 ms
+
+1 warmup + 3 timed passes, median reported.
+The published CPU rows are compared against Python/modernbert_benchmark.py, which warms
+up 3 passes; --warmup 3 matches that protocol.
+
+seq= 128 (valid  26)  median   1388.3 ms  min   1354.4 ms       18.7 tok/s  ~49.58 ms/layer
+seq= 256 (valid  26)  median   1762.0 ms  min   1745.7 ms       14.8 tok/s  ~62.93 ms/layer
+
+Each pass encodes the full padded sequence — this mode has no KV cache, since an encoder re-reads the whole sequence every time.
