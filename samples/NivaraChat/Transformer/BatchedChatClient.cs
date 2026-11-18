@@ -18,6 +18,7 @@ internal sealed class BatchedChatClient : IChatClient
     readonly float temperature;
     readonly float topP;
     readonly int maxNewTokens;
+    readonly bool useKvCache;
     readonly Random rng = new(1234);
 
     public BatchedChatClient(
@@ -25,7 +26,8 @@ internal sealed class BatchedChatClient : IChatClient
         TextTokenizer tokenizer,
         float temperature = 0.8f,
         int maxNewTokens = 256,
-        float topP = 1.0f)
+        float topP = 1.0f,
+        bool useKvCache = false)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -36,6 +38,7 @@ internal sealed class BatchedChatClient : IChatClient
         this.temperature = temperature;
         this.topP = Math.Clamp(topP, 0f, 1f);
         this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
+        this.useKvCache = useKvCache;
     }
 
     public ChatClientMetadata? Metadata { get; } =
@@ -86,19 +89,52 @@ internal sealed class BatchedChatClient : IChatClient
     {
         var promptTokens = tokenizer.Encode(prompt, addBosEos: true);
         var ids = new List<int>(promptTokens);
-        int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
 
         lock (rng)
         {
-            for (int t = 0; t < maxNewTokens; t++)
+            if (useKvCache)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
+                var window = ids.GetRange(ids.Count - seqLen, seqLen);
+                var cache = new TransformerKVCache<float>(model);
+                var logitsTensor = model.ForwardPrefill(ToIntArray(window), cache);
+                var logits = TensorToFloats(logitsTensor);
+                int position = window.Count;
 
-                var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
-                int next = Sample(logits);
-                if (next == tokenizer.EosToken)
-                    break;
-                ids.Add(next);
+                for (int t = 0; t < maxNewTokens; t++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    int next = Sample(logits);
+                    if (next == tokenizer.EosToken)
+                        break;
+                    ids.Add(next);
+
+                    if (position >= model.MaxSeqLen)
+                    {
+                        int keep = model.MaxSeqLen - 1;
+                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
+                        cache = new TransformerKVCache<float>(model);
+                        model.ForwardPrefill(ToIntArray(w), cache);
+                        position = keep;
+                    }
+
+                    logits = TensorToFloats(model.ForwardCached(next, position++, cache));
+                }
+            }
+            else
+            {
+                for (int t = 0; t < maxNewTokens; t++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
+                    var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
+                    int next = Sample(logits);
+                    if (next == tokenizer.EosToken)
+                        break;
+                    ids.Add(next);
+                }
             }
         }
 
@@ -110,21 +146,55 @@ internal sealed class BatchedChatClient : IChatClient
     {
         var promptTokens = tokenizer.Encode(prompt, addBosEos: true);
         var ids = new List<int>(promptTokens);
-        int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
 
         lock (rng)
         {
-            for (int t = 0; t < maxNewTokens; t++)
+            if (useKvCache)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
+                var window = ids.GetRange(ids.Count - seqLen, seqLen);
+                var cache = new TransformerKVCache<float>(model);
+                var logits = TensorToFloats(model.ForwardPrefill(ToIntArray(window), cache));
+                int position = window.Count;
 
-                var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
-                int next = Sample(logits);
-                if (next == tokenizer.EosToken)
-                    yield break;
+                for (int t = 0; t < maxNewTokens; t++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                ids.Add(next);
-                yield return tokenizer.Decode([next]);
+                    int next = Sample(logits);
+                    if (next == tokenizer.EosToken)
+                        yield break;
+
+                    ids.Add(next);
+                    yield return tokenizer.Decode([next]);
+
+                    if (position >= model.MaxSeqLen)
+                    {
+                        int keep = model.MaxSeqLen - 1;
+                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
+                        cache = new TransformerKVCache<float>(model);
+                        model.ForwardPrefill(ToIntArray(w), cache);
+                        position = keep;
+                    }
+
+                    logits = TensorToFloats(model.ForwardCached(next, position++, cache));
+                }
+            }
+            else
+            {
+                for (int t = 0; t < maxNewTokens; t++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
+                    var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
+                    int next = Sample(logits);
+                    if (next == tokenizer.EosToken)
+                        yield break;
+
+                    ids.Add(next);
+                    yield return tokenizer.Decode([next]);
+                }
             }
         }
     }
@@ -146,6 +216,23 @@ internal sealed class BatchedChatClient : IChatClient
         int rowStart = (window.Count - 1) * vocab;
         for (int v = 0; v < vocab; v++)
             last[v] = float.CreateChecked(logits[rowStart + v]);
+        return last;
+    }
+
+    static int[] ToIntArray(List<int> window)
+    {
+        var arr = new int[window.Count];
+        for (int i = 0; i < window.Count; i++) arr[i] = window[i];
+        return arr;
+    }
+
+    static float[] TensorToFloats(ReverseGradTensor<float> logits)
+    {
+        logits.Data.TryGetSpan(out var span);
+        int vocab = logits.Shape[^1];
+        var last = new float[vocab];
+        for (int v = 0; v < vocab; v++)
+            last[v] = span.Length >= vocab ? span[v] : float.CreateChecked(logits[v]);
         return last;
     }
 

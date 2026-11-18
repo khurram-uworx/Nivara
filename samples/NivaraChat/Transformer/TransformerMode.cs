@@ -87,6 +87,7 @@ public static class TransformerMode
                 case "--save": options.SavePath = args[++i]; break;
                 case "--load": options.LoadPath = args[++i]; break;
                 case "--no-di-demo": options.ShowDiDemo = false; break;
+                case "--kv-cache": options.UseKvCache = true; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
             }
@@ -250,7 +251,7 @@ public static class TransformerMode
         string prompt, TransformerOptions options)
     {
         Console.WriteLine($"\n--- samples (prompt: {prompt}) ---");
-        using var client = new BatchedChatClient(model, tokenizer, options.Temperature, options.MaxNewTokens, options.TopP);
+        using var client = new BatchedChatClient(model, tokenizer, options.Temperature, options.MaxNewTokens, options.TopP, options.UseKvCache);
 
         for (int i = 0; i < options.SampleCount; i++)
         {
@@ -272,7 +273,8 @@ public static class TransformerMode
             sp.GetRequiredService<TextTokenizer>(),
             options.Temperature,
             options.MaxNewTokens,
-            options.TopP));
+            options.TopP,
+            options.UseKvCache));
 
         using var provider = services.BuildServiceProvider();
         using var client = provider.GetRequiredService<IChatClient>();
@@ -313,6 +315,7 @@ Options:
                           --block-size/--n-head/--vocab-size used at save time;
                           the matching <path>.tokenizer.json is loaded too)
   --no-di-demo            Skip the DI + IChatClient demo at the end
+  --kv-cache              Use the cached generation path (default: off)
   --help, -h              Show this help
 """);
     }
@@ -339,6 +342,7 @@ Options:
         public string? DataPath = null;
         public string? Prompt = null;
         public bool ShowDiDemo = true;
+        public bool UseKvCache = false;
         public bool ShowHelp = false;
     }
 }
