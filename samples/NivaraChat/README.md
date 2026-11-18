@@ -396,10 +396,9 @@ artifacts with `--regenerate <queries|judge<|channel|>all>` (see [`../../docs/RA
 `--report <path>` writes the metric table, the paired comparisons, the learned weights and a
 "reading this report" section as markdown under the gitignored `samples/data/nivarachat/learn/`.
 Acceptance is a fair comparison, not a guarantee: a learned model that loses on held-out queries is
-a valid outcome and the report says so. With `--silk`, the MiniLM embeddings and — for `--loss listwise` — the fusion
-training loop and Adam step run on the device via `SilkRetrievalTrainer`; the
-query gate trains on the device too. `--loss pairwise` still trains on CPU,
-because the Silk trainer is listwise-only.
+a valid outcome and the report says so. With `--silk`, the MiniLM embeddings and the fusion training loop and Adam step
+run on the device via `SilkRetrievalTrainer` for both `--loss listwise` and
+`--loss pairwise`; the query gate trains on the device too.
 
 Uses: `RetrievalTrainingData` (`CandidatePool`, `TrainingSetBuilder`, `QuerySplit`), `RetrievalLabels` (`LabelKind`, `ResolvedLabels`, `SelectSource`, `Accepts`),
 `RetrievalTrainer` (`FusionModel`, `GatedFusionModel`, `TrainingOptions`), `RetrievalEvaluation`
