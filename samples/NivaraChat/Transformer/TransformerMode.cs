@@ -521,8 +521,8 @@ Options:
                           --block-size/--n-head/--vocab-size used at save time;
                           the matching <path>.tokenizer.json is loaded too)
   --no-di-demo            Skip the DI + IChatClient demo at the end
-  --kv-cache              Use the cached generation path (default: off)
-  --no-kv-cache           Disable the KV cache (re-project full window)
+  --kv-cache              Use the KV cache for faster generation (default)
+  --no-kv-cache           Re-run the full forward per token (no cache)
   --silk                  Use the Silk/OpenCL backend for generation (default: off)
   --help, -h              Show this help
 """);
@@ -551,7 +551,7 @@ Options:
         public string? Prompt = null;
         public string? Text = null;
         public bool ShowDiDemo = true;
-        public bool UseKvCache = false;
+        public bool UseKvCache = true;
         public bool UseSilk = false;
         public bool ShowHelp = false;
     }

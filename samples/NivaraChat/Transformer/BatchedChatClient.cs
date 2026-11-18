@@ -27,7 +27,7 @@ internal sealed class BatchedChatClient : IChatClient
         float temperature = 0.8f,
         int maxNewTokens = 256,
         float topP = 1.0f,
-        bool useKvCache = false)
+        bool useKvCache = true)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(tokenizer);
