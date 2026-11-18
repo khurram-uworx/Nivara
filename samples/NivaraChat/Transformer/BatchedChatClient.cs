@@ -110,16 +110,25 @@ internal sealed class BatchedChatClient : IChatClient
                         break;
                     ids.Add(next);
 
+                    if (position >= model.MaxSeqLen)
+                    {
+                        int keep = model.MaxSeqLen - 1;
+                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
+                        cache = new TransformerKVCache<float>(model);
+                        model.ForwardPrefill(ToIntArray(w), cache);
+                        position = keep;
+                    }
+
                     logits = TensorToFloats(model.ForwardCached(next, position++, cache));
                 }
             }
             else
             {
-                int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
                 for (int t = 0; t < maxNewTokens; t++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
+                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
                     var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
                     int next = Sample(logits);
                     if (next == tokenizer.EosToken)
@@ -159,16 +168,25 @@ internal sealed class BatchedChatClient : IChatClient
                     ids.Add(next);
                     yield return tokenizer.Decode([next]);
 
+                    if (position >= model.MaxSeqLen)
+                    {
+                        int keep = model.MaxSeqLen - 1;
+                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
+                        cache = new TransformerKVCache<float>(model);
+                        model.ForwardPrefill(ToIntArray(w), cache);
+                        position = keep;
+                    }
+
                     logits = TensorToFloats(model.ForwardCached(next, position++, cache));
                 }
             }
             else
             {
-                int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
                 for (int t = 0; t < maxNewTokens; t++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
+                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
                     var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
                     int next = Sample(logits);
                     if (next == tokenizer.EosToken)
