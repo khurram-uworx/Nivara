@@ -9,43 +9,20 @@ using System.Runtime.CompilerServices;
 namespace NivaraChat.Qwen;
 
 /// <summary>
-/// An <see cref="IChatClient"/> backed by Qwen2.5-0.5B-Instruct running as a
-/// <see cref="LlamaForCausalLM{TModel, TWeight}"/> (BF16-on-disk weights), served over the
-/// Microsoft.Extensions.AI content model. Inference is the default path: the model is run
-/// outside a <c>GradientUtils.Grad()</c> scope, so no graph nodes are built (per ADR-001 /
-/// ADR-002 inference-default direction).
-///
-/// Conversations are rendered byte-identically to HuggingFace's <c>apply_chat_template</c>
-/// (<see cref="QwenChatTemplate"/>), encoded by the byte-level BPE tokenizer, and decoded
-/// autoregressively with a KV cache, stopping on either <c>&lt;|im_end|&gt;</c> (151645) or
-/// <c>&lt;|endoftext|&gt;</c> (151643). Generated assistant turns containing
-/// <c>&lt;tool_call&gt;</c> blocks are parsed into <see cref="FunctionCallContent"/> so a
-/// <see cref="FunctionInvokingChatClient"/> (or the tool loop in <c>QwenMode</c>) can execute
-/// them; plain turns become <see cref="TextContent"/>. <paramref name="turnCallback"/> observes
-/// every generated assistant turn (used by the demo to print live progress).
+/// An <see cref="IChatClient"/> backed by Qwen2.5-0.5B-Instruct.
 /// </summary>
-internal sealed class QwenChatClient<TModel, TWeight> : IChatClient
+internal sealed class QwenChatClient<TModel, TWeight> : CausalLmChatClientBase
     where TModel : struct, IFloatingPointIeee754<TModel>
     where TWeight : struct, IFloatingPointIeee754<TWeight>
 {
     readonly LlamaForCausalLM<TModel, TWeight> model;
     readonly Gpt2BpeTokenizer tokenizer;
     readonly LlamaConfig config;
-    readonly int maxNewTokens;
-    readonly float temperature;
-    readonly float topP;
-    readonly bool useKvCache;
-    readonly Random rng;
     readonly TokenizePrefixCache tokenizeCache = new();
     readonly IReadOnlyList<string>? knownToolNames;
     readonly Action<string>? turnCallback;
     readonly int numLayers;
     readonly int kvWidth;
-
-    public ChatClientMetadata? Metadata { get; } =
-        new ChatClientMetadata("Nivara", null, "Qwen2.5-0.5B-Instruct (LlamaForCausalLM + GPT-2 BPE)");
-
-    public int TokenizeCacheHits => tokenizeCache.Hits;
 
     public QwenChatClient(
         LlamaForCausalLM<TModel, TWeight> model,
@@ -58,6 +35,7 @@ internal sealed class QwenChatClient<TModel, TWeight> : IChatClient
         bool useKvCache = true,
         IReadOnlyList<string>? knownToolNames = null,
         Action<string>? turnCallback = null)
+        : base(temperature ?? 0f, Math.Clamp(topP ?? 1f, 0f, 1f), maxNewTokens, useKvCache, new Random(seed ?? 0))
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -67,25 +45,30 @@ internal sealed class QwenChatClient<TModel, TWeight> : IChatClient
         this.model = model;
         this.tokenizer = tokenizer;
         this.config = config;
-        this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
-        this.temperature = temperature ?? 0f;
-        this.topP = Math.Clamp(topP ?? 1f, 0f, 1f);
-        this.useKvCache = useKvCache;
-        this.rng = new Random(seed ?? 0);
         this.knownToolNames = knownToolNames;
         this.turnCallback = turnCallback;
         this.numLayers = config.NumHiddenLayers;
         this.kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
     }
 
-    public object? GetService(Type serviceType, object? key = null) => null;
+    public override ChatClientMetadata? Metadata { get; } =
+        new ChatClientMetadata("Nivara", null, "Qwen2.5-0.5B-Instruct (LlamaForCausalLM + GPT-2 BPE)");
 
-    public Task<ChatResponse> GetResponseAsync(
+    public int TokenizeCacheHits => tokenizeCache.Hits;
+
+    public override Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var text = Decode(Generate(messages, cancellationToken));
+        var generated = new List<int>();
+        lock (rng)
+        {
+            foreach (var id in GenerateIds(messages, cancellationToken))
+                generated.Add(id);
+        }
+
+        var text = DecodeAll(generated);
         turnCallback?.Invoke(text);
 
         var calls = QwenToolCallParser.Parse(text, knownToolNames);
@@ -99,73 +82,47 @@ internal sealed class QwenChatClient<TModel, TWeight> : IChatClient
         return Task.FromResult(new ChatResponse(responseMessage));
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
+        => QwenChatTemplate.Render(messages, addGenerationPrompt: true);
+
+    protected override IReadOnlyList<int> Encode(string prompt)
+        => tokenizeCache.Encode(prompt, p => tokenizer.Encode(p));
+
+    protected override string DecodeToken(int tokenId)
+        => tokenizer.Decode(new[] { tokenId });
+
+    protected override string DecodeAll(IReadOnlyList<int> ids)
+        => tokenizer.Decode(ids);
+
+    protected override CausalLmOps BuildOps()
     {
-        var generated = Generate(messages, cancellationToken);
-        foreach (var id in generated)
-            yield return new ChatResponseUpdate(ChatRole.Assistant, tokenizer.Decode([id]));
-    }
-
-    public void Dispose() { }
-
-    /// <summary>Renders, encodes, and autoregressively decodes one assistant turn (ids only).</summary>
-    IReadOnlyList<int> Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
-    {
-        var prompt = QwenChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(tokenizeCache.Encode(prompt, p => tokenizer.Encode(p)));
-
-        using var cache = useKvCache ? new LlamaKVCache<TModel>(numLayers, kvWidth) : null;
-
-        bool greedy = temperature <= 0f;
-        var generated = new List<int>();
-
-        lock (rng)
-        {
-            var logits = useKvCache ? SeedCache(ids, cache!) : null;
-            int position = ids.Count;
-
-            for (int t = 0; t < maxNewTokens; t++)
+        LlamaKVCache<TModel>? cache = null;
+        return new CausalLmOps(
+            Prefill: w =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int next;
-                if (useKvCache)
-                {
-                    next = Select(LastRow(logits!));
-                }
-                else
-                {
-                    var full = model.Forward(ids.ToArray()); // [L, vocab]
-                    next = Select(LastRow(full));
-                }
-
-                if (QwenIds.StopIds.Contains(next))
-                    break;
-
-                generated.Add(next);
-
-                if (useKvCache)
-                    logits = model.ForwardCached(next, position++, cache!);
-                else
-                    ids.Add(next);
-
-                if (generated.Count >= config.MaxPositionEmbeddings - position)
-                    break;
-            }
-        }
-
-        return generated;
+                cache ??= new LlamaKVCache<TModel>(numLayers, kvWidth);
+                return ToFloat(model.ForwardPrefill(w, cache));
+            },
+            Cached: (t, p) => ToFloat(model.ForwardCached(t, p, cache!)),
+            LastLogits: w => ToFloat(model.Forward(w)),
+            ResetCache: () => cache = new LlamaKVCache<TModel>(numLayers, kvWidth),
+            IsStopToken: id => QwenIds.StopIds.Contains(id),
+            VocabSize: config.VocabSize,
+            EosTokenId: config.EosTokenId,
+            MaxSequenceLength: config.MaxPositionEmbeddings);
     }
 
-    /// <summary>Runs the prompt tokens through a single batched prefill to seed the per-layer cache
-    /// and produce the logits predicting the first generated token.</summary>
-    ReverseGradTensor<TModel> SeedCache(List<int> ids, LlamaKVCache<TModel> cache)
-        => model.ForwardPrefill(ids.ToArray(), cache);
+    protected override bool BreakOnContextLimit => true;
 
-    /// <summary>Returns the model's final-position logits (<c>[vocab]</c>) as a span.</summary>
+    static float[] ToFloat(ReverseGradTensor<TModel> logits)
+    {
+        var span = LastRow(logits);
+        var arr = new float[span.Length];
+        for (int i = 0; i < arr.Length; i++)
+            arr[i] = float.CreateChecked(span[i]);
+        return arr;
+    }
+
     static ReadOnlySpan<TModel> LastRow(ReverseGradTensor<TModel> logits)
     {
         logits.Data.TryGetSpan(out var span);
@@ -174,17 +131,4 @@ internal sealed class QwenChatClient<TModel, TWeight> : IChatClient
         int offset = (rows - 1) * vocab;
         return offset >= 0 && span.Length >= offset + vocab ? span.Slice(offset, vocab) : span;
     }
-
-    /// <summary>Selects the next token: argmax when greedy, otherwise temperature softmax with
-    /// optional top-p filtering, drawn from the shared seeded RNG.</summary>
-    int Select(ReadOnlySpan<TModel> lastRow)
-    {
-        int vocab = config.VocabSize;
-        if (lastRow.Length < vocab)
-            lastRow = lastRow[..vocab];
-
-        return TokenSampling.Sample(lastRow, vocab, temperature, topP, rng);
-    }
-
-    string Decode(IReadOnlyList<int> ids) => tokenizer.Decode(ids);
 }

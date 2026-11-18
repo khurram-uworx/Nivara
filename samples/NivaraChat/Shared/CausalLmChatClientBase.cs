@@ -67,7 +67,7 @@ internal abstract class CausalLmChatClientBase : IChatClient
             BreakOnContextLimit);
     }
 
-    public Task<ChatResponse> GetResponseAsync(
+    public virtual Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
