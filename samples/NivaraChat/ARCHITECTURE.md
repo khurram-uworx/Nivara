@@ -320,7 +320,12 @@ directly. The remaining gaps were closed by this work:
 - Top-p/top-k sampling, beam search — temperature + random sampling only.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
   Nivara's scope.
-- BPE/subword tokenization, multi-modal, ASP.NET hosting — out of scope, but the
+- BPE/subword tokenization for `--tinyshakespeare` — **deferred** (decision
+  D-014, issue #1311): word-level `TextTokenizer` kept for v1 so the sample stays
+  close to the classic TinyShakespeare framing; migration to `Gpt2BpeTokenizer`
+  is a separate, model-breaking follow-up (would invalidate saved
+  `*.tokenizer.json` + golden fixtures and require a BPE trainer, which the repo
+  does not yet have). Multi-modal, ASP.NET hosting — out of scope, but the
   sample is DI-compatible so hosting is a one-liner.
 
 ### Notes
@@ -401,6 +406,22 @@ cited code.
 - **D-012 — Consolidated `NivaraChatClient` into `--tinyshakespeare` mode**
   under `Transformer/` namespace; menu option 4. Hint:
   `Modes/TransformerMode.cs`.
+- **D-014 — Tokenizer strategy for `--tinyshakespeare`: keep word-level (Option A).**
+  Decision (issue #1311, parent #1270 Phase C): retain the word-level
+  `TextTokenizer` (~8k vocab, tied LM head, D-007) for v1. Rationale: keeps the
+  sample close to the classic TinyShakespeare educational framing (Karpathy
+  char-rnn style: split on whitespace, frequency vocab, small transformer) so
+  reviewers recognize the familiar concept and map it onto Nivara idioms
+  (AutoDiff, `BatchedMultiHeadAttention`, `IChatClient`); avoids breaking saved
+  `*.tokenizer.json` files and golden fixtures; avoids building a BPE trainer
+  (the repo's `Gpt2BpeTokenizer` only loads pre-trained vocab/merges). Cost
+  (tied LM head over ~8k vocab, ~1M short dot-calls/batch) is accepted and
+  absorbed by Silk in #1313; smoke/CI use `--vocab-size 1200`. Migration to
+  `Gpt2BpeTokenizer` (Option B) is deferred as a separate, model-breaking
+  follow-up that would update training, serialization (D-008), CLI, tests and
+  golden fixtures and ship its own issues. Hint: `Transformer/TinyShakespeare.cs`,
+  `Transformer/TransformerMode.cs`, `src/Nivara/AutoDiff/Nn/TextTokenizer.cs`,
+  `src/Nivara.Extensions/AI/Gpt2BpeTokenizer.cs`.
 - **Resolved open questions:** Route B chosen; batched attention shipped before
-  the sample.
+  the sample. (Tokenizer strategy now resolved by D-014.)
 
