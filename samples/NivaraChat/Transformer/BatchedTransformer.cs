@@ -33,8 +33,7 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
         int nEmbd,
         int nLayer,
         int nHead,
-        int maxSeqLen,
-        double dropout = 0.0)
+        int maxSeqLen)
     {
         if (vocabSize <= 0) throw new ArgumentOutOfRangeException(nameof(vocabSize));
         if (nEmbd <= 0) throw new ArgumentOutOfRangeException(nameof(nEmbd));
@@ -54,7 +53,7 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
 
         blocks = new BatchedTransformerBlock<T>[nLayer];
         for (int i = 0; i < nLayer; i++)
-            blocks[i] = new BatchedTransformerBlock<T>(nEmbd, nHead, maxSeqLen, dropout);
+            blocks[i] = new BatchedTransformerBlock<T>(nEmbd, nHead, maxSeqLen);
 
         finalNorm = new LayerNorm<T>(nEmbd);
 
@@ -130,7 +129,7 @@ public sealed class BatchedTransformerBlock<T> : Module<T> where T : struct, IFl
     readonly Linear<T> mlpFc1;
     readonly Linear<T> mlpFc2;
 
-    public BatchedTransformerBlock(int nEmbd, int nHead, int maxSeqLen, double dropout = 0.0)
+    public BatchedTransformerBlock(int nEmbd, int nHead, int maxSeqLen)
     {
         if (nEmbd <= 0) throw new ArgumentOutOfRangeException(nameof(nEmbd));
         if (nHead <= 0) throw new ArgumentOutOfRangeException(nameof(nHead));

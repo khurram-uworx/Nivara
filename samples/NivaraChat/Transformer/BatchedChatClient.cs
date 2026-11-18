@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using NivaraChat.Shared;
 
 namespace NivaraChat.Transformer;
 
@@ -15,6 +16,7 @@ internal sealed class BatchedChatClient : IChatClient
     readonly BatchedTransformer<float> model;
     readonly TextTokenizer tokenizer;
     readonly float temperature;
+    readonly float topP;
     readonly int maxNewTokens;
     readonly Random rng = new(1234);
 
@@ -22,7 +24,8 @@ internal sealed class BatchedChatClient : IChatClient
         BatchedTransformer<float> model,
         TextTokenizer tokenizer,
         float temperature = 0.8f,
-        int maxNewTokens = 256)
+        int maxNewTokens = 256,
+        float topP = 1.0f)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -31,6 +34,7 @@ internal sealed class BatchedChatClient : IChatClient
         this.model = model;
         this.tokenizer = tokenizer;
         this.temperature = temperature;
+        this.topP = Math.Clamp(topP, 0f, 1f);
         this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
     }
 
@@ -146,42 +150,5 @@ internal sealed class BatchedChatClient : IChatClient
     }
 
     int Sample(float[] logits)
-    {
-        float temperature = this.temperature;
-        float max = float.NegativeInfinity;
-        for (int i = 0; i < logits.Length; i++)
-            max = logits[i] > max ? logits[i] : max;
-
-        var exp = new float[logits.Length];
-        float sum = 0f;
-        for (int i = 0; i < logits.Length; i++)
-        {
-            exp[i] = MathF.Exp((logits[i] - max) / temperature);
-            sum += exp[i];
-        }
-
-        if (sum <= 0f || !float.IsFinite(sum))
-            return ArgMax(logits);
-
-        double r = rng.NextDouble() * sum;
-        double acc = 0;
-        for (int i = 0; i < exp.Length; i++)
-        {
-            acc += exp[i];
-            if (r <= acc)
-                return i;
-        }
-        return ArgMax(logits);
-    }
-
-    static int ArgMax(float[] logits)
-    {
-        int best = 0;
-        for (int i = 1; i < logits.Length; i++)
-        {
-            if (logits[i] > logits[best])
-                best = i;
-        }
-        return best;
-    }
+        => TokenSampling.Sample(logits, logits.Length, temperature, topP, rng);
 }

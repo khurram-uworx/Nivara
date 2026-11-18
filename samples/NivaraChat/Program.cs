@@ -339,7 +339,7 @@ void PrintUsage()
     Console.WriteLine("  --resume                  --rag-adaptive-eval: load persisted head on startup");
     Console.WriteLine("  --no-persist              --rag-adaptive-eval: train in memory, do not write laya_head.json");
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
-    Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
+    Console.WriteLine("                        --vocab-size --temperature --top-p --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
     Console.WriteLine("  --smollm options:    --model-dir --text --max-new-tokens --help");
 }

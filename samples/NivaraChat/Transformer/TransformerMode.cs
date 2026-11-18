@@ -71,7 +71,6 @@ public static class TransformerMode
                 case "--n-layer": options.NLayer = int.Parse(args[++i]); break;
                 case "--block-size": options.BlockSize = int.Parse(args[++i]); break;
                 case "--n-head": options.NHead = int.Parse(args[++i]); break;
-                case "--dropout": options.Dropout = double.Parse(args[++i]); break;
                 case "--epochs": options.Epochs = int.Parse(args[++i]); break;
                 case "--batch-size": options.BatchSize = int.Parse(args[++i]); break;
                 case "--lr": options.LearningRate = double.Parse(args[++i]); break;
@@ -80,6 +79,7 @@ public static class TransformerMode
                 case "--vocab-size": options.MaxVocabSize = int.Parse(args[++i]); break;
                 case "--seed": options.RngSeed = int.Parse(args[++i]); break;
                 case "--temperature": options.Temperature = float.Parse(args[++i]); break;
+                case "--top-p": options.TopP = float.Parse(args[++i]); break;
                 case "--max-new-tokens": options.MaxNewTokens = int.Parse(args[++i]); break;
                 case "--samples": options.SampleCount = int.Parse(args[++i]); break;
                 case "--data": options.DataPath = args[++i]; break;
@@ -113,7 +113,7 @@ public static class TransformerMode
         }
 
         using var model = new BatchedTransformer<float>(
-            tokenizer.VocabSize, options.NEmbd, options.NLayer, options.NHead, options.BlockSize, dropout: options.Dropout);
+            tokenizer.VocabSize, options.NEmbd, options.NLayer, options.NHead, options.BlockSize);
 
         if (!string.IsNullOrWhiteSpace(options.LoadPath))
         {
@@ -125,7 +125,7 @@ public static class TransformerMode
             int totalParams = 0;
             foreach (var p in model.GetParameters().Values)
                 totalParams += p.Length;
-            Console.WriteLine($"model: {options.NLayer}L x {options.NEmbd}D, {options.NHead} heads, block={options.BlockSize}, dropout={options.Dropout}");
+            Console.WriteLine($"model: {options.NLayer}L x {options.NEmbd}D, {options.NHead} heads, block={options.BlockSize}");
             Console.WriteLine($"params: {totalParams}");
 
             Train(model, tokenizer, docs!, options);
@@ -250,7 +250,7 @@ public static class TransformerMode
         string prompt, TransformerOptions options)
     {
         Console.WriteLine($"\n--- samples (prompt: {prompt}) ---");
-        using var client = new BatchedChatClient(model, tokenizer, options.Temperature, options.MaxNewTokens);
+        using var client = new BatchedChatClient(model, tokenizer, options.Temperature, options.MaxNewTokens, options.TopP);
 
         for (int i = 0; i < options.SampleCount; i++)
         {
@@ -271,7 +271,8 @@ public static class TransformerMode
             sp.GetRequiredService<BatchedTransformer<float>>(),
             sp.GetRequiredService<TextTokenizer>(),
             options.Temperature,
-            options.MaxNewTokens));
+            options.MaxNewTokens,
+            options.TopP));
 
         using var provider = services.BuildServiceProvider();
         using var client = provider.GetRequiredService<IChatClient>();
@@ -294,7 +295,6 @@ Options:
   --n-layer <int>         Number of transformer layers (default: 2)
   --block-size <int>      Context window / max sequence length (default: 64)
   --n-head <int>          Number of attention heads (default: 4)
-  --dropout <float>       Dropout probability (default: 0.1)
   --epochs <int>          Training epochs (default: 20)
   --batch-size <int>      Batch size (default: 32)
   --lr <float>            Learning rate (default: 3e-3)
@@ -302,6 +302,7 @@ Options:
   --beta2 <float>         Adam beta2 (default: 0.95)
   --vocab-size <int>      Max word-vocab size (default: 8000)
   --temperature <float>   Sampling temperature (default: 0.8)
+  --top-p <float>         Nucleus (top-p) cutoff for sampling (default: 1.0)
   --max-new-tokens <int>  Max tokens per generated reply (default: 96)
   --samples <int>         Number of generated samples (default: 5)
   --seed <int>            RNG seed (default: 42)
@@ -327,11 +328,11 @@ Options:
         public double LearningRate = 3e-3;
         public double Beta1 = 0.9;
         public double Beta2 = 0.95;
-        public double Dropout = 0.1;
         public int RngSeed = 42;
         public int MaxVocabSize = 8000;
         public int MaxNewTokens = 96;
         public float Temperature = 0.8f;
+        public float TopP = 1.0f;
         public int SampleCount = 5;
         public string? SavePath = null;
         public string? LoadPath = null;
