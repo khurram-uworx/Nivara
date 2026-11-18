@@ -1,7 +1,9 @@
 # NivaraChat generalization gaps (post-TinyShakespeare)
 
-Umbrella context: `docs/plans/TINY-SHAKESPEARE.md` (issues #1270/#1307–#1315) added a Silk/GPU
-path, KV cache, top-p, and CPU-vs-Silk parity for the TinyShakespeare `BatchedTransformer`.
+Umbrella context: issues #1270/#1307–#1315 added a Silk/GPU path, KV cache, top-p, and
+CPU-vs-Silk parity for the TinyShakespeare `BatchedTransformer`. The original phased plan
+lived in `docs/plans/TINY-SHAKESPEARE.md`, which has been retired now that all of those
+issues are closed and merged.
 This document captures the follow-up gaps identified when comparing that work against the
 rest of NivaraChat (SmolLM, Qwen, and the trained classifier models), and the GitHub issues
 filed for them. Training stays on the CPU AutoDiff path; Silk is inference-only, matching
@@ -59,7 +61,7 @@ The clearest gap is that TinyShakespeare has **no Silk `IChatClient`** (its `--s
 - `ToSilkWeights` for SmolLM/Qwen: they do not train in Nivara; weights come from safetensors.
 - Classifier models (sentiment/entity/validator): no autoregressive generation or KV cache;
   Silk paths already exist (`GpuTextLinearClassifier`, etc.).
-- GPU training / AutoDiff on Silk (non-goal from `TINY-SHAKESPEARE.md`).
+- GPU training / AutoDiff on Silk (non-goal carried over from the retired TinyShakespeare plan).
 - Rank-3 (batched) MatMul in core.
 
 ## Key references for coding agents
