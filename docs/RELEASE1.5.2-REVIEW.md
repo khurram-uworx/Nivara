@@ -95,12 +95,12 @@ the sample README tables will be refreshed from the remaining captures before ta
 - Background benchmark runs are long; the canonical runner remains the preferred entry
   point.
 - The canonical `regen_perf_table.py` copy (three identical copies under `samples/*/Python/`)
-  has two defects: it drops the `| Scenario | Prev | … |` header and separator on regen,
-  and it computes `Δ%` against the *old* Prev instead of the shifted Prev, so the column
-  does not match the Prev/Current pair. The core harness table for v1.5.2 was regenerated
-  with a one-off corrected routine (header restored, `Δ% = (Current − Prev)/Prev`), and the
-  three regen scripts should be fixed before the next release. Troubleshooting the core
-  harness JSON also showed three new scenarios (`AutoDiff RMSNormModule fwd+bwd`,
+  had two defects: it dropped the `| Scenario | Prev | … |` header and separator on regen,
+  and it computed `Δ%` against the *old* Prev instead of the shifted Prev, so the column
+  did not match the Prev/Current pair. All three copies are now fixed (header preserved,
+  `Δ% = (Current − Prev)/Prev`, and JSON-only results appended with `Prev = —`). The core
+  harness table for v1.5.2 was regenerated with the corrected logic. Troubleshooting the
+  core harness JSON also showed three new scenarios (`AutoDiff RMSNormModule fwd+bwd`,
   `Qwen decode block`, `Qwen decode fwd`) that had never been added as table rows; they
   are now present with `Prev = —`.
 
