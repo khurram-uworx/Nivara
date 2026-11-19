@@ -96,21 +96,24 @@ public static class RagAdaptiveEvalMode
         }
 
         // head-training backend selection (after index builds, to avoid device contention)
+        SilkRuntime? silkHeadRuntime = null;
         if (ctx.UseSilk)
         {
             try
             {
                 var probeTensors = HeadToCheckpointTensors(engine.Head);
-                using var probeRuntime = new SilkRuntime();
-                using var probeTrainer = new SilkLayaHeadTrainer(probeRuntime, probeTensors, engine.Head.HeadLayerCount, 2, 8);
+                silkHeadRuntime = new SilkRuntime();
+                using var probeTrainer = new SilkLayaHeadTrainer(silkHeadRuntime, probeTensors, engine.Head.HeadLayerCount, 2, 8);
                 silkHeadAvailable = true;
-                silkUpdate = SilkUpdate;
+                silkUpdate = (h, ex, ep, lr) => SilkUpdate(silkHeadRuntime, h, ex, ep, lr);
                 headTrainingBackend = "silk";
             }
             catch (Exception probeError)
             {
                 silkHeadAvailable = false;
                 headTrainingBackend = "cpu (silk unavailable)";
+                silkHeadRuntime?.Dispose();
+                silkHeadRuntime = null;
                 Console.WriteLine($"Silk head training unavailable ({probeError.GetType().Name}: {probeError.Message}); falling back to CPU AutoDiff.");
             }
         }
@@ -529,6 +532,7 @@ public static class RagAdaptiveEvalMode
     }
 
     static void SilkUpdate(
+        SilkRuntime runtime,
         LayaDecisionHead<float, float> head,
         IReadOnlyList<AdaptiveTrainingExample> examples,
         int epochs,
@@ -541,7 +545,6 @@ public static class RagAdaptiveEvalMode
         foreach (var e in examples)
             if (e.SequenceLength > maxSeq) maxSeq = e.SequenceLength;
 
-        using var runtime = new SilkRuntime();
         using var trainer = new SilkLayaHeadTrainer(runtime, tensors, head.HeadLayerCount, 2, maxSeq);
 
         int n = examples.Count;
