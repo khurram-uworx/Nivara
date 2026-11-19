@@ -83,7 +83,7 @@ internal abstract class CausalLmChatClientBase : IChatClient
         return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, text)]));
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public virtual async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
