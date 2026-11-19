@@ -322,6 +322,12 @@ directly. The remaining gaps were closed by this work:
 - Top-p sampling — now available via `--top-p` (`TokenSampling`); top-k and beam search remain out of scope.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
   Nivara's scope.
+- Silk is inference-only for this sample's transformer: training stays on the CPU
+  AutoDiff path. `ToSilkWeights()` exists only for the Nivara-trained
+  `BatchedTransformer`; SmolLM/Qwen import weights from safetensors and never
+  train in Nivara, so they have no `ToSilkWeights` path. Classifier models
+  (sentiment/entity/validator) have no autoregressive generation or KV cache;
+  their Silk paths are separate (`GpuTextLinearClassifier`, etc.).
 - BPE/subword tokenization for `--tinyshakespeare` — **deferred** (decision
   D-014, issue #1311): word-level `TextTokenizer` kept for v1 so the sample stays
   close to the classic TinyShakespeare framing; migration to `Gpt2BpeTokenizer`
