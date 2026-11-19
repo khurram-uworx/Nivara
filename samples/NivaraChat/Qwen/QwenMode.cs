@@ -108,7 +108,8 @@ public static class QwenMode
             (nivaraValidatorModel, nivaraValidatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
             var sentimentSilk = options.UseSilk ? SilkTextClassifier.TryCreate(nivaraSentimentModel, 20, 3) : null;
             var validatorSilk = options.UseSilk ? SilkTextClassifier.TryCreate(nivaraValidatorModel, 40, 2) : null;
-            NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok, sentimentSilk, validatorSilk);
+            var entitySilk = options.UseSilk ? SilkTokenClassifier.TryCreate(nivaraEntityModel, 20, 5) : null;
+            NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok, sentimentSilk, validatorSilk, entitySilk);
 
             nivaraTools = NivaraAIFunctions.CreateRegistered(
                 nivaraSentimentModel, nivaraSentimentTok,

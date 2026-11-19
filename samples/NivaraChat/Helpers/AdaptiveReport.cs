@@ -38,6 +38,7 @@ public sealed record AdaptiveReportInput
     public required int UpdateBatch { get; init; }
     public required int HeadEpochs { get; init; }
     public required double HeadLearningRate { get; init; }
+    public string HeadTrainingBackend { get; init; } = "cpu";
     public required IReadOnlyList<AdaptiveReportRow> RetrievalRows { get; init; }
     public required IReadOnlyList<PairedComparison> Comparisons { get; init; }
     public required AdaptiveReportDecision DecisionBefore { get; init; }
@@ -72,6 +73,7 @@ public sealed record AdaptiveReportSilk(
     bool LayaWithinTolerance = true,
     bool LayaAvailable = false)
 {
+    public string HeadTrainingBackend { get; init; } = "cpu";
     /// <summary>Optional explicit statement of which components were compared.</summary>
     public string? ComponentsCompared { get; init; }
 
@@ -225,7 +227,8 @@ public static class AdaptiveReport
             c.AppendLine("- Laya parity: not run (pass --silk to enable, or OpenCL unavailable).");
         else
             c.AppendLine($"- Laya encoder parity max |cpu - silk|: {input.Silk.LayaMaxAbsoluteDifference.ToString("0.0000000", inv)} (within tolerance: {input.Silk.LayaWithinTolerance})");
-        c.AppendLine("- Scope note: embedding parity uses the 1e-5 tolerance; ModernBERT feature extraction parity is reported under Laya when available. Decisions and head training remain CPU in both runs.");
+        c.AppendLine($"- Head training backend: {input.Silk.HeadTrainingBackend}");
+        c.AppendLine("- Scope note: embedding parity uses the 1e-5 tolerance; ModernBERT feature extraction parity is reported under Laya when available. Decisions remain CPU in both runs; head training backend is recorded above.");
         c.AppendLine();
         c.AppendLine("## Persistence");
         c.AppendLine();
@@ -318,7 +321,8 @@ public static class AdaptiveReport
                 layaAvailable = input.Silk.LayaAvailable,
                 layaMaxAbs = input.Silk.LayaMaxAbsoluteDifference,
                 layaWithinTolerance = input.Silk.LayaWithinTolerance,
-                componentsCompared = input.Silk.ComparedComponents
+                componentsCompared = input.Silk.ComparedComponents,
+                headTrainingBackend = input.Silk.HeadTrainingBackend
             },
             persistence = new
             {

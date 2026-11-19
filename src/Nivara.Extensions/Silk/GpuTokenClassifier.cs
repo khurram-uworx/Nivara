@@ -1,0 +1,461 @@
+namespace Nivara.Silk;
+
+/// <summary>
+/// Token-level (per-token) classifier (embedding → FC1 → ReLU → FC2) trained on Silk/OpenCL.
+/// Unlike <see cref="GpuTextLinearClassifier"/> (document-level, which mean-pools over the
+/// sequence), this keeps every token as its own row: forward returns one logit vector per token,
+/// so it backs the entity/NER model in NivaraChat. Forward/backward run on the device; FC1/FC2
+/// and the embedding are device-authoritative during training and the host mirrors refresh when
+/// <c>Train</c> returns. f32 only.
+/// </summary>
+public sealed class GpuTokenClassifier : IDisposable
+{
+    readonly SilkRuntime runtime;
+    readonly int vocabSize;
+    readonly int embeddingDim;
+    readonly int hiddenDim;
+    readonly int numClasses;
+    readonly Random rng;
+
+    readonly float[] embedding;
+    readonly float[] fc1Weight;   // [embeddingDim, hiddenDim] — GPU layout
+    readonly float[] fc1Bias;
+    readonly float[] fc2Weight;   // [hiddenDim, numClasses]
+    readonly float[] fc2Bias;
+
+    nint fc1Buf, fc1BiasBuf, fc2Buf, fc2BiasBuf;
+    nint fc1Wm, fc1Wv, fc1Bm, fc1Bv, fc2Wm, fc2Wv, fc2Bm, fc2Bv;
+    nint embBuf, embWm, embWv, dEmbBuf;
+    nint tokenIdBuf;
+    int tokenIdCap;
+
+    SilkRuntime.SilkBuffer pooledBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer hBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer logitsBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dzBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dHBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dPooledBuf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dW1Buf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer db1Buf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer dW2Buf = SilkRuntime.SilkBuffer.Empty;
+    SilkRuntime.SilkBuffer db2Buf = SilkRuntime.SilkBuffer.Empty;
+
+    float[] pooled = [];
+    internal float[] gradEmb = [];
+    int[] batchTokens = [];
+    int[] batchLabels = [];
+
+    int adamStep;
+    bool disposed;
+
+    public string DeviceName => runtime.DeviceName;
+
+    public GpuTokenClassifier(int vocabSize, int embeddingDim, int hiddenDim, int seed = 42, int numClasses = 2)
+    {
+        if (numClasses < 2) throw new ArgumentOutOfRangeException(nameof(numClasses));
+        this.vocabSize = vocabSize;
+        this.embeddingDim = embeddingDim;
+        this.hiddenDim = hiddenDim;
+        this.numClasses = numClasses;
+        rng = new Random(seed);
+
+        runtime = new SilkRuntime();
+        embedding = new float[vocabSize * embeddingDim];
+        fc1Weight = new float[embeddingDim * hiddenDim];
+        fc1Bias = new float[hiddenDim];
+        fc2Weight = new float[hiddenDim * numClasses];
+        fc2Bias = new float[numClasses];
+
+        InitWeights();
+
+        fc1Buf = runtime.Allocate(fc1Weight.Length);
+        fc1BiasBuf = runtime.Allocate(fc1Bias.Length);
+        fc2Buf = runtime.Allocate(fc2Weight.Length);
+        fc2BiasBuf = runtime.Allocate(fc2Bias.Length);
+        fc1Wm = runtime.Allocate(fc1Weight.Length);
+        fc1Wv = runtime.Allocate(fc1Weight.Length);
+        fc1Bm = runtime.Allocate(fc1Bias.Length);
+        fc1Bv = runtime.Allocate(fc1Bias.Length);
+        fc2Wm = runtime.Allocate(fc2Weight.Length);
+        fc2Wv = runtime.Allocate(fc2Weight.Length);
+        fc2Bm = runtime.Allocate(fc2Bias.Length);
+        fc2Bv = runtime.Allocate(fc2Bias.Length);
+
+        embBuf = runtime.Allocate(embedding.Length);
+        embWm = runtime.Allocate(embedding.Length);
+        embWv = runtime.Allocate(embedding.Length);
+        dEmbBuf = runtime.Allocate(embedding.Length);
+
+        ZeroMomentBuffers();
+        UploadWeights();
+    }
+
+    void ThrowIfDisposed() { if (disposed) throw new ObjectDisposedException(nameof(GpuTokenClassifier)); }
+
+    void InitWeights()
+    {
+        for (int i = 0; i < embedding.Length; i++) embedding[i] = NextFloat(-0.05f, 0.05f);
+        for (int i = 0; i < fc1Weight.Length; i++) fc1Weight[i] = NextFloat(-0.05f, 0.05f);
+        for (int i = 0; i < fc2Weight.Length; i++) fc2Weight[i] = NextFloat(-0.05f, 0.05f);
+    }
+
+    float NextFloat(float min, float max) => min + (float)rng.NextDouble() * (max - min);
+
+    public void SetWeights(float[] embeddingWeights, float[] fc1Weights, float[] fc1Biases,
+        float[] fc2Weights, float[] fc2Biases)
+    {
+        ThrowIfDisposed();
+        ValidateShapes(embeddingWeights, fc1Weights, fc1Biases, fc2Weights, fc2Biases);
+        CopyWeights(embeddingWeights, fc1Weights, fc1Biases, fc2Weights, fc2Biases);
+        UploadWeights();
+    }
+
+    public void SetWeightsCpuLayout(
+        int vocabSize, int embeddingDim, int maxSeqLen,
+        float[] embeddingWeights,
+        float[] fc1WeightsCpu, float[] fc1Biases,
+        float[] fc2WeightsCpu, float[] fc2Biases)
+    {
+        ThrowIfDisposed();
+        if (vocabSize != this.vocabSize || embeddingDim != this.embeddingDim || maxSeqLen < 1)
+            throw new ArgumentException("Shape mismatch with the classifier's configured dimensions.");
+        if (fc1WeightsCpu is null || fc1WeightsCpu.Length != hiddenDim * embeddingDim)
+            throw new ArgumentException("FC1 weight shape mismatch.", nameof(fc1WeightsCpu));
+        if (fc2WeightsCpu is null || fc2WeightsCpu.Length != numClasses * hiddenDim)
+            throw new ArgumentException("FC2 weight shape mismatch.", nameof(fc2WeightsCpu));
+
+        var fc1Gpu = new float[embeddingDim * hiddenDim];
+        for (int e = 0; e < embeddingDim; e++)
+            for (int h = 0; h < hiddenDim; h++)
+                fc1Gpu[e * hiddenDim + h] = fc1WeightsCpu[h * embeddingDim + e];
+        var fc2Gpu = new float[hiddenDim * numClasses];
+        for (int h = 0; h < hiddenDim; h++)
+            for (int c = 0; c < numClasses; c++)
+                fc2Gpu[h * numClasses + c] = fc2WeightsCpu[c * hiddenDim + h];
+
+        ValidateShapes(embeddingWeights, fc1Gpu, fc1Biases, fc2Gpu, fc2Biases);
+        CopyWeights(embeddingWeights, fc1Gpu, fc1Biases, fc2Gpu, fc2Biases);
+        UploadWeights();
+    }
+
+    void ValidateShapes(float[] embeddingWeights, float[] fc1Weights, float[] fc1Biases,
+        float[] fc2Weights, float[] fc2Biases)
+    {
+        if (embeddingWeights is null || embeddingWeights.Length != embedding.Length)
+            throw new ArgumentException("Embedding weight shape mismatch.", nameof(embeddingWeights));
+        if (fc1Weights is null || fc1Weights.Length != fc1Weight.Length)
+            throw new ArgumentException("FC1 weight shape mismatch.", nameof(fc1Weights));
+        if (fc1Biases is null || fc1Biases.Length != fc1Bias.Length)
+            throw new ArgumentException("FC1 bias shape mismatch.", nameof(fc1Biases));
+        if (fc2Weights is null || fc2Weights.Length != fc2Weight.Length)
+            throw new ArgumentException("FC2 weight shape mismatch.", nameof(fc2Weights));
+        if (fc2Biases is null || fc2Biases.Length != fc2Bias.Length)
+            throw new ArgumentException("FC2 bias shape mismatch.", nameof(fc2Biases));
+    }
+
+    void CopyWeights(float[] embeddingWeights, float[] fc1Weights, float[] fc1Biases,
+        float[] fc2Weights, float[] fc2Biases)
+    {
+        Array.Copy(embeddingWeights, embedding, embedding.Length);
+        Array.Copy(fc1Weights, fc1Weight, fc1Weight.Length);
+        Array.Copy(fc1Biases, fc1Bias, fc1Bias.Length);
+        Array.Copy(fc2Weights, fc2Weight, fc2Weight.Length);
+        Array.Copy(fc2Biases, fc2Bias, fc2Bias.Length);
+    }
+
+    public float[] ExportEmbedding() { ThrowIfDisposed(); var emb = runtime.Download(embBuf, embedding.Length); emb.CopyTo(embedding, 0); var a = new float[embedding.Length]; Array.Copy(embedding, a, a.Length); return a; }
+    public float[] ExportFc1Weight() { ThrowIfDisposed(); var a = new float[fc1Weight.Length]; Array.Copy(fc1Weight, a, a.Length); return a; }
+    public float[] ExportFc1Bias() { ThrowIfDisposed(); var a = new float[fc1Bias.Length]; Array.Copy(fc1Bias, a, a.Length); return a; }
+    public float[] ExportFc2Weight() { ThrowIfDisposed(); var a = new float[fc2Weight.Length]; Array.Copy(fc2Weight, a, a.Length); return a; }
+    public float[] ExportFc2Bias() { ThrowIfDisposed(); var a = new float[fc2Bias.Length]; Array.Copy(fc2Bias, a, a.Length); return a; }
+
+    public (float[] Embedding, float[] Fc1W, float[] Fc1B, float[] Fc2W, float[] Fc2B) ExportCpuLayout()
+    {
+        ThrowIfDisposed();
+        var fc1Cpu = new float[hiddenDim * embeddingDim];
+        for (int e = 0; e < embeddingDim; e++)
+            for (int h = 0; h < hiddenDim; h++)
+                fc1Cpu[h * embeddingDim + e] = fc1Weight[e * hiddenDim + h];
+        var fc2Cpu = new float[numClasses * hiddenDim];
+        for (int h = 0; h < hiddenDim; h++)
+            for (int c = 0; c < numClasses; c++)
+                fc2Cpu[c * hiddenDim + h] = fc2Weight[h * numClasses + c];
+        return (ExportEmbedding(), fc1Cpu, ExportFc1Bias(), fc2Cpu, ExportFc2Bias());
+    }
+
+    void RefreshHostMirrors()
+    {
+        var emb = runtime.Download(embBuf, embedding.Length);
+        emb.CopyTo(embedding, 0);
+        var fc1 = runtime.Download(fc1Buf, fc1Weight.Length);
+        fc1.CopyTo(fc1Weight, 0);
+        var fc1b = runtime.Download(fc1BiasBuf, fc1Bias.Length);
+        fc1b.CopyTo(fc1Bias, 0);
+        var fc2 = runtime.Download(fc2Buf, fc2Weight.Length);
+        fc2.CopyTo(fc2Weight, 0);
+        var fc2b = runtime.Download(fc2BiasBuf, fc2Bias.Length);
+        fc2b.CopyTo(fc2Bias, 0);
+    }
+
+    void ForwardCore(int[] tokenIds, int batchSize, int seqLen)
+    {
+        if (tokenIds is null || tokenIds.Length != batchSize * seqLen)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokenIds));
+        for (int i = 0; i < tokenIds.Length; i++)
+            if (tokenIds[i] < 0 || tokenIds[i] >= vocabSize) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+
+        int n = batchSize * seqLen;
+        pooledBuf = runtime.Ensure(pooledBuf, n * embeddingDim);
+        hBuf = runtime.Ensure(hBuf, n * hiddenDim);
+        logitsBuf = runtime.Ensure(logitsBuf, n * numClasses);
+
+        EnsureTokenBuffer(n);
+        runtime.Upload(tokenIdBuf, tokenIds.AsSpan());
+
+        SilkLauncher.EmbeddingGatherInput(runtime, tokenIdBuf, embBuf, pooledBuf.Handle, batchSize, seqLen, embeddingDim);
+
+        SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmRelu,
+            pooledBuf.Handle, fc1Buf, hBuf.Handle, fc1BiasBuf,
+            n, embeddingDim, hiddenDim);
+        SilkLauncher.GemmEpilogue(runtime, SilkKernels.GemmBias,
+            hBuf.Handle, fc2Buf, logitsBuf.Handle, fc2BiasBuf,
+            n, hiddenDim, numClasses);
+    }
+
+    public float[] Forward(int[] tokenIds, int batchSize, int seqLen,
+        out float[] pooledOut, out float[] hiddenOut)
+    {
+        ThrowIfDisposed();
+        ForwardCore(tokenIds, batchSize, seqLen);
+        pooledOut = runtime.Download(pooledBuf.Handle, batchSize * seqLen * embeddingDim);
+        pooled = pooledOut;
+        hiddenOut = runtime.Download(hBuf.Handle, batchSize * seqLen * hiddenDim);
+        return runtime.Download(logitsBuf.Handle, batchSize * seqLen * numClasses);
+    }
+
+    public float[] Forward(int[] tokenIds, int batchSize, int seqLen)
+    {
+        ThrowIfDisposed();
+        ForwardCore(tokenIds, batchSize, seqLen);
+        return runtime.Download(logitsBuf.Handle, batchSize * seqLen * numClasses);
+    }
+
+    public int[] Predict(int[] tokenIds, int seqLen)
+    {
+        ThrowIfDisposed();
+        if (tokenIds is null || tokenIds.Length % seqLen != 0)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokenIds));
+        int batch = tokenIds.Length / seqLen;
+        var logits = Forward(tokenIds, batch, seqLen);
+        int total = tokenIds.Length;
+        var result = new int[total];
+        for (int i = 0; i < total; i++)
+        {
+            int best = 0; float bestVal = logits[i * numClasses];
+            for (int c = 1; c < numClasses; c++)
+                if (logits[i * numClasses + c] > bestVal) { bestVal = logits[i * numClasses + c]; best = c; }
+            result[i] = best;
+        }
+        return result;
+    }
+
+    public IReadOnlyList<SilkTrainEpoch> Train(int[] tokens, int[] labels, int batchSize, int seqLen, int epochs, float learningRate, int seed)
+    {
+        ThrowIfDisposed();
+        if (tokens is null || labels is null) throw new ArgumentNullException();
+        if (tokens.Length % seqLen != 0) throw new ArgumentException("Token shape mismatch.");
+        int seqCount = tokens.Length / seqLen;
+        if (labels.Length != tokens.Length) throw new ArgumentException("Label count mismatch.");
+        if (batchSize <= 0) throw new ArgumentOutOfRangeException(nameof(batchSize));
+        if (epochs <= 0) throw new ArgumentOutOfRangeException(nameof(epochs));
+
+        adamStep = 0;
+        ZeroMomentBuffers();
+
+        var results = new List<SilkTrainEpoch>(epochs);
+        int batchesPerEpoch = (seqCount + batchSize - 1) / batchSize;
+        var shuffle = new Random(seed);
+
+        for (int epoch = 0; epoch < epochs; epoch++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int[] indices = Enumerable.Range(0, seqCount).ToArray();
+            for (int i = indices.Length - 1; i > 0; i--)
+            {
+                int j = shuffle.Next(i + 1);
+                (indices[i], indices[j]) = (indices[j], indices[i]);
+            }
+
+            float lossSum = 0f;
+            int lossBatches = 0;
+            for (int b = 0; b < batchesPerEpoch; b++)
+            {
+                int start = b * batchSize;
+                int n = Math.Min(start + batchSize, seqCount) - start;
+                if (n <= 0) continue;
+
+                int tokenCount = n * seqLen;
+                if (batchTokens is null || batchTokens.Length != tokenCount) batchTokens = new int[tokenCount];
+                if (batchLabels is null || batchLabels.Length != tokenCount) batchLabels = new int[tokenCount];
+                for (int i = 0; i < n; i++)
+                {
+                    int src = indices[start + i];
+                    Array.Copy(tokens, src * seqLen, batchTokens, i * seqLen, seqLen);
+                    Array.Copy(labels, src * seqLen, batchLabels, i * seqLen, seqLen);
+                }
+
+                ForwardCore(batchTokens, n, seqLen);
+                var logits = runtime.Download(logitsBuf.Handle, tokenCount * numClasses);
+                Backward(logits, batchTokens, batchLabels, n, seqLen);
+                AdamUpdateAll(learningRate);
+
+                lossSum += SilkLoss.CrossEntropy(logits, batchLabels, tokenCount, numClasses);
+                lossBatches++;
+            }
+
+            sw.Stop();
+            results.Add(new SilkTrainEpoch(epoch, lossBatches > 0 ? lossSum / lossBatches : 0f, sw.Elapsed));
+        }
+
+        RefreshHostMirrors();
+        return results;
+    }
+
+    internal void Backward(float[] logits, int[] tokens, int[] labels, int batch, int seqLen)
+    {
+        ThrowIfDisposed();
+        int n = batch * seqLen;
+        if (logits is null || logits.Length != n * numClasses)
+            throw new ArgumentException("Logit count mismatch.", nameof(logits));
+        if (tokens is null || tokens.Length != n)
+            throw new ArgumentException("Token array size mismatch.", nameof(tokens));
+        if (labels is null || labels.Length != n)
+            throw new ArgumentException("Label count mismatch.", nameof(labels));
+
+        int hidLen = n * hiddenDim;
+
+        dzBuf = runtime.Ensure(dzBuf, n * numClasses);
+        dHBuf = runtime.Ensure(dHBuf, hidLen);
+        dPooledBuf = runtime.Ensure(dPooledBuf, n * embeddingDim);
+        dW1Buf = runtime.Ensure(dW1Buf, fc1Weight.Length);
+        db1Buf = runtime.Ensure(db1Buf, fc1Bias.Length);
+        dW2Buf = runtime.Ensure(dW2Buf, fc2Weight.Length);
+        db2Buf = runtime.Ensure(db2Buf, fc2Bias.Length);
+
+        var dz = new float[n * numClasses];
+        SilkLoss.InputGradient(logits, labels, n, numClasses, 1f / n, dz);
+        runtime.Upload(dzBuf.Handle, dz);
+
+        SilkLauncher.ColSum(runtime, dzBuf.Handle, db2Buf.Handle, n, numClasses, 1f);
+        SilkLauncher.GemmTn(runtime, hBuf.Handle, dzBuf.Handle, dW2Buf.Handle,
+            aRows: hiddenDim, aCols: n, bCols: numClasses);
+        SilkLauncher.GemmNt(runtime, dzBuf.Handle, fc2Buf, dHBuf.Handle,
+            aRows: n, aCols: numClasses, bCols: hiddenDim);
+        SilkLauncher.ReluBackward(runtime, dHBuf.Handle, hBuf.Handle, dHBuf.Handle, hidLen);
+        SilkLauncher.ColSum(runtime, dHBuf.Handle, db1Buf.Handle, n, hiddenDim, 1f);
+        SilkLauncher.GemmTn(runtime, pooledBuf.Handle, dHBuf.Handle, dW1Buf.Handle,
+            aRows: embeddingDim, aCols: n, bCols: hiddenDim);
+        SilkLauncher.GemmNt(runtime, dHBuf.Handle, fc1Buf, dPooledBuf.Handle,
+            aRows: n, aCols: hiddenDim, bCols: embeddingDim);
+
+        EnsureTokenBuffer(n);
+        runtime.Upload(tokenIdBuf, tokens.AsSpan());
+
+        SilkLauncher.Fill(runtime, dEmbBuf, 0f, embedding.Length);
+        SilkLauncher.EmbeddingBackwardInput(runtime, tokenIdBuf, dPooledBuf.Handle, dEmbBuf,
+            batch, seqLen, embeddingDim);
+
+        gradEmb = SilkLoss.Obtain(ref gradEmb, embedding.Length);
+        var dEmb = runtime.Download(dEmbBuf, embedding.Length);
+        dEmb.CopyTo(gradEmb, 0);
+    }
+
+    internal (float[] Fc1W, float[] Fc1B, float[] Fc2W, float[] Fc2B) DownloadGradients()
+    {
+        ThrowIfDisposed();
+        return (
+            runtime.Download(dW1Buf.Handle, fc1Weight.Length),
+            runtime.Download(db1Buf.Handle, fc1Bias.Length),
+            runtime.Download(dW2Buf.Handle, fc2Weight.Length),
+            runtime.Download(db2Buf.Handle, fc2Bias.Length));
+    }
+
+    internal void AdamUpdateAll(float learningRate)
+    {
+        adamStep++;
+        float bc1 = 1f - MathF.Pow(0.9f, adamStep);
+        float bc2 = 1f - MathF.Pow(0.999f, adamStep);
+
+        SilkLauncher.AdamUpdate(runtime, fc1Buf, dW1Buf.Handle, fc1Wm, fc1Wv, learningRate, bc1, bc2, 1e-8f, 0f, fc1Weight.Length);
+        SilkLauncher.AdamUpdate(runtime, fc1BiasBuf, db1Buf.Handle, fc1Bm, fc1Bv, learningRate, bc1, bc2, 1e-8f, 0f, fc1Bias.Length);
+        SilkLauncher.AdamUpdate(runtime, fc2Buf, dW2Buf.Handle, fc2Wm, fc2Wv, learningRate, bc1, bc2, 1e-8f, 0f, fc2Weight.Length);
+        SilkLauncher.AdamUpdate(runtime, fc2BiasBuf, db2Buf.Handle, fc2Bm, fc2Bv, learningRate, bc1, bc2, 1e-8f, 0f, fc2Bias.Length);
+
+        SilkLauncher.AdamUpdate(runtime, embBuf, dEmbBuf, embWm, embWv, learningRate, bc1, bc2, 1e-8f, 0f, embedding.Length);
+    }
+
+    void ZeroMomentBuffers()
+    {
+        SilkLauncher.Fill(runtime, embWm, 0f, embedding.Length);
+        SilkLauncher.Fill(runtime, embWv, 0f, embedding.Length);
+        SilkLauncher.Fill(runtime, fc1Wm, 0f, fc1Weight.Length);
+        SilkLauncher.Fill(runtime, fc1Wv, 0f, fc1Weight.Length);
+        SilkLauncher.Fill(runtime, fc1Bm, 0f, fc1Bias.Length);
+        SilkLauncher.Fill(runtime, fc1Bv, 0f, fc1Bias.Length);
+        SilkLauncher.Fill(runtime, fc2Wm, 0f, fc2Weight.Length);
+        SilkLauncher.Fill(runtime, fc2Wv, 0f, fc2Weight.Length);
+        SilkLauncher.Fill(runtime, fc2Bm, 0f, fc2Bias.Length);
+        SilkLauncher.Fill(runtime, fc2Bv, 0f, fc2Bias.Length);
+    }
+
+    void UploadWeights()
+    {
+        runtime.Upload(embBuf, embedding.AsSpan());
+        runtime.Upload(fc1Buf, fc1Weight.AsSpan());
+        runtime.Upload(fc1BiasBuf, fc1Bias.AsSpan());
+        runtime.Upload(fc2Buf, fc2Weight.AsSpan());
+        runtime.Upload(fc2BiasBuf, fc2Bias.AsSpan());
+    }
+
+    void EnsureTokenBuffer(int count)
+    {
+        if (tokenIdBuf != 0 && tokenIdCap >= count) return;
+        if (tokenIdBuf != 0) runtime.Release(tokenIdBuf);
+        tokenIdBuf = runtime.AllocateBytes((ulong)count * sizeof(int));
+        tokenIdCap = count;
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        runtime.Release(fc1Buf);
+        runtime.Release(fc1BiasBuf);
+        runtime.Release(fc2Buf);
+        runtime.Release(fc2BiasBuf);
+        runtime.Release(fc1Wm);
+        runtime.Release(fc1Wv);
+        runtime.Release(fc1Bm);
+        runtime.Release(fc1Bv);
+        runtime.Release(fc2Wm);
+        runtime.Release(fc2Wv);
+        runtime.Release(fc2Bm);
+        runtime.Release(fc2Bv);
+        runtime.Release(embBuf);
+        runtime.Release(embWm);
+        runtime.Release(embWv);
+        runtime.Release(dEmbBuf);
+        if (tokenIdBuf != 0) runtime.Release(tokenIdBuf);
+        runtime.Release(pooledBuf.Handle);
+        runtime.Release(hBuf.Handle);
+        runtime.Release(logitsBuf.Handle);
+        runtime.Release(dzBuf.Handle);
+        runtime.Release(dHBuf.Handle);
+        runtime.Release(dPooledBuf.Handle);
+        runtime.Release(dW1Buf.Handle);
+        runtime.Release(db1Buf.Handle);
+        runtime.Release(dW2Buf.Handle);
+        runtime.Release(db2Buf.Handle);
+        runtime.Dispose();
+        disposed = true;
+    }
+}
