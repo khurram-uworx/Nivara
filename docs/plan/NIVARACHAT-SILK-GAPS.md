@@ -28,9 +28,9 @@ NivaraChat's `--silk` coverage is broad but uneven:
 - **Not on Silk at all:** the entity (token-level) classifier — neither inference nor
   training has a Silk path; `EntityTrainer` and `EntityTextModel` are CPU-only and
   `GpuTextLinearClassifier` is document-level.
-- **Correctly out of scope (AutoDiff stays on CPU):** TinyShakespeare transformer training
-  (`BatchedTransformer` via `ReverseGradOperations`), SmolLM/Qwen (pretrained weights from
-  safetensors, no training), classifier-free LLM fine-tuning.
+- **Stays on CPU AutoDiff (reference path):** SmolLM/Qwen (pretrained weights from
+  safetensors, no training), classifier-free LLM fine-tuning. TinyShakespeare transformer
+  training is now tracked as Gap S6 (#1342) rather than an implicit non-goal.
 
 The clearest gap is the entity classifier: it is the only domain model with no Silk path, and
 there is no `GpuTokenClassifier` in core to back it.
@@ -46,6 +46,7 @@ there is no `GpuTokenClassifier` in core to back it.
 | #1273 | NivaraChat: no training demo for Llama (SmolLM/Qwen pretrained-only) | Low |
 | #1283 | NivaraInference: generic Silk trainer for non-BERT models (SmolLM, Qwen LLM, vision) | Low |
 | #1284 | NivaraInference: LLM fine-tuning (SmolLM / Qwen) on CPU and Silk | Low |
+| #1342 | NivaraChat: TinyShakespeare transformer training on Silk (AutoDiff → device) | Low |
 
 ## Identified gaps (not yet filed)
 
@@ -102,16 +103,30 @@ training for causal LMs does not exist yet (only BERT-shaped trainers). Treat as
 a design note scoping data format, loss, optimizer, memory budget, precision. Not a release
 blocker.
 
-### Gap S6 — TinyShakespeare transformer training on Silk — Non-goal (this release)
+### Gap S6 — TinyShakespeare transformer training on Silk — Low (#1342)
 
-Training stays on the CPU AutoDiff path (ADR-001/002). Porting AutoDiff transformer training
-to Silk is out of scope; Silk is inference-only for `--tinyshakespeare`. Consistent with the
-prior non-goal and with SmolLM/Qwen.
+Currently `--tinyshakespeare` training runs entirely on the CPU AutoDiff path
+(`BatchedTransformer`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Adam<T>`); Silk is
+inference-only (`SilkTinyShakespeareSession`, `SilkBatchedChatClient` via `ToSilkWeights()`).
+Previously recorded as a non-goal. Now tracked explicitly so it is not silently dropped.
+
+**Goal:** scope (design note first) a Silk training path for the batched transformer — device
+forward/backward for the transformer block (attention + FFN + layernorm + embedding) and an
+Adam step, exporting trained weights back to the CPU `BatchedTransformer` for save/load and
+inference. Preserve the CPU AutoDiff path as the reference parity gate.
+
+**Constraints:** f32 only this release; parity gate vs CPU AutoDiff; AutoDiff semantics
+matched or documented as divergent.
+
+**Depends on:** design note; large, open-ended. Not a release blocker.
+
+**Key files:** `samples/NivaraChat/Transformer/BatchedTransformer.cs`,
+`Transformer/TransformerMode.cs`, `src/Nivara.Extensions/Silk/SilkTinyShakespeareSession.cs`,
+`src/Nivara/AutoDiff/ReverseGradOperations.cs`.
 
 ## Non-goals (intentionally not generalized)
 
 - `ToSilkWeights` for SmolLM/Qwen: they do not train in Nivara; weights come from safetensors.
-- GPU training / AutoDiff on Silk for the transformer (S6).
 - Rank-3 (batched) MatMul in core (ADR-003).
 - BPE migration for TinyShakespeare (D-014, issue #1328) — separate, model-breaking.
 - bf16/fp16 *training* on Silk beyond what already ships (release constraint: f32 only).
@@ -135,4 +150,4 @@ prior non-goal and with SmolLM/Qwen.
    Design the weight mapping first.
 3. **S3** (#1276) and **S4** (#1274) — low priority; S4 is a decision, not code.
 4. **S5** — design note only; defer implementation.
-5. S6 remains a non-goal.
+5. **S6** (#1342) — design note first; large, open-ended; not a release blocker.
