@@ -11,6 +11,7 @@ public sealed class AdaptiveFeedbackCollector
     readonly int epochs;
     readonly float learningRate;
     readonly bool persist;
+    readonly Action<LayaDecisionHead<float, float>, IReadOnlyList<AdaptiveTrainingExample>, int, float>? updateAction;
     readonly List<AdaptiveTrainingExample> buffer = [];
 
     public int BufferCount => buffer.Count;
@@ -26,7 +27,8 @@ public sealed class AdaptiveFeedbackCollector
         int batchThreshold = 10,
         int epochs = AdaptiveTraining.DefaultEpochs,
         float learningRate = AdaptiveTraining.DefaultLearningRate,
-        bool persist = true)
+        bool persist = true,
+        Action<LayaDecisionHead<float, float>, IReadOnlyList<AdaptiveTrainingExample>, int, float>? updateAction = null)
     {
         ArgumentNullException.ThrowIfNull(head);
         ArgumentException.ThrowIfNullOrWhiteSpace(weightsPath);
@@ -41,6 +43,7 @@ public sealed class AdaptiveFeedbackCollector
         this.epochs = epochs;
         this.learningRate = learningRate;
         this.persist = persist;
+        this.updateAction = updateAction;
         Persist = persist;
     }
 
@@ -68,7 +71,7 @@ public sealed class AdaptiveFeedbackCollector
         try
         {
             var updateSw = Stopwatch.StartNew();
-            AdaptiveTraining.Update(head, buffer, epochs, learningRate);
+            (updateAction ?? AdaptiveTraining.Update)(head, buffer, epochs, learningRate);
             updateSw.Stop();
             UpdateMilliseconds += updateSw.ElapsedMilliseconds;
 
