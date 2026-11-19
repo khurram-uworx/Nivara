@@ -14,6 +14,8 @@ internal sealed class FeedbackCollector
     readonly int _maxSeqLen;
     readonly float _threshold;
     readonly string _modelsDir;
+    readonly bool _useSilk;
+    readonly SilkTextClassifier? _silk;
 
     readonly List<(string text, int label)> _buffer = [];
     readonly int _retrainThreshold;
@@ -28,7 +30,9 @@ internal sealed class FeedbackCollector
         string modelsDir,
         float threshold = 0.6f,
         int maxSeqLen = 20,
-        int retrainThreshold = 50)
+        int retrainThreshold = 50,
+        bool useSilk = false,
+        SilkTextClassifier? silk = null)
     {
         _model = model;
         _tokenizer = tokenizer;
@@ -37,12 +41,17 @@ internal sealed class FeedbackCollector
         _threshold = threshold;
         _maxSeqLen = maxSeqLen;
         _retrainThreshold = retrainThreshold;
+        _useSilk = useSilk;
+        _silk = silk;
     }
 
     public async Task<(string intent, float confidence, bool collected)> ClassifyAsync(string input)
     {
-        var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
-            _model, _tokenizer, input, _maxSeqLen, numClasses: 5);
+        var (bestClass, confidence) = _silk is not null
+            ? ModelInferenceHelper.RunClassifierWithConfidence(
+                _silk, _tokenizer, input, _maxSeqLen, numClasses: 5)
+            : ModelInferenceHelper.RunClassifierWithConfidence(
+                _model, _tokenizer, input, _maxSeqLen, numClasses: 5);
 
         string nivaraIntent = ValidIntents[bestClass];
 
@@ -100,7 +109,8 @@ internal sealed class FeedbackCollector
             feedbackTexts, feedbackLabels,
             modelsDir: _modelsDir,
             additionalEpochs: 5,
-            batchSize: 16);
+            batchSize: 16,
+            useSilk: _useSilk);
 
         _buffer.Clear();
         return (model, tokenizer);

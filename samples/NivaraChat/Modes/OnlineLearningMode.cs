@@ -27,6 +27,7 @@ public static class OnlineLearningMode
 
         Console.WriteLine("Loading intent model...");
         var (intentModel, intentTok) = ModeHelpers.LoadIntentModel(ctx.ModelsDir);
+        SilkTextClassifier? intentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(intentModel, 20, 5) : null;
         Console.WriteLine("Intent model loaded.\n");
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
@@ -36,7 +37,8 @@ public static class OnlineLearningMode
 
         var collector = new FeedbackCollector(
             intentModel, intentTok, chatClient, ctx.ModelsDir,
-            threshold: ctx.ConfidenceThreshold, retrainThreshold: 10);
+            threshold: ctx.ConfidenceThreshold, retrainThreshold: 10,
+            useSilk: ctx.UseSilk, silk: intentSilk);
 
         Console.WriteLine($"Threshold: {ctx.ConfidenceThreshold:F2} — below this, LLM provides corrected intent.");
         Console.WriteLine($"Retrain buffer: {collector.BufferCount}/10 examples.");
@@ -64,15 +66,21 @@ public static class OnlineLearningMode
                 Console.WriteLine("\n  Buffer full — triggering incremental retrain...");
                 var (newModel, newTok) = collector.Retrain();
                 intentModel.Dispose();
+                intentSilk?.Dispose();
+                intentModel = newModel;
+                intentTok = newTok;
+                intentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(newModel, 20, 5) : null;
                 collector = new FeedbackCollector(
                     newModel, newTok, chatClient, ctx.ModelsDir,
-                    threshold: ctx.ConfidenceThreshold, retrainThreshold: 10);
+                    threshold: ctx.ConfidenceThreshold, retrainThreshold: 10,
+                    useSilk: ctx.UseSilk, silk: intentSilk);
                 Console.WriteLine("  Retrain complete. Model updated.\n");
             }
             Console.WriteLine();
         }
 
         intentModel.Dispose();
+        intentSilk?.Dispose();
         Console.WriteLine($"\nDone. {collector.TotalCollected} examples collected, {collector.BufferCount} pending.");
     }
 }

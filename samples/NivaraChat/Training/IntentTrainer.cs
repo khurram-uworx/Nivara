@@ -152,28 +152,18 @@ public static class IntentTrainer
 
     public static (TextClassifierModel<float> model, TextTokenizer tokenizer) TrainIncremental(
         string[] feedbackTexts, int[] feedbackLabels,
-        string modelsDir, int additionalEpochs = 5, int batchSize = 16)
+        string modelsDir, int additionalEpochs = 5, int batchSize = 16, bool useSilk = false, int seed = 42)
     {
         var checkpointPath = Path.Combine(modelsDir, "intent_checkpoint.json");
         bool hasCheckpoint = File.Exists(checkpointPath);
 
         var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "intent_tokenizer.json"));
-        var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen: 20);
-        if (hasCheckpoint)
-        {
-            Console.WriteLine("  Loading intent checkpoint (weights + optimizer state).");
-        }
-        else
-        {
-            ModelSerializer.Load(model, Path.Combine(modelsDir, "intent_model.json"));
-            Console.WriteLine("  No checkpoint found; warm-starting weights with a fresh optimizer.");
-        }
 
         int maxSeqLen = 20;
         var allTexts = new List<string>();
         var allLabels = new List<int>();
 
-        var (origTexts, origLabels) = IntentDataGenerator.GenerateIntentData(500, seed: 42);
+        var (origTexts, origLabels) = IntentDataGenerator.GenerateIntentData(500, seed: seed);
         allTexts.AddRange(origTexts);
         allLabels.AddRange(origLabels);
 
@@ -185,6 +175,64 @@ public static class IntentTrainer
         {
             var encoded = tokenizer.Encode(allTexts[i], fixedLength: maxSeqLen);
             Array.Copy(encoded, 0, allTokens, i * maxSeqLen, maxSeqLen);
+        }
+
+        if (useSilk)
+        {
+            TextClassifierModel<float>? seedModel = null;
+            GpuTextLinearClassifier? silk = null;
+            try
+            {
+                seedModel = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen);
+                ModelSerializer.Load(seedModel, Path.Combine(modelsDir, "intent_model.json"));
+                silk = new GpuTextLinearClassifier(seedModel.VocabSize, 32, 64, seed, 5);
+                var ps = seedModel.GetParameters().Values.ToArray();
+                var emb = ps[0].Tensor.Data.ToArray();
+                var fc1wCpu = ps[1].Tensor.Data.ToArray();
+                var fc1b = ps[2].Tensor.Data.ToArray();
+                var fc2wCpu = ps[3].Tensor.Data.ToArray();
+                var fc2b = ps[4].Tensor.Data.ToArray();
+                silk.SetWeightsCpuLayout(seedModel.VocabSize, 32, maxSeqLen, emb, fc1wCpu, fc1b, fc2wCpu, fc2b);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  Silk/OpenCL unavailable ({ex.Message}); online learning retrain is CPU-only.");
+                silk?.Dispose();
+                seedModel?.Dispose();
+                silk = null;
+            }
+
+            if (silk is not null)
+            {
+                Console.WriteLine("  Incremental training intent classifier on Silk (device)...");
+                var silkEpochs = silk.Train(allTokens, allLabels.ToArray(), batchSize, maxSeqLen, additionalEpochs, 0.0005f, seed);
+                foreach (var e in silkEpochs) Console.WriteLine($"    epoch {e.Epoch}: loss={e.Loss:F4} ({e.Elapsed.TotalSeconds:F1}s)");
+
+                var layout = silk.ExportCpuLayout();
+                var silkModel = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen);
+                silkModel.SetWeights(layout.Embedding, layout.Fc1W, layout.Fc1B, layout.Fc2W, layout.Fc2B);
+
+                Directory.CreateDirectory(modelsDir);
+                ModelSerializer.Save(silkModel, Path.Combine(modelsDir, "intent_model.json"));
+                tokenizer.Save(Path.Combine(modelsDir, "intent_tokenizer.json"));
+                Console.WriteLine($"  Saved updated model to {modelsDir}/");
+
+                silk.Dispose();
+                seedModel?.Dispose();
+                silkModel.Eval();
+                return (silkModel, tokenizer);
+            }
+        }
+
+        var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen: 20);
+        if (hasCheckpoint)
+        {
+            Console.WriteLine("  Loading intent checkpoint (weights + optimizer state).");
+        }
+        else
+        {
+            ModelSerializer.Load(model, Path.Combine(modelsDir, "intent_model.json"));
+            Console.WriteLine("  No checkpoint found; warm-starting weights with a fresh optimizer.");
         }
 
         var frame = FrameBuilder.BuildDocumentClassificationFrame(allTokens, allLabels.ToArray(), allTexts.Count, maxSeqLen);
