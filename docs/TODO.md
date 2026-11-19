@@ -62,10 +62,11 @@ no training-loop code is duplicated across samples.
 9. docs: remove TODO.md — plan executed
 
 ## Blast radius
-- `samples/NivaraChat/Helpers/AdaptiveTraining*.cs` moved/generalized; NivaraChat call sites updated.
 - `samples/Nivara.Samples` gains new files; referenced by NivaraChat + NivaraInference (already).
 - `samples/NivaraInference/Program.cs` + new mode file.
-- No core library changes. No test changes expected except possible new tests.
+- No core library changes. No test changes except SupportedModes allow-list.
+- Note: promotion of NivaraChat's Laya-specific `AdaptiveTraining` into Nivara.Samples was deferred;
+  the new ModernBERT training lives in Nivara.Samples without duplicating that code.
 
 ## GitHub issues log
 
