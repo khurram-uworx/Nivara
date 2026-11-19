@@ -69,32 +69,9 @@ public static class RagAdaptiveEvalMode
             cpuLayaEngine = new LayaRetrievalDecisionHead.LayaDecisionEngine(
                 modelDir, loadAdaptiveWeights: ctx.Resume, adaptiveWeightsPath: headWeightsPath, useSilk: false);
 
-        // head-training backend selection
         bool silkHeadAvailable = false;
         string headTrainingBackend = ctx.UseSilk ? "cpu (silk unavailable)" : "cpu";
         Action<LayaDecisionHead<float, float>, IReadOnlyList<AdaptiveTrainingExample>, int, float>? silkUpdate = null;
-        if (ctx.UseSilk)
-        {
-            try
-            {
-                var probeTensors = HeadToCheckpointTensors(engine.Head);
-                using var probeRuntime = new SilkRuntime();
-                using var probeTrainer = new SilkLayaHeadTrainer(probeRuntime, probeTensors, engine.Head.HeadLayerCount, 2, 8);
-                silkHeadAvailable = true;
-                silkUpdate = SilkUpdate;
-                headTrainingBackend = "silk";
-            }
-            catch (Exception probeError)
-            {
-                silkHeadAvailable = false;
-                headTrainingBackend = "cpu (silk unavailable)";
-                Console.WriteLine($"Silk head training unavailable ({probeError.GetType().Name}: {probeError.Message}); falling back to CPU AutoDiff.");
-            }
-        }
-
-        var collector = new AdaptiveFeedbackCollector(
-            engine.Head, headWeightsPath, updateBatch, headEpochs, headLr, persist: !ctx.NoPersist,
-            updateAction: silkHeadAvailable ? silkUpdate : null);
 
         // silk parity
         MultiViewIndex? silkIndex = null;
@@ -117,6 +94,30 @@ public static class RagAdaptiveEvalMode
                     ["VectorContent", "VectorTitle", "VectorSection", "VectorCode"]);
             }
         }
+
+        // head-training backend selection (after index builds, to avoid device contention)
+        if (ctx.UseSilk)
+        {
+            try
+            {
+                var probeTensors = HeadToCheckpointTensors(engine.Head);
+                using var probeRuntime = new SilkRuntime();
+                using var probeTrainer = new SilkLayaHeadTrainer(probeRuntime, probeTensors, engine.Head.HeadLayerCount, 2, 8);
+                silkHeadAvailable = true;
+                silkUpdate = SilkUpdate;
+                headTrainingBackend = "silk";
+            }
+            catch (Exception probeError)
+            {
+                silkHeadAvailable = false;
+                headTrainingBackend = "cpu (silk unavailable)";
+                Console.WriteLine($"Silk head training unavailable ({probeError.GetType().Name}: {probeError.Message}); falling back to CPU AutoDiff.");
+            }
+        }
+
+        var collector = new AdaptiveFeedbackCollector(
+            engine.Head, headWeightsPath, updateBatch, headEpochs, headLr, persist: !ctx.NoPersist,
+            updateAction: silkHeadAvailable ? silkUpdate : null);
 
         double layaMaxAbs = 0d;
         bool layaWithin = true;
