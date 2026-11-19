@@ -8,20 +8,13 @@ namespace NivaraChat.Transformer;
 
 /// <summary>
 /// An <see cref="IChatClient"/> backed by a <see cref="SilkTinyShakespeareSession"/> (Silk/OpenCL
-/// GPU path for the batched TinyShakespeare transformer). Mirrors
-/// <c>SilkSmolLMChatClient</c>: prefill + cached decode + overflow + top-p sampling, with a
-/// non-cached fallback that re-projects the full window.
+/// GPU path for the batched TinyShakespeare transformer).
 /// </summary>
-internal sealed class SilkBatchedChatClient : IChatClient
+internal sealed class SilkBatchedChatClient : CausalLmChatClientBase
 {
     readonly SilkTinyShakespeareSession session;
     readonly TextTokenizer tokenizer;
     readonly int maxSeqLen;
-    readonly int maxNewTokens;
-    readonly float temperature;
-    readonly float topP;
-    readonly bool useKvCache;
-    readonly Random rng = new(0);
 
     public SilkBatchedChatClient(
         SilkTinyShakespeareSession session,
@@ -32,6 +25,7 @@ internal sealed class SilkBatchedChatClient : IChatClient
         float? topP = null,
         int? seed = null,
         bool useKvCache = true)
+        : base(temperature ?? 0f, Math.Clamp(topP ?? 1f, 0f, 1f), maxNewTokens, useKvCache, new Random(seed ?? 0))
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -39,110 +33,38 @@ internal sealed class SilkBatchedChatClient : IChatClient
         this.session = session;
         this.tokenizer = tokenizer;
         this.maxSeqLen = maxSeqLen > 0 ? maxSeqLen : 1;
-        this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
-        this.temperature = temperature ?? 0f;
-        this.topP = Math.Clamp(topP ?? 1f, 0f, 1f);
-        this.useKvCache = useKvCache;
-        this.rng = new Random(seed ?? 0);
     }
 
-    public ChatClientMetadata? Metadata { get; } =
+    public override ChatClientMetadata? Metadata { get; } =
         new ChatClientMetadata("Nivara", null, "TinyShakespeare (Silk/OpenCL batched transformer)");
 
-    public object? GetService(Type serviceType, object? key = null) => null;
+    public override void Dispose() => session.Dispose();
 
-    public Task<ChatResponse> GetResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        var sb = new StringBuilder();
-        foreach (var chunk in Generate(messages, cancellationToken))
-            sb.Append(chunk);
-        return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, sb.ToString())]));
-    }
+    protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
+        => FormatConversation(messages);
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        foreach (var chunk in Generate(messages, cancellationToken))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return new ChatResponseUpdate(ChatRole.Assistant, chunk);
-            await Task.CompletedTask;
-        }
-    }
+    protected override IReadOnlyList<int> Encode(string prompt)
+        => tokenizer.Encode(prompt, addBosEos: true);
 
-    public void Dispose() => session.Dispose();
+    protected override string DecodeToken(int tokenId)
+        => tokenizer.Decode(new[] { tokenId });
 
-    IEnumerable<string> Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
-    {
-        var prompt = FormatConversation(messages);
-        var ids = new List<int>(tokenizer.Encode(prompt, addBosEos: true));
+    protected override string DecodeAll(IReadOnlyList<int> ids)
+        => string.Concat(ids.Select(id => tokenizer.Decode(new[] { id })));
 
-        bool isGreedy = temperature <= 0f;
-        int generated = 0;
+    protected override CausalLmOps BuildOps() => new(
+        Prefill: w => session.ForwardPrefill(w),
+        Cached: (t, p) => session.ForwardCached(t, p),
+        LastLogits: w => session.ForwardPrefill(w),
+        ResetCache: session.ResetCache,
+        IsStopToken: id => id == tokenizer.EosToken,
+        VocabSize: tokenizer.VocabSize,
+        EosTokenId: tokenizer.EosToken,
+        MaxSequenceLength: maxSeqLen);
 
-        lock (rng)
-        {
-            if (useKvCache)
-                session.ResetCache();
-
-            float[]? logits = null;
-            int position = ids.Count;
-
-            if (useKvCache)
-            {
-                int seqLen = Math.Min(ids.Count, maxSeqLen);
-                var window = ids.GetRange(ids.Count - seqLen, seqLen);
-                logits = session.ForwardPrefill(window.ToArray());
-                ids = new List<int>(window);
-                position = window.Count;
-            }
-
-            while (generated < maxNewTokens)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int next;
-                if (useKvCache && logits is not null)
-                {
-                    int vocab = tokenizer.VocabSize;
-                    next = TokenSampling.Sample(logits.AsSpan(), vocab, isGreedy ? 0f : temperature, isGreedy ? 1f : topP, rng);
-                }
-                else
-                {
-                    int seqLen = Math.Min(ids.Count, maxSeqLen);
-                    var window = ids.GetRange(ids.Count - seqLen, seqLen);
-                    var full = session.ForwardPrefill(window.ToArray());
-                    int vocab = tokenizer.VocabSize;
-                    next = TokenSampling.Sample(full.AsSpan(), vocab, isGreedy ? 0f : temperature, isGreedy ? 1f : topP, rng);
-                }
-
-                if (next == tokenizer.EosToken)
-                    yield break;
-
-                ids.Add(next);
-                generated++;
-                yield return tokenizer.Decode(new[] { next });
-
-                if (useKvCache)
-                {
-                    if (position >= maxSeqLen)
-                    {
-                        int keep = maxSeqLen - 1;
-                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
-                        session.ResetCache();
-                        session.ForwardPrefill(w.ToArray());
-                        position = keep;
-                    }
-                    logits = session.ForwardCached(next, position++);
-                }
-            }
-        }
-    }
+    protected override bool WindowPrompt => true;
+    protected override bool WindowNonCached => true;
+    protected override int OverflowKeep => maxSeqLen - 1;
 
     static string FormatConversation(IEnumerable<ChatMessage> messages)
     {

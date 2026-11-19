@@ -11,15 +11,10 @@ namespace NivaraChat.Transformer;
 /// The model runs in eval mode; generation is autoregressive and re-entrant (each call
 /// builds its own tensors), so concurrent requests are safe.
 /// </summary>
-internal sealed class BatchedChatClient : IChatClient
+internal sealed class BatchedChatClient : CausalLmChatClientBase
 {
     readonly BatchedTransformer<float> model;
     readonly TextTokenizer tokenizer;
-    readonly float temperature;
-    readonly float topP;
-    readonly int maxNewTokens;
-    readonly bool useKvCache;
-    readonly Random rng = new(1234);
 
     public BatchedChatClient(
         BatchedTransformer<float> model,
@@ -28,6 +23,7 @@ internal sealed class BatchedChatClient : IChatClient
         int maxNewTokens = 256,
         float topP = 1.0f,
         bool useKvCache = true)
+        : base(temperature, topP, maxNewTokens, useKvCache, new Random(1234))
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -35,40 +31,44 @@ internal sealed class BatchedChatClient : IChatClient
         model.Eval();
         this.model = model;
         this.tokenizer = tokenizer;
-        this.temperature = temperature;
-        this.topP = Math.Clamp(topP, 0f, 1f);
-        this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
-        this.useKvCache = useKvCache;
     }
 
-    public ChatClientMetadata? Metadata { get; } =
+    public override ChatClientMetadata? Metadata { get; } =
         new ChatClientMetadata("Nivara", null, "BatchedTransformer-word-tokenizer");
 
-    public object? GetService(Type serviceType, object? key = null) => null;
+    protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
+        => FormatConversation(messages);
 
-    public Task<ChatResponse> GetResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        CancellationToken cancellationToken = default)
+    protected override IReadOnlyList<int> Encode(string prompt)
+        => tokenizer.Encode(prompt, addBosEos: true);
+
+    protected override string DecodeToken(int tokenId)
+        => tokenizer.Decode([tokenId]);
+
+    protected override string DecodeAll(IReadOnlyList<int> ids)
+        => tokenizer.Decode(ids.ToArray());
+
+    protected override CausalLmOps BuildOps()
     {
-        var prompt = FormatConversation(messages);
-        var text = Generate(prompt, cancellationToken);
-        return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, text)]));
+        TransformerKVCache<float>? cache = null;
+        return new CausalLmOps(
+            Prefill: w =>
+            {
+                cache ??= new TransformerKVCache<float>(model);
+                return TensorToFloats(model.ForwardPrefill(w, cache));
+            },
+            Cached: (t, p) => TensorToFloats(model.ForwardCached(t, p, cache!)),
+            LastLogits: ForwardLastRow,
+            ResetCache: () => cache = new TransformerKVCache<float>(model),
+            IsStopToken: id => id == tokenizer.EosToken,
+            VocabSize: model.VocabSize,
+            EosTokenId: tokenizer.EosToken,
+            MaxSequenceLength: model.MaxSeqLen);
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var prompt = FormatConversation(messages);
-        foreach (var chunk in GenerateStreaming(prompt, cancellationToken))
-        {
-            yield return new ChatResponseUpdate(ChatRole.Assistant, chunk);
-        }
-    }
-
-    public void Dispose() { }
+    protected override bool WindowPrompt => true;
+    protected override bool WindowNonCached => true;
+    protected override int OverflowKeep => model.MaxSeqLen - 1;
 
     static string FormatConversation(IEnumerable<ChatMessage> messages)
     {
@@ -85,146 +85,27 @@ internal sealed class BatchedChatClient : IChatClient
         return sb.ToString();
     }
 
-    string Generate(string prompt, CancellationToken cancellationToken)
+    float[] ForwardLastRow(int[] window)
     {
-        var promptTokens = tokenizer.Encode(prompt, addBosEos: true);
-        var ids = new List<int>(promptTokens);
-
-        lock (rng)
-        {
-            if (useKvCache)
-            {
-                int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
-                var window = ids.GetRange(ids.Count - seqLen, seqLen);
-                var cache = new TransformerKVCache<float>(model);
-                var logitsTensor = model.ForwardPrefill(ToIntArray(window), cache);
-                var logits = TensorToFloats(logitsTensor);
-                int position = window.Count;
-
-                for (int t = 0; t < maxNewTokens; t++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    int next = Sample(logits);
-                    if (next == tokenizer.EosToken)
-                        break;
-                    ids.Add(next);
-
-                    if (position >= model.MaxSeqLen)
-                    {
-                        int keep = model.MaxSeqLen - 1;
-                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
-                        cache = new TransformerKVCache<float>(model);
-                        model.ForwardPrefill(ToIntArray(w), cache);
-                        position = keep;
-                    }
-
-                    logits = TensorToFloats(model.ForwardCached(next, position++, cache));
-                }
-            }
-            else
-            {
-                for (int t = 0; t < maxNewTokens; t++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
-                    var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
-                    int next = Sample(logits);
-                    if (next == tokenizer.EosToken)
-                        break;
-                    ids.Add(next);
-                }
-            }
-        }
-
-        var generated = ids.Skip(promptTokens.Length).ToArray();
-        return tokenizer.Decode(generated);
-    }
-
-    IEnumerable<string> GenerateStreaming(string prompt, CancellationToken cancellationToken)
-    {
-        var promptTokens = tokenizer.Encode(prompt, addBosEos: true);
-        var ids = new List<int>(promptTokens);
-
-        lock (rng)
-        {
-            if (useKvCache)
-            {
-                int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
-                var window = ids.GetRange(ids.Count - seqLen, seqLen);
-                var cache = new TransformerKVCache<float>(model);
-                var logits = TensorToFloats(model.ForwardPrefill(ToIntArray(window), cache));
-                int position = window.Count;
-
-                for (int t = 0; t < maxNewTokens; t++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    int next = Sample(logits);
-                    if (next == tokenizer.EosToken)
-                        yield break;
-
-                    ids.Add(next);
-                    yield return tokenizer.Decode([next]);
-
-                    if (position >= model.MaxSeqLen)
-                    {
-                        int keep = model.MaxSeqLen - 1;
-                        var w = ids.GetRange(ids.Count - 1 - keep, keep);
-                        cache = new TransformerKVCache<float>(model);
-                        model.ForwardPrefill(ToIntArray(w), cache);
-                        position = keep;
-                    }
-
-                    logits = TensorToFloats(model.ForwardCached(next, position++, cache));
-                }
-            }
-            else
-            {
-                for (int t = 0; t < maxNewTokens; t++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    int seqLen = Math.Min(ids.Count, model.MaxSeqLen);
-                    var logits = ForwardLastRow(ids.GetRange(ids.Count - seqLen, seqLen));
-                    int next = Sample(logits);
-                    if (next == tokenizer.EosToken)
-                        yield break;
-
-                    ids.Add(next);
-                    yield return tokenizer.Decode([next]);
-                }
-            }
-        }
-    }
-
-    float[] ForwardLastRow(List<int> window)
-    {
-        var data = new float[window.Count];
-        for (int i = 0; i < window.Count; i++)
+        var data = new float[window.Length];
+        for (int i = 0; i < window.Length; i++)
             data[i] = window[i];
 
         var column = NivaraColumn<float>.Create(data);
         var input = new ReverseGradTensor<float>(column, requiresGrad: false);
-        input.Reshape(1, window.Count);
+        input.Reshape(1, window.Length);
 
         var logits = model.Forward(input);
         int vocab = logits.Shape[^1];
 
         var last = new float[vocab];
-        int rowStart = (window.Count - 1) * vocab;
+        int rowStart = (window.Length - 1) * vocab;
         for (int v = 0; v < vocab; v++)
             last[v] = float.CreateChecked(logits[rowStart + v]);
         return last;
     }
 
-    static int[] ToIntArray(List<int> window)
-    {
-        var arr = new int[window.Count];
-        for (int i = 0; i < window.Count; i++) arr[i] = window[i];
-        return arr;
-    }
+    static int[] ToIntArray(List<int> window) => window.ToArray();
 
     static float[] TensorToFloats(ReverseGradTensor<float> logits)
     {
@@ -235,7 +116,4 @@ internal sealed class BatchedChatClient : IChatClient
             last[v] = span.Length >= vocab ? span[v] : float.CreateChecked(logits[v]);
         return last;
     }
-
-    int Sample(float[] logits)
-        => TokenSampling.Sample(logits, logits.Length, temperature, topP, rng);
 }

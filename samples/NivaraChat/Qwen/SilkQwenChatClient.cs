@@ -6,16 +6,11 @@ using NivaraChat.Shared;
 
 namespace NivaraChat.Qwen;
 
-internal sealed class SilkQwenChatClient : IChatClient, IDisposable
+internal sealed class SilkQwenChatClient : CausalLmChatClientBase, IDisposable
 {
     readonly SilkQwenSession session;
     readonly Gpt2BpeTokenizer tokenizer;
     readonly LlamaConfig config;
-    readonly int maxNewTokens;
-    readonly float temperature;
-    readonly float topP;
-    readonly bool useKvCache;
-    readonly Random rng;
     readonly TokenizePrefixCache tokenizeCache = new();
     readonly IReadOnlyList<string>? knownToolNames;
     readonly Action<string>? turnCallback;
@@ -31,6 +26,7 @@ internal sealed class SilkQwenChatClient : IChatClient, IDisposable
         bool useKvCache = true,
         IReadOnlyList<string>? knownToolNames = null,
         Action<string>? turnCallback = null)
+        : base(temperature ?? 0f, Math.Clamp(topP ?? 1f, 0f, 1f), maxNewTokens, useKvCache, new Random(seed ?? 0))
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(tokenizer);
@@ -39,26 +35,23 @@ internal sealed class SilkQwenChatClient : IChatClient, IDisposable
         this.session = session;
         this.tokenizer = tokenizer;
         this.config = config;
-        this.maxNewTokens = maxNewTokens > 0 ? maxNewTokens : 1;
-        this.temperature = temperature ?? 0f;
-        this.topP = Math.Clamp(topP ?? 1f, 0f, 1f);
-        this.useKvCache = useKvCache;
-        this.rng = new Random(seed ?? 0);
         this.knownToolNames = knownToolNames;
         this.turnCallback = turnCallback;
     }
 
-    public ChatClientMetadata? Metadata { get; } =
+    public override ChatClientMetadata? Metadata { get; } =
         new ChatClientMetadata("Nivara", null, "Qwen2.5-0.5B-Instruct (Silk/OpenCL causal LM + GPT-2 BPE)");
 
-    public object? GetService(Type serviceType, object? key = null) => null;
+    public int TokenizeCacheHits => tokenizeCache.Hits;
 
-    public Task<ChatResponse> GetResponseAsync(
+    public override void Dispose() => session.Dispose();
+
+    public override Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var ids = Generate(messages, cancellationToken);
+        var ids = GenerateIds(messages, cancellationToken).ToList();
         var text = tokenizer.Decode(ids);
 
         turnCallback?.Invoke(text);
@@ -74,73 +67,46 @@ internal sealed class SilkQwenChatClient : IChatClient, IDisposable
         return Task.FromResult(new ChatResponse(responseMessage));
     }
 
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var ids = Generate(messages, cancellationToken);
+        var ids = GenerateIds(messages, cancellationToken).ToList();
         foreach (var id in ids)
-            yield return new ChatResponseUpdate(ChatRole.Assistant, tokenizer.Decode([id]));
+            yield return new ChatResponseUpdate(ChatRole.Assistant, tokenizer.Decode(new[] { id }));
     }
 
-    public void Dispose() => session.Dispose();
+    protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
+        => QwenChatTemplate.Render(messages, addGenerationPrompt: true);
 
-    IReadOnlyList<int> Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
+    protected override IReadOnlyList<int> Encode(string prompt)
+        => tokenizeCache.Encode(prompt, p => tokenizer.Encode(p));
+
+    protected override string DecodeToken(int tokenId)
+        => tokenizer.Decode(new[] { tokenId });
+
+    protected override string DecodeAll(IReadOnlyList<int> ids)
+        => tokenizer.Decode(ids);
+
+    protected override CausalLmOps BuildOps() => new(
+        Prefill: w => LastVocab(session.ForwardPrefill(w)),
+        Cached: (t, p) => LastVocab(session.ForwardCached(t, p)),
+        LastLogits: w => LastVocab(session.Forward(w)),
+        ResetCache: session.ResetCache,
+        IsStopToken: id => QwenIds.StopIds.Contains(id),
+        VocabSize: config.VocabSize,
+        EosTokenId: config.EosTokenId,
+        MaxSequenceLength: config.MaxPositionEmbeddings);
+
+    protected override bool BreakOnContextLimit => true;
+
+    float[] LastVocab(float[] logits)
     {
-        var prompt = QwenChatTemplate.Render(messages, addGenerationPrompt: true);
-        var ids = new List<int>(tokenizeCache.Encode(prompt, p => tokenizer.Encode(p)));
-
-        bool greedy = temperature <= 0f;
-        var generated = new List<int>();
-
-        lock (rng)
-        {
-            session.ResetCache();
-
-            float[]? logits = useKvCache ? session.ForwardPrefill(ids.ToArray()) : null;
-            int position = ids.Count;
-
-            for (int t = 0; t < maxNewTokens; t++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int next;
-                if (useKvCache && logits is not null)
-                {
-                    int vocab = config.VocabSize;
-                    int start = logits.Length - vocab;
-                    var row = start >= 0 && logits.Length >= start + vocab
-                        ? logits.AsSpan(start, vocab)
-                        : logits.AsSpan(0, Math.Min(vocab, logits.Length));
-                    next = TokenSampling.Sample(row, vocab, temperature, topP, rng);
-                }
-                else
-                {
-                    var full = session.Forward(ids.ToArray());
-                    int vocab = config.VocabSize;
-                    int start = full.Length - vocab;
-                    var row = start >= 0 && full.Length >= start + vocab
-                        ? full.AsSpan(start, vocab)
-                        : full.AsSpan(0, Math.Min(vocab, full.Length));
-                    next = TokenSampling.Sample(row, vocab, temperature, topP, rng);
-                }
-
-                if (QwenIds.StopIds.Contains(next))
-                    break;
-
-                generated.Add(next);
-
-                if (useKvCache)
-                    logits = session.ForwardCached(next, position++);
-                else
-                    ids.Add(next);
-
-                if (generated.Count >= config.MaxPositionEmbeddings - position)
-                    break;
-            }
-        }
-
-        return generated;
+        int vocab = config.VocabSize;
+        int start = logits.Length - vocab;
+        return (start >= 0 && logits.Length >= start + vocab
+            ? logits.AsSpan(start, vocab)
+            : logits.AsSpan(0, Math.Min(vocab, logits.Length))).ToArray();
     }
 }
