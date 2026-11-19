@@ -395,6 +395,16 @@ public sealed partial class SilkLayaHeadTrainer : IDisposable
 
     public Dictionary<string, (float[] Data, int[] Shape)> ExportCheckpoint() => weights.Export();
 
+    public void ZeroGradients()
+    {
+        ThrowIfDisposed();
+        foreach (var p in weights.Parameters.Where(p => p.Trainable))
+        {
+            if (p.Gradient.Handle != nint.Zero)
+                SilkLauncher.Fill(runtime, p.Gradient.Handle, 0f, p.Count);
+        }
+    }
+
     public Dictionary<string, (float[] Data, int[] Shape)> ExportGradients() => weights.ExportGradients();
 
     public void Dispose()
