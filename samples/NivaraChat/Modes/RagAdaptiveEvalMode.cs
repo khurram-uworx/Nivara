@@ -1,5 +1,7 @@
 using Nivara;
 using Nivara.AutoDiff;
+using Nivara.AI;
+using Nivara.Silk;
 using NivaraChat.Helpers;
 using System.Diagnostics;
 
@@ -67,8 +69,32 @@ public static class RagAdaptiveEvalMode
             cpuLayaEngine = new LayaRetrievalDecisionHead.LayaDecisionEngine(
                 modelDir, loadAdaptiveWeights: ctx.Resume, adaptiveWeightsPath: headWeightsPath, useSilk: false);
 
+        // head-training backend selection
+        bool silkHeadAvailable = false;
+        string headTrainingBackend = ctx.UseSilk ? "cpu (silk unavailable)" : "cpu";
+        Action<LayaDecisionHead<float, float>, IReadOnlyList<AdaptiveTrainingExample>, int, float>? silkUpdate = null;
+        if (ctx.UseSilk)
+        {
+            try
+            {
+                var probeTensors = HeadToCheckpointTensors(engine.Head);
+                using var probeRuntime = new SilkRuntime();
+                using var probeTrainer = new SilkLayaHeadTrainer(probeRuntime, probeTensors, engine.Head.HeadLayerCount, 2, 8);
+                silkHeadAvailable = true;
+                silkUpdate = SilkUpdate;
+                headTrainingBackend = "silk";
+            }
+            catch (Exception probeError)
+            {
+                silkHeadAvailable = false;
+                headTrainingBackend = "cpu (silk unavailable)";
+                Console.WriteLine($"Silk head training unavailable ({probeError.GetType().Name}: {probeError.Message}); falling back to CPU AutoDiff.");
+            }
+        }
+
         var collector = new AdaptiveFeedbackCollector(
-            engine.Head, headWeightsPath, updateBatch, headEpochs, headLr, persist: !ctx.NoPersist);
+            engine.Head, headWeightsPath, updateBatch, headEpochs, headLr, persist: !ctx.NoPersist,
+            updateAction: silkHeadAvailable ? silkUpdate : null);
 
         // silk parity
         MultiViewIndex? silkIndex = null;
@@ -262,7 +288,7 @@ public static class RagAdaptiveEvalMode
             timings.Add(new AdaptiveReportTiming("index build (silk)", 1, (int)silkBuildMs));
         timings.Add(new AdaptiveReportTiming("test feature extraction (before)", testResult.Examples.Count + (testResult.Observations.Count - testResult.Examples.Count), (int)testSw.ElapsedMilliseconds));
         timings.Add(new AdaptiveReportTiming("train feature extraction + decisions", trainExamplesCount, (int)trainSw.ElapsedMilliseconds));
-        timings.Add(new AdaptiveReportTiming("head updates (AutoDiff)", saves, (int)collector.UpdateMilliseconds));
+        timings.Add(new AdaptiveReportTiming(silkHeadAvailable ? "head updates (Silk)" : "head updates (AutoDiff)", saves, (int)collector.UpdateMilliseconds));
         timings.Add(new AdaptiveReportTiming("head persistence", saves, (int)collector.PersistMilliseconds));
         timings.Add(new AdaptiveReportTiming("test feature extraction (after)", testResultAfter.Examples.Count, (int)testAfterSw.ElapsedMilliseconds));
 
@@ -278,7 +304,10 @@ public static class RagAdaptiveEvalMode
             ctx.UseSilk && silkIndex is not null,
             layaMaxAbs,
             layaWithin,
-            layaAvailable);
+            layaAvailable)
+        {
+            HeadTrainingBackend = headTrainingBackend
+        };
 
         var input = new AdaptiveReportInput
         {
@@ -312,6 +341,7 @@ public static class RagAdaptiveEvalMode
             UpdateBatch = updateBatch,
             HeadEpochs = headEpochs,
             HeadLearningRate = headLr,
+            HeadTrainingBackend = headTrainingBackend,
             RetrievalRows = combinedRows,
             Comparisons = comparisons,
             DecisionBefore = new AdaptiveReportDecision(
@@ -496,6 +526,149 @@ public static class RagAdaptiveEvalMode
             RagEvalMetrics.SignTestPValue(wins, losses), RagEvalMetrics.CohensD(a, b),
             a.Average() - b.Average());
     }
+
+    static void SilkUpdate(
+        LayaDecisionHead<float, float> head,
+        IReadOnlyList<AdaptiveTrainingExample> examples,
+        int epochs,
+        float learningRate)
+    {
+        if (examples.Count == 0) return;
+
+        var tensors = HeadToCheckpointTensors(head);
+        int maxSeq = 1;
+        foreach (var e in examples)
+            if (e.SequenceLength > maxSeq) maxSeq = e.SequenceLength;
+
+        using var runtime = new SilkRuntime();
+        using var trainer = new SilkLayaHeadTrainer(runtime, tensors, head.HeadLayerCount, 2, maxSeq);
+
+        int n = examples.Count;
+        for (var epoch = 0; epoch < epochs; epoch++)
+        {
+            trainer.ZeroGradients();
+            foreach (var example in examples)
+            {
+                var output = trainer.Forward(example.Features, LayaQuestionType.Choice, example.MarkerPositions, example.SequenceLength);
+
+                var dScorer = new float[example.MarkerPositions.Length];
+                var labels = new[] { example.Target };
+                SilkSoftmaxInputGradient(output.Logits, labels, 1, example.MarkerPositions.Length, 1f / n, dScorer);
+
+                var dAct = new float[2];
+                trainer.Backward(dScorer, dAct);
+            }
+            trainer.AdamUpdateAll(learningRate, 0f);
+        }
+
+        var exported = trainer.ExportCheckpoint();
+        using var reloaded = LayaDecisionHead<float, float>.LoadWeights(exported, head.HeadLayerCount, 2);
+        head.LoadStateDict(reloaded.StateDict(), strict: true);
+    }
+
+    static void SilkSoftmaxInputGradient(float[] logits, int[] labels, int n, int numClasses, float scale, float[] dZ)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            int rowBase = i * numClasses;
+            float max = float.NegativeInfinity;
+            for (int c = 0; c < numClasses; c++)
+                max = MathF.Max(max, logits[rowBase + c]);
+            float sum = 0f;
+            for (int c = 0; c < numClasses; c++)
+                sum += MathF.Exp(logits[rowBase + c] - max);
+            int label = labels[i];
+            for (int c = 0; c < numClasses; c++)
+            {
+                float p = MathF.Exp(logits[rowBase + c] - max) / sum;
+                dZ[rowBase + c] = (p - (c == label ? 1f : 0f)) * scale;
+            }
+        }
+    }
+
+    static Dictionary<string, (float[] Data, int[] Shape)> HeadToCheckpointTensors(LayaDecisionHead<float, float> head)
+    {
+        var t = new Dictionary<string, (float[] Data, int[] Shape)>(StringComparer.Ordinal);
+        int h = head.HiddenSize;
+
+        // type_emb
+        t["type_emb.weight"] = (TensorToFloat(head.typeEmb.Weight!.Tensor), new[] { 3, h });
+
+        // head layers
+        for (int i = 0; i < head.HeadLayers.Count; i++)
+        {
+            var layer = head.HeadLayers[i];
+            string hp = $"head.layers.{i}";
+
+            // norm1
+            AddLayerNorm(t, layer.norm1, $"{hp}.norm1", h);
+            // attn fused in_proj
+            var attn = layer.attn;
+            var qW = TensorToFloat(attn.qProj.Weight!.Tensor);
+            var kW = TensorToFloat(attn.kProj.Weight!.Tensor);
+            var vW = TensorToFloat(attn.vProj.Weight!.Tensor);
+            var fusedW = new float[3 * h * h];
+            var ws = new[] { qW, kW, vW };
+            for (int b = 0; b < 3; b++)
+                for (int r = 0; r < h; r++)
+                    for (int c = 0; c < h; c++)
+                        fusedW[(b * h + r) * h + c] = ws[b][r * h + c];
+            t[$"{hp}.self_attn.in_proj_weight"] = (fusedW, new[] { 3 * h, h });
+
+            var qB = TensorToFloat(attn.qProj.Bias!.Tensor);
+            var kB = TensorToFloat(attn.kProj.Bias!.Tensor);
+            var vB = TensorToFloat(attn.vProj.Bias!.Tensor);
+            var fusedB = new float[3 * h];
+            Array.Copy(qB, 0, fusedB, 0, h);
+            Array.Copy(kB, 0, fusedB, h, h);
+            Array.Copy(vB, 0, fusedB, 2 * h, h);
+            t[$"{hp}.self_attn.in_proj_bias"] = (fusedB, new[] { 3 * h });
+
+            AddLinear(t, attn.oProj, $"{hp}.self_attn.out_proj");
+
+            // norm2
+            AddLayerNorm(t, layer.norm2, $"{hp}.norm2", h);
+
+            // linear1 / linear2
+            AddLinear(t, layer.linear1, $"{hp}.linear1");
+            AddLinear(t, layer.linear2, $"{hp}.linear2");
+        }
+
+        // scorer
+        AddLayerNorm(t, head.scorerNorm, "scorer.0", h);
+        AddLinear(t, head.scorerHidden, "scorer.1");
+        AddLinear(t, head.scorerOut, "scorer.3");
+
+        // act_head
+        AddLinear(t, head.actInput, "act_head.0");
+        AddLinear(t, head.actOut, "act_head.2");
+
+        // temperature
+        var tempArr = new float[head.CheckpointTemperature.Count];
+        for (int i = 0; i < tempArr.Length; i++)
+            tempArr[i] = float.CreateChecked(head.CheckpointTemperature[i]);
+        t["temperature"] = (tempArr, new[] { 3 });
+
+        return t;
+    }
+
+    static void AddLayerNorm(Dictionary<string, (float[] Data, int[] Shape)> t, Nivara.AutoDiff.Nn.LayerNorm<float> ln, string prefix, int n)
+    {
+        if (ln.Weight is not null)
+            t[$"{prefix}.weight"] = (TensorToFloat(ln.Weight.Tensor), new[] { n });
+        if (ln.Bias is not null)
+            t[$"{prefix}.bias"] = (TensorToFloat(ln.Bias.Tensor), new[] { n });
+    }
+
+    static void AddLinear(Dictionary<string, (float[] Data, int[] Shape)> t, Nivara.AutoDiff.Nn.Linear<float, float> lin, string prefix)
+    {
+        t[$"{prefix}.weight"] = (TensorToFloat(lin.Weight!.Tensor), new[] { lin.OutFeatures, lin.InFeatures });
+        if (lin.Bias is not null)
+            t[$"{prefix}.bias"] = (TensorToFloat(lin.Bias.Tensor), new[] { lin.OutFeatures });
+    }
+
+    static float[] TensorToFloat(ReverseGradTensor<float> tensor)
+        => tensor.Data.ToArray();
 
     static ResolvedLabels? LoadLabels(ModeContext ctx, string repoRoot, MultiViewIndex index)
     {
