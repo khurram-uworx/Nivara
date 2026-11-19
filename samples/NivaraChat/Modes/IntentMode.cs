@@ -27,6 +27,13 @@ public static class IntentMode
         Console.WriteLine("Loading intent model...");
         var (intentModel, intentTok) = ModeHelpers.LoadIntentModel(ctx.ModelsDir);
         SilkTextClassifier? intentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(intentModel, 20, 5) : null;
+        var silk = ctx.UseSilk ? "Silk (OpenCL)" : "CPU";
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", Directory.Exists(Path.Combine(ModeHelpers.GetRepoRoot(), "samples", "data", "minilm")) ? silk : "not used", "F32"),
+            new ComponentBackend("llm", ctx.UseOllama ? $"Ollama ({ctx.ModelName})" : "not used", "n/a"),
+            [new ComponentBackend("intent", intentSilk is not null ? silk : "CPU", "F32")],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
         Console.WriteLine("Intent model loaded.\n");
 
         if (!ctx.UseOllama)

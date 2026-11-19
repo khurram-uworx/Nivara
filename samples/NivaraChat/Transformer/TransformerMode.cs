@@ -8,6 +8,7 @@ using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Silk;
+using NivaraChat.Helpers;
 using NivaraChat.Shared;
 using System.Diagnostics;
 
@@ -146,6 +147,12 @@ public static class TransformerMode
             Console.WriteLine($"Saved tokenizer: {tokenizerPath}");
         }
 
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", "not used", "n/a"),
+            new ComponentBackend("llm", options.UseSilk ? "Silk (OpenCL)" : "CPU", "F32"),
+            [],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
         if (options.UseSilk)
         {
             RunSilkChat(model, tokenizer, options);

@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.Samples;
 using Nivara.Silk;
+using NivaraChat.Helpers;
 using System.Diagnostics;
 using System.Numerics;
 
@@ -127,6 +128,12 @@ public static class SmollmMode
             Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
 
         Console.WriteLine($"Loading SmolLM-135M-Instruct (BFloat16 storage / F32 compute){(options.UseSilk ? " via Silk/OpenCL" : "")}...");
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", "not used", "n/a"),
+            new ComponentBackend("llm", options.UseSilk ? "Silk (OpenCL)" : "CPU", "BF16 storage / F32"),
+            [],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
         var loadSw = Stopwatch.StartNew();
         if (options.UseSilk)
             await RunSilk(config, tokenizer, modelDir, options);

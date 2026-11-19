@@ -30,6 +30,12 @@ public static class RagAdaptiveMode
         LayaRetrievalDecisionHead.LayaDecisionEngine? engine = null;
         if (Directory.Exists(modelDir) && File.Exists(Path.Combine(modelDir, "model.safetensors")))
             engine = new LayaRetrievalDecisionHead.LayaDecisionEngine(modelDir, useSilk: ctx.UseSilk);
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", ctx.UseSilk ? "Silk (OpenCL)" : "CPU", "F32"),
+            new ComponentBackend("llm", ctx.UseOllama ? $"Ollama ({ctx.ModelName})" : "not used", "n/a"),
+            [],
+            new ComponentBackend("laya-encoder", engine is not null && ctx.UseSilk ? "Silk (OpenCL)" : (engine is not null ? "CPU" : "not used"), "F32"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
 
         IChatClient? chatClient = LlmClientFactory.Create(ctx);
         if (chatClient is not null)

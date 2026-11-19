@@ -109,7 +109,18 @@ public static class QwenMode
             var sentimentSilk = options.UseSilk ? SilkTextClassifier.TryCreate(nivaraSentimentModel, 20, 3) : null;
             var validatorSilk = options.UseSilk ? SilkTextClassifier.TryCreate(nivaraValidatorModel, 40, 2) : null;
             var entitySilk = options.UseSilk ? SilkTokenClassifier.TryCreate(nivaraEntityModel, 20, 5) : null;
-            NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok, sentimentSilk, validatorSilk, entitySilk);
+            var silk = options.UseSilk ? "Silk (OpenCL)" : "CPU";
+BackendMatrixPrinter.Print(new BackendMatrix(
+    new ComponentBackend("embeddings", "not used", "n/a"),
+    new ComponentBackend("llm", options.UseSilk ? "Silk (OpenCL)" : "CPU", "BF16 storage / F32"),
+    [
+        new ComponentBackend("sentiment", sentimentSilk is not null ? silk : "CPU", "F32"),
+        new ComponentBackend("validator", validatorSilk is not null ? silk : "CPU", "F32"),
+        new ComponentBackend("entity", entitySilk is not null ? silk : "CPU", "F32"),
+    ],
+    new ComponentBackend("laya-encoder", "not used", "n/a"),
+    new ComponentBackend("laya-head-training", "not used", "n/a")));
+NivaraToolFunctions.Initialize(nivaraSentimentModel, nivaraSentimentTok, nivaraEntityModel, nivaraEntityTok, nivaraValidatorModel, nivaraValidatorTok, sentimentSilk, validatorSilk, entitySilk);
 
             nivaraTools = NivaraAIFunctions.CreateRegistered(
                 nivaraSentimentModel, nivaraSentimentTok,
@@ -412,7 +423,18 @@ public static class QwenMode
             var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(nivaraModelsDir);
             var sentimentSilk = options.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
             var validatorSilk = options.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
-            NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok, sentimentSilk, validatorSilk);
+            var entitySilk = options.UseSilk ? SilkTokenClassifier.TryCreate(entityModel, 20, 5) : null;
+            BackendMatrixPrinter.Print(new BackendMatrix(
+                new ComponentBackend("embeddings", "not used", "n/a"),
+                new ComponentBackend("llm", "Silk (OpenCL)", "BF16 storage / F32"),
+                [
+                    new ComponentBackend("sentiment", sentimentSilk is not null ? "Silk (OpenCL)" : "CPU", "F32"),
+                    new ComponentBackend("validator", validatorSilk is not null ? "Silk (OpenCL)" : "CPU", "F32"),
+                    new ComponentBackend("entity", entitySilk is not null ? "Silk (OpenCL)" : "CPU", "F32"),
+                ],
+                new ComponentBackend("laya-encoder", "not used", "n/a"),
+                new ComponentBackend("laya-head-training", "not used", "n/a")));
+            NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok, sentimentSilk, validatorSilk, entitySilk);
 
             var tools = NivaraAIFunctions.CreateRegistered(
                 sentimentModel, sentimentTok,

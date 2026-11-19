@@ -313,6 +313,14 @@ public static class RagAdaptiveEvalMode
             HeadTrainingBackend = headTrainingBackend
         };
 
+        var backendMatrix = new BackendMatrix(
+            new ComponentBackend("embeddings", ctx.UseSilk ? "Silk (OpenCL)" : "CPU", "F32"),
+            new ComponentBackend("llm", "not used", "n/a"),
+            [],
+            new ComponentBackend("laya-encoder", ctx.UseSilk ? "Silk (OpenCL)" : "CPU", "F32"),
+            new ComponentBackend("laya-head-training", headTrainingBackend, "F32"));
+        BackendMatrixPrinter.Print(backendMatrix);
+
         var input = new AdaptiveReportInput
         {
             Mode = ctx.UseSilk ? "adaptive-eval (silk)" : "adaptive-eval (cpu)",
@@ -360,6 +368,7 @@ public static class RagAdaptiveEvalMode
             ReliabilityAfter = calibAfter.Bins,
             Timings = timings,
             Silk = silkReport,
+            Backends = backendMatrix,
             Persistence = new AdaptiveReportPersistence(headWeightsPath, existedBefore, saves, bytesWritten, finalSize, verified) { Disabled = ctx.NoPersist },
             InSampleAgreement = inSample,
             DecisiveNote = decisiveNote,

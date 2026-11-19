@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Nivara.Samples;
+using NivaraChat.Helpers;
 using System.Numerics.Tensors;
 
 namespace NivaraChat.Modes;
@@ -34,6 +35,12 @@ public static class EmbeddingMode
         var embedMeta = generator.GetService(typeof(EmbeddingGeneratorMetadata), null) as EmbeddingGeneratorMetadata;
         Console.WriteLine($"  Dimensions:   {embedMeta?.DefaultModelDimensions ?? 0}");
         Console.WriteLine($"  Loaded in:    {sw.ElapsedMilliseconds} ms\n");
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", ctx.UseSilk ? "Silk (OpenCL)" : "CPU", "F32"),
+            new ComponentBackend("llm", "not used", "n/a"),
+            [],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
 
         var documents = new[]
         {
