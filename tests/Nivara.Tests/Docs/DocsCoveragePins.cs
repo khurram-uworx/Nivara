@@ -20,7 +20,7 @@ internal static class DocsCoveragePins
     /// Documents in scope: the <c>*.md</c> files at the repository root plus the reader-facing
     /// documents under <c>docs/</c>.
     /// </summary>
-    internal const int ExpectedDocumentCount = 61;
+    internal const int ExpectedDocumentCount = 62;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -31,5 +31,5 @@ internal static class DocsCoveragePins
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 516;
+    internal const int ExpectedDocumentReferenceCount = 518;
 }
