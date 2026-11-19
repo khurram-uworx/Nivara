@@ -110,15 +110,19 @@ Currently `--tinyshakespeare` training runs entirely on the CPU AutoDiff path
 inference-only (`SilkTinyShakespeareSession`, `SilkBatchedChatClient` via `ToSilkWeights()`).
 Previously recorded as a non-goal. Now tracked explicitly so it is not silently dropped.
 
-**Goal:** scope (design note first) a Silk training path for the batched transformer — device
-forward/backward for the transformer block (attention + FFN + layernorm + embedding) and an
-Adam step, exporting trained weights back to the CPU `BatchedTransformer` for save/load and
-inference. Preserve the CPU AutoDiff path as the reference parity gate.
+**Design note:** `docs/plan/NIVARACHAT-TINYSHAKESPEARE-SILK-TRAINING.md` scopes kernels needed,
+memory budget, precision lane (f32 only), save/load round-trip, parity gate, and non-goals.
+Implementation tracked separately.
+
+**Goal:** a Silk training path for the batched transformer — device forward/backward for the
+transformer block (attention + FFN + layernorm + embedding) and an Adam step, exporting
+trained weights back to the CPU `BatchedTransformer` for save/load and inference. Preserve
+the CPU AutoDiff path as the reference parity gate.
 
 **Constraints:** f32 only this release; parity gate vs CPU AutoDiff; AutoDiff semantics
 matched or documented as divergent.
 
-**Depends on:** design note; large, open-ended. Not a release blocker.
+**Depends on:** design note (done); large, open-ended. Not a release blocker.
 
 **Key files:** `samples/NivaraChat/Transformer/BatchedTransformer.cs`,
 `Transformer/TransformerMode.cs`, `src/Nivara.Extensions/Silk/SilkTinyShakespeareSession.cs`,
