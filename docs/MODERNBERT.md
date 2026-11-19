@@ -28,6 +28,27 @@ Two pre-existing core bugs were found and fixed, both now regression-tested:
 
 2. **`GradKernels` returned `NaN` for a fully-masked softmax row.** ModernBERT's sliding window leaves rows at or past `validLength + window` with no visible key, so the row max is `-inf` and `x - max` is `NaN` — and because the mask is applied as an **add**, `NaN + (-inf) = NaN` meant the poisoned row escaped suppression in the next layer and took every other query row with it. The kernels now clamp a row whose max is exactly `-inf` to zeros, which is the one case PyTorch's `_safe_softmax` (what `scaled_dot_product_attention` uses) clamps too. The test is deliberately `max == -inf` and not `!max.IsFinite`: a `NaN` or `+inf` row max means the model already diverged, PyTorch propagates both to `NaN`, and zeroing them would delete the most useful diagnostic a diverging run produces. The residual gap — a `NaN` already present in q/k/v was still not suppressed, because `NaN + (-inf) = NaN` — was filed as #448 and is now **closed**: `AttentionKernels<T>.ApplyMask` *assigns* `-inf` to a suppressed cell rather than summing into it, which discards the bad value instead of combining with it, so neither a `NaN` nor a `+inf` score can escape the mask. Only the `-inf` cell is a suppression signal — a `NaN` or `+inf` mask cell stays additive (PyTorch parity for a non-finite *mask* is unchanged) and a finite `finfo.min` fill keeps its magnitude (so a fully-masked row still collapses to one constant).
 
+## Fine-tuning (head-only, frozen encoder)
+
+ModernBERT is inference-only as an encoder, but a small classification head can be
+trained on top of its frozen `[CLS]` representation without retraining the
+~395M-parameter backbone:
+
+- `ModernBertClassificationHead<TModel, TWeight>` (`Nivara.Samples`) — `Linear(hidden, hidden) + ReLU + Linear(hidden, numClasses)` on the `[CLS]` row.
+- `ModernBertHeadTraining.Train` (CPU, F32) — precomputes frozen `[CLS]` features via `ModernBertEncoder.Forward`, then trains only the head with Adam + cross-entropy, exporting + reloading the head weights.
+- `SilkModernBertHeadTrainer` (Silk/OpenCL, F32) — device-side counterpart.
+
+CLI entry points (see the [NivaraInference README](../samples/NivaraInference/README.md)):
+
+```bash
+dotnet run --project samples/NivaraInference -c Release -- modernbert train-head          # CPU
+dotnet run --project samples/NivaraInference -c Release -- modernbert --silk train-head    # OpenCL
+```
+
+Encoder weights stay frozen by construction (only head params are in the optimizer);
+the showcase asserts the encoder is byte-identical before/after. Narrow dtypes and
+partial encoder unfreezing are out of scope for now.
+
 ## Library features used
 
 | Capability | Where exercised |
