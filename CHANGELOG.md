@@ -2,6 +2,40 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
+## [1.5.3] - 2026-11-20
+
+### Added
+
+- Silk/OpenCL token-level classifier (`GpuTokenClassifier`) and entity training paths in
+  NivaraChat (`EntityTextModel`, `EntityTrainer` with `useSilk`), plus retrieval training
+  with pairwise loss on Silk (`SilkRetrievalTrainer`).
+- Silk head training for ModernBERT (`SilkModernBertHeadTrainer`, `SilkModernBertHeadWeights`)
+  and a new `modernbert train-head` mode in NivaraInference (CPU and `--silk`, F32).
+- TinyShakespeare transformer mode in NivaraChat with KV-cache decode, `--top-p` sampling,
+  `--kv-cache`, and a Silk/OpenCL runner (`--silk`), including CPU-vs-Silk parity tests.
+- Shared causal-LM generation loop (`CausalLmGenerator`/`CausalLmOps`/`CausalLmChatClientBase`)
+  used by Qwen, SmolLM, and BatchedChatClient clients.
+- `--silk --precision fp16` exposure for minilm, distilbert, distilbert_sst, modernbert,
+  and laya inference paths.
+- Per-component backend reporting matrix printed by inference modes.
+- `ToSilkWeights()` export helper on `BatchedTransformer`.
+
+### Changed
+
+- NivaraChat clients (Qwen, SmolLM, Batched) migrated to the shared causal-LM generator;
+  KV cache defaults on for `BatchedChatClient` and `TransformerMode`.
+- `SilkDistilBertTrainer` `Backward`/`AdamUpdateAll`/`ExportGradients` promoted to public;
+  `ZeroGradients` added to `SilkLayaHeadTrainer`.
+- Text/token classifiers documented as F32-only on Silk.
+- Backend reporting and adaptive-eval parity reporting now state compared components.
+
+### Fixed
+
+- Silk runtime lifetime across head training (avoid dispose crash); deferred Silk
+  head-training probe until after index builds.
+- Gather row counts in the Silk TinyShakespeare runner.
+- Context-window growth in the non-cached path and cache-overflow handling.
+
 ## [1.5.2] - 2026-11-16
 
 ### Added

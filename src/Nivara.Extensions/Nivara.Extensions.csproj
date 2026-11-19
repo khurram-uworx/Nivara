@@ -8,9 +8,9 @@
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU5104</WarningsNotAsErrors>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>1.5.2</PackageVersion>
+    <PackageVersion>1.5.3</PackageVersion>
     <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, the BERT-family model layer, and the Silk OpenCL GPU backend for Nivara</Description>
-    <PackageReleaseNotes>v1.5.2: Deferred Linear/Embedding weight init on model load paths, ONNX export Phase 1, frame-level dataset operations, public TryGetReadOnlyTensorSpan, Silk native F16/BF16 paths and Laya head training, plus gradient-tracking fixes. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.3: Silk/OpenCL expansion across NivaraChat, ModernBERT head training, TinyShakespeare transformer with KV cache, backend reporting matrix, plus gradient-tracking fixes. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>
