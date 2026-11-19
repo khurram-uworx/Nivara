@@ -50,6 +50,8 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 dotnet run --project samples/NivaraInference -c Release -- modernbert benchmark  # seq 128 + 256; 1 warmup + 3 timed; --seq 256 times one length
 dotnet run --project samples/NivaraInference -c Release -- modernbert --silk benchmark    # seq 128 + 512 + 2048 + 4096
+dotnet run --project samples/NivaraInference -c Release -- modernbert train-head          # head-only fine-tune on CPU (F32), frozen encoder
+dotnet run --project samples/NivaraInference -c Release -- modernbert --silk train-head    # same on OpenCL
 
 # MiniLM on the OpenCL iGPU (Silk only -- hand-authored OpenCL kernels; F32-only)
 dotnet run --project samples/NivaraInference -c Release -- minilm --silk
