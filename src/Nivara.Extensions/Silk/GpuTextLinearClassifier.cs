@@ -10,6 +10,12 @@ namespace Nivara.Silk;
 /// refreshed when <c>Train</c> returns. The embedding is device-resident: gather and mean pool run on the device, the
 /// backward scatter is a deterministic on-device reduction, and the table takes the fused
 /// <c>adam_update</c> step. Host mirrors refresh when <c>Train</c> returns.
+///
+/// Precision: f32 only (decision, issue #1274). No bf16/fp16 partials: text classifiers are
+/// trained and serialized as f32, Silk training is f32-only this release, and the CPU reference
+/// (TextClassifierModel<float>) is f32. Narrow storage would require new device kernels and
+/// weight loaders for no benefit at classifier scale and would break the f32 parity gate. The
+/// f32 CPU<->Silk parity tests are the assurance.
 /// </summary>
 public sealed class GpuTextLinearClassifier : IDisposable
 {

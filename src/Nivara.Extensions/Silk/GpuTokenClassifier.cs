@@ -6,7 +6,12 @@ namespace Nivara.Silk;
 /// sequence), this keeps every token as its own row: forward returns one logit vector per token,
 /// so it backs the entity/NER model in NivaraChat. Forward/backward run on the device; FC1/FC2
 /// and the embedding are device-authoritative during training and the host mirrors refresh when
-/// <c>Train</c> returns. f32 only.
+/// <c>Train</c> returns.
+///
+/// Precision: f32 only (decision, issue #1274). No bf16/fp16 partials: text classifiers are
+/// trained and serialized as f32, Silk training is f32-only this release, and the CPU reference
+/// is f32. Narrow storage would require new device kernels and weight loaders for no benefit at
+/// classifier scale and would break the f32 parity gate. The f32 CPU<->Silk parity is the assurance.
 /// </summary>
 public sealed class GpuTokenClassifier : IDisposable
 {

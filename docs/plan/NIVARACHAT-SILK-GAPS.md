@@ -90,10 +90,17 @@ with CPU fallback, and record the backend in the adaptive report. f32 only for t
 
 Already filed. Per-component backend + precision matrix in run output and `AdaptiveReport`.
 
-### Gap S4 — Silk text classifiers float-only (#1274) — Low
+### Gap S4 - Silk text classifiers float-only (#1274) - Low
 
-Already filed. Decide on bf16/fp16 partials for `GpuTextLinearClassifier`/`GpuTextConvClassifier`
-or document f32-only (consistent with this release's constraint).
+**Resolved (khurram/1274): decision documented.** Text classifiers remain f32-only: no bf16/fp16
+partials for `GpuTextLinearClassifier`/`GpuTextConvClassifier` (or `GpuTokenClassifier`).
+Rationale: text classifiers in NivaraChat/NivaraClassifier are trained and serialized as f32;
+Silk training is f32-only this release; the CPU reference models are f32; narrow storage would
+require new device kernels and weight loaders for no benefit at classifier scale and would break
+the f32 parity gate. The f32 CPU↔Silk parity is pinned by
+`tests/Nivara.Tests/Gpu/GpuTextConvClassifierTests.cs` and
+`tests/Nivara.Tests/Gpu/GpuTextLinearClassifierTests.cs`. See `docs/SILK.md` §13c
+("Precision: f32 only (decision, #1274)").
 
 ### Gap S5 — Llama/SmolLM/Qwen training demo (#1273/#1283/#1284) — Low (optional)
 

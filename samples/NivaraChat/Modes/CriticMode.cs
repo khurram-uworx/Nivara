@@ -30,6 +30,13 @@ public static class CriticMode
         Console.WriteLine("Loading trained models...");
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir);
         var validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
+        var silk = ctx.UseSilk ? "Silk (OpenCL)" : "CPU";
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", "not used", "n/a"),
+            new ComponentBackend("llm", ctx.UseOllama ? $"Ollama ({ctx.ModelName})" : "not used", "n/a"),
+            [new ComponentBackend("validator", validatorSilk is not null ? silk : "CPU", "F32")],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
         Console.WriteLine("Models loaded.\n");
 
         Console.WriteLine($"Connecting to LLM at {ctx.OllamaUrl} (model: {ctx.ModelName})...");

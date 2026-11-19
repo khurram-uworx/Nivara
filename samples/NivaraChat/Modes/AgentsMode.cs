@@ -29,6 +29,17 @@ public static class AgentsMode
         var sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
         var validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
         var entitySilk = ctx.UseSilk ? SilkTokenClassifier.TryCreate(entityModel, 20, 5) : null;
+        var silk = ctx.UseSilk ? "Silk (OpenCL)" : "CPU";
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", "not used", "n/a"),
+            new ComponentBackend("llm", ctx.UseOllama ? $"Ollama ({ctx.ModelName})" : "not used", "n/a"),
+            [
+                new ComponentBackend("sentiment", sentimentSilk is not null ? silk : "CPU", "F32"),
+                new ComponentBackend("validator", validatorSilk is not null ? silk : "CPU", "F32"),
+                new ComponentBackend("entity", entitySilk is not null ? silk : "CPU", "F32"),
+            ],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
         Console.WriteLine("Models loaded.\n");
 
         var sentimentText = new SentimentTextModel(sentimentModel, sentimentTok, silk: sentimentSilk);

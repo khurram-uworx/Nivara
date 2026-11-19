@@ -49,6 +49,7 @@ public sealed record AdaptiveReportInput
     public required IReadOnlyList<AdaptiveCalibrationBin> ReliabilityAfter { get; init; }
     public required IReadOnlyList<AdaptiveReportTiming> Timings { get; init; }
     public required AdaptiveReportSilk Silk { get; init; }
+    public BackendMatrix Backends { get; init; } = BackendMatrix.Default;
     public required AdaptiveReportPersistence Persistence { get; init; }
     public required IReadOnlyList<AdaptiveReportAgreement> InSampleAgreement { get; init; }
     public required string DecisiveNote { get; init; }
@@ -64,6 +65,23 @@ public sealed record AdaptiveReportDecision(
 public sealed record AdaptiveReportCalibration(int Count, double Ece, double Brier);
 
 public sealed record AdaptiveReportTiming(string Stage, int Count, long Milliseconds);
+
+public sealed record ComponentBackend(string Component, string Backend, string Precision);
+
+public sealed record BackendMatrix(
+    ComponentBackend Embeddings,
+    ComponentBackend Llm,
+    IReadOnlyList<ComponentBackend> Classifiers,
+    ComponentBackend LayaEncoder,
+    ComponentBackend LayaHeadTraining)
+{
+    public static BackendMatrix Default { get; } = new(
+        new ComponentBackend("embeddings", "cpu", "F32"),
+        new ComponentBackend("llm", "cpu", "F32"),
+        [],
+        new ComponentBackend("laya-encoder", "cpu", "F32"),
+        new ComponentBackend("laya-head-training", "cpu", "F32"));
+}
 
 public sealed record AdaptiveReportSilk(
     string Backend, double MaxAbsoluteDifference, int MismatchedRows,
@@ -230,6 +248,17 @@ public static class AdaptiveReport
         c.AppendLine($"- Head training backend: {input.Silk.HeadTrainingBackend}");
         c.AppendLine("- Scope note: embedding parity uses the 1e-5 tolerance; ModernBERT feature extraction parity is reported under Laya when available. Decisions remain CPU in both runs; head training backend is recorded above.");
         c.AppendLine();
+        c.AppendLine("## Backends");
+        c.AppendLine();
+        c.AppendLine("| Component | Backend | Precision |");
+        c.AppendLine("| --- | --- | --- |");
+        c.AppendLine($"| {input.Backends.Embeddings.Component} | {input.Backends.Embeddings.Backend} | {input.Backends.Embeddings.Precision} |");
+        c.AppendLine($"| {input.Backends.Llm.Component} | {input.Backends.Llm.Backend} | {input.Backends.Llm.Precision} |");
+        foreach (var cb in input.Backends.Classifiers)
+            c.AppendLine($"| {cb.Component} | {cb.Backend} | {cb.Precision} |");
+        c.AppendLine($"| {input.Backends.LayaEncoder.Component} | {input.Backends.LayaEncoder.Backend} | {input.Backends.LayaEncoder.Precision} |");
+        c.AppendLine($"| {input.Backends.LayaHeadTraining.Component} | {input.Backends.LayaHeadTraining.Backend} | {input.Backends.LayaHeadTraining.Precision} |");
+        c.AppendLine();
         c.AppendLine("## Persistence");
         c.AppendLine();
         c.AppendLine($"- Path: {input.Persistence.Path}");
@@ -323,6 +352,14 @@ public static class AdaptiveReport
                 layaWithinTolerance = input.Silk.LayaWithinTolerance,
                 componentsCompared = input.Silk.ComparedComponents,
                 headTrainingBackend = input.Silk.HeadTrainingBackend
+            },
+            backends = new
+            {
+                embeddings = new { component = input.Backends.Embeddings.Component, backend = input.Backends.Embeddings.Backend, precision = input.Backends.Embeddings.Precision },
+                llm = new { component = input.Backends.Llm.Component, backend = input.Backends.Llm.Backend, precision = input.Backends.Llm.Precision },
+                classifiers = input.Backends.Classifiers.Select(cb => new { component = cb.Component, backend = cb.Backend, precision = cb.Precision }).ToArray(),
+                layaEncoder = new { component = input.Backends.LayaEncoder.Component, backend = input.Backends.LayaEncoder.Backend, precision = input.Backends.LayaEncoder.Precision },
+                layaHeadTraining = new { component = input.Backends.LayaHeadTraining.Component, backend = input.Backends.LayaHeadTraining.Backend, precision = input.Backends.LayaHeadTraining.Precision }
             },
             persistence = new
             {

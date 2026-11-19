@@ -25,6 +25,16 @@ public static class HandoffMode
         var (sentimentModel, sentimentTok) = ModeHelpers.LoadSentimentModel(ctx.ModelsDir);
         var (entityModel, entityTok) = ModeHelpers.LoadEntityModel(ctx.ModelsDir);
         var sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
+        var silk = ctx.UseSilk ? "Silk (OpenCL)" : "CPU";
+        BackendMatrixPrinter.Print(new BackendMatrix(
+            new ComponentBackend("embeddings", "not used", "n/a"),
+            new ComponentBackend("llm", ctx.UseOllama ? $"Ollama ({ctx.ModelName})" : "not used", "n/a"),
+            [
+                new ComponentBackend("sentiment", sentimentSilk is not null ? silk : "CPU", "F32"),
+                new ComponentBackend("entity", "CPU", "F32"),
+            ],
+            new ComponentBackend("laya-encoder", "not used", "n/a"),
+            new ComponentBackend("laya-head-training", "not used", "n/a")));
         Console.WriteLine("Models loaded.\n");
 
         if (!ctx.UseOllama)
