@@ -71,7 +71,7 @@ class Program
         ["distilbert"] = ["", "benchmark"],
         ["distilbert_sst"] = ["", "benchmark", "predict"],
         ["laya"] = ["", "benchmark", "train"],
-        ["modernbert"] = ["", "benchmark"],
+        ["modernbert"] = ["", "benchmark", "train-head"],
         ["smollm"] = ["", "benchmark", "ab", "generate"],
         ["qwen"] = ["", "tools", "distill", "benchmark"],
         // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
@@ -1007,6 +1007,7 @@ class Program
                     if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                     return ModernBert.RunGpu(mbSilkTensors, modelDir, open);
                 }
+                if (mode == "train-head") return ModernBert.RunTrainHead(F32(), modelDir);
                 if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                 if (compare) return ModernBert.Compare(F32(), modelDir);
                 if (bf16) return ModernBert.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16", seqLengths, warmup, iterations);
