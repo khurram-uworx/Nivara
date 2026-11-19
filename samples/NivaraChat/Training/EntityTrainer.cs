@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
 using Nivara.Samples;
+using Nivara.Silk;
 using NivaraChat.Data;
 
 namespace NivaraChat.Training;
@@ -13,7 +14,7 @@ public static class EntityTrainer
     static readonly string[] EntityClasses = ["O", "B-person", "B-org", "B-date", "B-location"];
 
     public static (TokenClassifierModel<float> model, TextTokenizer tokenizer) Train(
-        int epochs = 20, int batchSize = 32, int numSamples = 1000, string saveDir = "models", int seed = 42)
+        int epochs = 20, int batchSize = 32, int numSamples = 1000, string saveDir = "models", int seed = 42, bool useSilk = false)
     {
         var (texts, labelSequences) = SyntheticDataGenerator.GenerateEntityData(numSamples, seed);
         var tokenizer = TextTokenizer.FromDocuments(texts, maxVocabSize: 5000);
@@ -39,6 +40,30 @@ public static class EntityTrainer
                     ? Array.IndexOf(EntityClasses, labelTokens[j])
                     : 0;
                 trainLabelIds[i * maxSeqLen + j] = labelId >= 0 ? labelId : 0;
+            }
+        }
+
+        if (useSilk)
+        {
+            GpuTokenClassifier? silk = null;
+            try { silk = new GpuTokenClassifier(tokenizer.VocabSize, 32, 64, seed, numClasses); }
+            catch (InvalidOperationException ex) { Console.WriteLine($"  Silk/OpenCL unavailable ({ex.Message}); using CPU trainer."); }
+            if (silk is not null)
+            {
+                Console.WriteLine("  Training entity extractor on Silk (device forward/backward)...");
+                var silkEpochs = silk.Train(trainTokens, trainLabelIds, batchSize, maxSeqLen, epochs, 0.001f, seed);
+                foreach (var e in silkEpochs) Console.WriteLine($"    epoch {e.Epoch}: loss={e.Loss:F4} ({e.Elapsed.TotalSeconds:F1}s)");
+
+                var layout = silk.ExportCpuLayout();
+                using var silkModel = new TokenClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses, maxSeqLen);
+                silkModel.SetWeights(layout.Embedding, layout.Fc1W, layout.Fc1B, layout.Fc2W, layout.Fc2B);
+
+                Directory.CreateDirectory(saveDir);
+                ModelSerializer.Save(silkModel, Path.Combine(saveDir, "entity_model.json"));
+                tokenizer.Save(Path.Combine(saveDir, "entity_tokenizer.json"));
+                Console.WriteLine($"  Saved to {saveDir}/");
+                silk.Dispose();
+                return (silkModel, tokenizer);
             }
         }
 
