@@ -87,7 +87,7 @@ class Program
         ["minilm"] = ["", "benchmark", "similarity"],
         ["distilbert"] = ["", "benchmark"],
         ["distilbert_sst"] = ["", "benchmark", "predict"],
-        ["modernbert"] = ["", "benchmark"],
+        ["modernbert"] = ["", "benchmark", "train-head"],
         ["laya"] = ["", "benchmark", "train"],
         ["smollm"] = ["", "benchmark", "generate"],
         ["qwen"] = ["", "benchmark", "tools", "distill"],
@@ -986,6 +986,7 @@ class Program
             case "modernbert":
                 if (useSilk)
                 {
+                    if (mode == "train-head") return ModernBert.RunTrainHeadGpu(F32(), modelDir, Nivara.AI.GpuSeamFactories.ModernBert);
                     if (bf16)
                     {
                         if (benchmark) return ModernBert.BenchmarkGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, seqLengths, warmup, iterations, Nivara.AI.GpuSeamFactories.ModernBert);
