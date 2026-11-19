@@ -34,6 +34,7 @@ public static class ToolsMode
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir);
         SilkTextClassifier? sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
         SilkTextClassifier? validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
+        SilkTokenClassifier? entitySilk = ctx.UseSilk ? SilkTokenClassifier.TryCreate(entityModel, 20, 5) : null;
         Console.WriteLine("Models loaded.\n");
 
         Console.WriteLine($"Connecting to Ollama at {ctx.OllamaUrl} (model: {ctx.ModelName})...");
@@ -45,7 +46,7 @@ public static class ToolsMode
         }
         Console.WriteLine("Ollama connected.\n");
 
-        NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok, sentimentSilk, validatorSilk);
+        NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok, sentimentSilk, validatorSilk, entitySilk);
 
         var tools = new AITool[]
         {
@@ -102,6 +103,7 @@ cleanup:
         validatorModel.Dispose();
         sentimentSilk?.Dispose();
         validatorSilk?.Dispose();
+        entitySilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }
