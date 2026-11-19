@@ -15,6 +15,7 @@ public static class NivaraToolFunctions
     private static TextTokenizer? _validatorTokenizer;
     private static SilkTextClassifier? _sentimentSilk;
     private static SilkTextClassifier? _validatorSilk;
+    private static SilkTokenClassifier? _entitySilk;
 
     private static readonly string[] SentimentClasses = ["negative", "neutral", "positive"];
     private static readonly string[] EntityClasses = ["O", "B-person", "B-org", "B-date", "B-location"];
@@ -23,7 +24,8 @@ public static class NivaraToolFunctions
         TextClassifierModel<float> sentimentModel, TextTokenizer sentimentTok,
         TokenClassifierModel<float> entityModel, TextTokenizer entityTok,
         TextClassifierModel<float> validatorModel, TextTokenizer validatorTok,
-        SilkTextClassifier? sentimentSilk = null, SilkTextClassifier? validatorSilk = null)
+        SilkTextClassifier? sentimentSilk = null, SilkTextClassifier? validatorSilk = null,
+        SilkTokenClassifier? entitySilk = null)
     {
         _sentimentModel = sentimentModel;
         _sentimentTokenizer = sentimentTok;
@@ -33,6 +35,7 @@ public static class NivaraToolFunctions
         _validatorTokenizer = validatorTok;
         _sentimentSilk = sentimentSilk;
         _validatorSilk = validatorSilk;
+        _entitySilk = entitySilk;
     }
 
     [Description("Analyze sentiment of text. Returns positive/negative/neutral with confidence score.")]
@@ -55,10 +58,41 @@ public static class NivaraToolFunctions
         [Description("The text to extract entities from")] string text)
     {
         EnsureEntityModel();
-        var entities = ModelInferenceHelper.RunTokenClassifier(
-            _entityModel!, _entityTokenizer!, text, maxSeqLen: 20, EntityClasses);
-        float confidence = ModelInferenceHelper.RunTokenClassifierWithConfidence(
-            _entityModel!, _entityTokenizer!, text, maxSeqLen: 20, EntityClasses);
+        Dictionary<string, List<string>> entities;
+        float confidence;
+        if (_entitySilk is not null)
+        {
+            var tokens = _entityTokenizer!.Encode(text, fixedLength: 20, addBosEos: false);
+            var logits = _entitySilk.ForwardLogits(tokens);
+            var wordTokens = TextTokenizer.Tokenize(text);
+            entities = new Dictionary<string, List<string>>();
+            foreach (var cls in EntityClasses)
+            {
+                if (cls == "O") continue;
+                entities[cls.Replace("B-", "")] = [];
+            }
+            int numClasses = EntityClasses.Length;
+            for (int i = 0; i < Math.Min(wordTokens.Count, 20); i++)
+            {
+                int bestClass = ModelInferenceHelper.ArgMax(logits, i * numClasses, numClasses);
+                string label = EntityClasses[bestClass];
+                if (label != "O")
+                {
+                    var entityType = label.Replace("B-", "");
+                    if (entities.ContainsKey(entityType))
+                        entities[entityType].Add(wordTokens[i]);
+                }
+            }
+            int ec = entities.Values.Sum(e => e.Count);
+            confidence = ec > 0 ? 0.85f : 0.2f;
+        }
+        else
+        {
+            entities = ModelInferenceHelper.RunTokenClassifier(
+                _entityModel!, _entityTokenizer!, text, maxSeqLen: 20, EntityClasses);
+            confidence = ModelInferenceHelper.RunTokenClassifierWithConfidence(
+                _entityModel!, _entityTokenizer!, text, maxSeqLen: 20, EntityClasses);
+        }
         return JsonSerializer.Serialize(new { entities, confidence });
     }
 
