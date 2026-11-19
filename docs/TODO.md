@@ -69,4 +69,4 @@ no training-loop code is duplicated across samples.
 
 ## GitHub issues log
 
-- [ ] (to be created) Silk counterpart follow-up for ModernBERT head training.
+- [x] #1351 — Silk counterpart follow-up for ModernBERT head training (created while working on #1280).
