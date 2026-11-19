@@ -47,6 +47,16 @@ public sealed class TokenClassifierModel<T> : Module<T> where T : struct, IFloat
         return logits;
     }
 
+    public void SetWeights(T[] embeddingWeights, T[] fc1WeightsCpuLayout, T[] fc1Biases, T[] fc2WeightsCpuLayout, T[] fc2Biases)
+    {
+        var ps = GetParameters().Values.ToArray();
+        ps[0].Tensor = ReverseGradTensor<T>.FromMatrix(embeddingWeights, VocabSize, EmbeddingDim, requiresGrad: false);
+        ps[1].Tensor = ReverseGradTensor<T>.FromMatrix(fc1WeightsCpuLayout, fc1WeightsCpuLayout.Length / EmbeddingDim, EmbeddingDim, requiresGrad: false);
+        ps[2].Tensor = ReverseGradTensor<T>.FromMatrix(fc1Biases, 1, fc1Biases.Length, requiresGrad: false);
+        ps[3].Tensor = ReverseGradTensor<T>.FromMatrix(fc2WeightsCpuLayout, NumClasses, fc2WeightsCpuLayout.Length / NumClasses, requiresGrad: false);
+        ps[4].Tensor = ReverseGradTensor<T>.FromMatrix(fc2Biases, 1, fc2Biases.Length, requiresGrad: false);
+    }
+
     public int[] Predict(int[] tokenIds)
     {
         ArgumentNullException.ThrowIfNull(tokenIds);
