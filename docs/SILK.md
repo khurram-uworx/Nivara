@@ -712,6 +712,15 @@ gradients within 5e-4 against reverse-mode AutoDiff on identical weights (the de
 reassociate, so these are tolerance bounds, not bit-identity claims), a loss-decreasing smoke run
 per classifier, and the CPU-layout round trip exact.
 
+- **Precision: f32 only (decision, #1274).** `GpuTextConvClassifier`, `GpuTextLinearClassifier`
+  (and `GpuTokenClassifier`) are deliberately f32-only: no bf16/fp16 partial constructors.
+  Rationale: text classifiers in NivaraChat/NivaraClassifier are trained and serialized as f32;
+  Silk training is f32-only this release; the CPU reference models (`TextClassifierModel<float>`,
+  `ConvTextClassifierModel<float>`) are f32; narrow storage would require new device kernels and
+  weight loaders for no benefit at classifier scale and would break the f32 parity gate. The f32
+  CPU↔Silk parity tests above are the assurance. Narrow precision remains available only where a
+  true runner exists (BERT/MiniLM/Laya/ModernBERT inference).
+
 - **`SilkModes`** is the allow-list: `minilm` (empty, `benchmark`, `similarity`); `distilbert` (empty,
   `benchmark`); `distilbert_sst` (empty, `benchmark`, `predict`); `modernbert` and `laya` (empty,
   `benchmark`); `smollm` (empty, `benchmark`, `generate`); `qwen` (empty, `benchmark`, `tools`,
