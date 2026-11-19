@@ -28,10 +28,11 @@ public static class AgentsMode
         var (validatorModel, validatorTok) = ModeHelpers.LoadValidatorModel(ctx.ModelsDir, useAgentsFormat: true);
         var sentimentSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(sentimentModel, 20, 3) : null;
         var validatorSilk = ctx.UseSilk ? SilkTextClassifier.TryCreate(validatorModel, 40, 2) : null;
+        var entitySilk = ctx.UseSilk ? SilkTokenClassifier.TryCreate(entityModel, 20, 5) : null;
         Console.WriteLine("Models loaded.\n");
 
         var sentimentText = new SentimentTextModel(sentimentModel, sentimentTok, silk: sentimentSilk);
-        var entityText = new EntityTextModel(entityModel, entityTok);
+        var entityText = new EntityTextModel(entityModel, entityTok, silk: entitySilk);
         var validatorText = new ValidatorTextModel(validatorModel, validatorTok, silk: validatorSilk);
 
         var sentimentAgent = new NivaraChatClient(sentimentText).AsAIAgent("NivaraSentiment");
@@ -96,6 +97,7 @@ public static class AgentsMode
         validatorModel.Dispose();
         sentimentSilk?.Dispose();
         validatorSilk?.Dispose();
+        entitySilk?.Dispose();
         Console.WriteLine("\nDone.");
     }
 }
