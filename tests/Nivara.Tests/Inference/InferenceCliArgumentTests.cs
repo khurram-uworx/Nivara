@@ -406,7 +406,7 @@ public class InferenceCliArgumentTests
     /// </summary>
     [Test]
     public void SilkSmolLM_Precision_Rejected() =>
-        AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk is F32-only");
+        AssertRejected(Run("smollm", "--silk", "--precision", "fp16"), "--silk fp16 is supported only for");
 
     [Test]
     public void Silk_RejectedBeforeModelFileLookup()
@@ -419,7 +419,7 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SilkPrecisionCombination_Rejected() =>
-        AssertRejected(Run("minilm", "--silk", "--precision", "fp16"), "--silk is F32-only");
+        AssertRejected(Run("mobilenet_v2", "--silk", "--precision", "fp16"), "--silk fp16 is supported only for");
 
     [Test]
     public void SilkUnsupportedMode_Rejected() =>
@@ -437,18 +437,28 @@ public class InferenceCliArgumentTests
             "Unsupported mode 'compare_diag' for 'laya'");
 
     [Test]
-    public void SilkModernBert_Fp16_Rejected() =>
-        AssertRejected(Run("modernbert", "--silk", "--precision", "fp16"), "--silk is F32-only");
+    public void SilkModernBert_Fp16_Accepted() =>
+        Assert.That(Run("modernbert", "--silk", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
     [Test]
-    public void SilkModernBert_Fp16_Benchmark_Rejected() =>
-        AssertRejected(Run("modernbert", "--silk", "benchmark", "--precision", "fp16"), "--silk is F32-only");
+    public void SilkModernBert_Fp16_Benchmark_Accepted() =>
+        Assert.That(Run("modernbert", "--silk", "benchmark", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
 
     [Test]
-    public void SilkLaya_Fp16_Rejected() =>
-        AssertRejected(Run("laya", "--silk", "--precision", "fp16"), "--silk is F32-only");
+    public void SilkLaya_Fp16_Accepted() =>
+        Assert.That(Run("laya", "--silk", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
     [Test]
-    public void SilkLaya_Fp16_Benchmark_Rejected() =>
-        AssertRejected(Run("laya", "--silk", "benchmark", "--precision", "fp16"), "--silk is F32-only");
+    public void SilkLaya_Fp16_Benchmark_Accepted() =>
+        Assert.That(Run("laya", "--silk", "benchmark", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
+
+    [Test]
+    public void SilkMiniLm_Fp16_Accepted() =>
+        Assert.That(Run("minilm", "--silk", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
+    [Test]
+    public void SilkDistilBert_Fp16_Accepted() =>
+        Assert.That(Run("distilbert", "--silk", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
+    [Test]
+    public void SilkDistilBertSst_Fp16_Accepted() =>
+        Assert.That(Run("distilbert_sst", "--silk", "--precision", "fp16").StdErr, Does.Contain("Model file not found"));
 
     /// <summary>
     /// #591: <c>--simd-widen</c> is an A/B lever only where the run reads the toggle. smollm and qwen

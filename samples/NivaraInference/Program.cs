@@ -699,16 +699,16 @@ class Program
 
         bool silkNarrowModel = modelType is "minilm" or "distilbert" or "distilbert_sst" or "modernbert" or "laya"
             || (modelType == "qwen" && mode != "distill");
-        if (useSilk && fp16)
+        if (useSilk && fp16 && modelType is not ("minilm" or "distilbert" or "distilbert_sst" or "modernbert" or "laya"))
         {
-            Console.Error.WriteLine("--silk is F32-only: fp16 shows no measured speedup at current shapes (0.97–1.07×), so bf16 is preferred; use --precision bf16 or drop --silk.");
+            Console.Error.WriteLine("--silk fp16 is supported only for minilm, distilbert, distilbert_sst, modernbert and laya; use --precision bf16 or drop --silk for this model.");
             return 1;
         }
 
         // #586: a narrow --precision is only meaningful where the dispatch selects a narrow runner. The
         // vision models have none, and laya/modernbert 'compare'/'compare_diag' are F32-only, so the flag
         // there loaded BF16/Half weights and then ran the F32 path.
-        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && bf16) && !ConsumesNarrow(modelType, mode, synthetic: syntheticWeights))
+        if ((bf16 || fp16) && !(useSilk && silkNarrowModel && (bf16 || fp16)) && !ConsumesNarrow(modelType, mode, synthetic: syntheticWeights))
         {
             Console.Error.WriteLine(isQwen
                 ? "Qwen2.5 precision error: bf16 supports only the 'benchmark' mode; tools/distill run F32 or native."
@@ -889,6 +889,13 @@ class Program
                         if (compare) return RunMiniLmSilkCompare(WidenBFloat16Tensors(tensorsBf16));
                         return RunMiniLmSilkInferenceBf16(tensorsBf16);
                     }
+                    if (fp16)
+                    {
+                        if (mode == "similarity") return RunMiniLmSilkSimilarityFp16(tensorsHalf);
+                        if (benchmark) return BenchmarkMiniLmSilk(WidenHalfTensors(tensorsHalf));
+                        if (compare) return RunMiniLmSilkCompare(WidenHalfTensors(tensorsHalf));
+                        return RunMiniLmSilkInferenceFp16(tensorsHalf);
+                    }
                     var miniSilkTensors = F32();
                     if (mode == "similarity") return RunMiniLmSilkSimilarity(miniSilkTensors);
                     if (benchmark) return BenchmarkMiniLmSilk(miniSilkTensors);
@@ -907,6 +914,11 @@ class Program
                         if (compare) return RunDistilBertSilkCompare(WidenBFloat16Tensors(tensorsBf16));
                         return benchmark ? BenchmarkDistilBertSilk(WidenBFloat16Tensors(tensorsBf16)) : RunDistilBertSilkInferenceBf16(tensorsBf16);
                     }
+                    if (fp16)
+                    {
+                        if (compare) return RunDistilBertSilkCompare(WidenHalfTensors(tensorsHalf));
+                        return benchmark ? BenchmarkDistilBertSilk(WidenHalfTensors(tensorsHalf)) : RunDistilBertSilkInferenceFp16(tensorsHalf);
+                    }
                     var distSilkTensors = F32();
                     if (compare) return RunDistilBertSilkCompare(distSilkTensors);
                     return benchmark ? BenchmarkDistilBertSilk(distSilkTensors) : RunDistilBertSilkInference(distSilkTensors);
@@ -924,6 +936,13 @@ class Program
                         if (benchmark) return BenchmarkDistilBertSstSilk(WidenBFloat16Tensors(tensorsBf16));
                         if (compare) return RunDistilBertSstSilkCompare(WidenBFloat16Tensors(tensorsBf16));
                         return RunDistilBertSstSilkInferenceBf16(tensorsBf16);
+                    }
+                    if (fp16)
+                    {
+                        if (mode == "predict") return RunDistilBertSstSilkPredictFp16(tensorsHalf);
+                        if (benchmark) return BenchmarkDistilBertSstSilk(WidenHalfTensors(tensorsHalf));
+                        if (compare) return RunDistilBertSstSilkCompare(WidenHalfTensors(tensorsHalf));
+                        return RunDistilBertSstSilkInferenceFp16(tensorsHalf);
                     }
                     var sstSilkTensors = F32();
                     if (mode == "predict") return RunDistilBertSstSilkPredict(sstSilkTensors);
@@ -947,7 +966,7 @@ class Program
                         if (compare) return Laya.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.Laya);
                         return Laya.RunGpu(tensorsBf16, modelDir);
                     }
-                    if (native)
+                    if (native || fp16)
                     {
                         if (benchmark) return Laya.RunBenchmarkGpu(tensorsHalf, modelDir, Nivara.AI.GpuSeamFactories.LayaFp16);
                         if (compare) return Laya.CompareGpu(tensorsHalf, modelDir, Nivara.AI.GpuSeamFactories.LayaFp16);
@@ -973,6 +992,13 @@ class Program
                         if (compare) return ModernBert.CompareGpu(WidenBFloat16Tensors(tensorsBf16), modelDir, Nivara.AI.GpuSeamFactories.ModernBert);
                         if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
                         return ModernBert.RunGpu(tensorsBf16, modelDir);
+                    }
+                    if (fp16)
+                    {
+                        if (benchmark) return ModernBert.BenchmarkGpu(WidenHalfTensors(tensorsHalf), modelDir, seqLengths, warmup, iterations, Nivara.AI.GpuSeamFactories.ModernBert);
+                        if (compare) return ModernBert.CompareGpu(WidenHalfTensors(tensorsHalf), modelDir, Nivara.AI.GpuSeamFactories.ModernBert);
+                        if (compareDiag) return ModernBert.CompareDiag(F32(), modelDir);
+                        return ModernBert.RunGpu(tensorsHalf, modelDir);
                     }
                     OpenModernBertSession open = Nivara.AI.GpuSeamFactories.ModernBert;
                     var mbSilkTensors = F32();
@@ -1971,6 +1997,19 @@ class Program
             throw;
         }
     }
+    static BertEncoderBackend OpenSilkEncoderFp16(BertConfig config, Dictionary<string, (Half[] Data, int[] Shape)> tensors, BertGpuNaming naming)
+    {
+        var runtime = new Nivara.Silk.SilkRuntime();
+        try
+        {
+            return new BertEncoderBackend(runtime, new Nivara.Silk.SilkBertEncoderRunner(runtime, config, tensors, naming));
+        }
+        catch
+        {
+            runtime.Dispose();
+            throw;
+        }
+    }
 
     static int RunMiniLmSilkInferenceBf16(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
     {
@@ -2022,6 +2061,58 @@ class Program
 
         return 0;
     }
+
+    static int RunMiniLmSilkInferenceFp16(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Silk Inference ===");
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoderFp16(config, tensors, BertGpuNaming.Bert);
+        buildSw.Stop();
+        var runner = session.Runner;
+
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine();
+        Console.WriteLine($"Config: dim={config.HiddenSize}, layers={config.NumHiddenLayers}, heads={config.NumAttentionHeads}, intermediate={config.IntermediateSize}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 2.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        Console.WriteLine($"Input tokens (first 10): [{string.Join(", ", intIds.Take(10))}] (seqLen={intIds.Length})");
+        Console.WriteLine();
+
+        var fwdSw = Stopwatch.StartNew();
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        fwdSw.Stop();
+
+        var embedding = MiniLmClsEmbeddings(result.Hidden, 1, intIds.Length, config.HiddenSize)[0];
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{config.HiddenSize}]");
+        Console.WriteLine($"Output stats: min={TensorPrimitives.Min(embedding.AsSpan()):F6}, max={TensorPrimitives.Max(embedding.AsSpan()):F6}, mean={TensorPrimitives.Average(embedding.AsSpan()):F6}");
+        Console.Write("Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, embedding.Length); i++)
+        {
+            Console.Write($"{embedding[i]:F6}");
+            if (i < Math.Min(10, embedding.Length) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+        float norm = TensorPrimitives.Norm(embedding.AsSpan());
+        Console.WriteLine($"L2 norm: {norm:F6} (should be ~1.0 for normalized embeddings)");
+        Console.WriteLine();
+
+        return 0;
+    }
+
 
     static int RunMiniLmSilkSimilarityBf16(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
     {
@@ -2098,6 +2189,82 @@ class Program
         return 0;
     }
 
+    static int RunMiniLmSilkSimilarityFp16(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Cosine Similarity Demo (Silk) ===");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "minilm");
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoderFp16(config, tensors, BertGpuNaming.Bert);
+        buildSw.Stop();
+        var runner = session.Runner;
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+
+        Console.WriteLine($"Sentences ({sentences.Length}):");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.WriteLine($"  [{i}] {sentences[i]}");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelDir, "vocab.txt"));
+        var embeddings = new float[sentences.Length][];
+        const int maxLen = 128;
+        for (int s = 0; s < sentences.Length; s++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, sentences[s], maxLen);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            var hidden = result.Hidden;
+
+            var cls = new float[config.HiddenSize];
+            Array.Copy(hidden, 0, cls, 0, config.HiddenSize);
+
+            float norm = 0f;
+            foreach (var x in cls) norm += x * x;
+            norm = MathF.Sqrt(norm);
+            if (norm > 1e-12f)
+            {
+                float inv = 1f / norm;
+                for (int i = 0; i < cls.Length; i++) cls[i] *= inv;
+            }
+            embeddings[s] = cls;
+        }
+
+        Console.WriteLine("Cosine Similarity Matrix:");
+        Console.Write("       ");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.Write($"  [{i}]   ");
+        Console.WriteLine();
+
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            Console.Write($"  [{i}]  ");
+            for (int j = 0; j < sentences.Length; j++)
+            {
+                float sim = TensorPrimitives.CosineSimilarity(embeddings[i].AsSpan(), embeddings[j].AsSpan());
+                Console.Write($"{sim,7:F4} ");
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine();
+
+        return 0;
+    }
+
+
     static int RunDistilBertSilkInferenceBf16(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
     {
         Console.WriteLine("=== DistilBERT Silk Inference ===");
@@ -2133,6 +2300,43 @@ class Program
 
         return 0;
     }
+
+    static int RunDistilBertSilkInferenceFp16(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT Silk Inference ===");
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoderFp16(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        buildSw.Stop();
+        var runner = session.Runner;
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 2.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        string text = "This is a test sentence.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+        Console.WriteLine($"Input: \"{text}\" (seqLen={intIds.Length})");
+        Console.WriteLine();
+
+        var fwdSw = Stopwatch.StartNew();
+        var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+        fwdSw.Stop();
+        Console.WriteLine($"Silk forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        return 0;
+    }
+
 
     static int RunDistilBertSstSilkInferenceBf16(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
     {
@@ -2170,6 +2374,44 @@ class Program
 
         return 0;
     }
+
+    static int RunDistilBertSstSilkInferenceFp16(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Silk Inference ===");
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoderFp16(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        buildSw.Stop();
+        var runner = session.Runner;
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * 2.0 / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        for (int i = 0; i < DistilBertSst.CompareSentences.Length; i++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, DistilBertSst.CompareSentences[i], maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var sw = Stopwatch.StartNew();
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            sw.Stop();
+            var logits = result.Logits!;
+            var (argMax, probs) = DistilBertSst.Softmax(logits.AsSpan());
+            Console.WriteLine($"  [{i}] {DistilBertSst.Label(argMax),-8} {probs[argMax] * 100,5:F1}%   logits=[{logits[0]:F3}, {logits[1]:F3}]  {sw.ElapsedMilliseconds} ms");
+        }
+        Console.WriteLine();
+
+        return 0;
+    }
+
 
     static int RunDistilBertSstSilkPredictBf16(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
     {
@@ -2211,6 +2453,47 @@ class Program
         return 0;
     }
 
+    static int RunDistilBertSstSilkPredictFp16(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Interactive Sentiment (Silk) ===");
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        using var session = OpenSilkEncoderFp16(config.ToBertConfig(), tensors, BertGpuNaming.DistilBert);
+        buildSw.Stop();
+        var runner = session.Runner;
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+
+        Console.WriteLine($"Device: {runner.DeviceName}");
+        Console.WriteLine($"Model build (upload + JIT): {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+        Console.WriteLine("Type a movie review and press Enter (or 'quit' to exit).\n");
+
+        string? line;
+        while ((line = Console.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (string.IsNullOrEmpty(line) || line.Equals("quit", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, line, maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+
+            var sw = Stopwatch.StartNew();
+            var result = runner.Forward(intIds, attnMask, 1, intIds.Length);
+            sw.Stop();
+
+            var logits = result.Logits ?? Array.Empty<float>();
+            var (argMax, probs) = DistilBertSst.Softmax(logits.AsSpan());
+            Console.WriteLine($"  Sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)  [{sw.ElapsedMilliseconds} ms]");
+        }
+
+        return 0;
+    }
+
+
     static Dictionary<string, (float[] Data, int[] Shape)> WidenBFloat16Tensors(
         Dictionary<string, (BFloat16[] Data, int[] Shape)> src)
     {
@@ -2222,6 +2505,21 @@ class Program
             var dst = new float[data.Length];
             for (int i = 0; i < data.Length; i++)
                 dst[i] = BitConverter.UInt32BitsToSingle((uint)u[i] << 16);
+            result[kv.Key] = (dst, kv.Value.Shape);
+        }
+        return result;
+    }
+
+    static Dictionary<string, (float[] Data, int[] Shape)> WidenHalfTensors(
+        Dictionary<string, (Half[] Data, int[] Shape)> src)
+    {
+        var result = new Dictionary<string, (float[] Data, int[] Shape)>(src.Count);
+        foreach (var kv in src)
+        {
+            var data = kv.Value.Data;
+            var dst = new float[data.Length];
+            for (int i = 0; i < data.Length; i++)
+                dst[i] = (float)data[i];
             result[kv.Key] = (dst, kv.Value.Shape);
         }
         return result;
