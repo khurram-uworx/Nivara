@@ -586,7 +586,7 @@ Options:
   --no-di-demo            Skip the DI + IChatClient demo at the end
   --kv-cache              Use the KV cache for faster generation (default)
   --no-kv-cache           Re-run the full forward per token (no cache)
-  --silk                  Use the Silk/OpenCL backend for generation (default: off)
+  --silk                  Use the Silk/OpenCL backend: trains on device (f32 only) and generates (default: off)
   --help, -h              Show this help
 """);
     }
