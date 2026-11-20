@@ -762,9 +762,10 @@ class Program
         {
             if (mode == "train")
             {
-                if (!useSilk) { Console.Error.WriteLine("laya train requires --silk."); return 1; }
                 var synthTensors = Laya.SynthesizeTensors<float>(LayaSyntheticConfig, LayaSyntheticAgent);
-                return Laya.RunTrainGpu(synthTensors, Laya.CreateSyntheticModelDir(LayaSyntheticConfig, LayaSyntheticAgent));
+                var synthModelDir = Laya.CreateSyntheticModelDir(LayaSyntheticConfig, LayaSyntheticAgent);
+                if (useSilk) return Laya.RunTrainGpu(synthTensors, synthModelDir);
+                return Laya.RunTrain(synthTensors, synthModelDir);
             }
             string syntheticModelDir = Laya.CreateSyntheticModelDir(LayaSyntheticConfig, LayaSyntheticAgent);
 
@@ -977,7 +978,7 @@ class Program
                     if (compare) return Laya.CompareGpu(F32(), modelDir, open);
                     return Laya.RunGpu(F32(), modelDir, open);
                 }
-                if (mode == "train") { Console.Error.WriteLine("laya train requires --silk."); return 1; }
+                if (mode == "train") return Laya.RunTrain(F32(), modelDir);
                 if (compare) return Laya.Compare(F32(), modelDir);
                 if (bf16) return Laya.Run<BFloat16, BFloat16>(tensorsBf16, modelDir, mode, "BFloat16");
                 if (layaNativeCpu) return Laya.Run<float, Half>(tensorsHalf, modelDir, mode, "native (F16 storage, F32 compute)");
