@@ -280,7 +280,7 @@ defaults.
 --load <path>           Load model from JSON (pass the same architecture flags used at save time)
 --no-di-demo            Skip the DI + IChatClient demo
 --kv-cache / --no-kv-cache  Use the KV cache (default: on)
---silk                 Use the Silk/OpenCL backend for generation (default: off)
+--silk                 Use the Silk/OpenCL backend: trains on device (f32 only) and generates (default: off)
 --help, -h              Show this help
 ```
 

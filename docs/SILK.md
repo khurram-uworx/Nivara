@@ -920,6 +920,49 @@ dotnet run --project tests/Nivara.PerformanceTests -c Release -- --silk-distilbe
 Each run prints a `Backward chain` median per batch (B=2/4/8); the tables above are those
 medians. The CPU counterpart is `--cpu-distilbert-train-profile` (all layers only).
 
+## 13g. TinyShakespeare trainer (`SilkTinyShakespeareTrainer`, #1359)
+
+`SilkTinyShakespeareTrainer` (`src/Nivara.Extensions/Silk/SilkTinyShakespeareTrainer.cs`) trains
+the batched causal transformer (`BatchedTransformer<float>`) used by
+`NivaraChat --tinyshakespeare` end to end on the device, so `--tinyshakespeare --silk` now
+trains on the OpenCL device instead of being inference-only:
+
+- **Forward** runs the full causal transformer on device: token + position embeddings, per-layer
+  pre-norm (LayerNorm → multi-head causal self-attention → residual, LayerNorm → GELU FC →
+  residual), final LayerNorm and the tied LM head, materialising the attention probabilities
+  needed for the reverse chain. Causal masking is baked into the attention prep (only positions
+  `j <= qPos` contribute), so the device path matches the CPU AutoDiff reference.
+- **Backward** is the composed chain: LM head → final norm → per layer (LN2 / FC2 / GELU / FC1 /
+  LN1 → attention → QKV) → embedding scatter, writing weight gradients into device buffers in
+  the same layout as `ToSilkWeights()` / `ToSilkGradients()`. The causal attention backward
+  uses the dedicated `causal_attention_backward_prep` kernel (see below); the shared
+  `attention_backward_dq` / `attention_backward_dkv` launches are reused for the gradient GEMMs.
+- **Optimizer** is one `adam_update` per parameter (weight decay 0 by default, matching the CPU
+  path's single parameter group); the moment buffers are zeroed at the start of `Train`.
+- **Materialisation** is `ExportCheckpoint()` (keyed, CPU layout) + `BatchedTransformer.LoadFromSilkWeights(...)`
+  + `ModelSerializer.Save` — no device checkpoint format. `ExportGradients()` inverts the same
+  layout so device gradients can be compared key-for-key with a reverse-mode pass.
+  `--tinyshakespeare --silk` trains on device, then imports weights into the CPU model so
+  save/load and inference paths are unchanged.
+- Caps come from the constructor (`maxBatch`, `maxSeqLen`); the trainer throws when the input has
+  fewer than `blockSize + 1` tokens. F32 only.
+
+Parity is pinned in `tests/Nivara.Tests/Gpu/SilkTinyShakespeareTrainerTests.cs`: forward logits
+within 1e-4, parameter gradients within 1e-3, one-step weights within 1e-2, and a loss/logits
+round-trip after save/load, against `BatchedTransformer<float>` driven through `CrossEntropyLoss`
+and `Adam<float>` on a 1-layer / hidden-16 / 2-head / vocab-32 / seqLen-8 model.
+
+### Causal attention-backward kernel (`causal_attention_backward_prep`)
+
+The existing attention-backward prep kernel is non-causal (it attends over the full sequence), so
+a causal transformer's gradient needs a masked variant. `causal_attention_backward_prep`
+computes the softmax probabilities only over `j <= qPos` (positions `j > qPos` are set to
+`-INFINITY` then zeroed in the probs buffer) and the `delta = Σ_j p_j · (dAttn · V_j)`
+reduction over the same causal window, so the subsequent `attention_backward_dq` /
+`attention_backward_dkv` launches (which consume `probs` and `delta`) produce gradients
+consistent with causal masking. Launched via `SilkLauncher.CausalAttentionBackwardPrep(...)` with
+the same buffer/argument order as the non-causal prep. F32 only.
+
 ## 13f. Retrieval fusion (`RagLearnMode`, #915)
 
 `SilkRetrievalTrainer` (`samples/NivaraChat/Helpers/SilkRetrievalTrainer.cs`) trains the
@@ -954,6 +997,8 @@ Silk (`--silk`) is honoured by the following user-facing entry points as of this
   - `--smollm --silk` (and `--smollm --precision bf16 --silk`) — SmolLM chat/plain
     generation on `SilkSmolLMChatClient`.
   - `--qwen --silk …` — tools/plain/benchmark/distill through `SilkQwenSession`.
+   - `--tinyshakespeare --silk` — trains the causal transformer on device (f32 only) via
+     `SilkTinyShakespeareTrainer`, then imports weights for generation.
 - **NivaraInference**
   - `minilm {default, benchmark, similarity}`; `distilbert …`; `distilbert_sst
     {default, benchmark, predict}`; `modernbert`, `laya {default, benchmark}`; `smollm {default,
