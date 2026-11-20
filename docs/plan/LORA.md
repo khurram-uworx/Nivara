@@ -1,9 +1,15 @@
-# LoRA Fine-Tuning vs RAG — Design Note (#1273)
+# LoRA Fine-Tuning vs RAG — Design Note
 
 Status: **design note** (no implementation yet). Scopes a LoRA fine-tuning demo for the
-pretrained causal LMs in NivaraChat (SmolLM-135M, Qwen2.5-0.5B) and a head-to-head
-comparison with the RAG pipeline in [RAG.md](RAG.md), using the **same markdown corpus** as
-the knowledge source.
+pretrained causal LMs (SmolLM-135M, Qwen2.5-0.5B) and a head-to-head comparison with the
+RAG pipeline in [RAG.md](RAG.md), using the **same markdown corpus** as the knowledge
+source.
+
+**Home.** Fine-tuning (data build, adapter training, validation) is homed in
+`samples/NivaraInference`; `samples/NivaraChat` keeps the RAG pipeline and a thin
+consumption path that loads a tuned adapter for the FT arms. Shared code (`LoRALinear`,
+data format, templates) matures in `src/Nivara`/`Nivara.Samples` and is promoted once
+stable.
 
 Consolidates the design asks in `docs/plan/NIVARACHAT-SILK-GAPS.md` (Gap S5, #1273 /
 #1283 / #1284). Full-parameter LLM fine-tuning is intentionally not scoped (see §12);
@@ -149,25 +155,37 @@ If the measured results contradict these, the report says so.
 
 ## 8. CLI surface (proposed)
 
+Fine-tuning and validation live in NivaraInference; NivaraChat only consumes a tuned
+adapter for the FT arms of the comparison.
+
 ```
-# 1. Generate grounded Q&A from docs (needs an LLM, e.g. --ollama)
+# NivaraInference: fine-tune a LoRA adapter (CPU) on a data file
+dotnet run --project samples/NivaraInference -- smollm ft-lora --data ft-data.jsonl --out adapters/smollm-lora --rank 8 --epochs 3
+
+# NivaraInference: validate a tuned adapter (loss + held-out accuracy)
+dotnet run --project samples/NivaraInference -- smollm ft-eval --adapter adapters/smollm-lora --data ft-data.jsonl
+
+# NivaraChat: build grounded Q&A from docs (needs an LLM, e.g. --ollama)
 dotnet run --project samples/NivaraChat -- --ft-data --regenerate --ollama --force
 
-# 2. Fine-tune a LoRA adapter (CPU)
-dotnet run --project samples/NivaraChat -- --ft-lora --model smollm --rank 8 --epochs 3
-
-# 3. Compare Base / RAG / FT / FT+RAG on held-out questions
-dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --report ft-vs-rag.md
+# NivaraChat: compare Base / RAG / FT / FT+RAG, loading the adapter produced above
+dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --adapter ../NivaraInference/adapters/smollm-lora --report ft-vs-rag.md
 ```
 
-Key flags: `--model smollm|qwen`, `--rank`, `--alpha`, `--targets q,v[,k,o,ffn]`, `--lr`,
-`--epochs`, `--batch-size`, `--max-len`, `--seed`, `--adapter <path>`, `--merge`,
-`--docs-dir`, `--report`, `--force`.
+Key flags (NivaraInference): `--data`, `--out`, `--adapter`, `--rank`, `--alpha`,
+`--targets q,v[,k,o,ffn]`, `--lr`, `--epochs`, `--batch-size`, `--max-len`, `--seed`,
+`--merge`, `--max-memory`, `--force`.
+Key flags (NivaraChat): `--model smollm|qwen`, `--adapter <path>`, `--docs-dir`,
+`--report`, `--force`.
 
 ## 9. Proposed file layout
 
 - `src/Nivara/AutoDiff/Nn/LoRALinear.cs` — module, merge, adapter save/load (core, reusable)
-- `samples/NivaraChat/FineTuning/` — data builder, SFT trainer, `FtLoraMode`, `FtVsRagMode`
+- `samples/NivaraInference/FineTuning/` — data consumer, SFT trainer, `FtLoraMode`,
+  `FtEvalMode`, validation metrics (home of fine-tuning)
+- `samples/NivaraChat/FineTuning/` — `FtVsRagMode` only, consuming an adapter produced by
+  NivaraInference
+- `samples/NivaraChat/Helpers/` — data builder (`--ft-data`) reused by both samples
 - `tests/Nivara.Tests/AutoDiff/LoRALinearTests.cs` — step-0 parity, gradient check vs
   finite differences, merge equivalence, frozen-base has no grad
 - `docs/LORA.md` (this file) updated with measured results

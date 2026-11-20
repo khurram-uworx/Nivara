@@ -105,9 +105,10 @@ the f32 parity gate. The f32 CPU↔Silk parity is pinned by
 ### Gap S5 — Llama/SmolLM/Qwen training demo (#1273/#1283/#1284) — Low (optional) — CLOSED (scope decision)
 
 SmolLM/Qwen are inference-only in NivaraChat (issue #1273 closed as out of scope).
-Training/fine-tuning for causal LMs is homed in NivaraInference (#1283, #1284) with
-the design note docs/plan/LORA.md. NivaraChat keeps --tinyshakespeare as the in-sample
-training demo; core AutoDiff supports training LlamaForCausalLM generically.
+Fine-tuning is homed in NivaraInference (design note docs/plan/LORA.md): data build,
+adapter training and validation live there. NivaraChat keeps --tinyshakespeare as the
+in-sample training demo, the RAG pipeline, and a thin consumption path that loads a tuned
+adapter for the FT arms; core AutoDiff supports training LlamaForCausalLM generically.
 
 ### Gap S6 — TinyShakespeare transformer training on Silk — Low (#1342) — IMPLEMENTED
 
