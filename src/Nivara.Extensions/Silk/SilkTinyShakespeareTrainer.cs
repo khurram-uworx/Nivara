@@ -21,6 +21,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
     readonly float eps;
     readonly float scale;
 
+    int trainableLayerCount;
+
     // weights
     readonly nint tokEmb;
     readonly nint tokEmbTransposed;
@@ -105,7 +107,17 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
     bool disposed;
 
     // parameter list for adam/zero-grad
-    readonly List<(nint Weight, nint Grad, nint M, nint V, int Count)> parameters = new();
+    readonly List<Param> parameters = new();
+
+    sealed class Param
+    {
+        public nint Weight;
+        public nint Grad;
+        public nint M;
+        public nint V;
+        public int Count;
+        public bool Trainable;
+    }
 
     int[]? posIdHost;
 
@@ -114,7 +126,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         TinyShakespeareConfig config,
         Dictionary<string, (float[] Data, int[] Shape)> tensors,
         int maxBatch = 32,
-        int maxSeqLen = 64)
+        int maxSeqLen = 64,
+        int trainableLayerCount = -1)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
@@ -138,6 +151,11 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         runtime.EnsureAttentionLocalMemory(headDim);
 
         int nLayers = config.NumHiddenLayers;
+
+        int normalizedTrainable = trainableLayerCount < 0
+            ? nLayers
+            : SilkPartialTrainingPolicy.Normalize(trainableLayerCount, nLayers, trainable: true);
+        this.trainableLayerCount = normalizedTrainable;
 
         // position table
         posEmb = runtime.Allocate(maxSeqLen * hiddenDim);
@@ -309,31 +327,34 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         dInterm = runtime.Allocate(cap * intermediateDim);
         dQkv = runtime.Allocate(cap * hiddenDim * 3);
         dAttn = runtime.Allocate(cap * hiddenDim);
-        dLnA = runtime.Allocate(hiddenDim);
-        dLnB = runtime.Allocate(hiddenDim);
+        dLnA = runtime.Allocate(cap * hiddenDim);
+        dLnB = runtime.Allocate(cap * hiddenDim);
         dLogitsBuf = runtime.Allocate(cap * vocabSize);
         targetIdsBuf = runtime.Allocate(cap);
         attnProbs = runtime.Allocate(numHeads * cap * cap);
         attnDelta = runtime.Allocate(numHeads * cap);
 
+        bool embeddingsTrainable = SilkPartialTrainingPolicy.EmbeddingsTrainable(normalizedTrainable, nLayers, trainable: true);
+
         // register params
-        AddParam(tokEmb, tokEmbGrad, tokEmbM, tokEmbV, vocabSize * hiddenDim);
-        AddParam(finalNormW, finalNormWGrad, finalNormWM, finalNormWV, hiddenDim);
-        AddParam(finalNormB, finalNormBGrad, finalNormBM, finalNormBV, hiddenDim);
+        AddParam(tokEmb, tokEmbGrad, tokEmbM, tokEmbV, vocabSize * hiddenDim, embeddingsTrainable);
+        AddParam(finalNormW, finalNormWGrad, finalNormWM, finalNormWV, hiddenDim, true);
+        AddParam(finalNormB, finalNormBGrad, finalNormBM, finalNormBV, hiddenDim, true);
         for (int i = 0; i < nLayers; i++)
         {
-            AddParam(ln1W[i], ln1WGrad[i], ln1WM[i][0], ln1WV[i][0], hiddenDim);
-            AddParam(ln1B[i], ln1BGrad[i], ln1BM[i][0], ln1BV[i][0], hiddenDim);
-            AddParam(ln2W[i], ln2WGrad[i], ln2WM[i][0], ln2WV[i][0], hiddenDim);
-            AddParam(ln2B[i], ln2BGrad[i], ln2BM[i][0], ln2BV[i][0], hiddenDim);
-            AddParam(wQ[i], wQGrad[i], wQM[i][0], wQV[i][0], hiddenDim * hiddenDim);
-            AddParam(wK[i], wKGrad[i], wKM[i][0], wKV[i][0], hiddenDim * hiddenDim);
-            AddParam(wV[i], wVGrad[i], wVM[i][0], wVV[i][0], hiddenDim * hiddenDim);
-            AddParam(wO[i], wOGrad[i], wOM[i][0], wOV[i][0], hiddenDim * hiddenDim);
-            AddParam(wFc1[i], wFc1Grad[i], wFc1M[i][0], wFc1V[i][0], hiddenDim * intermediateDim);
-            AddParam(fc1Bias[i], fc1BiasGrad[i], fc1BiasM[i][0], fc1BiasV[i][0], intermediateDim);
-            AddParam(wFc2[i], wFc2Grad[i], wFc2M[i][0], wFc2V[i][0], intermediateDim * hiddenDim);
-            AddParam(fc2Bias[i], fc2BiasGrad[i], fc2BiasM[i][0], fc2BiasV[i][0], hiddenDim);
+            bool layerTrainable = SilkPartialTrainingPolicy.LayerTrainable(i, nLayers, normalizedTrainable, trainable: true);
+            AddParam(ln1W[i], ln1WGrad[i], ln1WM[i][0], ln1WV[i][0], hiddenDim, layerTrainable);
+            AddParam(ln1B[i], ln1BGrad[i], ln1BM[i][0], ln1BV[i][0], hiddenDim, layerTrainable);
+            AddParam(ln2W[i], ln2WGrad[i], ln2WM[i][0], ln2WV[i][0], hiddenDim, layerTrainable);
+            AddParam(ln2B[i], ln2BGrad[i], ln2BM[i][0], ln2BV[i][0], hiddenDim, layerTrainable);
+            AddParam(wQ[i], wQGrad[i], wQM[i][0], wQV[i][0], hiddenDim * hiddenDim, layerTrainable);
+            AddParam(wK[i], wKGrad[i], wKM[i][0], wKV[i][0], hiddenDim * hiddenDim, layerTrainable);
+            AddParam(wV[i], wVGrad[i], wVM[i][0], wVV[i][0], hiddenDim * hiddenDim, layerTrainable);
+            AddParam(wO[i], wOGrad[i], wOM[i][0], wOV[i][0], hiddenDim * hiddenDim, layerTrainable);
+            AddParam(wFc1[i], wFc1Grad[i], wFc1M[i][0], wFc1V[i][0], hiddenDim * intermediateDim, layerTrainable);
+            AddParam(fc1Bias[i], fc1BiasGrad[i], fc1BiasM[i][0], fc1BiasV[i][0], intermediateDim, layerTrainable);
+            AddParam(wFc2[i], wFc2Grad[i], wFc2M[i][0], wFc2V[i][0], intermediateDim * hiddenDim, layerTrainable);
+            AddParam(fc2Bias[i], fc2BiasGrad[i], fc2BiasM[i][0], fc2BiasV[i][0], hiddenDim, layerTrainable);
         }
 
         foreach (var p in parameters)
@@ -344,10 +365,33 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         }
     }
 
-    void AddParam(nint w, nint g, nint m, nint v, int count)
-        => parameters.Add((w, g, m, v, count));
+    void AddParam(nint w, nint g, nint m, nint v, int count, bool trainable)
+        => parameters.Add(new Param { Weight = w, Grad = g, M = m, V = v, Count = count, Trainable = trainable });
 
     public string DeviceName => runtime.DeviceName;
+
+    public int TrainableLayerCount
+    {
+        get => trainableLayerCount;
+        set
+        {
+            int normalized = SilkPartialTrainingPolicy.Normalize(value, config.NumHiddenLayers, trainable: true);
+            trainableLayerCount = normalized;
+            bool embeddingsTrainable = SilkPartialTrainingPolicy.EmbeddingsTrainable(normalized, config.NumHiddenLayers, trainable: true);
+            int idx = 0;
+            if (idx < parameters.Count) parameters[idx++].Trainable = embeddingsTrainable; // tokEmb
+            if (idx < parameters.Count) parameters[idx++].Trainable = true; // finalNormW
+            if (idx < parameters.Count) parameters[idx++].Trainable = true; // finalNormB
+            for (int i = 0; i < config.NumHiddenLayers; i++)
+            {
+                bool layerTrainable = SilkPartialTrainingPolicy.LayerTrainable(i, config.NumHiddenLayers, normalized, trainable: true);
+                for (int k = 0; k < 12; k++)
+                {
+                    if (idx < parameters.Count) parameters[idx++].Trainable = layerTrainable;
+                }
+            }
+        }
+    }
 
     public float[] Forward(int[] inputTokens, int seqLen)
     {
@@ -379,18 +423,15 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
             SilkLauncher.Gemm(runtime, normed1[li], wK[li], kBuf[li], seqLen, hiddenDim, hiddenDim);
             SilkLauncher.Gemm(runtime, normed1[li], wV[li], vBuf[li], seqLen, hiddenDim, hiddenDim);
 
-            // build qkv combined buffer (row-major [seq, 3*hidden])
+            // build qkv combined buffer (block-major [q rows][k rows][v rows], as the attention backward kernel expects)
             {
                 float[] q = runtime.Download(qBuf[li], seqLen * hiddenDim);
                 float[] k = runtime.Download(kBuf[li], seqLen * hiddenDim);
                 float[] v = runtime.Download(vBuf[li], seqLen * hiddenDim);
                 float[] qkv = new float[seqLen * hiddenDim * 3];
-                for (int r = 0; r < seqLen; r++)
-                {
-                    Array.Copy(q, r * hiddenDim, qkv, r * hiddenDim * 3, hiddenDim);
-                    Array.Copy(k, r * hiddenDim, qkv, r * hiddenDim * 3 + hiddenDim, hiddenDim);
-                    Array.Copy(v, r * hiddenDim, qkv, r * hiddenDim * 3 + 2 * hiddenDim, hiddenDim);
-                }
+                Array.Copy(q, 0, qkv, 0, seqLen * hiddenDim);
+                Array.Copy(k, 0, qkv, seqLen * hiddenDim, seqLen * hiddenDim);
+                Array.Copy(v, 0, qkv, 2 * seqLen * hiddenDim, seqLen * hiddenDim);
                 runtime.Upload(qkvBuf[li], qkv);
             }
 
@@ -459,7 +500,9 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         SilkLauncher.Gemm(runtime, dLogitsBuf, tokEmb, dTmp, seqLen, vocabSize, hiddenDim);
         // dTokEmb (vocab,hidden) += dLogits^T @ finalNorm (hidden? actually x) 
         // grad tokEmb (vocab,hidden) = dLogits^T (vocab,seq) @ normedBuf (seq,hidden)
-        SilkLauncher.GemmTn(runtime, dLogitsBuf, normedBuf, tokEmbGrad, vocabSize, seqLen, hiddenDim);
+        bool embeddingsTrainable = SilkPartialTrainingPolicy.EmbeddingsTrainable(trainableLayerCount, config.NumHiddenLayers, trainable: true);
+        if (embeddingsTrainable)
+            SilkLauncher.GemmTn(runtime, dLogitsBuf, normedBuf, tokEmbGrad, vocabSize, seqLen, hiddenDim);
         // Wait GemmTn(a=normedBuf [seq,hidden], b=dLogits [seq,vocab], c=tokEmbGrad [hidden? no])
         // Need check shape. Use runtime? We'll trust and test.
 
@@ -471,7 +514,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         // dCur starts as dTmp2 (grad into last block output)
         runtime.CopyBuffer(dTmp2, dCur, 0, 0, seqLen * hiddenDim);
 
-        for (int li = config.NumHiddenLayers - 1; li >= 0; li--)
+        int firstTrainableLayer = config.NumHiddenLayers - trainableLayerCount;
+        for (int li = config.NumHiddenLayers - 1; li >= firstTrainableLayer; li--)
         {
             // FFN residual: dCur already includes residual grad from upstream? We'll handle residual add.
             // fc2 backward
@@ -552,7 +596,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         // token embedding backward: scatter row grads into tokEmbGrad
         // dCur now holds grad wrt x (input to first layer) = grad wrt token+pos embedding (pos no grad)
         // We need map dCur (seq,hidden) back to token embedding rows: EmbeddingBackwardRows(ids, dCur, tokEmbGrad, seq, hidden)
-        SilkLauncher.EmbeddingBackwardRows(runtime, idsBuf, dCur, tokEmbGrad, seqLen, hiddenDim);
+        if (firstTrainableLayer == 0)
+            SilkLauncher.EmbeddingBackwardRows(runtime, idsBuf, dCur, tokEmbGrad, seqLen, hiddenDim);
 
         // tokEmbGrad already accumulated LM head grad above? We added tokEmbGrad += ... earlier. Good.
     }
@@ -570,7 +615,7 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         adamStep++;
         float c1 = 1f - MathF.Pow(beta1, adamStep);
         float c2 = 1f - MathF.Pow(beta2, adamStep);
-        foreach (var p in parameters)
+        foreach (var p in parameters.Where(p => p.Trainable))
         {
             SilkLauncher.AdamUpdate(runtime, p.Weight, p.Grad, p.M, p.V, learningRate, c1, c2, 1e-8f, weightDecay, p.Count);
         }
