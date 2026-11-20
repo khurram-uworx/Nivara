@@ -110,16 +110,12 @@ training for causal LMs does not exist yet (only BERT-shaped trainers). Treat as
 a design note scoping data format, loss, optimizer, memory budget, precision. Not a release
 blocker.
 
-### Gap S6 — TinyShakespeare transformer training on Silk — Low (#1342)
+### Gap S6 — TinyShakespeare transformer training on Silk — Low (#1342) — IMPLEMENTED
 
-Currently `--tinyshakespeare` training runs entirely on the CPU AutoDiff path
-(`BatchedTransformer`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Adam<T>`); Silk is
-inference-only (`SilkTinyShakespeareSession`, `SilkBatchedChatClient` via `ToSilkWeights()`).
-Previously recorded as a non-goal. Now tracked explicitly so it is not silently dropped.
-
-**Design note:** `docs/plan/NIVARACHAT-TINYSHAKESPEARE-SILK-TRAINING.md` scopes kernels needed,
-memory budget, precision lane (f32 only), save/load round-trip, parity gate, and non-goals.
-Implementation tracked separately.
+`--tinyshakespeare --silk` now trains on the device via `SilkTinyShakespeareTrainer`
+(f32 only), exporting weights back into the CPU `BatchedTransformer` through
+`LoadFromSilkWeights`. The CPU AutoDiff path remains the default and reference parity gate.
+Parity tests in `tests/Nivara.Tests/Gpu/SilkTinyShakespeareTrainerTests.cs`.
 
 **Goal:** a Silk training path for the batched transformer — device forward/backward for the
 transformer block (attention + FFN + layernorm + embedding) and an Adam step, exporting

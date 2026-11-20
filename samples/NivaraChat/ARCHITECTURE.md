@@ -322,8 +322,9 @@ directly. The remaining gaps were closed by this work:
 - Top-p sampling — now available via `--top-p` (`TokenSampling`); top-k and beam search remain out of scope.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
   Nivara's scope.
-- Silk is inference-only for this sample's transformer: training stays on the CPU
-  AutoDiff path. `ToSilkWeights()` exists only for the Nivara-trained
+- Silk training is now available for this sample's transformer (`--silk`), via
+  `SilkTinyShakespeareTrainer` (f32 only); the CPU AutoDiff path remains the default
+  and reference parity gate. `ToSilkWeights()` exists only for the Nivara-trained
   `BatchedTransformer`; SmolLM/Qwen import weights from safetensors and never
   train in Nivara, so they have no `ToSilkWeights` path. Classifier models
   (sentiment/entity/validator) have no autoregressive generation or KV cache;
@@ -437,10 +438,13 @@ cited code.
   `--block-size`. Hint: `Transformer/TransformerKVCache.cs`,
   `Transformer/BatchedTransformer.cs::ForwardCached`,
   `Transformer/TransformerMode.cs::RunSilk`.
-- **D-016 — Silk/OpenCL backend for TinyShakespeare.** `--silk` exports weights
-  via `BatchedTransformer.ToSilkWeights()` and runs generation through
-  `SilkTinyShakespeareSession` (prefill + cached decode), F32-only. Hint:
+- **D-016 — Silk/OpenCL backend for TinyShakespeare.** `--silk` now trains on the device
+  (via `SilkTinyShakespeareTrainer`, f32 only) and runs generation through
+  `SilkTinyShakespeareSession` (prefill + cached decode), F32-only. Trained weights export
+  back into the CPU `BatchedTransformer` via `LoadFromSilkWeights`, so save/load and
+  inference paths are unchanged. Hint:
   `Transformer/BatchedTransformer.cs::ToSilkWeights`,
+  `src/Nivara.Extensions/Silk/SilkTinyShakespeareTrainer.cs`,
   `src/Nivara.Extensions/Silk/SilkTinyShakespeareSession.cs`.
 - **D-017 — Top-p (nucleus) sampling.** `--top-p` (default 1.0) is consumed by
   `TokenSampling.Sample` in both the CPU and Silk generation paths. Hint:
