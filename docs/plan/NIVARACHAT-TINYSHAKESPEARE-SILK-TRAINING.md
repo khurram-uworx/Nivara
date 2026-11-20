@@ -1,6 +1,6 @@
 # NivaraChat: TinyShakespeare transformer training on Silk (AutoDiff → device) — design note
 
-**Status:** design note, not yet implemented. Written 2026-11-19.
+**Status:** implemented (PR #1359). Written 2026-11-19; updated 2026-11-20.
 **Scope:** `samples/NivaraChat` (training path) and a new `SilkTinyShakespeareTrainer` in
 `src/Nivara.Extensions/Silk`.
 **Release constraint:** Silk training is **f32 only** this release. No bf16/fp16 training on
