@@ -159,10 +159,6 @@ public static partial class Laya
         ExportLinear(exported, "act_head.0", head.actInput);
         ExportLinear(exported, "act_head.2", head.actOut);
 
-        var temp = new float[head.CheckpointTemperature.Count];
-        for (int i = 0; i < temp.Length; i++) temp[i] = head.CheckpointTemperature[i];
-        exported["temperature"] = (temp, new[] { temp.Length });
-
         return exported;
     }
 
