@@ -674,7 +674,9 @@ explicit `--precision f32` keeps the F32 device path, and `distill` stays F32. `
 `relu`, `relu6`, `maxpool2d`, and `adaptive_avgpool2d`. They share the same runtime and host-side
 geometry helpers, and are the kernels listed in `KernelNames` under the vision family.
 
-As with the encoders, f32 is the default; bf16 routes keep selected weights (tokEmb/tied heads or QKV/FFN) in bf16.
+Vision is F32-only: these runners have no BF16/FP16 lane (the apparent BF16 constructors were
+widening shims and have been removed, see issue #1282). `--precision bf16`/`fp16` is rejected for
+the vision models.
 
 ## 13c. Text classifiers (NivaraClassifier sample)
 

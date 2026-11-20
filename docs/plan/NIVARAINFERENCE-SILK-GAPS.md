@@ -55,10 +55,10 @@ CPU narrow paths support FP16 (Half) for several models; Silk runners exist but 
 rejects `--silk --precision fp16` globally. Dead runner code remains. Decision needed:
 remove unreachable runners + CPU FP16 paths (Option A) or expose the flag (Option B).
 
-### Gap N3 — Vision BF16 shims (#1282) — Low
+### Gap N3 — Vision BF16 shims (#1282) — Low (resolved)
 
-`SilkMobileNetV2GpuRunner.Bf16.cs` and `SilkResNet18GpuRunner.Bf16.cs` widen to F32; no
-true narrow path. Shims imply a capability that does not exist.
+`SilkMobileNetV2GpuRunner.Bf16.cs` and `SilkResNet18GpuRunner.Bf16.cs` widened to F32; no
+true narrow path. Shims removed in #1282: vision Silk runners are now F32-only.
 
 ### Gap N4 — ModernBERT has no training path (#1280) — Medium
 
