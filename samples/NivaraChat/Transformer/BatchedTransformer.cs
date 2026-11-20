@@ -251,6 +251,71 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
         return result;
     }
 
+    /// <summary>
+    /// Loads parameters from a Silk/OpenCL checkpoint dictionary (same keys/shapes as
+    /// <see cref="ToSilkWeights"/>) into this CPU model.
+    /// </summary>
+    public void LoadFromSilkWeights(Dictionary<string, (float[] Data, int[] Shape)> weights)
+    {
+        ArgumentNullException.ThrowIfNull(weights);
+
+        void SetParam(Parameter<T>? param, string key)
+        {
+            if (param is null) return;
+            var (data, shape) = weights[key];
+            var arr = new T[data.Length];
+            for (int i = 0; i < data.Length; i++) arr[i] = T.CreateChecked(data[i]);
+            var col = NivaraColumn<T>.Create(arr);
+            var t = new ReverseGradTensor<T>(col, param.Tensor.RequiresGrad);
+            t.Reshape(shape);
+            param.Tensor = t;
+        }
+
+        SetParam(tokenEmb.Weight, "tok_emb.weight");
+        SetParam(finalNorm.Weight, "final_norm.weight");
+        SetParam(finalNorm.Bias, "final_norm.bias");
+
+        for (int i = 0; i < blocks.Length; i++)
+        {
+            string prefix = $"layers.{i}.";
+            blocks[i].LoadFromSilkWeights(weights, prefix);
+        }
+    }
+
+    /// <summary>
+    /// Exports gradients into the conventional Silk weight dictionary shape, reading
+    /// <see cref="ReverseGradTensor{T}.Grad"/> (zeros when absent).
+    /// </summary>
+    public Dictionary<string, (float[] Data, int[] Shape)> ToSilkGradients()
+    {
+        var result = new Dictionary<string, (float[] Data, int[] Shape)>(StringComparer.Ordinal);
+        Func<ReverseGradTensor<T>?, float[]> readGrad = t =>
+        {
+            if (t?.Grad is null) return new float[t?.Length ?? 0];
+            t.Grad.TryGetSpan(out var span);
+            var arr = new float[t.Length];
+            for (int i = 0; i < arr.Length; i++) arr[i] = span.Length > i ? float.CreateChecked(span[i]) : 0f;
+            return arr;
+        };
+        // token emb
+        var te = tokenEmb.Weight!.Tensor;
+        result["tok_emb.weight"] = (readGrad(te), (int[])te.Shape.Clone());
+        // final norm
+        if (finalNorm.Weight is not null)
+        {
+            var w = finalNorm.Weight.Tensor;
+            result["final_norm.weight"] = (readGrad(w), (int[])w.Shape.Clone());
+        }
+        if (finalNorm.Bias is not null)
+        {
+            var b = finalNorm.Bias.Tensor;
+            result["final_norm.bias"] = (readGrad(b), (int[])b.Shape.Clone());
+        }
+        for (int i = 0; i < blocks.Length; i++)
+            blocks[i].PopulateSilkGradients(i, result, readGrad);
+        return result;
+    }
+
     internal static float[] TensorToFloatArray(ReverseGradTensor<T> tensor)
     {
         ArgumentNullException.ThrowIfNull(tensor);
@@ -474,6 +539,56 @@ public sealed class BatchedTransformerBlock<T> : Module<T> where T : struct, IFl
         hidden.Reshape(batch, length, nEmbd);               // [1, 1, D]
 
         return ReverseGradOperations.Add(hidden, residual);
+    }
+
+    internal void LoadFromSilkWeights(Dictionary<string, (float[] Data, int[] Shape)> weights, string prefix)
+    {
+        void SetParam(Parameter<T>? param, string key)
+        {
+            if (param is null) return;
+            var (data, shape) = weights[key];
+            var arr = new T[data.Length];
+            for (int i = 0; i < data.Length; i++) arr[i] = T.CreateChecked(data[i]);
+            var col = NivaraColumn<T>.Create(arr);
+            var t = new ReverseGradTensor<T>(col, param.Tensor.RequiresGrad);
+            t.Reshape(shape);
+            param.Tensor = t;
+        }
+
+        SetParam(ln1.Weight, prefix + "ln1.weight");
+        SetParam(ln1.Bias, prefix + "ln1.bias");
+        SetParam(ln2.Weight, prefix + "ln2.weight");
+        SetParam(ln2.Bias, prefix + "ln2.bias");
+        SetParam(qProj.Weight, prefix + "q_proj.weight");
+        SetParam(kProj.Weight, prefix + "k_proj.weight");
+        SetParam(vProj.Weight, prefix + "v_proj.weight");
+        SetParam(oProj.Weight, prefix + "o_proj.weight");
+        SetParam(mlpFc1.Weight, prefix + "mlp_fc1.weight");
+        SetParam(mlpFc1.Bias, prefix + "mlp_fc1.bias");
+        SetParam(mlpFc2.Weight, prefix + "mlp_fc2.weight");
+        SetParam(mlpFc2.Bias, prefix + "mlp_fc2.bias");
+    }
+
+    internal void PopulateSilkGradients(int layerIndex, Dictionary<string, (float[] Data, int[] Shape)> dict, Func<ReverseGradTensor<T>?, float[]> readGrad)
+    {
+        string prefix = $"layers.{layerIndex}.";
+        void Add(string name, ReverseGradTensor<T>? tensor)
+        {
+            if (tensor is null) return;
+            dict[prefix + name] = (readGrad(tensor), (int[])tensor.Shape.Clone());
+        }
+        Add("ln1.weight", ln1.Weight?.Tensor);
+        Add("ln1.bias", ln1.Bias?.Tensor);
+        Add("ln2.weight", ln2.Weight?.Tensor);
+        Add("ln2.bias", ln2.Bias?.Tensor);
+        Add("q_proj.weight", qProj.Weight?.Tensor);
+        Add("k_proj.weight", kProj.Weight?.Tensor);
+        Add("v_proj.weight", vProj.Weight?.Tensor);
+        Add("o_proj.weight", oProj.Weight?.Tensor);
+        Add("mlp_fc1.weight", mlpFc1.Weight?.Tensor);
+        Add("mlp_fc1.bias", mlpFc1.Bias?.Tensor);
+        Add("mlp_fc2.weight", mlpFc2.Weight?.Tensor);
+        Add("mlp_fc2.bias", mlpFc2.Bias?.Tensor);
     }
 
     internal void PopulateSilkWeights(int layerIndex, Dictionary<string, (float[] Data, int[] Shape)> dict)
