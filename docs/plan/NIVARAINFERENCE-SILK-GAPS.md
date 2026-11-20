@@ -7,7 +7,7 @@ training on Silk is required; inference may still use bf16/fp16 where a runner e
 
 This document is the single umbrella for Silk gaps in the NivaraInference sample. It consolidates
 the already-filed issues #1279–#1284 and #1343 and records the assessment of what is already on
-Silk versus what is not. The NivaraChat counterpart is `docs/plan/NIVARACHAT-SILK-GAPS.md`.
+Silk versus what is not. The NivaraChat counterpart was retired once all of its gaps (S1–S6) closed.
 
 ## Assessment summary
 

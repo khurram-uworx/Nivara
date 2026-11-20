@@ -15,7 +15,7 @@ Pre-requisites for this home (chat-template promotion and causal-LM loading-help
 extraction, plus the base-weight freeze mechanism) are tracked in §0 below and must
 land before the LoRA implementation begins.
 
-Consolidates the design asks in `docs/plan/NIVARACHAT-SILK-GAPS.md` (Gap S5, #1273 /
+Consolidates the design asks from Gap S5 of the now-retired NivaraChat Silk gaps note (#1273 /
 #1283 / #1284). Full-parameter LLM fine-tuning is intentionally not scoped (see §12);
 the supported SFT path is LoRA. Not a release blocker.
 
