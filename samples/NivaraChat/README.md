@@ -552,6 +552,8 @@ Tested examples:
 
 This is **Stage A** of the SmolLM two-demo plan: plain causal-LM chat only. Tool calling (the SmolLM2 Hermes `<tool_call>`/`<tool_response>` format wiring Nivara's trained models as `AIFunction` tools) is a later stage and is intentionally not included here.
 
+**Scope note (issue #1273):** SmolLM/Qwen are served from pretrained checkpoints and are **inference-only** in this sample — there is no training/fine-tuning path for `LlamaForCausalLM` here. Training a transformer from scratch is demonstrated by `--tinyshakespeare` (see above), and core AutoDiff already supports training `LlamaForCausalLM<TModel,TWeight>` generically (see `docs/AUTODIFF.md` and `samples/Nivara.Samples/LlamaForCausalLM.cs`). LLM fine-tuning (incl. LoRA) is homed in the `NivaraInference` sample and tracked by issues #1283 / #1284 with the design note `docs/plan/LORA.md`.
+
 Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), `SmolLMChatClient<T>` (`IChatClient`, temperature/top-p sampling, KV-cached generation), `SmollmChatTemplate` (Hermes ChatML rendering).
 
 ### Qwen (`--qwen`)
