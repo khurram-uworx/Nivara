@@ -66,10 +66,15 @@ ModernBERT-large is inference-only. No AutoDiff wrapper or Silk trainer covers i
 (full + sliding-window) attention. Head-only fine-tune on frozen `[CLS]` is the proposed
 scope.
 
-### Gap N5 — SmolLM/Qwen have no training path (#1283, #1284) — Low
+### Gap N5 - SmolLM/Qwen have no training path (#1283, #1284) - Low
 
 Pretrained weights from safetensors; no in-sample training. Generic Silk trainer for causal
 LMs does not exist (only BERT-shaped `SilkDistilBertTrainer` and `SilkLayaHeadTrainer`).
+
+**Home decision.** LoRA/fine-tuning is homed in NivaraInference (see `docs/plan/LORA.md`,
+which is the consolidated design note). NivaraChat keeps the RAG comparison and a thin
+consumption path that loads an adapter produced here. Shared code (`LoRALinear`, data format,
+templates) matures in `src/Nivara`/`Nivara.Samples` and is promoted once stable.
 
 ### Gap N6 — BF16 training unreachable in NivaraFineTuning (#1279) — High
 

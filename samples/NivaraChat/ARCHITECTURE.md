@@ -322,7 +322,8 @@ directly. The remaining gaps were closed by this work:
 - Top-p sampling — now available via `--top-p` (`TokenSampling`); top-k and beam search remain out of scope.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
   Nivara's scope. Llama/SmolLM/Qwen training is out of NivaraChat scope (issue #1273);
-  LLM fine-tuning is homed in NivaraInference (#1283, #1284, docs/plan/LORA.md).
+  fine-tuning is homed in NivaraInference (#1283, #1284, docs/plan/LORA.md), and
+  NivaraChat only consumes a tuned adapter for its FT comparison arms.
 - Silk training is now available for this sample's transformer (`--silk`), via
   `SilkTinyShakespeareTrainer` (f32 only); the CPU AutoDiff path remains the default
   and reference parity gate. `ToSilkWeights()` exists only for the Nivara-trained

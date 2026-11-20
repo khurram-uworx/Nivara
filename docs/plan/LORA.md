@@ -1,12 +1,19 @@
-# LoRA Fine-Tuning vs RAG — Design Note (#1273)
+# LoRA Fine-Tuning vs RAG — Design Note
 
 Status: **design note** (no implementation yet). Scopes a LoRA fine-tuning demo for the
-pretrained causal LMs in NivaraChat (SmolLM-135M, Qwen2.5-0.5B) and a head-to-head
-comparison with the RAG pipeline in [RAG.md](RAG.md), using the **same markdown corpus** as
-the knowledge source.
+pretrained causal LMs (SmolLM-135M, Qwen2.5-0.5B) and a head-to-head comparison with the
+RAG pipeline in [RAG.md](RAG.md), using the **same markdown corpus** as the knowledge
+source.
 
-Closes the "design note first" ask in `docs/plan/NIVARACHAT-SILK-GAPS.md` (Gap S5, #1273 /
-#1283 / #1284). Not a release blocker.
+**Home.** Fine-tuning (data build, adapter training, validation) is homed in
+`samples/NivaraInference`; `samples/NivaraChat` keeps the RAG pipeline and a thin
+consumption path that loads a tuned adapter for the FT arms. Shared code (`LoRALinear`,
+data format, templates) matures in `src/Nivara`/`Nivara.Samples` and is promoted once
+stable.
+
+Consolidates the design asks in `docs/plan/NIVARACHAT-SILK-GAPS.md` (Gap S5, #1273 /
+#1283 / #1284). Full-parameter LLM fine-tuning is intentionally not scoped (see §12);
+the supported SFT path is LoRA. Not a release blocker.
 
 ## 1. Goal
 
@@ -30,6 +37,7 @@ Deliverables:
 | `Module<T>`, `Parameter<T>`, `StateDict`/`LoadStateDict`, `AdamW`, `TrainingLoop`, `ModelSerializer` | Available (see [AUTODIFF.md](AUTODIFF.md), [RETRAINING.md](RETRAINING.md)) |
 | RAG index, chunker, judge labels, split, paired metrics | Available (`samples/NivaraChat/Helpers/*`) |
 | LoRA, freeze mechanism, SFT loss with prompt masking | **Missing** |
+| Silk causal-LM trainer (SmolLM/Qwen), `rms_norm_backward` | **Missing** (tracked in §14, #1283) |
 
 `samples/NivaraChat/ARCHITECTURE.md` currently lists "Fine-tuning/LoRA" under *Not doing*;
 that line is updated when this lands.
@@ -83,17 +91,19 @@ than generalize. Split on the source file path (FNV-1a with seed mixed in, 80/10
 test questions come from documents the adapter never saw. A second report line covers
 "seen-document" questions, which is the case FT is *supposed* to win.
 
-**Format.** Chat template of the target model (`SmollmChatTemplate`, `QwenChatTemplate`),
-one example = system + question + answer. Loss is next-token cross-entropy over the
-**answer tokens only** (prompt masked). Max sequence length 256-512, configurable.
+**Format.** Chat template of the target model (`SmollmChatTemplate`, `QwenChatTemplate`,
+both `internal static` renderers in the sample; the fine-tuning code lives in the same
+assembly so this is fine), one example = system + question + answer. Loss is next-token
+cross-entropy over the **answer tokens only** (prompt masked). Max sequence length 256-512,
+configurable.
 
 ## 5. Training setup
 
 - Optimizer `AdamW`, lr ~2e-4 (adapter-only), few epochs, early stopping on validation loss,
   best-checkpoint restore via `StateDict`/`LoadStateDict` as in RAG.md §5.
 - Gradient accumulation to keep per-step memory small on CPU; batch size 1-4.
-- CPU AutoDiff, f32 compute. Silk training for causal LMs does not exist (#1283) and is a
-  non-goal here; the CPU path stays the reference.
+- CPU AutoDiff, f32 compute. Silk training for causal LMs is tracked in §14 (#1283) and is
+  a non-goal for this CPU demo; the CPU path stays the reference.
 - Seeded and reproducible: same corpus + seed gives same split, data order and loss curve
   (to a stated tolerance).
 - Memory budget table (weights, activations, adapter + optimizer state) is printed at start
@@ -145,25 +155,37 @@ If the measured results contradict these, the report says so.
 
 ## 8. CLI surface (proposed)
 
+Fine-tuning and validation live in NivaraInference; NivaraChat only consumes a tuned
+adapter for the FT arms of the comparison.
+
 ```
-# 1. Generate grounded Q&A from docs (needs an LLM, e.g. --ollama)
+# NivaraInference: fine-tune a LoRA adapter (CPU) on a data file
+dotnet run --project samples/NivaraInference -- smollm ft-lora --data ft-data.jsonl --out adapters/smollm-lora --rank 8 --epochs 3
+
+# NivaraInference: validate a tuned adapter (loss + held-out accuracy)
+dotnet run --project samples/NivaraInference -- smollm ft-eval --adapter adapters/smollm-lora --data ft-data.jsonl
+
+# NivaraChat: build grounded Q&A from docs (needs an LLM, e.g. --ollama)
 dotnet run --project samples/NivaraChat -- --ft-data --regenerate --ollama --force
 
-# 2. Fine-tune a LoRA adapter (CPU)
-dotnet run --project samples/NivaraChat -- --ft-lora --model smollm --rank 8 --epochs 3
-
-# 3. Compare Base / RAG / FT / FT+RAG on held-out questions
-dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --report ft-vs-rag.md
+# NivaraChat: compare Base / RAG / FT / FT+RAG, loading the adapter produced above
+dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --adapter ../NivaraInference/adapters/smollm-lora --report ft-vs-rag.md
 ```
 
-Key flags: `--model smollm|qwen`, `--rank`, `--alpha`, `--targets q,v[,k,o,ffn]`, `--lr`,
-`--epochs`, `--batch-size`, `--max-len`, `--seed`, `--adapter <path>`, `--merge`,
-`--docs-dir`, `--report`, `--force`.
+Key flags (NivaraInference): `--data`, `--out`, `--adapter`, `--rank`, `--alpha`,
+`--targets q,v[,k,o,ffn]`, `--lr`, `--epochs`, `--batch-size`, `--max-len`, `--seed`,
+`--merge`, `--max-memory`, `--force`.
+Key flags (NivaraChat): `--model smollm|qwen`, `--adapter <path>`, `--docs-dir`,
+`--report`, `--force`.
 
 ## 9. Proposed file layout
 
 - `src/Nivara/AutoDiff/Nn/LoRALinear.cs` — module, merge, adapter save/load (core, reusable)
-- `samples/NivaraChat/FineTuning/` — data builder, SFT trainer, `FtLoraMode`, `FtVsRagMode`
+- `samples/NivaraInference/FineTuning/` — data consumer, SFT trainer, `FtLoraMode`,
+  `FtEvalMode`, validation metrics (home of fine-tuning)
+- `samples/NivaraChat/FineTuning/` — `FtVsRagMode` only, consuming an adapter produced by
+  NivaraInference
+- `samples/NivaraChat/Helpers/` — data builder (`--ft-data`) reused by both samples
 - `tests/Nivara.Tests/AutoDiff/LoRALinearTests.cs` — step-0 parity, gradient check vs
   finite differences, merge equivalence, frozen-base has no grad
 - `docs/LORA.md` (this file) updated with measured results
@@ -189,9 +211,12 @@ Key flags: `--model smollm|qwen`, `--rank`, `--alpha`, `--targets q,v[,k,o,ffn]`
 
 ## 12. Non-goals
 
-- Silk / GPU training for causal LMs (#1283), bf16/fp16 training, QLoRA and quantization.
-- Full-parameter fine-tuning and general-purpose LLM training beyond this minimal SFT loop
-  (#1284).
+- Full-parameter fine-tuning of causal LMs — infeasible as a shipped CPU workflow (memory +
+  wall-clock); out of scope. LoRA is the supported SFT path. Tracked separately as an
+  opt-in experiment only, not a mode.
+- QLoRA / quantization.
+- Silk / GPU training for causal LMs in v1 (see §14); CPU path stays the reference.
+- bf16/fp16 *training* (CPU mixed storage is inference-only; Silk training is f32 only).
 - Replacing RAG: the point is a measured comparison, not a verdict in advance.
 
 ## 13. References
@@ -199,5 +224,75 @@ Key flags: `--model smollm|qwen`, `--rank`, `--alpha`, `--targets q,v[,k,o,ffn]`
 - [RAG.md](RAG.md) — corpus, chunking, judge labels, split, paired metrics
 - [AUTODIFF.md](AUTODIFF.md), [RETRAINING.md](RETRAINING.md) — training stack, checkpoints
 - [SMOLLM.md](SMOLLM.md), [QWEN.md](QWEN.md) — the target models
-- `samples/Nivara.Samples/LlamaForCausalLM.cs`, `src/Nivara/AutoDiff/Nn/Linear.cs`
+- `samples/Nivara.Samples/LlamaForCausalLM.cs` — model, loader, mixed-dtype guard
+- `src/Nivara/AutoDiff/Nn/Linear.cs`
 - `samples/NivaraFineTuning/` — existing DistilBERT fine-tuning sample (classification head)
+- `docs/plan/NIVARAINFERENCE-SILK-GAPS.md` — umbrella for Silk gaps (N5/N6)
+
+## 14. Silk counterpart (future, from #1283)
+
+LoRA on Silk is *not* a v1 deliverable: there is no Silk trainer for causal LMs yet, and a
+Silk LoRA path would reuse the same device trainer with frozen base weights plus adapter
+buffers. This section consolidates the Silk/causal-LM scoping that was previously a separate note
+so there is one source of truth.
+
+**What exists today (Silk).** Trainers: `SilkDistilBertTrainer` (+ BF16 true, FP16),
+`SilkLayaHeadTrainer` (+ BF16 narrow), `SilkModernBertHeadTrainer`, `SilkTinyShakespeareTrainer`.
+Inference-only runners with no backward/Adam: `SilkSmolLMGpuRunner`, `SilkQwenGpuRunner`,
+`SilkMobileNetV2GpuRunner`, `SilkResNet18GpuRunner`. Precedent for a causal-LM-on-Silk
+trainer: `SilkTinyShakespeareTrainer` + `BatchedTransformer` (device forward/backward over a
+transformer block, Adam step, export back to CPU weights), with parity tests in
+`tests/Nivara.Tests/Gpu/SilkTinyShakespeareTrainerTests.cs`.
+
+**Kernel inventory.** Available: `gemm_row4_*`, `col_sum`, `relu`/`relu_backward`,
+`gelu`/`gelu_backward`, `layer_norm`/`layer_norm_backward`, `rms_norm` (forward only),
+`silu`/`swiglu`, `causal_gqa_attention`, `causal_attention_backward_prep`,
+`attention_backward_dq`/`attention_backward_dkv`, `rotary`, `conv2d` +
+`conv2d_backward_{weight,input,bias}`, `embedding_*`, `softmax_cross_entropy_backward`,
+`adam_update`/`adam_update_bf16`. **Missing for causal LMs:** `rms_norm_backward`
+(Tier 1/2). Vision (Tier 3) additionally needs `batchnorm_backward`, `maxpool2d_backward`,
+`adaptive_avgpool2d_backward`.
+
+**CPU reference.** `LlamaForCausalLM<float,float>` (existing) via `GradientUtils.Grad()`.
+The device trainer must match it; tied embeddings mean the tokEmb buffer is shared with the
+LM head and gradients accumulate into the same buffer.
+
+**Tiers.**
+- Tier 1: `SilkSmolLMTrainer` (sealed, `IDisposable`) over the Llama family (RoPE, GQA,
+  SwiGLU, RMSNorm, tied embeddings); new `SilkSmolLMWeights.cs`, `rms_norm_backward` kernel
+  + launcher. Single-sequence steps first; batching deferred.
+- Tier 2: Qwen2.5-0.5B reusing Tier 1 with config differences (GQA with qkv bias, larger
+  vocab/hidden, different RoPE theta); thin subclass or shared trainer parameterized by
+  config + bias flag.
+- Tier 3: vision (MobileNetV2, ResNet-18) head-only first (freeze backbone, train
+  classifier head), mirroring `SilkModernBertHeadTrainer`; full backbone deferred.
+
+**Precision lanes.** Training f32 only (release constraint, consistent with `docs/SILK.md` §13
+and the #1274 text-classifier decision). Inference keeps existing lanes (BF16 widen for
+SmolLM/Qwen). Narrow (BF16 weights / F32 compute) training is out of scope unless #1149
+lands.
+
+**Parity gate** (mirror `SilkTinyShakespeareTrainerTests`): seeded tiny fixture (small
+hidden size, few layers, small vocab); forward logits within 1e-4; gradients within 1e-3
+(max-abs) for all parameter groups; one Adam step within 1e-2; checkpoint export → reload
+round trip; seeded weights (avoid the unseeded-baseline problem of the first Laya gate).
+Skip gracefully when no OpenCL device.
+
+**Non-obvious points.**
+- Tied embeddings: tokEmb buffer shared with the head projection; gradients accumulate.
+- RoPE is position-dependent: recompute cos/sin per sequence length, save for backward.
+- Single sequence per step (`hidden` is `[seqLen, hidden]`); batching deferred.
+- For causal LMs the trainer owns the cross-entropy loss internally (like
+  `SilkTinyShakespeareTrainer.Backward(targets, scale)`); head-only vision takes
+  caller-supplied upstream gradients.
+- No activation-level BF16 unless #1149 lands first.
+
+**Open decisions.** Shared `SilkCausalLmTrainer` vs. separate `SilkSmolLMTrainer`/
+`SilkQwenTrainer`; CPU AutoDiff as the sole parity reference for v1; primitives-first
+surface (no convenience `Train(...)` loop in v1, matching DistilBERT); vision head-only first;
+whether a `Conv2d`/`BatchNorm` AutoDiff module is needed in `Nivara.Samples` for a vision
+CPU parity reference (recommended, separate item).
+
+**Relation to LoRA.** A Silk LoRA path would build on Tier 1/2 above: frozen base weights
+plus adapter buffers, with the freeze mechanism from §3. It is not a v1 deliverable and the
+CPU LoRA path (§3-§10) remains the reference and the shipped demo.
