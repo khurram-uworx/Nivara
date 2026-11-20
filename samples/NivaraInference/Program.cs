@@ -858,7 +858,7 @@ class Program
             case "mobilenet_v2":
                 if (useSilk)
                 {
-                    var mobSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
+                    var mobSilkTensors = F32();
                     if (benchmark) return RunMobileNetV2SilkBenchmark(mobSilkTensors);
                     if (compare) return RunMobileNetV2SilkCompare(mobSilkTensors);
                     if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "mobilenet_v2");
@@ -870,7 +870,7 @@ class Program
             case "resnet18":
                 if (useSilk)
                 {
-                    var resSilkTensors = bf16 ? WidenBFloat16Tensors(tensorsBf16) : F32();
+                    var resSilkTensors = F32();
                     if (benchmark) return RunResNet18SilkBenchmark(resSilkTensors);
                     if (compare) return RunResNet18SilkCompare(resSilkTensors);
                     if (compareDiag) return InferenceCompare.VisionCompareDiag(F32(), "resnet18");
