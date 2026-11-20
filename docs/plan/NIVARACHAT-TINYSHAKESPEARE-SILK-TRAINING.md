@@ -216,3 +216,12 @@ Documented as divergent / not supported on Silk:
 - `docs/SILK.md`, `docs/adr/001-autodiff-nonnullable-domain.md`,
   `docs/adr/002-autodiff-span-boundary.md`.
 - `docs/plan/LAYA-HEAD-TRAINING.md` (format template).
+
+## 16. Follow-up issues (post-PR #1359)
+
+Remaining work tracked as GitHub issues:
+
+- #1360 — TinyShakespeare Silk: add save/load round-trip + loss parity tests.
+- #1361 — TinyShakespeare Silk: update CLI help and docs/SILK.md.
+- #1362 — TinyShakespeare Silk: enforce maxBatch/maxSeqLen OOM guard.
+- #1363 — TinyShakespeare Silk: support trainableLayerCount (partial/frozen training).
