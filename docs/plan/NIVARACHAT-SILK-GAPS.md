@@ -43,7 +43,7 @@ there is no `GpuTokenClassifier` in core to back it.
 | #1341 | NivaraChat: Laya adaptive-head training is CPU-only (SilkLayaHeadTrainer not wired) | Medium |
 | #1274 | NivaraChat: core Silk text classifiers are float-only (no bf16/fp16) | Low |
 | #1276 | NivaraChat: mixed backends within one run are not reported accurately | Low |
-| #1273 | NivaraChat: no training demo for Llama (SmolLM/Qwen pretrained-only) | Low |
+| #1273 | NivaraChat: no training demo for Llama (SmolLM/Qwen pretrained-only) | Low | Closed (#1273 scope decision — homed in NivaraInference) |
 | #1283 | NivaraInference: generic Silk trainer for non-BERT models (SmolLM, Qwen LLM, vision) | Low |
 | #1284 | NivaraInference: LLM fine-tuning (SmolLM / Qwen) on CPU and Silk | Low |
 | #1342 | NivaraChat: TinyShakespeare transformer training on Silk (AutoDiff → device) | Low |
@@ -102,13 +102,12 @@ the f32 parity gate. The f32 CPU↔Silk parity is pinned by
 `tests/Nivara.Tests/Gpu/GpuTextLinearClassifierTests.cs`. See `docs/SILK.md` §13c
 ("Precision: f32 only (decision, #1274)").
 
-### Gap S5 — Llama/SmolLM/Qwen training demo (#1273/#1283/#1284) — Low (optional)
+### Gap S5 — Llama/SmolLM/Qwen training demo (#1273/#1283/#1284) — Low (optional) — CLOSED (scope decision)
 
-SmolLM/Qwen are inference-only (pretrained weights from safetensors). Core AutoDiff supports
-training `LlamaForCausalLM<TModel,TWeight>` but it is not exercised in the sample. Generic Silk
-training for causal LMs does not exist yet (only BERT-shaped trainers). Treat as design-first:
-a design note scoping data format, loss, optimizer, memory budget, precision. Not a release
-blocker.
+SmolLM/Qwen are inference-only in NivaraChat (issue #1273 closed as out of scope).
+Training/fine-tuning for causal LMs is homed in NivaraInference (#1283, #1284) with
+the design note docs/plan/LORA.md. NivaraChat keeps --tinyshakespeare as the in-sample
+training demo; core AutoDiff supports training LlamaForCausalLM generically.
 
 ### Gap S6 — TinyShakespeare transformer training on Silk — Low (#1342) — IMPLEMENTED
 
