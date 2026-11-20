@@ -215,8 +215,8 @@ Key flags: `--model smollm|qwen`, `--rank`, `--alpha`, `--targets q,v[,k,o,ffn]`
 
 LoRA on Silk is *not* a v1 deliverable: there is no Silk trainer for causal LMs yet, and a
 Silk LoRA path would reuse the same device trainer with frozen base weights plus adapter
-buffers. This section consolidates the scoping that previously lived in
-`docs/plan/GENERIC-SILK-TRAINER.md` (now folded in here) so there is one source of truth.
+buffers. This section consolidates the Silk/causal-LM scoping that was previously a separate note
+so there is one source of truth.
 
 **What exists today (Silk).** Trainers: `SilkDistilBertTrainer` (+ BF16 true, FP16),
 `SilkLayaHeadTrainer` (+ BF16 narrow), `SilkModernBertHeadTrainer`, `SilkTinyShakespeareTrainer`.
