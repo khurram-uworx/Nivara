@@ -119,8 +119,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(tensors);
-        if (maxBatch <= 0) throw new ArgumentOutOfRangeException(nameof(maxBatch));
-        if (maxSeqLen <= 0) throw new ArgumentOutOfRangeException(nameof(maxSeqLen));
+        if (maxBatch <= 0) throw new ArgumentOutOfRangeException(nameof(maxBatch), maxBatch, "maxBatch must be positive.");
+        if (maxSeqLen <= 0) throw new ArgumentOutOfRangeException(nameof(maxSeqLen), maxSeqLen, "maxSeqLen must be positive.");
 
         this.runtime = runtime;
         this.config = config;
@@ -352,7 +352,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
     public float[] Forward(int[] inputTokens, int seqLen)
     {
         ThrowIfDisposed();
-        if (seqLen <= 0 || seqLen > maxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen));
+        if (seqLen <= 0 || seqLen > maxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen), seqLen, $"Expected 1..{maxSeqLen}.");
+        if ((long)seqLen > (long)maxBatch * maxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen), seqLen, $"seqLen ({seqLen}) exceeds maxBatch*maxSeqLen ({(long)maxBatch * maxSeqLen}).");
         if (inputTokens.Length < seqLen) throw new ArgumentException("inputTokens too short.", nameof(inputTokens));
 
         currentSeqLen = seqLen;
@@ -431,7 +432,8 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
     public void Backward(int[] targetTokens, int seqLen, float scale)
     {
         ThrowIfDisposed();
-        if (seqLen <= 0 || seqLen > maxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen));
+        if (seqLen <= 0 || seqLen > maxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen), seqLen, $"Expected 1..{maxSeqLen}.");
+        if ((long)seqLen > (long)maxBatch * maxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen), seqLen, $"seqLen ({seqLen}) exceeds maxBatch*maxSeqLen ({(long)maxBatch * maxSeqLen}).");
         if (targetTokens.Length < seqLen) throw new ArgumentException("targetTokens too short.", nameof(targetTokens));
 
         // upload targets
@@ -644,6 +646,11 @@ public sealed class SilkTinyShakespeareTrainer : IDisposable
         int seed)
     {
         ThrowIfDisposed();
+        if (batchSize <= 0) throw new ArgumentOutOfRangeException(nameof(batchSize), batchSize, "batchSize must be positive.");
+        if (blockSize <= 0) throw new ArgumentOutOfRangeException(nameof(blockSize), blockSize, "blockSize must be positive.");
+        if ((long)batchSize * blockSize > (long)maxBatch * maxSeqLen)
+            throw new ArgumentOutOfRangeException(nameof(batchSize), batchSize,
+                $"batchSize*blockSize ({(long)batchSize * blockSize}) exceeds maxBatch*maxSeqLen ({(long)maxBatch * maxSeqLen}).");
         if (allTokens.Length < blockSize + 1) throw new ArgumentException("not enough tokens", nameof(allTokens));
         var rng = new Random(seed);
         int nTokens = allTokens.Length;
