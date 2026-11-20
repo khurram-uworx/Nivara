@@ -167,4 +167,101 @@ public class SilkTinyShakespeareTrainerTests
         tensor.Data.CopyTo(values, 0f);
         return values;
     }
+
+    [Test]
+    public void SaveLoadRoundTrip_LogitsAndLossMatchCpu()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available."); }
+
+        using var modelCpu = new BatchedTransformer<float>(Vocab, NEmbd, NLayer, NHead, Block);
+        var initial = modelCpu.ToSilkWeights();
+
+        int[] input = [1, 2, 3, 4, 5, 6, 7, 0];
+        int[] target = [2, 3, 4, 5, 6, 7, 0, 1];
+
+        var config = new TinyShakespeareConfig
+        {
+            HiddenSize = NEmbd,
+            NumHiddenLayers = NLayer,
+            NumAttentionHeads = NHead,
+            VocabSize = Vocab,
+            MaxSeqLen = Block,
+        };
+
+        using var runtime = new SilkRuntime();
+        using var trainer = new SilkTinyShakespeareTrainer(runtime, config, initial,
+            maxBatch: 4, maxSeqLen: Block);
+
+        // loss parity (before the step, on identical initial weights)
+        float cpuLoss;
+        using (var g = GradientUtils.Grad())
+        {
+            var logits = modelCpu.Forward(BuildInput(input));
+            var lossFn = new CrossEntropyLoss<float>();
+            var loss = lossFn.Forward(logits, (int[])target.Clone());
+            cpuLoss = loss[0];
+        }
+        var silkLogits0 = trainer.Forward(input, input.Length);
+        float silkLoss = CrossEntropy(silkLogits0, target, input.Length, Vocab);
+        Assert.That(MathF.Abs(cpuLoss - silkLoss), Is.LessThanOrEqualTo(1e-3f),
+            $"loss diverged: cpu={cpuLoss} silk={silkLoss}");
+
+        // one explicit step on device
+        trainer.ZeroGradients();
+        trainer.Forward(input, input.Length);
+        trainer.Backward(target, target.Length, 1f / input.Length);
+        trainer.AdamUpdateAll(1e-3f, 0f, 0.9f, 0.95f);
+
+        // save / load round trip
+        var silkWeights = trainer.ExportCheckpoint();
+        using var modelImported = new BatchedTransformer<float>(Vocab, NEmbd, NLayer, NHead, Block);
+        modelImported.LoadFromSilkWeights(silkWeights);
+
+        var silkLogitsAfter = trainer.Forward(input, input.Length);
+
+        float[] cpuLogitsAfter;
+        {
+            var logits = modelImported.Forward(BuildInput(input));
+            cpuLogitsAfter = TensorToFloats(logits);
+        }
+
+        Assert.That(cpuLogitsAfter.Length, Is.EqualTo(silkLogitsAfter.Length));
+        float maxAbs = 0f;
+        for (int i = 0; i < cpuLogitsAfter.Length; i++)
+            maxAbs = MathF.Max(maxAbs, MathF.Abs(cpuLogitsAfter[i] - silkLogitsAfter[i]));
+        Assert.That(maxAbs, Is.LessThanOrEqualTo(1e-3f),
+            $"logits diverged: maxAbs={maxAbs}");
+
+        for (int t = 0; t < input.Length; t++)
+        {
+            int cpuArgmax = ArgMax(cpuLogitsAfter, t * Vocab, Vocab);
+            int silkArgmax = ArgMax(silkLogitsAfter, t * Vocab, Vocab);
+            Assert.That(silkArgmax, Is.EqualTo(cpuArgmax),
+                $"argmax mismatch at position {t}");
+        }
+    }
+
+    static int ArgMax(float[] values, int offset, int count)
+    {
+        int best = 0;
+        for (int i = 1; i < count; i++)
+            if (values[offset + i] > values[offset + best]) best = i;
+        return best;
+    }
+
+    static float CrossEntropy(float[] logits, int[] targets, int seqLen, int vocab)
+    {
+        float sum = 0f;
+        for (int t = 0; t < seqLen; t++)
+        {
+            float max = float.NegativeInfinity;
+            for (int v = 0; v < vocab; v++) max = MathF.Max(max, logits[t * vocab + v]);
+            float s = 0f;
+            for (int v = 0; v < vocab; v++) s += MathF.Exp(logits[t * vocab + v] - max);
+            float logp = logits[t * vocab + targets[t]] - max - MathF.Log(s);
+            sum += -logp;
+        }
+        return sum / seqLen;
+    }
 }
