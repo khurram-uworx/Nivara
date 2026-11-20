@@ -76,6 +76,8 @@ public static class TransformerMode
                 case "--n-head": options.NHead = int.Parse(args[++i]); break;
                 case "--epochs": options.Epochs = int.Parse(args[++i]); break;
                 case "--batch-size": options.BatchSize = int.Parse(args[++i]); break;
+                case "--max-batch": options.MaxBatch = int.Parse(args[++i]); break;
+                case "--max-seq": options.MaxSeq = int.Parse(args[++i]); break;
                 case "--lr": options.LearningRate = double.Parse(args[++i]); break;
                 case "--beta1": options.Beta1 = double.Parse(args[++i]); break;
                 case "--beta2": options.Beta2 = double.Parse(args[++i]); break;
@@ -293,7 +295,9 @@ public static class TransformerMode
 
         using var runtime = new SilkRuntime();
         var weights = model.ToSilkWeights();
-        using var trainer = new SilkTinyShakespeareTrainer(runtime, config, weights, maxBatch: options.BatchSize, maxSeqLen: options.BlockSize);
+        int maxBatch = options.MaxBatch > 0 ? options.MaxBatch : options.BatchSize;
+        int maxSeq = options.MaxSeq > 0 ? options.MaxSeq : options.BlockSize;
+        using var trainer = new SilkTinyShakespeareTrainer(runtime, config, weights, maxBatch: maxBatch, maxSeqLen: maxSeq);
         Console.WriteLine($"  Device: {trainer.DeviceName}");
 
         int nBatches = Math.Max(1, (nTokens - 1) / (options.BatchSize * options.BlockSize));
@@ -568,6 +572,8 @@ Options:
   --n-head <int>          Number of attention heads (default: 4)
   --epochs <int>          Training epochs (default: 20)
   --batch-size <int>      Batch size (default: 32)
+  --max-batch <int>       Cap for device activation buffers: max batch (default: --batch-size)
+  --max-seq <int>         Cap for device activation buffers: max seq len (default: --block-size)
   --lr <float>            Learning rate (default: 3e-3)
   --beta1 <float>         Adam beta1 (default: 0.9)
   --beta2 <float>         Adam beta2 (default: 0.95)
@@ -599,6 +605,8 @@ Options:
         public int NHead = 4;
         public int Epochs = 20;
         public int BatchSize = 32;
+        public int MaxBatch = 0;
+        public int MaxSeq = 0;
         public double LearningRate = 3e-3;
         public double Beta1 = 0.9;
         public double Beta2 = 0.95;
