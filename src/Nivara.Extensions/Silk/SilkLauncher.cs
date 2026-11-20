@@ -215,6 +215,25 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.AttentionGroupSize]);
     }
 
+    public static void CausalAttentionBackwardPrep(
+        SilkRuntime runtime, nint qkv, nint dAttn, nint probs, nint delta,
+        int batch, int seqLen, int numHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.CausalAttentionBackwardPrep, 0, qkv);
+        runtime.SetBuffer(SilkKernels.CausalAttentionBackwardPrep, 1, dAttn);
+        runtime.SetBuffer(SilkKernels.CausalAttentionBackwardPrep, 2, probs);
+        runtime.SetBuffer(SilkKernels.CausalAttentionBackwardPrep, 3, delta);
+        runtime.SetUInt32(SilkKernels.CausalAttentionBackwardPrep, 4, (uint)batch);
+        runtime.SetUInt32(SilkKernels.CausalAttentionBackwardPrep, 5, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.CausalAttentionBackwardPrep, 6, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.CausalAttentionBackwardPrep, 7, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.CausalAttentionBackwardPrep, 8, scale);
+        runtime.Run(
+            SilkKernels.CausalAttentionBackwardPrep,
+            [(nuint)SilkKernels.AttentionGlobal(batch * numHeads * seqLen)],
+            [(nuint)SilkKernels.AttentionGroupSize]);
+    }
+
     public static void AttentionBackwardDq(
         SilkRuntime runtime, nint qkv, nint probs, nint delta, nint dAttn, nint dQkv,
         int batch, int seqLen, int numHeads, int headDim, float scale)
