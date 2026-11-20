@@ -135,7 +135,10 @@ public static class TransformerMode
             Console.WriteLine($"model: {options.NLayer}L x {options.NEmbd}D, {options.NHead} heads, block={options.BlockSize}");
             Console.WriteLine($"params: {totalParams}");
 
-            Train(model, tokenizer, docs!, options);
+            if (options.UseSilk)
+                TrainSilk(model, tokenizer, docs!, options);
+            else
+                Train(model, tokenizer, docs!, options);
         }
 
         if (!string.IsNullOrWhiteSpace(options.SavePath))
@@ -263,6 +266,59 @@ public static class TransformerMode
         }
 
         sw.Stop();
+        Console.WriteLine($"\ntime: {sw.Elapsed.TotalSeconds:F2}s");
+    }
+
+    static void TrainSilk(BatchedTransformer<float> model, TextTokenizer tokenizer, List<string> docs, TransformerOptions options)
+    {
+        Console.WriteLine("tokenizing...");
+        var allTokens = new List<int>();
+        foreach (var doc in docs)
+        {
+            var tokens = tokenizer.Encode(doc, addBosEos: false);
+            allTokens.AddRange(tokens);
+            allTokens.Add(tokenizer.EosToken);
+        }
+        int nTokens = allTokens.Count;
+        Console.WriteLine($"tokens: {nTokens}");
+
+        var config = new TinyShakespeareConfig
+        {
+            HiddenSize = options.NEmbd,
+            NumHiddenLayers = options.NLayer,
+            NumAttentionHeads = options.NHead,
+            VocabSize = tokenizer.VocabSize,
+            MaxSeqLen = options.BlockSize,
+        };
+
+        using var runtime = new SilkRuntime();
+        var weights = model.ToSilkWeights();
+        using var trainer = new SilkTinyShakespeareTrainer(runtime, config, weights, maxBatch: options.BatchSize, maxSeqLen: options.BlockSize);
+        Console.WriteLine($"  Device: {trainer.DeviceName}");
+
+        int nBatches = Math.Max(1, (nTokens - 1) / (options.BatchSize * options.BlockSize));
+        Console.WriteLine($"batches/epoch: {nBatches}");
+
+        var sw = Stopwatch.StartNew();
+        for (int epoch = 1; epoch <= options.Epochs; epoch++)
+        {
+            var epochSw = Stopwatch.StartNew();
+            float avgLoss = trainer.Train(
+                allTokens.ToArray(),
+                1,
+                options.BatchSize,
+                options.BlockSize,
+                (float)options.LearningRate,
+                (float)options.Beta1,
+                (float)options.Beta2,
+                options.RngSeed + epoch);
+            epochSw.Stop();
+            Console.WriteLine($"epoch {epoch}/{options.Epochs} | loss {avgLoss:F4} | {epochSw.Elapsed.TotalSeconds:F1}s");
+        }
+        sw.Stop();
+
+        var exported = trainer.ExportCheckpoint();
+        model.LoadFromSilkWeights(exported);
         Console.WriteLine($"\ntime: {sw.Elapsed.TotalSeconds:F2}s");
     }
 

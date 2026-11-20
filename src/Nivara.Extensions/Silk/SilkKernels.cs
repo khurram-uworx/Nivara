@@ -202,6 +202,7 @@ internal static class SilkKernels
     // Transformer-training backward kernels (#956): the multi-head attention gradient, split into
     // three deterministic launches so each output element has one writer and an ascending loop.
     public const string AttentionBackwardPrep = "attention_backward_prep";
+    public const string CausalAttentionBackwardPrep = "causal_attention_backward_prep";
     public const string AttentionBackwardDq = "attention_backward_dq";
     public const string AttentionBackwardDkv = "attention_backward_dkv";
 
@@ -222,7 +223,7 @@ internal static class SilkKernels
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
-        AttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
+        AttentionBackwardPrep, CausalAttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
@@ -2107,6 +2108,94 @@ internal static class SilkKernels
                     acc += p * dotv;
                 }
             }
+            delta[idx] = acc;
+        }
+
+        __kernel void causal_attention_backward_prep(
+            __global const float* qkv,
+            __global const float* dAttn,
+            __global float* probs,
+            __global float* delta,
+            const uint batch,
+            const uint seqLen,
+            const uint numHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = batch * numHeads * seqLen;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint b = idx / (numHeads * seqLen);
+            uint rem = idx - b * (numHeads * seqLen);
+            uint h = rem / seqLen;
+            uint qPos = rem - h * seqLen;
+
+            uint D = numHeads * headDim;
+            uint rows = batch * seqLen;
+            uint kOff = rows * D;
+            uint vOff = 2u * rows * D;
+            uint dOffset = h * headDim;
+            uint qRow = b * seqLen + qPos;
+            uint probsBase = idx * seqLen;
+            uint qBase = qRow * D + dOffset;
+            uint dAttnBase = qRow * D + dOffset;
+
+            float qrow[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                qrow[d] = qkv[qBase + d];
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
+            int qp = (int)qPos;
+            int sl = (int)seqLen;
+
+            float mx = -INFINITY;
+            for (int j = 0; j <= qp && j < sl; ++j)
+            {
+                uint kBase = kOff + (b * seqLen + (uint)j) * D + dOffset;
+                prefetch(qkv + kBase, (size_t)headDim);
+                float score = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    score += qrow[d] * qkv[kBase + d];
+                score *= scale;
+                probs[probsBase + (uint)j] = score;
+                mx = fmax(mx, score);
+            }
+            for (int j = qp + 1; j < sl; ++j)
+                probs[probsBase + (uint)j] = -INFINITY;
+
+            if (mx == -INFINITY)
+            {
+                for (uint j = 0; j < seqLen; ++j) probs[probsBase + j] = 0.0f;
+                delta[idx] = 0.0f;
+                return;
+            }
+
+            float sum = 0.0f;
+            for (int j = 0; j <= qp && j < sl; ++j)
+                sum += exp(probs[probsBase + (uint)j] - mx);
+
+            float acc = 0.0f;
+            for (int j = 0; j <= qp && j < sl; ++j)
+            {
+                float p = exp(probs[probsBase + (uint)j] - mx) / sum;
+                probs[probsBase + (uint)j] = p;
+                if (p != 0.0f)
+                {
+                    uint vBase = vOff + (b * seqLen + (uint)j) * D + dOffset;
+                    prefetch(qkv + vBase, (size_t)headDim);
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * qkv[vBase + d];
+                    acc += p * dotv;
+                }
+            }
+            for (int j = qp + 1; j < sl; ++j)
+                probs[probsBase + (uint)j] = 0.0f;
+
             delta[idx] = acc;
         }
 

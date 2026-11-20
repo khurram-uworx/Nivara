@@ -1,6 +1,6 @@
 # NivaraChat: TinyShakespeare transformer training on Silk (AutoDiff → device) — design note
 
-**Status:** design note, not yet implemented. Written 2026-11-19.
+**Status:** implemented (PR #1359). Written 2026-11-19; updated 2026-11-20.
 **Scope:** `samples/NivaraChat` (training path) and a new `SilkTinyShakespeareTrainer` in
 `src/Nivara.Extensions/Silk`.
 **Release constraint:** Silk training is **f32 only** this release. No bf16/fp16 training on
@@ -216,3 +216,12 @@ Documented as divergent / not supported on Silk:
 - `docs/SILK.md`, `docs/adr/001-autodiff-nonnullable-domain.md`,
   `docs/adr/002-autodiff-span-boundary.md`.
 - `docs/plan/LAYA-HEAD-TRAINING.md` (format template).
+
+## 16. Follow-up issues (post-PR #1359)
+
+Remaining work tracked as GitHub issues:
+
+- #1360 — TinyShakespeare Silk: add save/load round-trip + loss parity tests.
+- #1361 — TinyShakespeare Silk: update CLI help and docs/SILK.md.
+- #1362 — TinyShakespeare Silk: enforce maxBatch/maxSeqLen OOM guard.
+- #1363 — TinyShakespeare Silk: support trainableLayerCount (partial/frozen training).
