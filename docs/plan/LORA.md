@@ -6,14 +6,34 @@ RAG pipeline in [RAG.md](RAG.md), using the **same markdown corpus** as the know
 source.
 
 **Home.** Fine-tuning (data build, adapter training, validation) is homed in
-`samples/NivaraInference`; `samples/NivaraChat` keeps the RAG pipeline and a thin
+`samples/NivaraFineTuning`; `samples/NivaraChat` keeps the RAG pipeline and a thin
 consumption path that loads a tuned adapter for the FT arms. Shared code (`LoRALinear`,
 data format, templates) matures in `src/Nivara`/`Nivara.Samples` and is promoted once
 stable.
 
+Pre-requisites for this home (chat-template promotion and causal-LM loading-helper
+extraction, plus the base-weight freeze mechanism) are tracked in §0 below and must
+land before the LoRA implementation begins.
+
 Consolidates the design asks in `docs/plan/NIVARACHAT-SILK-GAPS.md` (Gap S5, #1273 /
 #1283 / #1284). Full-parameter LLM fine-tuning is intentionally not scoped (see §12);
 the supported SFT path is LoRA. Not a release blocker.
+
+## 0. Pre-requisites (must land before the LoRA implementation)
+
+The LoRA work is homed in `samples/NivaraFineTuning` (see **Home** above). That
+sample cannot reach `NivaraChat`'s `internal` chat templates, and its causal-LM
+loading helpers currently live in `NivaraInference`. The following issues must be
+resolved first; each is tracked as a GitHub issue:
+
+| # | Pre-req | Issue |
+|---|---|---|
+| 1 | Promote `SmollmChatTemplate` and `QwenChatTemplate` from `NivaraChat` into `Nivara.Samples` so both `NivaraChat` and `NivaraFineTuning` share one copy (byte-exact rendering preserved). | #1372 |
+| 2 | Extract SmolLM/Qwen config + tokenizer loading helpers from `NivaraInference` into `Nivara.Samples` so `NivaraFineTuning` can load a trainable base model without duplication. | #1373 |
+| 3 | Freeze mechanism for base weights: a loader option (`requiresGrad: false`) or `Module<T>.Freeze()`, so only LoRA adapter params accumulate gradients. | #1374 |
+
+Until #1372 and #1373 land, the chat-template and loading-helper references in
+§4/§8/§9 below assume the promoted/shared locations.
 
 ## 1. Goal
 
@@ -92,10 +112,9 @@ test questions come from documents the adapter never saw. A second report line c
 "seen-document" questions, which is the case FT is *supposed* to win.
 
 **Format.** Chat template of the target model (`SmollmChatTemplate`, `QwenChatTemplate`,
-both `internal static` renderers in the sample; the fine-tuning code lives in the same
-assembly so this is fine), one example = system + question + answer. Loss is next-token
-cross-entropy over the **answer tokens only** (prompt masked). Max sequence length 256-512,
-configurable.
+promoted to `Nivara.Samples` per pre-req #1372 so `NivaraFineTuning` can reach them),
+one example = system + question + answer. Loss is next-token cross-entropy over the
+**answer tokens only** (prompt masked). Max sequence length 256-512, configurable.
 
 ## 5. Training setup
 
@@ -155,36 +174,39 @@ If the measured results contradict these, the report says so.
 
 ## 8. CLI surface (proposed)
 
-Fine-tuning and validation live in NivaraInference; NivaraChat only consumes a tuned
-adapter for the FT arms of the comparison.
+Fine-tuning and validation live in NivaraFineTuning; NivaraChat only consumes a tuned
+adapter for the FT arms of the comparison. (NivaraFineTuning uses `--mode` dispatch,
+so the fine-tune/eval invocations below use `--mode`; model selection is via
+`--model`.)
 
 ```
-# NivaraInference: fine-tune a LoRA adapter (CPU) on a data file
-dotnet run --project samples/NivaraInference -- smollm ft-lora --data ft-data.jsonl --out adapters/smollm-lora --rank 8 --epochs 3
+# NivaraFineTuning: fine-tune a LoRA adapter (CPU) on a data file
+dotnet run --project samples/NivaraFineTuning -- --mode ft-lora --model smollm --data ft-data.jsonl --out adapters/smollm-lora --rank 8 --epochs 3
 
-# NivaraInference: validate a tuned adapter (loss + held-out accuracy)
-dotnet run --project samples/NivaraInference -- smollm ft-eval --adapter adapters/smollm-lora --data ft-data.jsonl
+# NivaraFineTuning: validate a tuned adapter (loss + held-out accuracy)
+dotnet run --project samples/NivaraFineTuning -- --mode ft-eval --model smollm --adapter adapters/smollm-lora --data ft-data.jsonl
 
 # NivaraChat: build grounded Q&A from docs (needs an LLM, e.g. --ollama)
 dotnet run --project samples/NivaraChat -- --ft-data --regenerate --ollama --force
 
 # NivaraChat: compare Base / RAG / FT / FT+RAG, loading the adapter produced above
-dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --adapter ../NivaraInference/adapters/smollm-lora --report ft-vs-rag.md
+dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --adapter ../NivaraFineTuning/adapters/smollm-lora --report ft-vs-rag.md
 ```
 
-Key flags (NivaraInference): `--data`, `--out`, `--adapter`, `--rank`, `--alpha`,
-`--targets q,v[,k,o,ffn]`, `--lr`, `--epochs`, `--batch-size`, `--max-len`, `--seed`,
-`--merge`, `--max-memory`, `--force`.
+Key flags (NivaraFineTuning): `--data`, `--out`, `--adapter`, `--model`, `--rank`,
+`--alpha`, `--targets q,v[,k,o,ffn]`, `--lr`, `--epochs`, `--batch-size`, `--max-len`,
+`--seed`, `--merge`, `--max-memory`, `--force`.
 Key flags (NivaraChat): `--model smollm|qwen`, `--adapter <path>`, `--docs-dir`,
 `--report`, `--force`.
 
 ## 9. Proposed file layout
 
 - `src/Nivara/AutoDiff/Nn/LoRALinear.cs` — module, merge, adapter save/load (core, reusable)
-- `samples/NivaraInference/FineTuning/` — data consumer, SFT trainer, `FtLoraMode`,
-  `FtEvalMode`, validation metrics (home of fine-tuning)
+- `samples/NivaraFineTuning/` — data consumer, SFT trainer, `FtLoraMode`,
+  `FtEvalMode`, validation metrics (home of fine-tuning); reuses shared helpers from
+  `Nivara.Samples` (pre-reqs #1372, #1373)
 - `samples/NivaraChat/FineTuning/` — `FtVsRagMode` only, consuming an adapter produced by
-  NivaraInference
+  NivaraFineTuning
 - `samples/NivaraChat/Helpers/` — data builder (`--ft-data`) reused by both samples
 - `tests/Nivara.Tests/AutoDiff/LoRALinearTests.cs` — step-0 parity, gradient check vs
   finite differences, merge equivalence, frozen-base has no grad
