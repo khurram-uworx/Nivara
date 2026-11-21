@@ -150,7 +150,7 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
         // Inference-default: outside a Grad scope the fused single-token kernel runs each block
         // with zero steady-state allocations (reuses the per-layer scratch + the ping-pong).
-        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused)
+        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused && !HasAnyAdapter())
             return ForwardCachedFusedCore(tokenId, positionOffset, cache);
 
         var h = Embed.Forward(tokenId); // [1, hidden]
@@ -194,7 +194,7 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
         cache.Ensure(inputIds.Length);
 
-        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused)
+        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused && !HasAnyAdapter())
             return ForwardPrefillFusedCore(inputIds, cache);
 
         var h = Embed.Forward(inputIds); // [L, hidden]
@@ -282,6 +282,13 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
                 "compute and weight dtypes differ and the base is not frozen: the narrow weights have no " +
                 "same-type backward node. Freeze the base for adapter (for example LoRA) training with " +
                 "compute-type adapter gradients.");
+    }
+
+    bool HasAnyAdapter()
+    {
+        foreach (var layer in layers)
+            if (layer.HasAdapter) return true;
+        return false;
     }
 
     static void CopyEmbeddingRow(ReadOnlySpan<TWeight> weights, int tokenId, int hidden, Span<TModel> destination)

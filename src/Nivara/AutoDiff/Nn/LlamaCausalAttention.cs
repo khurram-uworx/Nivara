@@ -35,6 +35,8 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
     public Module<TModel>? VAdapter { get; set; }
     /// <summary>Gets or sets the LoRA adapter module for the output projection; null routes to the plain OProj.</summary>
     public Module<TModel>? OAdapter { get; set; }
+    /// <summary>Gets whether any attention projection has a LoRA adapter attached.</summary>
+    public bool HasAdapter => QAdapter is not null || KAdapter is not null || VAdapter is not null || OAdapter is not null;
     readonly RotaryEmbedding<TModel> rotary;
 
     readonly TModel attnScale;
