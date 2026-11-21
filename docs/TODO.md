@@ -51,7 +51,7 @@ No source code, tests, or pins should change: `docs/plan/*` is excluded from the
 
 ## GitHub issues log
 
-- [ ] (to be created) — user-facing docs still claim `--silk --precision fp16` is rejected (docs/SILK.md, BFLOAT16.md, HALF-F16.md, ACCELERATION.md, DISTELBERT.md, LAYA.md, QWEN.md); CLI now accepts it for minilm/distilbert/distilbert_sst/modernbert/laya. Track as follow-up.
+- [x] #1391 — user-facing docs still claim `--silk --precision fp16` is rejected (docs/SILK.md, BFLOAT16.md, HALF-F16.md, ACCELERATION.md, DISTELBERT.md, LAYA.md, QWEN.md); CLI now accepts it for minilm/distilbert/distilbert_sst/modernbert/laya. Tracked as follow-up (out of scope for this branch).
 
 ## Grounding (G1)
 
