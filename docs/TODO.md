@@ -56,3 +56,4 @@ wraps a frozen `Linear<TModel, TWeight>` base with adapter matrices `A`/`B` in c
 ## GitHub issues log
 
 - [ ] #1394 — LoRA: mixed-dtype LoRALinear<TModel,TWeight> for frozen Llama base (BF16 storage / F32 adapters) (in scope)
+- [ ] #1407 — Mixed-dtype LoRALinear adapter save/load round trip is uncovered (created while working on #1394)
