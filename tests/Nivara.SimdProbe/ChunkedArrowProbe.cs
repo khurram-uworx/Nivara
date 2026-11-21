@@ -59,12 +59,12 @@ internal static class ChunkedArrowProbe
         {
             var a = BuildArray(offset, 4);
             var b = BuildArray(offset + 100, 4);
-            var schema = new Schema(new[] { FieldA, FieldB }, null);
+            var schema = new Apache.Arrow.Schema(new[] { FieldA, FieldB }, null);
             batches.Add(new RecordBatch(schema, new IArrowArray[] { a, b }, 4));
             offset += 4;
         }
 
-        var table = Table.TableFromRecordBatches(new Schema(new[] { FieldA, FieldB }, null), batches);
+        var table = Table.TableFromRecordBatches(new Apache.Arrow.Schema(new[] { FieldA, FieldB }, null), batches);
         int countA = table.Column(0).Data.ArrayCount;
         int countB = table.Column(1).Data.ArrayCount;
 
@@ -85,7 +85,7 @@ internal static class ChunkedArrowProbe
             BuildArray(106, 2),
         });
 
-        var table = new Table(new Schema(new[] { FieldA, FieldB }, null), new[] { columnA, columnB });
+        var table = new Table(new Apache.Arrow.Schema(new[] { FieldA, FieldB }, null), new[] { columnA, columnB });
 
         int countA = table.Column(0).Data.ArrayCount;
         int countB = table.Column(1).Data.ArrayCount;

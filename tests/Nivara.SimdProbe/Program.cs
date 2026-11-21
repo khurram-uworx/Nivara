@@ -31,6 +31,9 @@ internal class Program
         if (args.Length > 0 && args[0] == "metrics")
             return ClassificationCountingProbe.Run();
 
+        if (args.Length > 0 && args[0] == "blas")
+            return BlasProbe.Run();
+
         Console.WriteLine("=== BFloat16 / Half SIMD Probe ===");
         Console.WriteLine($"Runtime: {Environment.Version}  Platform: {RuntimeInformation.OSArchitecture}");
         Console.WriteLine($"Vector128.IsHardwareAccelerated: {Vector128.IsHardwareAccelerated}");
