@@ -171,10 +171,10 @@ static class Program
 
     static int RunTrain(CliArgs cli)
         => cli.Precision == "bf16"
-            ? RunTrainCore<BFloat16>(cli)
+            ? RunTrainCore<float>(cli, loadBf16Weights: true)
             : RunTrainCore<float>(cli);
 
-    static int RunTrainCore<T>(CliArgs cli) where T : struct, System.Numerics.IFloatingPointIeee754<T>
+    static int RunTrainCore<T>(CliArgs cli, bool loadBf16Weights = false) where T : struct, System.Numerics.IFloatingPointIeee754<T>
     {
         var modelPath = cli.ModelDir;
         var dataPath = cli.DataDir;
@@ -192,8 +192,24 @@ static class Program
         Console.WriteLine($"  dim={distilConfig.Dim}, layers={distilConfig.NLayers}, heads={distilConfig.NHeads}");
 
         Console.WriteLine("Loading SafeTensors weights...");
-        var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelPath, "model.safetensors"));
-        Console.WriteLine($"  Loaded {tensors.Count} tensors");
+        Dictionary<string, (T[] Data, int[] Shape)> tensors;
+        if (loadBf16Weights)
+        {
+            var bf16Tensors = SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelPath, "model.safetensors"));
+            tensors = new Dictionary<string, (T[] Data, int[] Shape)>(bf16Tensors.Count);
+            foreach (var kv in bf16Tensors)
+            {
+                var data = new T[kv.Value.Data.Length];
+                for (int i = 0; i < data.Length; i++) data[i] = T.CreateChecked(kv.Value.Data[i]);
+                tensors[kv.Key] = (data, kv.Value.Shape);
+            }
+            Console.WriteLine($"  Loaded {bf16Tensors.Count} tensors (BF16, widened to {typeof(T).Name} internally)");
+        }
+        else
+        {
+            tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelPath, "model.safetensors"));
+            Console.WriteLine($"  Loaded {tensors.Count} tensors");
+        }
 
         Console.WriteLine($"Building model (numClasses=2)...");
         using var model = new DistilBertForSequenceClassification<T>(bertConfig, numClasses: 2);
@@ -335,7 +351,7 @@ static class Program
             using var trainer = cli.Precision == "bf16"
                 ? SilkDistilBertTrainer.CreateTrueBf16(
                     runtime, bertConfig,
-                    SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelPath, "model.safetensors")),
+                    ToBFloat16Tensors(model.ToSilkTensors()),
                     BertGpuNaming.DistilBert, maxBatch, maxSeqLen,
                     trainableLayerCount: cli.TrainableLayers)
                 : new SilkDistilBertTrainer(
@@ -771,6 +787,19 @@ static class Program
             if (Directory.Exists(candidate)) return candidate;
         }
         return Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", name);
+    }
+
+    static Dictionary<string, (BFloat16[] Data, int[] Shape)> ToBFloat16Tensors(
+        Dictionary<string, (float[] Data, int[] Shape)> src)
+    {
+        var result = new Dictionary<string, (BFloat16[] Data, int[] Shape)>(src.Count);
+        foreach (var kv in src)
+        {
+            var data = new BFloat16[kv.Value.Data.Length];
+            for (int i = 0; i < data.Length; i++) data[i] = BFloat16.CreateChecked(kv.Value.Data[i]);
+            result[kv.Key] = (data, kv.Value.Shape);
+        }
+        return result;
     }
 
     static void EnsureExists(string path, string label)
