@@ -107,14 +107,14 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 
 | Order | Issue | Depends on | Parallel? | Notes |
 |---:|---|---|---|---|
-| 1 | **Plan/grounding: reshape LORA.md + docs/TODO tracking** | G1 | no | Update `docs/plan/LORA.md` to reflect headline pivot; keep reusable technical sections; record decisions. |
-| 2 | **Reconcile untracked ft-data artifacts** | 1 | no | Inspect `FtDataBuilder.cs`/`FtDataModels.cs`; either integrate into new plan or remove/move with explanation. Do not silently drop. |
-| 3 | **Behavioral SFT dataset format + deterministic generator** | D1,D4 | after 1 | Worklog scenario: synthetic JSONL/TSV, system+user+assistant, prompt-masked labels, deterministic seed, train/val/test split, provenance header. |
-| 4 | **Causal LM LoRA SFT trainer (CPU reference)** | 3, D1 | after 3 | Generic Llama-family LoRA SFT (AutoDiff/AdamW, prompt masking, checkpoint best-by-val, memory guard, deterministic). Headline run: Qwen2.5-0.5B; generic verification: SmolLM. |
-| 5 | **Silk/iGPU headline path (D2a, no compromise)** | 3, D1 | can run CPU-first or Silk-first; parity required before G2/release | Real Silk causal-LM LoRA training: `rms_norm_backward` + backward chain + Llama-family/Qwen Silk trainer path + CPU/Silk parity tests. Headline Qwen2.5-0.5B, verify genericity on SmolLM where feasible. No false iGPU claim. |
-| 6 | **NivaraFineTuning CLI + report** | 4,5 | after 5 | `--mode ft-lora` / `--mode ft-eval` (or equivalent) for generic Llama-family SLMs; headline Qwen2.5-0.5B. Prints param count, memory budget, loss, accuracy, before/after; `--silk` runs real iGPU training path with CPU/Silk parity reporting. |
-| 7 | **NivaraChat adapter consumption touchpoint (optional thin)** | 6 | parallel with 8 | Load adapted model/adapter for interactive demo; do not disturb RAG modes. |
-| 8 | **Tests + docs + showcase README** | 3-7 | after impl | Unit tests (parity, frozen base, grad check, overfit sanity, determinism, round-trip, prompt masking). Update docs/LORA.md, NivaraFineTuning README, sample README. DocsCoveragePins/ADR index only if docs count/citations change. |
+| 1 | **#1414 Plan/grounding: reshape LORA.md + docs/TODO tracking** | G1 | no | Update `docs/plan/LORA.md` to reflect headline pivot; keep reusable technical sections; record decisions. |
+| 2 | **#1415 Reconcile untracked ft-data artifacts** | 1 | no | Inspect `FtDataBuilder.cs`/`FtDataModels.cs`; either integrate into new plan or remove/move with explanation. Do not silently drop. |
+| 3 | **#1416 Behavioral SFT dataset format + deterministic generator** | D1,D4 | after 1 | Worklog scenario: synthetic JSONL/TSV, system+user+assistant, prompt-masked labels, deterministic seed, train/val/test split, provenance header. Seed data copied to `samples/data/worklog/` (self-contained). |
+| 4 | **#1417 Causal LM LoRA SFT trainer (CPU reference)** | 3, D1 | after 3 | Generic Llama-family LoRA SFT (AutoDiff/AdamW, prompt masking, checkpoint best-by-val, memory guard, deterministic). Headline run: Qwen2.5-0.5B; generic verification: SmolLM. |
+| 5 | **#1418 Silk/iGPU headline path (D2a, no compromise)** | 3, D1 | can run CPU-first or Silk-first; parity required before G2/release | Real Silk causal-LM LoRA training: `rms_norm_backward` + backward chain + Llama-family/Qwen Silk trainer path + CPU/Silk parity tests. Headline Qwen2.5-0.5B, verify genericity on SmolLM where feasible. No false iGPU claim. |
+| 6 | **#1420 NivaraFineTuning CLI + report** | 4,5 | after 4 or 5; parity required before G2 | `--mode ft-lora` / `--mode ft-eval` (or equivalent) for generic Llama-family SLMs; headline Qwen2.5-0.5B. Prints param count, memory budget, loss, accuracy, before/after; `--silk` runs real iGPU training path with CPU/Silk parity reporting. |
+| 7 | **#1419 NivaraChat adapter consumption touchpoint (optional thin)** | 6 | parallel with 8 | Load adapted model/adapter for interactive demo; do not disturb RAG modes. |
+| 8 | **#1421 Tests + docs + showcase README** | 3-7 | after impl | Unit tests (parity, frozen base, grad check, overfit sanity, determinism, round-trip, prompt masking). Update docs/LORA.md, NivaraFineTuning README, sample README. DocsCoveragePins/ADR index only if docs count/citations change. |
 | 9 | **G2 review + PR** | all | no | Branch review whole + against TODO; fix gaps; push/create PR only with confirmation. |
 
 ## Proposed file areas (subject to G1/G2)
@@ -148,14 +148,14 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 
 ## GitHub issues log
 
-- [ ] (to be created after G1 clearance) Plan/grounding: reshape LORA.md
-- [ ] (to be created) Reconcile untracked ft-data artifacts
-- [ ] (to be created) Behavioral SFT dataset format + deterministic generator
-- [ ] (to be created) Causal LM LoRA SFT trainer (CPU reference)
-- [ ] (to be created) Silk/iGPU headline path (scope per D2)
-- [ ] (to be created) NivaraFineTuning CLI + report
-- [ ] (to be created) NivaraChat adapter consumption touchpoint (optional)
-- [ ] (to be created) Tests + docs + showcase README
+- [ ] #1414 — Plan/grounding: reshape `docs/plan/LORA.md` for Qwen2.5-0.5B Silk FT headline
+- [ ] #1415 — Reconcile untracked ft-data artifacts
+- [ ] #1416 — Behavioral worklog SFT dataset and deterministic generator
+- [ ] #1417 — Generic Llama-family CPU SFT trainer (Qwen headline, SmolLM verify)
+- [ ] #1418 — Silk iGPU causal-LM LoRA training with CPU/Silk parity (D2a)
+- [ ] #1420 — NivaraFineTuning CLI and report for SLM LoRA showcase
+- [ ] #1421 — Tests, docs, and DocsCoveragePins for SLM iGPU FT showcase
+- [ ] #1419 — Optional NivaraChat adapter consumption demo
 - [ ] (to be created) G2 review + PR tracking
 
 ## G1 grounding checklist (to complete before asking for clearance)
