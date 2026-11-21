@@ -1,5 +1,3 @@
-using Nivara;
-using Nivara.AutoDiff;
 using System.Numerics;
 
 namespace NivaraChat.Transformer;

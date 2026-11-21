@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;

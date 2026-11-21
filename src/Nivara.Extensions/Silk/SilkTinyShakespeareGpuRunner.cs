@@ -1,5 +1,3 @@
-using System.Numerics;
-
 namespace Nivara.Silk;
 
 /// <summary>

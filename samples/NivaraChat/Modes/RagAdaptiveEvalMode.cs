@@ -1,6 +1,6 @@
 using Nivara;
-using Nivara.AutoDiff;
 using Nivara.AI;
+using Nivara.AutoDiff;
 using Nivara.Silk;
 using NivaraChat.Helpers;
 using System.Diagnostics;

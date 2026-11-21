@@ -1,5 +1,4 @@
 using Nivara.AI;
-using Nivara.Samples;
 
 namespace NivaraChat.SmolLM;
 

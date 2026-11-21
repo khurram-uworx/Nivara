@@ -1,5 +1,3 @@
-using Nivara.AI;
-
 namespace Nivara.Silk;
 
 /// <summary>F32 weights for the ModernBERT classification head on the Silk (OpenCL) device.</summary>

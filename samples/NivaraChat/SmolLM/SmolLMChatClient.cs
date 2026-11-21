@@ -4,7 +4,6 @@ using Nivara.AutoDiff;
 using Nivara.Samples;
 using NivaraChat.Shared;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 
 namespace NivaraChat.SmolLM;
 

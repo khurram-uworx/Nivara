@@ -4,7 +4,6 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
-using System.Numerics;
 
 namespace Nivara.AI;
 

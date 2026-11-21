@@ -1,6 +1,5 @@
 using Nivara.AI;
 using Nivara.AutoDiff.Nn;
-using System.Numerics;
 
 namespace NivaraInference;
 

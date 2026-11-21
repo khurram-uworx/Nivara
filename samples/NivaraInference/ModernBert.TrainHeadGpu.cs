@@ -1,6 +1,5 @@
 using Nivara.AI;
 using Nivara.Silk;
-using System.Numerics;
 
 namespace NivaraInference;
 
