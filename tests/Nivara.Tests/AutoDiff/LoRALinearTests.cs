@@ -2,6 +2,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Samples;
 using NUnit.Framework;
 using System.Numerics;
 
@@ -299,5 +300,35 @@ public class LoRALinearTests
         var after = lora.Forward(x);
         for (int i = 0; i < before.Length; i++)
             Assert.That(after[i], Is.EqualTo(before[i]).Within(1e-5f));
+    }
+
+    [Test]
+    public void LoRALinear_Mixed_LlamaFrozenBase_AdapterGradients_AreAdapterOnly()
+    {
+        var config = new LlamaConfig
+        {
+            HiddenSize = 4, NumHiddenLayers = 1, NumAttentionHeads = 2,
+            NumKeyValueHeads = 1, IntermediateSize = 4, VocabSize = 8, AttentionBias = false,
+        };
+        var tensors = NivaraInference.Qwen.SynthesizeTensors<System.Numerics.BFloat16>(config);
+        using var model = LlamaLoader.Load<float, BFloat16>(config, tensors, requiresGrad: false);
+        var attn = model.layers[0].Attention;
+        var qLora = new LoRALinear<float, BFloat16>(attn.QProj, r: 2, alpha: 4f);
+        var vLora = new LoRALinear<float, BFloat16>(attn.VProj, r: 2, alpha: 4f);
+        attn.QAdapter = qLora;
+        attn.VAdapter = vLora;
+
+        var logits = model.Forward(new[] { 0, 1, 2, 3 });
+        var grad = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, logits.Length).ToArray()), requiresGrad: false);
+        grad.Reshape(logits.Shape[0], logits.Shape[1]);
+        logits.Backward(grad);
+
+        Assert.That(qLora.A.Tensor.Grad, Is.Not.Null);
+        Assert.That(qLora.B.Tensor.Grad, Is.Not.Null);
+        Assert.That(vLora.A.Tensor.Grad, Is.Not.Null);
+        Assert.That(vLora.B.Tensor.Grad, Is.Not.Null);
+        Assert.That(attn.QProj.Weight!.Tensor.Grad, Is.Null,
+            "Frozen mixed base weight should have no gradient");
     }
 }
