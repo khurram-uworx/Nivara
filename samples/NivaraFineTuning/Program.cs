@@ -28,6 +28,20 @@ sealed record CliArgs
     public bool Silk { get; init; }
     public string Precision { get; init; } = "f32";
 
+    // LoRA SFT options
+    public string TrainData { get; init; } = "";
+    public string ValData { get; init; } = "";
+    public string TestData { get; init; } = "";
+    public string OutDir { get; init; } = "";
+    public string AdapterPath { get; init; } = "";
+    public string Template { get; init; } = "qwen";
+    public int Rank { get; init; } = 8;
+    public float Alpha { get; init; } = 16f;
+    public string Targets { get; init; } = "q,v";
+    public int Seed { get; init; } = 42;
+    public int LogEvery { get; init; } = 10;
+    public bool Force { get; init; }
+
     public static CliArgs Parse(string[] args)
     {
         var dataDir = Program.FindDefaultPath("data");
@@ -43,6 +57,18 @@ sealed record CliArgs
         int trainableLayers = -1;
         bool silk = false;
         string precision = "f32";
+        string trainData = "";
+        string valData = "";
+        string testData = "";
+        string outDir = "";
+        string adapterPath = "";
+        string template = "qwen";
+        int rank = 8;
+        float alpha = 16f;
+        string targets = "q,v";
+        int seed = 42;
+        int logEvery = 10;
+        bool force = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -85,6 +111,42 @@ sealed record CliArgs
                 case "--precision" when i + 1 < args.Length:
                     precision = args[++i].ToLowerInvariant();
                     break;
+                case "--train-data" when i + 1 < args.Length:
+                    trainData = args[++i];
+                    break;
+                case "--val-data" when i + 1 < args.Length:
+                    valData = args[++i];
+                    break;
+                case "--test-data" when i + 1 < args.Length:
+                    testData = args[++i];
+                    break;
+                case "--out-dir" when i + 1 < args.Length:
+                    outDir = args[++i];
+                    break;
+                case "--adapter" when i + 1 < args.Length:
+                    adapterPath = args[++i];
+                    break;
+                case "--template" when i + 1 < args.Length:
+                    template = args[++i].ToLowerInvariant();
+                    break;
+                case "--rank" when i + 1 < args.Length:
+                    rank = int.Parse(args[++i]);
+                    break;
+                case "--alpha" when i + 1 < args.Length:
+                    alpha = float.Parse(args[++i]);
+                    break;
+                case "--targets" when i + 1 < args.Length:
+                    targets = args[++i].ToLowerInvariant();
+                    break;
+                case "--seed" when i + 1 < args.Length:
+                    seed = int.Parse(args[++i]);
+                    break;
+                case "--log-every" when i + 1 < args.Length:
+                    logEvery = int.Parse(args[++i]);
+                    break;
+                case "--force":
+                    force = true;
+                    break;
                 case "--help":
                 case "-h":
                     PrintHelp();
@@ -92,9 +154,6 @@ sealed record CliArgs
                     break;
             }
         }
-
-        // --silk train now runs the full forward/backward/optimizer on the OpenCL device via
-        // SilkDistilBertTrainer (#956); falls back to exit 1 when OpenCL is unavailable.
 
         if (precision is not ("f32" or "bf16"))
         {
@@ -115,41 +174,61 @@ sealed record CliArgs
             ModelDir = modelDir,
             SavePath = savePath,
             Silk = silk,
-            Precision = precision
+            Precision = precision,
+            TrainData = trainData,
+            ValData = valData,
+            TestData = testData,
+            OutDir = outDir,
+            AdapterPath = adapterPath,
+            Template = template,
+            Rank = rank,
+            Alpha = alpha,
+            Targets = targets,
+            Seed = seed,
+            LogEvery = logEvery,
+            Force = force
         };
     }
 
     static void PrintHelp()
     {
         Console.WriteLine("""
-NivaraFineTuning - DistilBERT fine-tuning on GLUE SST-2
+NivaraFineTuning - DistilBERT fine-tuning and Llama-family LoRA SFT showcase
 
 Usage:
-  NivaraFineTuning --mode <train|eval|predict> [options]
+  NivaraFineTuning --mode <train|eval|predict|ft-lora|ft-eval> [options]
 
-Options:
-  --mode          train|eval|predict (default: train)
+DistilBERT options:
+  --mode          train|eval|predict|ft-lora|ft-eval (default: train)
   --epochs        Number of training epochs (default: 3)
-  --lr            Learning rate (default: 2e-5)
+  --lr            Learning rate
   --batch-size    Batch size for training/eval (default: 4)
   --max-len       Maximum sequence length (default: 128)
-  --max-examples  Limit training to first N examples (default: 0 = all)
-  --trainable-layers  Number of top transformer layers to train (-1/all default; 0 head only; N top N)
+  --max-examples  Limit examples (default: 0 = all)
+  --trainable-layers  Top transformer layers to train (-1 all)
   --data-dir      Path to SST-2 data directory
-  --model-dir     Path to DistilBERT model directory
+  --model-dir     Path to model directory
   --save-path     Path to save/load fine-tuned model
-  --help          Show this help message
-  --silk          Run train/eval/predict on the OpenCL GPU via Silk; fails with exit 1 when OpenCL is unavailable
-  --precision     f32 (default) or bf16. CPU bf16 trains in BFloat16 via AutoDiff; Silk bf16 uses CreateTrueBf16 and exports an F32 checkpoint
+  --silk          Use OpenCL/Silk path when supported
+  --precision     f32 (default) or bf16
 
-GPU:
-  --silk runs forward (and, for train, backward and AdamW) on the OpenCL device. F32-only;
-  exits 1 when OpenCL is unavailable (no CPU fallback).
+LoRA SFT options:
+  --train-data    JSONL training data path
+  --val-data      JSONL validation data path
+  --test-data     JSONL test data path
+  --out-dir       Output directory for adapters/reports
+  --adapter       Adapter file path
+  --template      qwen|smollm (default: qwen)
+  --rank          LoRA rank (default: 8)
+  --alpha         LoRA alpha (default: 16)
+  --targets       q,v,k,o,ffn comma-separated (default: q,v)
+  --seed          Random seed (default: 42)
+  --log-every     Training log interval (default: 10)
+  --force         Overwrite outputs
 
 Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
-  NivaraFineTuning --mode eval --save-path ./my_model.json
-  NivaraFineTuning --mode predict
+  NivaraFineTuning --mode ft-lora --model-dir samples/data/qwen2.5-0.5b-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template qwen --epochs 1 --max-examples 32 --max-len 256 --out-dir out/worklog-lora
 """);
     }
 }
@@ -165,6 +244,8 @@ static class Program
             "train" => cli.Silk ? RunTrainSilk(cli) : RunTrain(cli),
             "eval" => RunEval(cli),
             "predict" => RunPredict(cli),
+            "ft-lora" => RunFtLora(cli),
+            "ft-eval" => RunFtEval(cli),
             _ => throw new ArgumentException($"Unknown mode '{cli.Mode}'. Use --help for usage.")
         };
     }
@@ -774,6 +855,124 @@ static class Program
             if (val > bestVal) { bestVal = val; best = c; }
         }
         return best;
+    }
+
+    static int RunFtLora(CliArgs cli)
+    {
+        var modelDir = ResolveModelDir(cli.ModelDir);
+        var trainData = ResolveDataPath(cli.TrainData, cli.DataDir, "train.jsonl");
+        var valData = ResolveDataPath(cli.ValData, cli.DataDir, "test.jsonl");
+        var outDir = string.IsNullOrWhiteSpace(cli.OutDir)
+            ? Path.Combine(FindDefaultPath("data"), "worklog", "lora-output")
+            : cli.OutDir;
+
+        Console.WriteLine("=== Nivara LoRA SFT (generic Llama-family) ===");
+        Console.WriteLine($"Model: {modelDir}");
+        Console.WriteLine($"Train: {trainData}");
+        Console.WriteLine($"Val:   {valData}");
+        Console.WriteLine($"Template: {cli.Template}, rank={cli.Rank}, alpha={cli.Alpha}, targets={cli.Targets}");
+        Console.WriteLine($"Epochs={cli.Epochs}, lr={cli.Lr}, maxLen={cli.MaxLen}, maxExamples={cli.MaxExamples}, seed={cli.Seed}");
+        Console.WriteLine($"Silk: {cli.Silk} (D2a parity path; CPU reference implemented, Silk trainer path pending in this branch if unavailable)");
+
+        if (cli.Silk)
+        {
+            Console.Error.WriteLine("ERROR: --silk LoRA SFT training is not yet wired in this branch. CPU reference is available; Silk D2a parity path is being implemented.");
+            Console.Error.WriteLine("Run without --silk for CPU reference, or wait for the D2a Silk trainer commit.");
+            return 1;
+        }
+
+        bool qwen = IsQwenModelDir(modelDir, cli.Template);
+        var options = new WorklogLoraSftOptions
+        {
+            ModelDir = modelDir,
+            TrainPath = trainData,
+            ValPath = valData,
+            OutputDir = outDir,
+            Template = cli.Template,
+            Rank = cli.Rank,
+            Alpha = cli.Alpha,
+            Targets = ParseTargets(cli.Targets),
+            LearningRate = cli.Lr,
+            Epochs = cli.Epochs,
+            MaxLen = cli.MaxLen,
+            MaxExamples = cli.MaxExamples,
+            MaxValExamples = cli.MaxExamples > 0 ? Math.Max(1, cli.MaxExamples / 4) : 0,
+            Seed = cli.Seed,
+            LogEvery = cli.LogEvery,
+            SaveAdapter = true,
+            BaseModelId = qwen ? "qwen2.5-0.5b-instruct" : "smollm-135m-instruct"
+        };
+
+        WorklogLoraSftResult result;
+        if (qwen)
+            result = WorklogLoraSftTrainer.TrainQwenFloatBf16(options);
+        else
+            result = WorklogLoraSftTrainer.TrainSmolLMFloatBf16(options);
+
+        Console.WriteLine();
+        Console.WriteLine("=== LoRA SFT Result ===");
+        Console.WriteLine($"Train examples: {result.TrainExamples}, Val examples: {result.ValExamples}");
+        Console.WriteLine($"Base params: {result.BaseParams:N0}, Trainable adapter params: {result.TrainableParams:N0}");
+        Console.WriteLine($"Initial val loss: {result.InitialValLoss:F4}");
+        Console.WriteLine($"Best val loss:    {result.BestValLoss:F4} (epoch {result.BestEpoch})");
+        Console.WriteLine($"Elapsed: {result.ElapsedMs / 1000.0:F1}s");
+        if (result.AdapterPath is not null)
+            Console.WriteLine($"Adapter: {result.AdapterPath}");
+        return 0;
+    }
+
+    static int RunFtEval(CliArgs cli)
+    {
+        Console.Error.WriteLine("ft-eval is not implemented yet in this branch; planned in #1420/#1421.");
+        return 1;
+    }
+
+    static string ResolveModelDir(string modelDir)
+    {
+        if (!string.IsNullOrWhiteSpace(modelDir)) return modelDir;
+        var qwen = Path.Combine(FindDefaultPath("data"), "qwen2.5-0.5b-instruct");
+        if (Directory.Exists(qwen)) return qwen;
+        return FindDefaultPath("data/distilbert");
+    }
+
+    static string ResolveDataPath(string explicitPath, string dataDir, string defaultName)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitPath)) return explicitPath;
+        if (!string.IsNullOrWhiteSpace(dataDir))
+        {
+            var candidate = Path.Combine(dataDir, defaultName);
+            if (File.Exists(candidate)) return candidate;
+        }
+        var worklog = Path.Combine(FindDefaultPath("data"), "worklog", defaultName);
+        if (File.Exists(worklog)) return worklog;
+        return Path.Combine(FindDefaultPath("data"), defaultName);
+    }
+
+    static bool IsQwenModelDir(string modelDir, string template)
+    {
+        var name = Path.GetFileName(modelDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (name.Contains("qwen", StringComparison.OrdinalIgnoreCase)) return true;
+        if (name.Contains("smollm", StringComparison.OrdinalIgnoreCase)) return false;
+        return template.Equals("qwen", StringComparison.OrdinalIgnoreCase);
+    }
+
+    static LlamaLoRATarget ParseTargets(string targets)
+    {
+        var result = LlamaLoRATarget.None;
+        foreach (var part in targets.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            result |= part.ToLowerInvariant() switch
+            {
+                "q" => LlamaLoRATarget.Q,
+                "k" => LlamaLoRATarget.K,
+                "v" => LlamaLoRATarget.V,
+                "o" => LlamaLoRATarget.O,
+                "ffn" => LlamaLoRATarget.FFN,
+                _ => throw new ArgumentException($"Unknown LoRA target '{part}'. Expected q,k,v,o,ffn.")
+            };
+        }
+        if (result == LlamaLoRATarget.None) result = LlamaLoRATarget.Q | LlamaLoRATarget.V;
+        return result;
     }
 
     internal static string FindDefaultPath(string name)
