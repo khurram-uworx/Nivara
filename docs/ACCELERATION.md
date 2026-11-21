@@ -25,8 +25,9 @@ Laya, are F32 by default, with `--precision bf16` available on ModernBERT/Laya (
 weights stay bf16, activations f32) and on Qwen/SmolLM (tokEmb/tied LM head); MiniLM/DistilBERT widen
 bf16 to f32 at load. The same Silk backend also runs SmolLM, Qwen,
 MobileNetV2, and ResNet-18, with the Qwen and vision modes described in SILK.md. Silk is distributed as
-Silk.NET.OpenCL 2.23.0 and compiles OpenCL C in-process on the Intel OpenCL ICD. `--precision fp16` is
-rejected at the sample CLI (measured 0.97–1.07× vs f32, no speedup).
+Silk.NET.OpenCL 2.23.0 and compiles OpenCL C in-process on the Intel OpenCL ICD. On Silk,
+`--precision fp16` runs a native fp16 device path for minilm, distilbert, distilbert_sst, modernbert
+and laya; it is rejected for smollm/qwen (Half range) and the vision models (no narrow path).
 
 ## Why this route
 
@@ -106,8 +107,10 @@ Cross-host medians on the Arc 140T are dot16 7.0 µs, silu 6.7 µs, gemv 100.6 �
 
 BF16 conversion only and FP16 arithmetic are device-side facts from SILK.md §5; on the production route F32 stays
 the default, `--precision bf16` stores selected weights as BF16 (ModernBERT/Laya QKV, FFN and tokEmb; Qwen
-and SmolLM tokEmb/tied heads) with f32 activations, and `--precision fp16` is rejected at the sample CLI
-(0.97–1.07× vs f32, no measured benefit). Detail: [SILK.md §5](SILK.md) and [SILK.md §13](SILK.md).
+and SmolLM tokEmb/tied heads) with f32 activations. On Silk, `--precision fp16` runs a native fp16
+device path for minilm, distilbert, distilbert_sst, modernbert and laya; it is rejected for smollm/qwen
+(Half range) and the vision models (no narrow path). Detail: [SILK.md §5](SILK.md) and
+[SILK.md §13](SILK.md).
 
 ## 2. Correctness
 
@@ -210,7 +213,9 @@ with the ILGPU backend in 1.5.0, so a stale invocation falls through to the mode
 - Vision convolution kernels and the Nivara-CPU deficit: #457, #458.
 - Driver-bump hygiene: rerun the probe gate and all model compares after an Intel driver update.
 - bf16 selected-weight storage on the GPU is shipped for ModernBERT/Laya (QKV, FFN, tokEmb) and
-  Qwen/SmolLM (tokEmb/tied heads); fp16 remains rejected at the sample CLI (Half range/precision insufficient for Qwen2.5-0.5B; use f32 or bf16).
+  Qwen/SmolLM (tokEmb/tied heads); fp16 remains rejected at the sample CLI for qwen (Half
+  range/precision insufficient for Qwen2.5-0.5B) and the vision models (no narrow path), and is
+  supported on Silk for minilm, distilbert, distilbert_sst, modernbert and laya.
 - Streaming budget enforcement and Phase 2 spill: #325.
 - Promotion of the Nivara GPU path into `src/Nivara.Gpu`: pending, and nothing in core changes until that decision.
 

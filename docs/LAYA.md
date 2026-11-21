@@ -181,7 +181,7 @@ A bare `laya` run keeps the checkpoint's F16 weights resident and computes in F3
 - **Compute = F32.** `ModernBertEncoder<float, Half>` and `LayaDecisionHead<float, Half>` run in F32; projections use `GradKernels.MixedMatMulTransposedB<float, Half>` so weights widen in-register. `ModernBertLayer.ForwardFused` is `TWeight`-generic and reads weights through `ParamSpan`/`ModelSpan` (no widening at load); `ModernBertEncoder.Forward` gathers embedding rows in the storage dtype via `Embedding.GatherRows`. Norms and activations run in F32.
 - **In-register widening.** `NarrowFloatKernels`/`WidenPrimitives` convert `Half` lanes to `float`, run the SIMD `TensorPrimitives<float>` path, and narrow back; element-wise ops and matmul row-dots use it above the length gate. Correctness is unchanged, but `Half` has no `Vector<Half>` on .NET 11, so throughput stays in the scalar-fallback order.
 - **Temperature rounding.** The checkpoint's `temperature [3]` is F32; on the native path it is read as F32 and narrowed to `Half` (then re-widened to F32 in `LayaDecisionHead`), so the printed raw value differs from the checkpoint by ~1e-4 relative (e.g. `choice:11+` 0.1006). Recorded here so the next reader does not re-derive it; the precision impact on the clamped result is nil (0.1006 still clamps to 0.5).
-- **Silk asymmetry.** CPU native keeps `Half` storage / F32 compute. `laya --silk` with the default/native precision runs the F16 device path (F16 storage / F32 compute, issue #1225); an explicit `--precision bf16` keeps the BF16 Silk path (widened), and `--precision f32` runs the F32 device path. `--silk --precision fp16` stays rejected (pure-Half compute remains CPU-only); the checkpoint is F16, not BF16, so there is no BF16-native storage for Laya.
+- **Silk asymmetry.** CPU native keeps `Half` storage / F32 compute. `laya --silk` with the default/native precision runs the F16 device path (F16 storage / F32 compute, issue #1225); an explicit `--precision bf16` keeps the BF16 Silk path (widened), and `--precision f32` runs the F32 device path. `--silk --precision fp16` now runs the native fp16 device path on Silk (Half storage/compute); pure Half/Half compute remains CPU-only. The checkpoint is F16, not BF16, so there is no BF16-native storage for Laya.
 
 ## GPU path
 
@@ -430,9 +430,8 @@ native fp16 device path).
 - Honors `--precision` (f32 / bf16 / fp16 / native) and `--silk`.
 - The single F32 `temperature` scalar is narrowed to Half on the native (F16 storage) path;
   precision impact is negligible and is documented here rather than special-cased.
-- Silk has no native Half device path for Laya's F16 checkpoint (fp16 is rejected on Silk
-  except via the native fp16 path), so a Silk synthetic run stays F32/bf16 widened unless
-  `--precision native` selects the fp16 device path.
+- Silk supports the native fp16 device path for Laya's F16 checkpoint (`--precision fp16` /
+  `native`); otherwise a Silk synthetic run stays F32/bf16 widened.
 
 ## Head training (Silk)
 
