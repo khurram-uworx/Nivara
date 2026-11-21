@@ -545,7 +545,8 @@ public static class LlamaLoader
 {
     public static LlamaForCausalLM<TModel, TWeight> Load<TModel, TWeight>(
         LLamaConfigLike config,
-        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors)
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
@@ -588,6 +589,7 @@ public static class LlamaLoader
             StateDictLoader.LoadLinear(layer.DownProj, tensors, $"{p}.mlp.down_proj");
         }
 
+        if (!requiresGrad) model.Freeze();
         model.Eval();
         return model;
     }
@@ -637,13 +639,13 @@ public static class LlamaLoader
     /// <c>model.safetensors</c> from <paramref name="modelDir"/> as <typeparamref name="TWeight"/>.
     /// </summary>
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null)
+        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var (config, tokenizer) = LoadConfigAndTokenizer(modelDir, qwen);
         var tensors = SafeTensorsLoader.Read<TWeight>(Path.Combine(modelDir, "model.safetensors"));
-        var model = Load<TModel, TWeight>(config, tensors);
+        var model = Load<TModel, TWeight>(config, tensors, requiresGrad);
         return (model, config, tokenizer);
     }
 
@@ -652,37 +654,38 @@ public static class LlamaLoader
         LoadModel<TModel, TWeight>(
             Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
             string modelDir,
-            bool? qwen = null)
+            bool? qwen = null,
+            bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var (config, tokenizer) = LoadConfigAndTokenizer(modelDir, qwen);
-        var model = Load<TModel, TWeight>(config, tensors);
+        var model = Load<TModel, TWeight>(config, tensors, requiresGrad);
         return (model, config, tokenizer);
     }
 
     /// <summary>SmolLM-specific model-directory loader.</summary>
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadSmolLM<TModel, TWeight>(string modelDir)
+        LoadSmolLM<TModel, TWeight>(string modelDir, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LoadModel<TModel, TWeight>(modelDir, false);
+        => LoadModel<TModel, TWeight>(modelDir, false, requiresGrad);
 
     /// <summary>Qwen-specific model-directory loader.</summary>
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadQwen<TModel, TWeight>(string modelDir)
+        LoadQwen<TModel, TWeight>(string modelDir, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LoadModel<TModel, TWeight>(modelDir, true);
+        => LoadModel<TModel, TWeight>(modelDir, true, requiresGrad);
 
     /// <summary>
     /// Convenience overload: <c>Load(modelDir)</c> returns the model/config/tokenizer tuple.
     /// </summary>
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        Load<TModel, TWeight>(string modelDir, bool? qwen = null)
+        Load<TModel, TWeight>(string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LoadModel<TModel, TWeight>(modelDir, qwen);
+        => LoadModel<TModel, TWeight>(modelDir, qwen, requiresGrad);
 
     static bool IsQwenModel(string modelDir, LlamaConfig config)
     {
@@ -730,34 +733,34 @@ public static class LlamaModelLoader
         => LlamaLoader.LoadQwenConfigAndTokenizer(modelDir);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null)
+        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.LoadModel<TModel, TWeight>(modelDir, qwen);
+        => LlamaLoader.LoadModel<TModel, TWeight>(modelDir, qwen, requiresGrad);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadModel<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir, bool? qwen = null)
+        LoadModel<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir, qwen);
+        => LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir, qwen, requiresGrad);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadSmolLM<TModel, TWeight>(string modelDir)
+        LoadSmolLM<TModel, TWeight>(string modelDir, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.LoadSmolLM<TModel, TWeight>(modelDir);
+        => LlamaLoader.LoadSmolLM<TModel, TWeight>(modelDir, requiresGrad);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadQwen<TModel, TWeight>(string modelDir)
+        LoadQwen<TModel, TWeight>(string modelDir, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.LoadQwen<TModel, TWeight>(modelDir);
+        => LlamaLoader.LoadQwen<TModel, TWeight>(modelDir, requiresGrad);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        Load<TModel, TWeight>(string modelDir, bool? qwen = null)
+        Load<TModel, TWeight>(string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.Load<TModel, TWeight>(modelDir, qwen);
+        => LlamaLoader.Load<TModel, TWeight>(modelDir, qwen, requiresGrad);
 }
 
 public static class CausalLmLoader
@@ -766,15 +769,15 @@ public static class CausalLmLoader
         => LlamaLoader.LoadConfigAndTokenizer(modelDir, qwen);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null)
+        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.LoadModel<TModel, TWeight>(modelDir, qwen);
+        => LlamaLoader.LoadModel<TModel, TWeight>(modelDir, qwen, requiresGrad);
 
     public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
-        Load<TModel, TWeight>(string modelDir, bool? qwen = null)
+        Load<TModel, TWeight>(string modelDir, bool? qwen = null, bool requiresGrad = true)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
-        => LlamaLoader.Load<TModel, TWeight>(modelDir, qwen);
+        => LlamaLoader.Load<TModel, TWeight>(modelDir, qwen, requiresGrad);
 }
 
