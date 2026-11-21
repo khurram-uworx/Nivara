@@ -307,8 +307,13 @@ public class LoRALinearTests
     {
         var config = new LlamaConfig
         {
-            HiddenSize = 4, NumHiddenLayers = 1, NumAttentionHeads = 2,
-            NumKeyValueHeads = 1, IntermediateSize = 4, VocabSize = 8, AttentionBias = false,
+            HiddenSize = 4,
+            NumHiddenLayers = 1,
+            NumAttentionHeads = 2,
+            NumKeyValueHeads = 1,
+            IntermediateSize = 4,
+            VocabSize = 8,
+            AttentionBias = false,
         };
         var tensors = NivaraInference.Qwen.SynthesizeTensors<System.Numerics.BFloat16>(config);
         using var model = LlamaLoader.Load<float, BFloat16>(config, tensors, requiresGrad: false);

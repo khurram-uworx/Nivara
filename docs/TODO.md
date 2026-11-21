@@ -2,6 +2,8 @@
 
 - Work branch: `khurram/1394`
 - Tracking issue: #1394 (open, enhancement, opened 2026-11-21)
+- Slices landed: mixed LoRA module (dff6e47b), Llama-stack wiring + guard reconciliation +
+  LM-level mixed adapter-gradient test (7cfa9ca6); adapter save/load round trip deferred (#1407).
 
 ## Problem
 
@@ -13,8 +15,9 @@ use mixed-dtype projections `Linear<TModel, TWeight>` — BF16 storage / F32 com
 
 Because of that, the minimal LoRA module from #1380 cannot wrap a frozen
 `Linear<TModel, TWeight>` base, and the full-stack mixed-dtype training guard
-(`LlamaForCausalLM.ThrowIfMixedDtypeTraining`) currently rejects mixed compute/weight dtypes
-inside a `GradientUtils.Grad()` scope as inference-only.
+(`LlamaForCausalLM.ThrowIfMixedDtypeTraining`) rejected mixed compute/weight dtypes
+inside a `GradientUtils.Grad()` scope as inference-only. Slice 2 reconciled that guard:
+a frozen mixed base plus F32 adapters is now the supported adapter-training path.
 
 Issue #1394 asks for a mixed-dtype `LoRALinear<TModel, TWeight>` (or a generic overload) that
 wraps a frozen `Linear<TModel, TWeight>` base with adapter matrices `A`/`B` in compute type
@@ -28,13 +31,22 @@ wraps a frozen `Linear<TModel, TWeight>` base with adapter matrices `A`/`B` in c
      (`MixedMatMulTransposedB`), adapter math stays same-type F32.
    - step-0 parity: adapted == base (exact); `Merge()` folds adapter delta into base weight
      (needs BF16 narrowing decision).
+   DONE (slice 1, commit `dff6e47b`): `LoRALinear<TModel, TWeight>` landed with parity, frozen
+   base, finite-difference and merge tests; adapter save/load round trip deferred (#1407).
 2. Wire adapter injection into the causal-LM stack (targets: attention q/v default, optional k/o/ffn).
+   DONE (slice 2, commit `7cfa9ca6`): `LlamaCausalAttention<TModel, TWeight>` gained Q/K/V/O adapter
+   seams; the mixed tied head now builds the tracked matmul when the input requires grad; the
+   LM-level mixed adapter-gradient test landed.
 3. Reconcile the mixed-dtype training guard so a frozen mixed base + F32 adapter graph is allowed.
+   DONE (slice 2): guard now names the frozen-base contract explicitly; `LlamaLoader.Load<float,
+   BFloat16>` frozen-base + adapter tests landed.
 4. Tests per acceptance criteria:
    - step-0 parity adapted == base (exact) on a tiny Llama-shaped block;
    - frozen base produces no base gradients after backward;
    - adapter gradients match finite differences;
    - works with `LlamaLoader.Load<float, BFloat16>` frozen base; adapters stay F32.
+   DONE for the landed slices (LoRALinearTests 10/10, related mixed/Llama fixtures 61/61, Release);
+   end-to-end adapter-only training loop on the frozen stack is still open.
 
 ## Verification steps
 
@@ -45,6 +57,9 @@ wraps a frozen `Linear<TModel, TWeight>` base with adapter matrices `A`/`B` in c
 ## Planned commits
 
 - `docs: plan mixed-dtype LoRA for issue #1394 in TODO.md` (this file, own logical unit).
+- `Add mixed-dtype LoRALinear<TModel, TWeight> adapter module` (core, `dff6e47b`).
+- `Wire mixed-dtype LoRA into the frozen Llama stack` (adapter seams, tracked mixed tied
+  head, guard wording, LM-level mixed adapter-gradient test, `7cfa9ca6`).
 
 ## Blast radius
 
