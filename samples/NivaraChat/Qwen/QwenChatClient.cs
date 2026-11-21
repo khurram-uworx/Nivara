@@ -83,7 +83,7 @@ internal sealed class QwenChatClient<TModel, TWeight> : CausalLmChatClientBase
     }
 
     protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
-        => QwenChatTemplate.Render(messages, addGenerationPrompt: true);
+        => Nivara.Samples.QwenChatTemplate.Render(messages, addGenerationPrompt: true);
 
     protected override IReadOnlyList<int> Encode(string prompt)
         => tokenizeCache.Encode(prompt, p => tokenizer.Encode(p));
@@ -106,7 +106,7 @@ internal sealed class QwenChatClient<TModel, TWeight> : CausalLmChatClientBase
             Cached: (t, p) => ToFloat(model.ForwardCached(t, p, cache!)),
             LastLogits: w => ToFloat(model.Forward(w)),
             ResetCache: () => cache = new LlamaKVCache<TModel>(numLayers, kvWidth),
-            IsStopToken: id => QwenIds.StopIds.Contains(id),
+            IsStopToken: id => Nivara.Samples.QwenIds.StopIds.Contains(id),
             VocabSize: config.VocabSize,
             EosTokenId: config.EosTokenId,
             MaxSequenceLength: config.MaxPositionEmbeddings);

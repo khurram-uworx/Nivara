@@ -6,14 +6,14 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace NivaraChat.Qwen;
+namespace Nivara.Samples;
 
 /// <summary>
 /// Special-token ids for Qwen2.5 (verified against the downloaded checkpoint's
 /// <c>tokenizer.json</c> / <c>generation_config.json</c>, issue #382 Phase 2):
 /// <c>eos_token_id</c> is the array <c>[151645, 151643]</c> — generation must stop on either.
 /// </summary>
-internal static class QwenIds
+public static class QwenIds
 {
     public const int EndOfText = 151643;   // <|endoftext|> (also the bos id)
     public const int ImStart = 151644;     // <|im_start|>
@@ -36,7 +36,7 @@ internal static class QwenIds
 /// <c>qwen_tool_prompt.txt</c> / <c>qwen_tool_final_prompt.txt</c> (pinned byte-for-byte by
 /// <c>QwenChatTemplateTests</c>).
 /// </summary>
-internal static class QwenChatTemplate
+public static class QwenChatTemplate
 {
     public const string ImStart = "<|im_start|>";
     public const string ImEnd = "<|im_end|>";
@@ -237,7 +237,7 @@ internal static class QwenChatTemplate
 /// <summary>Serializes <see cref="JsonNode"/> trees with Jinja-<c>tojson</c> conventions:
 /// spaces after <c>:</c>/<c>,</c>, and relaxed string escaping (literal <c>'</c>, Unicode, no
 /// HTML escaping) — mirroring Python's <c>json.dumps(..., ensure_ascii=False)</c>.</summary>
-internal static class QwenJson
+public static class QwenJson
 {
     static readonly JsonSerializerOptions Relaxed = new()
     {

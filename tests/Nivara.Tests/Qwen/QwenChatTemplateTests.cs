@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Nivara.Samples;
 using NivaraChat.Qwen;
 using NUnit.Framework;
 using System.Text;

@@ -180,7 +180,7 @@ public static class QwenMode
         var weather = QwenSampleTools.CreateWeatherTool();
         var history = new List<ChatMessage>
         {
-            new(ChatRole.System, QwenChatTemplate.BuildToolsSystemMessage([weather])),
+            new(ChatRole.System, Nivara.Samples.QwenChatTemplate.BuildToolsSystemMessage([weather])),
         };
         using var loop = new FunctionInvokingChatClient(client)
         {
@@ -231,7 +231,7 @@ public static class QwenMode
     {
         var history = new List<ChatMessage>
         {
-            new(ChatRole.System, QwenChatTemplate.BuildToolsSystemMessage(tools)),
+            new(ChatRole.System, Nivara.Samples.QwenChatTemplate.BuildToolsSystemMessage(tools)),
         };
         using var loop = new FunctionInvokingChatClient(client)
         {
