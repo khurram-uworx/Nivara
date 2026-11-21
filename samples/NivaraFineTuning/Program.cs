@@ -9,6 +9,7 @@ using Nivara.AutoDiff.Utilities;
 using Nivara.Metrics;
 using Nivara.Samples;
 using Nivara.Silk;
+using System.Numerics;
 
 namespace NivaraFineTuning;
 
@@ -25,6 +26,7 @@ sealed record CliArgs
     public int MaxExamples { get; init; }
     public int TrainableLayers { get; init; } = -1;
     public bool Silk { get; init; }
+    public string Precision { get; init; } = "f32";
 
     public static CliArgs Parse(string[] args)
     {
@@ -40,6 +42,7 @@ sealed record CliArgs
         int maxExamples = 0;
         int trainableLayers = -1;
         bool silk = false;
+        string precision = "f32";
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -79,6 +82,9 @@ sealed record CliArgs
                 case "--silk":
                     silk = true;
                     break;
+                case "--precision" when i + 1 < args.Length:
+                    precision = args[++i].ToLowerInvariant();
+                    break;
                 case "--help":
                 case "-h":
                     PrintHelp();
@@ -89,6 +95,12 @@ sealed record CliArgs
 
         // --silk train now runs the full forward/backward/optimizer on the OpenCL device via
         // SilkDistilBertTrainer (#956); falls back to exit 1 when OpenCL is unavailable.
+
+        if (precision is not ("f32" or "bf16"))
+        {
+            Console.Error.WriteLine($"--precision expects f32 or bf16; got '{precision}'.");
+            Environment.Exit(1);
+        }
 
         return new CliArgs
         {
@@ -102,7 +114,8 @@ sealed record CliArgs
             DataDir = dataDir,
             ModelDir = modelDir,
             SavePath = savePath,
-            Silk = silk
+            Silk = silk,
+            Precision = precision
         };
     }
 
@@ -126,7 +139,8 @@ Options:
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
   --help          Show this help message
-  --silk          Run train/eval/predict on the OpenCL GPU via Silk (F32-only); fails with exit 1 when OpenCL is unavailable
+  --silk          Run train/eval/predict on the OpenCL GPU via Silk; fails with exit 1 when OpenCL is unavailable
+  --precision     f32 (default) or bf16. CPU bf16 trains in BFloat16 via AutoDiff; Silk bf16 uses CreateTrueBf16 and exports an F32 checkpoint
 
 GPU:
   --silk runs forward (and, for train, backward and AdamW) on the OpenCL device. F32-only;
@@ -156,6 +170,11 @@ static class Program
     }
 
     static int RunTrain(CliArgs cli)
+        => cli.Precision == "bf16"
+            ? RunTrainCore<BFloat16>(cli)
+            : RunTrainCore<float>(cli);
+
+    static int RunTrainCore<T>(CliArgs cli) where T : struct, System.Numerics.IFloatingPointIeee754<T>
     {
         var modelPath = cli.ModelDir;
         var dataPath = cli.DataDir;
@@ -173,11 +192,11 @@ static class Program
         Console.WriteLine($"  dim={distilConfig.Dim}, layers={distilConfig.NLayers}, heads={distilConfig.NHeads}");
 
         Console.WriteLine("Loading SafeTensors weights...");
-        var tensors = SafeTensorsLoader.Read(Path.Combine(modelPath, "model.safetensors"));
+        var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelPath, "model.safetensors"));
         Console.WriteLine($"  Loaded {tensors.Count} tensors");
 
         Console.WriteLine($"Building model (numClasses=2)...");
-        using var model = new DistilBertForSequenceClassification<float>(bertConfig, numClasses: 2);
+        using var model = new DistilBertForSequenceClassification<T>(bertConfig, numClasses: 2);
         model.LoadWeights(tensors);
         model.Train();
         Console.WriteLine("  Model built, encoder weights loaded, classifier head random-initialized.");
@@ -202,11 +221,11 @@ static class Program
         var devTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Dev, cli.MaxLen);
         Console.WriteLine($"  {devTokenized.Count} examples");
 
-        var lossFn = new CrossEntropyLoss<float>();
-        using var optimizer = new AdamW<float>(cli.Lr, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        var lossFn = new CrossEntropyLoss<T>();
+        using var optimizer = new AdamW<T>(T.CreateChecked(cli.Lr), beta1: 0.9, beta2: 0.999, eps: 1e-8);
 
         var allParams = model.GetParameters().Values;
-        optimizer.AddParameterGroup(allParams, learningRate: cli.Lr, weightDecay: 0.01f);
+        optimizer.AddParameterGroup(allParams, learningRate: T.CreateChecked(cli.Lr), weightDecay: T.CreateChecked(0.01f));
         Console.WriteLine($"  Optimizer: AdamW(lr={cli.Lr}, weightDecay=0.01)");
 
         for (int epoch = 1; epoch <= cli.Epochs; epoch++)
@@ -224,12 +243,12 @@ static class Program
 
             foreach (var batch in trainBatches)
             {
-                var inputIds = GradientUtils.Constant(batch.TokenIds);
-                var attnMask = GradientUtils.Constant(batch.AttentionMask);
+                var intIds = Array.ConvertAll(batch.TokenIds, x => (int)x);
+                var attnMask = GradientUtils.Constant(Array.ConvertAll(batch.AttentionMask, x => T.CreateChecked(x)));
 
                 using (GradientUtils.Grad())
                 {
-                    var logits = model.Forward(inputIds, attnMask, batch.BatchSize, batch.SeqLen);
+                    var logits = model.Forward(intIds, attnMask, batch.BatchSize, batch.SeqLen);
                     var loss = lossFn.Forward(logits, batch.Labels);
                     loss.Backward();
                     optimizer.Step();
@@ -255,7 +274,7 @@ static class Program
                 Console.WriteLine($"  Steady-state ms/batch: {steadyMs:F1}");
             }
 
-            var (devLoss, devAcc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
+            var (devLoss, devAcc) = Evaluate<T>(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);
             Console.WriteLine($"Dev - loss: {devLoss:F4}, accuracy: {devAcc:F2}%");
         }
 
@@ -284,12 +303,12 @@ static class Program
         Console.WriteLine($"  dim={distilConfig.Dim}, layers={distilConfig.NLayers}, heads={distilConfig.NHeads}");
 
         Console.WriteLine("Loading SafeTensors weights...");
-        var tensors = SafeTensorsLoader.Read(Path.Combine(modelPath, "model.safetensors"));
-        Console.WriteLine($"  Loaded {tensors.Count} tensors");
+        var f32Tensors = SafeTensorsLoader.Read(Path.Combine(modelPath, "model.safetensors"));
+        Console.WriteLine($"  Loaded {f32Tensors.Count} tensors");
 
         Console.WriteLine("Building CPU model (numClasses=2)...");
         using var model = new DistilBertForSequenceClassification<float>(bertConfig, numClasses: 2);
-        model.LoadWeights(tensors);
+        model.LoadWeights(f32Tensors);
         model.Train();
         Console.WriteLine("  Model built, encoder weights loaded, classifier head random-initialized.");
 
@@ -313,7 +332,15 @@ static class Program
             if (maxSeqLen != cli.MaxLen)
                 Console.WriteLine($"  (seq len clamped to device cap {maxSeqLen})");
 
-            using var trainer = new SilkDistilBertTrainer(runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert, maxBatch, maxSeqLen, trainableLayerCount: cli.TrainableLayers);
+            using var trainer = cli.Precision == "bf16"
+                ? SilkDistilBertTrainer.CreateTrueBf16(
+                    runtime, bertConfig,
+                    SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelPath, "model.safetensors")),
+                    BertGpuNaming.DistilBert, maxBatch, maxSeqLen,
+                    trainableLayerCount: cli.TrainableLayers)
+                : new SilkDistilBertTrainer(
+                    runtime, bertConfig, model.ToSilkTensors(), BertGpuNaming.DistilBert,
+                    maxBatch, maxSeqLen, trainableLayerCount: cli.TrainableLayers);
             using var runner = trainer.CreateInferenceRunner();
             Console.WriteLine($"  Device: {trainer.DeviceName}, classes={trainer.NumClasses}");
             if (cli.TrainableLayers >= 0)
@@ -672,13 +699,13 @@ static class Program
         return (loss, acc);
     }
 
-    static (float Loss, float Accuracy) Evaluate(
-        DistilBertForSequenceClassification<float> model,
-        CrossEntropyLoss<float> lossFn,
+    static (float Loss, float Accuracy) Evaluate<T>(
+        DistilBertForSequenceClassification<T> model,
+        CrossEntropyLoss<T> lossFn,
         BertTokenizer tokenizer,
         List<Sst2Example> devSet,
         int maxLen,
-        int batchSize)
+        int batchSize) where T : struct, System.Numerics.IFloatingPointIeee754<T>
     {
         model.Eval();
         var tokenized = Sst2Dataset.Tokenize(tokenizer, devSet, maxLen);
@@ -691,17 +718,17 @@ static class Program
 
         foreach (var batch in batches)
         {
-            var inputIds = GradientUtils.Constant(batch.TokenIds);
-            var attnMask = GradientUtils.Constant(batch.AttentionMask);
+            var intIds = Array.ConvertAll(batch.TokenIds, x => (int)x);
+            var attnMask = GradientUtils.Constant(Array.ConvertAll(batch.AttentionMask, x => T.CreateChecked(x)));
 
-            var logits = model.Forward(inputIds, attnMask, batch.BatchSize, batch.SeqLen);
+            var logits = model.Forward(intIds, attnMask, batch.BatchSize, batch.SeqLen);
             var loss = lossFn.Forward(logits, batch.Labels);
 
             totalLoss += float.CreateChecked(loss.Data[0]);
 
             for (int i = 0; i < batch.BatchSize; i++)
             {
-                int predicted = ArgMax(logits, i, model.NumClasses);
+                int predicted = ArgMax<T>(logits, i, model.NumClasses);
                 predictedLabels.Add(predicted);
                 actualLabels.Add(batch.Labels[i]);
             }
@@ -721,13 +748,13 @@ static class Program
         return (totalLoss / batches.Count, total > 0 ? (float)correct / total * 100 : 0f);
     }
 
-    static int ArgMax(ReverseGradTensor<float> logits, int row, int numClasses)
+    static int ArgMax<T>(ReverseGradTensor<T> logits, int row, int numClasses) where T : struct, System.Numerics.IFloatingPointIeee754<T>
     {
         int best = 0;
-        float bestVal = logits.Data[row * numClasses];
+        float bestVal = float.CreateChecked(logits.Data[row * numClasses]);
         for (int c = 1; c < numClasses; c++)
         {
-            float val = logits.Data[row * numClasses + c];
+            float val = float.CreateChecked(logits.Data[row * numClasses + c]);
             if (val > bestVal) { bestVal = val; best = c; }
         }
         return best;
