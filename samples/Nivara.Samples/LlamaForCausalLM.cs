@@ -9,6 +9,20 @@ using System.Runtime.InteropServices;
 namespace Nivara.Samples;
 
 /// <summary>
+/// Selects which causal-LM projections receive a <see cref="LoRALinear{TModel, TWeight}"/> adapter.
+/// </summary>
+[Flags]
+public enum LlamaLoRATarget
+{
+    None = 0,
+    Q = 1,
+    K = 2,
+    V = 4,
+    O = 8,
+    FFN = 16,
+}
+
+/// <summary>
 /// Llama-family causal language model: token embedding, <c>numHiddenLayers</c> decoder
 /// blocks, a final RMS norm, and a tied-embedding LM head producing logits over the
 /// vocabulary. Inference-by-default: running outside a <c>GradientUtils.Grad()</c> scope
@@ -128,6 +142,111 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
         => throw new NotImplementedException("Use Forward(int[] inputIds) for LlamaForCausalLM.");
 
     /// <summary>
+    /// Attaches low-rank adapters to the selected causal-LM projections. The default target set is
+    /// query and value; <see cref="LlamaLoRATarget.K"/>, <see cref="LlamaLoRATarget.O"/>, and
+    /// <see cref="LlamaLoRATarget.FFN"/> widen the adapter surface.
+    /// </summary>
+    /// <param name="targets">Projections that should receive adapters.</param>
+    /// <param name="rank">Adapter rank.</param>
+    /// <param name="alpha">Adapter scaling factor.</param>
+    /// <returns>The created adapters, one per selected projection per layer.</returns>
+    public IReadOnlyList<LoRALinear<TModel, TWeight>> AttachLora(
+        LlamaLoRATarget targets = LlamaLoRATarget.Q | LlamaLoRATarget.V,
+        int rank = 8,
+        TModel? alpha = null)
+    {
+        var adapters = new List<LoRALinear<TModel, TWeight>>();
+        if (targets == LlamaLoRATarget.None) return adapters;
+
+        foreach (var layer in layers)
+        {
+            if (targets.HasFlag(LlamaLoRATarget.Q))
+            {
+                var adapter = new LoRALinear<TModel, TWeight>(layer.Attention.QProj, rank, alpha);
+                layer.Attention.QAdapter = adapter;
+                adapters.Add(adapter);
+            }
+
+            if (targets.HasFlag(LlamaLoRATarget.K))
+            {
+                var adapter = new LoRALinear<TModel, TWeight>(layer.Attention.KProj, rank, alpha);
+                layer.Attention.KAdapter = adapter;
+                adapters.Add(adapter);
+            }
+
+            if (targets.HasFlag(LlamaLoRATarget.V))
+            {
+                var adapter = new LoRALinear<TModel, TWeight>(layer.Attention.VProj, rank, alpha);
+                layer.Attention.VAdapter = adapter;
+                adapters.Add(adapter);
+            }
+
+            if (targets.HasFlag(LlamaLoRATarget.O))
+            {
+                var adapter = new LoRALinear<TModel, TWeight>(layer.Attention.OProj, rank, alpha);
+                layer.Attention.OAdapter = adapter;
+                adapters.Add(adapter);
+            }
+
+            if (targets.HasFlag(LlamaLoRATarget.FFN))
+            {
+                var gate = new LoRALinear<TModel, TWeight>(layer.GateProj, rank, alpha);
+                layer.GateAdapter = gate;
+                var up = new LoRALinear<TModel, TWeight>(layer.UpProj, rank, alpha);
+                layer.UpAdapter = up;
+                var down = new LoRALinear<TModel, TWeight>(layer.DownProj, rank, alpha);
+                layer.DownAdapter = down;
+                adapters.AddRange(new[] { gate, up, down });
+            }
+        }
+
+        return adapters;
+    }
+
+    /// <summary>
+    /// Merges every attached LoRA adapter into its frozen base projection.
+    /// </summary>
+    public void MergeAllAdapters()
+    {
+        foreach (var layer in layers)
+        {
+            if (layer.Attention.QAdapter is LoRALinear<TModel, TWeight> qLora) qLora.Merge();
+            if (layer.Attention.KAdapter is LoRALinear<TModel, TWeight> kLora) kLora.Merge();
+            if (layer.Attention.VAdapter is LoRALinear<TModel, TWeight> vLora) vLora.Merge();
+            if (layer.Attention.OAdapter is LoRALinear<TModel, TWeight> oLora) oLora.Merge();
+            if (layer.GateAdapter is LoRALinear<TModel, TWeight> gateLora) gateLora.Merge();
+            if (layer.UpAdapter is LoRALinear<TModel, TWeight> upLora) upLora.Merge();
+            if (layer.DownAdapter is LoRALinear<TModel, TWeight> downLora) downLora.Merge();
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of trainable adapter parameters implied by the selected target set.
+    /// </summary>
+    /// <param name="rank">Adapter rank.</param>
+    /// <param name="alpha">Adapter scaling factor (retained for API symmetry; not part of the count).</param>
+    /// <param name="targets">Projections that should receive adapters.</param>
+    /// <returns>The adapter parameter count.</returns>
+    public int AdapterParameterCount(int rank = 8, TModel? alpha = null, LlamaLoRATarget targets = LlamaLoRATarget.Q | LlamaLoRATarget.V)
+    {
+        int total = 0;
+        foreach (var layer in layers)
+        {
+            if (targets.HasFlag(LlamaLoRATarget.Q)) total += rank * (layer.Attention.QProj.InFeatures + layer.Attention.QProj.OutFeatures);
+            if (targets.HasFlag(LlamaLoRATarget.K)) total += rank * (layer.Attention.KProj.InFeatures + layer.Attention.KProj.OutFeatures);
+            if (targets.HasFlag(LlamaLoRATarget.V)) total += rank * (layer.Attention.VProj.InFeatures + layer.Attention.VProj.OutFeatures);
+            if (targets.HasFlag(LlamaLoRATarget.O)) total += rank * (layer.Attention.OProj.InFeatures + layer.Attention.OProj.OutFeatures);
+            if (targets.HasFlag(LlamaLoRATarget.FFN))
+            {
+                total += rank * (layer.GateProj.InFeatures + layer.GateProj.OutFeatures);
+                total += rank * (layer.UpProj.InFeatures + layer.UpProj.OutFeatures);
+                total += rank * (layer.DownProj.InFeatures + layer.DownProj.OutFeatures);
+            }
+        }
+        return total;
+    }
+
+    /// <summary>
     /// Runs the causal-LM stack for a <em>single</em> token during cached inference, returning
     /// logits <c>[1, vocabSize]</c>. The token's hidden state is embedded and passed through every
     /// layer's <see cref="LlamaDecoderBlock{TModel, TWeight}.ForwardCached"/>, which appends the new
@@ -150,7 +269,7 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
         // Inference-default: outside a Grad scope the fused single-token kernel runs each block
         // with zero steady-state allocations (reuses the per-layer scratch + the ping-pong).
-        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused)
+        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused && !HasAnyAdapter())
             return ForwardCachedFusedCore(tokenId, positionOffset, cache);
 
         var h = Embed.Forward(tokenId); // [1, hidden]
@@ -194,7 +313,7 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
         cache.Ensure(inputIds.Length);
 
-        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused)
+        if (!GradientUtils.IsGradEnabled && LlamaFusedKernels.DecoderBlockFused && !HasAnyAdapter())
             return ForwardPrefillFusedCore(inputIds, cache);
 
         var h = Embed.Forward(inputIds); // [L, hidden]
@@ -282,6 +401,13 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
                 "compute and weight dtypes differ and the base is not frozen: the narrow weights have no " +
                 "same-type backward node. Freeze the base for adapter (for example LoRA) training with " +
                 "compute-type adapter gradients.");
+    }
+
+    bool HasAnyAdapter()
+    {
+        foreach (var layer in layers)
+            if (layer.HasAdapter) return true;
+        return false;
     }
 
     static void CopyEmbeddingRow(ReadOnlySpan<TWeight> weights, int tokenId, int hidden, Span<TModel> destination)

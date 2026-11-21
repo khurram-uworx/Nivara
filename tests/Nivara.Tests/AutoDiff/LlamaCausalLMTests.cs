@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
@@ -64,5 +65,56 @@ public class LlamaCausalLMTests
         int embeddingSized = state.Values.Count(t => t.Shape.Length == 2 && t.Shape[0] == 128 && t.Shape[1] == 32);
         Assert.That(embeddingSized, Is.EqualTo(1),
             "Exactly one [vocab, hidden]-shaped parameter (the embedding, shared as the LM head) must exist.");
+    }
+
+    [Test]
+    public void AttachLora_DefaultTargets_QAndV_AttachesPerLayerAdapters()
+    {
+        using var model = TinyModel();
+        var adapters = model.AttachLora();
+
+        Assert.That(adapters.Count, Is.EqualTo(4));
+        Assert.That(model.layers[0].Attention.QAdapter, Is.Not.Null);
+        Assert.That(model.layers[0].Attention.VAdapter, Is.Not.Null);
+        Assert.That(model.layers[0].Attention.KAdapter, Is.Null);
+        Assert.That(model.layers[0].Attention.OAdapter, Is.Null);
+        Assert.That(model.layers[0].GateAdapter, Is.Null);
+        Assert.That(model.layers[0].HasAdapter, Is.True);
+    }
+
+    [Test]
+    public void AttachLora_FFN_AddsGateUpDownAdapters()
+    {
+        using var model = TinyModel();
+        var adapters = model.AttachLora(targets: LlamaLoRATarget.FFN);
+
+        Assert.That(adapters.Count, Is.EqualTo(6));
+        Assert.That(model.layers[0].GateAdapter, Is.Not.Null);
+        Assert.That(model.layers[0].UpAdapter, Is.Not.Null);
+        Assert.That(model.layers[0].DownAdapter, Is.Not.Null);
+    }
+
+    [Test]
+    public void MergeAllAdapters_PostMergeForward_MatchesUnmergedWithin1e5()
+    {
+        using var model = TinyModel();
+        model.AttachLora();
+        int[] tokens = [1, 12, 45, 78, 99];
+        var before = model.Forward(tokens);
+
+        model.MergeAllAdapters();
+        var after = model.Forward(tokens);
+
+        Assert.That(after.Length, Is.EqualTo(before.Length));
+        for (int i = 0; i < before.Length; i++)
+            Assert.That(after[i], Is.EqualTo(before[i]).Within(1e-5f));
+    }
+
+    [Test]
+    public void AdapterParameterCount_DefaultQAndV_MatchesTinyModelShape()
+    {
+        using var model = TinyModel();
+
+        Assert.That(model.AdapterParameterCount(), Is.EqualTo(1792));
     }
 }

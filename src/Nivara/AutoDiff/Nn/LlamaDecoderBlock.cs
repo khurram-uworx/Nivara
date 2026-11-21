@@ -42,12 +42,24 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
     public Linear<TModel, TWeight> UpProj { get; }
     /// <summary>Gets the down-projection linear.</summary>
     public Linear<TModel, TWeight> DownProj { get; }
+    /// <summary>Gets or sets the LoRA adapter module for the feed-forward gate projection; null routes to the plain gate projection.</summary>
+    public Module<TModel>? GateAdapter { get; set; }
+    /// <summary>Gets or sets the LoRA adapter module for the feed-forward up projection; null routes to the plain up projection.</summary>
+    public Module<TModel>? UpAdapter { get; set; }
+    /// <summary>Gets or sets the LoRA adapter module for the feed-forward down projection; null routes to the plain down projection.</summary>
+    public Module<TModel>? DownAdapter { get; set; }
 
     /// <summary>Gets the hidden (embedding) dimension.</summary>
     public int HiddenSize => hiddenSize;
 
     /// <summary>Gets whether the self-attention query/key/value projections carry a bias.</summary>
     public bool QkvBias => Attention.QkvBias;
+    /// <summary>Gets whether any decoder-block projection has a LoRA adapter attached.</summary>
+    public bool HasAdapter =>
+        Attention.HasAdapter ||
+        GateAdapter is not null ||
+        UpAdapter is not null ||
+        DownAdapter is not null;
 
     /// <summary>
     /// Creates a Llama decoder block.
@@ -128,10 +140,13 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
 
         // Pre-norm gated SiLU feed-forward with residual add.
         var ffnIn = PostNorm.Forward(h);
-        var gate = Activation.Silu(GateProj.Forward(ffnIn));
-        var up = UpProj.Forward(ffnIn);
+        var gateModule = GateAdapter ?? (Module<TModel>)GateProj;
+        var upModule = UpAdapter ?? (Module<TModel>)UpProj;
+        var downModule = DownAdapter ?? (Module<TModel>)DownProj;
+        var gate = Activation.Silu(gateModule.Forward(ffnIn));
+        var up = upModule.Forward(ffnIn);
         var gated = ReverseGradOperations.Multiply(gate, up);
-        var mlpOut = DownProj.Forward(gated);
+        var mlpOut = downModule.Forward(gated);
         return ReverseGradOperations.Add(h, mlpOut);
     }
 
@@ -160,10 +175,13 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         var h = ReverseGradOperations.Add(input, attnOut);
 
         var ffnIn = PostNorm.Forward(h);
-        var gate = Activation.Silu(GateProj.Forward(ffnIn));
-        var up = UpProj.Forward(ffnIn);
+        var gateModule = GateAdapter ?? (Module<TModel>)GateProj;
+        var upModule = UpAdapter ?? (Module<TModel>)UpProj;
+        var downModule = DownAdapter ?? (Module<TModel>)DownProj;
+        var gate = Activation.Silu(gateModule.Forward(ffnIn));
+        var up = upModule.Forward(ffnIn);
         var gated = ReverseGradOperations.Multiply(gate, up);
-        var mlpOut = DownProj.Forward(gated);
+        var mlpOut = downModule.Forward(gated);
         return ReverseGradOperations.Add(h, mlpOut);
     }
 
@@ -190,10 +208,13 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         var h = ReverseGradOperations.Add(input, attnOut);
 
         var ffnIn = PostNorm.Forward(h);
-        var gate = Activation.Silu(GateProj.Forward(ffnIn));
-        var up = UpProj.Forward(ffnIn);
+        var gateModule = GateAdapter ?? (Module<TModel>)GateProj;
+        var upModule = UpAdapter ?? (Module<TModel>)UpProj;
+        var downModule = DownAdapter ?? (Module<TModel>)DownProj;
+        var gate = Activation.Silu(gateModule.Forward(ffnIn));
+        var up = upModule.Forward(ffnIn);
         var gated = ReverseGradOperations.Multiply(gate, up);
-        var mlpOut = DownProj.Forward(gated);
+        var mlpOut = downModule.Forward(gated);
         return ReverseGradOperations.Add(h, mlpOut);
     }
 

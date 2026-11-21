@@ -196,6 +196,9 @@ public sealed class LoRALinear<TModel, TWeight> : Module<TModel>
     /// <summary>Gets the scaling factor <c>alpha</c>.</summary>
     public TModel Alpha => alpha;
 
+    /// <summary>Gets the number of trainable adapter parameters (A plus B).</summary>
+    public int AdapterParameterCount => r * (baseLinear.InFeatures + baseLinear.OutFeatures);
+
     /// <summary>Gets whether the adapter has been merged into the base.</summary>
     public bool IsMerged => merged;
 
