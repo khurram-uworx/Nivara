@@ -54,6 +54,63 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     }
 
     /// <summary>
+    /// Freezes this module and all registered child modules: every leaf parameter
+    /// tensor is rebuilt with gradient tracking disabled (and any accumulated
+    /// gradient cleared), so the module no longer participates in backward
+    /// accumulation. Used to keep base weights constant during adapter (e.g. LoRA)
+    /// training.
+    /// </summary>
+    public void Freeze() => SetRequiresGrad(false);
+
+    /// <summary>
+    /// Re-enables gradient tracking for this module and all registered child
+    /// modules by rebuilding every leaf parameter tensor with
+    /// <c>requiresGrad = true</c>.
+    /// </summary>
+    public void Unfreeze() => SetRequiresGrad(true);
+
+    /// <summary>
+    /// Sets whether gradient tracking is enabled for this module and all
+    /// registered child modules by rebuilding every leaf parameter tensor
+    /// accordingly.
+    /// </summary>
+    /// <param name="requiresGrad">Whether gradients should be tracked.</param>
+    public void SetRequiresGrad(bool requiresGrad)
+    {
+        foreach (var param in parameters.ToArray())
+            SetParameterRequiresGrad(param, requiresGrad);
+
+        foreach (var mixed in mixedParameters.ToArray())
+            SetMixedParameterRequiresGrad(mixed, requiresGrad);
+
+        foreach (var module in modules)
+            module.SetRequiresGrad(requiresGrad);
+    }
+
+    void SetParameterRequiresGrad<TParam>(Parameter<TParam> parameter, bool requiresGrad)
+        where TParam : struct, IFloatingPointIeee754<TParam>
+    {
+        var tensor = parameter.Tensor;
+        var values = new TParam[tensor.Length];
+        tensor.Data.CopyTo(values, TParam.Zero);
+        var data = NivaraColumn<TParam>.Create(values);
+        parameter.Tensor = new ReverseGradTensor<TParam>(data, requiresGrad, tensor.Shape);
+    }
+
+    void SetMixedParameterRequiresGrad(object mixed, bool requiresGrad)
+    {
+        var paramType = mixed.GetType();
+        if (!paramType.IsGenericType || paramType.GetGenericTypeDefinition() != typeof(Parameter<>))
+            return;
+
+        var weightType = paramType.GetGenericArguments()[0];
+        var method = typeof(Module<T>).GetMethod(
+                nameof(SetParameterRequiresGrad),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .MakeGenericMethod(weightType);
+        method.Invoke(this, new object[] { mixed, requiresGrad });
+    }
+    /// <summary>
     /// Registers child modules so their parameters are included in <see cref="Parameters()"/>,
     /// <see cref="GetParameters()"/>, <see cref="StateDict"/>, and <see cref="Train"/> / <see cref="Eval"/>.
     /// </summary>
