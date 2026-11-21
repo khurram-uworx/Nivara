@@ -407,15 +407,17 @@ on-disk dtypes to `T` at load.
 - ModernBERT / MiniLM / DistilBERT are F32 on disk, so "native" == F32. No
   default change; already honest.
 - Vision models are F32 + int64; no narrow path exists, and
-  `--silk --precision fp16` is rejected.
+  `--silk --precision fp16` is rejected for them (and for smollm/qwen). It is supported on Silk for
+  minilm, distilbert, distilbert_sst, modernbert and laya.
 - Pure-Half compute (`Laya.Run<Half,Half>`) stays an opt-in `--precision fp16`;
   do not make it the default. The memory win comes from storage, not compute,
   and F32 compute is far better.
 - Do not refactor Laya/ModernBERT to per-tensor mixed storage dtypes; the single
   `TWeight` suffices because Laya's checkpoint is effectively uniform F16.
 - Laya native runs on Silk via the F16 device path (`GpuSeamFactories.LayaFp16`,
-  #1225); pure `--precision fp16` (Half/Half compute) is still rejected on Silk
-  and stays F32/bf16 widened. Laya's single F32 `temperature` scalar is narrowed
+  #1225); `--precision fp16` now also runs the native fp16 device path on Silk for laya (and the
+  other four BERT-family models), while pure Half/Half compute stays CPU-only. Laya's single F32
+  `temperature` scalar is narrowed
   to `Half` on the native path and re-widened in `LayaDecisionHead`
   (documented in `docs/LAYA.md`).
 - NivaraChat's Laya decision engine stays F32 (`float,float`) because adaptive

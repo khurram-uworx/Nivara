@@ -372,12 +372,13 @@ the vision models expose their own mode sets (see §14); the BERT-family models 
 (tokEmb/tied LM head for SmolLM/Qwen; the QKV, FFN and tokEmb matrices for ModernBERT and Laya) as
 BF16 and widens in-register; activations stay f32. On the Silk device path native and explicit
 `--precision bf16` are the same run for SmolLM/Qwen. MiniLM/DistilBERT/DistilBERT+SST-2 still widen
-BF16 to f32 before upload. `--precision fp16` is rejected at the sample CLI (measured 0.97–1.07×
-vs f32): use bf16 or drop `--silk`. Laya's default is now native (F16 storage, F32 compute) on CPU
-and on the Silk device path: `laya --silk` with default/native precision stores weights as F16 on
-the device and widens in-register (issue #1225); an explicit `--precision bf16` keeps the BF16 Silk
-path, and `--precision f32` runs the F32 device path. `--silk --precision fp16` stays rejected
-(pure-Half compute remains CPU-only).
+BF16 to f32 before upload. On Silk, `--precision fp16` now runs a native fp16 device path for
+minilm, distilbert, distilbert_sst, modernbert and laya (Half storage/compute on device); it
+remains rejected for smollm/qwen (Half range) and the vision models (no narrow path). Laya's
+default is now native (F16 storage, F32 compute) on CPU and on the Silk device path: `laya --silk`
+with default/native precision stores weights as F16 on the device and widens in-register (issue
+#1225); an explicit `--precision bf16` keeps the BF16 Silk path, and `--precision f32` runs the
+F32 device path. `--silk --precision fp16` is supported for laya (native fp16 device path).
 
 **Bottom line for fine-tuning (issue #1003):** on the integrated Intel Graphics the Silk path is
 **6.2-8.6x faster than the CPU reverse-mode path** at B=2/4/8, L=128, even at the
@@ -736,8 +737,9 @@ per classifier, and the CPU-layout round trip exact.
 - **Precision**: `--silk --precision bf16` is supported. Selected weights stay bf16 on device
   (tokEmb/tied LM head for SmolLM and Qwen; QKV/FFN/tokEmb matrices for ModernBERT and Laya) with
   in-register widening and f32 activations; MiniLM/DistilBERT/DistilBERT+SST-2 widen bf16 to f32
-  before upload. `--silk --precision fp16` is rejected — bf16 is preferred, there is no measured
-  speedup at current shapes (0.97–1.07× vs f32); use bf16 or drop --silk. F32 remains the default.
+  before upload. `--silk --precision fp16` runs a native fp16 device path for minilm, distilbert,
+  distilbert_sst, modernbert and laya (Half storage/compute on device); it is rejected for
+  smollm/qwen (Half range) and the vision models (no narrow path). F32 remains the default.
 - **`--gpu` / `--ilgpu` are rejected, not aliased** to the removed backend, so an old invocation fails
   loudly: neither is a flag any more, so the token falls through to the positional mode slot and the
   mode allow-list refuses it.
