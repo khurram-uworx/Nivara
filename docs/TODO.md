@@ -149,7 +149,7 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 ## GitHub issues log
 
 - [ ] #1414 — Plan/grounding: reshape `docs/plan/LORA.md` for Qwen2.5-0.5B Silk FT headline
-- [ ] #1415 — Reconcile untracked ft-data artifacts
+- [x] #1415 — Reconcile untracked ft-data artifacts (removed untracked `FtDataBuilder.cs`/`FtDataModels.cs`; doc-QA oriented, no references, conflicts with behavioral SFT pivot)
 - [ ] #1416 — Behavioral worklog SFT dataset and deterministic generator
 - [ ] #1417 — Generic Llama-family CPU SFT trainer (Qwen headline, SmolLM verify)
 - [ ] #1418 — Silk iGPU causal-LM LoRA training with CPU/Silk parity (D2a)
