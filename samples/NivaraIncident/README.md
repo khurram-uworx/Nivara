@@ -50,6 +50,9 @@ dotnet run --project samples/NivaraIncident -c Release -- analyze --benchmark --
 # Analyze with Silk acceleration
 dotnet run --project samples/NivaraIncident -c Release -- analyze --dataset ./samples/data/incident-lab --scenario A --silk
 
+# Run Streamix scenarios with OpenBLAS (online AutoDiff path)
+dotnet run --project samples/NivaraIncident -c Release -- streamix --dataset ./samples/data/incident-lab --scenario A --blas --threads 2
+
 # Run analyses with chunked streaming output
 dotnet run --project samples/NivaraIncident -- analyze --dataset ./samples/data/incident-lab --scenario A --stream --chunk-size 50000
 
@@ -78,7 +81,9 @@ dotnet run --project samples/NivaraIncident -- streamix --dataset ./samples/data
 | `bench-kernels` | - | Kernel vectorization visibility report (standalone mode) |
 | `streamix` | - | Run Streamix streaming scenarios (fault-tolerant, windowed, AutoDiff) |
 | `--silk` | - | Run Grouped Aggregation on Silk/OpenCL (F32; fails loudly if no OpenCL device) |
-
+| `--blas` | - | Register the OpenBLAS GEMM/GEMV provider (opt-in, streamix only). Default off; managed path remains fallback. |
+| `--threads <N>` | `1` | Nivara row-block count for `--blas` (only valid with `--blas`). |
+| `--blas-threads <N>` | `1` | OpenBLAS pool size (`openblas_set_num_threads`) for `--blas` (only valid with `--blas`). |
 ## What it exercises
 
 - **Typed expression execution** — `Filter`/`Select`/`Sort` via `ColumnExpressions.Col`/`Lit`, fused into kernel passes by the ADR-004 expression engine.
@@ -268,6 +273,34 @@ evaluation of an automatic/conditional offload mode; constants are first-pass pl
 and must be recalibrated against measured Silk timings before use.
 
 ---
+
+## BLAS (OpenBLAS) acceleration
+
+`--blas` is opt-in and applies only to the `streamix` command's online AutoDiff path
+(`Linear`/`Adam`), not the analytics pipeline. It registers the OpenBLAS GEMM/GEMV
+provider process-wide for that run; the managed path remains the default and bit-identical
+fallback. Requires `lib/libopenblas.dll` at the repo root.
+
+### Availability and status
+
+Parity with `NivaraInference` (`--blas`, `--threads`, `--blas-threads`, default 1).
+Probe numbers (from `tests/Nivara.SimdProbe -- blas`, `managed/blas` ratio):
+
+| Shape | M | K | N | Ratio |
+|---|---:|---:|---:|---:|
+| square-256 | 256 | 256 | 256 | 18.56x |
+| tall-1024x64 | 1024 | 1024 | 64 | 2.81x |
+| batched-8x768 | 8 | 768 | 768 | 0.61x |
+| hidden-768 (GEMV) | - | 768 | 768 | 1.87x |
+| hidden-4096 (GEMV) | - | 4096 | 4096 | 1.03x |
+
+BLAS wins on larger square/tall GEMM and most GEMV, but loses on small-batch
+(`batched-8x768`: 0.61x) and is within noise on `hidden-4096` (1.03x). Online
+learning here uses small batches (batch size 128), the regime where BLAS does not help,
+so it stays opt-in.
+
+Policy: `--blas` is the user's choice. If requested, the provider is registered even
+when CPU is faster. The managed path remains the default.
 
 ## Performance
 
