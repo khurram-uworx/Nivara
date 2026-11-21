@@ -212,34 +212,6 @@ public static class Qwen
     static readonly int[] EvalGold = [1, 0, 1, 0, 1, 0, 1, 0];
 
     // ----------------------------------------------------------------------------------
-    // Model / tokenizer loading (shared by all sub-modes)
-    // ----------------------------------------------------------------------------------
-
-    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadModel<TModel, TWeight>(
-        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir)
-        where TModel : struct, IFloatingPointIeee754<TModel>
-        where TWeight : struct, IFloatingPointIeee754<TWeight>
-    {
-        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
-        var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
-        return (model, config, tokenizer);
-    }
-
-    /// <summary>Config + tokenizer without materializing a CPU model. The Silk distill path hands
-    /// the host tensors straight to the device and never builds one, which keeps a second ~1.9 GB
-    /// copy of the weights out of the process.</summary>
-    static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadConfigAndTokenizer(string modelDir)
-    {
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"),
-            Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<|endoftext|>",
-            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
-        return (config, tokenizer);
-    }
-
-    // ----------------------------------------------------------------------------------
     // Synthetic weights (--synthetic-weights): Qwen2.5-0.5B-shaped random tensors so the
     // benchmark runs without the ~2 GB checkpoint. Timing is shape-driven; the values are
     // deterministic pseudo-random near zero to keep activations finite.
@@ -446,12 +418,7 @@ public static class Qwen
         Console.WriteLine($"Device: GPU (Silk)  Precision: {prec}  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
 
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"),
-            Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<|endoftext|>",
-            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         using var session = SilkQwenSession.Open(ToSilkConfig(config), (dynamic)tensors);
@@ -516,12 +483,7 @@ public static class Qwen
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) -- Silk ===");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"),
-            Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<|endoftext|>",
-            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
@@ -546,12 +508,7 @@ public static class Qwen
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"),
-            Path.Combine(modelDir, "merges.txt"),
-            unkToken: "<|endoftext|>",
-            tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
         var prompt = QwenChatTemplate.RenderPlain(PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
 
@@ -683,7 +640,7 @@ public static class Qwen
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
 
-        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
+        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, vocab={config.VocabSize}");
         Console.WriteLine();
@@ -810,7 +767,7 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark ===");
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
-        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
+        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
 
         string toolJson = QwenChatTemplate.ToolJson(
             WeatherToolName, WeatherToolDesc, [("city", "string", CityParamDesc, true)]);
@@ -830,7 +787,7 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain-prompt KV-cache decode benchmark ===");
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
-        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
+        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
 
         var promptIds = tokenizer.Encode(QwenChatTemplate.RenderPlain(PlainPrompt));
         return NarrowWidenScope<TModel>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens, "the plain prompt"));
@@ -845,7 +802,7 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) ===");
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
-        var (model, config, tokenizer) = LoadModel<TModel, TWeight>(tensors, modelDir);
+        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
 
         var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
@@ -986,7 +943,7 @@ public static class Qwen
         int seed)
     {
         PrintDistillHeader($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
-        var (model, config, tokenizer) = LoadModel<float, float>(tensors, modelDir);
+        var (model, config, tokenizer) = LlamaLoader.LoadModel<float, float>(tensors, modelDir);
         return RunDistillCore(config, modelDir, teacherExamples, force, seed,
             sentence => RunTeacherClassify(model, config, tokenizer, sentence));
     }
@@ -1005,7 +962,7 @@ public static class Qwen
         string prec = typeof(T) == typeof(BFloat16) ? "BFloat16" : "F32";
         PrintDistillHeader($"Device: GPU (Silk)  Precision: {prec} (BF16-upcast)  KV cache: on");
 
-        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir);
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         using var session = SilkQwenSession.Open(ToSilkConfig(config), (dynamic)tensors);
         buildSw.Stop();

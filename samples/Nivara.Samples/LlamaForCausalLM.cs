@@ -591,6 +591,108 @@ public static class LlamaLoader
         model.Eval();
         return model;
     }
+
+    // -----------------------------------------------------------------------
+    // Config + tokenizer loading helpers (shared by SmolLM and Qwen)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Reads <c>config.json</c> from <paramref name="modelDir"/> and builds the matching
+    /// <see cref="Gpt2BpeTokenizer"/>. Qwen checkpoints need their added tokens merged from
+    /// <c>tokenizer.json</c>; SmolLM does not. When <paramref name="qwen"/> is null the
+    /// choice is inferred from the directory name / config (rope theta, vocab size).
+    /// </summary>
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadConfigAndTokenizer(
+        string modelDir, bool? qwen = null)
+    {
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        bool isQwen = qwen ?? IsQwenModel(modelDir, config);
+
+        string vocabPath = Path.Combine(modelDir, "vocab.json");
+        string mergesPath = Path.Combine(modelDir, "merges.txt");
+        if (isQwen)
+        {
+            var tokenizer = new Gpt2BpeTokenizer(
+                vocabPath,
+                mergesPath,
+                unkToken: " péri",
+                tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
+            return (config, tokenizer);
+        }
+        var smolTokenizer = new Gpt2BpeTokenizer(vocabPath, mergesPath);
+        return (config, smolTokenizer);
+    }
+
+    /// <summary>SmolLM-specific config + tokenizer loading (no added-token merge).</summary>
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadSmolLMConfigAndTokenizer(string modelDir)
+        => LoadConfigAndTokenizer(modelDir, false);
+
+    /// <summary>Qwen-specific config + tokenizer loading (merges added tokens from tokenizer.json).</summary>
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadQwenConfigAndTokenizer(string modelDir)
+        => LoadConfigAndTokenizer(modelDir, true);
+
+    /// <summary>
+    /// Loads a model directory into a <see cref="LlamaForCausalLM{TModel,TWeight}"/> together
+    /// with its <see cref="LlamaConfig"/> and <see cref="Gpt2BpeTokenizer"/>. Reads
+    /// <c>model.safetensors</c> from <paramref name="modelDir"/> as <typeparamref name="TWeight"/>.
+    /// </summary>
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir, qwen);
+        var tensors = SafeTensorsLoader.Read<TWeight>(Path.Combine(modelDir, "model.safetensors"));
+        var model = Load<TModel, TWeight>(config, tensors);
+        return (model, config, tokenizer);
+    }
+
+    /// <summary>Compat overload accepting pre-read tensors (avoids a second safetensors parse).</summary>
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadModel<TModel, TWeight>(
+            Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+            string modelDir,
+            bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        var (config, tokenizer) = LoadConfigAndTokenizer(modelDir, qwen);
+        var model = Load<TModel, TWeight>(config, tensors);
+        return (model, config, tokenizer);
+    }
+
+    /// <summary>SmolLM-specific model-directory loader.</summary>
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadSmolLM<TModel, TWeight>(string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LoadModel<TModel, TWeight>(modelDir, false);
+
+    /// <summary>Qwen-specific model-directory loader.</summary>
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadQwen<TModel, TWeight>(string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LoadModel<TModel, TWeight>(modelDir, true);
+
+    /// <summary>
+    /// Convenience overload: <c>Load(modelDir)</c> returns the model/config/tokenizer tuple.
+    /// </summary>
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        Load<TModel, TWeight>(string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LoadModel<TModel, TWeight>(modelDir, qwen);
+
+    static bool IsQwenModel(string modelDir, LlamaConfig config)
+    {
+        var name = Path.GetFileName(modelDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            .ToLowerInvariant();
+        if (name.Contains("qwen")) return true;
+        if (config.RopeTheta >= 100000f) return true;
+        if (config.VocabSize >= 100000) return true;
+        return false;
+    }
 }
 
 /// <summary>
@@ -611,5 +713,68 @@ public interface LLamaConfigLike
     float RopeTheta { get; }
     bool TieWordEmbeddings { get; }
     bool AttentionBias { get; }
+}
+
+/// <summary>
+/// Alias for <see cref="LlamaLoader"/> for callers that expect a dedicated model-loader type.
+/// </summary>
+public static class LlamaModelLoader
+{
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadConfigAndTokenizer(string modelDir, bool? qwen = null)
+        => LlamaLoader.LoadConfigAndTokenizer(modelDir, qwen);
+
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadSmolLMConfigAndTokenizer(string modelDir)
+        => LlamaLoader.LoadSmolLMConfigAndTokenizer(modelDir);
+
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadQwenConfigAndTokenizer(string modelDir)
+        => LlamaLoader.LoadQwenConfigAndTokenizer(modelDir);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.LoadModel<TModel, TWeight>(modelDir, qwen);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadModel<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir, qwen);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadSmolLM<TModel, TWeight>(string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.LoadSmolLM<TModel, TWeight>(modelDir);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadQwen<TModel, TWeight>(string modelDir)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.LoadQwen<TModel, TWeight>(modelDir);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        Load<TModel, TWeight>(string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.Load<TModel, TWeight>(modelDir, qwen);
+}
+
+public static class CausalLmLoader
+{
+    public static (LlamaConfig Config, Gpt2BpeTokenizer Tokenizer) LoadConfigAndTokenizer(string modelDir, bool? qwen = null)
+        => LlamaLoader.LoadConfigAndTokenizer(modelDir, qwen);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        LoadModel<TModel, TWeight>(string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.LoadModel<TModel, TWeight>(modelDir, qwen);
+
+    public static (LlamaForCausalLM<TModel, TWeight> Model, LlamaConfig Config, Gpt2BpeTokenizer Tokenizer)
+        Load<TModel, TWeight>(string modelDir, bool? qwen = null)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+        => LlamaLoader.Load<TModel, TWeight>(modelDir, qwen);
 }
 

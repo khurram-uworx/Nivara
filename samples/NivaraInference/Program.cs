@@ -3765,7 +3765,7 @@ class Program
     {
         Console.WriteLine("=== SmolLM-135M Causal LM (F32, Silk) ===");
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
@@ -3776,8 +3776,6 @@ class Program
                           $"intermediate={config.IntermediateSize}");
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         ConsumeGeneratedSilk(session, modelDir, tokenizer, config, "F32");
         return 0;
     }
@@ -3786,7 +3784,7 @@ class Program
     {
         Console.WriteLine("=== SmolLM-135M Causal LM (BFloat16, Silk) ===");
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
@@ -3797,8 +3795,6 @@ class Program
                           $"intermediate={config.IntermediateSize}");
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         ConsumeGeneratedSilk(session, modelDir, tokenizer, config, "BFloat16");
         return 0;
     }
@@ -3869,7 +3865,7 @@ class Program
     {
         Console.WriteLine("=== SmolLM-135M Benchmark (F32, Silk) ===");
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
@@ -3878,8 +3874,6 @@ class Program
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         const string Prompt = "The capital of France is";
         var promptIds = tokenizer.Encode(Prompt);
         const int MaxNewTokens = 32;
@@ -3908,7 +3902,7 @@ class Program
     {
         Console.WriteLine("=== SmolLM-135M Benchmark (BFloat16, Silk) ===");
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         using var session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
@@ -3917,8 +3911,6 @@ class Program
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         const string Prompt = "The capital of France is";
         var promptIds = tokenizer.Encode(Prompt);
         const int MaxNewTokens = 32;
@@ -3961,7 +3953,7 @@ class Program
         Console.WriteLine();
 
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
@@ -3975,8 +3967,6 @@ class Program
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
         Console.WriteLine();
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         const string Prompt = "The capital of France is";
         var promptIds = tokenizer.Encode(Prompt);
         const int MaxNewTokens = 32;
@@ -4024,7 +4014,7 @@ class Program
         Console.WriteLine();
 
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<T, T>(config, tensors);
@@ -4038,8 +4028,6 @@ class Program
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
         Console.WriteLine();
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         const string Prompt = "The capital of France is";
         var promptIds = tokenizer.Encode(Prompt);
         const int MaxNewTokens = 32;
@@ -4152,7 +4140,7 @@ class Program
         Console.WriteLine();
 
         var modelDir = Path.Combine("samples", "data", "smollm-135m");
-        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
@@ -4169,8 +4157,6 @@ class Program
         Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
         Console.WriteLine();
 
-        var tokenizer = new Gpt2BpeTokenizer(
-            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
         ConsumeGenerated(model, modelDir, tokenizer, config, precisionName);
     }
 
