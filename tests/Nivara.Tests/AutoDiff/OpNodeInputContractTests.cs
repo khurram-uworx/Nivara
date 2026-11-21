@@ -658,6 +658,14 @@ public class OpNodeInputContractTests
             return new ModuleRowContext(input, output, [module.Weight!.Tensor, module.Bias!.Tensor]);
         });
 
+        yield return new ModuleRow("LoRALinear", () =>
+        {
+            var module = new LoRALinear<float>(inFeatures: 4, outFeatures: 3, r: 2);
+            var input = Mat2D(Rand(8, 3091), 2, 4, requiresGrad: true);
+            var output = module.Forward(input);
+            return new ModuleRowContext(input, output, [module.A.Tensor, module.B.Tensor]);
+        });
+
         // Embedding and SparseEmbedding consume their input as integer selectors via
         // int.CreateChecked, so the input is a non-differentiable constant and correctly
         // never enters the graph. Requires-grad on it is a caller error, not a contract
