@@ -310,6 +310,25 @@ public class LoRALinearTests
     }
 
     [Test]
+    public void LoRALinear_AdapterSerializer_Load_RejectsMismatchedAlpha()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(lora, path, "qwen2.5-0.5b-instruct");
+
+            using var mismatchedAlpha = new LoRALinear<float>(4, 3, r: 2, alpha: 8f);
+            Assert.That(() => LoraAdapterSerializer.Load(mismatchedAlpha, path, "qwen2.5-0.5b-instruct"),
+                Throws.InvalidOperationException);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
     public void LoRALinear_AdapterSerializer_Load_RejectsUnsupportedFormat()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");

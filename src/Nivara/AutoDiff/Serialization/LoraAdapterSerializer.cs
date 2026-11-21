@@ -101,7 +101,7 @@ public static class LoraAdapterSerializer
     /// <param name="expectedTargets">The adapter target names the loaded adapter must serve.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="lora"/>, <paramref name="path"/>, or <paramref name="expectedBaseModelId"/> is null or blank.</exception>
     /// <exception cref="FileNotFoundException">Thrown when the adapter file does not exist.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the format, rank, base model, or shapes are incompatible.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the format, rank, alpha, base model, or shapes are incompatible.</exception>
     public static void Load<T>(
         LoRALinear<T> lora,
         string path,
@@ -110,7 +110,7 @@ public static class LoraAdapterSerializer
         where T : struct, IFloatingPointIeee754<T>
     {
         var file = ReadAdapterFile(path);
-        ValidateAdapterFile(lora.Rank, file, expectedBaseModelId, expectedTargets);
+        ValidateAdapterFile(lora.Rank, file, GetDouble(lora.Alpha), expectedBaseModelId, expectedTargets);
         LoadAdapter(lora.A, lora.B, lora.Base.InFeatures, lora.Base.OutFeatures, lora.Rank, file);
     }
 
@@ -125,7 +125,7 @@ public static class LoraAdapterSerializer
     /// <param name="expectedTargets">The adapter target names the loaded adapter must serve.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="lora"/>, <paramref name="path"/>, or <paramref name="expectedBaseModelId"/> is null or blank.</exception>
     /// <exception cref="FileNotFoundException">Thrown when the adapter file does not exist.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the format, rank, base model, or shapes are incompatible.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the format, rank, alpha, base model, or shapes are incompatible.</exception>
     public static void Load<TModel, TWeight>(
         LoRALinear<TModel, TWeight> lora,
         string path,
@@ -135,7 +135,7 @@ public static class LoraAdapterSerializer
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         var file = ReadAdapterFile(path);
-        ValidateAdapterFile(lora.Rank, file, expectedBaseModelId, expectedTargets);
+        ValidateAdapterFile(lora.Rank, file, GetDouble(lora.Alpha), expectedBaseModelId, expectedTargets);
         LoadAdapter(lora.A, lora.B, lora.Base.InFeatures, lora.Base.OutFeatures, lora.Rank, file);
     }
 
@@ -177,6 +177,7 @@ public static class LoraAdapterSerializer
     static void ValidateAdapterFile(
         int rank,
         LoraAdapterFile file,
+        double expectedAlpha,
         string expectedBaseModelId,
         IReadOnlyList<string>? expectedTargets)
     {
@@ -191,6 +192,10 @@ public static class LoraAdapterSerializer
         if (file.Rank != rank)
             throw new InvalidOperationException(
                 $"Cannot load LoRA adapter with rank {file.Rank}: adapter rank does not match the target rank {rank}.");
+
+        if (file.Alpha != expectedAlpha)
+            throw new InvalidOperationException(
+                $"Cannot load LoRA adapter with alpha {file.Alpha}: adapter alpha does not match the target alpha {expectedAlpha}.");
 
         if (expectedTargets is not null && !expectedTargets.SequenceEqual(file.Targets ?? []))
             throw new InvalidOperationException(
