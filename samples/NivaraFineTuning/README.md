@@ -135,6 +135,9 @@ Trains for 3 epochs with AdamW (lr=2e-5, weight_decay=0.01), reports per-epoch t
 ```bash
 # Quick smoke test (1 epoch, batch size 2)
 dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2
+
+# BF16 fine-tune (CPU)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --precision bf16 --epochs 1 --batch-size 2 --max-examples 25
 ```
 
 ### Evaluate
@@ -166,9 +169,12 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval --silk
 dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict --silk
 ```
 
-`--silk` defaults to F32; `--precision bf16` is supported via on-device widening, while
-`--precision fp16` is rejected (bf16 preferred: no measured speedup at current shapes). A device is required in every mode; the run exits with status 1 when
-OpenCL is unavailable (no CPU fallback). Use the same command without `--silk` for the CPU path.
+`--silk` defaults to F32. `--precision bf16` runs the true BF16 lane: on Silk it uses
+`SilkDistilBertTrainer.CreateTrueBf16` (BF16 matmul weights on device, F32 activations/AdamW
+moments) and exports an F32 checkpoint; on CPU it trains `DistilBertForSequenceClassification<BFloat16>`
+through AutoDiff. `--precision fp16` is rejected (use bf16). A device is required in every
+`--silk` mode; the run exits with status 1 when OpenCL is unavailable (no CPU fallback). Use the
+same command without `--silk` for the CPU path.
 
 ### Custom options
 
