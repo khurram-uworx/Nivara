@@ -78,7 +78,7 @@ internal sealed class SilkQwenChatClient : CausalLmChatClientBase, IDisposable
     }
 
     protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
-        => QwenChatTemplate.Render(messages, addGenerationPrompt: true);
+        => Nivara.Samples.QwenChatTemplate.Render(messages, addGenerationPrompt: true);
 
     protected override IReadOnlyList<int> Encode(string prompt)
         => tokenizeCache.Encode(prompt, p => tokenizer.Encode(p));
@@ -94,7 +94,7 @@ internal sealed class SilkQwenChatClient : CausalLmChatClientBase, IDisposable
         Cached: (t, p) => LastVocab(session.ForwardCached(t, p)),
         LastLogits: w => LastVocab(session.Forward(w)),
         ResetCache: session.ResetCache,
-        IsStopToken: id => QwenIds.StopIds.Contains(id),
+        IsStopToken: id => Nivara.Samples.QwenIds.StopIds.Contains(id),
         VocabSize: config.VocabSize,
         EosTokenId: config.EosTokenId,
         MaxSequenceLength: config.MaxPositionEmbeddings);

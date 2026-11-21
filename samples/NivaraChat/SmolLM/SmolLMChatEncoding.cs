@@ -1,4 +1,5 @@
 using Nivara.AI;
+using Nivara.Samples;
 
 namespace NivaraChat.SmolLM;
 
@@ -9,8 +10,8 @@ public static class SmolLMChatEncoding
 {
     public static readonly string[] SpecialTokens =
     [
-        SmollmChatTemplate.ImStart,
-        SmollmChatTemplate.ImEnd,
+        Nivara.Samples.SmollmChatTemplate.ImStart,
+        Nivara.Samples.SmollmChatTemplate.ImEnd,
         "<​|endoftext|>",
     ];
 

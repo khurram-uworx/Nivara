@@ -1,7 +1,7 @@
 using Microsoft.Extensions.AI;
 using System.Text;
 
-namespace NivaraChat.SmolLM;
+namespace Nivara.Samples;
 
 /// <summary>
 /// Renders an <c>Microsoft.Extensions.AI</c> conversation into the Hermes ChatML format used by
@@ -9,7 +9,7 @@ namespace NivaraChat.SmolLM;
 /// optional trailing <c>&lt;|im_start|&gt;assistant\n</c> generation prompt. Plain-chat only in
 /// Stage A (no tool-call/result content is emitted).
 /// </summary>
-internal static class SmollmChatTemplate
+public static class SmollmChatTemplate
 {
     public const string ImStart = "<|im_start|>";
     public const string ImEnd = "<|im_end|>";

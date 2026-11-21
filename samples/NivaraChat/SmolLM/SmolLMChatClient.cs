@@ -17,8 +17,8 @@ internal sealed class SmolLMChatClient<TModel, TWeight> : CausalLmChatClientBase
 {
     static readonly string[] SpecialTokens =
     [
-        SmollmChatTemplate.ImStart,
-        SmollmChatTemplate.ImEnd,
+        Nivara.Samples.SmollmChatTemplate.ImStart,
+        Nivara.Samples.SmollmChatTemplate.ImEnd,
         "<|endoftext|>",
     ];
 
@@ -58,7 +58,7 @@ internal sealed class SmolLMChatClient<TModel, TWeight> : CausalLmChatClientBase
     public int TokenizeCacheHits => tokenizeCache.Hits;
 
     protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
-        => SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
+        => Nivara.Samples.SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
 
     protected override IReadOnlyList<int> Encode(string prompt)
         => tokenizeCache.Encode(prompt, p => EncodePrompt(p));

@@ -42,7 +42,7 @@ internal sealed class SilkSmolLMChatClient : CausalLmChatClientBase
     public override void Dispose() => session.Dispose();
 
     protected override string RenderPrompt(IEnumerable<ChatMessage> messages)
-        => SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
+        => Nivara.Samples.SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
 
     protected override IReadOnlyList<int> Encode(string prompt)
         => tokenizeCache.Encode(prompt, p => SmolLMChatEncoding.EncodePrompt(tokenizer, p));
