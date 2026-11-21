@@ -237,14 +237,20 @@ stay on CPU unless a kernel has been individually prototyped and shown profitabl
 
 ### Availability and status
 
-| Kernel / capability | Wired into `--silk`? | Measured CPU vs Silk | Notes |
-|---|---:|---|---|
-| `grouped_hash_reduce_partial` | Yes — Grouped Aggregation | 10k: 32.5 vs 38.4 ms (1.18x, slower); 100k: 236.3 vs 247.9 ms (1.05x, slower); 1M: 1533.2 vs 1474.6 ms (0.96x, ~4% faster) | Wired at all scales; remains an opt-in experiment |
-| `grouped_multistat_reduce_partial` | No (staged) | 100k: 0.28 vs 1.19 ms (4.258x, slower) | Count/errors/sum/squares/min/max in one pass |
-| `rolling_mean` | No (staged) | 100k: 0.47 vs 7.75 ms (16.426x, slower) | Strided sliding-window mean |
-| `rolling_max` | No (staged) | 100k: 0.65 vs 6.00 ms (9.268x, slower) | Strided sliding-window max |
-| `rolling_min` | No (staged) | 100k: 0.40 vs 5.39 ms (13.457x, slower) | Strided sliding-window min |
-| `percent_rank` | No (stays CPU) | n/a (not prototyped) | Partition-local ordering required; no OpenCL sort primitive; see issue #1038 |
+Measured on the shared iGPU (`Intel(R) Graphics`), .NET 11, Release; rows are legacy single-pass
+captures (convention not recorded in the original capture) unless noted. CPU = managed Nivara path,
+Silk = OpenCL path.
+
+| Kernel / capability | Wired into `--silk`? | Scale | CPU (ms) | Silk (ms) | Ratio (Silk/CPU) | Verdict | Notes |
+|---|---:|---:|---:|---:|---:|---|---|
+| `grouped_hash_reduce_partial` | Yes — Grouped Aggregation | 10k | 32.5 | 38.4 | 1.18x | slower | Wired at all scales; remains an opt-in experiment |
+| `grouped_hash_reduce_partial` | Yes — Grouped Aggregation | 100k | 236.3 | 247.9 | 1.05x | slower | |
+| `grouped_hash_reduce_partial` | Yes — Grouped Aggregation | 1M | 1533.2 | 1474.6 | 0.96x | ~4% faster | |
+| `grouped_multistat_reduce_partial` | No (staged) | 100k | 0.28 | 1.19 | 4.258x | slower | Count/errors/sum/squares/min/max in one pass |
+| `rolling_mean` | No (staged) | 100k | 0.47 | 7.75 | 16.426x | slower | Strided sliding-window mean |
+| `rolling_max` | No (staged) | 100k | 0.65 | 6.00 | 9.268x | slower | Strided sliding-window max |
+| `rolling_min` | No (staged) | 100k | 0.40 | 5.39 | 13.457x | slower | Strided sliding-window min |
+| `percent_rank` | No (stays CPU) | — | — | — | — | n/a | Partition-local ordering required; no OpenCL sort primitive; see issue #1038 |
 
 **Percent rank (issue #1038).** `AnalyzeRegionalPartitioning` uses `PercentRank` partitioned by
 region, but it is deliberately **not** prototyped as a Silk kernel and stays on CPU. Unlike the
@@ -284,15 +290,19 @@ fallback. Requires `lib/libopenblas.dll` at the repo root.
 ### Availability and status
 
 Parity with `NivaraInference` (`--blas`, `--threads`, `--blas-threads`, default 1).
-Probe numbers (from `tests/Nivara.SimdProbe -- blas`, `managed/blas` ratio):
+Probe numbers (from `tests/Nivara.SimdProbe -- blas`, `managed/blas` ratio): 5 untimed warmups per leg,
+then 20 interleaved A/B rounds alternating which leg is measured first, median (and min) ms,
+correctness gate `maxAbs <= 1e-3`. Haswell-class, OpenBLAS 0.3.34, .NET 11, Release.
 
-| Shape | M | K | N | Ratio |
-|---|---:|---:|---:|---:|
-| square-256 | 256 | 256 | 256 | 18.56x |
-| tall-1024x64 | 1024 | 1024 | 64 | 2.81x |
-| batched-8x768 | 8 | 768 | 768 | 0.61x |
-| hidden-768 (GEMV) | - | 768 | 768 | 1.87x |
-| hidden-4096 (GEMV) | - | 4096 | 4096 | 1.03x |
+| Shape | M | K | N | managed (ms) | blas (ms) | ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| square-256 | 256 | 256 | 256 | 12.76 | 0.69 | 18.56x |
+| square-512 | 512 | 512 | 512 | 4.04 | 2.18 | 1.85x |
+| tall-1024x64 | 1024 | 1024 | 64 | 2.89 | 1.03 | 2.81x |
+| batched-8x768 | 8 | 768 | 768 | 1.09 | 1.78 | 0.61x |
+| hidden-768 (GEMV) | - | 768 | 768 | 0.11 | 0.06 | 1.87x |
+| hidden-4096 (GEMV) | - | 4096 | 4096 | 3.56 | 3.47 | 1.03x |
+| vocab-768x30522 (GEMV) | - | 768 | 30522 | 8.27 | 6.36 | 1.30x |
 
 BLAS wins on larger square/tall GEMM and most GEMV, but loses on small-batch
 (`batched-8x768`: 0.61x) and is within noise on `hidden-4096` (1.03x). Online
@@ -302,7 +312,29 @@ so it stays opt-in.
 Policy: `--blas` is the user's choice. If requested, the provider is registered even
 when CPU is faster. The managed path remains the default.
 
+## CPU / Silk / BLAS comparison
+
+Where a backend is not applicable to a workload it is marked `n/a` rather than omitted, so the
+three options stay side by side.
+
+| Workload | CPU | Silk | BLAS | Notes |
+|---|---:|---:|---:|---|
+| Grouped Aggregation (10k) | 32.5 ms | 38.4 ms | n/a (analytics only) | Silk ~1.18x slower; opt-in |
+| Grouped Aggregation (100k) | 236.3 ms | 247.9 ms | n/a (analytics only) | Silk ~1.05x slower; opt-in |
+| Grouped Aggregation (1M) | 1533.2 ms | 1474.6 ms | n/a (analytics only) | Silk ~0.96x (~4% faster) |
+| Rolling kernels (100k) | 0.40–0.65 ms | 5.39–7.75 ms | n/a | 9–16x slower on the iGPU; not wired |
+| Online AutoDiff learning (streamix, batch 128) | not captured | n/a (not wired) | not captured | BLAS opt-in; small-batch regime, no measured win |
+
 ## Performance
+
+### Reporting convention
+
+All captures in this document are **single-pass** (`--benchmark --iterations 1`) or **no-warmup**
+(single `perf_counter`/`Stopwatch` read) unless a table's footer says otherwise; Silk/BLAS rows
+use the pass counts stated next to them. Going forward, new captures should use **1 warmup + 5
+timed passes, median** and record that convention in the footer, on a named machine, so CPU,
+Silk and BLAS rows stay comparable. `--silk` and `--blas` are opt-in; the managed path remains
+the default and is the baseline in every CPU column.
 
 | Metric | Value | Notes |
 |--------|-------|-------|
