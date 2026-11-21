@@ -2,6 +2,15 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
+## [Unreleased]
+
+### Added
+
+- `LoraAdapterSerializer` for adapter-only LoRA persistence: saves/loads trainable `A`/`B`
+  tensors plus versioned metadata (format, type, base model id, rank, alpha, targets) without
+  base weights, validates format/base model/rank/alpha/shapes on load, and rejects merged
+  adapters on save.
+
 ## [1.5.3] - 2026-11-20
 
 ### Added

@@ -258,10 +258,15 @@ public class LoRALinearTests
             Assert.That(version.GetInt32(), Is.EqualTo(1));
 
             var parameters = root.GetProperty("Parameters");
-            Assert.That(parameters.TryGetProperty("A", out var a), Is.True);
-            Assert.That(parameters.TryGetProperty("B", out var b), Is.True);
-            Assert.That(parameters.TryGetProperty("Weight", out _), Is.False);
-            Assert.That(parameters.TryGetProperty("Bias", out _), Is.False);
+            var parameterNames = parameters.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray();
+            Assert.That(parameterNames, Is.EqualTo(new[] { "A", "B" }));
+
+            var a = parameters.GetProperty("A");
+            var b = parameters.GetProperty("B");
+            Assert.That(a.TryGetProperty("Shape", out _), Is.True);
+            Assert.That(a.TryGetProperty("Values", out _), Is.True);
+            Assert.That(b.TryGetProperty("Shape", out _), Is.True);
+            Assert.That(b.TryGetProperty("Values", out _), Is.True);
 
             Assert.That(root.TryGetProperty("Targets", out var targets), Is.True);
         }
