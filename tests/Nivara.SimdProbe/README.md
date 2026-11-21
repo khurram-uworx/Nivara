@@ -32,6 +32,7 @@ dotnet run -c Release --project tests/Nivara.SimdProbe -- transpose    # #136 tr
 dotnet run -c Release --project tests/Nivara.SimdProbe -- tensor-api   # reading one row of a rank-2 Tensor<T> (docs fixes, #528)
 dotnet run -c Release --project tests/Nivara.SimdProbe -- chunked-arrow # per-column Arrow chunk counts (issue #862)
 dotnet run -c Release --project tests/Nivara.SimdProbe -- metrics       # classification counting: hash vs dense/marginal (issue #1067)
+dotnet run -c Release --project tests/Nivara.SimdProbe -- blas          # managed vs OpenBLAS GEMM/GEMV (issue #1382)
 dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
@@ -449,3 +450,41 @@ ADR-001 span-ified design) are `TensorsHelper` (matmul) and `RMSNormKernel`
   chunk-preserving export (#862).
 - `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `scalar` /
   `transpose` / `tensor-api` / `chunked-arrow` / `all`).
+
+## BLAS A/B probe (`blas` mode, issue #1382)
+
+Compares the managed `GradKernels.MatMulTransposedB` path against the OpenBLAS-backed
+path (`NivaraBlas.UseBlas`) for both GEMM (`aRows > 1`) and GEMV (`aRows == 1`),
+across square, tall-skinny, and batched shapes. The BLAS leg uses the hybrid shape
+recommended by `docs/BLAS-MKL.md`: Nivara owns the row parallelism
+(`threadCount = ProcessorCount`), OpenBLAS is called single-threaded per chunk
+(`openBlasThreads = 1`).
+
+Methodology: correctness gate first (`maxAbs(leg - double-precision truth) <= 1e-3`),
+5 untimed warmups per leg, then 20 interleaved A/B rounds alternating which leg is
+measured first, reporting median (and min) milliseconds and the `managed/blas` ratio.
+
+Measured on this machine (Haswell-class, OpenBLAS 0.3.34, .NET 11, Release):
+
+| shape            | M    | K    | N     | managed ms | blas ms | ratio  |
+|------------------|------|------|-------|-----------:|--------:|-------:|
+| square-256       | 256  | 256  | 256   | 12.76      | 0.69    | 18.56x |
+| square-512       | 512  | 512  | 512   | 4.04       | 2.18    | 1.85x  |
+| tall-1024x64     | 1024 | 1024 | 64    | 2.89       | 1.03    | 2.81x  |
+| batched-8x768    | 8    | 768  | 768   | 1.09       | 1.78    | 0.61x  |
+| hidden-768       | -    | 768  | 768   | 0.11       | 0.06    | 1.87x  |
+| hidden-4096      | -    | 4096 | 4096  | 3.56       | 3.47    | 1.03x  |
+| vocab-768x30522  | -    | 768  | 30522 | 8.27       | 6.36    | 1.30x  |
+
+All legs passed the `maxAbs <= 1e-3` gate.
+
+### Recorded decision
+
+OpenBLAS is clearly faster on the larger square/tall GEMM shapes and on most GEMV
+shapes, but the win is shape-dependent and marginal (or negative) on small-batch
+(`batched-8x768`, 0.61x) and large-square-cache (`square-512`, 1.85x) cases, and
+GEMV at `hidden-4096` is within noise (1.03x). Consistent with `docs/BLAS-MKL.md`,
+the recommendation is to **leave BLAS opt-in only** (the existing `NivaraBlas`
+registration seam) rather than wire it into any production path by default; the
+managed path remains the default and bit-identical fallback. A wiring decision
+should be revisited per call site using this probe, and never silently default-on.
