@@ -239,6 +239,18 @@ stay on CPU unless a kernel has been individually prototyped and shown profitabl
 | `rolling_mean` | No (staged) | 100k: 0.47 vs 7.75 ms (16.426x, slower) | Strided sliding-window mean |
 | `rolling_max` | No (staged) | 100k: 0.65 vs 6.00 ms (9.268x, slower) | Strided sliding-window max |
 | `rolling_min` | No (staged) | 100k: 0.40 vs 5.39 ms (13.457x, slower) | Strided sliding-window min |
+| `percent_rank` | No (stays CPU) | n/a (not prototyped) | Partition-local ordering required; no OpenCL sort primitive; see issue #1038 |
+
+**Percent rank (issue #1038).** `AnalyzeRegionalPartitioning` uses `PercentRank` partitioned by
+region, but it is deliberately **not** prototyped as a Silk kernel and stays on CPU. Unlike the
+rolling kernels above, percent rank needs partition-local *ordering* (sort each partition by the
+order keys, then `(rank - 1) / (partitionSize - 1)`), not a per-element pass; Silk has no sort
+primitive, and a naive counted-ranking kernel is O(n²) per partition and would be slower than
+the CPU `RankKernel` path. The sibling incident kernels are already slower than CPU on the
+shared iGPU (rolling mean 16.4×, rolling max 9.3×, multi-stat 4.3×), so there is no evidence
+a GPU percent rank would win; it would only be revisited with a discrete-GPU measurement
+showing a clear speedup or a clean OpenCL sorting primitive. `RankKernel` remains the
+reference and correctness baseline.
 
 Policy: `--silk` is the user's choice. If requested, the wired kernel runs even when
 CPU is faster. Slower kernels remain implemented and parity-tested for future reuse, but
