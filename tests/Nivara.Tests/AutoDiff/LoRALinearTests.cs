@@ -1,7 +1,9 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
+using System.IO;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -132,6 +134,31 @@ public class LoRALinearTests
             float fd = (lp - lm) / (2f * eps);
             Assert.That(gradB[idx], Is.EqualTo(fd).Within(1e-2f),
                 $"B grad mismatch at {idx}: autodiff={gradB[idx]} fd={fd}");
+        }
+    }
+
+    [Test]
+    public void LoRALinear_Serialization_RoundTrip()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        var path = Path.Combine(Path.GetTempPath(), $"lora_test_{Guid.NewGuid()}.json");
+
+        try
+        {
+            ModelSerializer.Save(lora, path);
+
+            using var loaded = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+            ModelSerializer.Load(loaded, path);
+
+            var x = MakeInput(2, 4);
+            var a = lora.Forward(x);
+            var b = loaded.Forward(x);
+            for (int i = 0; i < a.Length; i++)
+                Assert.That(b[i], Is.EqualTo(a[i]).Within(1e-6f));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
         }
     }
 
