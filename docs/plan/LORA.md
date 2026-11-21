@@ -249,7 +249,7 @@ Key flags (NivaraChat): `--model smollm|qwen`, `--adapter <path>`, `--docs-dir`,
 - `samples/Nivara.Samples/LlamaForCausalLM.cs` — model, loader, mixed-dtype guard
 - `src/Nivara/AutoDiff/Nn/Linear.cs`
 - `samples/NivaraFineTuning/` — existing DistilBERT fine-tuning sample (classification head)
-- `docs/plan/NIVARAINFERENCE-SILK-GAPS.md` — umbrella for Silk gaps (N5/N6)
+- (umbrella `docs/plan/NIVARAINFERENCE-SILK-GAPS.md` retired 2026-11-21 once its gaps resolved or deferred; Silk counterpart design now lives here in §14)
 
 ## 14. Silk counterpart (future, from #1283)
 
