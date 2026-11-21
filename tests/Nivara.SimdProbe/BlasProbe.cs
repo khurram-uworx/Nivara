@@ -9,10 +9,11 @@ namespace Nivara.SimdProbe;
 /// A/B probe: managed <c>GradKernels.MatMulTransposedB</c> (the in-tree path) vs the
 /// OpenBLAS-backed path, for both GEMM (<c>aRows &gt; 1</c>) and GEMV (<c>aRows == 1</c>).
 ///
-/// <para>The BLAS leg registers the provider with <c>threadCount = 1</c> and
-/// <c>openBlasThreads = 1</c> — the conservative integration shape (Nivara owns any
-/// row parallelism; OpenBLAS is called single-threaded) — so the comparison isolates
-/// the tuned kernel, not a second thread pool.</para>
+/// <para>The BLAS leg registers the provider with <c>threadCount = ProcessorCount</c>
+/// and <c>openBlasThreads = 1</c> — the hybrid integration shape (Nivara owns the row
+/// parallelism; OpenBLAS is called single-threaded per chunk) recommended by the
+/// BLAS-MKL probe — so the comparison reflects the candidate wiring rather than a
+/// single-threaded OpenBLAS call.</para>
 ///
 /// <para>Methodology follows the SimdProbe/transpose rules: correctness gate first
 /// (<c>maxAbs(leg - double truth) &lt;= 1e-3</c>), untimed warmup of both legs, then
@@ -103,7 +104,7 @@ internal static class BlasProbe
         };
         Action blas = () =>
         {
-            NivaraBlas.UseBlas(threadCount: 1, openBlasThreads: 1);
+            NivaraBlas.UseBlas(threadCount: Environment.ProcessorCount, openBlasThreads: 1);
             GradKernels.MatMulTransposedB(a, bt, blasBuf, m, k, n);
         };
 
@@ -181,7 +182,7 @@ internal static class BlasProbe
         };
         Action blas = () =>
         {
-            NivaraBlas.UseBlas(threadCount: 1, openBlasThreads: 1);
+            NivaraBlas.UseBlas(threadCount: Environment.ProcessorCount, openBlasThreads: 1);
             GradKernels.MatMulTransposedB(a, b, blasBuf, 1, k, n);
         };
 
