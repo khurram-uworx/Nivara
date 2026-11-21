@@ -5,6 +5,7 @@ using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
 using NUnit.Framework;
 using System.Numerics;
+using System.Text.Json;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -161,6 +162,204 @@ public class LoRALinearTests
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_RoundTrip_IdenticalLogitsOnFreshBase()
+    {
+        const int inF = 4, outF = 3, r = 2;
+        float[] weightData = new float[outF * inF];
+        for (int i = 0; i < weightData.Length; i++) weightData[i] = (i + 1) * 0.25f;
+
+        using var source = MakeLoRALinear(weightData, inF, outF, r, alpha: 4f);
+        SetAdapterValues(source.A, source.B, inF, outF, r);
+
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(source, path, "qwen2.5-0.5b-instruct", new[] { "q_proj" });
+
+            using var fresh = MakeLoRALinear(weightData, inF, outF, r, alpha: 4f);
+            LoraAdapterSerializer.Load(fresh, path, "qwen2.5-0.5b-instruct");
+
+            var x = MakeInput(2, inF);
+            var sourceOut = source.Forward(x);
+            var freshOut = fresh.Forward(x);
+            Assert.That(freshOut.Length, Is.EqualTo(sourceOut.Length));
+            for (int i = 0; i < sourceOut.Length; i++)
+                Assert.That(freshOut[i], Is.EqualTo(sourceOut[i]).Within(1e-6f));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_Mixed_RoundTrip_IdenticalLogitsOnFreshBase()
+    {
+        const int inF = 4, outF = 3, r = 2;
+        var sourceBase = Linear<float, BFloat16>.Uninitialized(inF, outF);
+        var sourceWeights = new BFloat16[outF * inF];
+        for (int i = 0; i < sourceWeights.Length; i++)
+            sourceWeights[i] = BFloat16.CreateChecked((float)(0.05 * (i + 1)));
+        sourceBase.BindWeight(ReverseGradTensor<BFloat16>.FromMatrix(sourceWeights, outF, inF, requiresGrad: true));
+
+        using var source = new LoRALinear<float, BFloat16>(sourceBase, r, alpha: 4f);
+        SetAdapterValues(source.A, source.B, inF, outF, r);
+
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(source, path, "qwen2.5-0.5b-instruct", new[] { "q_proj" });
+
+            var freshBase = Linear<float, BFloat16>.Uninitialized(inF, outF);
+            var freshWeights = new BFloat16[outF * inF];
+            for (int i = 0; i < freshWeights.Length; i++)
+                freshWeights[i] = BFloat16.CreateChecked((float)(0.05 * (i + 1)));
+            freshBase.BindWeight(ReverseGradTensor<BFloat16>.FromMatrix(freshWeights, outF, inF, requiresGrad: true));
+
+            using var fresh = new LoRALinear<float, BFloat16>(freshBase, r, alpha: 4f);
+            LoraAdapterSerializer.Load(fresh, path, "qwen2.5-0.5b-instruct");
+
+            var x = MakeInput(2, inF);
+            var sourceOut = source.Forward(x);
+            var freshOut = fresh.Forward(x);
+            Assert.That(freshOut.Length, Is.EqualTo(sourceOut.Length));
+            for (int i = 0; i < sourceOut.Length; i++)
+                Assert.That(freshOut[i], Is.EqualTo(sourceOut[i]).Within(1e-6f));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_File_ContainsAdapterOnly_TensorsAndMetadata()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(lora, path, "qwen2.5-0.5b-instruct", new[] { "q_proj" });
+
+            var json = File.ReadAllText(path);
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            Assert.That(root.TryGetProperty("Format", out var format), Is.True);
+            Assert.That(format.GetString(), Is.EqualTo(LoraAdapterSerializer.AdapterFormat));
+            Assert.That(root.TryGetProperty("BaseModelId", out var baseModelId), Is.True);
+            Assert.That(baseModelId.GetString(), Is.EqualTo("qwen2.5-0.5b-instruct"));
+            Assert.That(root.TryGetProperty("Rank", out var rank), Is.True);
+            Assert.That(rank.GetInt32(), Is.EqualTo(lora.Rank));
+            Assert.That(root.TryGetProperty("Version", out var version), Is.True);
+            Assert.That(version.GetInt32(), Is.EqualTo(1));
+
+            var parameters = root.GetProperty("Parameters");
+            var parameterNames = parameters.EnumerateObject().Select(p => p.Name).OrderBy(n => n).ToArray();
+            Assert.That(parameterNames, Is.EqualTo(new[] { "A", "B" }));
+
+            var a = parameters.GetProperty("A");
+            var b = parameters.GetProperty("B");
+            Assert.That(a.TryGetProperty("Shape", out _), Is.True);
+            Assert.That(a.TryGetProperty("Values", out _), Is.True);
+            Assert.That(b.TryGetProperty("Shape", out _), Is.True);
+            Assert.That(b.TryGetProperty("Values", out _), Is.True);
+
+            Assert.That(root.TryGetProperty("Targets", out var targets), Is.True);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_Load_RejectsMismatchedRank()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(lora, path, "qwen2.5-0.5b-instruct");
+
+            using var mismatched = new LoRALinear<float>(4, 3, r: 4, alpha: 4f);
+            Assert.That(() => LoraAdapterSerializer.Load(mismatched, path, "qwen2.5-0.5b-instruct"),
+                Throws.InvalidOperationException);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_Load_RejectsMismatchedBaseModel()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(lora, path, "qwen2.5-0.5b-instruct");
+
+            using var otherBase = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+            Assert.That(() => LoraAdapterSerializer.Load(otherBase, path, "smollm3b-causal"),
+                Throws.InvalidOperationException);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_Load_RejectsMismatchedAlpha()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            LoraAdapterSerializer.Save(lora, path, "qwen2.5-0.5b-instruct");
+
+            using var mismatchedAlpha = new LoRALinear<float>(4, 3, r: 2, alpha: 8f);
+            Assert.That(() => LoraAdapterSerializer.Load(mismatchedAlpha, path, "qwen2.5-0.5b-instruct"),
+                Throws.InvalidOperationException);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_Load_RejectsUnsupportedFormat()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        try
+        {
+            File.WriteAllText(path, "{\"Format\":\"nivara-lora-adapter-v2\",\"Type\":\"Float\",\"Version\":1,\"BaseModelId\":\"qwen2.5-0.5b-instruct\",\"Rank\":2,\"Alpha\":4.0,\"Targets\":[],\"Parameters\":{\"A\":{\"Shape\":[4,2],\"Values\":\"\"},\"B\":{\"Shape\":[2,3],\"Values\":\"\"}}}");
+
+            using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+            Assert.That(() => LoraAdapterSerializer.Load(lora, path, "qwen2.5-0.5b-instruct"),
+                Throws.InvalidOperationException);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void LoRALinear_AdapterSerializer_Save_RejectsMergedAdapter()
+    {
+        using var lora = new LoRALinear<float>(4, 3, r: 2, alpha: 4f);
+        lora.Merge();
+
+        var path = Path.Combine(Path.GetTempPath(), $"lora_adapter_{Guid.NewGuid()}.json");
+        Assert.That(() => LoraAdapterSerializer.Save(lora, path, "qwen2.5-0.5b-instruct"),
+            Throws.InvalidOperationException);
     }
 
     [Test]
@@ -335,5 +534,25 @@ public class LoRALinearTests
         Assert.That(vLora.B.Tensor.Grad, Is.Not.Null);
         Assert.That(attn.QProj.Weight!.Tensor.Grad, Is.Null,
             "Frozen mixed base weight should have no gradient");
+    }
+
+    static LoRALinear<float> MakeLoRALinear(float[] weightData, int inFeatures, int outFeatures, int r, float alpha)
+    {
+        var baseLinear = Linear<float>.Uninitialized(inFeatures, outFeatures);
+        baseLinear.BindWeight(ReverseGradTensor<float>.FromMatrix(weightData, outFeatures, inFeatures, requiresGrad: true));
+        return new LoRALinear<float>(baseLinear, r, alpha);
+    }
+
+    static void SetAdapterValues(Parameter<float> a, Parameter<float> b, int inFeatures, int outFeatures, int r)
+    {
+        var aData = new float[inFeatures * r];
+        for (int i = 0; i < aData.Length; i++)
+            aData[i] = (float)((i % 7) + 1) * 0.25f - 0.5f;
+        a.Tensor = ReverseGradTensor<float>.FromMatrix(aData, inFeatures, r, requiresGrad: true);
+
+        var bData = new float[r * outFeatures];
+        for (int i = 0; i < bData.Length; i++)
+            bData[i] = (float)((i % 5) + 1) * 0.5f - 1f;
+        b.Tensor = ReverseGradTensor<float>.FromMatrix(bData, r, outFeatures, requiresGrad: true);
     }
 }

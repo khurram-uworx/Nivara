@@ -132,7 +132,7 @@ MSELoss<T>                            ← Σ(pred - target)²
 L1Loss<T>                             ← Σ|pred - target|
 BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p)); eps via ctor
 BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable); fused backward via single OpNode
-CrossEntropyLoss<T>                   ← Fused log-softmax + NLL; soft or int[] targets; None → per-sample NLL
+CrossEntropyLoss<T>                   ← Fused log-softmax + NLL; soft or int[] targets; optional ignoreIndex for SFT prompt masking; None → per-sample NLL
 Activation.Softmax<T> / LogSoftmax<T> ← Dim-aware wrappers (Functional classes merged into Activation)
 
 Optimizers
@@ -923,7 +923,7 @@ All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Every loss inherits 
 | `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error. Default `Reduction.Mean`. |
 | `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability; `eps` is a ctor argument. |
 | `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed. Backward uses fused `sigmoid(x) - z` via custom OpNode (fixes subgradient error at x=0). |
-| `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + soft targets, or logits + `int[]` labels (one-hot built internally). `Reduction.None` returns per-sample NLL (`[N]`, summing class-weighted NLL within each row) matching PyTorch `reduction='none'`. |
+| `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + soft targets, or logits + `int[]` labels (one-hot built internally). `Forward(logits, targets, ignoreIndex)` masks prompt positions: masked rows contribute zero loss and zero gradient, and `Mean` divides by active (non-masked) token count. `Reduction.None` returns per-sample NLL (`[N]`, summing class-weighted NLL within each row) matching PyTorch `reduction='none'`. |
 | `Activation.Softmax<T>` | dim-aware softmax | `Activation.Softmax(input, dim = -1)` wrapping `ReverseGradOperations.Softmax`. |
 | `Activation.LogSoftmax<T>` | dim-aware log-softmax | `Activation.LogSoftmax(input, dim = -1)` wrapping `ReverseGradOperations.LogSoftmax`. |
 

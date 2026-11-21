@@ -672,4 +672,189 @@ public class LossTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new MSELoss<float>().Forward(predictions, targets, (Reduction)99));
     }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_MaskedPositions_ZeroLossAndZeroGradients()
+    {
+        var logitsData = new float[]
+        {
+            2f, 1f, 0.1f,  // active, target 0
+            5f, 9f, 1f,    // masked prompt position
+            1f, 2f, 0.5f,  // active, target 1
+            3f, 4f, 7f     // masked prompt position
+        };
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(logitsData), requiresGrad: true);
+        logits.Reshape(4, 3);
+        int[] targets = { 0, -100, 1, -100 };
+
+        var ce = new CrossEntropyLoss<float>(Reduction.None);
+        var loss = ce.Forward(logits, targets, -100);
+
+        Assert.That(loss.Length, Is.EqualTo(4));
+        Assert.That(loss[0], Is.GreaterThan(0f));
+        Assert.That(loss[1], Is.EqualTo(0f).Within(1e-7f));
+        Assert.That(loss[2], Is.GreaterThan(0f));
+        Assert.That(loss[3], Is.EqualTo(0f).Within(1e-7f));
+
+        var seed = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }), requiresGrad: false);
+        seed.Reshape(4);
+        loss.Backward(seed);
+
+        Assert.That(logits.Grad, Is.Not.Null);
+        for (int c = 0; c < 3; c++)
+        {
+            Assert.That(logits.Grad![1 * 3 + c], Is.EqualTo(0f).Within(1e-7f), $"masked row 1 class {c}");
+            Assert.That(logits.Grad[3 * 3 + c], Is.EqualTo(0f).Within(1e-7f), $"masked row 3 class {c}");
+        }
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_AnswerPositions_GradientsFlow()
+    {
+        var logitsData = new float[]
+        {
+            2f, 1f, 0.1f,
+            5f, 9f, 1f,
+            1f, 2f, 0.5f,
+            3f, 4f, 7f
+        };
+        var maskedLogits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(logitsData), requiresGrad: true);
+        maskedLogits.Reshape(4, 3);
+        int[] maskedTargets = { 0, -100, 1, -100 };
+
+        var maskedLoss = new CrossEntropyLoss<float>(Reduction.Sum).Forward(maskedLogits, maskedTargets, -100);
+        maskedLoss.Backward();
+
+        var activeLogits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 1f, 0.1f, 1f, 2f, 0.5f }), requiresGrad: true);
+        activeLogits.Reshape(2, 3);
+        int[] activeTargets = { 0, 1 };
+
+        var activeLoss = new CrossEntropyLoss<float>(Reduction.Sum).Forward(activeLogits, activeTargets);
+        activeLoss.Backward();
+
+        Assert.That(maskedLoss[0], Is.EqualTo(activeLoss[0]).Within(1e-5f));
+
+        Assert.That(maskedLogits.Grad, Is.Not.Null);
+        Assert.That(activeLogits.Grad, Is.Not.Null);
+        for (int c = 0; c < 3; c++)
+        {
+            Assert.That(maskedLogits.Grad![0 * 3 + c], Is.EqualTo(activeLogits.Grad![0 * 3 + c]).Within(1e-6f));
+            Assert.That(maskedLogits.Grad[2 * 3 + c], Is.EqualTo(activeLogits.Grad[1 * 3 + c]).Within(1e-6f));
+            Assert.That(float.IsNaN(maskedLogits.Grad[0 * 3 + c]), Is.False);
+            Assert.That(float.IsNaN(maskedLogits.Grad[2 * 3 + c]), Is.False);
+        }
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_Mean_DividesByActiveCount()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[]
+            {
+                2f, 1f, 0.1f,
+                5f, 9f, 1f,
+                1f, 2f, 0.5f,
+                3f, 4f, 7f
+            }), requiresGrad: false);
+        logits.Reshape(4, 3);
+        int[] targets = { 0, -100, 1, -100 };
+
+        var ce = new CrossEntropyLoss<float>();
+        var sumLoss = ce.Forward(logits, targets, -100, Reduction.Sum);
+        var meanLoss = ce.Forward(logits, targets, -100, Reduction.Mean);
+
+        Assert.That(meanLoss[0], Is.EqualTo(sumLoss[0] / 2f).Within(1e-5f));
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_None_ReturnsMaskedPerRowNll()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[]
+            {
+                2f, 1f, 0.1f,
+                5f, 9f, 1f,
+                1f, 2f, 0.5f
+            }), requiresGrad: false);
+        logits.Reshape(3, 3);
+        int[] targets = { 0, -100, 2 };
+
+        var loss = new CrossEntropyLoss<float>(Reduction.None).Forward(logits, targets, -100);
+
+        Assert.That(loss.Length, Is.EqualTo(3));
+        Assert.That(loss[0], Is.GreaterThan(0f));
+        Assert.That(loss[1], Is.EqualTo(0f).Within(1e-7f));
+        Assert.That(loss[2], Is.GreaterThan(0f));
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_InvalidActiveLabel_Throws()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }), requiresGrad: false);
+        logits.Reshape(2, 3);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new CrossEntropyLoss<float>().Forward(logits, new[] { -100, 3 }, -100));
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_AllMasked_Throws()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }), requiresGrad: false);
+        logits.Reshape(2, 3);
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            new CrossEntropyLoss<float>().Forward(logits, new[] { -100, -100 }, -100));
+        Assert.That(ex!.Message, Does.Contain("active target"));
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IgnoreIndex_OverfitSanity_10Examples_LossDropsNearZero()
+    {
+        const int n = 10;
+        const int classes = 4;
+        const int ignoreIndex = -100;
+        var rng = new Random(1397);
+        var logitsData = new float[n * classes];
+        for (int i = 0; i < logitsData.Length; i++)
+            logitsData[i] = (float)(rng.NextDouble() * 0.2 - 0.1);
+
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(logitsData), requiresGrad: true);
+        logits.Reshape(n, classes);
+
+        int[] targets = { 1, -100, 2, 0, -100, 3, 1, -100, 2, 0 };
+        var ce = new CrossEntropyLoss<float>(Reduction.Mean);
+
+        float initialLoss = 0f;
+        float finalLoss = 0f;
+        const float lr = 0.5f;
+
+        for (int step = 0; step < 400; step++)
+        {
+            using var gradScope = GradientUtils.Grad();
+            var logitsStep = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create((float[])logitsData.Clone()), requiresGrad: true);
+            logitsStep.Reshape(n, classes);
+
+            var loss = ce.Forward(logitsStep, targets, ignoreIndex);
+            if (step == 0) initialLoss = loss[0];
+            finalLoss = loss[0];
+
+            loss.Backward();
+            Assert.That(logitsStep.Grad, Is.Not.Null);
+
+            for (int i = 0; i < logitsData.Length; i++)
+                logitsData[i] -= lr * logitsStep.Grad![i];
+        }
+
+        Assert.That(initialLoss, Is.GreaterThan(0.1f));
+        Assert.That(finalLoss, Is.LessThan(0.05f));
+    }
 }
