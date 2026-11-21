@@ -13,6 +13,9 @@ and already ships Silk iGPU fine-tuning for DistilBERT (`NivaraFineTuning --mode
 --silk`). What is missing is the headline story the user asked for:
 
 > **Silk is our main headline; FT SLMs on iGPUs is Nivara's headline.**
+>
+> **Model choice (user direction):** use **Qwen2.5-0.5B** (already in repo), not Qwen3
+> or SmolLM. All plan references to "SmolLM/Qwen" below mean Qwen2.5-0.5B unless stated.
 
 The existing `docs/plan/LORA.md` frames LoRA as a doc-QA RAG-vs-FT comparison. That is
 the wrong showcase: small 135M/0.5B models do not memorize docs well, so FT looks weak
@@ -71,7 +74,7 @@ right SLM/LoRA showcase.
 - Causal-LM loading helpers extracted to `Nivara.Samples` (prereq #1373 closed).
 - Silk inference runners exist: `SilkSmolLMGpuRunner`, `SilkQwenGpuRunner`.
 - Silk trainers exist: `SilkDistilBertTrainer` (+ BF16/FP16/TrueBf16), `SilkLayaHeadTrainer`, `SilkModernBertHeadTrainer`, `SilkTinyShakespeareTrainer`.
-- **No** `SilkSmolLMTrainer` / `SilkQwenTrainer`; **no** `rms_norm_backward` kernel (LORA.md §14). Causal LM training on Silk is not implemented.
+- **No** `SilkSmolLMTrainer` / `SilkQwenTrainer`; **no** `rms_norm_backward` kernel (LORA.md §14). Causal LM training on Silk is not implemented. Qwen2.5-0.5B already has Silk inference (`SilkQwenGpuRunner`) and chat template/loading helpers in repo.
 - NivaraFineTuning currently fine-tunes DistilBERT SST-2 classification, CPU and Silk.
 - Untracked files on branch start: `samples/NivaraChat/Helpers/FtDataBuilder.cs`, `FtDataModels.cs` (look like prior doc-QA ft-data work; must be reconciled, not silently dropped).
 
@@ -79,8 +82,8 @@ right SLM/LoRA showcase.
 
 - **.NET tensors/spans are new/unstable in places** — ground any new Tensor/Span/BitConverter/BFloat16 usage via microsoft-learn MCP and a compile probe before committing design.
 - **Silk training is f32 only** (release constraint; see docs/SILK.md §13 and LORA.md §14). BF16 narrow training is out of scope unless #1149 lands.
-- **No `rms_norm_backward` kernel today.** A Silk causal-LM trainer for Llama-family needs it (LORA.md §14 Tier 1). This is a hard dependency for true "FT on iGPU" for SmolLM/Qwen.
-- **Memory:** SmolLM-135M BF16 base weights ~270MB; F32 activations/gradients for seq len 256-512 can be large. LoRA keeps adapter params small, but backward through frozen base still computes gradients flowing to adapters unless carefully designed. The plan must include a memory budget/guard.
+- **No `rms_norm_backward` kernel today.** A Silk causal-LM trainer for Llama-family needs it (LORA.md §14 Tier 1). This is a hard dependency for true "FT on iGPU" for Qwen2.5-0.5B.
+- **Memory:** Qwen2.5-0.5B BF16 base weights are ~1GB; F32 activations/gradients for seq len 256-512 can be large. LoRA keeps adapter params small, but backward through frozen base still computes gradients flowing to adapters unless carefully designed. The plan must include a memory budget/guard and small default batch/seq settings.
 - **Behavioral FT must be measurable.** Define metrics before implementation: field accuracy (ticket/hours/date), format validity, clarification accuracy, all-day/half-day convention accuracy.
 - **Do not break existing RAG showcase.** Any NivaraChat changes must be additive and not regress existing RAG modes.
 - **Benchmarks/tests:** targeted tests autonomously; full suite only with human confirmation; never run benchmarks as agent unless explicitly approved.
@@ -90,8 +93,8 @@ right SLM/LoRA showcase.
 1. **G1 - Plan clearance (this plan).** Human reviews this TODO.md after grounding. No implementation before clearance.
 2. **D1 - FT scenario.** Confirm the worklog/behavioral scenario captured above as the LoRA SLM showcase (Nivara-native, deterministic synthetic data). Alternative: another behavioral domain. Doc-QA memorization is not recommended.
 3. **D2 - "FT SLMs on iGPUs" scope.** Two credible readings:
-   - **D2a (full headline):** Implement Silk causal-LM LoRA training for SmolLM/Qwen (needs `rms_norm_backward`, backward chain, `SilkSmolLMTrainer`/shared Llama trainer, parity gate). This is the truest reading of the headline but is large/risky.
-   - **D2b (staged headline):** Deliver CPU LoRA SFT for SmolLM/Qwen as reference + Silk inference of adapted model + Silk DistilBERT FT as existing iGPU proof + create/track the Silk causal-LM trainer as the next issue. Honest but weaker headline.
+   - **D2a (full headline):** Implement Silk causal-LM LoRA training for Qwen2.5-0.5B (needs `rms_norm_backward`, backward chain, a `SilkQwenTrainer`/shared Llama-family trainer, parity gate). This is the truest reading of the headline but is large/risky.
+   - **D2b (staged headline):** Deliver CPU LoRA SFT for Qwen2.5-0.5B as reference + Silk inference of adapted model + Silk DistilBERT FT as existing iGPU proof + create/track the Silk causal-LM trainer as the next issue. Honest but weaker headline.
    - **D2c (hybrid):** Deliver CPU LoRA SFT now; also implement the minimum Silk kernel/trainer needed for LoRA adapter training on iGPU if feasible in this branch, behind an explicit flag; fall back to CPU with clear reporting. 
    **I need human direction on D2 before implementation.** I will not silently pick D2b.
 4. **D3 - Where LoRA module lives.** LORA.md open question: core (`src/Nivara`) or sample-scoped? `LoRALinear` already exists in core - keep it there. New SFT training helpers: prefer `Nivara.Samples` / `NivaraFineTuning` unless clearly reusable.
@@ -106,8 +109,8 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 | 1 | **Plan/grounding: reshape LORA.md + docs/TODO tracking** | G1 | no | Update `docs/plan/LORA.md` to reflect headline pivot; keep reusable technical sections; record decisions. |
 | 2 | **Reconcile untracked ft-data artifacts** | 1 | no | Inspect `FtDataBuilder.cs`/`FtDataModels.cs`; either integrate into new plan or remove/move with explanation. Do not silently drop. |
 | 3 | **Behavioral SFT dataset format + deterministic generator** | D1,D4 | after 1 | Worklog scenario: synthetic JSONL/TSV, system+user+assistant, prompt-masked labels, deterministic seed, train/val/test split, provenance header. |
-| 4 | **Causal LM LoRA SFT trainer (CPU reference)** | 3, D1 | after 3 | Fine-tune SmolLM/Qwen with LoRA adapters using AutoDiff/AdamW; prompt masking; checkpoint best-by-val; memory guard; deterministic. |
-| 5 | **Silk/iGPU headline path** | D2 | depends on D2 | D2a: rms_norm_backward + Silk Llama/SmolLM LoRA trainer + parity. D2c: minimum viable Silk adapter-training path. D2b: Silk inference of adapted model + explicit follow-up issue. |
+| 4 | **Causal LM LoRA SFT trainer (CPU reference)** | 3, D1 | after 3 | Fine-tune Qwen2.5-0.5B with LoRA adapters using AutoDiff/AdamW; prompt masking; checkpoint best-by-val; memory guard; deterministic. |
+| 5 | **Silk/iGPU headline path** | D2 | depends on D2 | D2a: rms_norm_backward + Silk Llama-family/Qwen LoRA trainer + parity. D2c: minimum viable Silk adapter-training path. D2b: Silk inference of adapted model + explicit follow-up issue. |
 | 6 | **NivaraFineTuning CLI + report** | 4,(5) | after 4 | `--mode ft-lora` / `--mode ft-eval` or equivalent; prints param count, memory budget, loss, accuracy; `--silk` path when available. |
 | 7 | **NivaraChat adapter consumption touchpoint (optional thin)** | 6 | parallel with 8 | Load adapted model/adapter for interactive demo; do not disturb RAG modes. |
 | 8 | **Tests + docs + showcase README** | 3-7 | after impl | Unit tests (parity, frozen base, grad check, overfit sanity, determinism, round-trip, prompt masking). Update docs/LORA.md, NivaraFineTuning README, sample README. DocsCoveragePins/ADR index only if docs count/citations change. |
@@ -137,7 +140,7 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 
 - **D2 scope risk (high):** True Silk causal-LM LoRA training needs rms_norm_backward + backward + trainer parity. This is non-trivial. I will not fake "on iGPU" by only running inference on iGPU.
 - **Small-model quality risk (medium):** Behavioral SFT should be picked so small LoRA can win; metrics must be chosen accordingly.
-- **Memory/runtime risk (medium):** CPU SFT over SmolLM/Qwen can be slow/heavy; need max-memory guard, small defaults, optional `--max-examples`.
+- **Memory/runtime risk (medium):** CPU SFT over Qwen2.5-0.5B can be slow/heavy; need max-memory guard, small defaults, optional `--max-examples`.
 - **Untracked ft-data files (low):** Must reconcile before building on top.
 - **Plan drift risk:** LORA.md currently describes doc-QA comparison; reshaping it is a doc change with possible DocsCoveragePins/ADR implications.
 
