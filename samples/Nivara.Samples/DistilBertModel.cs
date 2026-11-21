@@ -253,4 +253,14 @@ public static class DistilBertLoader
             StateDictLoader.LoadLayerNorm(layer.ln2, tensors, $"{p}.output_layer_norm");
         }
     }
+
+    public static DistilBertForSequenceClassification<T> LoadModel<T>(string modelDir, int numClasses = 2)
+        where T : struct, System.Numerics.IFloatingPointIeee754<T>
+    {
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
+        var model = new DistilBertForSequenceClassification<T>(config.ToBertConfig(), numClasses);
+        model.LoadWeights(tensors);
+        return model;
+    }
 }
