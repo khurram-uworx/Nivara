@@ -13,6 +13,7 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     readonly List<Parameter<T>> parameters = [];
     readonly List<object> mixedParameters = [];
     bool disposed;
+    bool frozen;
 
     /// <summary>
     /// Gets whether the module is in training mode. Stochastic layers such as
@@ -20,6 +21,13 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     /// True by default; switch via <see cref="Train"/> / <see cref="Eval"/>.
     /// </summary>
     public bool IsTraining { get; private set; } = true;
+
+    /// <summary>
+    /// Gets whether the module and all registered child modules are frozen (no gradient
+    /// tracking). Set through <see cref="SetRequiresGrad"/>; <see cref="Freeze"/> /
+    /// <see cref="Unfreeze"/> express it via gradient tracking flags.
+    /// </summary>
+    internal bool IsFrozen => frozen;
 
     /// <summary>
     /// Runs the forward pass for this module. When gradient tracking is enabled the
@@ -77,6 +85,8 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
     /// <param name="requiresGrad">Whether gradients should be tracked.</param>
     public void SetRequiresGrad(bool requiresGrad)
     {
+        frozen = !requiresGrad;
+
         foreach (var param in parameters.ToArray())
             SetParameterRequiresGrad(param, requiresGrad);
 

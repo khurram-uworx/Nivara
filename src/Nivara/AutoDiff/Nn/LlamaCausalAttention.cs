@@ -27,6 +27,14 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
     public Linear<TModel, TWeight> VProj { get; }
     /// <summary>Gets the output projection linear.</summary>
     public Linear<TModel, TWeight> OProj { get; }
+    /// <summary>Gets or sets the LoRA adapter module for the query projection; null routes to the plain QProj.</summary>
+    public Module<TModel>? QAdapter { get; set; }
+    /// <summary>Gets or sets the LoRA adapter module for the key projection; null routes to the plain KProj.</summary>
+    public Module<TModel>? KAdapter { get; set; }
+    /// <summary>Gets or sets the LoRA adapter module for the value projection; null routes to the plain VProj.</summary>
+    public Module<TModel>? VAdapter { get; set; }
+    /// <summary>Gets or sets the LoRA adapter module for the output projection; null routes to the plain OProj.</summary>
+    public Module<TModel>? OAdapter { get; set; }
     readonly RotaryEmbedding<TModel> rotary;
 
     readonly TModel attnScale;
@@ -172,9 +180,13 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
     {
         int qLen = input.shape[0];
 
-        var Q = QProj.Forward(input);
-        var K = KProj.Forward(input);
-        var V = VProj.Forward(input);
+        Module<TModel> q = QAdapter ?? (Module<TModel>)QProj;
+        Module<TModel> k = KAdapter ?? (Module<TModel>)KProj;
+        Module<TModel> v = VAdapter ?? (Module<TModel>)VProj;
+
+        var Q = q.Forward(input);
+        var K = k.Forward(input);
+        var V = v.Forward(input);
 
         // Apply RoPE before splitting/repeating (batched with an absolute offset; row p is
         // rotated by positionOffset + p — the same per-row math as ForwardCached).
@@ -202,7 +214,7 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
                     kCache.AsSpan(positionOffset * kvWidth, rowBytes),
                     vCache.AsSpan(positionOffset * kvWidth, rowBytes),
                     outData, qLen, numHeads, numKeyValueHeads, headDim, attnScale);
-                return OProj.Forward(new ReverseGradTensor<TModel>(
+                return (OAdapter ?? (Module<TModel>)OProj).Forward(new ReverseGradTensor<TModel>(
                     NivaraColumn<TModel>.CreateFromOwnedArray(outData), requiresGrad: false,
                     new[] { qLen, numHeads * headDim }));
             }
@@ -215,7 +227,7 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
 
         var mask = ModuleHelpers<TModel>.CreateCausalMask(qLen, qLen);
         var attn = ReverseGradOperations.MultiHeadAttention(Q, K, V, numHeads, attnScale, mask);
-        return OProj.Forward(attn);
+        return (OAdapter ?? (Module<TModel>)OProj).Forward(attn);
     }
 
     /// <summary>
@@ -252,9 +264,13 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
         if (kCache.Length < needed || vCache.Length < needed)
             throw new ArgumentException("Cache buffers must have capacity for the new token row.");
 
-        var Q = QProj.Forward(input);                     // [1, numHeads * headDim]
-        var K = KProj.Forward(input);                     // [1, numKeyValueHeads * headDim]
-        var V = VProj.Forward(input);                     // [1, numKeyValueHeads * headDim]
+        Module<TModel> q = QAdapter ?? (Module<TModel>)QProj;
+        Module<TModel> k = KAdapter ?? (Module<TModel>)KProj;
+        Module<TModel> v = VAdapter ?? (Module<TModel>)VProj;
+
+        var Q = q.Forward(input);
+        var K = k.Forward(input);
+        var V = v.Forward(input);
 
         Q = rotary.Forward(Q, positionOffset);
         K = rotary.Forward(K, positionOffset);
@@ -304,6 +320,6 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
             attn = ReverseGradOperations.MultiHeadAttention(Q, KFull, VFull, numHeads, attnScale, openMask);
         }
 
-        return OProj.Forward(attn);
+        return (OAdapter ?? (Module<TModel>)OProj).Forward(attn);
     }
 }

@@ -236,8 +236,10 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
     /// <summary>
     /// Tied LM head. Matching dtypes keep the autograd matmul (identical arithmetic to before the
-    /// storage/compute split); mixed dtypes run the span kernel and return a plain tensor, because
-    /// a narrow weight cannot participate in a same-type backward node.
+    /// storage/compute split); mixed dtypes run the span kernel and return a plain tensor when the
+    /// input does not require gradients (frozen narrow base, inference-only), or build the standard
+    /// tracked matmul node over the F32 compute input when it does (for example frozen narrow base
+    /// plus F32 adapters such as <see cref="LoRALinear{TModel, TWeight}"/>).
     /// </summary>
     ReverseGradTensor<TModel> TiedHead(ReverseGradTensor<TModel> h)
     {
@@ -247,7 +249,18 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
         if (!h.Data.TryGetSpan(out var hSpan))
             throw new InvalidOperationException("Tied-head input must be null-free.");
 
-        return TiedHead(hSpan, h.Shape[0]);
+        // Mixed storage + tracked input: the frozen narrow weight cannot take part in a same-type
+        // backward node, so run the head matmul through the standard tracked graph node over the
+        // F32 compute input; the narrow weight is the constant.
+        if (!h.RequiresGrad)
+            return TiedHead(hSpan, h.Shape[0]);
+
+        Embed.Weight!.Tensor.Data.TryGetSpan(out var weightSpan);
+        var weightData = new TModel[vocabSize * Embed.EmbeddingDim];
+        for (int i = 0; i < weightData.Length; i++)
+            weightData[i] = TModel.CreateChecked(weightSpan[i]);
+        var weightTensor = ReverseGradTensor<TModel>.FromMatrix(weightData, vocabSize, Embed.EmbeddingDim, requiresGrad: false);
+        return ReverseGradOperations.MatMulTransposedB(h, weightTensor);
     }
 
     ReverseGradTensor<TModel> TiedHead(ReadOnlySpan<TModel> rows, int rowCount)
@@ -263,11 +276,12 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
     void ThrowIfMixedDtypeTraining()
     {
-        if (GradientUtils.IsGradEnabled && typeof(TModel) != typeof(TWeight))
+        if (GradientUtils.IsGradEnabled && typeof(TModel) != typeof(TWeight) && !IsFrozen)
             throw new InvalidOperationException(
                 $"LlamaForCausalLM<{typeof(TModel).Name}, {typeof(TWeight).Name}> is inference-only when the " +
-                "compute and weight dtypes differ: the narrow weights have no same-type backward node. " +
-                "Use identical dtypes inside GradientUtils.Grad().");
+                "compute and weight dtypes differ and the base is not frozen: the narrow weights have no " +
+                "same-type backward node. Freeze the base for adapter (for example LoRA) training with " +
+                "compute-type adapter gradients.");
     }
 
     static void CopyEmbeddingRow(ReadOnlySpan<TWeight> weights, int tokenId, int hidden, Span<TModel> destination)
