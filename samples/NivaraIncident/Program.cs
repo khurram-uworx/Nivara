@@ -14,7 +14,11 @@ bool stream = false;
 bool benchmark = false;
 int iterations = 5;
 bool silk = false;
-
+bool blas = false;
+int blasThreads = 1;
+bool blasThreadsSet = false;
+int openBlasThreads = 1;
+bool openBlasThreadsSet = false;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--dataset" && i + 1 < args.Length) datasetPath = args[++i];
@@ -27,11 +31,54 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--benchmark") benchmark = true;
     else if (args[i] == "--quick") { benchmark = true; iterations = 1; }
     else if (args[i] == "--silk") silk = true;
+    else if (args[i] == "--blas") blas = true;
+    else if (args[i] == "--threads")
+    {
+        if (i + 1 >= args.Length)
+        {
+            Console.Error.WriteLine("--threads needs a value.");
+            return 1;
+        }
+        if (!int.TryParse(args[i + 1], out blasThreads) || blasThreads < 1)
+        {
+            Console.Error.WriteLine($"--threads expects a positive integer; got '{args[i + 1]}'.");
+            return 1;
+        }
+        blasThreadsSet = true;
+        i++;
+    }
+    else if (args[i] == "--blas-threads")
+    {
+        if (i + 1 >= args.Length)
+        {
+            Console.Error.WriteLine("--blas-threads needs a value.");
+            return 1;
+        }
+        if (!int.TryParse(args[i + 1], out openBlasThreads) || openBlasThreads < 1)
+        {
+            Console.Error.WriteLine($"--blas-threads expects a positive integer; got '{args[i + 1]}'.");
+            return 1;
+        }
+        openBlasThreadsSet = true;
+        i++;
+    }
 }
 
 var scenarioIds = scenarioId.Equals("all", StringComparison.OrdinalIgnoreCase)
     ? new[] { "A", "B", "C", "D" }
     : new[] { scenarioId };
+
+if (blasThreadsSet && !blas)
+{
+    Console.Error.WriteLine("--threads is an option of '--blas' only; add --blas or drop --threads.");
+    return 1;
+}
+
+if (openBlasThreadsSet && !blas)
+{
+    Console.Error.WriteLine("--blas-threads is an option of '--blas' only; add --blas or drop --blas-threads.");
+    return 1;
+}
 
 switch (mode)
 {
@@ -56,6 +103,20 @@ switch (mode)
             await Replay(datasetPath, Scenarios.Get(sid), chunkSize);
         break;
     case "streamix":
+        if (blas)
+        {
+            if (Nivara.Extensions.Blas.NivaraBlas.UseBlas(blasThreads, openBlasThreads))
+            {
+                Console.WriteLine($"BLAS: enabled ({blasThreads} row-block{(blasThreads == 1 ? "" : "s")}, {openBlasThreads} OpenBLAS thread{(openBlasThreads == 1 ? "" : "s")})");
+                if (blasThreads > 1 && openBlasThreads > 1)
+                    Console.WriteLine("BLAS: row-blocks and OpenBLAS threads are both above 1 (two pools).");
+            }
+            else
+            {
+                Console.Error.WriteLine($"BLAS: requested via --blas but provider could not be registered: {Nivara.Extensions.Blas.NivaraBlas.LastDiagnostic ?? "unknown reason"}");
+                return 1;
+            }
+        }
         foreach (var sid in scenarioIds)
             await RunStreamixScenarios(datasetPath, Scenarios.Get(sid), chunkSize);
         break;
@@ -63,6 +124,8 @@ switch (mode)
         PrintUsage();
         break;
 }
+
+return 0;
 
 void Generate(string dsPath, string sid, int sc, long rec)
 {
@@ -471,5 +534,8 @@ void PrintUsage()
     Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--quick] [--iterations <N>] [--silk]"); Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
-    Console.WriteLine("  NivaraIncident.Cli streamix      --dataset <path> --scenario <A|B|C|D|all> [--chunk-size <N>]");
+    Console.WriteLine("  NivaraIncident.Cli streamix      --dataset <path> --scenario <A|B|C|D|all> [--chunk-size <N>] [--blas] [--threads <N>] [--blas-threads <N>]");
+    Console.WriteLine("  --blas                           Register the OpenBLAS GEMM provider (opt-in, streamix only). Default off;");
+    Console.WriteLine("  --threads N                      Nivara row-block count for --blas. Optional, default 1.");
+    Console.WriteLine("  --blas-threads N                 OpenBLAS pool size. Optional, default 1.");
 }
