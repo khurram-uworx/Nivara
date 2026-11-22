@@ -114,6 +114,7 @@ public class SilkSmolLMParityTests
     }
 
     [Test]
+    [Category("Performance")]
     public void GreedyDecode_SyntheticWeights_CpuAndSilkMatchAndReportTiming()
     {
         try { using var probe = new SilkRuntime(); }
