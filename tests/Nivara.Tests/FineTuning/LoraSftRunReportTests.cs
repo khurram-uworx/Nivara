@@ -221,4 +221,109 @@ public sealed class LoraSftRunReportTests
         Assert.That(md, Does.Contain("Base metrics"));
         Assert.That(md, Does.Contain("Adapted metrics"));
     }
+
+    [Test]
+    public void Save_SilkFtLoraEvalReport_RoundTripsEvalFields()
+    {
+        var report = new LoraSftRunReport
+        {
+            Mode = "ft-lora",
+            Backend = "silk",
+            Device = "Intel(R) OpenCL GPU",
+            Model = "qwen2.5-0.5b-instruct",
+            Template = "qwen",
+            Rank = 8,
+            Alpha = 16f,
+            Targets = "q,v",
+            MaxLen = 256,
+            MaxExamples = 32,
+            Seed = 42,
+            TrainExamples = 24,
+            ValExamples = 8,
+            BaseParams = 1000,
+            AdapterParams = 200,
+            TrainableParams = 200,
+            TotalParams = 1200,
+            InitialValLoss = 2.5f,
+            BestValLoss = 2.0f,
+            BestEpoch = 1,
+            ElapsedMs = 1234,
+            AdapterPath = "out/lora-adapter.json",
+            AdapterFormat = "nivara-lora-sft-adapters-v1",
+            AdapterSha256 = "abc123",
+            MemoryBudgetBytes = 1073741824,
+            MemoryBudgetMode = "advisory",
+            EvalRan = true,
+            EvalSplit = "val",
+            EvalExamples = 8,
+            BaseMetrics = "Base\n  total=8",
+            AdaptedMetrics = "LoRA-adapted\n  total=8",
+            EvalDeltas = "valid_structure: +25.0%\nticket:          +25.0%",
+            BaseWorklogMetrics = new WorklogEvalMetrics(8, 6, 5, 5, 5, 1, 2, 1, 1, 1, 1),
+            AdaptedWorklogMetrics = new WorklogEvalMetrics(8, 8, 7, 7, 7, 2, 2, 1, 1, 1, 1),
+            EvalElapsedMs = 456,
+        };
+
+        var path = Path.Combine(Path.GetTempPath(), $"silk-ft-lora-eval-report-{Guid.NewGuid():N}.json");
+        try
+        {
+            report.Save(path);
+            var loaded = JsonSerializer.Deserialize<LoraSftRunReport>(File.ReadAllText(path), LoraSftRunReport.SerializerOptions);
+            Assert.That(loaded, Is.Not.Null);
+            Assert.That(loaded!.Mode, Is.EqualTo("ft-lora"));
+            Assert.That(loaded.Backend, Is.EqualTo("silk"));
+            Assert.That(loaded.Device, Is.EqualTo("Intel(R) OpenCL GPU"));
+            Assert.That(loaded.EvalRan, Is.True);
+            Assert.That(loaded.EvalSplit, Is.EqualTo("val"));
+            Assert.That(loaded.EvalExamples, Is.EqualTo(8));
+            Assert.That(loaded.BaseWorklogMetrics, Is.Not.Null);
+            Assert.That(loaded.AdaptedWorklogMetrics, Is.Not.Null);
+            Assert.That(loaded.BaseWorklogMetrics!.Total, Is.EqualTo(8));
+            Assert.That(loaded.AdaptedWorklogMetrics!.Total, Is.EqualTo(8));
+            Assert.That(loaded.EvalDeltas, Does.Contain("valid_structure"));
+            Assert.That(loaded.EvalElapsedMs, Is.EqualTo(456));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void SaveMarkdown_SilkFtLoraEvalReport_ContainsEvalSections()
+    {
+        var report = new LoraSftRunReport
+        {
+            Mode = "ft-lora",
+            Backend = "silk",
+            Device = "Intel(R) OpenCL GPU",
+            Model = "qwen2.5-0.5b-instruct",
+            Template = "qwen",
+            EvalRan = true,
+            EvalSplit = "val",
+            EvalExamples = 8,
+            EvalElapsedMs = 456,
+            BaseMetrics = "Base\n  total=8",
+            AdaptedMetrics = "LoRA-adapted\n  total=8",
+            EvalDeltas = "valid_structure: +25.0%\nticket:          +25.0%",
+        };
+
+        var path = Path.Combine(Path.GetTempPath(), $"silk-ft-lora-eval-report-{Guid.NewGuid():N}.md");
+        try
+        {
+            report.SaveMarkdown(path);
+            var md = File.ReadAllText(path);
+            Assert.That(md, Does.Contain("- **Backend:** silk"));
+            Assert.That(md, Does.Contain("- **Eval ran:** True"));
+            Assert.That(md, Does.Contain("- **Split:** val"));
+            Assert.That(md, Does.Contain("### Base metrics"));
+            Assert.That(md, Does.Contain("### Adapted metrics"));
+            Assert.That(md, Does.Contain("### Deltas"));
+            Assert.That(md, Does.Contain("valid_structure: +25.0%"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

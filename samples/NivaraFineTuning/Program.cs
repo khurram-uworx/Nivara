@@ -1211,11 +1211,99 @@ static class Program
             for (int i = 0; i < silkValLossPerEpoch.Count; i++)
                 silkLossCurve.Add(new LoraSftEpochLoss(i + 1, null, silkValLossPerEpoch[i]));
 
+            string deviceName = runtime.DeviceName;
+            WorklogEvalMetrics? baseMetrics = null;
+            WorklogEvalMetrics? adaptedMetrics = null;
+            string? evalDeltas = null;
+            int evalExamples = 0;
+            long evalElapsedMs = 0;
+            if (cli.Eval)
+            {
+                if (string.IsNullOrWhiteSpace(adapterPath) || !File.Exists(adapterPath))
+                    throw new InvalidOperationException("Silk ft-lora eval requires a saved best adapter; no adapter was produced. Disable --eval or ensure training saves an adapter.");
+                var evalRowsForGeneration = valRows;
+                if (cli.MaxExamples > 0 && evalRowsForGeneration.Count > cli.MaxExamples)
+                    evalRowsForGeneration = evalRowsForGeneration.Take(Math.Max(1, cli.MaxExamples / 4)).ToList();
+                evalExamples = evalRowsForGeneration.Count;
+                if (evalExamples == 0)
+                    throw new InvalidOperationException("Silk ft-lora eval requires at least one validation example. Provide validation data or disable --eval.");
+
+                // Free training GPU resources before opening a separate eval session.
+                trainer.Dispose();
+                runtime.Dispose();
+
+                var evalSw = System.Diagnostics.Stopwatch.StartNew();
+                var stopIds = WorklogSftGeneration.GetStopTokenIds(tokenizer, cli.Template);
+                if (qwen)
+                {
+                    var silkConfig = new QwenSilkConfig
+                    {
+                        HiddenSize = config.HiddenSize,
+                        NumHiddenLayers = config.NumHiddenLayers,
+                        NumAttentionHeads = config.NumAttentionHeads,
+                        NumKeyValueHeads = config.NumKeyValueHeads,
+                        IntermediateSize = config.IntermediateSize,
+                        VocabSize = config.VocabSize,
+                        MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+                        RmsNormEps = config.RmsNormEps,
+                        RopeTheta = config.RopeTheta,
+                    };
+                    SilkQwenSession evalSession;
+                    try { evalSession = SilkQwenSession.Open(silkConfig, tensors); }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException($"Silk ft-lora eval failed: OpenCL/Silk unavailable ({ex.Message}). No CPU fallback for --silk eval.", ex);
+                    }
+                    using (evalSession)
+                    {
+                        deviceName = evalSession.DeviceName;
+                        Console.WriteLine($"Eval OpenCL device: {deviceName}");
+                        (baseMetrics, adaptedMetrics, evalDeltas) = EvaluateSilkWorklogGeneration(
+                            cli, tokenizer, evalRowsForGeneration, stopIds, config.MaxPositionEmbeddings,
+                            evalSession.ForwardPrefillArgmax, evalSession.ForwardCachedArgmax, evalSession.ResetCache,
+                            evalSession.LoadAdapterBundle, adapterPath);
+                    }
+                }
+                else
+                {
+                    var silkConfig = new SmolLMConfig
+                    {
+                        HiddenSize = config.HiddenSize,
+                        NumHiddenLayers = config.NumHiddenLayers,
+                        NumAttentionHeads = config.NumAttentionHeads,
+                        NumKeyValueHeads = config.NumKeyValueHeads,
+                        IntermediateSize = config.IntermediateSize,
+                        VocabSize = config.VocabSize,
+                        MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+                        RmsNormEps = config.RmsNormEps,
+                        RopeTheta = config.RopeTheta,
+                        AttentionBias = config.AttentionBias,
+                    };
+                    SilkSmolLMSession evalSession;
+                    try { evalSession = SilkSmolLMSession.Open(silkConfig, tensors); }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException($"Silk ft-lora eval failed: OpenCL/Silk unavailable ({ex.Message}). No CPU fallback for --silk eval.", ex);
+                    }
+                    using (evalSession)
+                    {
+                        deviceName = evalSession.DeviceName;
+                        Console.WriteLine($"Eval OpenCL device: {deviceName}");
+                        (baseMetrics, adaptedMetrics, evalDeltas) = EvaluateSilkWorklogGeneration(
+                            cli, tokenizer, evalRowsForGeneration, stopIds, config.MaxPositionEmbeddings,
+                            evalSession.ForwardPrefillArgmax, evalSession.ForwardCachedArgmax, evalSession.ResetCache,
+                            evalSession.LoadAdapterBundle, adapterPath);
+                    }
+                }
+                evalSw.Stop();
+                evalElapsedMs = evalSw.ElapsedMilliseconds;
+            }
+
             var silkReport = new LoraSftRunReport
             {
                 Mode = "ft-lora",
                 Backend = "silk",
-                Device = runtime.DeviceName,
+                Device = deviceName,
                 Model = qwen ? "qwen2.5-0.5b-instruct" : "smollm",
                 Template = cli.Template,
                 Rank = cli.Rank,
@@ -1240,6 +1328,15 @@ static class Program
                 MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
                 MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
                 LossCurve = silkLossCurve,
+                EvalRan = baseMetrics is not null || adaptedMetrics is not null,
+                EvalSplit = (baseMetrics is not null || adaptedMetrics is not null) ? "val" : null,
+                EvalExamples = evalExamples,
+                BaseMetrics = baseMetrics?.ToReport("Base").Trim(),
+                AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
+                EvalDeltas = evalDeltas,
+                BaseWorklogMetrics = baseMetrics,
+                AdaptedWorklogMetrics = adaptedMetrics,
+                EvalElapsedMs = evalElapsedMs,
                 ParityStatus = "CPU/Silk parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke scaffolded.",
             };
             var silkReportPath = Path.Combine(outDir, "ft-lora-report.json");
@@ -1553,25 +1650,9 @@ static class Program
         Action resetCache,
         Action<string> loadAdapterBundle)
     {
-        int[] Generate(int[] promptIds) => WorklogSftGeneration.GenerateGreedyCached(
-            prefillArgmax, cachedArgmax, resetCache, promptIds, cli.MaxNewTokens, stopIds, maxSequenceLength);
-
-        var baseMetrics = WorklogSftGeneration.Evaluate(tokenizer, testRows, cli.Template, cli.MaxNewTokens, Generate, stopIds);
-        Console.WriteLine(baseMetrics.ToReport("Base"));
-
-        WorklogEvalMetrics? adaptedMetrics = null;
-        if (!string.IsNullOrWhiteSpace(cli.AdapterPath))
-        {
-            Console.WriteLine($"Loading adapter bundle: {cli.AdapterPath}");
-            loadAdapterBundle(cli.AdapterPath);
-            adaptedMetrics = WorklogSftGeneration.Evaluate(tokenizer, testRows, cli.Template, cli.MaxNewTokens, Generate, stopIds);
-            Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted"));
-            Console.WriteLine($"Delta valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}");
-            Console.WriteLine($"Delta ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}");
-            Console.WriteLine($"Delta hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}");
-            Console.WriteLine($"Delta date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}");
-            Console.WriteLine($"Delta convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}");
-        }
+        var (baseMetrics, adaptedMetrics, evalDeltas) = EvaluateSilkWorklogGeneration(
+            cli, tokenizer, testRows, stopIds, maxSequenceLength,
+            prefillArgmax, cachedArgmax, resetCache, loadAdapterBundle, cli.AdapterPath);
 
         var evalReport = new LoraSftRunReport
         {
@@ -1600,12 +1681,7 @@ static class Program
             AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
             BaseWorklogMetrics = baseMetrics,
             AdaptedWorklogMetrics = adaptedMetrics,
-            EvalDeltas = adaptedMetrics is null ? null :
-                $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
-                $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
-                $"hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}\n" +
-                $"date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}\n" +
-                $"convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}",
+            EvalDeltas = evalDeltas,
         };
         var evalReportPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.json");
         var evalMdPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.md");
@@ -1615,6 +1691,45 @@ static class Program
         catch (Exception ex) { Console.WriteLine($"Report (md) write skipped: {ex.Message}"); }
         return 0;
     }
+
+    static (WorklogEvalMetrics Base, WorklogEvalMetrics? Adapted, string? Deltas) EvaluateSilkWorklogGeneration(
+        CliArgs cli,
+        Gpt2BpeTokenizer tokenizer,
+        IReadOnlyList<WorklogSftExample> evalRows,
+        int[] stopIds,
+        int maxSequenceLength,
+        Func<int[], int> prefillArgmax,
+        Func<int, int, int> cachedArgmax,
+        Action resetCache,
+        Action<string> loadAdapterBundle,
+        string? adapterPath)
+    {
+        int[] Generate(int[] promptIds) => WorklogSftGeneration.GenerateGreedyCached(
+            prefillArgmax, cachedArgmax, resetCache, promptIds, cli.MaxNewTokens, stopIds, maxSequenceLength);
+
+        var baseMetrics = WorklogSftGeneration.Evaluate(tokenizer, evalRows, cli.Template, cli.MaxNewTokens, Generate, stopIds);
+        Console.WriteLine(baseMetrics.ToReport("Base"));
+
+        WorklogEvalMetrics? adaptedMetrics = null;
+        if (!string.IsNullOrWhiteSpace(adapterPath))
+        {
+            Console.WriteLine($"Loading adapter bundle: {adapterPath}");
+            loadAdapterBundle(adapterPath);
+            adaptedMetrics = WorklogSftGeneration.Evaluate(tokenizer, evalRows, cli.Template, cli.MaxNewTokens, Generate, stopIds);
+            Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted"));
+        }
+
+        string? deltas = adaptedMetrics is null ? null : FormatWorklogEvalDeltas(baseMetrics, adaptedMetrics);
+        if (deltas is not null) Console.WriteLine(deltas);
+        return (baseMetrics, adaptedMetrics, deltas);
+    }
+
+    static string FormatWorklogEvalDeltas(WorklogEvalMetrics baseMetrics, WorklogEvalMetrics adaptedMetrics) =>
+        $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
+        $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
+        $"hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}\n" +
+        $"date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}\n" +
+        $"convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}";
 
     static void LoadCpuAdapterBundle(string path, IReadOnlyList<LoRALinear<float, float>> adapters)
     {
