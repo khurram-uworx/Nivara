@@ -1,0 +1,12 @@
+=== Nivara HuggingFace Inference ===
+
+=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark ===
+Device: CPU (Intel64 Family 6 Model 197 Stepping 2, GenuineIntel ┬╖ 16 logical processors)  Runtime: .NET 11.0.0  Precision: BF16 (native, widen-SIMD)
+  Model build (BF16 (native, widen-SIMD)): 32 ms (290 tensors, 942 MB storage pool)
+
+Prompt tokens: 64. Decoding the synthetic prompt 3 times each path...
+
+  KV cache:  median 13146 ms for 32 tokens (400.6 ms/token, 2.5 tok/s) | prefill 5961 ms, decode 224.5 ms/token (4.45 tok/s)
+  Full fwd:  median 424552 ms for 32 tokens (14990.9 ms/token, 0.1 tok/s) | prefill 10260 ms, decode 12946.6 ms/token (0.08 tok/s)
+  Speedup:   37.4x
+
