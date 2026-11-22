@@ -182,9 +182,9 @@ public static class Qwen
     const int MaxNewTokens = 160;
     /// <summary>Decode cap for the synthetic benchmark: with random weights the argmax never hits
     /// a stop id, so the full-forward path would otherwise run all 160 tokens while re-forwarding
-    /// the prefix each step (~30 min). 24 tokens keeps the timing regime comparable to the real
-    /// tool turn (~19 tokens) at a practical runtime.</summary>
-    const int MaxNewTokensSynthetic = 24;
+    /// the prefix each step (~30 min). 32 tokens aligns with the SmolLM synthetic workload for
+    /// apples-to-apples comparison while keeping the full-forward path practical.</summary>
+    const int MaxNewTokensSynthetic = 32;
     /// <summary>Default plain (no-tools) prompt — fixed so the PyTorch fixture and NivaraInference
     /// stay byte-identical (like the pinned Paris weather tools prompt).</summary>
     const string PlainPrompt = "What is the capital of France?";
@@ -368,14 +368,23 @@ public static class Qwen
     /// stop-before-append semantics on Qwen stop ids. The CPU and Silk paths use identical sampling.</summary>
     public static List<int> GenerateSilk(
         SilkQwenSession session, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
+        => GenerateSilkTimed(session, config, promptIds, maxNewTokens, useKvCache).Ids;
+
+    /// <summary>Like <see cref="GenerateSilk"/> but also returns prefill and decode wall-clock
+    /// milliseconds so synthetic benchmarks can report comparable prefill/decode/total fields.</summary>
+    public static (List<int> Ids, long PrefillMs, long DecodeMs) GenerateSilkTimed(
+        SilkQwenSession session, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
     {
         session.ResetCache();
+        var prefillSw = System.Diagnostics.Stopwatch.StartNew();
         int next = useKvCache
             ? session.ForwardPrefillArgmax(promptIds.ToArray())
             : session.ForwardLastArgmax(promptIds.ToArray());
+        prefillSw.Stop();
 
         int position = promptIds.Count;
         var gen = new List<int>();
+        var decodeSw = System.Diagnostics.Stopwatch.StartNew();
         for (int t = 0; t < maxNewTokens && gen.Count < config.MaxPositionEmbeddings; t++)
         {
             if (QwenIds.StopIds.Contains(next))
@@ -385,7 +394,8 @@ public static class Qwen
                 ? session.ForwardCachedArgmax(next, position++)
                 : session.ForwardLastArgmax(BuildSequence(promptIds, gen));
         }
-        return gen;
+        decodeSw.Stop();
+        return (gen, prefillSw.ElapsedMilliseconds, decodeSw.ElapsedMilliseconds);
     }
 
     static int ArgMaxLastRowSilk(float[] logits, int vocab)
@@ -540,7 +550,8 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark -- Silk ===");
         var config = QwenSyntheticConfig;
-        Console.WriteLine($"Precision: {(bf16 ? "BF16 (synthetic)" : "F32 (synthetic)")}");
+        string precisionName = bf16 ? "BFloat16 storage / F32 compute" : "F32";
+        Console.WriteLine($"Precision: {precisionName}");
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         SilkQwenSession session;
         if (bf16)
@@ -558,18 +569,36 @@ public static class Qwen
             buildSw.Stop();
             Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
             Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+            Console.WriteLine();
 
             var promptIds = new int[64];
             for (int i = 0; i < promptIds.Length; i++)
-                promptIds[i] = (int)((SyntheticRng()) % (uint)config.VocabSize);
+                promptIds[i] = (int)(SyntheticRng() % (uint)config.VocabSize);
 
-            // Warmup.
-            GenerateSilk(session, config, promptIds, 8, useKvCache: true);
+            var warmup = GenerateSilkTimed(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+            long warmupMs = warmup.PrefillMs + warmup.DecodeMs;
+            double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Ids.Count * 1000.0 / warmup.DecodeMs : 0;
+            Console.WriteLine($"Warmup: {warmupMs} ms ({warmup.Ids.Count} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
 
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            var ids = GenerateSilk(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
-            sw.Stop();
-            Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F2}s ({(ids.Count > 0 ? sw.ElapsedMilliseconds / ids.Count : 0)} ms/token)");
+            var runs = new (long Ms, int Generated, long PrefillMs, long DecodeMs)[3];
+            for (int i = 0; i < 3; i++)
+            {
+                var timing = GenerateSilkTimed(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+                long totalMs = timing.PrefillMs + timing.DecodeMs;
+                runs[i] = (totalMs, timing.Ids.Count, timing.PrefillMs, timing.DecodeMs);
+                double decodeTokS = timing.DecodeMs > 0 ? timing.Ids.Count * 1000.0 / timing.DecodeMs : 0;
+                Console.WriteLine($"Run {i + 1}: {totalMs} ms ({timing.Ids.Count} tokens, " +
+                                  $"{timing.Ids.Count * 1000.0 / Math.Max(1, totalMs):F2} tok/s, " +
+                                  $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+            }
+
+            Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+            var median = runs[1];
+            double medianDecodeTokS = median.DecodeMs > 0 ? median.Generated * 1000.0 / median.DecodeMs : 0;
+            Console.WriteLine();
+            Console.WriteLine($"Median: {median.Ms} ms ({median.Generated} tokens, " +
+                              $"{median.Generated * 1000.0 / Math.Max(1, median.Ms):F2} tok/s, " +
+                              $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
             return 0;
         }
     }
@@ -871,10 +900,12 @@ public static class Qwen
             return (runs.Average(r => r.MsPerTok), s[1].Ms, s[1].PrefillMs, s[1].DecodeMsTok, s[1].Tokens);
         }
 
+        static double DecodeTokS(double msPerTok) => 1000.0 / Math.Max(0.01, msPerTok);
+
         var c = Summarize(cachedRuns);
         var f = Summarize(fullRuns);
-        Console.WriteLine($"  KV cache:  median {c.MedianMs:F0} ms for {c.Tokens} tokens ({c.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, c.AvgMsTok):F1} tok/s) | prefill {c.MedianPrefillMs:F0} ms, decode {c.MedianDecodeMsTok:F1} ms/token");
-        Console.WriteLine($"  Full fwd:  median {f.MedianMs:F0} ms for {f.Tokens} tokens ({f.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, f.AvgMsTok):F1} tok/s) | prefill {f.MedianPrefillMs:F0} ms, decode {f.MedianDecodeMsTok:F1} ms/token");
+        Console.WriteLine($"  KV cache:  median {c.MedianMs:F0} ms for {c.Tokens} tokens ({c.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, c.AvgMsTok):F1} tok/s) | prefill {c.MedianPrefillMs:F0} ms, decode {c.MedianDecodeMsTok:F1} ms/token ({DecodeTokS(c.MedianDecodeMsTok):F2} tok/s)");
+        Console.WriteLine($"  Full fwd:  median {f.MedianMs:F0} ms for {f.Tokens} tokens ({f.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, f.AvgMsTok):F1} tok/s) | prefill {f.MedianPrefillMs:F0} ms, decode {f.MedianDecodeMsTok:F1} ms/token ({DecodeTokS(f.MedianDecodeMsTok):F2} tok/s)");
         if (f.AvgMsTok > 0)
             Console.WriteLine($"  Speedup:   {f.AvgMsTok / Math.Max(0.01, c.AvgMsTok):F1}x");
         Console.WriteLine();
