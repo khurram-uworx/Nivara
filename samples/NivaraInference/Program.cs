@@ -3716,8 +3716,9 @@ class Program
 
     static int RunSmolLMSyntheticBenchmarkSilk(bool plain = false, bool bf16 = false)
     {
+        string precisionName = bf16 ? "BFloat16 storage / F32 compute" : "F32";
         Console.WriteLine("=== SmolLM-135M (synthetic weights): KV-cache decode benchmark -- Silk ===");
-        Console.WriteLine($"Precision: {(bf16 ? "BF16 (synthetic)" : "F32 (synthetic)")}");
+        Console.WriteLine($"Device: Silk  Precision: {precisionName}");
         var config = SmolLMSyntheticConfig;
         var buildSw = Stopwatch.StartNew();
         Nivara.Silk.SilkSmolLMSession session;
@@ -3736,6 +3737,7 @@ class Program
         {
             Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
             Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+            Console.WriteLine();
 
             uint rng = 0x9E3779B9;
             var promptIds = new int[64];
@@ -3744,15 +3746,29 @@ class Program
                 rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
                 promptIds[i] = (int)(rng % (uint)config.VocabSize);
             }
+            const int MaxNewTokens = 32;
 
-            // Warmup.
-            RunSmolLMGenerationSilk(session, promptIds, config, 8);
+            var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+            double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
+            Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
 
-            var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
-            double decodeTokS = ids.DecodeMs > 0 ? ids.Generated * 1000.0 / ids.DecodeMs : 0;
-            Console.WriteLine($"{ids.Generated} tokens in {ids.Milliseconds} ms " +
-                              $"({(ids.Generated * 1000.0 / Math.Max(1, ids.Milliseconds)):F2} tok/s, " +
-                              $"prefill {ids.PrefillMs} ms, decode {ids.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+            var runs = new (long Ms, int Generated, long PrefillMs, long DecodeMs)[3];
+            for (int i = 0; i < 3; i++)
+            {
+                var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+                runs[i] = (timing.Milliseconds, timing.Generated, timing.PrefillMs, timing.DecodeMs);
+                double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
+                Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
+                                  $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
+                                  $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+            }
+            Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+            var median = runs[1];
+            double medianDecodeTokS = median.DecodeMs > 0 ? median.Generated * 1000.0 / median.DecodeMs : 0;
+            Console.WriteLine();
+            Console.WriteLine($"Median: {median.Ms} ms ({median.Generated} tokens, " +
+                              $"{median.Generated * 1000.0 / Math.Max(1, median.Ms):F2} tok/s, " +
+                              $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
             return 0;
         }
     }
