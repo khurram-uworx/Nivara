@@ -406,4 +406,5 @@ Notes:
 - The tools prompt is much larger (206 prompt tokens) and its prefill dominates (3,895 ms); decode is 259.6 ms/token.
 - The GPU (Silk/OpenCL, Intel Graphics) run reached about 130 ms/token, faster than the CPU plain run to the same 7-token answer, with a one-time 5,178 ms model build.
 - Speedup figures measure **cache vs. full re-forward inside Nivara**, not vs. PyTorch. PyTorch numbers are the distance-to-library reference only.
+- **CPU viability fallback.** Real-checkpoint Qwen CPU runs can be too slow for interactive smoke use on typical dev machines. When CPU is impractical, use synthetic-weight CPU/Silk parity as the deterministic confidence gate: fixed seed/shape, argmax equality, and bounded logits tolerance (`maxAbs <= 1e-3 * (1 + max|cpu|)`) on prefill and cached decode. SmolLM-135M is the smaller diagnostic path; `samples/NivaraInference` reports prefill/decode split and decode throughput (`tok/s`) for SmolLM CPU and Silk runs to localize bottlenecks before attempting a real checkpoint.
 

@@ -113,6 +113,109 @@ public class SilkSmolLMParityTests
         Assert.That(maxAbs, Is.LessThanOrEqualTo(1e-3f * scale));
     }
 
+    [Test]
+    [Category("Performance")]
+    public void GreedyDecode_SyntheticWeights_CpuAndSilkMatchAndReportTiming()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk parity verification."); }
+
+        var (tensors, silkConfig) = SmolLMTestWeights.Synthesize();
+        var config = new LlamaConfig
+        {
+            HiddenSize = silkConfig.HiddenSize,
+            NumHiddenLayers = silkConfig.NumHiddenLayers,
+            NumAttentionHeads = silkConfig.NumAttentionHeads,
+            NumKeyValueHeads = silkConfig.NumKeyValueHeads,
+            IntermediateSize = silkConfig.IntermediateSize,
+            VocabSize = silkConfig.VocabSize,
+            MaxPositionEmbeddings = silkConfig.MaxPositionEmbeddings,
+            RmsNormEps = silkConfig.RmsNormEps,
+            RopeTheta = silkConfig.RopeTheta,
+            AttentionBias = silkConfig.AttentionBias,
+            TieWordEmbeddings = true,
+            HiddenAct = "silu",
+        };
+
+        int[] prompt = [1, 2, 3, 4];
+        const int maxNewTokens = 4;
+
+        var cpu = GreedyDecodeCpu(config, tensors, prompt, maxNewTokens);
+        using var session = SilkSmolLMSession.Open(silkConfig, tensors);
+        var silk = GreedyDecodeSilk(session, prompt, maxNewTokens, config.EosTokenId);
+
+        Assert.That(silk.GeneratedIds, Is.EqualTo(cpu.GeneratedIds));
+        Assert.That(cpu.LastLogits.All(float.IsFinite), Is.True);
+        Assert.That(silk.LastLogits.All(float.IsFinite), Is.True);
+
+        double cpuDecodeTokS = cpu.DecodeMs > 0 ? cpu.GeneratedIds.Count * 1000.0 / cpu.DecodeMs : 0;
+        double silkDecodeTokS = silk.DecodeMs > 0 ? silk.GeneratedIds.Count * 1000.0 / silk.DecodeMs : 0;
+        TestContext.Progress.WriteLine(
+            $"SmolLM synthetic CPU/Silk: prompt={prompt.Length}, generated={cpu.GeneratedIds.Count}, " +
+            $"cpu prefill={cpu.PrefillMs} ms, cpu decode={cpu.DecodeMs} ms ({cpuDecodeTokS:F2} tok/s), " +
+            $"silk prefill={silk.PrefillMs} ms, silk decode={silk.DecodeMs} ms ({silkDecodeTokS:F2} tok/s)");
+    }
+
+    static (List<int> GeneratedIds, float[] LastLogits, long PrefillMs, long DecodeMs) GreedyDecodeCpu(
+        LlamaConfig config,
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        int[] prompt,
+        int maxNewTokens)
+    {
+        var model = LlamaLoader.Load<float, float>(config, tensors);
+        int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
+        using var cache = new LlamaKVCache<float>(config.NumHiddenLayers, kvWidth);
+
+        var prefillSw = System.Diagnostics.Stopwatch.StartNew();
+        var prefill = model.ForwardPrefill(prompt, cache);
+        prefillSw.Stop();
+        var last = new float[config.VocabSize];
+        for (int i = 0; i < config.VocabSize; i++) last[i] = prefill.Data[i];
+        int next = ArgMax(last);
+
+        var generated = new List<int>(maxNewTokens);
+        int position = prompt.Length;
+        var decodeSw = System.Diagnostics.Stopwatch.StartNew();
+        for (int t = 0; t < maxNewTokens; t++)
+        {
+            generated.Add(next);
+            if (next == config.EosTokenId)
+                break;
+            var step = model.ForwardCached(next, position++, cache);
+            for (int i = 0; i < config.VocabSize; i++) last[i] = step.Data[i];
+            next = ArgMax(last);
+        }
+        decodeSw.Stop();
+        return (generated, last, prefillSw.ElapsedMilliseconds, decodeSw.ElapsedMilliseconds);
+    }
+
+    static (List<int> GeneratedIds, float[] LastLogits, long PrefillMs, long DecodeMs) GreedyDecodeSilk(
+        SilkSmolLMSession session,
+        int[] prompt,
+        int maxNewTokens,
+        int eosTokenId)
+    {
+        session.ResetCache();
+        var prefillSw = System.Diagnostics.Stopwatch.StartNew();
+        var last = session.ForwardPrefill(prompt);
+        prefillSw.Stop();
+        int next = ArgMax(last);
+
+        var generated = new List<int>(maxNewTokens);
+        int position = prompt.Length;
+        var decodeSw = System.Diagnostics.Stopwatch.StartNew();
+        for (int t = 0; t < maxNewTokens; t++)
+        {
+            generated.Add(next);
+            if (next == eosTokenId)
+                break;
+            last = session.ForwardCached(next, position++);
+            next = ArgMax(last);
+        }
+        decodeSw.Stop();
+        return (generated, last, prefillSw.ElapsedMilliseconds, decodeSw.ElapsedMilliseconds);
+    }
+
     static int ArgMax(float[] values)
     {
         int best = 0;
