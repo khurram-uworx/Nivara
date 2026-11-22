@@ -65,9 +65,9 @@ Downstream callers: `ft-lora`/`ft-eval` CLI and (future) #1418 Silk path. Keep p
 
 ## GitHub issues log
 
-- [ ] #1417 — LoRA: generic Llama-family CPU SFT trainer (this branch)
-- [ ] #1416 — LoRA: behavioral worklog SFT dataset and deterministic generator (dependency, already on base)
-- [ ] (add discoveries here immediately during execution)
+- [x] #1417 — LoRA: generic Llama-family CPU SFT trainer (this branch)
+- [x] #1416 — LoRA: behavioral worklog SFT dataset and deterministic generator (dependency, already on base)
+- [ ] #1425 — SFT trainer: surface structured worklog eval metrics (field/structure/convention/clarification) (deferred)
 
 ## Grounding / decisions
 
