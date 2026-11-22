@@ -1,457 +1,92 @@
-# NivaraFineTuning — DistilBERT Fine-Tuning on GLUE SST-2
+# NivaraFineTuning — Fine-tuning showcase
 
-A sample project demonstrating fine-tuning a pre-trained DistilBERT model for sequence classification using Nivara's AutoDiff engine — entirely in C#, no Python runtime required for inference.
+A sample project demonstrating fine-tuning with Nivara's AutoDiff engine — entirely in
+C#, no Python runtime required for inference.
 
-**Target audience:** .NET developers exploring transfer learning and fine-tuning pipelines with Nivara.
+- **Track A — DistilBERT on GLUE SST-2** (sequence classification, full-model fine-tune).
+- **Track B — LoRA SFT for Llama-family SLMs** (Qwen2.5-0.5B headline, SmolLM generic
+  verification; CPU reference + Silk/iGPU path).
+
+**Target audience:** .NET developers exploring transfer learning and fine-tuning pipelines
+with Nivara.
+
+## Guides
+
+- **[BERT-TUNING.md](BERT-TUNING.md)** — DistilBERT/SST-2 track: ML concepts for .NET
+  developers, architecture, dataset, setup, usage, expected results, performance
+  benchmarks, scope of validation, Python reference, key APIs, core library improvements.
+- **[LORA-TUNING.md](LORA-TUNING.md)** — LoRA SFT track: generic Llama-family LoRA
+  trainer (CPU + Silk), CLI, SmolLM verification, report artifacts, adapter format, D2a
+  parity status.
 
 ## What this sample does
 
-1. Loads pre-trained DistilBERT weights (distilbert-base-uncased) from SafeTensors format
-2. Builds a sequence classification head on top of the frozen encoder
-3. Loads the GLUE SST-2 sentiment dataset via Parquet files
-4. Fine-tunes the classification head (full model) using AdamW optimizer
-5. Evaluates on the dev set and reports loss + accuracy
-6. Saves and reloads the fine-tuned model via `ModelSerializer`
-7. Interactive sentiment prediction mode
-
-## ML concepts for .NET developers
-
-New to language-model training loops? The hyperparameters in this sample map
-cleanly onto ideas you already know from C#:
-
-| ML term | What it is | C# mental model | This sample |
-|---------|------------|-----------------|-------------|
-| **Batch (B)** | Number of examples processed before one weight update | Rows per `foreach` iteration | `--batch-size 4` |
-| **Epoch** | One complete pass over the training set | One full `for` loop over all rows | `--epochs 3` |
-| **Sequence length (L)** | Fixed width every input row is padded/truncated to | A rectangular array dimension | `--max-len 128` |
-| **Token** | A subword unit produced by the tokenizer | A key looked up in `vocab.txt` | word pieces |
-
-- **Batch size (B).** The model does not adjust its weights after every single
-  sentence. It processes `B` sentences, aggregates their error, and takes one
-  optimization step. `B=2` means 67,349 / 2 ≈ 33,675 weight updates per epoch.
-  Bigger batches = fewer steps and better vectorized-kernel utilization, but
-  more memory and autograd graph per step.
-
-- **Epoch.** A single pass through the entire training set. The default run uses
-  3 epochs, so each sentence is seen 3 times (re-shuffled between passes) —
-  which is why a full run costs roughly 3× a single epoch.
-
-- **Token vs. character.** The model never reads raw text. The tokenizer splits
-  each sentence into subword units first — e.g. `"flawlessly"` becomes the two
-  tokens `["flaw", "##lessly"]`. The average SST-2 sentence is only ~19 tokens,
-  but a long tail of examples exceeds 100.
-
-- **Sequence length (L).** A hard cap on the number of tokens per sentence.
-  Every row is padded to `L` (typically with `[PAD]` tokens) so a batch is a
-  rectangular `[B × L]` matrix the kernels can process in one shot. `128` is the
-  GLUE convention: it covers ~99.9% of sentences at roughly 10× less compute
-  than BERT's 512-token pretraining width. The trade-off: compute scales with
-  `L`, not with actual content, so a 19-token sentence still pays for 128
-  positions — most of the attention work is spent on padding.
-
-## Architecture
-
-```
-Input: [B×L] token IDs + [B×L] attention mask
-  │
-  ├─ wordEmbed:     Embedding(vocabSize=30522, dim=768)
-  ├─ posEmbed:      Embedding(maxPos=512, dim=768)  ← per-sequence repeated [0..L-1]
-  ├─ embedLn:       LayerNorm(768)
-  │
-  ├─ BertEncoder × 6 layers
-  │   ├─ ln1 → BertSelfAttention (12 heads, block-diagonal mask) → residual
-  │   └─ ln2 → Linear(768→3072) → GELU → Linear(3072→768) → residual
-  │
-  ├─ Extract [CLS] tokens: gather positions [0, L, 2L, ...] → [B, 768]
-  ├─ preClassifier: Linear(768→768) → ReLU
-  └─ classifier:    Linear(768→numLabels) → [B, numLabels]
-```
-
-The classification head uses **ReLU** (matching HF `DistilBertForSequenceClassification`, which applies `nn.ReLU()` after `pre_classifier`) via `ReverseGradOperations.Relu`. The shared `DistilBertForSequenceClassification<T>` (in `Nivara.Samples`) is used by both this sample and the `distilbert_sst` inference showcase.
-
-### Batched attention
-
-The encoder uses `BertEncoder<T>.ForwardBatched` with a block-diagonal attention mask that:
-- Isolates cross-sequence positions (masked to `-inf`) so each sequence only attends within itself
-- Applies padding mask to ignore pad tokens within each sequence
-- Position IDs are `[0, 1, ..., L-1]` repeated `B` times (not `[0..B×L-1]`)
-
-## Dataset
-
-[GLUE SST-2](https://huggingface.co/datasets/nyu-mll/glue) — Stanford Sentiment Treebank v2, binary sentiment classification:
-
-| Split | Examples | Format |
-|-------|----------|--------|
-| Train | 67,349 | Parquet (`train-00000-of-00001.parquet`) |
-| Dev   | 872     | Parquet (`validation-00000-of-00001.parquet`) |
-
-Labels: `0` = negative, `1` = positive.
-
-The data is loaded via `Nivara.IO.NivaraParquetReader` from `Nivara.Extensions` (Parquet.Net 6.0.3).
-
-## Setup
-
-### Prerequisites
-
-- .NET 10.0 SDK
-- HuggingFace CLI (`hf`): `pip install huggingface-hub`
-- Python 3.10+ (for data downloads and reference script)
-
-### Download DistilBERT model
-
-```bash
-hf download distilbert-base-uncased --local-dir samples/data/distilbert
-```
-
-This downloads:
-- `samples/data/distilbert/config.json` — model configuration
-- `samples/data/distilbert/model.safetensors` — pre-trained weights (6 layers, 67M params)
-- `samples/data/distilbert/vocab.txt` — BERT tokenizer vocabulary
-
-### Download SST-2 dataset
-
-```bash
-hf download --repo-type dataset nyu-mll/glue sst2/train-00000-of-00001.parquet sst2/validation-00000-of-00001.parquet --local-dir samples/data/sst2
-```
-
-This downloads Parquet files to `samples/data/sst2/`.
-
-## Usage
-
-> **Always run with `-c Release`.** The default `dotnet run` configuration is Debug
-> (no JIT optimization), which runs the numeric kernels several times slower than
-> Release. Use `dotnet run -c Release --project samples/NivaraFineTuning -- ...`.
-> The sample enables Server GC and Tiered PGO to reduce GC pauses under the
-> ~1 GB/batch allocation churn of a 67M-parameter training step.
-
-### Train
-
-```bash
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 3 --batch-size 4
-```
-
-Trains for 3 epochs with AdamW (lr=2e-5, weight_decay=0.01), reports per-epoch training loss and dev accuracy. Saves the fine-tuned model to `samples/data/distilbert/finetuned_model.json`.
-
-```bash
-# Quick smoke test (1 epoch, batch size 2)
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2
-
-# BF16 fine-tune (CPU)
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --precision bf16 --epochs 1 --batch-size 2 --max-examples 25
-```
-
-### Evaluate
-
-```bash
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval
-```
-
-Loads the fine-tuned model from `samples/data/distilbert/finetuned_model.json`, runs inference on the SST-2 dev set, reports loss and accuracy.
-
-### Interactive prediction
-
-```bash
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict
-```
-
-Type sentences and get POSITIVE/NEGATIVE with confidence percentage. Type `quit` to exit.
-
-### Silk (OpenCL GPU)
-
-```bash
-# Train on the OpenCL device (forward/backward/AdamW on device; exits 1 if OpenCL is unavailable)
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 4 --max-examples 25
-
-# Evaluate a fine-tuned model on the device (exits 1 if OpenCL is unavailable)
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval --silk
-
-# Interactive prediction on the device
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict --silk
-```
-
-`--silk` defaults to F32. `--precision bf16` runs the true BF16 lane: on Silk it uses
-`SilkDistilBertTrainer.CreateTrueBf16` (BF16 matmul weights on device, F32 activations/AdamW
-moments) and exports an F32 checkpoint; on CPU it trains `DistilBertForSequenceClassification<BFloat16>`
-through AutoDiff. `--precision fp16` is rejected (use bf16). A device is required in every
-`--silk` mode; the run exits with status 1 when OpenCL is unavailable (no CPU fallback). Use the
-same command without `--silk` for the CPU path.
-
-### Custom options
-
-```bash
-dotnet run --project samples/NivaraFineTuning -- \
-  --mode train \
-  --epochs 5 \
-  --lr 3e-5 \
-  --batch-size 8 \
-  --max-len 256 \
-  --model-dir ./my-distilbert \
-  --data-dir ./my-data \
-  --save-path ./my-model.json
-```
-
-## Expected results
-
-> The accuracy figures below are **targets** from reference runs, not
-> measurements this sample establishes — it validates on a small slice rather
-> than the full dataset. See
-> [Scope of validation](#scope-of-validation-proof-of-concept-not-a-benchmark-claim).
-
-On a single CPU core (no GPU):
-
-| Epoch | Training loss (avg) | Dev accuracy |
-|-------|-------------------|--------------|
-| 1     | ~0.45             | ~78-82%      |
-| 2     | ~0.35             | ~80-84%      |
-| 3     | ~0.30             | ~81-85%      |
-
-Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 80-85%.
-
-### Expected timing
-
-By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
-backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
-unavailable). For `--max-examples 100 --batch-size 2 --epochs 1 -c Release` on CPU,
-the v1.5.2 capture measured **1.238 s/batch** steady-state (see
-[Performance benchmarks](#performance-benchmarks)); a full 33,674-batch epoch
-extrapolates to **~11.6 hours**. With `--silk` the same shape ran at
-**0.247 s/batch** (**~2.3 hours per epoch**) on the integrated GPU. Keep
-`--max-len` at the default 128 and use `--max-examples` to validate the pipeline
-before committing to a full run.
-
-## Performance benchmarks
-
-Measured on the same machine (Intel Core Ultra 7 255H, 16 logical processors,
-Windows 11) in one AC-powered session. The PyTorch and Nivara (CPU) columns run on
-the CPU; the Nivara (Silk/OpenCL) column runs on `Intel(R) Graphics`. Nivara runs
-in Release mode with Server GC + Tiered PGO (as configured in the sample project).
-PyTorch uses MKL-optimized kernels with `torch_threads = 16`. Both sides fine-tune
-DistilBERT-base (67M params) on the first 100 SST-2 examples at
-`--batch-size 2 --max-len 128` and report **steady-state ms/batch**: PyTorch runs
-2 untimed warmup epochs before timing; Nivara excludes the first (JIT/OpenCL
-warmup) batch. `--seed 0` fixes the training shuffle. The runner did not record
-the OpenCL driver version, so none is quoted. Run-to-run variance is ~±10% per
-`tests/Nivara.PerformanceTests/README.md`.
-
-Recorded **2026-11-18** on Python 3.12.10, PyTorch 2.13.0+cpu,
-`torch_threads=16`, .NET 11.0.0, AC power. All three columns come from the same
-capture: PyTorch **338.4 ms/batch**, Nivara CPU **1238.1 ms/batch**, Nivara Silk
-**247.0 ms/batch**. The Silk path is **~1.4x faster than PyTorch CPU** at this
-shape, while the CPU Nivara path remains **~3.7x slower** than PyTorch.
-
-### Paired CPU vs Silk (issue #1003)
-
-Measured on the same machine (Intel Core Ultra 7 255H, Windows 11, .NET 10,
-Release, Server GC + Tiered PGO) with `--mode train --epochs 1 --max-len 128
---max-examples 48 --batch-size B`; first batch excluded as steady-state. Silk run
-on **battery power (not AC)**, so integrated-GPU figures are conservative — treat
-them as an upper bound on Silk ms/batch.
-
-| B | L | Nivara CPU (ms/batch) | Nivara Silk/OpenCL (ms/batch) | CPU / Silk |
-|---|---|---:|---:|---:|
-| 2 | 128 | 3140.9 | 365.8 | 8.59x |
-| 4 | 128 | 4516.8 | 636.7 | 7.09x |
-| 8 | 128 | 7720.4 | 1250.4 | 6.17x |
-
-Conclusion (per #961 item 6): on this laptop the CPU reverse-mode path is **not**
-within ~1.5x of the integrated GPU at B<=8 — Silk is 6.2-8.6x faster at these
-shapes, so the "CPU is the better fit at B<=8" fork is **not** supported and the
-fine-tuning value of Silk starts at B>=2. The earlier concern about <10% GPU
-utilization is real but does not erase the device advantage; optimisation work
-should focus on the backward chain (especially attention backward / DKV, ~72-80%
-of Silk batch time) rather than reverting to the CPU path. A 48-example run is small,
-so the absolute figures vary ~±10% run-to-run (per `tests/Nivara.PerformanceTests/README.md`);   re-run on AC power before quoting an official number.
-
-| Config | PyTorch (CPU) | Nivara (.NET 11) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
-|--------|---------------|-------------------|----------------------|----------------|-----------------|
-| Fine-tune B=2, L=128, 100 examples | 338.4 ms/batch | 1238.1 ms/batch | 247.0 ms/batch | **~3.7x** | **0.73x (1.4x faster)** |
-
-The ~3× gap is consistent with prior measurements on different hardware: at batch
-size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward
-pass through 67M params, not by BLAS peak throughput, so the CPU SIMD kernels and
-memory management keep Nivara within ~3× of PyTorch's MKL.
-
-**Caveats (Silk / integrated GPU).** The Silk path is expected to be competitive
-only at larger batch sizes or decode-style workloads. The small-batch (B=2..4)
-fine-tuning loop is dominated by 38 small Linear matmuls and may not beat the CPU
-SIMD path; do not claim a win without measurement. Record run-to-run variance
-(±10% floor per `tests/Nivara.PerformanceTests/README.md`) and the steady-state
-ms/batch (first batch excluded, as printed by `RunTrainSilk`).
-
-### Estimated full-run wall-clock (approximate)
-
-> **Disclaimer:** the figures below are **estimates, not measurements.** They
-> extrapolate the 100-example per-batch numbers from the 2026-11-18 capture to
-> the full 33,674 batches of a 67,349-example epoch and assume per-batch cost is
-> constant — which is approximate. Real runs drift with machine load, GC
-> pressure, and thermals; treat them as ballpark planning figures (±30%).
-
-| Config | Framework | 1 epoch (est.) | 3 epochs (est.) |
-|--------|-----------|----------------|-----------------|
-| B=2, L=128 | PyTorch (CPU) | ~3.2 h | ~9.5 h |
-| B=2, L=128 | Nivara (.NET 11) | ~11.6 h | ~34.7 h |
-| B=2, L=128 | Nivara (Silk/OpenCL) | ~2.3 h | ~6.9 h |
-
-B=4 was not captured in this session; its previous derived rows were removed
-rather than carried forward as if they were fresh measurements.
-
-### Re-running
-
-```bash
-cd samples/NivaraFineTuning
-
-# Both sides, tee'd to benchmark_results.txt (uses GNU coreutils tee on PATH)
-.\benchmark_timing.cmd 25 2 1
-
-# PyTorch side only
-python Python\benchmark_timing.py --epochs 1 --batch-size 2 --max-examples 25
-
-# Nivara side only (batch times are printed per batch; batch 1 is JIT warmup)
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2 --max-examples 25
-
-# Nivara Silk/OpenCL side only (per-batch timing; first batch is OpenCL JIT warmup)
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 2 --max-examples 25
-
-# Silk scaling study (B=2, 4, 8) — run each on AC power
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 2 --max-examples 25
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 4 --max-examples 25
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --silk --epochs 1 --batch-size 8 --max-examples 25
-```
-
-> **AC power required.** Plug the device into AC power before recording Silk
-> numbers; integrated-GPU results are skewed by thermal/battery throttling. Record
-> the OpenCL driver version and the power state with the measurement.
-
-Record new results in the table above with the measurement date and a note on
-what changed. Kernel-level micro-measurements (matmul/transpose/softmax/attention)
-live in `tests/Nivara.PerformanceTests`.
-
-## Scope of validation: proof of concept, not a benchmark claim
-
-This sample is deliberately **validated on a tiny slice** of SST-2
-(`--max-examples 25`, batch size 2, one epoch). That was an explicit choice, and
-it deserves an explicit note. The numbers in this section describe that original
-correctness validation, not the 100-example release capture in
-[Performance benchmarks](#performance-benchmarks).
-
-**What we set out to prove.** That the entire fine-tuning pipeline works
-end-to-end in managed C# — SafeTensors weight loading, the frozen-encoder
-forward pass, the backward pass through 67M parameters, AdamW parameter updates,
-full dev-set evaluation, and save/reload. That is a *correctness* question, and
-it does not require the full dataset to answer.
-
-**What was actually measured.** On the 25-example slice, training loss fell from
-~0.75 to ~0.70 across the 13 batches of a single epoch, and evaluation on the
-*full* 872-example dev set returned **60.09% accuracy** — comfortably above the
-50% coin-flip baseline. Those numbers show the loop is learning and the numerics
-line up; they are not a claim about final model quality.
-
-**What we deliberately did not run.** A full SST-2 fine-tune on CPU costs ~32
-hours per epoch (67,349 examples at ~3.4 s/batch), so a complete 3-epoch run is
-~4 days of wall-clock. We judged that against the goal — proving technical
-correctness — and chose the 25-example slice instead. The first example of a
-training slice already exercises every layer, every gradient, and every
-optimizer step the full run would; what a slice cannot tell you is *accuracy*,
-which is why the harness still evaluates on the full dev set.
-
-**Where performance stands.** On this machine the CPU path is ~3× slower than
-PyTorch's MKL kernels at this configuration (1.54 s vs 0.50 s per batch), while
-the Silk/OpenCL path on the integrated GPU runs ~1.9× faster (0.26 s per batch).
-The honest summary: *technically correct, and now competitive on the GPU for
-this shape.* The numerics are right, the pipeline is complete, and the benchmark
-harness in the previous section is the tool for chasing the gap.
-
-## Python reference
-
-A PyTorch reference implementation is provided for accuracy comparison:
-
-```bash
-cd samples/NivaraFineTuning/Python
-pip install -r requirements.txt
-python finetune_distilbert.py
-```
-
-Uses identical hyperparameters (lr=2e-5, epochs=3, batch_size=4, max_len=128) with `transformers.AutoModelForSequenceClassification` and `datasets` SST-2 loader.
+1. Loads pre-trained DistilBERT weights (distilbert-base-uncased) from SafeTensors and
+   fine-tunes a classification head on GLUE SST-2 (Track A).
+2. Runs generic LoRA SFT on Llama-family causal LMs (Qwen2.5-0.5B / SmolLM) over
+   deterministic synthetic worklog data, emitting a validated adapter bundle (Track B).
+3. Evaluates base vs LoRA-adapted models and writes structured JSON + Markdown reports.
+4. Supports CPU reference and Silk/OpenCL (iGPU) paths; adapter bundles round-trip
+   between backends.
+
+## How it helped Nivara the library
+
+DistilBERT track (core improvements in `src/Nivara`):
+
+- Block-diagonal attention mask utility for flattened batch encoding.
+- SafeTensors-to-module weight mapping with HuggingFace snake_case key translation.
+- Graceful loading of random-init heads when fine-tuning from scratch.
+- Reflection-based DistilBertConfig JSON parser (snake_case -> PascalCase).
+- Shared `DistilBertForSequenceClassification<T>` promoted to `Nivara.Samples`.
+- No token-type embeddings for DistilBERT (`includeTokenTypeEmbedding: false`).
+
+LoRA track (core additions in `src/Nivara`):
+
+- `LoRALinear<T>` / `LoRALinear<TModel, TWeight>`: frozen base, Kaiming A / zero B,
+  merge, adapter-only gradients.
+- `LoraAdapterSerializer` (`nivara-lora-adapter-v1`): single-adapter save/load with
+  rank/alpha/base-model/targets/shape validation.
+- Multi-adapter SFT bundle (`nivara-lora-sft-adapters-v1`) shared by CPU and Silk
+  trainers, with shape/rank/count validation on load.
 
 ## Key Nivara APIs exercised
 
-| API | Usage |
-|-----|-------|
-| `BertEncoder<T>.ForwardBatched` | Flattened batch processing with block-diagonal attention mask |
-| `Embedding<T>` | Token embedding (gather path) and position embedding |
-| `Linear<T>` | Q/K/V/O projections, FFN layers, pre-classifier, classifier head |
-| `LayerNorm<T>` | Pre-norm layer normalization with configurable epsilon |
-| `ReverseGradOperations.GeluExact` | GELU activation in the encoder FFN intermediate (exact erf) |
-| `ReverseGradOperations.Relu` | Classification-head activation (matches HF `nn.ReLU`) |
-| `ReverseGradOperations.Gather` | [CLS] token extraction from batched encoder output |
-| `AdamW<T>` | Parameter-efficient fine-tuning with weight decay |
-| `CrossEntropyLoss<T>` | Multi-class classification loss with integer labels |
-| `GradientUtils.Grad()` | Reverse-mode autograd scope for training |
-| `ModelSerializer.Save/Load` | Fine-tuned model persistence |
-| `SafeTensorsLoader` | Zero-dependency SafeTensors binary parser (via `Nivara.Samples`) |
-| `Module<T>.Train/Eval` | Training/eval mode toggle |
-| `Nivara.IO.NivaraParquetReader` | Parquet dataset loading (via `Nivara.Extensions`) |
+| API | Where | Purpose |
+|-----|-------|---------|
+| `BertEncoder<T>.ForwardBatched` | Track A | Flattened batch processing with block-diagonal attention mask |
+| `Linear<T>` | Both | Projections, FFN, classifier head, LoRA A/B |
+| `CrossEntropyLoss<T>` | Both | Classification / prompt-masked causal-LM loss |
+| `AdamW<T>` | Both | Optimizer (full-model and adapter-only) |
+| `GradientUtils.Grad()` | Both | Opt-in reverse-mode training scope |
+| `ModelSerializer.Save/Load` | Track A | Fine-tuned model persistence |
+| `SafeTensorsLoader` | Track A | Zero-dependency SafeTensors parser (via `Nivara.Samples`) |
+| `Module<T>.Train/Eval` | Both | Training/eval mode toggle |
+| `Nivara.IO.NivaraParquetReader` | Track A | Parquet dataset loading (via `Nivara.Extensions`) |
 
-## Core library improvements made during implementation
+## Setup
 
-- **Block-diagonal mask utility**: `BuildBlockDiagonalMask` in `BertSelfAttention<T>` — handles flattened batch encoding with per-sequence attention isolation. Candidate for promotion to `ModuleHelpers<T>` if similar patterns arise.
-- **DistilBERT weight mapping**: SafeTensors-to-module parameter mapping with HuggingFace snake_case key translation (`pre_classifier`, `sa_layer_norm`, `ffn.lin1/lin2`, etc.)
-- **Loading random-init heads gracefully**: `LoadWeights` checks for classifier/pre_classifier keys before loading, allowing random initialization when fine-tuning from scratch
-- **DistilBertConfig JSON parser**: Maps HuggingFace `snake_case` config keys to PascalCase C# properties via reflection-based parsing
-- **Shared model promotion**: `DistilBertForSequenceClassification<T>` + `DistilBertConfig` now live in `Nivara.Samples` and are shared by this sample and the `distilbert_sst` inference showcase (`samples/NivaraInference`)
-- **No token-type embeddings**: the classifier constructs its encoder with `includeTokenTypeEmbedding: false` (DistilBERT never feeds segment ids); the previous default added a random token-type embedding that degraded frozen-encoder parity
+See [BERT-TUNING.md](BERT-TUNING.md) for DistilBERT/SST-2 prerequisites and downloads,
+and [LORA-TUNING.md](LORA-TUNING.md) for LoRA SLM prerequisites (model dirs + worklog data).
 
-## Release Benchmark
+> **Always run with `-c Release`.** Debug builds run the numeric kernels unoptimized.
 
-Run this during release prep (step 5 of `RELEASING.md`). Requires Python, PyTorch,
-and DistilBERT SST-2 weights (see Setup section).
+## Quick start
 
-```powershell
-cd samples/NivaraFineTuning
-.\benchmark_timing.cmd
+DistilBERT (Track A):
+
+```bash
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2 --max-examples 25
 ```
 
-The script runs PyTorch (CPU), Nivara (CPU) and Nivara (Silk/OpenCL) side by
-side and writes results to `benchmark_results.txt`.
-
-**Update the Performance benchmarks table:**
-1. Apply Prev/Current/Ratio/Δ% pattern for the Nivara timings.
-2. Update the **Slowdown (CPU)** and **Slowdown (Silk)** columns (PyTorch / Nivara ratio).
-3. Update extrapolated full-run estimates if timings changed significantly.
-4. Update the recording line with machine info, date, AC-power state and OpenCL driver version.
-
-## LoRA SFT (generic Llama-family, CPU reference)
-
-The sample also ships a generic LoRA SFT trainer for Llama-family causal LMs (Qwen2.5-0.5B headline, SmolLM generic verification).
-
-### CLI
+LoRA SFT (Track B, CPU):
 
 ```bash
 dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-lora \
   --model-dir samples/data/qwen2.5-0.5b-instruct \
   --train-data samples/data/worklog/train.jsonl \
   --val-data samples/data/worklog/test.jsonl \
-  --template qwen --epochs 1 --max-examples 32 --max-len 256 \
-  --rank 8 --alpha 16 --targets q,v --seed 42 --out-dir out/worklog-lora
+  --template qwen --epochs 1 --max-examples 4 --max-len 128 \
+  --rank 4 --alpha 8 --lr 2e-4 --out-dir out/worklog-lora
 ```
 
-Key options: `--template qwen|smollm`, `--rank`, `--alpha`, `--targets q,k,v,o,ffn`, `--patience` (early stopping, 0=disabled), `--min-delta`, `--grad-accum`, `--max-examples`, `--max-len`, `--seed`, `--log-every`.
-
-### Evaluation
-
-```bash
-dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-eval \
-  --model-dir samples/data/qwen2.5-0.5b-instruct \
-  --test-data samples/data/worklog/test.jsonl \
-  --adapter out/worklog-lora/lora_adapters.json --template qwen
-```
-
-Reports base vs LoRA-adapted metrics: valid structure, ticket, hours, date, multi-ticket, clarification, convention accuracy.
-
-### Adapter format
-
-Saved as `lora_adapters.json` / `lora-adapter.json` with format `nivara-lora-sft-adapters-v1` (base64-encoded A/B matrices plus rank/alpha/targets/template/baseModelId metadata). Loaded with shape/rank/count validation. Both the CPU and Silk (`--silk`) paths now share one bundle schema (`LoraSftAdapterBundle`) and each `ft-lora`/`ft-eval` run writes a structured JSON report (`ft-lora-report.json` / `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, and honest D2a parity status. Silk path remains not release-parity-certified.
-
-### Defaults / memory guard
-
-Per-example steps, small defaults (`maxLen=256`). `--max-examples` caps data; `--max-len` capped at 2048 and validated against model `MaxPositionEmbeddings`. Gradient accumulation via `--grad-accum`. Early stopping via `--patience`/`--min-delta`.
+See the guides above for full options, benchmarks, and validation scope.
