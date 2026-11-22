@@ -1,0 +1,14 @@
+{
+  "format": "nivara-worklog-sft-v1",
+  "seed": 42,
+  "total": 450,
+  "baseDate": "2026-07-19",
+  "trainRatio": 0.78,
+  "valRatio": 0,
+  "train": 351,
+  "val": 0,
+  "test": 99,
+  "provenanceHash": "45ee448ee413a6e17fbf3887dc2e62c7ef02694ab1e5cf9b41e57be1f5b29a6d",
+  "fractionRule": "minutes/60 rounded to 2 decimals (MidpointRounding.AwayFromZero), invariant formatting",
+  "generator": "NivaraFineTuning.WorklogSftDataset.GenerateSynthetic"
+}
