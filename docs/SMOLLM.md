@@ -210,6 +210,7 @@ where supported).
 - The synthetic runners (`RunSmolLMSyntheticBenchmark`,
   `RunSmolLMSyntheticAb`, `RunSmolLMSyntheticBenchmarkSilk`) were dead code until
   #1254 wired them through the CLI; `--synthetic-weights` is rejected outside the
-  default single-shot run and `benchmark`.
+  default single-shot run, `benchmark`, and `profile`.
+- Decode profile (#1453): `smollm --synthetic-weights profile` / `smollm --synthetic-weights --silk profile` reports per-phase cached-decode dispatch/timing on Silk (CPU reports timing only).
 - Tests: `InferenceCliArgumentTests` pins the CLI scope; bias gating is shared with
   Qwen via `SynthesizeTensors<T>`.

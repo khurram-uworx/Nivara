@@ -106,3 +106,24 @@ Synthetic SmolLM CPU/Silk benchmarks (64 prompt / 32 generated, BF16 storage/F32
 - Initial fusion experiment: QK-rotary single-dispatch fusion (1 kernel/layer/token saved) unless profile evidence points to a higher-value candidate. Must be behind parity tests.
 - Benchmarks: human granted explicit approval to run synthetic benchmarks; run sequentially and wait for shell to be idle before next command. Capture raw outputs in PR/issue comments or temp files (not `release/*`).
 - Training fusion backlog (deferred, create issues): chunked linear+CE (no full logits materialization); flash-style attention fwd+bwd (no full score matrix); SwiGLU fwd+bwd; RMSNorm+residual fwd+bwd; RoPE inside QKV path; LoRA epilogue base(x)+(x*A)*B*scale; bias/activation/residual matmul epilogues.
+
+## Evidence (synthetic Silk, Intel(R) Graphics, .NET 11, Release, 2026-05-23)
+
+Commands run by agent with explicit human approval:
+
+- `dotnet run -c Release --project samples/NivaraInference -- smollm --synthetic-weights --silk profile`
+- `dotnet run -c Release --project samples/NivaraInference -- qwen --synthetic-weights --silk profile`
+
+SmolLM-135M (30L, 576 hidden, 9/3 heads, 1536 inter, vocab 49152, BF16 storage/F32 compute, 64 prompt/32 generated):
+- Warmup: 5763 ms (32 tokens, prefill 144 ms, decode 5619 ms, 5.69 tok/s)
+- Profile run: 6058 ms (32 tokens, prefill 112 ms, decode 5946 ms, 5.38 tok/s)
+- Kernel dispatches: 4896 (153.00/token), queue copies: 1920
+- Phase ms/token: Embed 0.289, QKV norm+proj 21.353, Rotary 1.964, Cache copy 2.729, Attention+O proj 20.258, MLP 135.888, Final norm+LM head 2.948, Argmax 0.233. MLP dominates (~73%).
+
+Qwen2.5-0.5B shape (24L, 896 hidden, 14/2 heads, 4864 inter, vocab 151936, BF16 storage/F32 compute, 64 prompt/32 generated):
+- Warmup: 19081 ms (32 tokens, prefill 560 ms, decode 18521 ms, 1.73 tok/s)
+- Profile run: 18494 ms (32 tokens, prefill 221 ms, decode 18273 ms, 1.75 tok/s)
+- Kernel dispatches: 3936 (123.00/token), queue copies: 1536
+- Phase ms/token: Embed 0.115, QKV norm+proj 29.987, Rotary 2.068, Cache copy 2.385, Attention+O proj 25.263, MLP 499.207, Final norm+LM head 11.418, Argmax 0.435. MLP dominates (~87%).
+
+Fusion experiment (#1453): fused Q+K rotary (`rotary_qk`) replaces 2 rotary dispatches/layer/token with 1. Dispatch reduction: SmolLM 30 dispatches/token (183 -> 153, -16.4%), Qwen 24 dispatches/token (147 -> 123, -16.3%). Rotary phase is small (~2 ms/token), so time impact is expected small; MLP is the dominant next target. Before counts are calculated from pre-fusion dispatch shape (same run shape, +numLayers dispatches/token); after counts measured above.
