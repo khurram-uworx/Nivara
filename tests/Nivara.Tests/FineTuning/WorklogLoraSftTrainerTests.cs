@@ -244,7 +244,7 @@ public sealed class WorklogLoraSftTrainerTests
     [Test]
     public void Train_ComputeWorklogEvalMetrics_ReturnsMetrics()
     {
-        var model = new LlamaForCausalLM<float, float>(vocabSize: 300, hiddenSize: 8, numHiddenLayers: 1, numHeads: 2, numKeyValueHeads: 2, intermediateSize: 16, maxPositionEmbeddings: 64);
+        var model = new LlamaForCausalLM<float, float>(vocabSize: 300, hiddenSize: 8, numHiddenLayers: 1, numHeads: 2, numKeyValueHeads: 2, intermediateSize: 16, maxPositionEmbeddings: 512);
         var tokenizer = CreateByteLevelTokenizer();
         var trainTok = new List<WorklogTokenizedExample> { TinyExample(1, vocab: 300) };
         var valTok = new List<WorklogTokenizedExample> { TinyExample(2, vocab: 300) };
@@ -295,13 +295,43 @@ public sealed class WorklogLoraSftTrainerTests
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "nivara-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        var vocab = new Dictionary<string, int>(capacity: 260);
-        for (int i = 0; i < 256; i++)
-            vocab[$"<0x{i:X2}>"] = i;
-        var json = "{\"model\":{\"type\":\"BPE\",\"vocab\":" + System.Text.Json.JsonSerializer.Serialize(vocab)
+        var vocab = BuildByteLevelBaseVocab();
+        string[] specials = ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "system", "user", "assistant", "tool"];
+        foreach (var token in specials)
+        {
+            if (!vocab.ContainsKey(token))
+                vocab[token] = vocab.Count;
+        }
+
+        var json = "{\"model\":{\"vocab\":" + System.Text.Json.JsonSerializer.Serialize(vocab)
             + ",\"merges\":[]},\"pre_tokenizer\":{\"type\":\"ByteLevel\",\"add_prefix_space\":false,\"use_regex\":false},\"added_tokens\":[]}";
         var path = Path.Combine(tempDir, "tokenizer.json");
         File.WriteAllText(path, json);
         return Nivara.AI.Gpt2BpeTokenizer.LoadFromTokenizerJson(path, "<|endoftext|>", normalizeNfc: false);
+    }
+
+    static Dictionary<string, int> BuildByteLevelBaseVocab()
+    {
+        var bs = new List<int>();
+        for (int i = '!'; i <= '~'; i++) bs.Add(i);
+        for (int i = 0xA1; i <= 0xAC; i++) bs.Add(i);
+        for (int i = 0xAE; i <= 0xFF; i++) bs.Add(i);
+        var bsSet = new HashSet<int>(bs);
+        var cs = new List<int>(bs);
+        int n = 0;
+        for (int b = 0; b < 256; b++)
+        {
+            if (!bsSet.Contains(b))
+            {
+                bs.Add(b);
+                cs.Add(256 + n);
+                n++;
+            }
+        }
+
+        var vocab = new Dictionary<string, int>(512);
+        for (int i = 0; i < bs.Count; i++)
+            vocab[((char)cs[i]).ToString()] = i;
+        return vocab;
     }
 }
