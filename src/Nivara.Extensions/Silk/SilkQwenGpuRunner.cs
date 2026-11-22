@@ -218,8 +218,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
             // RoPE in place
-            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
-            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
 
             // causal GQA attention -> context
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
@@ -306,8 +305,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
-            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
-            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
@@ -366,8 +364,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
-            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
-            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
 
             runtime.CopyBuffer(k.Handle, kCache[li], 0, 0, seqLen * kvDim);
             runtime.CopyBuffer(v.Handle, vCache[li], 0, 0, seqLen * kvDim);
@@ -436,8 +433,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             if (profile) { runtime.Finish(); profileQkvMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             EnsureRopeTables(position + 1);
-            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
-            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numKvHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, numKvHeads, headDim, headDim / 2);
             if (profile) { runtime.Finish(); profileRotaryMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             runtime.CopyBuffer(k.Handle, kCache[li], 0, position * kvDim, kvDim);
@@ -603,8 +599,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
-            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, headDim, headDim / 2);
-            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numKvHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
 
             // capture K/V (RoPE'd) into cache
             runtime.CopyBuffer(k.Handle, kCache[li], 0, 0, seqLen * kvDim);
@@ -671,8 +666,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             // RoPE at position
             EnsureRopeTables(position + 1);
-            SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
-            SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numKvHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, numKvHeads, headDim, headDim / 2);
 
             // append k/v to cache at row position
             runtime.CopyBuffer(k.Handle, kCache[li], 0, position * kvDim, kvDim);
