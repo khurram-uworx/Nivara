@@ -9,7 +9,7 @@ Issue #1443 as filed is "LoRA: record post-merge CPU ft-lora smoke evidence" (OP
 - Try SmolLM with more logging to determine what is happening and where time is spent.
 - If SmolLM CPU is still not viable, rely on synthetic-weight confirmation as the confidence gate.
 
-**Scope decision:** proceed with the human-requested SmolLM/Qwen CPU viability + synthetic parity + diagnostics work on branch `khurram/1443`. Record the #1443 mismatch in PR description; do not silently close #1443 unless the human confirms the issue should be repurposed.
+**Scope decision:** human confirmed (option 2) repurposing #1443. Issue retitled to "CPU inference viability: SmolLM/Qwen diagnostics and synthetic parity fallback" and body updated to match this work. Proceed on branch `khurram/1443`.
 
 ## Blast radius
 
@@ -33,31 +33,29 @@ No core `src/Nivara` changes planned. No public library API changes planned. Sam
 
 ## Proposed changes
 
-### A. Coarse timing/logging for SmolLM CPU path
+### A. Coarse timing/logging for SmolLM CPU path (done)
 
-Add prefill/decode split timing to SmolLM CPU generation, matching Qwen's existing `GenerateCore` split:
+- [x] `RunSmolLMGeneration<TModel,TWeight>`: split `ForwardPrefill` and decode loop timing; return tuple includes `PrefillMs`/`DecodeMs`.
+- [x] `BenchmarkSmolLMCore`, `RunSmolLMSyntheticBenchmark`, `RunSmolLMGenerate`/`ConsumeGenerated`, AB paths: print prefill/decode split and decode throughput as `tok/s`.
+- [x] Default output coarse; no new CLI flag added (avoids `InferenceCliArgumentTests` surface change).
 
-- `RunSmolLMGeneration<TModel,TWeight>`: measure `ForwardPrefill` separately from decode loop; return/include prefill/decode ms (extend return tuple or add an overload/helper that preserves existing call sites).
-- `BenchmarkSmolLMCore`, `RunSmolLMSyntheticBenchmark`: print `Prefill: X ms`, `Decode: Y ms (Z ms/token)`, total/tok/s.
-- `ConsumeGenerated` / `RunSmolLMGenerate`: print prefill/decode split in normal output.
-- Keep default output coarse and useful; avoid per-op/per-layer spam. If deeper diagnostics needed, gate behind an explicit opt-in (env var `NIVARA_VERBOSE_TIMING=1` or CLI flag — decide during G1/implementation; CLI flag requires `InferenceCliArgumentTests` update).
+### B. Silk SmolLM timing parity (done)
 
-### B. Silk SmolLM timing parity
+- [x] `RunSmolLMGenerationSilk`: split timing around `ForwardPrefillArgmax` and decode loop; report prefill/decode/total with `tok/s`.
+- [x] CPU/Silk comparison uses same prompt/max tokens/precision fields.
 
-- `RunSmolLMGenerationSilk`: split timing around `ForwardPrefillArgmax` and decode loop where measurable. Report prefill/decode/total.
-- Keep CPU/Silk comparison apples-to-apples for same prompt/max tokens/precision.
+### C. Synthetic-weight confirmation / tighter control (done)
 
-### C. Synthetic-weight confirmation / tighter control
+- [x] Existing GPU-gated parity tests remain confidence gate: `SilkSmolLMParityTests`, `SilkQwenParityTests`.
+- [x] Added CPU-only deterministic synthetic smoke tests: `SmolLMSyntheticSmokeTests`, `QwenSyntheticSmokeTests` (fast, no GPU, no checkpoint, deterministic ids + finite logits).
+- [x] Added GPU-gated Silk synthetic CPU/Silk timing comparison tests in `SilkSmolLMParityTests` and `SilkQwenParityTests` to report prefill/decode `tok/s` for future planning.
+- [x] No tolerance loosening; existing `1e-3 * (1 + max|cpu|)` parity bound unchanged.
 
-- Confirm existing synthetic parity tests remain the confidence gate: `SilkSmolLMParityTests`, `SilkQwenParityTests` (GPU category, skip when no OpenCL).
-- Add/strengthen CPU-only deterministic synthetic smoke where cheap: e.g. synthesize SmolLM/Qwen weights, run small prefill+few decode steps on CPU, assert deterministic generated ids/argmax for fixed seed/prompt/config and no NaN/Inf. Must be fast, no GPU, no real checkpoint.
-- If adding tests, keep them focused and not brittle; prefer extending existing test classes/files only when natural.
+### D. Documentation / evidence (done)
 
-### D. Documentation / evidence
-
-- Update `docs/QWEN.md` or relevant doc section with a concise note: Qwen real-checkpoint CPU can be impractical; SmolLM is the smaller diagnostic path; synthetic-weight CPU/Silk parity is the fallback confidence gate when real-checkpoint CPU is too slow. Include exact commands/conditions as appropriate.
-- Do not invent benchmark numbers. Only record numbers actually observed in this session/human-run artifacts.
-- Review `DocsCoveragePins`/doc gates if citations/snippet blocks/counts change.
+- [x] Updated `docs/QWEN.md` Interpretation with CPU viability fallback: synthetic-weight CPU/Silk parity gate and SmolLM as smaller diagnostic path with prefill/decode `tok/s` logging.
+- [x] No invented benchmark numbers.
+- [x] No new citations, fenced csharp blocks, or doc files; DocsCoveragePins unchanged.
 
 ## Verification steps
 
@@ -79,8 +77,7 @@ Add prefill/decode split timing to SmolLM CPU generation, matching Qwen's existi
 
 ## GitHub issues log
 
-- [ ] #1443 — "LoRA: record post-merge CPU ft-lora smoke evidence" (existing; branch name matches but issue scope differs from requested work — confirm disposition with human)
-- [ ] Create new issue if this work needs its own tracker separate from #1443.
+- [ ] #1443 — "CPU inference viability: SmolLM/Qwen diagnostics and synthetic parity fallback" (repurposed per human confirmation; tracks this branch's work)
 
 ## Notes
 
