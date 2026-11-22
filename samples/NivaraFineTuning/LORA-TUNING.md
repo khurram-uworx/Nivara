@@ -82,6 +82,15 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-eval \
   --adapter out/worklog-lora/lora_adapters.json --template qwen
 ```
 
+For Silk/OpenCL evaluation, add `--silk` (Qwen/SmolLM causal-LM adapters, no CPU fallback):
+
+```bash
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-eval --silk \
+  --model-dir samples/data/qwen2.5-0.5b-instruct \
+  --test-data samples/data/worklog/test.jsonl \
+  --adapter out/worklog-lora/lora-adapter.json --template qwen
+```
+
 Reports base vs LoRA-adapted metrics: valid structure, ticket, hours, date, multi-ticket, clarification, convention accuracy.
 
 ### Adapter format

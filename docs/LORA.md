@@ -90,7 +90,7 @@ Generic (SmolLM) verification:
 ## Limitations and open gaps
 
 - **D2a parity:** CPU/Silk LoRA training parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke tests are scaffolded as `[Explicit, Category("Gpu")]`. (#1438)
-- **Silk `ft-eval` missing:** `--mode ft-eval --silk` currently runs the CPU eval path silently; this is a known gap and must be guarded or implemented. (#1439, #1441)
+- **Silk `ft-eval`:** `--mode ft-eval --silk` evaluates Qwen/SmolLM causal-LM LoRA adapters on Silk/OpenCL with the same base-vs-adapted report shape as CPU. Missing OpenCL/device errors clearly; no CPU fallback. (#1439, #1441)
 - **Silk `ft-lora` generation eval missing:** Silk ft-lora reports loss/val-loss but lacks integrated base-vs-adapted generation eval parity with CPU. (#1437)
 - **Adapter format bridge by design:** Core single-adapter (`nivara-lora-adapter-v1`) and SFT multi-adapter bundle (`nivara-lora-sft-adapters-v1`) are distinct formats; no bridge provided.
 - **Memory report contract:** Memory budget/footprint in reports is advisory/unspecified; contract needs clarification. (#1442)

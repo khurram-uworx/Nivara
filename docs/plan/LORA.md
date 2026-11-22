@@ -109,10 +109,10 @@ Evidence artifacts: machine-readable JSON + short markdown summary (command, dev
 | Issue | Gap | Notes |
 |---|---|---|
 | #1438 | D2a Silk causal-LM training parity certification | Done on `khurram/1438`: `IsParityReady` removed; CPU/Silk parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke tests scaffolded as `[Explicit, Category("Gpu")]`; CLI/report/docs updated consistently. |
-| #1439 | Silk path for causal-LM `ft-eval` | `RunFtEval` is CPU-only, hardcodes `Backend="cpu"`/`Device="cpu"` (`samples/NivaraFineTuning/Program.cs:1362+`). No Silk eval path yet. |
+| #1439 | Silk path for causal-LM `ft-eval` | Done on `khurram/1439`: `RunFtEval` dispatches `--silk` to `RunFtEvalSilk` (`samples/NivaraFineTuning/Program.cs:1362+`), loads Qwen/SmolLM through Silk sessions, loads adapter bundles via `LoadAdapterBundle`, runs cached greedy generation-based worklog eval, and reports `Backend="silk"`/device with base-vs-adapted metrics shape. No CPU fallback. |
 | #1437 | Generation base-vs-adapted eval in Silk `ft-lora` | Silk `ft-lora` reports loss/val-loss but lacks integrated generation eval parity with CPU path. |
 | #1440 (G1) | Stale plan handoff after main merge | This doc needed refresh for main-landed state and current issue list (this edit addresses the immediate staleness; keep maintained). |
-| #1441 (G2) | `ft-eval --silk` silently ignored | `RunFtEval` does not check `cli.Silk`; passing `--silk` currently runs CPU eval silently. Must be fixed by #1439 or an explicit guard with no CPU fallback. |
+| #1441 (G2) | `ft-eval --silk` silently ignored | Resolved by #1439: `RunFtEval` checks `cli.Silk` and routes to Silk eval path; OpenCL unavailable errors clearly with no CPU fallback. |
 | #1442 (G3) | Report memory footprint contract unclear/approximate | Report memory fields are advisory/unspecified; decide measured-peak vs advisory-only contract and document/schema accordingly. |
 | #1443 (G4) | No recorded post-merge CPU ft-lora smoke evidence | CPU 0.5B backward can be slow; need small smoke run with granular logs and recorded outcome. |
 | #1444 (G5) | Role boundary between `docs/LORA.md` and `docs/plan/LORA.md` | User-facing doc vs handoff/active-gap tracker; reduce drift by making roles explicit and cross-linking. |
@@ -146,13 +146,15 @@ Evidence artifacts: machine-readable JSON + short markdown summary (command, dev
 - #1419/#1429 NivaraChat adapter consumption demo — done (CPU+Silk adapter load; `--merge-adapter` with `--silk` errors clearly).
 - #1420 NivaraFineTuning CLI/report — done (ft-generate/ft-lora/ft-eval, JSON+markdown reports).
 - #1421 tests/docs/DocsCoveragePins — done.
+- #1439 Silk causal-LM `ft-eval` — done on `khurram/1439` (Silk eval path, cached greedy seam, adapter bundle load, report parity shape, no CPU fallback).
+- #1441 (G2) `ft-eval --silk` silent CPU fallback — resolved by #1439.
 
 ## 9. Next session pick list (open issues)
 
 1. **#1438 D2a parity certification** — done on `khurram/1438` (synthetic GPU-gated parity confirmed; `IsParityReady` removed; real-checkpoint forward+loss smoke scaffolded).
-2. **#1439 Silk path for causal-LM `ft-eval`** — real Silk eval path; no silent CPU fallback. (Also resolves G2 immediate guard.)
+2. **#1439 Silk path for causal-LM `ft-eval`** — done on `khurram/1439`: Silk/OpenCL eval path for Qwen/SmolLM, cached greedy generation, adapter bundle load, base-vs-adapted report parity shape, no CPU fallback.
 3. **#1437 Generation base-vs-adapted eval in Silk `ft-lora`** — align Silk ft-lora report/eval with CPU path.
-4. **#1441 (G2) Guard `ft-eval --silk` silent CPU fallback** — quick guard until #1439 lands, or close as part of #1439.
+4. **#1441 (G2) Guard `ft-eval --silk` silent CPU fallback** — resolved by #1439.
 5. **#1440 (G1) Keep this handoff current** — update when gaps close; avoid stale branch/status/pick-list drift.
 6. **#1444 (G5) Clarify doc roles** — `docs/LORA.md` stable user guide; `docs/plan/LORA.md` handoff/active-gap tracker.
 7. **#1442 (G3) Memory footprint report contract** — advisory-only vs measured peak; schema/docs/tests.
