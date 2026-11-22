@@ -459,7 +459,7 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-eval \
 
 ### Report artifacts
 
-Each `ft-lora`/`ft-eval` run writes `ft-lora-report.json`/`ft-eval-report.json` plus a markdown companion (`ft-lora-report.md`/`ft-eval-report.md`) with device, params, memory budget, loss curve, eval before/after, adapter hash, and honest parity status. Memory budget is advisory only.
+Each ft-lora/ft-eval run writes ft-lora-report.json/ft-eval-report.json plus a Markdown companion report (ft-lora-report.md/ft-eval-report.md) with device, params, memory budget, loss curve, eval before/after, adapter hash, and honest parity status. Memory budget is advisory only.
 
 ### Evaluation
 
