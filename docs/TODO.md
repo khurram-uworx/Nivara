@@ -91,9 +91,18 @@ Synthetic SmolLM CPU/Silk benchmarks (64 prompt / 32 generated, BF16 storage/F32
 ## GitHub issues log
 
 - [ ] #1453 — Plan Silk SmolLM/Qwen decode fusion using synthetic-weight profiling (this plan)
-- [ ] (add discovered deferred work here immediately when found)
+- [ ] #1457 — Silk: chunked linear+cross-entropy for SmolLM/Qwen training (no full logits) (deferred, training fusion backlog)
+- [ ] #1458 — Silk: flash-style attention forward+backward for SmolLM/Qwen training (deferred, training fusion backlog)
+- [ ] #1459 — Silk: fuse SwiGLU forward+backward for SmolLM/Qwen (deferred, training fusion backlog)
+- [ ] #1460 — Silk: fuse RMSNorm+residual forward+backward for SmolLM/Qwen (deferred, training fusion backlog)
+- [ ] #1461 — Silk: fuse RoPE into QKV path for SmolLM/Qwen (deferred, training fusion backlog)
+- [ ] #1462 — Silk: fuse LoRA epilogue base(x)+(x*A)*B*scale for SmolLM/Qwen (deferred, training fusion backlog)
+- [ ] #1463 — Silk: fuse bias/activation/residual matmul epilogues for SmolLM/Qwen (deferred, training fusion backlog)
 
 ## G1 grounding notes
 
-- Pending: microsoft-learn queries and code-memory blast-radius confirmation before implementation.
-- Any decision/red flag/assumption surfaced during grounding will be escalated to human before implementation.
+- Cleared by human (2026-05-23): proceed with #1453 as filed (decode fusion profiling/dispatch reduction on Silk). Native-weights training deferred; training-fusion backlog tracked as separate issues. No `release/*` artifacts in this PR.
+- CLI shape confirmed: `smollm --synthetic-weights profile [--silk]` and `qwen --synthetic-weights profile [--silk]` as mode `profile`.
+- Initial fusion experiment: QK-rotary single-dispatch fusion (1 kernel/layer/token saved) unless profile evidence points to a higher-value candidate. Must be behind parity tests.
+- Benchmarks: human granted explicit approval to run synthetic benchmarks; run sequentially and wait for shell to be idle before next command. Capture raw outputs in PR/issue comments or temp files (not `release/*`).
+- Training fusion backlog (deferred, create issues): chunked linear+CE (no full logits materialization); flash-style attention fwd+bwd (no full score matrix); SwiGLU fwd+bwd; RMSNorm+residual fwd+bwd; RoPE inside QKV path; LoRA epilogue base(x)+(x*A)*B*scale; bias/activation/residual matmul epilogues.

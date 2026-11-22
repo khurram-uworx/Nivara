@@ -36,12 +36,32 @@ public sealed unsafe class SilkRuntime : IDisposable
     nint program;
     readonly Dictionary<string, nint> kernels = new();
     bool disposed;
+    int kernelDispatchCount;
+    int queueCopyCount;
 
     public string DeviceName { get; }
     public string Vendor { get; }
     public string DriverVersion { get; }
     public ulong MaxWorkGroupSize { get; }
     public ulong LocalMemorySize { get; }
+
+    /// <summary>Number of kernel dispatches enqueued through <see cref="Run"/> since construction
+    /// or the last <see cref="ResetKernelDispatchCount"/>. Counts kernel enqueues only; buffer
+    /// copies/uploads/downloads are not included.</summary>
+    public int KernelDispatchCount => kernelDispatchCount;
+
+    /// <summary>Number of device-to-device buffer copies enqueued through
+    /// <see cref="CopyBuffer"/> since construction or the last
+    /// <see cref="ResetKernelDispatchCount"/>.</summary>
+    public int QueueCopyCount => queueCopyCount;
+
+    /// <summary>Resets <see cref="KernelDispatchCount"/> and <see cref="QueueCopyCount"/> to zero
+    /// for a profiling window.</summary>
+    public void ResetProfilingCounters()
+    {
+        kernelDispatchCount = 0;
+        queueCopyCount = 0;
+    }
 
     /// <summary>
     /// Builds the context, the in-process program and every kernel in
@@ -362,6 +382,7 @@ public sealed unsafe class SilkRuntime : IDisposable
             0, null, null);
         if (err != 0)
             throw new InvalidOperationException($"Silk clEnqueueCopyBuffer({count} floats) failed ({err}).");
+        queueCopyCount++;
     }
 
     public void SetBuffer(string kernelName, uint index, nint buffer)
@@ -415,6 +436,7 @@ public sealed unsafe class SilkRuntime : IDisposable
             if (err != 0)
                 throw new InvalidOperationException($"Silk dispatch of '{kernelName}' failed ({err}).");
         }
+        kernelDispatchCount++;
     }
 
     /// <summary>Blocks until every queued command (kernels, copies) on the device queue has

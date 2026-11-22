@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Nn;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace Nivara.Silk;
@@ -68,6 +69,54 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
     float loraScale;
     nint loraTmpBuf; // [maxSeqLen, rank]
     nint loraOutBuf; // [maxSeqLen, maxOutDim]
+
+    // Decode profiling (opt-in). Enabled only for diagnostic runs; normal path is unchanged.
+    int profileTokens;
+    int profileDispatches;
+    int profileCopies;
+    double profileEmbedMs;
+    double profileQkvMs;
+    double profileRotaryMs;
+    double profileCacheCopyMs;
+    double profileAttentionOProjMs;
+    double profileMlpMs;
+    double profileFinalNormLmHeadMs;
+    double profileArgmaxMs;
+
+    /// <summary>Enables per-phase decode profiling. When true, each profiled decode token records
+    /// wall-clock phase timings with <see cref="SilkRuntime.Finish"/> boundaries and accumulates
+    /// dispatch/copy counts.</summary>
+    public bool ProfilingEnabled { get; set; }
+
+    /// <summary>Clears accumulated decode profiling counters.</summary>
+    public void ResetDecodeProfile()
+    {
+        profileTokens = 0;
+        profileDispatches = 0;
+        profileCopies = 0;
+        profileEmbedMs = 0;
+        profileQkvMs = 0;
+        profileRotaryMs = 0;
+        profileCacheCopyMs = 0;
+        profileAttentionOProjMs = 0;
+        profileMlpMs = 0;
+        profileFinalNormLmHeadMs = 0;
+        profileArgmaxMs = 0;
+    }
+
+    /// <summary>Returns the accumulated decode profiling snapshot.</summary>
+    public SilkDecodeProfile GetDecodeProfile() => new(
+        profileTokens,
+        profileDispatches,
+        profileCopies,
+        profileEmbedMs,
+        profileQkvMs,
+        profileRotaryMs,
+        profileCacheCopyMs,
+        profileAttentionOProjMs,
+        profileMlpMs,
+        profileFinalNormLmHeadMs,
+        profileArgmaxMs);
 
     public SilkSmolLMGpuRunner(
         SilkRuntime runtime,
@@ -373,7 +422,13 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         runtime.Upload(idsBuf.Handle, new int[] { tokenId });
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
 
+        bool profile = ProfilingEnabled;
+        Stopwatch? sw = profile ? Stopwatch.StartNew() : null;
+        int d0 = profile ? runtime.KernelDispatchCount : 0;
+        int c0 = profile ? runtime.QueueCopyCount : 0;
+
         GatherTokEmb(tokEmb, idsBuf.Handle, x.Handle, hiddenDim, hiddenDim);
+        if (profile) { runtime.Finish(); profileEmbedMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
         for (int li = 0; li < layers.Length; li++)
         {
@@ -387,28 +442,44 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
                 ],
                 [w.QLora, w.KLora, w.VLora],
                 hasBias: qkvBias, aRows: 1, aCols: hiddenDim, eps: eps);
+            if (profile) { runtime.Finish(); profileQkvMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             EnsureRopeTables(position + 1);
             SilkLauncher.Rotary(runtime, q.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numHeads, headDim, headDim / 2);
             SilkLauncher.Rotary(runtime, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, 1, numKvHeads, headDim, headDim / 2);
+            if (profile) { runtime.Finish(); profileRotaryMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             runtime.CopyBuffer(k.Handle, kCache[li], 0, position * kvDim, kvDim);
             runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
+            if (profile) { runtime.Finish(); profileCacheCopyMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             int kvLen = position + 1;
             DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
                 w.Wo, w.OLora, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
+            if (profile) { runtime.Finish(); profileAttentionOProjMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.GateLora, w.Wup, w.UpLora, w.Wdown, w.DownLora,
                 x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
+            if (profile) { runtime.Finish(); profileMlpMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
         RmsNormGemv(x.Handle, finalNormW,
             [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+        if (profile) { runtime.Finish(); profileFinalNormLmHeadMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
+
         int argmax = ArgMaxDevice(logitsBuf, vocabSize);
+        if (profile) { runtime.Finish(); profileArgmaxMs += sw!.Elapsed.TotalMilliseconds; }
+
         runtime.Release(logitsBuf);
+
+        if (profile)
+        {
+            profileTokens++;
+            profileDispatches += runtime.KernelDispatchCount - d0;
+            profileCopies += runtime.QueueCopyCount - c0;
+        }
 
         if (position + 1 > cachedLen) cachedLen = position + 1;
         return argmax;
