@@ -26,6 +26,9 @@ public sealed record WorklogLoraSftOptions
     public int MaxLen { get; init; } = 256;
     public int MaxExamples { get; init; } = 0;
     public int MaxValExamples { get; init; } = 0;
+    public int Patience { get; init; } = 0;
+    public float MinDelta { get; init; } = 0f;
+    public int GradientAccumulationSteps { get; init; } = 1;
     public int Seed { get; init; } = 42;
     public int LogEvery { get; init; } = 10;
     public bool SaveAdapter { get; init; } = true;
@@ -70,6 +73,13 @@ public static class WorklogLoraSftTrainer
         Console.WriteLine($"  Base params: {baseParams:N0}");
         Console.WriteLine($"  Adapters: {adapters.Count}, trainable params: {trainable:N0}");
 
+        if (options.MaxLen < 2 || options.MaxLen > 2048)
+            throw new ArgumentOutOfRangeException(nameof(options.MaxLen), "MaxLen must be between 2 and 2048.");
+        if (options.GradientAccumulationSteps < 1)
+            throw new ArgumentOutOfRangeException(nameof(options.GradientAccumulationSteps), "GradientAccumulationSteps must be >= 1.");
+        if (options.Patience < 0)
+            throw new ArgumentOutOfRangeException(nameof(options.Patience), "Patience must be >= 0.");
+
         var trainExamples = WorklogSftDataset.LoadJsonl(options.TrainPath);
         var valExamples = WorklogSftDataset.LoadJsonl(options.ValPath);
         if (options.MaxExamples > 0 && trainExamples.Count > options.MaxExamples)
@@ -99,6 +109,7 @@ public static class WorklogLoraSftTrainer
 
         float bestValLoss = initialValLoss;
         int bestEpoch = 0;
+        int epochsWithoutImprovement = 0;
         List<(string Name, TModel[] Data, int[] Shape)>? bestSnapshot = null;
 
         var sw = Stopwatch.StartNew();
@@ -109,6 +120,7 @@ public static class WorklogLoraSftTrainer
             float epochLoss = 0f;
             int steps = 0;
 
+            int accumSteps = Math.Max(1, options.GradientAccumulationSteps);
             for (int i = 0; i < trainTok.Count; i++)
             {
                 var ex = trainTok[i];
@@ -121,10 +133,15 @@ public static class WorklogLoraSftTrainer
                     if (options.LogEvery > 0 && (i + 1) % options.LogEvery == 0)
                         Console.WriteLine($"  epoch {epoch}/{options.Epochs} step {i + 1}/{trainTok.Count}: backward (loss={float.CreateChecked(loss.Data[0]):F4})...");
                     loss.Backward();
-                    optimizer.Step();
-                    optimizer.ZeroGrad();
                     epochLoss += float.CreateChecked(loss.Data[0]);
                     steps++;
+                }
+
+                bool stepNow = ((i + 1) % accumSteps == 0) || (i == trainTok.Count - 1);
+                if (stepNow)
+                {
+                    optimizer.Step();
+                    optimizer.ZeroGrad();
                 }
 
                 if (options.LogEvery > 0 && (i + 1) % options.LogEvery == 0)
@@ -135,11 +152,23 @@ public static class WorklogLoraSftTrainer
             float valLoss = EvaluateLoss(model, lossFn, valTok);
             Console.WriteLine($"Epoch {epoch}: trainLoss={trainAvg:F4} valLoss={valLoss:F4}");
 
-            if (valLoss < bestValLoss)
+            bool improved = valLoss < bestValLoss - options.MinDelta;
+            if (improved)
             {
                 bestValLoss = valLoss;
                 bestEpoch = epoch;
                 bestSnapshot = SnapshotAdapters(adapters);
+                epochsWithoutImprovement = 0;
+            }
+            else
+            {
+                epochsWithoutImprovement++;
+            }
+
+            if (options.Patience > 0 && epochsWithoutImprovement >= options.Patience)
+            {
+                Console.WriteLine($"Early stopping at epoch {epoch} (patience={options.Patience}).");
+                break;
             }
         }
         sw.Stop();
