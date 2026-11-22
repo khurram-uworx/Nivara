@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\samples\NivaraClassifier\NivaraClassifier.csproj" />
     <ProjectReference Include="..\..\samples\NivaraChat\NivaraChat.csproj" />
     <ProjectReference Include="..\..\samples\NivaraInference\NivaraInference.csproj" />
+    <ProjectReference Include="..\..\samples\NivaraFineTuning\NivaraFineTuning.csproj" />
   </ItemGroup>
 
   <ItemGroup>
