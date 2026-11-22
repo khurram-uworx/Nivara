@@ -1,5 +1,37 @@
 # NivaraFineTuning - LoRA SFT for Llama-family SLMs
 
+This guide covers the LoRA (Low-Rank Adaptation) supervised fine-tuning (SFT) track of the
+sample: adapting a pretrained Llama-family causal LM (Qwen2.5-0.5B-Instruct headline,
+SmolLM-135M generic verification) to a behavioral task (worklog -> structured `LogTime`)
+using Nivara's AutoDiff engine. For the DistilBERT/SST-2 track see [BERT-TUNING.md](BERT-TUNING.md).
+For the cross-cutting LoRA feature picture see `docs/LORA.md`.
+
+## Concepts and vocabulary
+
+- **Causal LM**: a model that predicts the next token given previous tokens. Used here as
+  the base for behavioral adaptation (not classification).
+- **LoRA (Low-Rank Adaptation)**: instead of updating all base weights, inject a small
+  trainable low-rank pair (A, B) into selected projections. Base weights stay frozen;
+  only A and B train. `output = base(x) + (alpha/rank) * B(A(x))`.
+- **Rank (r)**: inner dimension of the low-rank pair. Smaller = fewer trainable params and
+  faster; larger = more capacity. Typical 4-16.
+- **Alpha**: scaling factor for the LoRA contribution. Common rule: alpha = 2 * rank.
+- **Targets**: which projections get LoRA adapters (q, k, v, o, ffn). More targets =
+  more capacity and params.
+- **Frozen base**: base model weights are not updated (no gradients); only adapter params
+  train. Keeps base knowledge and reduces memory.
+- **Prompt masking**: during SFT, loss is computed only on answer tokens; prompt tokens
+  are masked with ignore index -100 so the model learns to produce the answer, not repeat
+  the prompt.
+- **Adapter bundle** (`nivara-lora-sft-adapters-v1`): on-disk format carrying one entry per
+  (layer, target) with base64 A/B matrices plus rank/alpha/targets/template/baseModelId
+  metadata. Shared by CPU and Silk trainers; round-trips between backends.
+- **CPU reference vs Silk/iGPU**: CPU path is the reference; Silk path targets iGPU.
+  Silk is **not release-parity-certified** (`IsParityReady` remains false) — parity is
+  synthetic + small smoke evidence, not full certification.
+- **Parity**: numerical agreement between CPU and Silk forward/grad/step within documented
+  tolerances (forward/loss 1.5e-3/2e-3, grad/weight rel 3e-2/5e-2).
+
 ## LoRA SFT (generic Llama-family, CPU reference)
 
 The sample also ships a generic LoRA SFT trainer for Llama-family causal LMs (Qwen2.5-0.5B headline, SmolLM generic verification).
