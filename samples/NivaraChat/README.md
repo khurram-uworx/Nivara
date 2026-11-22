@@ -608,7 +608,8 @@ dotnet run --project samples/NivaraChat -- --smollm plain --text "Log time for t
 
 Notes:
 - Adapter bundle format: `nivara-lora-sft-adapters-v1` (rank/alpha/targets/template/baseModelId metadata + base64 A/B matrices). Rank, alpha, and targets are read from the bundle header.
-- CPU path only: Silk Qwen/SmolLM inference sessions do not yet consume adapter bundles; passing `--adapter` with `--silk` errors clearly (no silent fallback).
+- CPU path only: Silk Qwen/SmolLM inference sessions do not yet consume adapter bundles; passing `--adapter` or `--merge-adapter` with `--silk` errors clearly (no silent fallback).
+- `--merge-adapter <path>` loads the adapter then calls `MergeAllAdapters()` to bake LoRA weights into base projections (deployment path).
 - RAG modes (`--rag*`) are unchanged.
 
 ## Nivara APIs demonstrated
