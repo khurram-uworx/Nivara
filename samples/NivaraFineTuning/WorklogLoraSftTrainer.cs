@@ -34,6 +34,9 @@ public sealed record WorklogLoraSftOptions
     public int LogEvery { get; init; } = 10;
     public bool SaveAdapter { get; init; } = true;
     public string BaseModelId { get; init; } = "";
+    public bool ComputeWorklogEvalMetrics { get; init; } = false;
+    public int EvalMaxNewTokens { get; init; } = 128;
+    public int MaxEvalExamples { get; init; } = 0; // 0 = all val examples
 }
 
 public sealed record WorklogLoraSftResult(
@@ -47,7 +50,10 @@ public sealed record WorklogLoraSftResult(
     long ElapsedMs,
     string? AdapterPath,
     List<float> TrainLossPerEpoch = default!,
-    List<float> ValLossPerEpoch = default!);
+    List<float> ValLossPerEpoch = default!,
+    WorklogEvalMetrics? BestValMetrics = null,
+    int EvalExamples = 0,
+    long EvalElapsedMs = 0);
 
 public static class WorklogLoraSftTrainer
 {
@@ -62,7 +68,8 @@ public static class WorklogLoraSftTrainer
         LlamaForCausalLM<TModel, TWeight>? model = null,
         Gpt2BpeTokenizer? tokenizer = null,
         List<WorklogTokenizedExample>? trainTok = null,
-        List<WorklogTokenizedExample>? valTok = null)
+        List<WorklogTokenizedExample>? valTok = null,
+        IReadOnlyList<WorklogSftExample>? valExamples = null)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
@@ -96,24 +103,35 @@ public static class WorklogLoraSftTrainer
         Console.WriteLine($"  Base params: {baseParams:N0}");
         Console.WriteLine($"  Adapters: {adapters.Count}, trainable params: {trainable:N0}");
 
+        IReadOnlyList<WorklogSftExample>? evalValExamples = valExamples;
         if (trainTok is null || valTok is null)
         {
             if (tokenizer is null)
                 throw new InvalidOperationException("Tokenizer is required when tokenized examples are not provided.");
             var trainExamples = WorklogSftDataset.LoadJsonl(options.TrainPath);
-            var valExamples = WorklogSftDataset.LoadJsonl(options.ValPath);
+            var loadedValExamples = WorklogSftDataset.LoadJsonl(options.ValPath);
             if (options.MaxExamples > 0 && trainExamples.Count > options.MaxExamples)
                 trainExamples = trainExamples.Take(options.MaxExamples).ToList();
-            if (options.MaxValExamples > 0 && valExamples.Count > options.MaxValExamples)
-                valExamples = valExamples.Take(options.MaxValExamples).ToList();
+            if (options.MaxValExamples > 0 && loadedValExamples.Count > options.MaxValExamples)
+                loadedValExamples = loadedValExamples.Take(options.MaxValExamples).ToList();
 
-            Console.WriteLine($"Tokenizing train={trainExamples.Count}, val={valExamples.Count}, maxLen={options.MaxLen}, template={options.Template}...");
+            Console.WriteLine($"Tokenizing train={trainExamples.Count}, val={loadedValExamples.Count}, maxLen={options.MaxLen}, template={options.Template}...");
             trainTok = WorklogSftDataset.Tokenize(trainExamples, tokenizer, options.Template, options.MaxLen);
-            valTok = WorklogSftDataset.Tokenize(valExamples, tokenizer, options.Template, options.MaxLen);
+            valTok = WorklogSftDataset.Tokenize(loadedValExamples, tokenizer, options.Template, options.MaxLen);
+            evalValExamples ??= loadedValExamples;
         }
         if (trainTok.Count == 0) throw new InvalidOperationException("No train examples after tokenization.");
         if (valTok.Count == 0) throw new InvalidOperationException("No val examples after tokenization.");
         Console.WriteLine($"  Tokenized train={trainTok.Count}, val={valTok.Count}");
+
+        if (options.ComputeWorklogEvalMetrics)
+        {
+            if (tokenizer is null)
+                throw new InvalidOperationException("Tokenizer is required when ComputeWorklogEvalMetrics is enabled.");
+            if (evalValExamples is null || evalValExamples.Count == 0)
+                throw new InvalidOperationException("Val examples are required when ComputeWorklogEvalMetrics is enabled. Provide valExamples or a val path that can be loaded.");
+        }
+
         Console.WriteLine("  Running initial validation...");
 
         var optimizer = new AdamW<TModel>(TModel.CreateChecked(options.LearningRate));
@@ -201,6 +219,30 @@ public static class WorklogLoraSftTrainer
         if (bestSnapshot is not null)
             RestoreAdapters(adapters, bestSnapshot);
 
+        WorklogEvalMetrics? bestValMetrics = null;
+        int evalExamplesCount = 0;
+        long evalElapsedMs = 0;
+        if (options.ComputeWorklogEvalMetrics)
+        {
+            var evalExamples = evalValExamples!;
+            if (options.MaxEvalExamples > 0 && evalExamples.Count > options.MaxEvalExamples)
+                evalExamples = evalExamples.Take(options.MaxEvalExamples).ToList();
+
+            Console.WriteLine($"Evaluating worklog metrics on {evalExamples.Count} val example(s) (maxNewTokens={options.EvalMaxNewTokens})...");
+            var evalSw = Stopwatch.StartNew();
+            model.Eval();
+            bestValMetrics = WorklogSftGeneration.Evaluate(
+                model,
+                tokenizer!,
+                evalExamples,
+                options.Template,
+                options.EvalMaxNewTokens);
+            evalSw.Stop();
+            evalExamplesCount = evalExamples.Count;
+            evalElapsedMs = evalSw.ElapsedMilliseconds;
+            Console.WriteLine(bestValMetrics.ToReport("Best-checkpoint val eval"));
+        }
+
         string? adapterPath = null;
         if (options.SaveAdapter && !string.IsNullOrWhiteSpace(options.OutputDir))
         {
@@ -211,7 +253,7 @@ public static class WorklogLoraSftTrainer
         }
 
         if (ownsModel) model.Dispose();
-        return new WorklogLoraSftResult(initialValLoss, bestValLoss, bestEpoch, trainTok.Count, valTok.Count, trainable, baseParams, sw.ElapsedMilliseconds, adapterPath, trainLossPerEpoch, valLossPerEpoch);
+        return new WorklogLoraSftResult(initialValLoss, bestValLoss, bestEpoch, trainTok.Count, valTok.Count, trainable, baseParams, sw.ElapsedMilliseconds, adapterPath, trainLossPerEpoch, valLossPerEpoch, bestValMetrics, evalExamplesCount, evalElapsedMs);
     }
 
     static float EvaluateLoss<TModel, TWeight>(
