@@ -352,6 +352,58 @@ public sealed class SilkLlamaLoRATrainerParityTests
     }
 
     [Test]
+    public void AdapterBundle_LoadsIntoCpuModel_PreservesWeights()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk Llama LoRA parity verification."); }
+
+        var (tensors, config) = Nivara.Tests.Qwen.QwenTestWeights.Synthesize(seed: 1234);
+        const int rank = 4;
+        const float alpha = 8f;
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
+
+        int inF = config.HiddenSize;
+        int outF = config.HiddenSize;
+        var a = Enumerable.Range(0, inF * rank).Select(i => (i % 13 - 6) * 0.01f).ToArray();
+        var b = Enumerable.Range(0, rank * outF).Select(i => (i % 7 - 3) * 0.02f).ToArray();
+        silk.SetLoraWeights(0, SilkLlamaLoRATarget.Q, a, b);
+
+        var path = Path.Combine(Path.GetTempPath(), $"nivara-lora-bundle-{Guid.NewGuid():N}.json");
+        try
+        {
+            silk.SaveAdapterBundle(path, "qwen2.5-0.5b-instruct", "qwen");
+
+            // Load into a CPU model via the shared bundle DTO.
+            var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
+            var cpuAdapters = cpuModel.AttachLora(LlamaLoRATarget.Q | LlamaLoRATarget.V, rank, alpha);
+
+            var bundle = Nivara.Silk.LoraSftAdapterBundle.Load(path);
+            Assert.That(bundle.Adapters.Length, Is.EqualTo(cpuAdapters.Count));
+
+            for (int i = 0; i < cpuAdapters.Count; i++)
+            {
+                var entry = bundle.Adapters[i];
+                var aBytes = Convert.FromBase64String(entry.A);
+                var bBytes = Convert.FromBase64String(entry.B);
+                var aData = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(aBytes).ToArray();
+                var bData = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bBytes).ToArray();
+                cpuAdapters[i].A.Tensor = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(aData, cpuAdapters[i].A.Tensor.Shape[0], cpuAdapters[i].A.Tensor.Shape[1], requiresGrad: true);
+                cpuAdapters[i].B.Tensor = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(bData, cpuAdapters[i].B.Tensor.Shape[0], cpuAdapters[i].B.Tensor.Shape[1], requiresGrad: true);
+            }
+
+            // Verify the CPU adapter weights match the original Silk weights for layer 0 Q.
+            var (cpuA, cpuB) = (GetTensorData(cpuAdapters[0].A.Tensor), GetTensorData(cpuAdapters[0].B.Tensor));
+            Assert.That(MaxAbsDiff(cpuA, a), Is.EqualTo(0f));
+            Assert.That(MaxAbsDiff(cpuB, b), Is.EqualTo(0f));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
     public void ForwardAndGrads_SmolLMShape_AllTargets_MatchesCpu()
     {
         try { using var probe = new SilkRuntime(); }
