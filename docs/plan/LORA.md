@@ -110,6 +110,8 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 5. **#1419 optional:** NivaraChat adapter consumption demo, additive only, no RAG regression.
 6. **G2 + PR:** branch-vs-plan review, docs gates, push/create PR with confirmation; no `docs/TODO.md` in final PR.
 
+**#1414 done on branch:** `docs/plan/LORA.md` reshaped for D1-D5/D2a; `docs/TODO.md` removed. Keep this file as handoff.
+
 ## 9. Guardrails
 
 - No external FineTuning-repo paths/references in code, docs, issues, or commits.
