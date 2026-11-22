@@ -1,5 +1,7 @@
 # LoRA fine-tuning for small language models (SLM)
 
+> **Role:** Stable user-facing guide for the LoRA SLM fine-tuning showcase. For implementation handoff, active gaps, and issue tracking, see `docs/plan/LORA.md`.
+
 This document describes the LoRA SLM fine-tuning showcase: a generic, Llama-family
 causal-LM LoRA path that runs on CPU (reference) and Silk/OpenCL (iGPU, in progress),
 with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
@@ -85,9 +87,12 @@ Generic (SmolLM) verification:
       --template smollm --epochs 1 --max-examples 8 --max-len 128 \
       --rank 4 --alpha 8 --targets q,v --seed 42 --out-dir out/worklog-lora-smollm
 
-## Limitations
+## Limitations and open gaps
 
-- Silk path is not release-parity-certified; `IsParityReady` remains `false`.
-- Adapter format bridge between core single-adapter and SFT bundle is not provided by design.
-- Silk inference does not consume adapter bundles yet.
-- Memory budget in reports is advisory only.
+- **D2a not release-parity-certified:** `SilkLlamaLoRATrainer.IsParityReady` remains `false`. Do not treat Silk training as release-certified. (#1438)
+- **Silk `ft-eval` missing:** `--mode ft-eval --silk` currently runs the CPU eval path silently; this is a known gap and must be guarded or implemented. (#1439, #1441)
+- **Silk `ft-lora` generation eval missing:** Silk ft-lora reports loss/val-loss but lacks integrated base-vs-adapted generation eval parity with CPU. (#1437)
+- **Adapter format bridge by design:** Core single-adapter (`nivara-lora-adapter-v1`) and SFT multi-adapter bundle (`nivara-lora-sft-adapters-v1`) are distinct formats; no bridge provided.
+- **Memory report contract:** Memory budget/footprint in reports is advisory/unspecified; contract needs clarification. (#1442)
+- **CPU smoke evidence:** Post-merge CPU ft-lora smoke evidence with granular logs is tracked. (#1443)
+- **Docs role/handoff drift:** User guide vs handoff roles tracked for cleanup. (#1440, #1444)

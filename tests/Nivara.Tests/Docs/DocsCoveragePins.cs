@@ -30,6 +30,7 @@ internal static class DocsCoveragePins
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
+    /// 526 baseline + 1 role-boundary cross-reference in docs/plan/LORA.md (#1440/#1444 refresh) = 527.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 526;
+    internal const int ExpectedDocumentReferenceCount = 527;
 }

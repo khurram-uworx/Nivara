@@ -1,6 +1,6 @@
 # LoRA SLM iGPU Fine-Tuning Showcase
 
-Status: **active implementation on `khurram/lora`** (D2a in progress; no release-parity claim yet). This document is the handoff for the LoRA plan/PR work and replaces `docs/TODO.md` for this branch.
+Status: **landed on main** (core LoRA showcase merged via PR #1422; follow-up PRs landed through #1436). D2a is functional but **not release-parity-certified** (`IsParityReady=false`). This document is the implementation handoff/active-gap tracker; see `docs/LORA.md` for the stable user-facing guide.
 
 ## 1. Goal
 
@@ -82,19 +82,30 @@ dotnet run --project samples/NivaraFineTuning/NivaraFineTuning.csproj -c Release
 
 Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for smoke.
 
-## 6. Known gaps / red flags
+## 6. Known gaps / red flags (open)
 
-- **D2a not release-ready:** `SilkLlamaLoRATrainer.IsParityReady == false`; parity evidence is synthetic + small real smoke, not full release certification.
-- **Parity scope:** tolerances tightened but still need justification over broader cases; no large real-checkpoint parity matrix.
-- **Adapter format:** Converged on shared `LoraSftAdapterBundle` (`nivara-lora-sft-adapters-v1`) between CPU and Silk; loaders validate rank/alpha/count/shapes. Core `LoraAdapterSerializer` (`nivara-lora-adapter-v1`, single-adapter) remains distinct by design; bridge not added (deliberate; multi-adapter bundle is a different contract).
-- **CPU/Silk report:** Structured JSON report now emitted (`ft-lora-report.json`, `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, parity status, before/after metrics. Memory footprint estimate still approximate.
-- **Tests:** generator determinism/split/provenance/evaluator unit tests landed (#1416/#1421); LoRA parity/merge/freeze/gradcheck, prompt masking, adapter save/load round-trip, generic SmolLM smoke (GPU shape parity) covered. #1421 docs/release-readiness in progress on this branch. Full suite not run.
-- **Docs:** `docs/plan/LORA.md` is now reshaped; other docs/DocsCoveragePins updates may be needed when #1421 lands.
+### Tracked issues
+
+| Issue | Gap | Notes |
+|---|---|---|
+| #1438 | D2a Silk causal-LM training parity certification | `SilkLlamaLoRATrainer.IsParityReady == false` (`src/Nivara.Extensions/Silk/SilkLlamaLoRATrainer.cs:165`); synthetic/small smoke evidence only; needs real-checkpoint parity matrix and consistent docs/CLI flip only when justified. |
+| #1439 | Silk path for causal-LM `ft-eval` | `RunFtEval` is CPU-only, hardcodes `Backend="cpu"`/`Device="cpu"` (`samples/NivaraFineTuning/Program.cs:1362+`). No Silk eval path yet. |
+| #1437 | Generation base-vs-adapted eval in Silk `ft-lora` | Silk `ft-lora` reports loss/val-loss but lacks integrated generation eval parity with CPU path. |
+| #1440 (G1) | Stale plan handoff after main merge | This doc needed refresh for main-landed state and current issue list (this edit addresses the immediate staleness; keep maintained). |
+| #1441 (G2) | `ft-eval --silk` silently ignored | `RunFtEval` does not check `cli.Silk`; passing `--silk` currently runs CPU eval silently. Must be fixed by #1439 or an explicit guard with no CPU fallback. |
+| #1442 (G3) | Report memory footprint contract unclear/approximate | Report memory fields are advisory/unspecified; decide measured-peak vs advisory-only contract and document/schema accordingly. |
+| #1443 (G4) | No recorded post-merge CPU ft-lora smoke evidence | CPU 0.5B backward can be slow; need small smoke run with granular logs and recorded outcome. |
+| #1444 (G5) | Role boundary between `docs/LORA.md` and `docs/plan/LORA.md` | User-facing doc vs handoff/active-gap tracker; reduce drift by making roles explicit and cross-linking. |
+
+### Guardrails
+
 - **No false iGPU claim:** docs/CLI must keep D2a status honest until parity is release-certified.
+- **No silent CPU fallback:** `--silk` paths must run on Silk or fail clearly.
+- **Adapter format:** `nivara-lora-sft-adapters-v1` is the shared CPU/Silk SFT bundle; core `nivara-lora-adapter-v1` remains a distinct single-adapter format by design.
 
 ## 7. File map (current)
 
-- `docs/plan/LORA.md` — this handoff/plan (authoritative for LoRA branch).
+- `docs/plan/LORA.md` — implementation handoff/active-gap tracker (this doc).
 - `samples/data/worklog/README.md`, `train.jsonl`, `test.jsonl` — deterministic seed data.
 - `samples/NivaraFineTuning/WorklogSftDataset.cs` — dataset/generator/tokenization.
 - `samples/NivaraFineTuning/WorklogSftEvaluator.cs` — eval metrics/parser.
@@ -105,21 +116,33 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 - `tests/Nivara.Tests/Gpu/SilkLlamaLoRATrainerParityTests.cs` — GPU-gated parity tests.
 - `samples/Nivara.Samples/LlamaForCausalLM.cs` — shared Llama-family model/loading; Qwen tokenizer unk fix.
 
-## 8. Next session pick list
+## 8. Landed / closed
 
-1. **#1418 hardening (recommended first):** run CPU smoke with new granular logs; run `ft-eval` before/after on Silk-produced adapter; collect real-checkpoint evidence; converge adapter format where needed; keep `IsParityReady=false` until evidence justifies flip.
-2. **#1420 report polish:** landed on `khurram/1420` — JSON + markdown reports, param breakdown, advisory memory budget, per-epoch loss curve, base/adapted eval integration, SmolLM verification command path. Parity remains not release-certified.
-3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, evaluator metric unit tests.
-4. **#1421 tests/docs/gates:** done on `khurram/1421` — `docs/LORA.md` added, plan updated, DocsCoveragePins adjusted; targeted tests + docs gates to be run.
-5. **#1419/#1429 done:** NivaraChat adapter consumption demo (`--adapter <path>` on `--qwen`/`--smollm`, CPU and Silk paths) — additive, no RAG regression. `--merge-adapter` remains CPU-only on Silk with an explicit error.
-6. **G2 + PR:** branch-vs-plan review, docs gates, push/create PR with confirmation; no `docs/TODO.md` in final PR.
+- #1414 plan reshape — done (plan is handoff on main).
+- #1415 reconcile ft-data artifacts — done.
+- #1416 worklog dataset/generator/eval — done (seed data, generator, evaluator, tests).
+- #1417 generic Llama-family CPU SFT trainer — done.
+- #1418 initial Silk D2a trainer path — done/closed as initial delivery; parity certification remains tracked by #1438.
+- #1419/#1429 NivaraChat adapter consumption demo — done (CPU+Silk adapter load; `--merge-adapter` with `--silk` errors clearly).
+- #1420 NivaraFineTuning CLI/report — done (ft-generate/ft-lora/ft-eval, JSON+markdown reports).
+- #1421 tests/docs/DocsCoveragePins — done.
 
-**#1414 done on branch:** `docs/plan/LORA.md` reshaped for D1-D5/D2a; `docs/TODO.md` removed. Keep this file as handoff.
+## 9. Next session pick list (open issues)
 
-## 9. Guardrails
+1. **#1438 D2a parity certification** — real-checkpoint parity matrix, close gaps, flip `IsParityReady`/docs/CLI only with evidence.
+2. **#1439 Silk path for causal-LM `ft-eval`** — real Silk eval path; no silent CPU fallback. (Also resolves G2 immediate guard.)
+3. **#1437 Generation base-vs-adapted eval in Silk `ft-lora`** — align Silk ft-lora report/eval with CPU path.
+4. **#1441 (G2) Guard `ft-eval --silk` silent CPU fallback** — quick guard until #1439 lands, or close as part of #1439.
+5. **#1440 (G1) Keep this handoff current** — update when gaps close; avoid stale branch/status/pick-list drift.
+6. **#1444 (G5) Clarify doc roles** — `docs/LORA.md` stable user guide; `docs/plan/LORA.md` handoff/active-gap tracker.
+7. **#1442 (G3) Memory footprint report contract** — advisory-only vs measured peak; schema/docs/tests.
+8. **#1443 (G4) CPU ft-lora smoke evidence** — small post-merge smoke with granular logs; record outcome.
+
+## 10. Guardrails
 
 - No external FineTuning-repo paths/references in code, docs, issues, or commits.
 - No false "FT on iGPU" or release-parity claim until D2a evidence supports it.
+- No silent CPU fallback for `--silk` paths: run on Silk or fail clearly.
 - Do not run full test suite unprompted; run targeted tests autonomously. Full suite requires confirmation and `Category!=Performance&Category!=ReleaseReadiness&Category!=Gpu`.
 - Do not push/create PR without explicit user confirmation.
-- Keep `docs/plan/LORA.md` as the handoff; do not reintroduce `docs/TODO.md`.
+- Keep `docs/plan/LORA.md` as the handoff/active-gap tracker; do not reintroduce `docs/TODO.md`.
