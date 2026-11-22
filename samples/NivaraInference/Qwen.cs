@@ -603,6 +603,109 @@ public static class Qwen
         }
     }
 
+    public static int RunSyntheticProfile<TModel, TWeight>(bool plain = false)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): decode profile ===");
+        string syntheticPrecision = typeof(TWeight) == typeof(BFloat16)
+            ? (typeof(TModel) == typeof(BFloat16) ? "BF16 (synthetic)" : "BF16 (native, widen-SIMD)")
+            : "F32 (synthetic)";
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {syntheticPrecision}");
+        Console.WriteLine("Note: kernel-dispatch profiling is Silk-only; reporting CPU decode timing.");
+        var tensors = SynthesizeTensors<TWeight>(QwenSyntheticConfig);
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        var model = LlamaLoader.Load<TModel, TWeight>(QwenSyntheticConfig, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var promptIds = SyntheticPrompt();
+        TimeGeneration(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+        var timing = TimeGeneration(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+        Console.WriteLine($"Profile run: {timing.Ms:F0} ms ({timing.Tokens} tokens, prefill {timing.PrefillMs:F0} ms, decode {timing.DecodeMsTok:F2} ms/token, {1000.0 / Math.Max(0.01, timing.DecodeMsTok):F2} tok/s)");
+        Console.WriteLine("CPU dispatch profile: N/A (Silk-only)");
+        return 0;
+    }
+
+    public static int RunSyntheticProfileSilk(bool plain = false, bool bf16 = false)
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): decode profile -- Silk ===");
+        var config = QwenSyntheticConfig;
+        string precisionName = bf16 ? "BFloat16 storage / F32 compute" : "F32";
+        Console.WriteLine($"Precision: {precisionName}");
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        SilkQwenSession session;
+        if (bf16)
+        {
+            var tensors = SynthesizeTensors<System.Numerics.BFloat16>(config);
+            session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        }
+        else
+        {
+            var tensors = SynthesizeTensors(config);
+            session = SilkQwenSession.Open(ToSilkConfig(config), tensors);
+        }
+
+        using (session)
+        {
+            buildSw.Stop();
+            Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+            Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+            Console.WriteLine();
+
+            var promptIds = SyntheticPrompt();
+            var warmup = GenerateSilkTimed(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+            long warmupMs = warmup.PrefillMs + warmup.DecodeMs;
+            double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Ids.Count * 1000.0 / warmup.DecodeMs : 0;
+            Console.WriteLine($"Warmup: {warmupMs} ms ({warmup.Ids.Count} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
+
+            session.ProfilingEnabled = true;
+            session.ResetDecodeProfile();
+            var timing = GenerateSilkTimed(session, config, promptIds, MaxNewTokensSynthetic, useKvCache: true);
+            var profile = session.GetDecodeProfile();
+            session.ProfilingEnabled = false;
+
+            long totalMs = timing.PrefillMs + timing.DecodeMs;
+            double decodeTokS = timing.DecodeMs > 0 ? timing.Ids.Count * 1000.0 / timing.DecodeMs : 0;
+            Console.WriteLine($"Profile run: {totalMs} ms ({timing.Ids.Count} tokens, prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+            PrintSilkDecodeProfile(profile);
+            return 0;
+        }
+    }
+
+    static int[] SyntheticPrompt()
+    {
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+            promptIds[i] = (int)(SyntheticRng() % (uint)QwenSyntheticConfig.VocabSize);
+        return promptIds;
+    }
+
+    static void PrintSilkDecodeProfile(Nivara.Silk.SilkDecodeProfile profile)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Decode profile (cached decode tokens only):");
+        Console.WriteLine($"  Tokens: {profile.TokenCount}");
+        Console.WriteLine($"  Kernel dispatches: {profile.KernelDispatches} ({profile.DispatchesPerToken:F2}/token)");
+        Console.WriteLine($"  Queue copies: {profile.QueueCopies}");
+        Console.WriteLine($"  Total profiled: {profile.TotalMs:F2} ms ({profile.MsPerToken:F2} ms/token)");
+        PrintProfilePhase("Embed", profile.EmbedMs, profile.TokenCount);
+        PrintProfilePhase("QKV norm+proj", profile.QkvMs, profile.TokenCount);
+        PrintProfilePhase("Rotary", profile.RotaryMs, profile.TokenCount);
+        PrintProfilePhase("Cache copy", profile.CacheCopyMs, profile.TokenCount);
+        PrintProfilePhase("Attention+O proj", profile.AttentionOProjMs, profile.TokenCount);
+        PrintProfilePhase("MLP", profile.MlpMs, profile.TokenCount);
+        PrintProfilePhase("Final norm+LM head", profile.FinalNormLmHeadMs, profile.TokenCount);
+        PrintProfilePhase("Argmax", profile.ArgmaxMs, profile.TokenCount);
+    }
+
+    static void PrintProfilePhase(string name, double ms, int tokens)
+    {
+        double perToken = tokens > 0 ? ms / tokens : 0;
+        Console.WriteLine($"  {name,-18} {ms,10:F2} ms  {perToken,8:F3} ms/token");
+    }
+
     static Nivara.Silk.QwenSilkConfig ToSilkConfig(LlamaConfig config) => new()
     {
         HiddenSize = config.HiddenSize,

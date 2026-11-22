@@ -99,6 +99,7 @@ internal static class SilkKernels
     public const string SplitColumns = "split_columns";
     public const string Rotary = "rotary";
     public const string RotaryBackward = "rotary_backward";
+    public const string RotaryQk = "rotary_qk";
     public const string GeGlu = "geglu";
     public const string Gemm = "gemm_row4"; public const string GemmBf16 = "gemm_row4_bf16"; public const string GemmF16 = "gemm_row4_f16";
     public const string GemmBias = "gemm_row4_bias";
@@ -222,7 +223,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, RotaryQk, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
@@ -519,6 +520,46 @@ internal static class SilkKernels
             float dy1 = dy[b + i + pair];
             dx[b + i] = dy0 * c + dy1 * s;
             dx[b + i + pair] = -dy0 * s + dy1 * c;
+        }
+
+        /* Fused Q+K half-split RoPE: applies the same rotary embedding to Q and K in one dispatch.
+           The first rows*numHeadsQ*pair work items process Q, the rest process K. Saves one kernel
+           dispatch per decode layer over two separate rotary launches. */
+        __kernel void rotary_qk(
+            __global const float* q,
+            __global const float* k,
+            __global const int* posIds,
+            __global const float* cosTab,
+            __global const float* sinTab,
+            __global float* qOut,
+            __global float* kOut,
+            const uint rows,
+            const uint numHeadsQ,
+            const uint numHeadsK,
+            const uint headDim)
+        {
+            uint pair = headDim / 2u;
+            uint idx = get_global_id(0);
+            uint qTotal = rows * numHeadsQ * pair;
+            uint kTotal = rows * numHeadsK * pair;
+            if (idx >= qTotal + kTotal) return;
+            int inQ = idx < qTotal;
+            uint baseIdx = inQ ? idx : (idx - qTotal);
+            uint nHeads = inQ ? numHeadsQ : numHeadsK;
+            __global const float* src = inQ ? q : k;
+            __global float* dst = inQ ? qOut : kOut;
+            uint i = baseIdx % pair;
+            uint rem = baseIdx / pair;
+            uint h = rem % nHeads;
+            uint row = rem / nHeads;
+            uint t = (uint)posIds[row] * pair + i;
+            float c = cosTab[t];
+            float s = sinTab[t];
+            uint b = row * (nHeads * headDim) + h * headDim;
+            float x0 = src[b + i];
+            float x1 = src[b + i + pair];
+            dst[b + i] = x0 * c - x1 * s;
+            dst[b + i + pair] = x0 * s + x1 * c;
         }
 
         /* First half is the GELU, second half is the gate. Reversing them still looks plausible. */

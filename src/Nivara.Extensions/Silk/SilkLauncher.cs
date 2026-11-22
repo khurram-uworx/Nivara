@@ -390,6 +390,26 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.RotaryBackward, rows * numHeads * halfDim);
     }
 
+    /// <summary>Fused Q+K half-split RoPE in one dispatch. Saves one kernel dispatch per layer
+    /// compared with two separate <see cref="Rotary"/> launches.</summary>
+    public static void RotaryQk(
+        SilkRuntime runtime, nint q, nint k, nint posIds, nint cos, nint sin,
+        int rows, int numHeadsQ, int numHeadsK, int headDim, int halfDim)
+    {
+        runtime.SetBuffer(SilkKernels.RotaryQk, 0, q);
+        runtime.SetBuffer(SilkKernels.RotaryQk, 1, k);
+        runtime.SetBuffer(SilkKernels.RotaryQk, 2, posIds);
+        runtime.SetBuffer(SilkKernels.RotaryQk, 3, cos);
+        runtime.SetBuffer(SilkKernels.RotaryQk, 4, sin);
+        runtime.SetBuffer(SilkKernels.RotaryQk, 5, q);
+        runtime.SetBuffer(SilkKernels.RotaryQk, 6, k);
+        runtime.SetUInt32(SilkKernels.RotaryQk, 7, (uint)rows);
+        runtime.SetUInt32(SilkKernels.RotaryQk, 8, (uint)numHeadsQ);
+        runtime.SetUInt32(SilkKernels.RotaryQk, 9, (uint)numHeadsK);
+        runtime.SetUInt32(SilkKernels.RotaryQk, 10, (uint)headDim);
+        Linear(runtime, SilkKernels.RotaryQk, rows * (numHeadsQ + numHeadsK) * halfDim);
+    }
+
     public static void GeGlu(SilkRuntime runtime, nint src, nint y, int rows, int intermediate)
     {
         runtime.SetBuffer(SilkKernels.GeGlu, 0, src);

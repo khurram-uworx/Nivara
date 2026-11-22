@@ -72,8 +72,8 @@ class Program
         ["distilbert_sst"] = ["", "benchmark", "predict"],
         ["laya"] = ["", "benchmark", "train"],
         ["modernbert"] = ["", "benchmark", "train-head"],
-        ["smollm"] = ["", "benchmark", "ab", "generate"],
-        ["qwen"] = ["", "tools", "distill", "benchmark"],
+        ["smollm"] = ["", "benchmark", "ab", "generate", "profile"],
+        ["qwen"] = ["", "tools", "distill", "benchmark", "profile"],
         // The TypeSafe demo is an HTTP client, not a weights-backed model: no sub-modes, no
         // checkpoint, and it dispatches before the model-file lookup below.
         ["typesafe"] = ["", "benchmark", "verify"],
@@ -89,8 +89,8 @@ class Program
         ["distilbert_sst"] = ["", "benchmark", "predict"],
         ["modernbert"] = ["", "benchmark", "train-head"],
         ["laya"] = ["", "benchmark", "train"],
-        ["smollm"] = ["", "benchmark", "generate"],
-        ["qwen"] = ["", "benchmark", "tools", "distill"],
+        ["smollm"] = ["", "benchmark", "generate", "profile"],
+        ["qwen"] = ["", "benchmark", "tools", "distill", "profile"],
         ["mobilenet_v2"] = ["", "benchmark"],
         ["resnet18"] = ["", "benchmark"],
     };
@@ -571,15 +571,15 @@ class Program
             return 1;
         }
 
-        if (plain && isQwen && mode.Length > 0 && mode != "benchmark")
+        if (plain && isQwen && mode.Length > 0 && mode != "benchmark" && mode != "profile")
         {
-            Console.Error.WriteLine($"--plain is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
+            Console.Error.WriteLine($"--plain is only valid with the default single-shot run, 'benchmark', or 'profile'; got '{got}'.");
             return 1;
         }
 
-        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark" && mode != "train")
+        if (syntheticWeights && (isQwen || isSmolLM || isLaya) && mode.Length > 0 && mode != "benchmark" && mode != "train" && mode != "profile")
         {
-            Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run or 'benchmark'; got '{got}'.");
+            Console.Error.WriteLine($"--synthetic-weights is only valid with the default single-shot run, 'benchmark', or 'profile'; got '{got}'.");
             return 1;
         }
 
@@ -736,6 +736,18 @@ class Program
 
         if (isQwen && syntheticWeights)
         {
+            if (mode == "profile")
+            {
+                if (useSilk)
+                    return Qwen.RunSyntheticProfileSilk(plain, bf16 || native);
+
+                if (native)
+                    return Qwen.RunSyntheticProfile<float, BFloat16>(plain);
+                if (bf16)
+                    return Qwen.RunSyntheticProfile<BFloat16, BFloat16>(plain);
+                return Qwen.RunSyntheticProfile<float, float>(plain);
+            }
+
             if (useSilk)
                 return Qwen.RunSyntheticBenchmarkSilk(plain, bf16 || native);
 
@@ -748,6 +760,18 @@ class Program
 
         if (isSmolLM && syntheticWeights)
         {
+            if (mode == "profile")
+            {
+                if (useSilk)
+                    return RunSmolLMSyntheticProfileSilk(plain, bf16 || native);
+
+                if (native)
+                    return RunSmolLMSyntheticProfile<float, BFloat16>();
+                if (bf16)
+                    return RunSmolLMSyntheticProfile<BFloat16, BFloat16>();
+                return RunSmolLMSyntheticProfile<float, float>();
+            }
+
             if (useSilk)
                 return RunSmolLMSyntheticBenchmarkSilk(plain, bf16 || native);
 
@@ -1020,10 +1044,10 @@ class Program
                 {
                     if (bf16 || native)
                     {
-                        if (benchmark) return BenchmarkSmolLMSilk(tensorsBf16);
+                        if (benchmark || mode == "profile") return BenchmarkSmolLMSilk(tensorsBf16);
                         return RunSmolLMSilk(tensorsBf16);
                     }
-                    if (benchmark) return BenchmarkSmolLMSilk(F32());
+                    if (benchmark || mode == "profile") return BenchmarkSmolLMSilk(F32());
                     return RunSmolLMSilk(F32());
                 }
                 if (mode == "ab")
@@ -1032,10 +1056,10 @@ class Program
                     if (fp16) return SmolLMAb(tensorsHalf);
                     return SmolLMAb(F32());
                 }
-                if (native) return benchmark ? BenchmarkSmolLMNative(tensorsBf16) : RunSmolLMNative(tensorsBf16);
-                if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16) : RunSmolLM(tensorsBf16);
-                if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf) : RunSmolLM(tensorsHalf);
-                return benchmark ? BenchmarkSmolLM(F32()) : RunSmolLM(F32());
+                if (native) return (benchmark || mode == "profile") ? BenchmarkSmolLMNative(tensorsBf16) : RunSmolLMNative(tensorsBf16);
+                if (bf16) return (benchmark || mode == "profile") ? BenchmarkSmolLM(tensorsBf16) : RunSmolLM(tensorsBf16);
+                if (fp16) return (benchmark || mode == "profile") ? BenchmarkSmolLM(tensorsHalf) : RunSmolLM(tensorsHalf);
+                return (benchmark || mode == "profile") ? BenchmarkSmolLM(F32()) : RunSmolLM(F32());
             case "qwen":
                 if (useSilk)
                 {
@@ -1046,17 +1070,17 @@ class Program
                         return Qwen.RunDistillSilk(F32(), modelDir, teacherExamples, force, seed);
                     if (bf16 || native)
                     {
-                        if (mode == "benchmark") return Qwen.RunBenchmarkSilk(tensorsBf16, modelDir);
+                        if (mode == "benchmark" || mode == "profile") return Qwen.RunBenchmarkSilk(tensorsBf16, modelDir);
                         if (plain) return Qwen.RunPlainSilk(tensorsBf16, modelDir, text);
                         return Qwen.RunToolsSilk(tensorsBf16, modelDir, useKvCache: !noKvCache, text);
                     }
-                    if (mode == "benchmark") return Qwen.RunBenchmarkSilk(F32(), modelDir);
+                    if (mode == "benchmark" || mode == "profile") return Qwen.RunBenchmarkSilk(F32(), modelDir);
                     if (plain) return Qwen.RunPlainSilk(F32(), modelDir, text);
                     return Qwen.RunToolsSilk(F32(), modelDir, useKvCache: !noKvCache, text);
                 }
                 if (mode == "distill")
                     return Qwen.RunDistill(F32(), modelDir, teacherExamples, force, seed);
-                if (mode == "benchmark")
+                if (mode == "benchmark" || mode == "profile")
                 {
                     if (native) return plain ? Qwen.RunPlainBenchmark<float, BFloat16>(tensorsBf16, modelDir) : Qwen.RunBenchmark<float, BFloat16>(tensorsBf16, modelDir);
                     if (bf16) return plain ? Qwen.RunPlainBenchmark<BFloat16, BFloat16>(tensorsBf16, modelDir) : Qwen.RunBenchmark<BFloat16, BFloat16>(tensorsBf16, modelDir);
@@ -3771,6 +3795,120 @@ class Program
                               $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
             return 0;
         }
+    }
+
+    static int RunSmolLMSyntheticProfile<TModel, TWeight>()
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        string precisionName = (typeof(TModel), typeof(TWeight)) switch
+        {
+            (var m, var w) when m == typeof(float) && w == typeof(BFloat16) => NativeSmolLMPrecision,
+            _ => PrecisionName(typeof(TWeight)),
+        };
+        Console.WriteLine("=== SmolLM-135M (synthetic weights): decode profile ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
+        Console.WriteLine("Note: kernel-dispatch profiling is Silk-only; reporting CPU decode timing.");
+
+        var tensors = Qwen.SynthesizeTensors<TWeight>(SmolLMSyntheticConfig);
+        var buildSw = Stopwatch.StartNew();
+        var model = LlamaLoader.Load<TModel, TWeight>(SmolLMSyntheticConfig, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+
+        var promptIds = SmolLMSyntheticPrompt();
+        const int MaxNewTokens = 32;
+        var warmup = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms)");
+        var timing = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+        double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
+        Console.WriteLine($"Profile run: {timing.Milliseconds} ms ({timing.Generated} tokens, prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+        Console.WriteLine("CPU dispatch profile: N/A (Silk-only)");
+        return 0;
+    }
+
+    static int RunSmolLMSyntheticProfileSilk(bool plain = false, bool bf16 = false)
+    {
+        string precisionName = bf16 ? "BFloat16 storage / F32 compute" : "F32";
+        Console.WriteLine("=== SmolLM-135M (synthetic weights): decode profile -- Silk ===");
+        Console.WriteLine($"Device: Silk  Precision: {precisionName}");
+        var config = SmolLMSyntheticConfig;
+        var buildSw = Stopwatch.StartNew();
+        Nivara.Silk.SilkSmolLMSession session;
+        if (bf16)
+        {
+            var tensors = Qwen.SynthesizeTensors<System.Numerics.BFloat16>(config);
+            session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        }
+        else
+        {
+            var tensors = Qwen.SynthesizeTensors(config);
+            session = Nivara.Silk.SilkSmolLMSession.Open(ToSilkConfig(config), tensors);
+        }
+        buildSw.Stop();
+
+        using (session)
+        {
+            Console.WriteLine($"Device: {session.DeviceName}  Vocab: {config.VocabSize}");
+            Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+            Console.WriteLine();
+
+            var promptIds = SmolLMSyntheticPrompt();
+            const int MaxNewTokens = 32;
+            var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+            double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
+            Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
+
+            session.ProfilingEnabled = true;
+            session.ResetDecodeProfile();
+            var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+            var profile = session.GetDecodeProfile();
+            session.ProfilingEnabled = false;
+
+            double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
+            Console.WriteLine($"Profile run: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
+                              $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+            PrintSilkDecodeProfile(profile);
+            return 0;
+        }
+    }
+
+    static int[] SmolLMSyntheticPrompt()
+    {
+        uint rng = 0x9E3779B9;
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+        {
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            promptIds[i] = (int)(rng % (uint)SmolLMSyntheticConfig.VocabSize);
+        }
+        return promptIds;
+    }
+
+    static void PrintSilkDecodeProfile(Nivara.Silk.SilkDecodeProfile profile)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Decode profile (cached decode tokens only):");
+        Console.WriteLine($"  Tokens: {profile.TokenCount}");
+        Console.WriteLine($"  Kernel dispatches: {profile.KernelDispatches} ({profile.DispatchesPerToken:F2}/token)");
+        Console.WriteLine($"  Queue copies: {profile.QueueCopies}");
+        Console.WriteLine($"  Total profiled: {profile.TotalMs:F2} ms ({profile.MsPerToken:F2} ms/token)");
+        PrintProfilePhase("Embed", profile.EmbedMs, profile.TokenCount);
+        PrintProfilePhase("QKV norm+proj", profile.QkvMs, profile.TokenCount);
+        PrintProfilePhase("Rotary", profile.RotaryMs, profile.TokenCount);
+        PrintProfilePhase("Cache copy", profile.CacheCopyMs, profile.TokenCount);
+        PrintProfilePhase("Attention+O proj", profile.AttentionOProjMs, profile.TokenCount);
+        PrintProfilePhase("MLP", profile.MlpMs, profile.TokenCount);
+        PrintProfilePhase("Final norm+LM head", profile.FinalNormLmHeadMs, profile.TokenCount);
+        PrintProfilePhase("Argmax", profile.ArgmaxMs, profile.TokenCount);
+    }
+
+    static void PrintProfilePhase(string name, double ms, int tokens)
+    {
+        double perToken = tokens > 0 ? ms / tokens : 0;
+        Console.WriteLine($"  {name,-18} {ms,10:F2} ms  {perToken,8:F3} ms/token");
     }
 
     static Nivara.Silk.SmolLMConfig ToSilkConfig(LlamaConfig config) => new()

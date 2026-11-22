@@ -322,6 +322,7 @@ Commands:
 - Python CPU reference: `python samples/NivaraInference/Python/qwen_benchmark.py`
 - Nivara CPU: `qwen benchmark` / `qwen benchmark --plain`
 - Nivara GPU (Silk): `qwen --silk benchmark` / `qwen --silk benchmark --plain` (BF16 storage / F32 compute by default; add `--precision f32` for the F32 device path) (real checkpoint required)
+- Synthetic decode profile (#1453, no real checkpoint required): `qwen --synthetic-weights profile` / `qwen --synthetic-weights --silk profile` (reports per-phase cached-decode dispatch/timing on Silk; CPU reports timing only)
 
 Status: measured on 2026-10-17 (see *Measured Qwen results* below).
 

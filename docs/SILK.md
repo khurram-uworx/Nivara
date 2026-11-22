@@ -1083,6 +1083,34 @@ All earlier fine-tuning follow-ups (#960-#966, #1001-#1004, #1010) are closed; s
 
 ---
 
+## 14. SmolLM/Qwen cached-decode profiling and fusion (#1453)
+
+`SilkSmolLMGpuRunner` and `SilkQwenGpuRunner` expose opt-in cached-decode profiling for
+root-cause analysis of dispatch/occupancy-bound decode on small Llama-family shapes.
+
+- **Dispatch counters:** `SilkRuntime.KernelDispatchCount` counts kernel enqueues through
+  `SilkRuntime.Run`; `SilkRuntime.QueueCopyCount` counts `CopyBuffer` enqueues. Both reset via
+  `ResetProfilingCounters()`. Uploads/downloads are not included.
+- **Decode profile:** set `ProfilingEnabled = true` on the runner/session, run cached decode, then
+  read `GetDecodeProfile()` (`SilkDecodeProfile`). Phase timings use `Stopwatch` +
+  `SilkRuntime.Finish()` boundaries only when profiling is enabled: embed, QKV norm+proj, rotary,
+  cache copy, attention+O proj, MLP, final norm+LM head, argmax. Normal decode path is unchanged.
+- **Synthetic diagnostic commands (human-run, GPU required for Silk):**
+
+```bat
+dotnet run -c Release --project samples/NivaraInference -- smollm --synthetic-weights profile
+dotnet run -c Release --project samples/NivaraInference -- smollm --synthetic-weights --silk profile
+dotnet run -c Release --project samples/NivaraInference -- qwen --synthetic-weights profile
+dotnet run -c Release --project samples/NivaraInference -- qwen --synthetic-weights --silk profile
+```
+
+- **#1453 fusion experiment:** Q+K rotary fused into one `rotary_qk` dispatch
+  (`SilkKernels.RotaryQk`, `SilkLauncher.RotaryQk`), replacing two `rotary` dispatches per layer
+  per token in SmolLM/Qwen prefill and cached decode. Expected dispatch reduction: one kernel per
+  layer per token (SmolLM 30/token, Qwen 0.5B 24/token) with parity preserved by existing
+  CPU/Silk synthetic parity tests. Before/after benchmark numbers should be captured with the
+  commands above and recorded in the #1453 PR/issue.
+
 ## References
 
 - [Silk.NET OpenCL](https://github.com/dotnet/Silk.NET)

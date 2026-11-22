@@ -28,6 +28,20 @@ public sealed class SilkSmolLMSession : IDisposable
         => new SilkSmolLMSession(config, tensors);
 
     public string DeviceName => runtime.DeviceName;
+
+    /// <summary>Enables per-phase cached-decode profiling on the underlying runner.</summary>
+    public bool ProfilingEnabled
+    {
+        get => runner.ProfilingEnabled;
+        set => runner.ProfilingEnabled = value;
+    }
+
+    /// <summary>Clears accumulated cached-decode profiling counters.</summary>
+    public void ResetDecodeProfile() => runner.ResetDecodeProfile();
+
+    /// <summary>Returns the accumulated cached-decode profiling snapshot.</summary>
+    public SilkDecodeProfile GetDecodeProfile() => runner.GetDecodeProfile();
+
     public float[] Forward(int[] tokenIds) => runner.Forward(tokenIds);
     public float[] ForwardLastLogits(int[] tokenIds) => runner.ForwardLastLogits(tokenIds);
     public int ForwardLastArgmax(int[] tokenIds) => runner.ForwardLastArgmax(tokenIds);
