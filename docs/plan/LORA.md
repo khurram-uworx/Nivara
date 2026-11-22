@@ -88,7 +88,7 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 - **Parity scope:** tolerances tightened but still need justification over broader cases; no large real-checkpoint parity matrix.
 - **Adapter format:** Converged on shared `LoraSftAdapterBundle` (`nivara-lora-sft-adapters-v1`) between CPU and Silk; loaders validate rank/alpha/count/shapes. Core `LoraAdapterSerializer` (`nivara-lora-adapter-v1`, single-adapter) remains distinct by design; bridge not added (deliberate; multi-adapter bundle is a different contract).
 - **CPU/Silk report:** Structured JSON report now emitted (`ft-lora-report.json`, `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, parity status, before/after metrics. Memory footprint estimate still approximate.
-- **Tests:** generator determinism/split/provenance/evaluator unit tests still needed (#1416/#1421). Full suite not run.
+- **Tests:** generator determinism/split/provenance/evaluator unit tests landed (#1416/#1421); LoRA parity/merge/freeze/gradcheck, prompt masking, adapter save/load round-trip, generic SmolLM smoke (GPU shape parity) covered. #1421 docs/release-readiness in progress on this branch. Full suite not run.
 - **Docs:** `docs/plan/LORA.md` is now reshaped; other docs/DocsCoveragePins updates may be needed when #1421 lands.
 - **No false iGPU claim:** docs/CLI must keep D2a status honest until parity is release-certified.
 
@@ -110,7 +110,7 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 1. **#1418 hardening (recommended first):** run CPU smoke with new granular logs; run `ft-eval` before/after on Silk-produced adapter; collect real-checkpoint evidence; converge adapter format where needed; keep `IsParityReady=false` until evidence justifies flip.
 2. **#1420 report polish:** landed on `khurram/1420` — JSON + markdown reports, param breakdown, advisory memory budget, per-epoch loss curve, base/adapted eval integration, SmolLM verification command path. Parity remains not release-certified.
 3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, evaluator metric unit tests.
-4. **#1421 tests/docs/gates:** targeted tests, docs updates, DocsCoveragePins/citation/ADR checks if docs change; doc snippet gate when docs touched.
+4. **#1421 tests/docs/gates:** done on `khurram/1421` — `docs/LORA.md` added, plan updated, DocsCoveragePins adjusted; targeted tests + docs gates to be run.
 5. **#1419 done:** NivaraChat adapter consumption demo (`--adapter <path>` on `--qwen`/`--smollm`, CPU path) — additive, no RAG regression. Silk inference does not yet consume bundles (explicit error).
 6. **G2 + PR:** branch-vs-plan review, docs gates, push/create PR with confirmation; no `docs/TODO.md` in final PR.
 
