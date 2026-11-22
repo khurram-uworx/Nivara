@@ -801,8 +801,25 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     {
         if (gateLora is null && upLora is null && downLora is null)
         {
-            if (bf16Weights) SilkLauncher.MlpBlockBf16(runtime, x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
-            else SilkLauncher.MlpBlock(runtime, x, gamma, wg, wu, wd, outBuf, residual, hidden, inter, eps2);
+            // Decode MLP decomposition: RmsNormGemv (gate+up, multi-WG) + SwiGlu (multi-WG) +
+            // GemmGemvAdd (down+residual, multi-WG). Replaces the single-WG fused mlp_block
+            // kernel which serialized decode on iGPUs (P1, #1453).
+            if (bf16Weights)
+            {
+                SilkLauncher.RmsNormGemvBf16(runtime, x, gamma,
+                    [new(wg, 0, gate.Handle, inter), new(wu, 0, up.Handle, inter)],
+                    hasBias: false, aRows: 1, aCols: hidden, eps: eps2);
+                SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, inter);
+                SilkLauncher.GemmGemvAddBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
+            }
+            else
+            {
+                SilkLauncher.RmsNormGemv(runtime, x, gamma,
+                    [new(wg, 0, gate.Handle, inter), new(wu, 0, up.Handle, inter)],
+                    hasBias: false, aRows: 1, aCols: hidden, eps: eps2);
+                SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, inter);
+                SilkLauncher.GemmGemvAdd(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
+            }
             return;
         }
 
