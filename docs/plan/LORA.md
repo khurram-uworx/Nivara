@@ -108,7 +108,7 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 ## 8. Next session pick list
 
 1. **#1418 hardening (recommended first):** run CPU smoke with new granular logs; run `ft-eval` before/after on Silk-produced adapter; collect real-checkpoint evidence; converge adapter format where needed; keep `IsParityReady=false` until evidence justifies flip.
-2. **#1420 report polish:** structured JSON/markdown report (base/adapted metrics, param counts, device, elapsed, memory/parity status, adapter path); SmolLM verification command path.
+2. **#1420 report polish:** landed on `khurram/1420` — JSON + markdown reports, param breakdown, advisory memory budget, per-epoch loss curve, base/adapted eval integration, SmolLM verification command path. Parity remains not release-certified.
 3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, evaluator metric unit tests.
 4. **#1421 tests/docs/gates:** targeted tests, docs updates, DocsCoveragePins/citation/ADR checks if docs change; doc snippet gate when docs touched.
 5. **#1419 done:** NivaraChat adapter consumption demo (`--adapter <path>` on `--qwen`/`--smollm`, CPU path) — additive, no RAG regression. Silk inference does not yet consume bundles (explicit error).
