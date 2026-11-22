@@ -98,6 +98,7 @@ internal static class SilkKernels
     public const string AttentionBf16Act = "batched_attention_bf16_act";
     public const string SplitColumns = "split_columns";
     public const string Rotary = "rotary";
+    public const string RotaryBackward = "rotary_backward";
     public const string GeGlu = "geglu";
     public const string Gemm = "gemm_row4"; public const string GemmBf16 = "gemm_row4_bf16"; public const string GemmF16 = "gemm_row4_f16";
     public const string GemmBias = "gemm_row4_bias";
@@ -133,6 +134,7 @@ internal static class SilkKernels
     public const string RmsNormGemvBf16 = "rms_norm_gemv_bf16";
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
+    public const string SwiGluBackward = "swiglu_backward";
     public const string CausalGqaAttention = "causal_gqa_attention";
     public const string DecodeGqaAttention = "decode_gqa_attention";
 
@@ -185,6 +187,7 @@ internal static class SilkKernels
     public const string GeluBackwardBf16Act = "gelu_backward_bf16_act";
     public const string LayerNormBackward = "layer_norm_backward";
     public const string LayerNormBackwardBf16Act = "layer_norm_backward_bf16_act";
+    public const string RmsNormBackward = "rms_norm_backward";
     public const string ColSum = "col_sum";
     public const string ColSumBf16Act = "col_sum_bf16_act";
     public const string Fill = "fill";
@@ -194,6 +197,7 @@ internal static class SilkKernels
     public const string AdamUpdate = "adam_update";
     public const string AdamUpdateBf16 = "adam_update_bf16";
     public const string SoftmaxCrossEntropyBackward = "softmax_cross_entropy_backward";
+    public const string Scale = "scale";
 
     // Rag-learn fused late-fusion helpers (#915 follow-up).
     public const string FusionForward = "fusion_forward";
@@ -203,6 +207,9 @@ internal static class SilkKernels
     // three deterministic launches so each output element has one writer and an ascending loop.
     public const string AttentionBackwardPrep = "attention_backward_prep";
     public const string CausalAttentionBackwardPrep = "causal_attention_backward_prep";
+    public const string CausalGqaAttentionBackwardPrep = "causal_gqa_attention_backward_prep";
+    public const string CausalGqaAttentionBackwardDq = "causal_gqa_attention_backward_dq";
+    public const string CausalGqaAttentionBackwardDkv = "causal_gqa_attention_backward_dkv";
     public const string AttentionBackwardDq = "attention_backward_dq";
     public const string AttentionBackwardDkv = "attention_backward_dkv";
 
@@ -215,15 +222,16 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
-        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, ColSum, ColSumBf16Act, Fill,
+        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, RmsNormBackward, ColSum, ColSumBf16Act, Fill,
         SoftmaxCrossEntropyBackward,
+        Scale,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
-        AttentionBackwardPrep, CausalAttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
+        AttentionBackwardPrep, CausalAttentionBackwardPrep, CausalGqaAttentionBackwardPrep, CausalGqaAttentionBackwardDq, CausalGqaAttentionBackwardDkv, AttentionBackwardDq, AttentionBackwardDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
@@ -483,6 +491,34 @@ internal static class SilkKernels
             float x1 = x[b + i + pair];
             y[b + i] = x0 * c - x1 * s;
             y[b + i + pair] = x0 * s + x1 * c;
+        }
+
+        /* Backward through half-split RoPE: inverse rotation. */
+        __kernel void rotary_backward(
+            __global const float* dy,
+            __global const int* posIds,
+            __global const float* cosTab,
+            __global const float* sinTab,
+            __global float* dx,
+            const uint rows,
+            const uint numHeads,
+            const uint headDim)
+        {
+            uint pair = headDim / 2u;
+            uint idx = get_global_id(0);
+            if (idx >= rows * numHeads * pair) return;
+            uint i = idx % pair;
+            uint rem = idx / pair;
+            uint h = rem % numHeads;
+            uint row = rem / numHeads;
+            uint t = (uint)posIds[row] * pair + i;
+            float c = cosTab[t];
+            float s = sinTab[t];
+            uint b = row * (numHeads * headDim) + h * headDim;
+            float dy0 = dy[b + i];
+            float dy1 = dy[b + i + pair];
+            dx[b + i] = dy0 * c + dy1 * s;
+            dx[b + i + pair] = -dy0 * s + dy1 * c;
         }
 
         /* First half is the GELU, second half is the gate. Reversing them still looks plausible. */
@@ -1613,6 +1649,27 @@ internal static class SilkKernels
             y[idx] = siluGate * up[idx];
         }
 
+        /* SwiGLU backward: y = silu(gate) * up. */
+        __kernel void swiglu_backward(
+            __global const float* dy,
+            __global const float* gate,
+            __global const float* up,
+            __global float* dGate,
+            __global float* dUp,
+            const uint rows,
+            const uint intermediate)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * intermediate) return;
+            float g = gate[idx];
+            float sig = 1.0f / (1.0f + exp(-g));
+            float siluGate = g * sig;
+            float dSilu = sig * (1.0f + g * (1.0f - sig));
+            float dOut = dy[idx];
+            dGate[idx] = dOut * up[idx] * dSilu;
+            dUp[idx] = dOut * siluGate;
+        }
+
         /* Causal GQA attention. q: [seq, numHeads*headDim], k/v: [seq, numKvHeads*headDim].
            One work item per (qPos, head). Attends j=0..qPos with KV-repeat. */
         __kernel void causal_gqa_attention(
@@ -2307,6 +2364,217 @@ internal static class SilkKernels
             }
         }
 
+        /* GQA causal attention backward prep: separate q/k/v/dAttn buffers.
+           q: [seq, numHeads*headDim], k/v: [seq, numKvHeads*headDim], dAttn: [seq, numHeads*headDim].
+           probs: [seqLen*numHeads*seqLen], delta: [seqLen*numHeads]. */
+        __kernel void causal_gqa_attention_backward_prep(
+            __global const float* q,
+            __global const float* k,
+            __global const float* v,
+            __global const float* dAttn,
+            __global float* probs,
+            __global float* delta,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = seqLen * numHeads;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint qPos = idx / numHeads;
+            uint h = idx % numHeads;
+            uint repeat = numHeads / numKvHeads;
+            uint kvHead = h / repeat;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint qBase = qPos * Dq + h * headDim;
+            uint kBaseHead = kvHead * headDim;
+            uint vBaseHead = kvHead * headDim;
+            uint dAttnBase = qPos * Dq + h * headDim;
+            uint probsBase = idx * seqLen;
+
+            float qrow[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                qrow[d] = q[qBase + d];
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
+            float mx = -INFINITY;
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                uint kBase = j * Dkv + kBaseHead;
+                float score = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    score += qrow[d] * k[kBase + d];
+                score *= scale;
+                probs[probsBase + j] = score;
+                mx = fmax(mx, score);
+            }
+            for (uint j = qPos + 1; j < seqLen; ++j)
+                probs[probsBase + j] = -INFINITY;
+
+            if (mx == -INFINITY)
+            {
+                for (uint j = 0; j < seqLen; ++j) probs[probsBase + j] = 0.0f;
+                delta[idx] = 0.0f;
+                return;
+            }
+
+            float sum = 0.0f;
+            for (uint j = 0; j <= qPos; ++j)
+                sum += exp(probs[probsBase + j] - mx);
+
+            float acc = 0.0f;
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                float p = exp(probs[probsBase + j] - mx) / sum;
+                probs[probsBase + j] = p;
+                if (p != 0.0f)
+                {
+                    uint vBase = j * Dkv + vBaseHead;
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * v[vBase + d];
+                    acc += p * dotv;
+                }
+            }
+            for (uint j = qPos + 1; j < seqLen; ++j)
+                probs[probsBase + j] = 0.0f;
+            delta[idx] = acc;
+        }
+
+        __kernel void causal_gqa_attention_backward_dq(
+            __global const float* k,
+            __global const float* v,
+            __global const float* dAttn,
+            __global const float* probs,
+            __global const float* delta,
+            __global float* dQ,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = seqLen * numHeads;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint qPos = idx / numHeads;
+            uint h = idx % numHeads;
+            uint repeat = numHeads / numKvHeads;
+            uint kvHead = h / repeat;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint kBaseHead = kvHead * headDim;
+            uint vBaseHead = kvHead * headDim;
+            uint dAttnBase = qPos * Dq + h * headDim;
+            uint probsBase = idx * seqLen;
+
+            float dq[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dq[d] = 0.0f;
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
+            float dl = delta[idx];
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                float p = probs[probsBase + j];
+                if (p == 0.0f) continue;
+                uint vBase = j * Dkv + vBaseHead;
+                float dotv = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    dotv += drow[d] * v[vBase + d];
+                float ds = p * (dotv - dl);
+                if (ds == 0.0f) continue;
+                uint kBase = j * Dkv + kBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    dq[d] += ds * k[kBase + d];
+            }
+
+            uint qOutBase = qPos * Dq + h * headDim;
+            for (uint d = 0; d < headDim; ++d)
+                dQ[qOutBase + d] = dq[d] * scale;
+        }
+
+        __kernel void causal_gqa_attention_backward_dkv(
+            __global const float* q,
+            __global const float* v,
+            __global const float* dAttn,
+            __global const float* probs,
+            __global const float* delta,
+            __global float* dK,
+            __global float* dV,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = seqLen * numKvHeads;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint jPos = idx / numKvHeads;
+            uint kvHead = idx % numKvHeads;
+            uint repeat = numHeads / numKvHeads;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint kvBaseHead = kvHead * headDim;
+            uint vBaseJ = jPos * Dkv + kvBaseHead;
+
+            float dk[MAXHEADDIM];
+            float dv[MAXHEADDIM];
+            float vj[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dk[d] = 0.0f;
+                dv[d] = 0.0f;
+                vj[d] = v[vBaseJ + d];
+            }
+
+            for (uint r = 0; r < repeat; ++r)
+            {
+                uint h = kvHead * repeat + r;
+                uint hOff = h * headDim;
+                for (uint i = jPos; i < seqLen; ++i)
+                {
+                    uint rowIdx = i * numHeads + h;
+                    float p = probs[rowIdx * seqLen + jPos];
+                    if (p == 0.0f) continue;
+                    uint dAttnBase = i * Dq + hOff;
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += dAttn[dAttnBase + d] * vj[d];
+                    float ds = p * (dotv - delta[rowIdx]);
+                    uint qBase = i * Dq + hOff;
+                    for (uint d = 0; d < headDim; ++d)
+                    {
+                        dv[d] += p * dAttn[dAttnBase + d];
+                        dk[d] += ds * q[qBase + d];
+                    }
+                }
+            }
+
+            uint outBase = jPos * Dkv + kvBaseHead;
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dK[outBase + d] = dk[d] * scale;
+                dV[outBase + d] = dv[d];
+            }
+        }
+
         /* gelu_backward: d flows back through the GELU exact derivative. act is the PRE-activation
            buffer (the input to GELU), since the derivative depends on x, not on GELU(x). */
         __kernel void gelu_backward(
@@ -2372,6 +2640,45 @@ internal static class SilkKernels
             meanDNorm /= (float)cols;
 
             dx[idx] = (gamma[col] * invStd) * (d[idx] - meanD - normalized * meanDNorm);
+        }
+
+        /* rms_norm_backward: backward through RMSNorm (no mean, no beta). Inputs: d (grad of
+           normed output), x (pre-norm input), gamma. Outputs: dx (grad input), dgammaAcc
+           (per-element products to be reduced with col_sum). */
+        __kernel void rms_norm_backward(
+            __global const float* d,
+            __global const float* x,
+            __global const float* gamma,
+            __global float* dx,
+            __global float* dgammaAcc,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint idx = get_global_id(0);
+            uint total = rows * cols;
+            if (idx >= total) return;
+            uint row = idx / cols;
+            uint col = idx % cols;
+            uint base = row * cols;
+
+            float sumSq = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+            {
+                float v = x[base + c];
+                sumSq += v * v;
+            }
+            float invRms = 1.0f / sqrt(sumSq / (float)cols + eps);
+
+            float normalized = x[idx] * invRms;
+            dgammaAcc[idx] = d[idx] * normalized;
+
+            float dot = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+                dot += d[base + c] * gamma[c] * x[base + c];
+
+            float invRms3 = invRms * invRms * invRms;
+            dx[idx] = invRms * d[idx] * gamma[col] - x[idx] * invRms3 * dot / (float)cols;
         }
 
         /* y[j] = scale * sum_i x[i*cols + j] — FC bias gradients. The scale is applied once at
@@ -2487,6 +2794,18 @@ internal static class SilkKernels
             y[idx] = value;
         }
 
+        /* y[i] = x[i] * scale. Used for LoRA delta scaling. */
+        __kernel void scale(
+            __global const float* x,
+            __global float* y,
+            const float s,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            y[idx] = x[idx] * s;
+        }
+
         /* Softmax cross-entropy input gradient: dZ[i,c] = (p[i,c] - onehot[i,c]) * scale,
            with the row maximum subtracted before exponentiation (matches SilkLoss.InputGradient
            and CrossEntropyLoss's mean reduction). One work item per sample row. */
@@ -2496,18 +2815,25 @@ internal static class SilkKernels
             __global float* dZ,
             const uint n,
             const uint numClasses,
-            const float scale)
+            const float scale,
+            const int ignoreIndex)
         {
             uint i = get_global_id(0);
             if (i >= n) return;
             uint base = i * numClasses;
+            int label = labels[i];
+            if (label == ignoreIndex)
+            {
+                for (uint c = 0u; c < numClasses; ++c)
+                    dZ[base + c] = 0.0f;
+                return;
+            }
             float mx = logits[base];
             for (uint c = 1u; c < numClasses; ++c)
                 mx = fmax(mx, logits[base + c]);
             float sum = 0.0f;
             for (uint c = 0u; c < numClasses; ++c)
                 sum += exp(logits[base + c] - mx);
-            int label = labels[i];
             for (uint c = 0u; c < numClasses; ++c)
             {
                 float p = exp(logits[base + c] - mx) / sum;

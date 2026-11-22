@@ -757,7 +757,6 @@ public static class LlamaLoader
             var tokenizer = new Gpt2BpeTokenizer(
                 vocabPath,
                 mergesPath,
-                unkToken: " péri",
                 tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
             return (config, tokenizer);
         }

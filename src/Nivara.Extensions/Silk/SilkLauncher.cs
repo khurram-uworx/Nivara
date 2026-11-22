@@ -274,6 +274,64 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.AttentionGroupSize]);
     }
 
+    public static void CausalGqaAttentionBackwardPrep(
+        SilkRuntime runtime, nint q, nint k, nint v, nint dAttn, nint probs, nint delta,
+        int seqLen, int numHeads, int numKvHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardPrep, 0, q);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardPrep, 1, k);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardPrep, 2, v);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardPrep, 3, dAttn);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardPrep, 4, probs);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardPrep, 5, delta);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardPrep, 6, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardPrep, 7, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardPrep, 8, (uint)numKvHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardPrep, 9, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.CausalGqaAttentionBackwardPrep, 10, scale);
+        runtime.Run(SilkKernels.CausalGqaAttentionBackwardPrep,
+            [(nuint)SilkKernels.AttentionGlobal(seqLen * numHeads)], [(nuint)SilkKernels.AttentionGroupSize]);
+    }
+
+    public static void CausalGqaAttentionBackwardDq(
+        SilkRuntime runtime, nint k, nint v, nint dAttn, nint probs, nint delta, nint dQ,
+        int seqLen, int numHeads, int numKvHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDq, 0, k);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDq, 1, v);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDq, 2, dAttn);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDq, 3, probs);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDq, 4, delta);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDq, 5, dQ);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDq, 6, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDq, 7, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDq, 8, (uint)numKvHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDq, 9, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.CausalGqaAttentionBackwardDq, 10, scale);
+        runtime.Run(SilkKernels.CausalGqaAttentionBackwardDq,
+            [(nuint)SilkKernels.AttentionGlobal(seqLen * numHeads)], [(nuint)SilkKernels.AttentionGroupSize]);
+    }
+
+    public static void CausalGqaAttentionBackwardDkv(
+        SilkRuntime runtime, nint q, nint v, nint dAttn, nint probs, nint delta, nint dK, nint dV,
+        int seqLen, int numHeads, int numKvHeads, int headDim, float scale)
+    {
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 0, q);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 1, v);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 2, dAttn);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 3, probs);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 4, delta);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 5, dK);
+        runtime.SetBuffer(SilkKernels.CausalGqaAttentionBackwardDkv, 6, dV);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDkv, 7, (uint)seqLen);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDkv, 8, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDkv, 9, (uint)numKvHeads);
+        runtime.SetUInt32(SilkKernels.CausalGqaAttentionBackwardDkv, 10, (uint)headDim);
+        runtime.SetFloat32(SilkKernels.CausalGqaAttentionBackwardDkv, 11, scale);
+        runtime.Run(SilkKernels.CausalGqaAttentionBackwardDkv,
+            [(nuint)SilkKernels.AttentionGlobal(seqLen * numKvHeads)], [(nuint)SilkKernels.AttentionGroupSize]);
+    }
+
     public static void Add(SilkRuntime runtime, nint a, nint b, nint y, int n)
     {
         runtime.SetBuffer(SilkKernels.Add, 0, a);
@@ -318,6 +376,20 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.Rotary, rows * numHeads * halfDim);
     }
 
+    public static void RotaryBackward(
+        SilkRuntime runtime, nint dy, nint posIds, nint cos, nint sin, nint dx, int rows, int numHeads, int headDim, int halfDim)
+    {
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 0, dy);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 1, posIds);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 2, cos);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 3, sin);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 4, dx);
+        runtime.SetUInt32(SilkKernels.RotaryBackward, 5, (uint)rows);
+        runtime.SetUInt32(SilkKernels.RotaryBackward, 6, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.RotaryBackward, 7, (uint)headDim);
+        Linear(runtime, SilkKernels.RotaryBackward, rows * numHeads * halfDim);
+    }
+
     public static void GeGlu(SilkRuntime runtime, nint src, nint y, int rows, int intermediate)
     {
         runtime.SetBuffer(SilkKernels.GeGlu, 0, src);
@@ -354,6 +426,18 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.SwiGlu, 3, (uint)rows);
         runtime.SetUInt32(SilkKernels.SwiGlu, 4, (uint)intermediate);
         Linear(runtime, SilkKernels.SwiGlu, rows * intermediate);
+    }
+
+    public static void SwiGluBackward(SilkRuntime runtime, nint dy, nint gate, nint up, nint dGate, nint dUp, int rows, int intermediate)
+    {
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 0, dy);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 1, gate);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 2, up);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 3, dGate);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 4, dUp);
+        runtime.SetUInt32(SilkKernels.SwiGluBackward, 5, (uint)rows);
+        runtime.SetUInt32(SilkKernels.SwiGluBackward, 6, (uint)intermediate);
+        Linear(runtime, SilkKernels.SwiGluBackward, rows * intermediate);
     }
 
     public static void CausalGqaAttention(
@@ -487,7 +571,7 @@ internal static class SilkLauncher
 
     public static void SoftmaxCrossEntropyBackward(
         SilkRuntime runtime, nint logits, nint labels, nint dLogits,
-        int n, int numClasses, float scale)
+        int n, int numClasses, float scale, int ignoreIndex = -1)
     {
         if (n <= 0) throw new ArgumentOutOfRangeException(nameof(n));
         if (numClasses <= 0) throw new ArgumentOutOfRangeException(nameof(numClasses));
@@ -497,10 +581,20 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.SoftmaxCrossEntropyBackward, 3, (uint)n);
         runtime.SetUInt32(SilkKernels.SoftmaxCrossEntropyBackward, 4, (uint)numClasses);
         runtime.SetFloat32(SilkKernels.SoftmaxCrossEntropyBackward, 5, scale);
+        runtime.SetInt32(SilkKernels.SoftmaxCrossEntropyBackward, 6, ignoreIndex);
         runtime.Run(
             SilkKernels.SoftmaxCrossEntropyBackward,
             [(nuint)SilkKernels.LinearGlobal(n)],
             [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void Scale(SilkRuntime runtime, nint x, nint y, float s, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Scale, 0, x);
+        runtime.SetBuffer(SilkKernels.Scale, 1, y);
+        runtime.SetFloat32(SilkKernels.Scale, 2, s);
+        runtime.SetUInt32(SilkKernels.Scale, 3, (uint)n);
+        Linear(runtime, SilkKernels.Scale, n);
     }
 
     static void GemmGrid(SilkRuntime runtime, string kernel, int aRows, int bCols)
@@ -1060,6 +1154,19 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.LayerNormBackwardBf16Act, 7, (uint)cols);
         runtime.SetFloat32(SilkKernels.LayerNormBackwardBf16Act, 8, eps);
         runtime.Run(SilkKernels.LayerNormBackwardBf16Act, [(nuint)SilkKernels.LinearGlobal(rows * cols)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void RmsNormBackward(SilkRuntime runtime, nint d, nint x, nint gamma, nint dx, nint dgammaAcc, int rows, int cols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 0, d);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 1, x);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 2, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 3, dx);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 4, dgammaAcc);
+        runtime.SetUInt32(SilkKernels.RmsNormBackward, 5, (uint)rows);
+        runtime.SetUInt32(SilkKernels.RmsNormBackward, 6, (uint)cols);
+        runtime.SetFloat32(SilkKernels.RmsNormBackward, 7, eps);
+        runtime.Run(SilkKernels.RmsNormBackward, [(nuint)SilkKernels.LinearGlobal(rows * cols)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
     public static void ColSumBf16Act(SilkRuntime runtime, nint x, nint y, int rows, int cols, float scale)
