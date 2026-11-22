@@ -108,33 +108,35 @@ public sealed class SilkLlamaLoRATrainerParityTests
         return silk;
     }
 
-    static void AssertLoraGradsMatch(LlamaForCausalLM<float, float> cpu, SilkLlamaLoRATrainer silk, int layers)
+    static void AssertLoraGradsMatch(LlamaForCausalLM<float, float> cpu, SilkLlamaLoRATrainer silk, int layers, float relTol = 5e-2f)
     {
         var cpuLayers = GetCpuLayers(cpu);
         int li = 0;
         foreach (var cpuLayer in cpuLayers)
         {
             var attn = cpuLayer.GetType().GetProperty("Attention")!.GetValue(cpuLayer)!;
-            CompareAdapterGrad(attn, "QAdapter", silk, li, SilkLlamaLoRATarget.Q);
-            CompareAdapterGrad(attn, "VAdapter", silk, li, SilkLlamaLoRATarget.V);
+            CompareAdapterGrad(attn, "QAdapter", silk, li, SilkLlamaLoRATarget.Q, relTol);
+            CompareAdapterGrad(attn, "KAdapter", silk, li, SilkLlamaLoRATarget.K, relTol);
+            CompareAdapterGrad(attn, "VAdapter", silk, li, SilkLlamaLoRATarget.V, relTol);
+            CompareAdapterGrad(attn, "OAdapter", silk, li, SilkLlamaLoRATarget.O, relTol);
+            CompareAdapterGrad(cpuLayer, "GateAdapter", silk, li, SilkLlamaLoRATarget.Gate, relTol);
+            CompareAdapterGrad(cpuLayer, "UpAdapter", silk, li, SilkLlamaLoRATarget.Up, relTol);
+            CompareAdapterGrad(cpuLayer, "DownAdapter", silk, li, SilkLlamaLoRATarget.Down, relTol);
             li++;
         }
         Assert.That(li, Is.EqualTo(layers));
     }
 
-    static void CompareAdapterGrad(object attn, string prop, SilkLlamaLoRATrainer silk, int layer, SilkLlamaLoRATarget target)
+    static void CompareAdapterGrad(object owner, string prop, SilkLlamaLoRATrainer silk, int layer, SilkLlamaLoRATarget target, float relTol)
     {
-        var adapter = attn.GetType().GetProperty(prop)!.GetValue(attn);
+        var adapter = owner.GetType().GetProperty(prop)!.GetValue(owner);
         if (adapter is null) return;
         var (aGrad, bGrad) = GetAdapterGrads(adapter);
         var (silkGA, silkGB) = silk.DownloadLoraGrads(layer, target);
-
-        float aScale = MaxAbs(aGrad) + 1e-6f;
-        float bScale = MaxAbs(bGrad) + 1e-6f;
-        float aRel = MaxAbsDiff(aGrad, silkGA) / aScale;
-        float bRel = MaxAbsDiff(bGrad, silkGB) / bScale;
-        Assert.That(aRel, Is.LessThanOrEqualTo(5e-2f), $"Layer {layer} {target} GradA rel diff {aRel} (maxAbs={MaxAbsDiff(aGrad, silkGA)})");
-        Assert.That(bRel, Is.LessThanOrEqualTo(5e-2f), $"Layer {layer} {target} GradB rel diff {bRel} (maxAbs={MaxAbsDiff(bGrad, silkGB)})");
+        float aRel = MaxAbsDiff(aGrad, silkGA) / (MaxAbs(aGrad) + 1e-6f);
+        float bRel = MaxAbsDiff(bGrad, silkGB) / (MaxAbs(bGrad) + 1e-6f);
+        Assert.That(aRel, Is.LessThanOrEqualTo(relTol), $"Layer {layer} {target} GradA rel diff {aRel} (maxAbs={MaxAbsDiff(aGrad, silkGA)})");
+        Assert.That(bRel, Is.LessThanOrEqualTo(relTol), $"Layer {layer} {target} GradB rel diff {bRel} (maxAbs={MaxAbsDiff(bGrad, silkGB)})");
     }
 
     static void CopyCpuLoraToSilk(LlamaForCausalLM<float, float> cpu, SilkLlamaLoRATrainer silk, int layers)
@@ -145,15 +147,20 @@ public sealed class SilkLlamaLoRATrainerParityTests
         {
             var attn = cpuLayer.GetType().GetProperty("Attention")!.GetValue(cpuLayer)!;
             CopyAdapter(attn, "QAdapter", silk, li, SilkLlamaLoRATarget.Q);
+            CopyAdapter(attn, "KAdapter", silk, li, SilkLlamaLoRATarget.K);
             CopyAdapter(attn, "VAdapter", silk, li, SilkLlamaLoRATarget.V);
+            CopyAdapter(attn, "OAdapter", silk, li, SilkLlamaLoRATarget.O);
+            CopyAdapter(cpuLayer, "GateAdapter", silk, li, SilkLlamaLoRATarget.Gate);
+            CopyAdapter(cpuLayer, "UpAdapter", silk, li, SilkLlamaLoRATarget.Up);
+            CopyAdapter(cpuLayer, "DownAdapter", silk, li, SilkLlamaLoRATarget.Down);
             li++;
         }
         Assert.That(li, Is.EqualTo(layers));
     }
 
-    static void CopyAdapter(object attn, string prop, SilkLlamaLoRATrainer silk, int layer, SilkLlamaLoRATarget target)
+    static void CopyAdapter(object owner, string prop, SilkLlamaLoRATrainer silk, int layer, SilkLlamaLoRATarget target)
     {
-        var adapter = attn.GetType().GetProperty(prop)!.GetValue(attn);
+        var adapter = owner.GetType().GetProperty(prop)!.GetValue(owner);
         if (adapter is null) return;
         var (aData, bData) = GetAdapterData(adapter);
         silk.SetLoraWeights(layer, target, aData, bData);
@@ -165,13 +172,18 @@ public sealed class SilkLlamaLoRATrainerParityTests
         {
             var attn = cpuLayer.GetType().GetProperty("Attention")!.GetValue(cpuLayer)!;
             ZeroAdapterGrad(attn, "QAdapter");
+            ZeroAdapterGrad(attn, "KAdapter");
             ZeroAdapterGrad(attn, "VAdapter");
+            ZeroAdapterGrad(attn, "OAdapter");
+            ZeroAdapterGrad(cpuLayer, "GateAdapter");
+            ZeroAdapterGrad(cpuLayer, "UpAdapter");
+            ZeroAdapterGrad(cpuLayer, "DownAdapter");
         }
     }
 
-    static void ZeroAdapterGrad(object attn, string prop)
+    static void ZeroAdapterGrad(object owner, string prop)
     {
-        var adapter = attn.GetType().GetProperty(prop)!.GetValue(attn);
+        var adapter = owner.GetType().GetProperty(prop)!.GetValue(owner);
         if (adapter is null) return;
         var aTensor = GetParamTensor(adapter, "A");
         var bTensor = GetParamTensor(adapter, "B");
@@ -318,7 +330,6 @@ public sealed class SilkLlamaLoRATrainerParityTests
         using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
         using var silk2 = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
 
-        // Make weights non-default
         int inF = config.HiddenSize;
         int outF = config.HiddenSize;
         var a = Enumerable.Range(0, inF * rank).Select(i => (i % 13 - 6) * 0.01f).ToArray();
@@ -338,5 +349,70 @@ public sealed class SilkLlamaLoRATrainerParityTests
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Test]
+    public void ForwardAndGrads_SmolLMShape_AllTargets_MatchesCpu()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk Llama LoRA parity verification."); }
+
+        var (tensors, smolConfig) = Nivara.Tests.SmolLM.SmolLMTestWeights.Synthesize(seed: 1234);
+        var config = new LlamaConfig
+        {
+            HiddenSize = smolConfig.HiddenSize,
+            NumHiddenLayers = smolConfig.NumHiddenLayers,
+            NumAttentionHeads = smolConfig.NumAttentionHeads,
+            NumKeyValueHeads = smolConfig.NumKeyValueHeads,
+            IntermediateSize = smolConfig.IntermediateSize,
+            VocabSize = smolConfig.VocabSize,
+            MaxPositionEmbeddings = smolConfig.MaxPositionEmbeddings,
+            RmsNormEps = smolConfig.RmsNormEps,
+            RopeTheta = smolConfig.RopeTheta,
+            TieWordEmbeddings = true,
+            HiddenAct = "silu",
+            AttentionBias = smolConfig.AttentionBias,
+        };
+
+        int[] input = [1, 2, 3, 4, 5, 6];
+        int[] labels = [-100, -100, -100, 4, 5, 6];
+        const int rank = 4;
+        const float alpha = 8f;
+        var cpuTargets = LlamaLoRATarget.Q | LlamaLoRATarget.K | LlamaLoRATarget.V | LlamaLoRATarget.O | LlamaLoRATarget.FFN;
+        var silkTargets = SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.K | SilkLlamaLoRATarget.V | SilkLlamaLoRATarget.O | SilkLlamaLoRATarget.FFN;
+
+        var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
+        cpuModel.AttachLora(cpuTargets, rank, alpha);
+
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, silkTargets);
+        CopyCpuLoraToSilk(cpuModel, silk, config.NumHiddenLayers);
+        ZeroCpuLoraGrads(cpuModel);
+        silk.ZeroLoraGradients();
+
+        var cpuLogits = cpuModel.Forward(input).Data.ToArray();
+        var silkLogits = silk.Forward(input);
+        Assert.That(ArgMaxLast(silkLogits, input.Length, config.VocabSize),
+            Is.EqualTo(ArgMaxLast(cpuLogits, input.Length, config.VocabSize)));
+        Assert.That(MaxAbsDiff(cpuLogits, silkLogits) / (MaxAbs(cpuLogits) + 1f), Is.LessThanOrEqualTo(3e-3f));
+
+        float cpuLoss;
+        var lossFn = new CrossEntropyLoss<float>();
+        using (GradientUtils.Grad())
+        {
+            var logits = cpuModel.Forward(input);
+            var logits2d = logits;
+            if (logits2d.Shape.Length == 3) logits2d.Reshape(input.Length, config.VocabSize);
+            var loss = lossFn.Forward(logits2d, labels, ignoreIndex: -100);
+            loss.Backward();
+            cpuLoss = loss.Data.ToArray()[0];
+        }
+
+        silk.Forward(input);
+        var (silkLoss, _) = silk.BackwardPromptMaskedCrossEntropy(labels, input.Length);
+        silk.BackwardTransformerBlocks(input.Length);
+
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(3e-3f * (MathF.Abs(cpuLoss) + 1f)));
+        AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers, relTol: 8e-2f);
     }
 }

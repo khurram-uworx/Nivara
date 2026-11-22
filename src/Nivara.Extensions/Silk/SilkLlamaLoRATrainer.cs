@@ -12,7 +12,10 @@ public enum SilkLlamaLoRATarget
     K = 2,
     V = 4,
     O = 8,
-    FFN = 16,
+    Gate = 16,
+    Up = 32,
+    Down = 64,
+    FFN = Gate | Up | Down,
 }
 
 /// <summary>
@@ -269,6 +272,9 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         SilkLlamaLoRATarget.K => layer.KLora,
         SilkLlamaLoRATarget.V => layer.VLora,
         SilkLlamaLoRATarget.O => layer.OLora,
+        SilkLlamaLoRATarget.Gate => layer.GateLora,
+        SilkLlamaLoRATarget.Up => layer.UpLora,
+        SilkLlamaLoRATarget.Down => layer.DownLora,
         _ => throw new ArgumentException($"Single target expected, got {target}.", nameof(target)),
     };
 
