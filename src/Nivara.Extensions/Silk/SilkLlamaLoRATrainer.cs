@@ -118,7 +118,19 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
     nint loraTmpBuf; // [maxSeqLen, rank]
     nint loraOutBuf; // [maxSeqLen, max(outDim)]
     nint loraDxBuf;  // [maxSeqLen, max(inDim)] scratch for LoRA backward
+    nint dQBuf;
+    nint dKBuf;
+    nint dVBuf;
+    nint dAttnOutBuf;
+    nint attnProbsBuf;
+    nint attnDeltaBuf;
+    nint dGateBuf;
+    nint dUpBuf;
+    nint dMlpBuf;
+    nint loraGradABuf; // [max(in,rank)] scratch
+    nint loraGradBBuf; // [max(rank,out)] scratch
     int ropeTableRows;
+    int adamStep;
     int[]? posIdHost;
 
     bool disposed;
@@ -243,12 +255,169 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         return (loss, valid);
     }
 
+    public void ZeroLoraGradients()
+    {
+        ThrowIfDisposed();
+        for (int i = 0; i < options.NumLayers; i++)
+            ZeroLayerLoraGrads(layers[i]);
+    }
+
+    public void AdamUpdateLora(float learningRate, float weightDecay = 0f, float beta1 = 0.9f, float beta2 = 0.999f)
+    {
+        ThrowIfDisposed();
+        adamStep++;
+        float c1 = 1f - MathF.Pow(beta1, adamStep);
+        float c2 = 1f - MathF.Pow(beta2, adamStep);
+        for (int i = 0; i < options.NumLayers; i++)
+            AdamLayerLora(layers[i], learningRate, c1, c2, weightDecay);
+    }
+
+    /// <summary>Runs forward, prompt-masked CE backward, full transformer backward, and LoRA Adam update.</summary>
     public float TrainStep(int[] inputIds, int[] labels, float learningRate)
     {
         ThrowIfDisposed();
-        throw new NotImplementedException(
-            "D2a Silk Llama LoRA backward/parity path is scaffolded but not complete yet. " +
-            "CPU reference is available; Silk parity is required before release readiness.");
+        ArgumentNullException.ThrowIfNull(inputIds);
+        ArgumentNullException.ThrowIfNull(labels);
+        int seqLen = inputIds.Length;
+        if (seqLen <= 0 || seqLen > options.MaxSeqLen) throw new ArgumentOutOfRangeException(nameof(inputIds));
+        if (labels.Length < seqLen) throw new ArgumentException("labels too short.", nameof(labels));
+
+        ZeroLoraGradients();
+        ForwardDevice(inputIds, seqLen);
+        var (loss, _) = BackwardPromptMaskedCrossEntropy(labels, seqLen);
+        BackwardTransformerBlocks(seqLen);
+        AdamUpdateLora(learningRate);
+        return loss;
+    }
+
+    /// <summary>Backward through all transformer blocks. Assumes dCurBuf holds grad at finalNorm input.</summary>
+    public void BackwardTransformerBlocks(int seqLen)
+    {
+        ThrowIfDisposed();
+        int h = options.HiddenDim;
+        int inter = options.IntermediateDim;
+
+        for (int li = options.NumLayers - 1; li >= 0; li--)
+        {
+            var layer = layers[li];
+            var act = activations[li];
+
+            // dCurBuf = dOut (grad into block output). Residual: dPostAttn += dOut, dMlpProj = dOut.
+            // Save dOut in dTmpBuf as dMlpProj source; dPostAttn starts as copy of dOut.
+            runtime.CopyBuffer(dCurBuf, dTmpBuf, 0, 0, seqLen * h); // dTmpBuf = dMlpProj/dOut
+
+            // Backward through down proj: dMlp = dOut @ DownW^T (+ LoRA)
+            BackwardLinearWithLora(act.Mlp, layer.DownW, layer.DownLora, dTmpBuf, dMlpBuf, seqLen, inter, h, addToDx: false);
+
+            // SwiGLU backward: gate,up -> dGate,dUp
+            SilkLauncher.SwiGluBackward(runtime, dMlpBuf, act.Gate, act.Up, dGateBuf, dUpBuf, seqLen, inter);
+
+            // Backward through up/gate projs into normed2 grad. Accumulate both into dTmpBuf(normed2-grad).
+            BackwardLinearWithLora(act.Normed2, layer.UpW, layer.UpLora, dUpBuf, dTmpBuf, seqLen, h, inter, addToDx: false);
+            BackwardLinearWithLora(act.Normed2, layer.GateW, layer.GateLora, dGateBuf, dTmpBuf, seqLen, h, inter, addToDx: true);
+
+            // RMSNorm backward on post-attention norm: input=PostAttn, gamma=PostNormW, dNormed=dTmpBuf
+            SilkLauncher.RmsNormBackward(runtime, dTmpBuf, act.PostAttn, layer.PostNormW, dMlpBuf, dLnAccBuf, seqLen, h, options.RmsNormEps);
+            // dMlpBuf now holds dPostAttn from FFN path. Add residual dOut.
+            SilkLauncher.Add(runtime, dMlpBuf, dCurBuf, dMlpBuf, seqLen * h);
+
+            // Attention residual split: dMlpBuf is dPostAttn total. dX_in_attn_res = dPostAttn, dAttnProj = dPostAttn.
+            runtime.CopyBuffer(dMlpBuf, dTmpBuf, 0, 0, seqLen * h); // dTmpBuf = dAttnProj
+
+            // Backward through O proj
+            BackwardLinearWithLora(act.AttnOut, layer.OW, layer.OLora, dTmpBuf, dAttnOutBuf, seqLen, qDim, h, addToDx: false);
+
+            // Attention backward: dAttnOutBuf is [seq,qDim]
+            SilkLauncher.CausalGqaAttentionBackwardPrep(runtime, act.Q, act.K, act.V, dAttnOutBuf, attnProbsBuf, attnDeltaBuf,
+                seqLen, options.NumHeads, options.NumKvHeads, headDim, attnScale);
+            SilkLauncher.CausalGqaAttentionBackwardDq(runtime, act.K, act.V, dAttnOutBuf, attnProbsBuf, attnDeltaBuf, dQBuf,
+                seqLen, options.NumHeads, options.NumKvHeads, headDim, attnScale);
+            SilkLauncher.CausalGqaAttentionBackwardDkv(runtime, act.Q, act.V, dAttnOutBuf, attnProbsBuf, attnDeltaBuf, dKBuf, dVBuf,
+                seqLen, options.NumHeads, options.NumKvHeads, headDim, attnScale);
+
+            // RoPE backward (inverse rotation)
+            SilkLauncher.RotaryBackward(runtime, dQBuf, posIdsBuf, cosBuf, sinBuf, dQBuf, seqLen, options.NumHeads, headDim, headDim / 2);
+            SilkLauncher.RotaryBackward(runtime, dKBuf, posIdsBuf, cosBuf, sinBuf, dKBuf, seqLen, options.NumKvHeads, headDim, headDim / 2);
+
+            // Backward through Q/K/V projs into normed1 grad
+            BackwardLinearWithLora(act.Normed1, layer.QW, layer.QLora, dQBuf, dTmpBuf, seqLen, h, qDim, addToDx: false);
+            BackwardLinearWithLora(act.Normed1, layer.KW, layer.KLora, dKBuf, dTmpBuf, seqLen, h, kvDim, addToDx: true);
+            BackwardLinearWithLora(act.Normed1, layer.VW, layer.VLora, dVBuf, dTmpBuf, seqLen, h, kvDim, addToDx: true);
+
+            // Input RMSNorm backward
+            SilkLauncher.RmsNormBackward(runtime, dTmpBuf, act.Input, layer.InputNormW, dCurBuf, dLnAccBuf, seqLen, h, options.RmsNormEps);
+            // Add residual from post-attn total
+            SilkLauncher.Add(runtime, dCurBuf, dMlpBuf, dCurBuf, seqLen * h);
+        }
+    }
+
+    void BackwardLinearWithLora(nint x, nint baseW, LoraPair? lora, nint dY, nint dX, int rows, int inFeatures, int outFeatures, bool addToDx)
+    {
+        // Base path dX contribution: dY @ W^T
+        if (addToDx)
+        {
+            SilkLauncher.GemmNtResidual(runtime, dY, baseW, dX, dX, rows, outFeatures, inFeatures);
+        }
+        else
+        {
+            SilkLauncher.GemmNt(runtime, dY, baseW, dX, rows, outFeatures, inFeatures);
+        }
+
+        if (lora is null) return;
+
+        // dLoraOut = loraScale * dY
+        SilkLauncher.Scale(runtime, dY, loraOutBuf, loraScale, rows * outFeatures);
+
+        // dB += loraTmp^T @ dLoraOut, loraTmp = x @ A
+        SilkLauncher.Gemm(runtime, x, lora.A, loraTmpBuf, rows, inFeatures, options.Rank);
+        SilkLauncher.GemmTn(runtime, loraTmpBuf, loraOutBuf, loraGradBBuf, options.Rank, rows, outFeatures);
+        SilkLauncher.Add(runtime, lora.GradB, loraGradBBuf, lora.GradB, options.Rank * outFeatures);
+
+        // dLoraTmp = dLoraOut @ B^T
+        SilkLauncher.GemmNt(runtime, loraOutBuf, lora.B, loraTmpBuf, rows, outFeatures, options.Rank);
+
+        // dA += x^T @ dLoraTmp
+        SilkLauncher.GemmTn(runtime, x, loraTmpBuf, loraGradABuf, inFeatures, rows, options.Rank);
+        SilkLauncher.Add(runtime, lora.GradA, loraGradABuf, lora.GradA, inFeatures * options.Rank);
+
+        // dX += dLoraTmp @ A^T
+        SilkLauncher.GemmNtResidual(runtime, loraTmpBuf, lora.A, dX, dX, rows, options.Rank, inFeatures);
+    }
+
+    void ZeroLayerLoraGrads(LayerWeights layer)
+    {
+        ZeroLoraPair(layer.QLora);
+        ZeroLoraPair(layer.KLora);
+        ZeroLoraPair(layer.VLora);
+        ZeroLoraPair(layer.OLora);
+        ZeroLoraPair(layer.GateLora);
+        ZeroLoraPair(layer.UpLora);
+        ZeroLoraPair(layer.DownLora);
+    }
+
+    void ZeroLoraPair(LoraPair? p)
+    {
+        if (p is null) return;
+        SilkLauncher.Fill(runtime, p.GradA, 0f, p.InFeatures * options.Rank);
+        SilkLauncher.Fill(runtime, p.GradB, 0f, options.Rank * p.OutFeatures);
+    }
+
+    void AdamLayerLora(LayerWeights layer, float lr, float c1, float c2, float weightDecay)
+    {
+        AdamLoraPair(layer.QLora, lr, c1, c2, weightDecay);
+        AdamLoraPair(layer.KLora, lr, c1, c2, weightDecay);
+        AdamLoraPair(layer.VLora, lr, c1, c2, weightDecay);
+        AdamLoraPair(layer.OLora, lr, c1, c2, weightDecay);
+        AdamLoraPair(layer.GateLora, lr, c1, c2, weightDecay);
+        AdamLoraPair(layer.UpLora, lr, c1, c2, weightDecay);
+        AdamLoraPair(layer.DownLora, lr, c1, c2, weightDecay);
+    }
+
+    void AdamLoraPair(LoraPair? p, float lr, float c1, float c2, float weightDecay)
+    {
+        if (p is null) return;
+        SilkLauncher.AdamUpdate(runtime, p.A, p.GradA, p.MA, p.VA, lr, c1, c2, 1e-8f, weightDecay, p.InFeatures * options.Rank);
+        SilkLauncher.AdamUpdate(runtime, p.B, p.GradB, p.MB, p.VB, lr, c1, c2, 1e-8f, weightDecay, options.Rank * p.OutFeatures);
     }
 
     static float ComputeMaskedCrossEntropy(float[] logits, int[] labels, int seqLen, int vocab)
@@ -367,6 +536,18 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         int maxOut = Math.Max(h, Math.Max(qDim, Math.Max(kvDim, options.IntermediateDim)));
         loraOutBuf = Alloc(cap * maxOut);
         loraDxBuf = Alloc(cap * maxOut);
+        dQBuf = Alloc(cap * qDim);
+        dKBuf = Alloc(cap * kvDim);
+        dVBuf = Alloc(cap * kvDim);
+        dAttnOutBuf = Alloc(cap * qDim);
+        attnProbsBuf = Alloc(cap * options.NumHeads * cap);
+        attnDeltaBuf = Alloc(cap * options.NumHeads);
+        dGateBuf = Alloc(cap * options.IntermediateDim);
+        dUpBuf = Alloc(cap * options.IntermediateDim);
+        dMlpBuf = Alloc(cap * options.IntermediateDim);
+        int maxIn = Math.Max(h, Math.Max(qDim, Math.Max(kvDim, options.IntermediateDim)));
+        loraGradABuf = Alloc(maxIn * options.Rank);
+        loraGradBBuf = Alloc(options.Rank * Math.Max(maxOut, maxIn));
     }
 
     void AllocateLayerActivations()

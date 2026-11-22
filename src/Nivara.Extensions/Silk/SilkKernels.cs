@@ -207,6 +207,9 @@ internal static class SilkKernels
     // three deterministic launches so each output element has one writer and an ascending loop.
     public const string AttentionBackwardPrep = "attention_backward_prep";
     public const string CausalAttentionBackwardPrep = "causal_attention_backward_prep";
+    public const string CausalGqaAttentionBackwardPrep = "causal_gqa_attention_backward_prep";
+    public const string CausalGqaAttentionBackwardDq = "causal_gqa_attention_backward_dq";
+    public const string CausalGqaAttentionBackwardDkv = "causal_gqa_attention_backward_dkv";
     public const string AttentionBackwardDq = "attention_backward_dq";
     public const string AttentionBackwardDkv = "attention_backward_dkv";
 
@@ -228,7 +231,7 @@ internal static class SilkKernels
         Scale,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
-        AttentionBackwardPrep, CausalAttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
+        AttentionBackwardPrep, CausalAttentionBackwardPrep, CausalGqaAttentionBackwardPrep, CausalGqaAttentionBackwardDq, CausalGqaAttentionBackwardDkv, AttentionBackwardDq, AttentionBackwardDkv,
         Gelu, EmbeddingBackwardRows, ScatterRows,
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
@@ -2358,6 +2361,217 @@ internal static class SilkKernels
             {
                 dQkv[kOutBase + d] = dk[d] * scale;
                 dQkv[vOutBase + d] = dv[d];
+            }
+        }
+
+        /* GQA causal attention backward prep: separate q/k/v/dAttn buffers.
+           q: [seq, numHeads*headDim], k/v: [seq, numKvHeads*headDim], dAttn: [seq, numHeads*headDim].
+           probs: [seqLen*numHeads*seqLen], delta: [seqLen*numHeads]. */
+        __kernel void causal_gqa_attention_backward_prep(
+            __global const float* q,
+            __global const float* k,
+            __global const float* v,
+            __global const float* dAttn,
+            __global float* probs,
+            __global float* delta,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = seqLen * numHeads;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint qPos = idx / numHeads;
+            uint h = idx % numHeads;
+            uint repeat = numHeads / numKvHeads;
+            uint kvHead = h / repeat;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint qBase = qPos * Dq + h * headDim;
+            uint kBaseHead = kvHead * headDim;
+            uint vBaseHead = kvHead * headDim;
+            uint dAttnBase = qPos * Dq + h * headDim;
+            uint probsBase = idx * seqLen;
+
+            float qrow[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                qrow[d] = q[qBase + d];
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
+            float mx = -INFINITY;
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                uint kBase = j * Dkv + kBaseHead;
+                float score = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    score += qrow[d] * k[kBase + d];
+                score *= scale;
+                probs[probsBase + j] = score;
+                mx = fmax(mx, score);
+            }
+            for (uint j = qPos + 1; j < seqLen; ++j)
+                probs[probsBase + j] = -INFINITY;
+
+            if (mx == -INFINITY)
+            {
+                for (uint j = 0; j < seqLen; ++j) probs[probsBase + j] = 0.0f;
+                delta[idx] = 0.0f;
+                return;
+            }
+
+            float sum = 0.0f;
+            for (uint j = 0; j <= qPos; ++j)
+                sum += exp(probs[probsBase + j] - mx);
+
+            float acc = 0.0f;
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                float p = exp(probs[probsBase + j] - mx) / sum;
+                probs[probsBase + j] = p;
+                if (p != 0.0f)
+                {
+                    uint vBase = j * Dkv + vBaseHead;
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += drow[d] * v[vBase + d];
+                    acc += p * dotv;
+                }
+            }
+            for (uint j = qPos + 1; j < seqLen; ++j)
+                probs[probsBase + j] = 0.0f;
+            delta[idx] = acc;
+        }
+
+        __kernel void causal_gqa_attention_backward_dq(
+            __global const float* k,
+            __global const float* v,
+            __global const float* dAttn,
+            __global const float* probs,
+            __global const float* delta,
+            __global float* dQ,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = seqLen * numHeads;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint qPos = idx / numHeads;
+            uint h = idx % numHeads;
+            uint repeat = numHeads / numKvHeads;
+            uint kvHead = h / repeat;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint kBaseHead = kvHead * headDim;
+            uint vBaseHead = kvHead * headDim;
+            uint dAttnBase = qPos * Dq + h * headDim;
+            uint probsBase = idx * seqLen;
+
+            float dq[MAXHEADDIM];
+            float drow[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dq[d] = 0.0f;
+                drow[d] = dAttn[dAttnBase + d];
+            }
+
+            float dl = delta[idx];
+            for (uint j = 0; j <= qPos; ++j)
+            {
+                float p = probs[probsBase + j];
+                if (p == 0.0f) continue;
+                uint vBase = j * Dkv + vBaseHead;
+                float dotv = 0.0f;
+                for (uint d = 0; d < headDim; ++d)
+                    dotv += drow[d] * v[vBase + d];
+                float ds = p * (dotv - dl);
+                if (ds == 0.0f) continue;
+                uint kBase = j * Dkv + kBaseHead;
+                for (uint d = 0; d < headDim; ++d)
+                    dq[d] += ds * k[kBase + d];
+            }
+
+            uint qOutBase = qPos * Dq + h * headDim;
+            for (uint d = 0; d < headDim; ++d)
+                dQ[qOutBase + d] = dq[d] * scale;
+        }
+
+        __kernel void causal_gqa_attention_backward_dkv(
+            __global const float* q,
+            __global const float* v,
+            __global const float* dAttn,
+            __global const float* probs,
+            __global const float* delta,
+            __global float* dK,
+            __global float* dV,
+            const uint seqLen,
+            const uint numHeads,
+            const uint numKvHeads,
+            const uint headDim,
+            const float scale)
+        {
+            uint total = seqLen * numKvHeads;
+            uint idx = get_global_id(0);
+            if (idx >= total) return;
+
+            uint jPos = idx / numKvHeads;
+            uint kvHead = idx % numKvHeads;
+            uint repeat = numHeads / numKvHeads;
+
+            uint Dq = numHeads * headDim;
+            uint Dkv = numKvHeads * headDim;
+            uint kvBaseHead = kvHead * headDim;
+            uint vBaseJ = jPos * Dkv + kvBaseHead;
+
+            float dk[MAXHEADDIM];
+            float dv[MAXHEADDIM];
+            float vj[MAXHEADDIM];
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dk[d] = 0.0f;
+                dv[d] = 0.0f;
+                vj[d] = v[vBaseJ + d];
+            }
+
+            for (uint r = 0; r < repeat; ++r)
+            {
+                uint h = kvHead * repeat + r;
+                uint hOff = h * headDim;
+                for (uint i = jPos; i < seqLen; ++i)
+                {
+                    uint rowIdx = i * numHeads + h;
+                    float p = probs[rowIdx * seqLen + jPos];
+                    if (p == 0.0f) continue;
+                    uint dAttnBase = i * Dq + hOff;
+                    float dotv = 0.0f;
+                    for (uint d = 0; d < headDim; ++d)
+                        dotv += dAttn[dAttnBase + d] * vj[d];
+                    float ds = p * (dotv - delta[rowIdx]);
+                    uint qBase = i * Dq + hOff;
+                    for (uint d = 0; d < headDim; ++d)
+                    {
+                        dv[d] += p * dAttn[dAttnBase + d];
+                        dk[d] += ds * q[qBase + d];
+                    }
+                }
+            }
+
+            uint outBase = jPos * Dkv + kvBaseHead;
+            for (uint d = 0; d < headDim; ++d)
+            {
+                dK[outBase + d] = dk[d] * scale;
+                dV[outBase + d] = dv[d];
             }
         }
 
