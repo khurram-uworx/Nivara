@@ -3621,20 +3621,26 @@ class Program
             const int MaxNewTokens = 32;
 
             var warmup = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
-            Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+            double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
+            Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
 
-            var runs = new (long Ms, int Generated)[3];
+            var runs = new (long Ms, int Generated, long PrefillMs, long DecodeMs)[3];
             for (int i = 0; i < 3; i++)
             {
                 var timing = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
-                runs[i] = (timing.Milliseconds, timing.Generated);
+                runs[i] = (timing.Milliseconds, timing.Generated, timing.PrefillMs, timing.DecodeMs);
+                double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
                 Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                                  $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
+                                  $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
+                                  $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
             }
             Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+            var median = runs[1];
+            double medianDecodeTokS = median.DecodeMs > 0 ? median.Generated * 1000.0 / median.DecodeMs : 0;
             Console.WriteLine();
-            Console.WriteLine($"Median: {runs[1].Ms} ms ({runs[1].Generated} tokens, " +
-                              $"{runs[1].Generated * 1000.0 / Math.Max(1, runs[1].Ms):F2} tok/s)");
+            Console.WriteLine($"Median: {median.Ms} ms ({median.Generated} tokens, " +
+                              $"{median.Generated * 1000.0 / Math.Max(1, median.Ms):F2} tok/s, " +
+                              $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
             return 0;
         }
         finally
@@ -3688,13 +3694,17 @@ class Program
 
         AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
         var scalar = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+        double scalarDecodeTokS = scalar.DecodeMs > 0 ? scalar.Generated * 1000.0 / scalar.DecodeMs : 0;
         Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
-                          $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s)");
+                          $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s, " +
+                          $"prefill {scalar.PrefillMs} ms, decode {scalar.DecodeMs} ms, {scalarDecodeTokS:F2} tok/s)");
 
         AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", false);
         var widened = RunSmolLMGeneration(model, promptIds, SmolLMSyntheticConfig, MaxNewTokens);
+        double widenDecodeTokS = widened.DecodeMs > 0 ? widened.Generated * 1000.0 / widened.DecodeMs : 0;
         Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
-                          $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s)");
+                          $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s, " +
+                          $"prefill {widened.PrefillMs} ms, decode {widened.DecodeMs} ms, {widenDecodeTokS:F2} tok/s)");
         AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
 
         Console.WriteLine();
@@ -3738,11 +3748,11 @@ class Program
             // Warmup.
             RunSmolLMGenerationSilk(session, promptIds, config, 8);
 
-            var sw = Stopwatch.StartNew();
             var ids = RunSmolLMGenerationSilk(session, promptIds, config, 24);
-            sw.Stop();
-            Console.WriteLine($"{ids.Generated} tokens in {sw.Elapsed.TotalSeconds:F2}s " +
-                              $"({(ids.Generated > 0 ? sw.ElapsedMilliseconds / ids.Generated : 0)} ms/token)");
+            double decodeTokS = ids.DecodeMs > 0 ? ids.Generated * 1000.0 / ids.DecodeMs : 0;
+            Console.WriteLine($"{ids.Generated} tokens in {ids.Milliseconds} ms " +
+                              $"({(ids.Generated * 1000.0 / Math.Max(1, ids.Milliseconds)):F2} tok/s, " +
+                              $"prefill {ids.PrefillMs} ms, decode {ids.DecodeMs} ms, {decodeTokS:F2} tok/s)");
             return 0;
         }
     }
@@ -3799,18 +3809,18 @@ class Program
         return 0;
     }
 
-    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGenerationSilk(
+    static (int Generated, long Milliseconds, List<int> Sequence, long PrefillMs, long DecodeMs) RunSmolLMGenerationSilk(
         Nivara.Silk.SilkSmolLMSession session, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
     {
         session.ResetCache();
+        var prefillSw = Stopwatch.StartNew();
         int next = session.ForwardPrefillArgmax(promptIds.ToArray());
+        prefillSw.Stop();
+
         int position = promptIds.Count;
         var sequence = new List<int>(promptIds);
         int generated = 0;
-        var genSw = Stopwatch.StartNew();
-        // prefill time included? Keep parity with CPU: count decode only? CPU GenerateCore counts prefill separately.
-        // Here we measure whole generation including prefill to match original.
-        int vocab = config.VocabSize;
+        var decodeSw = Stopwatch.StartNew();
         while (generated < maxNewTokens)
         {
             int best = next;
@@ -3824,8 +3834,11 @@ class Program
             generated++;
             next = session.ForwardCachedArgmax(best, position++);
         }
-        genSw.Stop();
-        return (generated, genSw.ElapsedMilliseconds, sequence);
+        decodeSw.Stop();
+
+        long prefillMs = prefillSw.ElapsedMilliseconds;
+        long decodeMs = decodeSw.ElapsedMilliseconds;
+        return (generated, prefillMs + decodeMs, sequence, prefillMs, decodeMs);
     }
 
     static void ConsumeGeneratedSilk(
@@ -3843,11 +3856,13 @@ class Program
         Console.WriteLine($"Prompt token ids ({promptIds.Count}): [{string.Join(", ", promptIds)}]");
         Console.WriteLine();
 
-        var (generated, genMs, sequence) = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
+        var (generated, genMs, sequence, prefillMs, decodeMs) = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
         var generatedIds = sequence.Skip(promptIds.Count).ToList();
+        double decodeTokS = decodeMs > 0 ? generated * 1000.0 / decodeMs : 0;
 
         Console.WriteLine($"Generated {generated} tokens in {genMs} ms " +
                           $"({generated * 1000.0 / Math.Max(1, genMs):F2} tok/s)");
+        Console.WriteLine($"  Prefill: {prefillMs} ms  Decode: {decodeMs} ms ({decodeTokS:F2} tok/s)");
         Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
         Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
         Console.WriteLine();
@@ -3879,22 +3894,26 @@ class Program
         const int MaxNewTokens = 32;
 
         var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
-        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+        double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
 
-        var runs = new (long Ms, int Generated)[3];
+        var runs = new (long Ms, int Generated, long PrefillMs, long DecodeMs)[3];
         for (int i = 0; i < 3; i++)
         {
             var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
-            runs[i] = (timing.Milliseconds, timing.Generated);
+            runs[i] = (timing.Milliseconds, timing.Generated, timing.PrefillMs, timing.DecodeMs);
+            double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
             Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
+                              $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
         }
         Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
-        long medianMs = runs[1].Ms;
-        int medianTokens = runs[1].Generated;
+        var median = runs[1];
+        double medianDecodeTokS = median.DecodeMs > 0 ? median.Generated * 1000.0 / median.DecodeMs : 0;
         Console.WriteLine();
-        Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
-                          $"{medianTokens * 1000.0 / Math.Max(1, medianMs):F2} tok/s)");
+        Console.WriteLine($"Median: {median.Ms} ms ({median.Generated} tokens, " +
+                          $"{median.Generated * 1000.0 / Math.Max(1, median.Ms):F2} tok/s, " +
+                          $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
         return 0;
     }
 
@@ -3916,22 +3935,26 @@ class Program
         const int MaxNewTokens = 32;
 
         var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
-        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+        double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
 
-        var runs = new (long Ms, int Generated)[3];
+        var runs = new (long Ms, int Generated, long PrefillMs, long DecodeMs)[3];
         for (int i = 0; i < 3; i++)
         {
             var timing = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
-            runs[i] = (timing.Milliseconds, timing.Generated);
+            runs[i] = (timing.Milliseconds, timing.Generated, timing.PrefillMs, timing.DecodeMs);
+            double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
             Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
+                              $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
         }
         Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
-        long medianMs = runs[1].Ms;
-        int medianTokens = runs[1].Generated;
+        var median = runs[1];
+        double medianDecodeTokS = median.DecodeMs > 0 ? median.Generated * 1000.0 / median.DecodeMs : 0;
         Console.WriteLine();
-        Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
-                          $"{medianTokens * 1000.0 / Math.Max(1, medianMs):F2} tok/s)");
+        Console.WriteLine($"Median: {median.Ms} ms ({median.Generated} tokens, " +
+                          $"{median.Generated * 1000.0 / Math.Max(1, median.Ms):F2} tok/s, " +
+                          $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
         return 0;
     }
 
@@ -3973,23 +3996,27 @@ class Program
 
         // Warmup pass (discarded — JIT + cache warming).
         var warmup = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
-        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+        double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
 
         // Median-of-3 timed runs (matches samples/NivaraInference/README.md methodology).
-        var runs = new (long Ms, int Generated)[3];
+        var runs = new (long Ms, int Generated, long PrefillMs, long DecodeMs)[3];
         for (int i = 0; i < 3; i++)
         {
             var timing = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
-            runs[i] = (timing.Milliseconds, timing.Generated);
+            runs[i] = (timing.Milliseconds, timing.Generated, timing.PrefillMs, timing.DecodeMs);
+            double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
             Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s)");
+                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
+                              $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
         }
         Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
-        long medianMs = runs[1].Ms;
-        int medianTokens = runs[1].Generated;
+        var median = runs[1];
+        double medianDecodeTokS = median.DecodeMs > 0 ? median.Generated * 1000.0 / median.DecodeMs : 0;
         Console.WriteLine();
-        Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
-                          $"{medianTokens * 1000.0 / Math.Max(1, medianMs):F2} tok/s)");
+        Console.WriteLine($"Median: {median.Ms} ms ({median.Generated} tokens, " +
+                          $"{median.Generated * 1000.0 / Math.Max(1, median.Ms):F2} tok/s, " +
+                          $"prefill {median.PrefillMs} ms, decode {median.DecodeMs} ms, {medianDecodeTokS:F2} tok/s)");
 
         return 0;
     }
@@ -4055,14 +4082,18 @@ class Program
         // Side A: scalar (UseWidenSimd = false).
         AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true);
         var scalar = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        double scalarDecodeTokS = scalar.DecodeMs > 0 ? scalar.Generated * 1000.0 / scalar.DecodeMs : 0;
         Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
-                          $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s)");
+                          $"{scalar.Generated * 1000.0 / Math.Max(1, scalar.Milliseconds):F2} tok/s, " +
+                          $"prefill {scalar.PrefillMs} ms, decode {scalar.DecodeMs} ms, {scalarDecodeTokS:F2} tok/s)");
 
         // Side B: widen (UseWidenSimd = true).
         AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", false);
         var widened = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        double widenDecodeTokS = widened.DecodeMs > 0 ? widened.Generated * 1000.0 / widened.DecodeMs : 0;
         Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
-                          $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s)");
+                          $"{widened.Generated * 1000.0 / Math.Max(1, widened.Milliseconds):F2} tok/s, " +
+                          $"prefill {widened.PrefillMs} ms, decode {widened.DecodeMs} ms, {widenDecodeTokS:F2} tok/s)");
         AppContext.SetSwitch("Nivara.Primitives.DisableWidenSimd", true); // restore safe default
 
         // Summary.
@@ -4103,7 +4134,7 @@ class Program
         return 0;
     }
 
-    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGeneration<TModel, TWeight>(
+    static (int Generated, long Milliseconds, List<int> Sequence, long PrefillMs, long DecodeMs) RunSmolLMGeneration<TModel, TWeight>(
         LlamaForCausalLM<TModel, TWeight> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
@@ -4114,10 +4145,14 @@ class Program
         using var cache = new LlamaKVCache<TModel>(config.NumHiddenLayers, kvWidth, cacheCapacity);
         var sequence = new List<int>(promptIds);
         int generated = 0;
-        var genSw = Stopwatch.StartNew();
+
+        var prefillSw = Stopwatch.StartNew();
         var logits = model.ForwardPrefill(promptIds.ToArray(), cache);
+        prefillSw.Stop();
+
         int position = promptIds.Count;
         int vocab = config.VocabSize;
+        var decodeSw = Stopwatch.StartNew();
         while (generated < maxNewTokens)
         {
             int next = ArgMaxLastRow(logits, 1, vocab);
@@ -4127,8 +4162,11 @@ class Program
                 break;
             logits = model.ForwardCached(next, position++, cache);
         }
-        genSw.Stop();
-        return (generated, genSw.ElapsedMilliseconds, sequence);
+        decodeSw.Stop();
+
+        long prefillMs = prefillSw.ElapsedMilliseconds;
+        long decodeMs = decodeSw.ElapsedMilliseconds;
+        return (generated, prefillMs + decodeMs, sequence, prefillMs, decodeMs);
     }
 
     static void RunSmolLMGenerate<TModel, TWeight>(Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string precisionName)
@@ -4183,11 +4221,13 @@ class Program
         Console.WriteLine($"Prompt token ids ({promptIds.Count}): [{string.Join(", ", promptIds)}]");
         Console.WriteLine();
 
-        var (generated, genMs, sequence) = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        var (generated, genMs, sequence, prefillMs, decodeMs) = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
         var generatedIds = sequence.Skip(promptIds.Count).ToList();
+        double decodeTokS = decodeMs > 0 ? generated * 1000.0 / decodeMs : 0;
 
         Console.WriteLine($"Generated {generated} tokens in {genMs} ms " +
                           $"({generated * 1000.0 / Math.Max(1, genMs):F2} tok/s)");
+        Console.WriteLine($"  Prefill: {prefillMs} ms  Decode: {decodeMs} ms ({decodeTokS:F2} tok/s)");
         Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
         Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
         Console.WriteLine();
