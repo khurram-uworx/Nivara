@@ -559,17 +559,17 @@ public class InferenceCliArgumentTests
 
     [Test]
     public void SyntheticWeights_OnSmolLMBeyondBenchmarkMode_Rejected() =>
-        AssertRejected(Run("smollm", "generate", "--synthetic-weights"), "is only valid with the default single-shot run or 'benchmark'");
+        AssertRejected(Run("smollm", "generate", "--synthetic-weights"), "is only valid with the default single-shot run, 'benchmark', or 'profile'");
 
     [Test]
     public void SyntheticWeights_OnQwenBeyondBenchmarkMode_Rejected() =>
-        AssertRejected(Run("qwen", "tools", "--synthetic-weights"), "is only valid with the default single-shot run or 'benchmark'");
+        AssertRejected(Run("qwen", "tools", "--synthetic-weights"), "is only valid with the default single-shot run, 'benchmark', or 'profile'");
 
     [Test]
     public void PlainAndPromptFlags_OutsideScope_Rejected()
     {
         AssertRejected(Run("minilm", "--plain"), "is a 'qwen' option only");
-        AssertRejected(Run("qwen", "tools", "--plain"), "only valid with the default single-shot run or 'benchmark'");
+        AssertRejected(Run("qwen", "tools", "--plain"), "only valid with the default single-shot run, 'benchmark', or 'profile'");
         AssertRejected(Run("minilm", "--text", "hi"), "is a 'qwen' / 'qwen tools' prompt option only");
         AssertRejected(Run("minilm", "--no-kv-cache"), "is the 'qwen tools' path only");
     }
@@ -629,6 +629,7 @@ public class InferenceCliArgumentTests
         ["qwen", "tools"],
         ["qwen", "distill", "--precision", "f32"],
         ["qwen", "benchmark"],
+        ["qwen", "profile"],
         ["qwen", "--precision", "native"],
         ["qwen", "tools", "--precision", "native"],
         ["qwen", "benchmark", "--precision", "native"],
@@ -637,18 +638,21 @@ public class InferenceCliArgumentTests
         ["qwen", "--silk", "distill", "--precision", "f32"],
         ["qwen", "--silk", "benchmark", "--precision", "bf16"],
         ["qwen", "--silk", "--precision", "native"],
+        ["qwen", "--silk", "profile"],
     ];
 
     static readonly string[][] AcceptedSmolLMCases =
     [
         ["smollm"],
         ["smollm", "generate"],
+        ["smollm", "profile"],
         ["smollm", "--precision", "native"],
         ["smollm", "--precision", "f32"],
         ["smollm", "--precision", "bf16"],
         ["smollm", "--precision", "fp16"],
         ["smollm", "benchmark", "--precision", "native"],
         ["smollm", "--silk", "--precision", "native"],
+        ["smollm", "--silk", "profile"],
     ];
 
     static void AssertRejected(CliResult result, string message)
