@@ -100,9 +100,14 @@ Implementation notes:
 
 ## G1 grounding notes
 
-- Pending: microsoft-learn grounding, code-memory blast radius, runtime probes. Any decision/red flag escalated before implementation.
+- Grounded code paths: `SilkLauncher.MlpBlock` dispatch is single-WG (`global/local = LinearGroupSize=256`, `SilkLauncher.cs:740-761`); `RmsNormGemv` is multi-WG (`GemvGlobalCols/GemvGroupSize`); `GemmGemvAdd` is multi-WG. Existing no-LoRA LoRA-path already decomposes MLP into multi-WG ops; no-LoRA path used fused single-WG kernel.
+- Blast radius: SmolLM/Qwen decode `MlpBlock` no-LoRA path only; BF16/F32 supported; LoRA active path unchanged. Fused `mlp_block`/`mlp_block_bf16` kernels left in place.
+- Decision: use Option A decomposition (RmsNormGemv gate+up + SwiGlu + GemmGemvAdd down+residual) for decode rows=1. RmsNormGemv requires aRows==1; all decode call sites are rows=1. No red flag requiring escalation.
+- microsoft-learn search was not specific to OpenCL NDRange (returned generic Windows results); grounding relied on existing runtime invariants (`SilkRuntime.Run` requires global multiple of local) and in-repo kernel/launcher contracts.
 
-## Evidence (baseline from khurram/1453, synthetic Silk, Intel(R) Graphics, .NET 11, Release, 2026-05-23)
+## Evidence (synthetic Silk, Intel(R) Graphics, .NET 11, Release)
+
+### Baseline (khurram/1453, before this branch, 2026-05-23)
 
 SmolLM-135M (30L, 576 hidden, 9/3 heads, 1536 inter, vocab 49152, BF16, 64 prompt/32 generated):
 - Profile run: 6058 ms, 32 tokens, prefill 112 ms, decode 5946 ms, **5.38 tok/s** (profiled, per-phase Finish)
@@ -114,4 +119,24 @@ Qwen2.5-0.5B (24L, 896 hidden, 14/2 heads, 4864 inter, vocab 151936, BF16, 64 pr
 - Dispatches: 3936 (123.00/token), copies: 1536
 - MLP 499.207 ms/token (87%)
 
-Fusion experiment already landed: `rotary_qk` saved 30/24 dispatches/token; time impact small because MLP dominates.
+### After P1 MLP decomposition (this branch, 2026-05-23)
+
+Commands (human-approved, run sequentially):
+- `dotnet run -c Release --project samples/NivaraInference -- smollm --synthetic-weights profile --silk`
+- `dotnet run -c Release --project samples/NivaraInference -- qwen --synthetic-weights profile --silk`
+
+SmolLM-135M (same shape):
+- Steady-state warmup (no per-phase sync): **11.80 tok/s**, 11.80 ms/token decode, 2845 ms total (32 tokens, prefill 134 ms, decode 2711 ms)
+- Profiled run (per-phase Finish sync, attribution only): **10.84 tok/s**, 92.28 ms/token decode, 3052 ms total (32 tokens, prefill 99 ms, decode 2953 ms)
+- Dispatches: 6816 (213.00/token), copies: 1920 (+60 dispatches/token = 2 extra/layer * 30 layers, expected)
+- MLP 50.752 ms/token (55%), down from 135.888 ms/token (**2.67x faster**)
+- Total profiled 2948.33 ms, down from ~5946 ms (**~2.02x**)
+
+Qwen2.5-0.5B (same shape):
+- Steady-state warmup (no per-phase sync): **6.29 tok/s**, 159.09 ms/token decode, 5338 ms total (32 tokens, prefill 247 ms, decode 5091 ms)
+- Profiled run (per-phase Finish sync, attribution only): **5.83 tok/s**, 171.50 ms/token decode, 5695 ms total (32 tokens, prefill 207 ms, decode 5488 ms)
+- Dispatches: 5472 (171.00/token), copies: 1536 (+48 dispatches/token = 2 extra/layer * 24 layers, expected)
+- MLP 113.193 ms/token (66%), down from 499.207 ms/token (**4.41x faster**)
+- Total profiled 5484.13 ms, down from ~18273 ms (**~3.33x**)
+
+Notes: synthetic weights (shape-driven), same device/driver session, profiled run includes per-phase `Finish()` sync for attribution; steady-state warmup is the better wall-clock throughput indicator. Dispatch increase is expected and accepted given wall-time win.
