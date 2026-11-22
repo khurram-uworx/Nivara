@@ -1191,7 +1191,7 @@ static class Program
             }
             var silkLossCurve = new List<LoraSftEpochLoss>();
             for (int i = 0; i < silkValLossPerEpoch.Count; i++)
-                silkLossCurve.Add(new LoraSftEpochLoss(i + 1, float.NaN, silkValLossPerEpoch[i]));
+                silkLossCurve.Add(new LoraSftEpochLoss(i + 1, null, silkValLossPerEpoch[i]));
 
             var silkReport = new LoraSftRunReport
             {

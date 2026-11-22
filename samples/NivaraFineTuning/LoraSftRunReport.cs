@@ -170,7 +170,7 @@ public sealed class LoraSftRunReport
             sb.AppendLine("| Epoch | Train loss | Val loss |");
             sb.AppendLine("|---|---:|---:|");
             foreach (var e in LossCurve)
-                sb.AppendLine($"| {e.Epoch} | {e.TrainLoss:F4} | {e.ValLoss:F4} |");
+                sb.AppendLine($"| {e.Epoch} | {(e.TrainLoss.HasValue ? e.TrainLoss.Value.ToString("F4") : "n/a")} | {e.ValLoss:F4} |");
         }
         sb.AppendLine();
         sb.AppendLine("## Memory budget");
@@ -237,4 +237,4 @@ public sealed class LoraSftRunReport
     }
 }
 
-public sealed record LoraSftEpochLoss(int Epoch, float TrainLoss, float ValLoss);
+public sealed record LoraSftEpochLoss(int Epoch, float? TrainLoss, float ValLoss);
