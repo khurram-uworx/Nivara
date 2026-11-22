@@ -105,7 +105,7 @@ public static class WorklogSftGeneration
         for (int t = 1; t < maxNewTokens; t++)
         {
             int pos = promptIds.Length + gen.Count - 1;
-            if (pos + 1 > maxSequenceLength) break;
+            if (pos + 1 >= maxSequenceLength) break;
             int next = cachedArgmax(gen[^1], pos);
             if (stop.Contains(next)) break;
             gen.Add(next);
