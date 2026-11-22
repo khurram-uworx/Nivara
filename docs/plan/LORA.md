@@ -1,320 +1,119 @@
-# LoRA Fine-Tuning vs RAG — Design Note
+# LoRA SLM iGPU Fine-Tuning Showcase
 
-Status: **design note** (no implementation yet). Scopes a LoRA fine-tuning demo for the
-pretrained causal LMs (SmolLM-135M, Qwen2.5-0.5B) and a head-to-head comparison with the
-RAG pipeline in [RAG.md](RAG.md), using the **same markdown corpus** as the knowledge
-source.
-
-**Home.** Fine-tuning (data build, adapter training, validation) is homed in
-`samples/NivaraFineTuning`; `samples/NivaraChat` keeps the RAG pipeline and a thin
-consumption path that loads a tuned adapter for the FT arms. Shared code (`LoRALinear`,
-data format, templates) matures in `src/Nivara`/`Nivara.Samples` and is promoted once
-stable.
-
-Pre-requisites for this home (chat-template promotion and causal-LM loading-helper
-extraction, plus the base-weight freeze mechanism) are tracked in §0 below and must
-land before the LoRA implementation begins.
-
-Consolidates the design asks from Gap S5 of the now-retired NivaraChat Silk gaps note (#1273 /
-#1283 / #1284). Full-parameter LLM fine-tuning is intentionally not scoped (see §12);
-the supported SFT path is LoRA. Not a release blocker.
-
-## 0. Pre-requisites (must land before the LoRA implementation)
-
-The LoRA work is homed in `samples/NivaraFineTuning` (see **Home** above). That
-sample cannot reach `NivaraChat`'s `internal` chat templates, and its causal-LM
-loading helpers currently live in `NivaraInference`. The following issues must be
-resolved first; each is tracked as a GitHub issue:
-
-| # | Pre-req | Issue |
-|---|---|---|
-| 1 | Promote `SmollmChatTemplate` and `QwenChatTemplate` from `NivaraChat` into `Nivara.Samples` so both `NivaraChat` and `NivaraFineTuning` share one copy (byte-exact rendering preserved). | #1372 |
-| 2 | Extract SmolLM/Qwen config + tokenizer loading helpers from `NivaraInference` into `Nivara.Samples` so `NivaraFineTuning` can load a trainable base model without duplication. | #1373 |
-| 3 | Freeze mechanism for base weights: a loader option (`requiresGrad: false`) or `Module<T>.Freeze()`, so only LoRA adapter params accumulate gradients. | #1374 |
-
-Until #1372 and #1373 land, the chat-template and loading-helper references in
-§4/§8/§9 below assume the promoted/shared locations.
+Status: **active implementation on `khurram/lora`** (D2a in progress; no release-parity claim yet). This document is the handoff for the LoRA plan/PR work and replaces `docs/TODO.md` for this branch.
 
 ## 1. Goal
 
-Answer one practical question for .NET developers, entirely in C#:
+Showcase Nivara's ability to fine-tune small language models (SLMs) on iGPUs with Silk as the headline path, while keeping CPU as the reference path and preserving NivaraChat RAG as a first-class showcase. RAG and FT are both strong capabilities; this plan does not frame them as mutually exclusive.
 
-> I have a pile of markdown docs. Should I retrieve from them (RAG), bake them into the
-> model (fine-tuning), or both?
+The FT showcase is **behavioral/domain adaptation**, not doc-QA memorization.
 
-Deliverables:
+## 2. Decisions (G1 cleared)
 
-1. A reusable `LoRALinear<T>` module and an adapter save/load path.
-2. A `--ft-lora` mode that fine-tunes a small causal LM on Q&A derived from `docs/**/*.md`.
-3. A `--ft-vs-rag` mode that scores four configurations on held-out questions with the same
-   paired statistics as `--rag-eval` / `--rag-learn`.
+- **D1 — FT scenario:** Worklog / company-assistant behavioral SFT (Nivara-native deterministic synthetic data). Natural-language worklog -> structured `LogTime` (`ticket`, `hours`, `date`). Conventions: standard office day = 8h; "all day"/"full day" = 8h (not 24h); "half day" = 4h; explicit durations used as stated (deterministic decimal rule); multi-ticket -> separate tool calls/records; ambiguous/non-worklog -> clarification. Eval: valid structure, ticket, hours, date, multi-ticket, clarification/abstention, convention accuracy; report before/after base vs LoRA-adapted.
+- **D2a — Silk/CPU parity, no compromise:** Real Silk causal-LM LoRA training for Qwen2.5-0.5B on iGPU with CPU/Silk parity required for release readiness. CPU-first or Silk-first execution is allowed; end state requires parity. No false iGPU claim.
+- **D3 — Layering:** `LoRALinear`/adapter serializer stay in core; SFT dataset/training CLI in `samples/NivaraFineTuning`; shared helpers only when clearly reusable in `samples/Nivara.Samples`.
+- **D4 — Data provenance:** Deterministic synthetic generator, no LLM required, seeded, provenance metadata/hash, refuse overwrite without `--force`. Maintainer-owned seed data copied into repo under `samples/data/worklog/`.
+- **D5 — Model scope:** Generic over Llama-family causal LMs (`LlamaForCausalLM<TModel,TWeight>`). Headline: Qwen2.5-0.5B-Instruct. SmolLM verifies genericity.
 
-## 2. What exists today
+## 3. What exists today (baseline)
 
-| Piece | State |
-|---|---|
-| `LlamaForCausalLM<TModel,TWeight>` (SmolLM, Qwen) | Core AutoDiff supports backward; sample only does inference |
-| `Module<T>`, `Parameter<T>`, `StateDict`/`LoadStateDict`, `AdamW`, `TrainingLoop`, `ModelSerializer` | Available (see [AUTODIFF.md](AUTODIFF.md), [RETRAINING.md](RETRAINING.md)) |
-| RAG index, chunker, judge labels, split, paired metrics | Available (`samples/NivaraChat/Helpers/*`) |
-| LoRA, freeze mechanism, SFT loss with prompt masking | **Missing** |
-| Silk causal-LM trainer (SmolLM/Qwen), `rms_norm_backward` | **Missing** (tracked in §14, #1283) |
+- Core LoRA: `LoRALinear<T>` / `LoRALinear<TModel,TWeight>`, merge, frozen base, Kaiming A / zero B, `LoraAdapterSerializer`.
+- Llama-family: `LlamaForCausalLM<TModel,TWeight>` with `AttachLora(...)`, merge helpers, Qwen/SmolLM loading paths and chat templates in `samples/Nivara.Samples`.
+- AutoDiff/training: `GradientUtils.Grad()`, `AdamW`, `CrossEntropyLoss(ignoreIndex)`, module freeze/param controls, `ModelSerializer`/state dict.
+- Silk: inference runners and trainers exist for other model families; `SilkLlamaLoRATrainer` now exists for D2a causal-LM LoRA training path (WIP, not release-certified).
+- NivaraFineTuning sample: DistilBERT SST-2 fine-tuning existed; now also has LoRA SFT modes.
 
-`samples/NivaraChat/ARCHITECTURE.md` currently lists "Fine-tuning/LoRA" under *Not doing*;
-that line is updated when this lands.
+## 4. What shipped on this branch
 
-## 3. LoRA module
+### Data / eval (#1416, partial)
+- `samples/data/worklog/` seed data: `train.jsonl` (350), `test.jsonl` (100), `README.md`.
+- `samples/NivaraFineTuning/WorklogSftDataset.cs`: JSONL load/save, deterministic split/hash, prompt-masked tokenization for Qwen/SmolLM templates, `GenerateSynthetic(count, seed)`, overwrite guard.
+- `samples/NivaraFineTuning/WorklogSftEvaluator.cs`: `LogTime` tool-call parsing, clarification detection, metrics for valid structure/ticket/hours/date/multi-ticket/clarification/convention; before/after report text.
+- CLI: `--mode ft-generate --out-dir ... --seed ... --max-examples ... [--force]`.
 
-`LoRALinear<T>` wraps a frozen base `Linear` and adds a low-rank update:
+### CPU reference (#1417, partial)
+- `samples/NivaraFineTuning/WorklogLoraSftTrainer.cs`: generic Llama-family LoRA SFT, frozen base, AdamW on adapter params, prompt-masked CE `ignoreIndex:-100`, best-checkpoint restore, adapter bundle save.
+- `samples/NivaraFineTuning/Program.cs`: `--mode ft-lora` CPU path; `--mode ft-eval` base + optional adapter before/after report.
+- CPU smoke: first-step 0.5B CPU backward can be slow; granular per-step logging added (`forward...`, `backward (loss=...)`, `avgLoss`).
 
-```
-y = base(x) + (alpha / r) * ((x @ A) @ B)      A: [in, r]   B: [r, out]
-```
+### Silk D2a (#1418, in progress)
+- `src/Nivara.Extensions/Silk/SilkKernels.cs` / `SilkLauncher.cs`: `rms_norm_backward`, `rotary_backward`, `swiglu_backward`, `scale`, GQA backward kernels, `SoftmaxCrossEntropyBackward(ignoreIndex)`.
+- `src/Nivara.Extensions/Silk/SilkLlamaLoRATrainer.cs`: generic Llama-family LoRA trainer (Qwen-shaped/SmolLM-shaped configs), base weight upload, LoRA A/B/grad/moment buffers, forward with LoRA q/k/v/o/gate/up/down, prompt-masked CE backward, transformer block backward, LoRA grad accumulation, Adam, `TrainStep`, adapter bundle save/load.
+- CLI: `--mode ft-lora --silk` wired with OpenCL availability check, honest `IsParityReady=false` warning, no silent CPU fallback.
+- Tests: `tests/Nivara.Tests/Gpu/SilkLlamaLoRATrainerParityTests.cs` (`[Category("Gpu")]`) — 5 tests pass on local OpenCL:
+  - Qwen-shaped Q/V forward parity;
+  - Qwen-shaped prompt-masked CE + LoRA grad parity;
+  - Qwen-shaped 1-step Adam/TrainStep parity;
+  - adapter bundle round-trip;
+  - SmolLM-shaped Q/K/V/O/FFN forward + prompt-masked CE + grad parity.
+- Tolerances tightened (forward/loss 1.5e-3 to 2e-3, grad/weight rel 3e-2 to 5e-2) and passing on local Intel iGPU.
+- Real-model Silk smoke (evidence, not release certification): Qwen2.5-0.5B-Instruct BF16, `Intel(R) Graphics`, `--max-examples 4 --max-len 128 --rank 4 --alpha 8 --epochs 1 --log-every 1`, initial val `14.2516`, best val `12.3500`, adapter saved, `10.2s`.
 
-- `A` is Kaiming-initialized, **`B` is zero**. At step 0 the adapted model is numerically
-  the base model. This is the same parity rule as RAG.md §1: every later delta is
-  attributable to learning. Unit test: `max |adapted - base| == 0` before any step.
-- Default targets: attention `q_proj` and `v_proj`; optional `k_proj`, `o_proj`, FFN
-  projections via a flag. Default `r = 8`, `alpha = 16`.
-- Trainable parameters for SmolLM-135M at r=8 on q/v: on the order of 0.3-0.5M (well under
-  1% of the base). Exact count is printed by the mode.
-- Adapter-only persistence: save/load just the `A`/`B` tensors (small file), plus a
-  `merge()` that folds the update into the base weight for inference with no overhead.
+## 5. Evidence and commands
 
-### Freezing the base — the main technical risk
+### Targeted checks run
 
-Base weights are created with `requiresGrad: true` (`Linear` constructor) and are often BF16
-mixed-typed parameters (`RegisterMixedParameters`). Passing only adapter parameters to the
-optimizer is not enough: AutoDiff would still compute and hold gradients for every base
-weight, which wastes memory and time and defeats the point of LoRA.
-
-Needed before the demo is practical (pick one, decide in review):
-
-- a loader option that creates base weights with `requiresGrad: false`, or
-- a `Freeze()` on `Module<T>` that rebuilds leaf tensors without grad tracking.
-
-The BF16 storage / F32 compute path (`LlamaLoader.Load<float, BFloat16>`) should be kept for
-the frozen base; adapters stay F32.
-
-## 4. Training data
-
-Same corpus and identity rules as RAG.md §2 and §7: every `docs/**/*.md` plus the sample
-README, `docs/plan/` excluded, chunk identity `path#ordinal`, corpus hash recorded.
-
-**Q&A generation.** For each chunk an LLM writes 1-3 question/answer pairs grounded in that
-chunk (extends the `--rag-eval --regenerate` judge path). Each pair keeps its source
-`ChunkId`. Output is a deterministic TSV/JSONL (sorted, LF, provenance header), refusing to
-overwrite without `--force`.
-
-**Split by document, not by question.** RAG.md splits by query hash. For fine-tuning that
-leaks: two questions about the same chunk in train and test let the model memorize rather
-than generalize. Split on the source file path (FNV-1a with seed mixed in, 80/10/10), so
-test questions come from documents the adapter never saw. A second report line covers
-"seen-document" questions, which is the case FT is *supposed* to win.
-
-**Format.** Chat template of the target model (`SmollmChatTemplate`, `QwenChatTemplate`,
-promoted to `Nivara.Samples` per pre-req #1372 so `NivaraFineTuning` can reach them),
-one example = system + question + answer. Loss is next-token cross-entropy over the
-**answer tokens only** (prompt masked). Max sequence length 256-512, configurable.
-
-## 5. Training setup
-
-- Optimizer `AdamW`, lr ~2e-4 (adapter-only), few epochs, early stopping on validation loss,
-  best-checkpoint restore via `StateDict`/`LoadStateDict` as in RAG.md §5.
-- Gradient accumulation to keep per-step memory small on CPU; batch size 1-4.
-- CPU AutoDiff, f32 compute. Silk training for causal LMs is tracked in §14 (#1283) and is
-  a non-goal for this CPU demo; the CPU path stays the reference.
-- Seeded and reproducible: same corpus + seed gives same split, data order and loss curve
-  (to a stated tolerance).
-- Memory budget table (weights, activations, adapter + optimizer state) is printed at start
-  and checked against a `--max-memory` guard.
-
-## 6. The comparison: four arms
-
-All arms answer the same held-out questions with the same decoding settings (greedy, same
-max tokens).
-
-| Arm | Model | Context given |
-|---|---|---|
-| A. Base | pretrained | none |
-| B. RAG | pretrained | top-K chunks from the multi-view index |
-| C. FT | base + LoRA | none |
-| D. FT + RAG | base + LoRA | top-K chunks |
-
-Retrieval for B and D reuses the existing index and fusion (fixed weights, optionally the
-learned ones from `--rag-learn`) so the retrieval side is held constant.
-
-**Metrics** (per question, then aggregated):
-
-- Answer correctness against the reference answer, LLM-judged against the source chunk
-  (same judge plumbing as `--rag-eval`), plus a cheap lexical check (key-term recall) so the
-  result does not depend on the judge alone.
-- Grounding: does the answer contradict the source chunk?
-- Abstention / hallucination on **out-of-corpus** questions (a small fixed set): does the
-  model say it does not know, or invent an answer?
-- Cost: tokens in/out, latency per answer, one-time training cost, index build cost.
-- Staleness test: edit one doc, then measure RAG after a reindex vs FT without retraining
-  (and FT after retraining), reported with wall-clock time.
-
-Statistics follow RAG.md §8: paired sign test and Cohen's d on per-question scores. A
-non-significant result is a valid result and is reported as such. Test split scores once.
-
-## 7. Expectations (to be confirmed by the run, not assumed)
-
-Stated up front so the demo is honest:
-
-- A 135M-parameter model with a small rank-8 adapter will not memorize a large doc set.
-  Expect RAG to beat FT on factual recall.
-- FT is expected to help with answer style, format, terminology and refusing off-topic
-  questions; D (FT + RAG) is the most likely overall winner.
-- RAG wins on freshness: a doc edit is live after reindexing, while FT needs retraining.
-- Qwen2.5-0.5B (about 4x larger) is a stretch target; CPU training time may make it
-  impractical, and the mode reports measured cost either way.
-
-If the measured results contradict these, the report says so.
-
-## 8. CLI surface (proposed)
-
-Fine-tuning and validation live in NivaraFineTuning; NivaraChat only consumes a tuned
-adapter for the FT arms of the comparison. (NivaraFineTuning uses `--mode` dispatch,
-so the fine-tune/eval invocations below use `--mode`; model selection is via
-`--model`.)
-
-```
-# NivaraFineTuning: fine-tune a LoRA adapter (CPU) on a data file
-dotnet run --project samples/NivaraFineTuning -- --mode ft-lora --model smollm --data ft-data.jsonl --out adapters/smollm-lora --rank 8 --epochs 3
-
-# NivaraFineTuning: validate a tuned adapter (loss + held-out accuracy)
-dotnet run --project samples/NivaraFineTuning -- --mode ft-eval --model smollm --adapter adapters/smollm-lora --data ft-data.jsonl
-
-# NivaraChat: build grounded Q&A from docs (needs an LLM, e.g. --ollama)
-dotnet run --project samples/NivaraChat -- --ft-data --regenerate --ollama --force
-
-# NivaraChat: compare Base / RAG / FT / FT+RAG, loading the adapter produced above
-dotnet run --project samples/NivaraChat -- --ft-vs-rag --model smollm --adapter ../NivaraFineTuning/adapters/smollm-lora --report ft-vs-rag.md
+```bat
+dotnet build src/Nivara.Extensions/Nivara.Extensions.csproj -c Release -nologo -v q
+dotnet build samples/NivaraFineTuning/NivaraFineTuning.csproj -c Release -nologo -v q
+dotnet test tests/Nivara.Tests/Nivara.Tests.csproj -c Release --filter "FullyQualifiedName~SilkLlamaLoRATrainerParityTests" --nologo -v q
 ```
 
-Key flags (NivaraFineTuning): `--data`, `--out`, `--adapter`, `--model`, `--rank`,
-`--alpha`, `--targets q,v[,k,o,ffn]`, `--lr`, `--epochs`, `--batch-size`, `--max-len`,
-`--seed`, `--merge`, `--max-memory`, `--force`.
-Key flags (NivaraChat): `--model smollm|qwen`, `--adapter <path>`, `--docs-dir`,
-`--report`, `--force`.
+Result: builds succeeded; GPU parity 5/5 passed on local OpenCL device.
 
-## 9. Proposed file layout
+### Silk smoke (human-runnable / small)
 
-- `src/Nivara/AutoDiff/Nn/LoRALinear.cs` — module, merge, adapter save/load (core, reusable)
-- `samples/NivaraFineTuning/` — data consumer, SFT trainer, `FtLoraMode`,
-  `FtEvalMode`, validation metrics (home of fine-tuning); reuses shared helpers from
-  `Nivara.Samples` (pre-reqs #1372, #1373)
-- `samples/NivaraChat/FineTuning/` — `FtVsRagMode` only, consuming an adapter produced by
-  NivaraFineTuning
-- `samples/NivaraChat/Helpers/` — data builder (`--ft-data`) reused by both samples
-- `tests/Nivara.Tests/AutoDiff/LoRALinearTests.cs` — step-0 parity, gradient check vs
-  finite differences, merge equivalence, frozen-base has no grad
-- `docs/LORA.md` (this file) updated with measured results
+```bat
+dotnet run --project samples/NivaraFineTuning/NivaraFineTuning.csproj -c Release -- --mode ft-lora --silk --model-dir samples/data/qwen2.5-0.5b-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template qwen --epochs 1 --max-examples 4 --max-len 128 --rank 4 --alpha 8 --lr 2e-4 --out-dir C:\Users\khurram\AppData\Local\Temp\opencode\nivara-ft-silk-smoke --log-every 1 --seed 42
+```
 
-## 10. Test plan
+Observed (Intel iGPU, smoke only): initial val `14.2516`, best val `12.3500`, adapter saved, `10.2s`.
 
-1. **Parity:** adapted == base at init (exact), after `merge()` equals unmerged output within 1e-5.
-2. **Grad check:** adapter gradients match finite differences on a tiny Llama.
-3. **Frozen base:** base weights unchanged after N steps; no base gradients allocated.
-4. **Overfit sanity:** a 10-example set drops loss near zero within a few epochs.
-5. **Determinism:** same seed reproduces split and first-epoch loss.
-6. **Round trip:** save adapter, reload on fresh base, identical logits.
+### CPU reference command
 
-## 11. Open questions
+```bat
+dotnet run --project samples/NivaraFineTuning/NivaraFineTuning.csproj -c Release -- --mode ft-lora --model-dir samples/data/qwen2.5-0.5b-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template qwen --epochs 1 --max-examples 4 --max-len 128 --rank 4 --alpha 8 --lr 2e-4 --out-dir C:\Users\khurram\AppData\Local\Temp\opencode\nivara-ft-cpu-smoke --log-every 1 --seed 42
+```
 
-- Core (`src/Nivara`) or sample-scoped `LoRALinear`? Core is more reusable; sample-scoped
-  matches how `LlamaForCausalLM` itself lives today.
-- Which LLM writes the Q&A: local Ollama, or the in-repo Qwen so the whole demo runs
-  offline? Offline is friendlier but the data quality is lower.
-- Freeze mechanism (see §3).
-- Whether to also expose adapters through the `IChatClient` wrappers so any NivaraChat mode
-  can serve a tuned model.
+Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for smoke.
 
-## 12. Non-goals
+## 6. Known gaps / red flags
 
-- Full-parameter fine-tuning of causal LMs — infeasible as a shipped CPU workflow (memory +
-  wall-clock); out of scope. LoRA is the supported SFT path. Tracked separately as an
-  opt-in experiment only, not a mode.
-- QLoRA / quantization.
-- Silk / GPU training for causal LMs in v1 (see §14); CPU path stays the reference.
-- bf16/fp16 *training* (CPU mixed storage is inference-only; Silk training is f32 only).
-- Replacing RAG: the point is a measured comparison, not a verdict in advance.
+- **D2a not release-ready:** `SilkLlamaLoRATrainer.IsParityReady == false`; parity evidence is synthetic + small real smoke, not full release certification.
+- **Parity scope:** tolerances tightened but still need justification over broader cases; no large real-checkpoint parity matrix.
+- **Adapter format:** Silk trainer bundle is `nivara-lora-sft-adapters-v1` compatible with sample bundle; convergence with core `LoraAdapterSerializer` metadata/shape naming may still be needed.
+- **CPU/Silk report:** ft-lora/ft-eval need structured report artifact (params, device, memory, parity status, before/after metrics).
+- **Tests:** generator determinism/split/provenance/evaluator unit tests still needed (#1416/#1421). Full suite not run.
+- **Docs:** `docs/plan/LORA.md` is now reshaped; other docs/DocsCoveragePins updates may be needed when #1421 lands.
+- **No false iGPU claim:** docs/CLI must keep D2a status honest until parity is release-certified.
 
-## 13. References
+## 7. File map (current)
 
-- [RAG.md](RAG.md) — corpus, chunking, judge labels, split, paired metrics
-- [AUTODIFF.md](AUTODIFF.md), [RETRAINING.md](RETRAINING.md) — training stack, checkpoints
-- [SMOLLM.md](SMOLLM.md), [QWEN.md](QWEN.md) — the target models
-- `samples/Nivara.Samples/LlamaForCausalLM.cs` — model, loader, mixed-dtype guard
-- `src/Nivara/AutoDiff/Nn/Linear.cs`
-- `samples/NivaraFineTuning/` — existing DistilBERT fine-tuning sample (classification head)
-- (umbrella `docs/plan/NIVARAINFERENCE-SILK-GAPS.md` retired 2026-11-21 once its gaps resolved or deferred; Silk counterpart design now lives here in §14)
+- `docs/plan/LORA.md` — this handoff/plan (authoritative for LoRA branch).
+- `samples/data/worklog/README.md`, `train.jsonl`, `test.jsonl` — deterministic seed data.
+- `samples/NivaraFineTuning/WorklogSftDataset.cs` — dataset/generator/tokenization.
+- `samples/NivaraFineTuning/WorklogSftEvaluator.cs` — eval metrics/parser.
+- `samples/NivaraFineTuning/WorklogLoraSftTrainer.cs` — CPU reference trainer.
+- `samples/NivaraFineTuning/Program.cs` — `ft-generate`/`ft-lora`/`ft-eval` CLI.
+- `src/Nivara.Extensions/Silk/SilkLlamaLoRATrainer.cs` — Silk D2a trainer.
+- `src/Nivara.Extensions/Silk/SilkKernels.cs`, `SilkLauncher.cs` — backward kernels/launchers.
+- `tests/Nivara.Tests/Gpu/SilkLlamaLoRATrainerParityTests.cs` — GPU-gated parity tests.
+- `samples/Nivara.Samples/LlamaForCausalLM.cs` — shared Llama-family model/loading; Qwen tokenizer unk fix.
 
-## 14. Silk counterpart (future, from #1283)
+## 8. Next session pick list
 
-LoRA on Silk is *not* a v1 deliverable: there is no Silk trainer for causal LMs yet, and a
-Silk LoRA path would reuse the same device trainer with frozen base weights plus adapter
-buffers. This section consolidates the Silk/causal-LM scoping that was previously a separate note
-so there is one source of truth.
+1. **#1418 hardening (recommended first):** run CPU smoke with new granular logs; run `ft-eval` before/after on Silk-produced adapter; collect real-checkpoint evidence; converge adapter format where needed; keep `IsParityReady=false` until evidence justifies flip.
+2. **#1420 report polish:** structured JSON/markdown report (base/adapted metrics, param counts, device, elapsed, memory/parity status, adapter path); SmolLM verification command path.
+3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, evaluator metric unit tests.
+4. **#1421 tests/docs/gates:** targeted tests, docs updates, DocsCoveragePins/citation/ADR checks if docs change; doc snippet gate when docs touched.
+5. **#1419 optional:** NivaraChat adapter consumption demo, additive only, no RAG regression.
+6. **G2 + PR:** branch-vs-plan review, docs gates, push/create PR with confirmation; no `docs/TODO.md` in final PR.
 
-**What exists today (Silk).** Trainers: `SilkDistilBertTrainer` (+ BF16 true, FP16),
-`SilkLayaHeadTrainer` (+ BF16 narrow), `SilkModernBertHeadTrainer`, `SilkTinyShakespeareTrainer`.
-Inference-only runners with no backward/Adam: `SilkSmolLMGpuRunner`, `SilkQwenGpuRunner`,
-`SilkMobileNetV2GpuRunner`, `SilkResNet18GpuRunner`. Precedent for a causal-LM-on-Silk
-trainer: `SilkTinyShakespeareTrainer` + `BatchedTransformer` (device forward/backward over a
-transformer block, Adam step, export back to CPU weights), with parity tests in
-`tests/Nivara.Tests/Gpu/SilkTinyShakespeareTrainerTests.cs`.
+## 9. Guardrails
 
-**Kernel inventory.** Available: `gemm_row4_*`, `col_sum`, `relu`/`relu_backward`,
-`gelu`/`gelu_backward`, `layer_norm`/`layer_norm_backward`, `rms_norm` (forward only),
-`silu`/`swiglu`, `causal_gqa_attention`, `causal_attention_backward_prep`,
-`attention_backward_dq`/`attention_backward_dkv`, `rotary`, `conv2d` +
-`conv2d_backward_{weight,input,bias}`, `embedding_*`, `softmax_cross_entropy_backward`,
-`adam_update`/`adam_update_bf16`. **Missing for causal LMs:** `rms_norm_backward`
-(Tier 1/2). Vision (Tier 3) additionally needs `batchnorm_backward`, `maxpool2d_backward`,
-`adaptive_avgpool2d_backward`.
-
-**CPU reference.** `LlamaForCausalLM<float,float>` (existing) via `GradientUtils.Grad()`.
-The device trainer must match it; tied embeddings mean the tokEmb buffer is shared with the
-LM head and gradients accumulate into the same buffer.
-
-**Tiers.**
-- Tier 1: `SilkSmolLMTrainer` (sealed, `IDisposable`) over the Llama family (RoPE, GQA,
-  SwiGLU, RMSNorm, tied embeddings); new `SilkSmolLMWeights.cs`, `rms_norm_backward` kernel
-  + launcher. Single-sequence steps first; batching deferred.
-- Tier 2: Qwen2.5-0.5B reusing Tier 1 with config differences (GQA with qkv bias, larger
-  vocab/hidden, different RoPE theta); thin subclass or shared trainer parameterized by
-  config + bias flag.
-- Tier 3: vision (MobileNetV2, ResNet-18) head-only first (freeze backbone, train
-  classifier head), mirroring `SilkModernBertHeadTrainer`; full backbone deferred.
-
-**Precision lanes.** Training f32 only (release constraint, consistent with `docs/SILK.md` §13
-and the #1274 text-classifier decision). Inference keeps existing lanes (BF16 widen for
-SmolLM/Qwen). Narrow (BF16 weights / F32 compute) training is out of scope unless #1149
-lands.
-
-**Parity gate** (mirror `SilkTinyShakespeareTrainerTests`): seeded tiny fixture (small
-hidden size, few layers, small vocab); forward logits within 1e-4; gradients within 1e-3
-(max-abs) for all parameter groups; one Adam step within 1e-2; checkpoint export → reload
-round trip; seeded weights (avoid the unseeded-baseline problem of the first Laya gate).
-Skip gracefully when no OpenCL device.
-
-**Non-obvious points.**
-- Tied embeddings: tokEmb buffer shared with the head projection; gradients accumulate.
-- RoPE is position-dependent: recompute cos/sin per sequence length, save for backward.
-- Single sequence per step (`hidden` is `[seqLen, hidden]`); batching deferred.
-- For causal LMs the trainer owns the cross-entropy loss internally (like
-  `SilkTinyShakespeareTrainer.Backward(targets, scale)`); head-only vision takes
-  caller-supplied upstream gradients.
-- No activation-level BF16 unless #1149 lands first.
-
-**Open decisions.** Shared `SilkCausalLmTrainer` vs. separate `SilkSmolLMTrainer`/
-`SilkQwenTrainer`; CPU AutoDiff as the sole parity reference for v1; primitives-first
-surface (no convenience `Train(...)` loop in v1, matching DistilBERT); vision head-only first;
-whether a `Conv2d`/`BatchNorm` AutoDiff module is needed in `Nivara.Samples` for a vision
-CPU parity reference (recommended, separate item).
-
-**Relation to LoRA.** A Silk LoRA path would build on Tier 1/2 above: frozen base weights
-plus adapter buffers, with the freeze mechanism from §3. It is not a v1 deliverable and the
-CPU LoRA path (§3-§10) remains the reference and the shipped demo.
+- No external FineTuning-repo paths/references in code, docs, issues, or commits.
+- No false "FT on iGPU" or release-parity claim until D2a evidence supports it.
+- Do not run full test suite unprompted; run targeted tests autonomously. Full suite requires confirmation and `Category!=Performance&Category!=ReleaseReadiness&Category!=Gpu`.
+- Do not push/create PR without explicit user confirmation.
+- Keep `docs/plan/LORA.md` as the handoff; do not reintroduce `docs/TODO.md`.

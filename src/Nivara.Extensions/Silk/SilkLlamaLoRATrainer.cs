@@ -735,9 +735,16 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
 
         return new LoraPair
         {
-            A = a, B = b, GradA = gradA, GradB = gradB,
-            MA = mA, VA = vA, MB = mB, VB = vB,
-            InFeatures = inFeatures, OutFeatures = outFeatures
+            A = a,
+            B = b,
+            GradA = gradA,
+            GradB = gradB,
+            MA = mA,
+            VA = vA,
+            MB = mB,
+            VB = vB,
+            InFeatures = inFeatures,
+            OutFeatures = outFeatures
         };
     }
 
