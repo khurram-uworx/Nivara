@@ -93,6 +93,6 @@ Generic (SmolLM) verification:
 - **Silk `ft-eval`:** `--mode ft-eval --silk` evaluates Qwen/SmolLM causal-LM LoRA adapters on Silk/OpenCL with the same base-vs-adapted report shape as CPU. Missing OpenCL/device errors clearly; no CPU fallback. (#1439, #1441)
 - **Silk `ft-lora` generation eval missing:** Silk ft-lora reports loss/val-loss but lacks integrated base-vs-adapted generation eval parity with CPU. (#1437)
 - **Adapter format bridge by design:** Core single-adapter (`nivara-lora-adapter-v1`) and SFT multi-adapter bundle (`nivara-lora-sft-adapters-v1`) are distinct formats; no bridge provided.
-- **Memory report contract:** Memory budget/footprint in reports is advisory/unspecified; contract needs clarification. (#1442)
+- **Memory report contract:** `--max-memory` and report fields `memoryBudgetBytes`/`memoryBudgetMode` record a requested advisory budget only (not measured runtime footprint, not a hard runtime cap). (#1442)
 - **CPU smoke evidence:** Post-merge CPU ft-lora smoke evidence with granular logs is tracked. (#1443)
 - **Docs role/handoff drift:** User guide vs handoff roles tracked for cleanup. (#1440, #1444)

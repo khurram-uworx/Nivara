@@ -113,7 +113,7 @@ Evidence artifacts: machine-readable JSON + short markdown summary (command, dev
 | #1437 | Generation base-vs-adapted eval in Silk `ft-lora` | Silk `ft-lora` reports loss/val-loss but lacks integrated generation eval parity with CPU path. |
 | #1440 (G1) | Stale plan handoff after main merge | This doc needed refresh for main-landed state and current issue list (this edit addresses the immediate staleness; keep maintained). |
 | #1441 (G2) | `ft-eval --silk` silently ignored | Resolved by #1439: `RunFtEval` checks `cli.Silk` and routes to Silk eval path; OpenCL unavailable errors clearly with no CPU fallback. |
-| #1442 (G3) | Report memory footprint contract unclear/approximate | Report memory fields are advisory/unspecified; decide measured-peak vs advisory-only contract and document/schema accordingly. |
+| #1442 (G3) | Report memory footprint contract unclear/approximate | Resolved: advisory-only clarified. `--max-memory`/`memoryBudgetBytes`/`memoryBudgetMode` are requested advisory budget only; not measured runtime footprint; not a hard runtime cap. Schema/docs/tests updated. |
 | #1443 (G4) | No recorded post-merge CPU ft-lora smoke evidence | CPU 0.5B backward can be slow; need small smoke run with granular logs and recorded outcome. |
 | #1444 (G5) | Role boundary between `docs/LORA.md` and `docs/plan/LORA.md` | User-facing doc vs handoff/active-gap tracker; reduce drift by making roles explicit and cross-linking. |
 
@@ -157,7 +157,7 @@ Evidence artifacts: machine-readable JSON + short markdown summary (command, dev
 4. **#1441 (G2) Guard `ft-eval --silk` silent CPU fallback** — resolved by #1439.
 5. **#1440 (G1) Keep this handoff current** — update when gaps close; avoid stale branch/status/pick-list drift.
 6. **#1444 (G5) Clarify doc roles** — `docs/LORA.md` stable user guide; `docs/plan/LORA.md` handoff/active-gap tracker.
-7. **#1442 (G3) Memory footprint report contract** — advisory-only vs measured peak; schema/docs/tests.
+7. **#1442 (G3) Memory footprint report contract** — done: advisory-only clarified (requested budget only; not measured runtime footprint; not a hard runtime cap).
 8. **#1443 (G4) CPU ft-lora smoke evidence** — small post-merge smoke with granular logs; record outcome.
 
 ## 10. Guardrails

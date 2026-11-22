@@ -85,9 +85,17 @@ public sealed class LoraSftRunReport
     [JsonPropertyName("parityStatus")]
     public string ParityStatus { get; set; } = "CPU/Silk parity confirmed by controlled synthetic GPU-gated tests.";
 
+    /// <summary>
+    /// Requested advisory memory budget in bytes, echoed from <c>--max-memory</c>.
+    /// This is not a measured runtime footprint and not a hard runtime cap.
+    /// </summary>
     [JsonPropertyName("memoryBudgetBytes")]
     public long? MemoryBudgetBytes { get; set; }
 
+    /// <summary>
+    /// Memory budget reporting mode: <c>advisory</c> when a budget was requested, otherwise <c>unspecified</c>.
+    /// The report does not include measured peak/actual memory footprint.
+    /// </summary>
     [JsonPropertyName("memoryBudgetMode")]
     public string MemoryBudgetMode { get; set; } = "unspecified"; // "advisory" | "unspecified"
 
@@ -182,10 +190,10 @@ public sealed class LoraSftRunReport
                 sb.AppendLine($"| {e.Epoch} | {(e.TrainLoss.HasValue ? e.TrainLoss.Value.ToString("F4") : "n/a")} | {e.ValLoss:F4} |");
         }
         sb.AppendLine();
-        sb.AppendLine("## Memory budget");
+        sb.AppendLine("## Memory budget (advisory, requested only)");
         sb.AppendLine();
-        sb.AppendLine($"- **Requested (bytes):** {(MemoryBudgetBytes.HasValue ? MemoryBudgetBytes.Value.ToString("N0") : "unspecified")}");
-        sb.AppendLine($"- **Mode:** {MemoryBudgetMode} (advisory only; not a hard runtime cap)");
+        sb.AppendLine($"- **Requested advisory budget (bytes):** {(MemoryBudgetBytes.HasValue ? MemoryBudgetBytes.Value.ToString("N0") : "unspecified")}");
+        sb.AppendLine($"- **Mode:** {MemoryBudgetMode} (requested budget only; not measured runtime footprint; not a hard runtime cap)");
         sb.AppendLine();
         sb.AppendLine("## Adapter");
         sb.AppendLine();

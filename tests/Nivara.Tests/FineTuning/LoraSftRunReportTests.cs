@@ -126,7 +126,9 @@ public sealed class LoraSftRunReportTests
         Assert.That(md, Does.Contain("## Parameters"));
         Assert.That(md, Does.Contain("Base params:"));
         Assert.That(md, Does.Contain("Adapter params:"));
-        Assert.That(md, Does.Contain("## Memory budget"));
+        Assert.That(md, Does.Contain("## Memory budget (advisory, requested only)"));
+        Assert.That(md, Does.Contain("Requested advisory budget (bytes):"));
+        Assert.That(md, Does.Contain("requested budget only; not measured runtime footprint; not a hard runtime cap"));
         Assert.That(md, Does.Contain("unspecified"));
         Assert.That(md, Does.Contain("## Eval"));
         Assert.That(md, Does.Contain("## Parity status"));
