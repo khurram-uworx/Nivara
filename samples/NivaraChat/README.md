@@ -593,6 +593,24 @@ in `docs/QWEN.md`.
 
 Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>` (`Read<float>` fused BF16→F32 at load), `Gpt2BpeTokenizer` (Qwen Split-regex pretokenization), `QwenChatClient<T>` (`IChatClient`), `QwenChatTemplate` (byte-exact renderer), `QwenToolCallParser` (`<tool_call>` → `FunctionCallContent`), `FunctionInvokingChatClient` (MEAI tool loop), `AIFunctionFactory` (`GetWeather`).
 
+### LoRA-adapted Qwen (FT showcase touchpoint)
+
+Optional, additive demo path: load a LoRA adapter bundle produced by `NivaraFineTuning --mode ft-lora` into the in-process Qwen (or SmolLM) model and prompt it. This is a fine-tuning showcase touchpoint — it does not change or replace any RAG mode.
+
+```bash
+# Train an adapter (CPU path shown; Silk path also supported by NivaraFineTuning)
+dotnet run --project samples/NivaraFineTuning -- --mode ft-lora --model-dir samples/data/qwen2.5-0.5b-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template qwen --epochs 1 --max-examples 4 --max-len 128 --rank 4 --alpha 8 --lr 2e-4 --out-dir /tmp/qwen-lora
+
+# Consume it in NivaraChat (CPU path; omit --silk)
+dotnet run --project samples/NivaraChat -- --qwen plain --text "Log time for ticket 123, 4 hours today" --adapter /tmp/qwen-lora/lora-adapter.json
+dotnet run --project samples/NivaraChat -- --smollm plain --text "Log time for ticket 123, 4 hours today" --adapter /tmp/qwen-lora/lora-adapter.json
+```
+
+Notes:
+- Adapter bundle format: `nivara-lora-sft-adapters-v1` (rank/alpha/targets/template/baseModelId metadata + base64 A/B matrices). Rank, alpha, and targets are read from the bundle header.
+- CPU path only: Silk Qwen/SmolLM inference sessions do not yet consume adapter bundles; passing `--adapter` with `--silk` errors clearly (no silent fallback).
+- RAG modes (`--rag*`) are unchanged.
+
 ## Nivara APIs demonstrated
 
 | API | Where | Purpose |

@@ -298,7 +298,7 @@ void PrintUsage()
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
     Console.WriteLine("  --tinyshakespeare    TinyShakespeare: train/serve a batched transformer as IChatClient (see --tinyshakespeare --help)");
     Console.WriteLine("  --smollm             SmolLM: serve the pretrained SmolLM-135M-Instruct causal LM as IChatClient (see --smollm --help)");
-    Console.WriteLine("  --qwen               Qwen: native function calling with Qwen2.5-0.5B-Instruct (see --qwen --help)");
+    Console.WriteLine("  --qwen               Qwen: native function calling with Qwen2.5-0.5B-Instruct (see --qwen --help; --adapter for LoRA demo)");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
@@ -341,5 +341,5 @@ void PrintUsage()
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --top-p --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
-    Console.WriteLine("  --smollm options:    --model-dir --text --max-new-tokens --help");
+    Console.WriteLine("  --smollm options:    --model-dir --text --max-new-tokens --adapter --help");
 }
