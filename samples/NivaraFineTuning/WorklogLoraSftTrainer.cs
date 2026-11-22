@@ -45,7 +45,9 @@ public sealed record WorklogLoraSftResult(
     int TrainableParams,
     int BaseParams,
     long ElapsedMs,
-    string? AdapterPath);
+    string? AdapterPath,
+    List<float> TrainLossPerEpoch = default!,
+    List<float> ValLossPerEpoch = default!);
 
 public static class WorklogLoraSftTrainer
 {
@@ -130,6 +132,8 @@ public static class WorklogLoraSftTrainer
         int bestEpoch = 0;
         int epochsWithoutImprovement = 0;
         List<(string Name, TModel[] Data, int[] Shape)>? bestSnapshot = null;
+        var trainLossPerEpoch = new List<float>();
+        var valLossPerEpoch = new List<float>();
 
         var sw = Stopwatch.StartNew();
         for (int epoch = 1; epoch <= options.Epochs; epoch++)
@@ -169,6 +173,8 @@ public static class WorklogLoraSftTrainer
 
             float trainAvg = steps > 0 ? epochLoss / steps : float.NaN;
             float valLoss = EvaluateLoss(model, lossFn, valTok);
+            trainLossPerEpoch.Add(trainAvg);
+            valLossPerEpoch.Add(valLoss);
             Console.WriteLine($"Epoch {epoch}: trainLoss={trainAvg:F4} valLoss={valLoss:F4}");
 
             bool improved = valLoss < bestValLoss - options.MinDelta;
@@ -205,7 +211,7 @@ public static class WorklogLoraSftTrainer
         }
 
         if (ownsModel) model.Dispose();
-        return new WorklogLoraSftResult(initialValLoss, bestValLoss, bestEpoch, trainTok.Count, valTok.Count, trainable, baseParams, sw.ElapsedMilliseconds, adapterPath);
+        return new WorklogLoraSftResult(initialValLoss, bestValLoss, bestEpoch, trainTok.Count, valTok.Count, trainable, baseParams, sw.ElapsedMilliseconds, adapterPath, trainLossPerEpoch, valLossPerEpoch);
     }
 
     static float EvaluateLoss<TModel, TWeight>(

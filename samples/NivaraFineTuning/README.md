@@ -435,7 +435,31 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-lora \
   --rank 8 --alpha 16 --targets q,v --seed 42 --out-dir out/worklog-lora
 ```
 
-Key options: `--template qwen|smollm`, `--rank`, `--alpha`, `--targets q,k,v,o,ffn`, `--patience` (early stopping, 0=disabled), `--min-delta`, `--grad-accum`, `--max-examples`, `--max-len`, `--seed`, `--log-every`.
+Key options: `--template qwen|smollm`, `--rank`, `--alpha`, `--targets q,k,v,o,ffn`, `--patience` (early stopping, 0=disabled), `--min-delta`, `--grad-accum`, `--max-examples`, `--max-len`, `--seed`, `--log-every`, `--max-memory` (advisory memory budget in bytes, reported in the artifact; not a hard cap), `--eval`/`--no-eval` (run base vs adapted eval during ft-lora; default on).
+
+### SmolLM verification path
+
+```bash
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-lora \
+  --model-dir samples/data/smollm-135m-instruct \
+  --train-data samples/data/worklog/train.jsonl \
+  --val-data samples/data/worklog/test.jsonl \
+  --template smollm --epochs 1 --max-examples 8 --max-len 128 \
+  --rank 4 --alpha 8 --targets q,v --seed 42 --out-dir out/worklog-lora-smollm
+```
+
+Follow with eval:
+
+```bash
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode ft-eval \
+  --model-dir samples/data/smollm-135m-instruct \
+  --test-data samples/data/worklog/test.jsonl \
+  --adapter out/worklog-lora-smollm/lora-adapter.json --template smollm
+```
+
+### Report artifacts
+
+Each `ft-lora`/`ft-eval` run writes `ft-lora-report.json`/`ft-eval-report.json` plus a markdown companion (`ft-lora-report.md`/`ft-eval-report.md`) with device, params, memory budget, loss curve, eval before/after, adapter hash, and honest parity status. Memory budget is advisory only.
 
 ### Evaluation
 

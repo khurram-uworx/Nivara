@@ -48,6 +48,8 @@ sealed record CliArgs
     public int GradAccum { get; init; } = 1;
     public bool Force { get; init; }
     public int MaxNewTokens { get; init; } = 128;
+    public long MaxMemory { get; init; }
+    public bool Eval { get; init; } = true;
     public double ValRatio { get; init; } = 0.0;
     public string BaseDate { get; init; } = "2026-07-19";
 
@@ -82,6 +84,8 @@ sealed record CliArgs
         int gradAccum = 1;
         bool force = false;
         int maxNewTokens = 128;
+        long maxMemory = 0;
+        bool eval = true;
         double valRatio = 0.0;
         string baseDate = "2026-07-19";
 
@@ -174,6 +178,15 @@ sealed record CliArgs
                 case "--max-new-tokens" when i + 1 < args.Length:
                     maxNewTokens = int.Parse(args[++i]);
                     break;
+                case "--max-memory" when i + 1 < args.Length:
+                    maxMemory = long.Parse(args[++i]);
+                    break;
+                case "--no-eval":
+                    eval = false;
+                    break;
+                case "--eval":
+                    eval = true;
+                    break;
                 case "--val-ratio" when i + 1 < args.Length:
                     valRatio = double.Parse(args[++i], CultureInfo.InvariantCulture);
                     break;
@@ -224,6 +237,8 @@ sealed record CliArgs
             GradAccum = gradAccum,
             Force = force,
             MaxNewTokens = maxNewTokens,
+            MaxMemory = maxMemory,
+            Eval = eval,
             ValRatio = valRatio,
             BaseDate = baseDate
         };
@@ -268,6 +283,8 @@ LoRA SFT options:
   --grad-accum    Gradient accumulation steps (default: 1)
   --force         Overwrite outputs
   --max-new-tokens  Max tokens to generate during ft-eval (default: 128)
+  --max-memory    Advisory memory budget in bytes reported in the report artifact (default: 0 = unspecified; not a hard cap)
+  --eval/--no-eval  Run base vs adapted eval during ft-lora and emit before/after metrics (default: --eval)
   --val-ratio     Validation split ratio for ft-generate (default: 0.0)
   --base-date     Base/today date for ft-generate relative dates (YYYY-MM-DD, default: 2026-07-19)
 
@@ -275,6 +292,7 @@ Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
   NivaraFineTuning --mode ft-generate --out-dir samples/data/worklog --seed 42 --max-examples 350 --force
   NivaraFineTuning --mode ft-lora --model-dir samples/data/qwen2.5-0.5b-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template qwen --epochs 1 --max-examples 32 --max-len 256 --out-dir out/worklog-lora
+   NivaraFineTuning --mode ft-lora --model-dir samples/data/smollm-135m-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template smollm --epochs 1 --max-examples 8 --max-len 128 --out-dir out/worklog-lora-smollm
 """);
     }
 }
@@ -920,6 +938,8 @@ static class Program
         Console.WriteLine($"Template: {cli.Template}, rank={cli.Rank}, alpha={cli.Alpha}, targets={cli.Targets}");
         Console.WriteLine($"Epochs={cli.Epochs}, lr={cli.Lr}, maxLen={cli.MaxLen}, maxExamples={cli.MaxExamples}, seed={cli.Seed}");
         Console.WriteLine($"Silk: {cli.Silk} (D2a parity path; CPU reference implemented, Silk trainer path pending in this branch if unavailable)");
+        Console.WriteLine($"MaxMemory (advisory): {(cli.MaxMemory > 0 ? cli.MaxMemory.ToString() + " bytes" : "unspecified")}");
+        Console.WriteLine($"Eval integration: {(cli.Eval ? "enabled" : "disabled")}");
 
         if (cli.Silk)
         {
@@ -967,6 +987,59 @@ static class Program
         if (result.AdapterPath is not null)
             Console.WriteLine($"Adapter: {result.AdapterPath}");
 
+        // Eval integration (base vs adapted) when enabled.
+        WorklogEvalMetrics? baseMetrics = null;
+        WorklogEvalMetrics? adaptedMetrics = null;
+        string? evalDeltas = null;
+        int evalExamples = 0;
+        if (cli.Eval)
+        {
+            try
+            {
+                var (_, tokenizer) = qwen
+                    ? LlamaLoader.LoadQwenConfigAndTokenizer(modelDir)
+                    : LlamaLoader.LoadSmolLMConfigAndTokenizer(modelDir);
+                var testRows = WorklogSftDataset.LoadJsonl(valData);
+                if (cli.MaxExamples > 0 && testRows.Count > cli.MaxExamples)
+                    testRows = testRows.Take(Math.Max(1, cli.MaxExamples / 4)).ToList();
+                var (model, _, _) = LlamaLoader.LoadModel<float, float>(modelDir, qwen: qwen, requiresGrad: false);
+                model.Eval();
+                var stopIds = GetStopTokenIds(tokenizer, cli.Template);
+                baseMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+                if (!string.IsNullOrWhiteSpace(result.AdapterPath))
+                {
+                    var adapters = model.AttachLora(ParseTargets(cli.Targets), cli.Rank, cli.Alpha);
+                    LoadCpuAdapterBundle(result.AdapterPath, adapters);
+                    adaptedMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+                    evalDeltas =
+                        $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
+                        $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
+                        $"hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}\n" +
+                        $"date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}\n" +
+                        $"convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}";
+                }
+                evalExamples = testRows.Count;
+                Console.WriteLine(baseMetrics.ToReport("Base (ft-lora eval)"));
+                if (adaptedMetrics is not null)
+                {
+                    Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted (ft-lora eval)"));
+                    Console.WriteLine(evalDeltas);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Eval integration skipped: {ex.Message}");
+            }
+        }
+
+        var lossCurve = new List<LoraSftEpochLoss>();
+        for (int i = 0; i < result.TrainLossPerEpoch.Count; i++)
+        {
+            float tl = i < result.TrainLossPerEpoch.Count ? result.TrainLossPerEpoch[i] : float.NaN;
+            float vl = i < result.ValLossPerEpoch.Count ? result.ValLossPerEpoch[i] : float.NaN;
+            lossCurve.Add(new LoraSftEpochLoss(i + 1, tl, vl));
+        }
+
         var cpuReport = new LoraSftRunReport
         {
             Mode = "ft-lora",
@@ -983,7 +1056,9 @@ static class Program
             TrainExamples = result.TrainExamples,
             ValExamples = result.ValExamples,
             BaseParams = result.BaseParams,
+            AdapterParams = result.TrainableParams,
             TrainableParams = result.TrainableParams,
+            TotalParams = result.BaseParams + result.TrainableParams,
             InitialValLoss = result.InitialValLoss,
             BestValLoss = result.BestValLoss,
             BestEpoch = result.BestEpoch,
@@ -991,10 +1066,21 @@ static class Program
             AdapterPath = result.AdapterPath,
             AdapterFormat = result.AdapterPath is null ? null : "nivara-lora-sft-adapters-v1",
             AdapterSha256 = LoraSftRunReport.Sha256File(result.AdapterPath),
+            MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
+            MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
+            LossCurve = lossCurve,
+            EvalRan = baseMetrics is not null,
+            EvalSplit = baseMetrics is not null ? "val" : null,
+            EvalExamples = evalExamples,
+            BaseMetrics = baseMetrics?.ToReport("Base").Trim(),
+            AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
+            EvalDeltas = evalDeltas,
         };
         var cpuReportPath = Path.Combine(outDir, "ft-lora-report.json");
         cpuReport.Save(cpuReportPath);
+        cpuReport.SaveMarkdown(Path.Combine(outDir, "ft-lora-report.md"));
         Console.WriteLine($"Report: {cpuReportPath}");
+        Console.WriteLine($"Report (md): {Path.Combine(outDir, "ft-lora-report.md")}");
         return 0;
     }
 
@@ -1060,6 +1146,7 @@ static class Program
             int bestEpoch = 0;
             string? adapterPath = null;
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            var silkValLossPerEpoch = new List<float>();
 
             for (int epoch = 1; epoch <= cli.Epochs; epoch++)
             {
@@ -1076,6 +1163,7 @@ static class Program
                 }
                 epochLoss /= order.Length;
                 float valLoss = EvaluateSilk(trainer, valExamples);
+                silkValLossPerEpoch.Add(valLoss);
                 Console.WriteLine($"epoch {epoch} train_loss={epochLoss:F4} val_loss={valLoss:F4}");
                 if (valLoss <= bestVal)
                 {
@@ -1095,6 +1183,16 @@ static class Program
             if (adapterPath is not null) Console.WriteLine($"Adapter: {adapterPath}");
             Console.WriteLine("NOTE: Silk D2a path is functional in this branch but not yet release-parity-certified; expanded parity/CI evidence is still required.");
 
+            int silkBaseParams = tensors.Values.Sum(v => v.Shape.Aggregate(1, (a, b) => a * b));
+            int silkTrainableParams = 0;
+            if (!string.IsNullOrWhiteSpace(adapterPath) && File.Exists(adapterPath))
+            {
+                try { silkTrainableParams = LoraSftAdapterBundle.Load(adapterPath).TrainableParams; } catch { }
+            }
+            var silkLossCurve = new List<LoraSftEpochLoss>();
+            for (int i = 0; i < silkValLossPerEpoch.Count; i++)
+                silkLossCurve.Add(new LoraSftEpochLoss(i + 1, float.NaN, silkValLossPerEpoch[i]));
+
             var silkReport = new LoraSftRunReport
             {
                 Mode = "ft-lora",
@@ -1110,6 +1208,10 @@ static class Program
                 Seed = cli.Seed,
                 TrainExamples = trainExamples.Count,
                 ValExamples = valExamples.Count,
+                BaseParams = silkBaseParams,
+                AdapterParams = silkTrainableParams,
+                TrainableParams = silkTrainableParams,
+                TotalParams = silkBaseParams + silkTrainableParams,
                 InitialValLoss = bestVal,
                 BestValLoss = bestVal,
                 BestEpoch = bestEpoch,
@@ -1117,10 +1219,16 @@ static class Program
                 AdapterPath = adapterPath,
                 AdapterFormat = adapterPath is null ? null : "nivara-lora-sft-adapters-v1",
                 AdapterSha256 = LoraSftRunReport.Sha256File(adapterPath),
+                MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
+                MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
+                LossCurve = silkLossCurve,
+                ParityStatus = "D2a in progress: synthetic + smoke parity evidence; not release-certified (IsParityReady=false).",
             };
             var silkReportPath = Path.Combine(outDir, "ft-lora-report.json");
             silkReport.Save(silkReportPath);
+            silkReport.SaveMarkdown(Path.Combine(outDir, "ft-lora-report.md"));
             Console.WriteLine($"Report: {silkReportPath}");
+            Console.WriteLine($"Report (md): {Path.Combine(outDir, "ft-lora-report.md")}");
             return 0;
         }
     }
@@ -1293,12 +1401,26 @@ static class Program
             AdapterPath = string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : cli.AdapterPath,
             AdapterFormat = string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : "nivara-lora-sft-adapters-v1",
             AdapterSha256 = LoraSftRunReport.Sha256File(string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : cli.AdapterPath),
+            MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
+            MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
+            EvalRan = true,
+            EvalSplit = "test",
+            EvalExamples = testRows.Count,
             BaseMetrics = baseMetrics.ToReport("Base").Trim(),
             AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
+            EvalDeltas = adaptedMetrics is null ? null :
+                $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
+                $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
+                $"hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}\n" +
+                $"date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}\n" +
+                $"convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}",
         };
         var evalReportPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.json");
+        var evalMdPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.md");
         try { evalReport.Save(evalReportPath); Console.WriteLine($"Report: {evalReportPath}"); }
         catch (Exception ex) { Console.WriteLine($"Report write skipped: {ex.Message}"); }
+        try { evalReport.SaveMarkdown(evalMdPath); Console.WriteLine($"Report (md): {evalMdPath}"); }
+        catch (Exception ex) { Console.WriteLine($"Report (md) write skipped: {ex.Message}"); }
         return 0;
     }
 
