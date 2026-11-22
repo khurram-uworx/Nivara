@@ -1306,43 +1306,33 @@ static class Program
 
     static void LoadCpuAdapterBundle(string path, IReadOnlyList<LoRALinear<float, float>> adapters)
     {
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var root = doc.RootElement;
-        if (root.TryGetProperty("format", out var formatProp) && formatProp.GetString() != "nivara-lora-sft-adapters-v1")
-            throw new InvalidOperationException("Unsupported adapter bundle format.");
-        if (!root.TryGetProperty("adapters", out var adaptersProp))
-            throw new InvalidOperationException("Adapter bundle missing 'adapters' array.");
-        var entries = adaptersProp.EnumerateArray().ToList();
-        if (entries.Count != adapters.Count)
-            throw new InvalidOperationException($"Adapter count mismatch: file has {entries.Count}, model has {adapters.Count}.");
-
-        // Best-effort metadata validation when present (older bundles may omit these).
-        if (root.TryGetProperty("rank", out var rankProp) && rankProp.TryGetInt32(out var fileRank))
-        {
-            if (adapters.Count > 0 && fileRank != adapters[0].Rank)
-                throw new InvalidOperationException($"Adapter rank mismatch: file rank={fileRank}, model rank={adapters[0].Rank}.");
-        }
+        var bundle = LoraSftAdapterBundle.Load(path);
+        if (bundle.Rank > 0 && adapters.Count > 0 && bundle.Rank != adapters[0].Rank)
+            throw new InvalidOperationException($"Adapter rank mismatch: file rank={bundle.Rank}, model rank={adapters[0].Rank}.");
+        if (adapters.Count > 0 && bundle.Alpha != 0f && MathF.Abs(bundle.Alpha - (float)adapters[0].Alpha) > 1e-6f)
+            throw new InvalidOperationException($"Adapter alpha mismatch: file alpha={bundle.Alpha}, model alpha={adapters[0].Alpha}.");
+        if (bundle.Adapters.Length != adapters.Count)
+            throw new InvalidOperationException($"Adapter count mismatch: file has {bundle.Adapters.Length}, model has {adapters.Count}.");
 
         for (int i = 0; i < adapters.Count; i++)
         {
-            var entry = entries[i];
-            if (entry.TryGetProperty("index", out var idxProp) && idxProp.TryGetInt32(out var idx) && idx != i)
-                throw new InvalidOperationException($"Adapter index mismatch at position {i}: file index={idx}.");
-            if (entry.TryGetProperty("aShape", out var aShapeProp))
+            var entry = bundle.Adapters[i];
+            if (entry.Index >= 0 && entry.Index != i)
+                throw new InvalidOperationException($"Adapter index mismatch at position {i}: file index={entry.Index}.");
+
+            if (entry.AShape.Length == 2)
             {
-                var shape = aShapeProp.EnumerateArray().Select(x => x.GetInt32()).ToArray();
-                if (shape.Length != 2 || shape[0] != adapters[i].A.Tensor.Shape[0] || shape[1] != adapters[i].A.Tensor.Shape[1])
+                if (entry.AShape[0] != adapters[i].A.Tensor.Shape[0] || entry.AShape[1] != adapters[i].A.Tensor.Shape[1])
                     throw new InvalidOperationException($"Adapter {i} A shape mismatch.");
             }
-            if (entry.TryGetProperty("bShape", out var bShapeProp))
+            if (entry.BShape.Length == 2)
             {
-                var shape = bShapeProp.EnumerateArray().Select(x => x.GetInt32()).ToArray();
-                if (shape.Length != 2 || shape[0] != adapters[i].B.Tensor.Shape[0] || shape[1] != adapters[i].B.Tensor.Shape[1])
+                if (entry.BShape[0] != adapters[i].B.Tensor.Shape[0] || entry.BShape[1] != adapters[i].B.Tensor.Shape[1])
                     throw new InvalidOperationException($"Adapter {i} B shape mismatch.");
             }
 
-            var aBytes = Convert.FromBase64String(entry.GetProperty("a").GetString()!);
-            var bBytes = Convert.FromBase64String(entry.GetProperty("b").GetString()!);
+            var aBytes = Convert.FromBase64String(entry.A);
+            var bBytes = Convert.FromBase64String(entry.B);
             var a = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(aBytes).ToArray();
             var b = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bBytes).ToArray();
             if (a.Length != adapters[i].A.Tensor.Length || b.Length != adapters[i].B.Tensor.Length)

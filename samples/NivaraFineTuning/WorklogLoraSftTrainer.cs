@@ -5,6 +5,7 @@ using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
+using Nivara.Silk;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.Samples;
@@ -280,24 +281,29 @@ public static class WorklogLoraSftTrainer
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        var payload = new
+        var entries = adapters.Select((a, i) => new LoraSftAdapterEntry
         {
-            format = "nivara-lora-sft-adapters-v1",
-            baseModelId = options.BaseModelId,
-            template = options.Template,
-            rank = options.Rank,
-            alpha = options.Alpha,
-            targets = options.Targets.ToString(),
-            trainableParams = adapters.Sum(a => a.A.Tensor.Length + a.B.Tensor.Length),
-            adapters = adapters.Select((a, i) => new
-            {
-                index = i,
-                aShape = a.A.Tensor.Shape.ToArray(),
-                bShape = a.B.Tensor.Shape.ToArray(),
-                a = Convert.ToBase64String(System.Runtime.InteropServices.MemoryMarshal.AsBytes(Copy(a.A.Tensor).AsSpan())),
-                b = Convert.ToBase64String(System.Runtime.InteropServices.MemoryMarshal.AsBytes(Copy(a.B.Tensor).AsSpan())),
-            }).ToArray()
+            Index = i,
+            // CPU trainer does not track per-adapter layer/target metadata; Silk
+            // populates these. Left as defaults (-1/"") to keep one shared schema.
+            Layer = -1,
+            Target = "",
+            AShape = a.A.Tensor.Shape.ToArray(),
+            BShape = a.B.Tensor.Shape.ToArray(),
+            A = Convert.ToBase64String(System.Runtime.InteropServices.MemoryMarshal.AsBytes(Copy(a.A.Tensor).AsSpan())),
+            B = Convert.ToBase64String(System.Runtime.InteropServices.MemoryMarshal.AsBytes(Copy(a.B.Tensor).AsSpan())),
+        }).ToArray();
+
+        var bundle = new LoraSftAdapterBundle
+        {
+            BaseModelId = options.BaseModelId,
+            Template = options.Template,
+            Rank = options.Rank,
+            Alpha = options.Alpha,
+            Targets = options.Targets.ToString(),
+            TrainableParams = adapters.Sum(a => a.A.Tensor.Length + a.B.Tensor.Length),
+            Adapters = entries,
         };
-        File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        LoraSftAdapterBundle.Save(path, bundle);
     }
 }

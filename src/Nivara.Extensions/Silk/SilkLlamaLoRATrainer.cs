@@ -196,52 +196,51 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
     {
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        var adapters = EnumerateLoraPairs().Select((p, i) => new
+        var entries = EnumerateLoraPairs().Select((p, i) => new LoraSftAdapterEntry
         {
-            index = i,
-            layer = p.LayerIndex,
-            target = p.Target,
-            aShape = new[] { p.Pair.InFeatures, options.Rank },
-            bShape = new[] { options.Rank, p.Pair.OutFeatures },
-            a = Convert.ToBase64String(MemoryMarshal.AsBytes(runtime.Download(p.Pair.A, p.Pair.InFeatures * options.Rank).AsSpan())),
-            b = Convert.ToBase64String(MemoryMarshal.AsBytes(runtime.Download(p.Pair.B, options.Rank * p.Pair.OutFeatures).AsSpan())),
+            Index = i,
+            Layer = p.LayerIndex,
+            Target = p.Target,
+            AShape = new[] { p.Pair.InFeatures, options.Rank },
+            BShape = new[] { options.Rank, p.Pair.OutFeatures },
+            A = Convert.ToBase64String(MemoryMarshal.AsBytes(runtime.Download(p.Pair.A, p.Pair.InFeatures * options.Rank).AsSpan())),
+            B = Convert.ToBase64String(MemoryMarshal.AsBytes(runtime.Download(p.Pair.B, options.Rank * p.Pair.OutFeatures).AsSpan())),
         }).ToArray();
 
-        var payload = new
+        var bundle = new LoraSftAdapterBundle
         {
-            format = "nivara-lora-sft-adapters-v1",
-            baseModelId,
-            template,
-            rank = options.Rank,
-            alpha = options.Alpha,
-            targets = options.Targets.ToString(),
-            adapters
+            BaseModelId = baseModelId,
+            Template = template,
+            Rank = options.Rank,
+            Alpha = options.Alpha,
+            Targets = options.Targets.ToString(),
+            TrainableParams = entries.Sum(e => e.AShape.Aggregate(1, (a, b) => a * b) + e.BShape.Aggregate(1, (a, b) => a * b)),
+            Adapters = entries,
         };
-        File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        LoraSftAdapterBundle.Save(path, bundle);
     }
 
     public void LoadAdapterBundle(string path)
     {
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var root = doc.RootElement;
-        if (root.GetProperty("format").GetString() != "nivara-lora-sft-adapters-v1")
-            throw new InvalidOperationException("Unsupported adapter bundle format.");
-        if (root.GetProperty("rank").GetInt32() != options.Rank)
+        var bundle = LoraSftAdapterBundle.Load(path);
+        if (bundle.Rank != options.Rank)
             throw new InvalidOperationException("Rank mismatch.");
+        if (bundle.Alpha != options.Alpha)
+            throw new InvalidOperationException("Alpha mismatch.");
 
         var adapters = EnumerateLoraPairs().ToList();
-        var entries = root.GetProperty("adapters").EnumerateArray().ToList();
-        if (entries.Count != adapters.Count)
-            throw new InvalidOperationException($"Adapter count mismatch: file has {entries.Count}, trainer has {adapters.Count}.");
+        var entries = bundle.Adapters;
+        if (entries.Length != adapters.Count)
+            throw new InvalidOperationException($"Adapter count mismatch: file has {entries.Length}, trainer has {adapters.Count}.");
 
         for (int i = 0; i < adapters.Count; i++)
         {
             var entry = entries[i];
             var pair = adapters[i].Pair;
-            var aBytes = Convert.FromBase64String(entry.GetProperty("a").GetString()!);
-            var bBytes = Convert.FromBase64String(entry.GetProperty("b").GetString()!);
+            var aBytes = Convert.FromBase64String(entry.A);
+            var bBytes = Convert.FromBase64String(entry.B);
             var a = MemoryMarshal.Cast<byte, float>(aBytes).ToArray();
             var b = MemoryMarshal.Cast<byte, float>(bBytes).ToArray();
             if (a.Length != pair.InFeatures * options.Rank || b.Length != options.Rank * pair.OutFeatures)
