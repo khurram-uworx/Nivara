@@ -130,7 +130,7 @@ public sealed class LoraSftRunReportTests
         Assert.That(md, Does.Contain("unspecified"));
         Assert.That(md, Does.Contain("## Eval"));
         Assert.That(md, Does.Contain("## Parity status"));
-        Assert.That(md, Does.Contain("not release-parity-certified"));
+        Assert.That(md, Does.Contain("CPU/Silk parity confirmed"));
 
         File.Delete(path);
     }

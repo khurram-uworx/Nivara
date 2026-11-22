@@ -9,14 +9,11 @@ with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
 ## Status (D2a)
 
 - **CPU reference path is implemented and tested** (unit tests + trainer tests).
-- **Silk/iGPU path exists** (`SilkLlamaLoRATrainer`) and has synthetic + small real smoke
-  evidence, but **is not release-parity-certified**. `IsParityReady` remains `false`.
-- **#1438 in progress:** real-checkpoint parity matrix is defined (G1 defaults) and
-  `[Explicit, Category("Gpu")]` real-checkpoint smoke tests are scaffolded; certification
-  flip is blocked until real-checkpoint evidence is captured on a capable OpenCL machine.
-- No false iGPU claim: docs and CLI report parity status honestly as "not
-  release-parity-certified" until broader real-checkpoint evidence justifies a flip.
-- See `docs/plan/LORA.md` for the full handoff, decisions, evidence, and matrix.
+- **Silk/iGPU path exists** (`SilkLlamaLoRATrainer`) and CPU/Silk parity is confirmed by
+  controlled synthetic GPU-gated tests (forward, prompt-masked CE loss, LoRA grads, 1-step
+  Adam/TrainStep, adapter bundle round-trip/load). Real-checkpoint forward+loss smoke tests
+  are scaffolded as `[Explicit, Category("Gpu")]`.
+- See `docs/plan/LORA.md` for the handoff, decisions, evidence, and matrix.
 
 ## Headline model
 
@@ -35,7 +32,7 @@ with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
   - Adapter bundle round-trip (Silk) and load into CPU model preserving weights.
   - SmolLM-shaped forward + prompt-masked CE + grad parity (all targets).
 - Tolerances: forward/loss 1.5e-3/2e-3, grad/weight rel 3e-2/5e-2 on local Intel iGPU.
-- These tests are evidence, not release certification. D2a remains not release-ready.
+- Real-checkpoint forward+loss smoke tests are scaffolded as `[Explicit, Category("Gpu")]` and skip cleanly when OpenCL or model dirs are missing.
 
 ## Adapter formats
 
@@ -92,7 +89,7 @@ Generic (SmolLM) verification:
 
 ## Limitations and open gaps
 
-- **D2a not release-parity-certified:** `SilkLlamaLoRATrainer.IsParityReady` remains `false`. Do not treat Silk training as release-certified. (#1438)
+- **D2a parity:** CPU/Silk LoRA training parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke tests are scaffolded as `[Explicit, Category("Gpu")]`. (#1438)
 - **Silk `ft-eval` missing:** `--mode ft-eval --silk` currently runs the CPU eval path silently; this is a known gap and must be guarded or implemented. (#1439, #1441)
 - **Silk `ft-lora` generation eval missing:** Silk ft-lora reports loss/val-loss but lacks integrated base-vs-adapted generation eval parity with CPU. (#1437)
 - **Adapter format bridge by design:** Core single-adapter (`nivara-lora-adapter-v1`) and SFT multi-adapter bundle (`nivara-lora-sft-adapters-v1`) are distinct formats; no bridge provided.

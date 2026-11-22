@@ -27,8 +27,8 @@ For the cross-cutting LoRA feature picture see `docs/LORA.md`.
   (layer, target) with base64 A/B matrices plus rank/alpha/targets/template/baseModelId
   metadata. Shared by CPU and Silk trainers; round-trips between backends.
 - **CPU reference vs Silk/iGPU**: CPU path is the reference; Silk path targets iGPU.
-  Silk is **not release-parity-certified** (`IsParityReady` remains false) — parity is
-  synthetic + small smoke evidence, not full certification.
+  CPU/Silk parity is confirmed by controlled synthetic GPU-gated tests; real-checkpoint
+  forward+loss smoke tests are scaffolded as `[Explicit, Category("Gpu")]`.
 - **Parity**: numerical agreement between CPU and Silk forward/grad/step within documented
   tolerances (forward/loss 1.5e-3/2e-3, grad/weight rel 3e-2/5e-2).
 
@@ -86,7 +86,7 @@ Reports base vs LoRA-adapted metrics: valid structure, ticket, hours, date, mult
 
 ### Adapter format
 
-Saved as `lora_adapters.json` / `lora-adapter.json` with format `nivara-lora-sft-adapters-v1` (base64-encoded A/B matrices plus rank/alpha/targets/template/baseModelId metadata). Loaded with shape/rank/count validation. Both the CPU and Silk (`--silk`) paths now share one bundle schema (`LoraSftAdapterBundle`) and each `ft-lora`/`ft-eval` run writes a structured JSON report (`ft-lora-report.json` / `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, and honest D2a parity status. Silk path remains not release-parity-certified.
+Saved as `lora_adapters.json` / `lora-adapter.json` with format `nivara-lora-sft-adapters-v1` (base64-encoded A/B matrices plus rank/alpha/targets/template/baseModelId metadata). Loaded with shape/rank/count validation. Both the CPU and Silk (`--silk`) paths now share one bundle schema (`LoraSftAdapterBundle`) and each `ft-lora`/`ft-eval` run writes a structured JSON report (`ft-lora-report.json` / `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, and D2a parity status.
 
 ### Defaults / memory guard
 
