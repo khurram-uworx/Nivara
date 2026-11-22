@@ -54,17 +54,34 @@ public static class WorklogLoraSftTrainer
     public static WorklogLoraSftResult TrainSmolLMFloatBf16(WorklogLoraSftOptions options)
         => Train<float, BFloat16>(options);
 
-    public static WorklogLoraSftResult Train<TModel, TWeight>(WorklogLoraSftOptions options)
+    public static WorklogLoraSftResult Train<TModel, TWeight>(
+        WorklogLoraSftOptions options,
+        LlamaForCausalLM<TModel, TWeight>? model = null,
+        Gpt2BpeTokenizer? tokenizer = null,
+        List<WorklogTokenizedExample>? trainTok = null,
+        List<WorklogTokenizedExample>? valTok = null)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (!Directory.Exists(options.ModelDir))
-            throw new DirectoryNotFoundException($"Model dir not found: {options.ModelDir}");
+        if (options.MaxLen < 2 || options.MaxLen > 2048)
+            throw new ArgumentOutOfRangeException(nameof(options.MaxLen), "MaxLen must be between 2 and 2048.");
+        if (options.GradientAccumulationSteps < 1)
+            throw new ArgumentOutOfRangeException(nameof(options.GradientAccumulationSteps), "GradientAccumulationSteps must be >= 1.");
+        if (options.Patience < 0)
+            throw new ArgumentOutOfRangeException(nameof(options.Patience), "Patience must be >= 0.");
 
-        Console.WriteLine($"Loading model from {options.ModelDir} ({typeof(TModel).Name}/{typeof(TWeight).Name})...");
-        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(options.ModelDir, requiresGrad: false);
-        model.Eval();
+        bool ownsModel = model is null;
+        if (ownsModel)
+        {
+            if (!Directory.Exists(options.ModelDir))
+                throw new DirectoryNotFoundException($"Model dir not found: {options.ModelDir}");
+            Console.WriteLine($"Loading model from {options.ModelDir} ({typeof(TModel).Name}/{typeof(TWeight).Name})...");
+            var loaded = LlamaLoader.LoadModel<TModel, TWeight>(options.ModelDir, requiresGrad: false);
+            model = loaded.Model;
+            tokenizer ??= loaded.Tokenizer;
+        }
+        model!.Eval();
 
         Console.WriteLine("Attaching LoRA adapters...");
         var adapters = model.AttachLora(options.Targets, options.Rank, TModel.CreateChecked(options.Alpha));
@@ -73,23 +90,21 @@ public static class WorklogLoraSftTrainer
         Console.WriteLine($"  Base params: {baseParams:N0}");
         Console.WriteLine($"  Adapters: {adapters.Count}, trainable params: {trainable:N0}");
 
-        if (options.MaxLen < 2 || options.MaxLen > 2048)
-            throw new ArgumentOutOfRangeException(nameof(options.MaxLen), "MaxLen must be between 2 and 2048.");
-        if (options.GradientAccumulationSteps < 1)
-            throw new ArgumentOutOfRangeException(nameof(options.GradientAccumulationSteps), "GradientAccumulationSteps must be >= 1.");
-        if (options.Patience < 0)
-            throw new ArgumentOutOfRangeException(nameof(options.Patience), "Patience must be >= 0.");
+        if (trainTok is null || valTok is null)
+        {
+            if (tokenizer is null)
+                throw new InvalidOperationException("Tokenizer is required when tokenized examples are not provided.");
+            var trainExamples = WorklogSftDataset.LoadJsonl(options.TrainPath);
+            var valExamples = WorklogSftDataset.LoadJsonl(options.ValPath);
+            if (options.MaxExamples > 0 && trainExamples.Count > options.MaxExamples)
+                trainExamples = trainExamples.Take(options.MaxExamples).ToList();
+            if (options.MaxValExamples > 0 && valExamples.Count > options.MaxValExamples)
+                valExamples = valExamples.Take(options.MaxValExamples).ToList();
 
-        var trainExamples = WorklogSftDataset.LoadJsonl(options.TrainPath);
-        var valExamples = WorklogSftDataset.LoadJsonl(options.ValPath);
-        if (options.MaxExamples > 0 && trainExamples.Count > options.MaxExamples)
-            trainExamples = trainExamples.Take(options.MaxExamples).ToList();
-        if (options.MaxValExamples > 0 && valExamples.Count > options.MaxValExamples)
-            valExamples = valExamples.Take(options.MaxValExamples).ToList();
-
-        Console.WriteLine($"Tokenizing train={trainExamples.Count}, val={valExamples.Count}, maxLen={options.MaxLen}, template={options.Template}...");
-        var trainTok = WorklogSftDataset.Tokenize(trainExamples, tokenizer, options.Template, options.MaxLen);
-        var valTok = WorklogSftDataset.Tokenize(valExamples, tokenizer, options.Template, options.MaxLen);
+            Console.WriteLine($"Tokenizing train={trainExamples.Count}, val={valExamples.Count}, maxLen={options.MaxLen}, template={options.Template}...");
+            trainTok = WorklogSftDataset.Tokenize(trainExamples, tokenizer, options.Template, options.MaxLen);
+            valTok = WorklogSftDataset.Tokenize(valExamples, tokenizer, options.Template, options.MaxLen);
+        }
         if (trainTok.Count == 0) throw new InvalidOperationException("No train examples after tokenization.");
         if (valTok.Count == 0) throw new InvalidOperationException("No val examples after tokenization.");
         Console.WriteLine($"  Tokenized train={trainTok.Count}, val={valTok.Count}");
@@ -185,7 +200,7 @@ public static class WorklogLoraSftTrainer
             Console.WriteLine($"Saved adapters to {adapterPath}");
         }
 
-        model.Dispose();
+        if (ownsModel) model.Dispose();
         return new WorklogLoraSftResult(initialValLoss, bestValLoss, bestEpoch, trainTok.Count, valTok.Count, trainable, baseParams, sw.ElapsedMilliseconds, adapterPath);
     }
 
