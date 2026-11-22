@@ -185,6 +185,16 @@ Produce a documented recommendation (in this file):
 
 - (empty — no issues created yet)
 
+## LoRA adapter consumption (#1419)
+
+`NivaraChat --smollm` accepts an optional `--adapter <path>` flag (CPU path) that loads a LoRA adapter bundle (`nivara-lora-sft-adapters-v1`, produced by `NivaraFineTuning --mode ft-lora`) into the in-process model before prompting. Rank, alpha, and targets are read from the bundle header. Silk path does not yet consume bundles (throws clearly, no silent fallback — tracked in #1429).
+
+```bash
+dotnet run --project samples/NivaraChat -- --smollm plain --text "..." --adapter /path/to/lora-adapter.json
+```
+
+`--merge-adapter <path>` loads the adapter, calls `MergeAllAdapters()` to bake the LoRA weights into the base projections, and then runs inference on the merged model.
+
 ## Synthetic weights (checkpoint-free)
 
 `smollm --synthetic-weights` (and `smollm benchmark --synthetic-weights`) fabricates

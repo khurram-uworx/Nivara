@@ -111,7 +111,7 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 2. **#1420 report polish:** structured JSON/markdown report (base/adapted metrics, param counts, device, elapsed, memory/parity status, adapter path); SmolLM verification command path.
 3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, evaluator metric unit tests.
 4. **#1421 tests/docs/gates:** targeted tests, docs updates, DocsCoveragePins/citation/ADR checks if docs change; doc snippet gate when docs touched.
-5. **#1419 optional:** NivaraChat adapter consumption demo, additive only, no RAG regression.
+5. **#1419 done:** NivaraChat adapter consumption demo (`--adapter <path>` on `--qwen`/`--smollm`, CPU path) — additive, no RAG regression. Silk inference does not yet consume bundles (explicit error).
 6. **G2 + PR:** branch-vs-plan review, docs gates, push/create PR with confirmation; no `docs/TODO.md` in final PR.
 
 **#1414 done on branch:** `docs/plan/LORA.md` reshaped for D1-D5/D2a; `docs/TODO.md` removed. Keep this file as handoff.

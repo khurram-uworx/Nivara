@@ -302,6 +302,16 @@ The Qwen inference path started from the pre-Qwen-fast baseline above (two gener
 
 A future `--qwen gguf` sub-mode would load the Qwen checkpoint as GGUF through a .NET GGUF library (candidates: LlamaSharp, TensorSharp — see the issue for the evaluation plan) and reuse the *same* `QwenChatTemplate` renderer, `QwenToolCallParser`, and tool-loop wiring — the format contract is model-loading-agnostic. Tracked in #390.
 
+### LoRA adapter consumption (#1419)
+
+`NivaraChat --qwen` accepts an optional `--adapter <path>` flag (CPU path) that loads a LoRA adapter bundle (`nivara-lora-sft-adapters-v1`, produced by `NivaraFineTuning --mode ft-lora`) into the in-process model before prompting. Rank, alpha, and targets are read from the bundle header. Silk path does not yet consume bundles (throws clearly, no silent fallback — tracked in #1429).
+
+```bash
+dotnet run --project samples/NivaraChat -- --qwen plain --text "..." --adapter /path/to/lora-adapter.json
+```
+
+`--merge-adapter <path>` (issue #1419 follow-up) loads the adapter, calls `MergeAllAdapters()` to bake the LoRA weights into the base projections, and then runs inference on the merged model — useful for deployment.
+
 ## GPU path
 
 Qwen now has a Silk runner (`--qwen ... --silk`: tools, plain, benchmark, distill). Native/default keeps BF16 weights on the device and widens in-register (BF16 storage / F32 compute, issue #1222); an explicit `--precision f32` runs the F32 device path. `distill` stays on the F32 device path (gradients). The first GPU backend is no longer available (removed in 1.5.0). The teacher pass in `distill` runs on either backend through one shared prompt-and-parse seam, so the two paths can only differ in the generation call. The GPU investigation for the Llama-family causal LM is in [docs/SMOLLM.md](SMOLLM.md); the CPU path remains the reference for large-kvLen and BF16 coverage.
