@@ -46,12 +46,12 @@ public sealed record WorklogLoraSftResult(
 public static class WorklogLoraSftTrainer
 {
     public static WorklogLoraSftResult TrainQwenFloatBf16(WorklogLoraSftOptions options)
-        => Train<float, BFloat16>(options, qwen: true);
+        => Train<float, BFloat16>(options);
 
     public static WorklogLoraSftResult TrainSmolLMFloatBf16(WorklogLoraSftOptions options)
-        => Train<float, BFloat16>(options, qwen: false);
+        => Train<float, BFloat16>(options);
 
-    public static WorklogLoraSftResult Train<TModel, TWeight>(WorklogLoraSftOptions options, bool qwen)
+    public static WorklogLoraSftResult Train<TModel, TWeight>(WorklogLoraSftOptions options)
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
@@ -59,8 +59,8 @@ public static class WorklogLoraSftTrainer
         if (!Directory.Exists(options.ModelDir))
             throw new DirectoryNotFoundException($"Model dir not found: {options.ModelDir}");
 
-        Console.WriteLine($"Loading model from {options.ModelDir} ({(qwen ? "qwen" : "smollm")}, {typeof(TModel).Name}/{typeof(TWeight).Name})...");
-        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(options.ModelDir, qwen: qwen, requiresGrad: false);
+        Console.WriteLine($"Loading model from {options.ModelDir} ({typeof(TModel).Name}/{typeof(TWeight).Name})...");
+        var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(options.ModelDir, requiresGrad: false);
         model.Eval();
 
         Console.WriteLine("Attaching LoRA adapters...");
