@@ -1105,7 +1105,7 @@ static class Program
     static int RunFtLoraSilk(CliArgs cli, string modelDir, string trainData, string valData, string outDir)
     {
         bool qwen = IsQwenModelDir(modelDir, cli.Template);
-        Console.WriteLine($"Silk D2a parity status: IsParityReady=false (initial forward/loss/grad parity tests pass on synthetic fixture; release readiness still requires expanded parity).");
+        Console.WriteLine("Silk D2a parity: CPU/Silk parity confirmed by controlled synthetic GPU-gated tests.");
 
         SilkRuntime runtime;
         try { runtime = new SilkRuntime(); }
@@ -1199,7 +1199,7 @@ static class Program
             Console.WriteLine($"Best val loss: {bestVal:F4} (epoch {bestEpoch})");
             Console.WriteLine($"Elapsed: {sw.ElapsedMilliseconds / 1000.0:F1}s");
             if (adapterPath is not null) Console.WriteLine($"Adapter: {adapterPath}");
-            Console.WriteLine("NOTE: Silk D2a path is functional in this branch but not yet release-parity-certified; expanded parity/CI evidence is still required.");
+            Console.WriteLine("NOTE: CPU/Silk parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke tests are scaffolded as Explicit GPU tests.");
 
             int silkBaseParams = tensors.Values.Sum(v => v.Shape.Aggregate(1, (a, b) => a * b));
             int silkTrainableParams = 0;
@@ -1240,7 +1240,7 @@ static class Program
                 MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
                 MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
                 LossCurve = silkLossCurve,
-                ParityStatus = "D2a in progress: synthetic + smoke parity evidence; not release-certified (IsParityReady=false).",
+                ParityStatus = "CPU/Silk parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke scaffolded.",
             };
             var silkReportPath = Path.Combine(outDir, "ft-lora-report.json");
             silkReport.Save(silkReportPath);
@@ -1359,11 +1359,13 @@ static class Program
         return 0;
     }
 
-    static int RunFtEval(CliArgs cli)
+    internal static int RunFtEval(CliArgs cli)
     {
         var modelDir = ResolveModelDir(cli.ModelDir);
         var testData = ResolveDataPath(cli.TestData, cli.DataDir, "test.jsonl");
         bool qwen = IsQwenModelDir(modelDir, cli.Template);
+        if (cli.Silk)
+            return RunFtEvalSilk(cli, modelDir, testData, qwen);
 
         Console.WriteLine("=== Nivara LoRA SFT Eval ===");
         Console.WriteLine($"Model: {modelDir}");
@@ -1444,6 +1446,175 @@ static class Program
         return 0;
     }
 
+
+    internal static int RunFtEvalSilk(CliArgs cli, string modelDir, string testData, bool qwen)
+    {
+        Console.WriteLine("=== Nivara LoRA SFT Eval (Silk) ===");
+        Console.WriteLine($"Model: {modelDir}");
+        Console.WriteLine($"Test:  {testData}");
+        Console.WriteLine($"Template: {cli.Template}, maxNewTokens={cli.MaxNewTokens}, maxExamples={cli.MaxExamples}");
+        if (!string.IsNullOrWhiteSpace(cli.AdapterPath))
+            Console.WriteLine($"Adapter: {cli.AdapterPath}");
+
+        var (_, tokenizer) = qwen
+            ? LlamaLoader.LoadQwenConfigAndTokenizer(modelDir)
+            : LlamaLoader.LoadSmolLMConfigAndTokenizer(modelDir);
+        var testRows = WorklogSftDataset.LoadJsonl(testData);
+        if (cli.MaxExamples > 0 && testRows.Count > cli.MaxExamples)
+            testRows = testRows.Take(cli.MaxExamples).ToList();
+
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        if (config.MaxPositionEmbeddings > 0 && cli.MaxLen > config.MaxPositionEmbeddings)
+            throw new ArgumentOutOfRangeException(nameof(cli.MaxLen), $"MaxLen {cli.MaxLen} exceeds model MaxPositionEmbeddings {config.MaxPositionEmbeddings}.");
+
+        Console.WriteLine("Loading model tensors...");
+        var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
+        var stopIds = WorklogSftGeneration.GetStopTokenIds(tokenizer, cli.Template);
+
+        if (qwen)
+        {
+            var silkConfig = new QwenSilkConfig
+            {
+                HiddenSize = config.HiddenSize,
+                NumHiddenLayers = config.NumHiddenLayers,
+                NumAttentionHeads = config.NumAttentionHeads,
+                NumKeyValueHeads = config.NumKeyValueHeads,
+                IntermediateSize = config.IntermediateSize,
+                VocabSize = config.VocabSize,
+                MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+                RmsNormEps = config.RmsNormEps,
+                RopeTheta = config.RopeTheta,
+            };
+
+            SilkQwenSession session;
+            try { session = SilkQwenSession.Open(silkConfig, tensors); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"ERROR: OpenCL/Silk unavailable: {ex.Message}");
+                Console.Error.WriteLine("No CPU fallback for --silk. Run without --silk for CPU reference.");
+                return 1;
+            }
+
+            using (session)
+            {
+                Console.WriteLine($"OpenCL device: {session.DeviceName}");
+                return RunFtEvalSilkWithSession(cli, tokenizer, testRows, stopIds, config.MaxPositionEmbeddings,
+                    session.DeviceName, "qwen2.5-0.5b-instruct",
+                    session.ForwardPrefillArgmax, session.ForwardCachedArgmax, session.ResetCache,
+                    session.LoadAdapterBundle);
+            }
+        }
+        else
+        {
+            var silkConfig = new SmolLMConfig
+            {
+                HiddenSize = config.HiddenSize,
+                NumHiddenLayers = config.NumHiddenLayers,
+                NumAttentionHeads = config.NumAttentionHeads,
+                NumKeyValueHeads = config.NumKeyValueHeads,
+                IntermediateSize = config.IntermediateSize,
+                VocabSize = config.VocabSize,
+                MaxPositionEmbeddings = config.MaxPositionEmbeddings,
+                RmsNormEps = config.RmsNormEps,
+                RopeTheta = config.RopeTheta,
+                AttentionBias = config.AttentionBias,
+            };
+
+            SilkSmolLMSession session;
+            try { session = SilkSmolLMSession.Open(silkConfig, tensors); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"ERROR: OpenCL/Silk unavailable: {ex.Message}");
+                Console.Error.WriteLine("No CPU fallback for --silk. Run without --silk for CPU reference.");
+                return 1;
+            }
+
+            using (session)
+            {
+                Console.WriteLine($"OpenCL device: {session.DeviceName}");
+                return RunFtEvalSilkWithSession(cli, tokenizer, testRows, stopIds, config.MaxPositionEmbeddings,
+                    session.DeviceName, "smollm",
+                    session.ForwardPrefillArgmax, session.ForwardCachedArgmax, session.ResetCache,
+                    session.LoadAdapterBundle);
+            }
+        }
+    }
+
+    internal static int RunFtEvalSilkWithSession(
+        CliArgs cli,
+        Gpt2BpeTokenizer tokenizer,
+        IReadOnlyList<WorklogSftExample> testRows,
+        int[] stopIds,
+        int maxSequenceLength,
+        string deviceName,
+        string modelName,
+        Func<int[], int> prefillArgmax,
+        Func<int, int, int> cachedArgmax,
+        Action resetCache,
+        Action<string> loadAdapterBundle)
+    {
+        int[] Generate(int[] promptIds) => WorklogSftGeneration.GenerateGreedyCached(
+            prefillArgmax, cachedArgmax, resetCache, promptIds, cli.MaxNewTokens, stopIds, maxSequenceLength);
+
+        var baseMetrics = WorklogSftGeneration.Evaluate(tokenizer, testRows, cli.Template, cli.MaxNewTokens, Generate, stopIds);
+        Console.WriteLine(baseMetrics.ToReport("Base"));
+
+        WorklogEvalMetrics? adaptedMetrics = null;
+        if (!string.IsNullOrWhiteSpace(cli.AdapterPath))
+        {
+            Console.WriteLine($"Loading adapter bundle: {cli.AdapterPath}");
+            loadAdapterBundle(cli.AdapterPath);
+            adaptedMetrics = WorklogSftGeneration.Evaluate(tokenizer, testRows, cli.Template, cli.MaxNewTokens, Generate, stopIds);
+            Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted"));
+            Console.WriteLine($"Delta valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}");
+        }
+
+        var evalReport = new LoraSftRunReport
+        {
+            Mode = "ft-eval",
+            Backend = "silk",
+            Device = deviceName,
+            Model = modelName,
+            Template = cli.Template,
+            Rank = cli.Rank,
+            Alpha = cli.Alpha,
+            Targets = cli.Targets,
+            MaxLen = cli.MaxLen,
+            MaxExamples = cli.MaxExamples,
+            Seed = cli.Seed,
+            TrainExamples = 0,
+            ValExamples = testRows.Count,
+            AdapterPath = string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : cli.AdapterPath,
+            AdapterFormat = string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : "nivara-lora-sft-adapters-v1",
+            AdapterSha256 = LoraSftRunReport.Sha256File(string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : cli.AdapterPath),
+            MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
+            MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
+            EvalRan = true,
+            EvalSplit = "test",
+            EvalExamples = testRows.Count,
+            BaseMetrics = baseMetrics.ToReport("Base").Trim(),
+            AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
+            BaseWorklogMetrics = baseMetrics,
+            AdaptedWorklogMetrics = adaptedMetrics,
+            EvalDeltas = adaptedMetrics is null ? null :
+                $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
+                $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
+                $"hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}\n" +
+                $"date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}\n" +
+                $"convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}",
+        };
+        var evalReportPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.json");
+        var evalMdPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.md");
+        try { evalReport.Save(evalReportPath); Console.WriteLine($"Report: {evalReportPath}"); }
+        catch (Exception ex) { Console.WriteLine($"Report write skipped: {ex.Message}"); }
+        try { evalReport.SaveMarkdown(evalMdPath); Console.WriteLine($"Report (md): {evalMdPath}"); }
+        catch (Exception ex) { Console.WriteLine($"Report (md) write skipped: {ex.Message}"); }
+        return 0;
+    }
 
     static void LoadCpuAdapterBundle(string path, IReadOnlyList<LoRALinear<float, float>> adapters)
     {

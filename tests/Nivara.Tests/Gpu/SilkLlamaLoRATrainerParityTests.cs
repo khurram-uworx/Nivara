@@ -1,3 +1,4 @@
+using Nivara.AI;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
@@ -466,5 +467,148 @@ public sealed class SilkLlamaLoRATrainerParityTests
 
         Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)));
         AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers, relTol: 5e-2f);
+    }
+
+    [Test]
+    [Explicit("Real-checkpoint parity smoke (small batch): forward+prompt-masked loss parity on real weights. CPU backward/step is too slow on 0.5B-class CPU AutoDiff; grad/step parity is covered by synthetic GPU tests. Requires OpenCL and local checkpoint.")]
+    public void RealCheckpoint_Qwen05B_LoraQv_ForwardLossParitySmoke()
+    {
+        var modelDir = ResolveModelDir("qwen2.5-0.5b-instruct");
+        if (modelDir is null)
+            Assert.Ignore("Qwen2.5-0.5B-Instruct checkpoint not found under samples/data; skipping real-checkpoint parity smoke.");
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping real-checkpoint Silk Llama LoRA parity smoke."); }
+
+        var (config, tensors) = LoadRealCheckpoint(modelDir);
+        int[] input = [1, 2, 3, 4];
+        int[] labels = [-100, -100, -100, 4];
+        const int rank = 4;
+        const float alpha = 8f;
+        const int maxSeqLen = 16;
+
+        var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
+        cpuModel.AttachLora(LlamaLoRATarget.Q | LlamaLoRATarget.V, rank, alpha);
+
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V, maxSeqLen);
+        CopyCpuLoraToSilk(cpuModel, silk, config.NumHiddenLayers);
+
+        var cpuLogits = cpuModel.Forward(input).Data.ToArray();
+        var silkLogits = silk.Forward(input);
+        Assert.That(ArgMaxLast(silkLogits, input.Length, config.VocabSize),
+            Is.EqualTo(ArgMaxLast(cpuLogits, input.Length, config.VocabSize)), "Qwen real-checkpoint last-token argmax mismatch");
+        Assert.That(MaxAbsDiff(cpuLogits, silkLogits) / (MaxAbs(cpuLogits) + 1f), Is.LessThanOrEqualTo(1.5e-3f),
+            "Qwen real-checkpoint forward rel diff exceeded tolerance");
+
+        float cpuLoss;
+        var lossFn = new CrossEntropyLoss<float>();
+        using (GradientUtils.Grad())
+        {
+            var logits = cpuModel.Forward(input);
+            var logits2d = logits;
+            if (logits2d.Shape.Length == 3) logits2d.Reshape(input.Length, config.VocabSize);
+            var loss = lossFn.Forward(logits2d, labels, ignoreIndex: -100);
+            cpuLoss = loss.Data.ToArray()[0];
+        }
+
+        silk.Forward(input);
+        var (silkLoss, valid) = silk.BackwardPromptMaskedCrossEntropy(labels, input.Length);
+        Assert.That(valid, Is.EqualTo(1));
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)),
+            $"Qwen real-checkpoint loss mismatch: cpu={cpuLoss}, silk={silkLoss}");
+
+        cpuModel.Dispose();
+    }
+
+    [Test]
+    [Explicit("Real-checkpoint parity smoke (small batch): forward+prompt-masked loss parity on real weights. CPU backward/step is too slow on 0.5B-class CPU AutoDiff; grad/step parity is covered by synthetic GPU tests. Requires OpenCL and local checkpoint.")]
+    public void RealCheckpoint_SmolLM135M_LoraQv_ForwardLossParitySmoke()
+    {
+        var modelDir = ResolveModelDir("smollm-135m", "smollm-135m-instruct");
+        if (modelDir is null)
+            Assert.Ignore("SmolLM-135M checkpoint not found under samples/data; skipping real-checkpoint parity smoke.");
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping real-checkpoint Silk Llama LoRA parity smoke."); }
+
+        var (config, tensors) = LoadRealCheckpoint(modelDir);
+        int[] input = [1, 2, 3, 4];
+        int[] labels = [-100, -100, -100, 4];
+        const int rank = 4;
+        const float alpha = 8f;
+        const int maxSeqLen = 16;
+
+        var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
+        cpuModel.AttachLora(LlamaLoRATarget.Q | LlamaLoRATarget.V, rank, alpha);
+
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V, maxSeqLen);
+        CopyCpuLoraToSilk(cpuModel, silk, config.NumHiddenLayers);
+
+        var cpuLogits = cpuModel.Forward(input).Data.ToArray();
+        var silkLogits = silk.Forward(input);
+        Assert.That(ArgMaxLast(silkLogits, input.Length, config.VocabSize),
+            Is.EqualTo(ArgMaxLast(cpuLogits, input.Length, config.VocabSize)), "SmolLM real-checkpoint last-token argmax mismatch");
+        Assert.That(MaxAbsDiff(cpuLogits, silkLogits) / (MaxAbs(cpuLogits) + 1f), Is.LessThanOrEqualTo(2e-3f),
+            "SmolLM real-checkpoint forward rel diff exceeded tolerance");
+
+        float cpuLoss;
+        var lossFn = new CrossEntropyLoss<float>();
+        using (GradientUtils.Grad())
+        {
+            var logits = cpuModel.Forward(input);
+            var logits2d = logits;
+            if (logits2d.Shape.Length == 3) logits2d.Reshape(input.Length, config.VocabSize);
+            var loss = lossFn.Forward(logits2d, labels, ignoreIndex: -100);
+            cpuLoss = loss.Data.ToArray()[0];
+        }
+
+        silk.Forward(input);
+        var (silkLoss, valid) = silk.BackwardPromptMaskedCrossEntropy(labels, input.Length);
+        Assert.That(valid, Is.EqualTo(1));
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)),
+            $"SmolLM real-checkpoint loss mismatch: cpu={cpuLoss}, silk={silkLoss}");
+
+        cpuModel.Dispose();
+    }
+
+    static string? ResolveModelDir(params string[] candidateNames)
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(TestContext.CurrentContext.TestDirectory, "..", "..", "..", "..", ".."));
+        foreach (var name in candidateNames)
+        {
+            var dir = Path.Combine(repoRoot, "samples", "data", name);
+            if (File.Exists(Path.Combine(dir, "model.safetensors")) &&
+                File.Exists(Path.Combine(dir, "config.json")))
+            {
+                return dir;
+            }
+        }
+        return null;
+    }
+
+    static (LlamaConfig Config, Dictionary<string, (float[] Data, int[] Shape)> Tensors) LoadRealCheckpoint(string modelDir)
+    {
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
+        return (config, tensors);
+    }
+
+    static SilkLlamaLoRATrainer CreateSilkTrainer(SilkRuntime runtime, LlamaConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int rank, float alpha, SilkLlamaLoRATarget targets, int maxSeqLen)
+    {
+        var silk = new SilkLlamaLoRATrainer(runtime, new SilkLlamaLoRATrainer.Options(
+            VocabSize: config.VocabSize,
+            HiddenDim: config.HiddenSize,
+            IntermediateDim: config.IntermediateSize,
+            NumLayers: config.NumHiddenLayers,
+            NumHeads: config.NumAttentionHeads,
+            NumKvHeads: config.NumKeyValueHeads,
+            MaxSeqLen: maxSeqLen,
+            RmsNormEps: config.RmsNormEps,
+            RopeTheta: config.RopeTheta,
+            Rank: rank,
+            Alpha: alpha,
+            Targets: targets));
+        silk.UploadBaseWeights(tensors);
+        return silk;
     }
 }

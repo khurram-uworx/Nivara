@@ -6,7 +6,7 @@ namespace NivaraFineTuning;
 
 /// <summary>
 /// Structured, machine-readable summary emitted by the ft-lora / ft-eval CLI paths.
-/// Honest about D2a parity status: never claims release certification.
+/// Includes D2a parity status.
 /// </summary>
 public sealed class LoraSftRunReport
 {
@@ -83,7 +83,7 @@ public sealed class LoraSftRunReport
     public string? AdapterSha256 { get; set; }
 
     [JsonPropertyName("parityStatus")]
-    public string ParityStatus { get; set; } = "D2a in progress: synthetic + smoke parity evidence; not release-certified.";
+    public string ParityStatus { get; set; } = "CPU/Silk parity confirmed by controlled synthetic GPU-gated tests.";
 
     [JsonPropertyName("memoryBudgetBytes")]
     public long? MemoryBudgetBytes { get; set; }
@@ -234,8 +234,6 @@ public sealed class LoraSftRunReport
         sb.AppendLine("## Parity status");
         sb.AppendLine();
         sb.AppendLine(ParityStatus);
-        sb.AppendLine();
-        sb.AppendLine("_Silk/iGPU path is not release-parity-certified unless explicitly stated._");
         return sb.ToString();
     }
 

@@ -19,4 +19,8 @@
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nivara.Tests" />
+  </ItemGroup>
+
 </Project>

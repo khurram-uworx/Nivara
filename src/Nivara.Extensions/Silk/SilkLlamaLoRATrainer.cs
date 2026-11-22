@@ -19,9 +19,10 @@ public enum SilkLlamaLoRATarget
 }
 
 /// <summary>
-/// D2a: Silk/OpenCL LoRA trainer for Llama-family causal LMs (Qwen2.5/SmolLM).
-/// Forward pass supports LoRA delta on configured targets. Backward/optimizer/parity
-/// are being completed for release readiness.
+/// Silk/OpenCL LoRA trainer for Llama-family causal LMs (Qwen2.5/SmolLM).
+/// Supports LoRA forward, prompt-masked cross-entropy backward, transformer
+/// backward, Adam update, and adapter bundle save/load. CPU/Silk parity is
+/// confirmed by controlled synthetic GPU-gated tests.
 /// </summary>
 public sealed class SilkLlamaLoRATrainer : IDisposable
 {
@@ -162,7 +163,6 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         AllocateLayerActivations();
     }
 
-    public bool IsParityReady => false;
     public int MaxSeqLen => options.MaxSeqLen;
 
     public void SetLoraWeights(int layerIndex, SilkLlamaLoRATarget target, float[] aData, float[] bData)

@@ -1,5 +1,7 @@
 # LoRA fine-tuning for small language models (SLM)
 
+> **Role:** Stable user-facing guide for the LoRA SLM fine-tuning showcase. For implementation handoff, active gaps, and issue tracking, see `docs/plan/LORA.md`.
+
 This document describes the LoRA SLM fine-tuning showcase: a generic, Llama-family
 causal-LM LoRA path that runs on CPU (reference) and Silk/OpenCL (iGPU, in progress),
 with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
@@ -7,11 +9,11 @@ with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
 ## Status (D2a)
 
 - **CPU reference path is implemented and tested** (unit tests + trainer tests).
-- **Silk/iGPU path exists** (`SilkLlamaLoRATrainer`) and has synthetic + small real smoke
-  evidence, but **is not release-parity-certified**. `IsParityReady` remains `false`.
-- No false iGPU claim: docs and CLI report parity status honestly as "not
-  release-parity-certified" until broader real-checkpoint evidence justifies a flip.
-- See `docs/plan/LORA.md` for the full handoff, decisions, and evidence.
+- **Silk/iGPU path exists** (`SilkLlamaLoRATrainer`) and CPU/Silk parity is confirmed by
+  controlled synthetic GPU-gated tests (forward, prompt-masked CE loss, LoRA grads, 1-step
+  Adam/TrainStep, adapter bundle round-trip/load). Real-checkpoint forward+loss smoke tests
+  are scaffolded as `[Explicit, Category("Gpu")]`.
+- See `docs/plan/LORA.md` for the handoff, decisions, evidence, and matrix.
 
 ## Headline model
 
@@ -30,7 +32,7 @@ with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
   - Adapter bundle round-trip (Silk) and load into CPU model preserving weights.
   - SmolLM-shaped forward + prompt-masked CE + grad parity (all targets).
 - Tolerances: forward/loss 1.5e-3/2e-3, grad/weight rel 3e-2/5e-2 on local Intel iGPU.
-- These tests are evidence, not release certification. D2a remains not release-ready.
+- Real-checkpoint forward+loss smoke tests are scaffolded as `[Explicit, Category("Gpu")]` and skip cleanly when OpenCL or model dirs are missing.
 
 ## Adapter formats
 
@@ -85,9 +87,12 @@ Generic (SmolLM) verification:
       --template smollm --epochs 1 --max-examples 8 --max-len 128 \
       --rank 4 --alpha 8 --targets q,v --seed 42 --out-dir out/worklog-lora-smollm
 
-## Limitations
+## Limitations and open gaps
 
-- Silk path is not release-parity-certified; `IsParityReady` remains `false`.
-- Adapter format bridge between core single-adapter and SFT bundle is not provided by design.
-- Silk inference does not consume adapter bundles yet.
-- Memory budget in reports is advisory only.
+- **D2a parity:** CPU/Silk LoRA training parity confirmed by controlled synthetic GPU-gated tests; real-checkpoint forward+loss smoke tests are scaffolded as `[Explicit, Category("Gpu")]`. (#1438)
+- **Silk `ft-eval`:** `--mode ft-eval --silk` evaluates Qwen/SmolLM causal-LM LoRA adapters on Silk/OpenCL with the same base-vs-adapted report shape as CPU. Missing OpenCL/device errors clearly; no CPU fallback. (#1439, #1441)
+- **Silk `ft-lora` generation eval missing:** Silk ft-lora reports loss/val-loss but lacks integrated base-vs-adapted generation eval parity with CPU. (#1437)
+- **Adapter format bridge by design:** Core single-adapter (`nivara-lora-adapter-v1`) and SFT multi-adapter bundle (`nivara-lora-sft-adapters-v1`) are distinct formats; no bridge provided.
+- **Memory report contract:** Memory budget/footprint in reports is advisory/unspecified; contract needs clarification. (#1442)
+- **CPU smoke evidence:** Post-merge CPU ft-lora smoke evidence with granular logs is tracked. (#1443)
+- **Docs role/handoff drift:** User guide vs handoff roles tracked for cleanup. (#1440, #1444)
