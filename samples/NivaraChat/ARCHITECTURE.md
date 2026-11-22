@@ -322,7 +322,7 @@ directly. The remaining gaps were closed by this work:
 - Top-p sampling — now available via `--top-p` (`TokenSampling`); top-k and beam search remain out of scope.
 - Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
   Nivara's scope. Llama/SmolLM/Qwen training is out of NivaraChat scope (issue #1273);
-  fine-tuning is homed in NivaraFineTuning (#1283, #1284, docs/plan/LORA.md), and
+  fine-tuning is homed in NivaraFineTuning (#1283, #1284; see `docs/LORA.md`), and
   NivaraChat consumes a tuned adapter via `--adapter <path>` on `--qwen`/`--smollm`
   (CPU path) as an FT showcase touchpoint (issue #1419). RAG modes are unaffected.
 - Silk training is now available for this sample's transformer (`--silk`), via
