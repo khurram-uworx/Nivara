@@ -1,6 +1,7 @@
 using Microsoft.ML.Tokenizers;
 using Nivara;
 using Nivara.AI;
+using System.Globalization;
 using System.Text.Json;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -44,6 +45,8 @@ sealed record CliArgs
     public int LogEvery { get; init; } = 10;
     public bool Force { get; init; }
     public int MaxNewTokens { get; init; } = 128;
+    public double ValRatio { get; init; } = 0.0;
+    public string BaseDate { get; init; } = "2026-07-19";
 
     public static CliArgs Parse(string[] args)
     {
@@ -73,6 +76,8 @@ sealed record CliArgs
         int logEvery = 10;
         bool force = false;
         int maxNewTokens = 128;
+        double valRatio = 0.0;
+        string baseDate = "2026-07-19";
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -154,6 +159,12 @@ sealed record CliArgs
                 case "--max-new-tokens" when i + 1 < args.Length:
                     maxNewTokens = int.Parse(args[++i]);
                     break;
+                case "--val-ratio" when i + 1 < args.Length:
+                    valRatio = double.Parse(args[++i], CultureInfo.InvariantCulture);
+                    break;
+                case "--base-date" when i + 1 < args.Length:
+                    baseDate = args[++i];
+                    break;
                 case "--help":
                 case "-h":
                     PrintHelp();
@@ -194,7 +205,9 @@ sealed record CliArgs
             Seed = seed,
             LogEvery = logEvery,
             Force = force,
-            MaxNewTokens = maxNewTokens
+            MaxNewTokens = maxNewTokens,
+            ValRatio = valRatio,
+            BaseDate = baseDate
         };
     }
 
@@ -234,6 +247,8 @@ LoRA SFT options:
   --log-every     Training log interval (default: 10)
   --force         Overwrite outputs
   --max-new-tokens  Max tokens to generate during ft-eval (default: 128)
+  --val-ratio     Validation split ratio for ft-generate (default: 0.0)
+  --base-date     Base/today date for ft-generate relative dates (YYYY-MM-DD, default: 2026-07-19)
 
 Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
@@ -1075,30 +1090,40 @@ static class Program
     {
         int total = cli.MaxExamples > 0 ? cli.MaxExamples : 450;
         int seed = cli.Seed;
+        double valRatio = cli.ValRatio;
+        var baseDate = DateTime.ParseExact(cli.BaseDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None);
         string outDir = string.IsNullOrWhiteSpace(cli.OutDir)
             ? Path.Combine(FindDefaultPath("data"), "worklog")
             : cli.OutDir;
         Directory.CreateDirectory(outDir);
 
         var trainPath = Path.Combine(outDir, "train.jsonl");
+        var valPath = Path.Combine(outDir, "val.jsonl");
         var testPath = Path.Combine(outDir, "test.jsonl");
         var metaPath = Path.Combine(outDir, "provenance.json");
 
-        if (!cli.Force && (File.Exists(trainPath) || File.Exists(testPath) || File.Exists(metaPath)))
+        bool willWriteVal = valRatio > 0;
+        if (!cli.Force && (File.Exists(trainPath) || File.Exists(testPath) || File.Exists(metaPath) || (willWriteVal && File.Exists(valPath))))
         {
             Console.Error.WriteLine($"ERROR: Output files already exist in '{outDir}'. Use --force to overwrite.");
             return 1;
         }
 
-        Console.WriteLine($"Generating deterministic worklog SFT dataset: total={total}, seed={seed}");
-        var all = WorklogSftDataset.GenerateSynthetic(total, seed);
-        var split = WorklogSftDataset.SplitDeterministic(all, seed, trainRatio: 0.78, valRatio: 0.0);
-        // SplitDeterministic with valRatio 0 puts remainder in test; adjust to match 350/100 style
+        Console.WriteLine($"Generating deterministic worklog SFT dataset: total={total}, seed={seed}, baseDate={cli.BaseDate}, valRatio={valRatio.ToString(CultureInfo.InvariantCulture)}");
+        var all = WorklogSftDataset.GenerateSynthetic(total, seed, baseDate);
+        var split = WorklogSftDataset.SplitDeterministic(all, seed, trainRatio: 0.78, valRatio: valRatio);
         var train = split.Train;
+        var val = split.Validation;
         var test = split.Test;
-        if (split.Validation.Count > 0) { test.AddRange(split.Validation); }
+        if (!willWriteVal && val.Count > 0)
+        {
+            test.AddRange(val);
+            val = [];
+        }
 
         WorklogSftDataset.SaveJsonl(trainPath, train, force: cli.Force);
+        if (willWriteVal)
+            WorklogSftDataset.SaveJsonl(valPath, val, force: cli.Force);
         WorklogSftDataset.SaveJsonl(testPath, test, force: cli.Force);
 
         var meta = new
@@ -1106,14 +1131,21 @@ static class Program
             format = "nivara-worklog-sft-v1",
             seed,
             total,
+            baseDate = cli.BaseDate,
+            trainRatio = 0.78,
+            valRatio,
             train = train.Count,
+            val = val.Count,
             test = test.Count,
             provenanceHash = split.ProvenanceHash,
+            fractionRule = "minutes/60 rounded to 2 decimals (MidpointRounding.AwayFromZero), invariant formatting",
             generator = "NivaraFineTuning.WorklogSftDataset.GenerateSynthetic"
         };
-        File.WriteAllText(metaPath, System.Text.Json.JsonSerializer.Serialize(meta, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
 
         Console.WriteLine($"Wrote {trainPath} ({train.Count})");
+        if (willWriteVal)
+            Console.WriteLine($"Wrote {valPath} ({val.Count})");
         Console.WriteLine($"Wrote {testPath} ({test.Count})");
         Console.WriteLine($"Provenance: {split.ProvenanceHash}");
         return 0;

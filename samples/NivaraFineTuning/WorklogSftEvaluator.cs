@@ -123,11 +123,12 @@ public static class WorklogSftEvaluator
                 continue;
             }
 
-            // Compare calls as sets by ticket+hours+date for multi-ticket; simple for single.
-            bool allTickets = expected.ExpectedCalls.All(ec => predCalls.Any(pc => string.Equals(pc.Ticket, ec.Ticket, StringComparison.OrdinalIgnoreCase)));
-            bool allHours = expected.ExpectedCalls.All(ec => predCalls.Any(pc => pc.Hours == ec.Hours));
-            bool allDates = expected.ExpectedCalls.All(ec => predCalls.Any(pc => string.Equals(pc.Date, ec.Date, StringComparison.OrdinalIgnoreCase)));
+            // Compare calls as tuple-multisets by ticket+hours+date.
             bool exactCount = predCalls.Count == expected.ExpectedCalls.Count;
+            bool allTickets = AllFieldMatches(expected.ExpectedCalls, predCalls, static (e, p) => string.Equals(p.Ticket, e.Ticket, StringComparison.OrdinalIgnoreCase));
+            bool allHours = AllFieldMatches(expected.ExpectedCalls, predCalls, static (e, p) => p.Hours == e.Hours);
+            bool allDates = AllFieldMatches(expected.ExpectedCalls, predCalls, static (e, p) => string.Equals(p.Date, e.Date, StringComparison.OrdinalIgnoreCase));
+            bool exactTuples = exactCount && AllTuplesMatch(expected.ExpectedCalls, predCalls);
 
             if (allTickets && exactCount) ticket++;
             if (allHours && exactCount) hours++;
@@ -136,7 +137,7 @@ public static class WorklogSftEvaluator
             if (expected.ExpectedCalls.Count > 1)
             {
                 multiTotal++;
-                if (exactCount && allTickets && allHours && allDates) multiOk++;
+                if (exactTuples) multiOk++;
             }
 
             var convention = DetectConvention(expected.UserText);
@@ -167,5 +168,35 @@ public static class WorklogSftEvaluator
             "half-day" => calls.All(c => c.Hours == 4m),
             _ => true
         };
+    }
+
+    static bool AllFieldMatches(
+        IReadOnlyList<WorklogLogTimeCall> expected,
+        IReadOnlyList<WorklogLogTimeCall> predicted,
+        Func<WorklogLogTimeCall, WorklogLogTimeCall, bool> match)
+    {
+        var remaining = predicted.ToList();
+        foreach (var e in expected)
+        {
+            int idx = remaining.FindIndex(p => match(e, p));
+            if (idx < 0) return false;
+            remaining.RemoveAt(idx);
+        }
+        return true;
+    }
+
+    static bool AllTuplesMatch(IReadOnlyList<WorklogLogTimeCall> expected, IReadOnlyList<WorklogLogTimeCall> predicted)
+    {
+        var remaining = predicted.ToList();
+        foreach (var e in expected)
+        {
+            int idx = remaining.FindIndex(p =>
+                string.Equals(p.Ticket, e.Ticket, StringComparison.OrdinalIgnoreCase)
+                && p.Hours == e.Hours
+                && string.Equals(p.Date, e.Date, StringComparison.OrdinalIgnoreCase));
+            if (idx < 0) return false;
+            remaining.RemoveAt(idx);
+        }
+        return remaining.Count == 0;
     }
 }

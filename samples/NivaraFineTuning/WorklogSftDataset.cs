@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -79,8 +80,14 @@ public static class WorklogSftDataset
         }
 
         int trainCount = Math.Max(1, (int)Math.Floor(examples.Count * trainRatio));
-        int valCount = Math.Max(1, (int)Math.Floor(examples.Count * valRatio));
-        if (trainCount + valCount >= examples.Count) valCount = Math.Max(0, examples.Count - trainCount - 1);
+        int valCount = valRatio <= 0 ? 0 : Math.Max(1, (int)Math.Floor(examples.Count * valRatio));
+        if (trainCount + valCount >= examples.Count)
+        {
+            if (valRatio <= 0)
+                trainCount = Math.Max(1, examples.Count - 1);
+            else
+                valCount = Math.Max(0, examples.Count - trainCount - 1);
+        }
 
         var train = new List<WorklogSftExample>(trainCount);
         var val = new List<WorklogSftExample>(valCount);
@@ -224,41 +231,35 @@ public static class WorklogSftDataset
         };
     }
 
-    public static List<WorklogSftExample> GenerateSynthetic(int count, int seed = 42)
+    public static List<WorklogSftExample> GenerateSynthetic(int count, int seed = 42, DateTime? baseDate = null)
     {
         if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
         var rng = new Random(seed);
+        var today = (baseDate ?? new DateTime(2026, 7, 19)).Date;
         var tickets = new[] { "POS-100", "AUTH-7", "API-314", "DB-42", "WEB-250", "MOB-8", "OPS-19", "INFRA-5", "UI-77", "PAY-12" };
-        var dates = Enumerable.Range(0, 30).Select(i => new DateTime(2026, 7, 1).AddDays(i).ToString("yyyy-MM-dd")).ToArray();
+        var explicitDates = Enumerable.Range(0, 30).Select(i => new DateTime(2026, 7, 1).AddDays(i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).ToArray();
         const string system = "You are a worklog assistant. When the user describes their work, call the LogTime tool with:\n- ticket: the ticket ID (e.g. POS-100, AUTH-7, API-314)\n- hours: decimal hours worked\n- date: ISO date string (use today's date if not specified)\n\nOffice hours rules:\n- The standard office day is 8 hours.\n- If the user says all day or full day, that means 8 hours.\n- Half day means 4 hours.\n- If the user mentions a specific duration, use that number.\n- Never interpret all day as 24 hours.\n\nIf the user mentions multiple tickets in one message, make a separate tool call for each ticket.\nIf the input is ambiguous, ask for clarification rather than guessing.";
 
         var examples = new List<WorklogSftExample>(count);
         for (int i = 0; i < count; i++)
         {
-            int kind = rng.Next(6); // 0:explicit,1:all-day,2:half-day,3:multi,4:clarification,5:explicit-decimal
-            string date = dates[rng.Next(dates.Length)];
+            int kind = rng.Next(7); // 0:explicit,1:all-day,2:half-day,3:multi,4:clarification,5:explicit-decimal,6:relative-date
+            string date = explicitDates[rng.Next(explicitDates.Length)];
             string ticket = tickets[rng.Next(tickets.Length)];
             string ticket2 = tickets[(Array.IndexOf(tickets, ticket) + 1 + rng.Next(tickets.Length - 1)) % tickets.Length];
 
             (string user, string assistant) = kind switch
             {
-                0 => ($"I worked {Pick(rng, "2 hours", "3 hours", "6 hours")} on {ticket} on {date}.",
-                      ToolCall(ticket, kind == 0 ? ParseHoursFromUser(rng, 2, 3, 6) : 2m, date)),
+                0 => ExplicitHoursExample(rng, ticket, date),
                 1 => ($"I spent {Pick(rng, "all day", "the full day")} on {ticket} on {date}.",
                       ToolCall(ticket, 8m, date)),
                 2 => ($"I did a {Pick(rng, "half day", "half-day")} on {ticket} on {date}.",
                       ToolCall(ticket, 4m, date)),
                 3 => MultiTicketExample(rng, ticket, ticket2, date),
                 4 => ClarificationExample(rng),
-                _ => DecimalExample(rng, ticket, date),
+                5 => DecimalExample(rng, ticket, date),
+                _ => RelativeDateExample(rng, ticket, today),
             };
-
-            // Fix kind 0 hours to match text
-            if (kind == 0)
-            {
-                decimal h = user.Contains("2 hours") ? 2m : user.Contains("3 hours") ? 3m : 6m;
-                assistant = ToolCall(ticket, h, date);
-            }
 
             examples.Add(new WorklogSftExample([
                 new WorklogMessage("system", system),
@@ -281,11 +282,67 @@ public static class WorklogSftDataset
             ToolCall(t1, 4m, date) + "\n" + ToolCall(t2, 4m, date));
     }
 
+    static (string user, string assistant) ExplicitHoursExample(Random rng, string ticket, string date)
+    {
+        var options = new (string text, decimal hours)[]
+        {
+            ("2 hours", 2m),
+            ("3 hours", 3m),
+            ("6 hours", 6m),
+            ("1 hour", 1m),
+            ("8 hours", 8m),
+        };
+        var pick = options[rng.Next(options.Length)];
+        var templates = new[]
+        {
+            $"I worked {pick.text} on {ticket} on {date}.",
+            $"Logged {pick.text} on {ticket} on {date}.",
+            $"Spent {pick.text} on {ticket} on {date}.",
+        };
+        return (Pick(rng, templates), ToolCall(ticket, pick.hours, date));
+    }
+
     static (string user, string assistant) DecimalExample(Random rng, string ticket, string date)
     {
-        var options = new (string text, decimal hours)[] { ("2.5 hours", 2.5m), ("1.5 hours", 1.5m), ("0.5 hours", 0.5m), ("20 minutes", 0.33m) };
+        var options = new (string text, decimal hours)[]
+        {
+            ("2.5 hours", 2.5m),
+            ("1.5 hours", 1.5m),
+            ("0.5 hours", 0.5m),
+            ("20 minutes", MinutesToDecimalHours(20)),
+            ("30 minutes", MinutesToDecimalHours(30)),
+            ("45 minutes", MinutesToDecimalHours(45)),
+        };
         var pick = options[rng.Next(options.Length)];
-        return ($"I spent {pick.text} on {ticket} on {date}.", ToolCall(ticket, pick.hours, date));
+        var templates = new[]
+        {
+            $"I spent {pick.text} on {ticket} on {date}.",
+            $"Worked {pick.text} on {ticket} on {date}.",
+        };
+        return (Pick(rng, templates), ToolCall(ticket, pick.hours, date));
+    }
+
+    static (string user, string assistant) RelativeDateExample(Random rng, string ticket, DateTime today)
+    {
+        var options = new (string phrase, int dayOffset)[]
+        {
+            ("Today", 0),
+            ("Yesterday", -1),
+            ("Tomorrow", 1),
+        };
+        var pick = options[rng.Next(options.Length)];
+        var resolvedDate = today.AddDays(pick.dayOffset).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        int pattern = rng.Next(4);
+        (string text, decimal hours) = pattern switch
+        {
+            0 => ($"{pick.phrase} I worked 2 hours on {ticket}.", 2m),
+            1 => ($"{pick.phrase} I spent all day on {ticket}.", 8m),
+            2 => ($"{pick.phrase} I did a half day on {ticket}.", 4m),
+            _ => ($"{pick.phrase} I spent 30 minutes on {ticket}.", MinutesToDecimalHours(30)),
+        };
+
+        return (text, ToolCall(ticket, hours, resolvedDate));
     }
 
     static (string user, string assistant) ClarificationExample(Random rng)
@@ -306,13 +363,19 @@ public static class WorklogSftDataset
         return (prompts[i], replies[i]);
     }
 
-    static decimal ParseHoursFromUser(Random rng, params int[] choices) => choices[rng.Next(choices.Length)];
+    public static decimal MinutesToDecimalHours(int minutes)
+    {
+        if (minutes < 0) throw new ArgumentOutOfRangeException(nameof(minutes));
+        return Math.Round(minutes / 60m, 2, MidpointRounding.AwayFromZero);
+    }
 
     static string Pick(Random rng, params string[] choices) => choices[rng.Next(choices.Length)];
 
     static string ToolCall(string ticket, decimal hours, string date)
     {
-        string hoursText = hours % 1 == 0 ? ((int)hours).ToString(System.Globalization.CultureInfo.InvariantCulture) : hours.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string hoursText = hours % 1 == 0
+            ? ((int)hours).ToString(CultureInfo.InvariantCulture)
+            : hours.ToString(CultureInfo.InvariantCulture);
         return $"<tool_call>\n<function>LogTime</function>\n<parameter=ticket>{ticket}</parameter>\n<parameter=hours>{hoursText}</parameter>\n<parameter=date>{date}</parameter>\n</tool_call>";
     }
 }
