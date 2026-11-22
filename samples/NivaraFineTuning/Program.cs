@@ -263,6 +263,9 @@ LoRA SFT options:
   --targets       q,v,k,o,ffn comma-separated (default: q,v)
   --seed          Random seed (default: 42)
   --log-every     Training log interval (default: 10)
+  --patience      Early stopping patience in epochs (default: 0 = disabled)
+  --min-delta     Minimum val-loss improvement to reset patience (default: 0)
+  --grad-accum    Gradient accumulation steps (default: 1)
   --force         Overwrite outputs
   --max-new-tokens  Max tokens to generate during ft-eval (default: 128)
   --val-ratio     Validation split ratio for ft-generate (default: 0.0)
