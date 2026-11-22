@@ -88,29 +88,26 @@ public sealed class WorklogLoraSftTrainerTests
     [Test]
     public void Train_DeterministicGivenSeed()
     {
-        Func<WorklogLoraSftResult> run = () =>
+        var model = TinyModel();
+        var trainTok = new List<WorklogTokenizedExample> { TinyExample(1), TinyExample(2) };
+        var valTok = new List<WorklogTokenizedExample> { TinyExample(3) };
+        var options = new WorklogLoraSftOptions
         {
-            var model = TinyModel();
-            var trainTok = new List<WorklogTokenizedExample> { TinyExample(1), TinyExample(2) };
-            var valTok = new List<WorklogTokenizedExample> { TinyExample(3) };
-            var options = new WorklogLoraSftOptions
-            {
-                ModelDir = Path.GetTempPath(),
-                TrainPath = "x",
-                ValPath = "y",
-                Rank = 2,
-                Alpha = 4f,
-                Epochs = 1,
-                MaxLen = 32,
-                Seed = 42,
-                LogEvery = 0,
-                SaveAdapter = false,
-            };
-            return WorklogLoraSftTrainer.Train(options, model, null, trainTok, valTok);
+            ModelDir = Path.GetTempPath(),
+            TrainPath = "x",
+            ValPath = "y",
+            Rank = 2,
+            Alpha = 4f,
+            Epochs = 1,
+            MaxLen = 32,
+            Seed = 42,
+            LogEvery = 0,
+            SaveAdapter = false,
         };
 
-        var r1 = run();
-        var r2 = run();
+        var r1 = WorklogLoraSftTrainer.Train(options, model, null, trainTok, valTok);
+        // Re-run on the same model instance; Train re-attaches fresh seeded adapters.
+        var r2 = WorklogLoraSftTrainer.Train(options, model, null, trainTok, valTok);
 
         Assert.That(r1.InitialValLoss, Is.EqualTo(r2.InitialValLoss));
         Assert.That(r1.BestValLoss, Is.EqualTo(r2.BestValLoss));

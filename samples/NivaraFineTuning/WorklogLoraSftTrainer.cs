@@ -85,6 +85,9 @@ public static class WorklogLoraSftTrainer
 
         Console.WriteLine("Attaching LoRA adapters...");
         var adapters = model.AttachLora(options.Targets, options.Rank, TModel.CreateChecked(options.Alpha));
+        // Seed adapter A init for reproducible training given options.Seed.
+        var seededInit = new Nivara.AutoDiff.Nn.Initializers.KaimingUniformInitializer<TModel>(options.Seed);
+        foreach (var adapter in adapters) seededInit.Initialize(adapter.A);
         int trainable = adapters.Sum(a => a.A.Tensor.Length + a.B.Tensor.Length);
         int baseParams = model.GetParameters().Values.Sum(p => p.Tensor.Length);
         Console.WriteLine($"  Base params: {baseParams:N0}");
