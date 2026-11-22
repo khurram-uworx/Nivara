@@ -1359,7 +1359,7 @@ static class Program
         return 0;
     }
 
-    static int RunFtEval(CliArgs cli)
+    internal static int RunFtEval(CliArgs cli)
     {
         var modelDir = ResolveModelDir(cli.ModelDir);
         var testData = ResolveDataPath(cli.TestData, cli.DataDir, "test.jsonl");
@@ -1447,7 +1447,7 @@ static class Program
     }
 
 
-    static int RunFtEvalSilk(CliArgs cli, string modelDir, string testData, bool qwen)
+    internal static int RunFtEvalSilk(CliArgs cli, string modelDir, string testData, bool qwen)
     {
         Console.WriteLine("=== Nivara LoRA SFT Eval (Silk) ===");
         Console.WriteLine($"Model: {modelDir}");
@@ -1540,7 +1540,7 @@ static class Program
         }
     }
 
-    static int RunFtEvalSilkWithSession(
+    internal static int RunFtEvalSilkWithSession(
         CliArgs cli,
         Gpt2BpeTokenizer tokenizer,
         IReadOnlyList<WorklogSftExample> testRows,

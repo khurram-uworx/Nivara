@@ -141,4 +141,84 @@ public sealed class LoraSftRunReportTests
         Assert.That(LoraSftRunReport.Sha256File(null), Is.Null);
         Assert.That(LoraSftRunReport.Sha256File("does-not-exist.json"), Is.Null);
     }
+
+    [Test]
+    public void Save_SilkFtEvalReport_RoundTripsBackendDeviceAndMetrics()
+    {
+        var report = new LoraSftRunReport
+        {
+            Mode = "ft-eval",
+            Backend = "silk",
+            Device = "Intel(R) Graphics",
+            Model = "qwen2.5-0.5b-instruct",
+            Template = "qwen",
+            Rank = 4,
+            Alpha = 8f,
+            Targets = "q,v",
+            MaxLen = 128,
+            MaxExamples = 4,
+            Seed = 42,
+            TrainExamples = 0,
+            ValExamples = 4,
+            EvalRan = true,
+            EvalSplit = "test",
+            EvalExamples = 4,
+            BaseMetrics = "Base\ntotal=4",
+            AdaptedMetrics = "LoRA-adapted\ntotal=4",
+            EvalDeltas = "ticket: +25.0%",
+            BaseWorklogMetrics = new WorklogEvalMetrics(4, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0),
+            AdaptedWorklogMetrics = new WorklogEvalMetrics(4, 4, 3, 3, 3, 0, 0, 0, 0, 0, 0),
+            AdapterPath = "out/lora-adapter.json",
+            AdapterFormat = "nivara-lora-sft-adapters-v1",
+            AdapterSha256 = "deadbeef",
+        };
+
+        var path = Path.Combine(Path.GetTempPath(), $"lora-silk-eval-{Guid.NewGuid():N}.json");
+        try
+        {
+            report.Save(path);
+            var loaded = JsonSerializer.Deserialize<LoraSftRunReport>(File.ReadAllText(path), LoraSftRunReport.SerializerOptions);
+
+            Assert.That(loaded, Is.Not.Null);
+            Assert.That(loaded!.Mode, Is.EqualTo("ft-eval"));
+            Assert.That(loaded.Backend, Is.EqualTo("silk"));
+            Assert.That(loaded.Device, Is.EqualTo("Intel(R) Graphics"));
+            Assert.That(loaded.EvalRan, Is.True);
+            Assert.That(loaded.EvalSplit, Is.EqualTo("test"));
+            Assert.That(loaded.BaseWorklogMetrics, Is.Not.Null);
+            Assert.That(loaded.AdaptedWorklogMetrics, Is.Not.Null);
+            Assert.That(loaded.EvalDeltas, Does.Contain("ticket"));
+            Assert.That(loaded.AdapterFormat, Is.EqualTo("nivara-lora-sft-adapters-v1"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void SaveMarkdown_SilkFtEvalReport_ContainsBackendDeviceAndEval()
+    {
+        var report = new LoraSftRunReport
+        {
+            Mode = "ft-eval",
+            Backend = "silk",
+            Device = "Intel(R) Graphics",
+            Model = "qwen2.5-0.5b-instruct",
+            Template = "qwen",
+            EvalRan = true,
+            EvalSplit = "test",
+            EvalExamples = 4,
+            BaseMetrics = "Base\ntotal=4",
+            AdaptedMetrics = "LoRA-adapted\ntotal=4",
+        };
+
+        var md = report.ToMarkdown();
+
+        Assert.That(md, Does.Contain("**Backend:** silk"));
+        Assert.That(md, Does.Contain("**Device:** Intel(R) Graphics"));
+        Assert.That(md, Does.Contain("## Eval"));
+        Assert.That(md, Does.Contain("Base metrics"));
+        Assert.That(md, Does.Contain("Adapted metrics"));
+    }
 }
