@@ -18,9 +18,22 @@ public static class WorklogSftGeneration
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         ArgumentNullException.ThrowIfNull(model);
+        stopIds ??= GetStopTokenIds(tokenizer, template);
+        return Evaluate(tokenizer, examples, template, maxNewTokens, promptIds => GenerateGreedy(model, promptIds, maxNewTokens, stopIds), stopIds);
+    }
+
+    public static WorklogEvalMetrics Evaluate(
+        Gpt2BpeTokenizer tokenizer,
+        IReadOnlyList<WorklogSftExample> examples,
+        string template,
+        int maxNewTokens,
+        Func<int[], int[]> generateGreedy,
+        int[]? stopIds = null)
+    {
         ArgumentNullException.ThrowIfNull(tokenizer);
         ArgumentNullException.ThrowIfNull(examples);
         ArgumentException.ThrowIfNullOrWhiteSpace(template);
+        ArgumentNullException.ThrowIfNull(generateGreedy);
         if (maxNewTokens <= 0) throw new ArgumentOutOfRangeException(nameof(maxNewTokens), "maxNewTokens must be > 0.");
 
         stopIds ??= GetStopTokenIds(tokenizer, template);
@@ -31,7 +44,7 @@ public static class WorklogSftGeneration
                 .ToList();
             var promptText = RenderEvalPrompt(promptMessages, template);
             var promptIds = tokenizer.Encode(promptText).ToArray();
-            var genIds = GenerateGreedy(model, promptIds, maxNewTokens, stopIds);
+            var genIds = generateGreedy(promptIds);
             return tokenizer.Decode(genIds);
         });
     }
@@ -62,6 +75,40 @@ public static class WorklogSftGeneration
             Array.Copy(promptIds, seq, promptIds.Length);
             for (int i = 0; i < gen.Count; i++) seq[promptIds.Length + i] = gen[i];
             logits = model.Forward(seq);
+        }
+        return gen.ToArray();
+    }
+
+    public static int[] GenerateGreedyCached(
+        Func<int[], int> prefillArgmax,
+        Func<int, int, int> cachedArgmax,
+        Action resetCache,
+        int[] promptIds,
+        int maxNewTokens,
+        int[] stopIds,
+        int maxSequenceLength = int.MaxValue)
+    {
+        ArgumentNullException.ThrowIfNull(prefillArgmax);
+        ArgumentNullException.ThrowIfNull(cachedArgmax);
+        ArgumentNullException.ThrowIfNull(resetCache);
+        ArgumentNullException.ThrowIfNull(promptIds);
+        ArgumentNullException.ThrowIfNull(stopIds);
+        if (maxNewTokens <= 0) return [];
+
+        var stop = new HashSet<int>(stopIds);
+        var gen = new List<int>(maxNewTokens);
+        resetCache();
+        if (promptIds.Length == 0 || promptIds.Length >= maxSequenceLength) return [];
+        int first = prefillArgmax(promptIds);
+        if (stop.Contains(first)) return [];
+        gen.Add(first);
+        for (int t = 1; t < maxNewTokens; t++)
+        {
+            int pos = promptIds.Length + gen.Count - 1;
+            if (pos + 1 > maxSequenceLength) break;
+            int next = cachedArgmax(gen[^1], pos);
+            if (stop.Contains(next)) break;
+            gen.Add(next);
         }
         return gen.ToArray();
     }
