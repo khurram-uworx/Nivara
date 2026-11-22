@@ -283,7 +283,7 @@ LoRA SFT options:
   --grad-accum    Gradient accumulation steps (default: 1)
   --force         Overwrite outputs
   --max-new-tokens  Max tokens to generate during ft-eval (default: 128)
-  --max-memory    Advisory memory budget in bytes reported in the report artifact (default: 0 = unspecified; not a hard cap)
+  --max-memory    Requested advisory memory budget in bytes reported in the run report (default: 0 = unspecified; not measured runtime footprint; not a hard runtime cap)
   --eval/--no-eval  Run base vs adapted eval during ft-lora and emit before/after metrics (default: --eval)
   --val-ratio     Validation split ratio for ft-generate (default: 0.0)
   --base-date     Base/today date for ft-generate relative dates (YYYY-MM-DD, default: 2026-07-19)
@@ -938,7 +938,7 @@ static class Program
         Console.WriteLine($"Template: {cli.Template}, rank={cli.Rank}, alpha={cli.Alpha}, targets={cli.Targets}");
         Console.WriteLine($"Epochs={cli.Epochs}, lr={cli.Lr}, maxLen={cli.MaxLen}, maxExamples={cli.MaxExamples}, seed={cli.Seed}");
         Console.WriteLine($"Silk: {cli.Silk} (D2a parity path; CPU reference implemented, Silk trainer path pending in this branch if unavailable)");
-        Console.WriteLine($"MaxMemory (advisory): {(cli.MaxMemory > 0 ? cli.MaxMemory.ToString() + " bytes" : "unspecified")}");
+        Console.WriteLine($"MaxMemory (requested advisory budget, not measured): {(cli.MaxMemory > 0 ? cli.MaxMemory.ToString() + " bytes" : "unspecified")}");
         Console.WriteLine($"Eval integration: {(cli.Eval ? "enabled" : "disabled")}");
 
         if (cli.Silk)
