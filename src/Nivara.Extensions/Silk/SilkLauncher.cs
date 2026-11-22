@@ -513,7 +513,7 @@ internal static class SilkLauncher
 
     public static void SoftmaxCrossEntropyBackward(
         SilkRuntime runtime, nint logits, nint labels, nint dLogits,
-        int n, int numClasses, float scale)
+        int n, int numClasses, float scale, int ignoreIndex = -1)
     {
         if (n <= 0) throw new ArgumentOutOfRangeException(nameof(n));
         if (numClasses <= 0) throw new ArgumentOutOfRangeException(nameof(numClasses));
@@ -523,10 +523,20 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.SoftmaxCrossEntropyBackward, 3, (uint)n);
         runtime.SetUInt32(SilkKernels.SoftmaxCrossEntropyBackward, 4, (uint)numClasses);
         runtime.SetFloat32(SilkKernels.SoftmaxCrossEntropyBackward, 5, scale);
+        runtime.SetInt32(SilkKernels.SoftmaxCrossEntropyBackward, 6, ignoreIndex);
         runtime.Run(
             SilkKernels.SoftmaxCrossEntropyBackward,
             [(nuint)SilkKernels.LinearGlobal(n)],
             [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void Scale(SilkRuntime runtime, nint x, nint y, float s, int n)
+    {
+        runtime.SetBuffer(SilkKernels.Scale, 0, x);
+        runtime.SetBuffer(SilkKernels.Scale, 1, y);
+        runtime.SetFloat32(SilkKernels.Scale, 2, s);
+        runtime.SetUInt32(SilkKernels.Scale, 3, (uint)n);
+        Linear(runtime, SilkKernels.Scale, n);
     }
 
     static void GemmGrid(SilkRuntime runtime, string kernel, int aRows, int bCols)

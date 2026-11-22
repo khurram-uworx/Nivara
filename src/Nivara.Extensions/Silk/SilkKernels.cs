@@ -197,6 +197,7 @@ internal static class SilkKernels
     public const string AdamUpdate = "adam_update";
     public const string AdamUpdateBf16 = "adam_update_bf16";
     public const string SoftmaxCrossEntropyBackward = "softmax_cross_entropy_backward";
+    public const string Scale = "scale";
 
     // Rag-learn fused late-fusion helpers (#915 follow-up).
     public const string FusionForward = "fusion_forward";
@@ -224,6 +225,7 @@ internal static class SilkKernels
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
         GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, RmsNormBackward, ColSum, ColSumBf16Act, Fill,
         SoftmaxCrossEntropyBackward,
+        Scale,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
         AttentionBackwardPrep, CausalAttentionBackwardPrep, AttentionBackwardDq, AttentionBackwardDkv,
@@ -2578,6 +2580,18 @@ internal static class SilkKernels
             y[idx] = value;
         }
 
+        /* y[i] = x[i] * scale. Used for LoRA delta scaling. */
+        __kernel void scale(
+            __global const float* x,
+            __global float* y,
+            const float s,
+            const uint n)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= n) return;
+            y[idx] = x[idx] * s;
+        }
+
         /* Softmax cross-entropy input gradient: dZ[i,c] = (p[i,c] - onehot[i,c]) * scale,
            with the row maximum subtracted before exponentiation (matches SilkLoss.InputGradient
            and CrossEntropyLoss's mean reduction). One work item per sample row. */
@@ -2587,18 +2601,25 @@ internal static class SilkKernels
             __global float* dZ,
             const uint n,
             const uint numClasses,
-            const float scale)
+            const float scale,
+            const int ignoreIndex)
         {
             uint i = get_global_id(0);
             if (i >= n) return;
             uint base = i * numClasses;
+            int label = labels[i];
+            if (label == ignoreIndex)
+            {
+                for (uint c = 0u; c < numClasses; ++c)
+                    dZ[base + c] = 0.0f;
+                return;
+            }
             float mx = logits[base];
             for (uint c = 1u; c < numClasses; ++c)
                 mx = fmax(mx, logits[base + c]);
             float sum = 0.0f;
             for (uint c = 0u; c < numClasses; ++c)
                 sum += exp(logits[base + c] - mx);
-            int label = labels[i];
             for (uint c = 0u; c < numClasses; ++c)
             {
                 float p = exp(logits[base + c] - mx) / sum;
