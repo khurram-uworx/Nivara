@@ -88,6 +88,7 @@ public static class SmollmMode
                 case "--no-kv-cache": options.UseKvCache = false; break;
                 case "--silk": options.UseSilk = true; break;
                 case "--adapter": options.AdapterPath = args[++i]; break;
+                case "--merge-adapter": options.MergeAdapterPath = args[++i]; break;
                 case "--text": options.Text = args[++i]; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
@@ -158,6 +159,14 @@ public static class SmollmMode
             Console.WriteLine($"Applying LoRA adapter from {options.AdapterPath}...");
             LoraAdapterLoader.Apply(model, options.AdapterPath);
             Console.WriteLine("  Adapter applied.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.MergeAdapterPath))
+        {
+            Console.WriteLine($"Merging LoRA adapter from {options.MergeAdapterPath}...");
+            LoraAdapterLoader.Apply(model, options.MergeAdapterPath);
+            model.MergeAllAdapters();
+            Console.WriteLine("  Adapter merged into base weights.");
         }
 
         using var client = new SmolLMChatClient<float, BFloat16>(
@@ -246,7 +255,7 @@ public static class SmollmMode
         string modelDir,
         SmollmOptions options)
     {
-        if (!string.IsNullOrWhiteSpace(options.AdapterPath))
+        if (!string.IsNullOrWhiteSpace(options.AdapterPath) || !string.IsNullOrWhiteSpace(options.MergeAdapterPath))
             throw new NotSupportedException("Silk SmolLM inference does not yet consume LoRA adapter bundles; use the CPU path (omit --silk) for adapter demos.");
 
         var tensors = SafeTensorsLoader.Read<BFloat16>(Path.Combine(modelDir, "model.safetensors"));
@@ -312,6 +321,7 @@ public static class SmollmMode
               --silk                 Use Silk OpenCL backend for SmolLM chat/plain generation
               --adapter <path>       Optional LoRA adapter bundle (nivara-lora-sft-adapters-v1) to apply
                                      (CPU path only; FT showcase touchpoint, not RAG-vs-FT)
+              --merge-adapter <path> Load adapter then merge into base weights (deployment path)
               --text <string>        Single-shot prompt (skips REPL)
               -h, --help             Show this help
             """);
@@ -329,6 +339,7 @@ public static class SmollmMode
         public bool UseKvCache { get; set; } = true;
         public string? Text { get; set; }
         public string? AdapterPath { get; set; }
+        public string? MergeAdapterPath { get; set; }
         public bool ShowHelp { get; set; }
         public bool UseSilk { get; set; }
     }

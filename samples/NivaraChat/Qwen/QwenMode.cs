@@ -91,6 +91,16 @@ public static class QwenMode
             Console.WriteLine("  Adapter applied.");
         }
 
+        if (!string.IsNullOrWhiteSpace(options.MergeAdapterPath))
+        {
+            if (typeof(TModel) != typeof(float))
+                throw new NotSupportedException("LoRA adapter merging requires float compute type.");
+            Console.WriteLine($"Merging LoRA adapter from {options.MergeAdapterPath}...");
+            LoraAdapterLoader.Apply((LlamaForCausalLM<float, TWeight>)(object)model, options.MergeAdapterPath);
+            ((LlamaForCausalLM<float, TWeight>)(object)model).MergeAllAdapters();
+            Console.WriteLine("  Adapter merged into base weights.");
+        }
+
         string[]? knownNames = null;
         List<AIFunction>? nivaraTools = null;
         TextClassifierModel<float>? nivaraSentimentModel = null;
@@ -385,7 +395,7 @@ public static class QwenMode
         QwenOptions options)
         where T : struct, IFloatingPointIeee754<T>
     {
-        if (!string.IsNullOrWhiteSpace(options.AdapterPath))
+        if (!string.IsNullOrWhiteSpace(options.AdapterPath) || !string.IsNullOrWhiteSpace(options.MergeAdapterPath))
             throw new NotSupportedException("Silk Qwen inference does not yet consume LoRA adapter bundles; use the CPU path (omit --silk) for adapter demos.");
 
         var silkConfig = new QwenSilkConfig
@@ -511,6 +521,7 @@ public static class QwenMode
             else if (args[i] == "--nivara-tools" && i + 1 < args.Length) options.NivaraTools = args[++i];
             else if (args[i] == "--silk") options.UseSilk = true;
             else if (args[i] == "--adapter" && i + 1 < args.Length) options.AdapterPath = args[++i];
+            else if (args[i] == "--merge-adapter" && i + 1 < args.Length) options.MergeAdapterPath = args[++i];
             else if (args[i] is "-h" or "--help") options.ShowHelp = true;
             else if (args[i].StartsWith("-", StringComparison.Ordinal))
             {
@@ -553,6 +564,7 @@ public static class QwenMode
               --silk                 Use Silk/OpenCL backend for generation (plain/chat/tools)
               --adapter <path>       Optional LoRA adapter bundle (nivara-lora-sft-adapters-v1) to apply
                                      (CPU path only; FT showcase touchpoint, not RAG-vs-FT)
+              --merge-adapter <path> Load adapter then merge into base weights (deployment path)
               -h, --help             Show this help
             """);
     }
@@ -571,6 +583,7 @@ public static class QwenMode
         public string? Text { get; set; }
         public string? NivaraTools { get; set; }
         public string? AdapterPath { get; set; }
+        public string? MergeAdapterPath { get; set; }
         public bool ShowHelp { get; set; }
     }
 }

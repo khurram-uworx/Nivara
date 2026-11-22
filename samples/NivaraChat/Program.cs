@@ -242,6 +242,10 @@ async Task RunInteractiveMenu(string modelsDir)
                 await SmollmMode.RunInteractive();
                 Console.WriteLine();
                 break;
+            case "6":
+                await QwenMode.Run(new[] { "chat" });
+                Console.WriteLine();
+                break;
             case "q":
                 return;
         }
@@ -257,6 +261,7 @@ string ShowMainMenu()
     Console.WriteLine("  3. Agents      - Run the agents pipeline with live chat");
     Console.WriteLine("  4. TinyShakespeare - Train/serve a batched transformer as IChatClient");
     Console.WriteLine("  5. SmolLM        - Serve the pretrained SmolLM-135M-Instruct causal LM as IChatClient");
+    Console.WriteLine("  6. Qwen          - Serve Qwen2.5-0.5B-Instruct as IChatClient (--adapter optional)");
     Console.WriteLine("  q. Quit\n");
     Console.Write("> ");
     return Console.ReadLine()?.Trim().ToLower() ?? "";
