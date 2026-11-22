@@ -40,15 +40,19 @@ The FT showcase is **behavioral/domain adaptation**, not doc-QA memorization.
 ### Silk D2a (#1418, in progress)
 - `src/Nivara.Extensions/Silk/SilkKernels.cs` / `SilkLauncher.cs`: `rms_norm_backward`, `rotary_backward`, `swiglu_backward`, `scale`, GQA backward kernels, `SoftmaxCrossEntropyBackward(ignoreIndex)`.
 - `src/Nivara.Extensions/Silk/SilkLlamaLoRATrainer.cs`: generic Llama-family LoRA trainer (Qwen-shaped/SmolLM-shaped configs), base weight upload, LoRA A/B/grad/moment buffers, forward with LoRA q/k/v/o/gate/up/down, prompt-masked CE backward, transformer block backward, LoRA grad accumulation, Adam, `TrainStep`, adapter bundle save/load.
-- CLI: `--mode ft-lora --silk` wired with OpenCL availability check, honest `IsParityReady=false` warning, no silent CPU fallback.
-- Tests: `tests/Nivara.Tests/Gpu/SilkLlamaLoRATrainerParityTests.cs` (`[Category("Gpu")]`) — 5 tests pass on local OpenCL:
+- Canonical adapter bundle: `src/Nivara.Extensions/Silk/LoraSftAdapterBundle.cs` (`nivara-lora-sft-adapters-v1`) shared by CPU and Silk; both producers now emit the same schema (index/layer/target/aShape/bShape/a/b) plus trainableParams and alpha; loaders validate rank/alpha/count/shapes. Silk bundle additionally carries layer/target. CPU bundle leaves layer/target as defaults (not tracked) — optional fields.
+- CLI: `--mode ft-lora --silk` wired with OpenCL availability check, honest `IsParityReady=false` warning, no silent CPU fallback. Added `MaxLen <= MaxPositionEmbeddings` guard and structured JSON report (`ft-lora-report.json`) with device, params, losses, elapsed, adapter path + SHA256, parity status.
+- `ft-eval` now emits `ft-eval-report.json` (base + adapted metrics, adapter hash) and works against Silk-produced bundles.
+- Tests: `tests/Nivara.Tests/Gpu/SilkLlamaLoRATrainerParityTests.cs` (`[Category("Gpu")]`) — 6 tests pass on local OpenCL:
   - Qwen-shaped Q/V forward parity;
   - Qwen-shaped prompt-masked CE + LoRA grad parity;
   - Qwen-shaped 1-step Adam/TrainStep parity;
-  - adapter bundle round-trip;
+  - adapter bundle round-trip (Silk);
+  - adapter bundle loads into CPU model preserving weights (new);
   - SmolLM-shaped Q/K/V/O/FFN forward + prompt-masked CE + grad parity.
-- Tolerances tightened (forward/loss 1.5e-3 to 2e-3, grad/weight rel 3e-2 to 5e-2) and passing on local Intel iGPU.
+- Tolerances: forward/loss 1.5e-3/2e-3, grad/weight rel 3e-2/5e-2, passing on local Intel iGPU.
 - Real-model Silk smoke (evidence, not release certification): Qwen2.5-0.5B-Instruct BF16, `Intel(R) Graphics`, `--max-examples 4 --max-len 128 --rank 4 --alpha 8 --epochs 1 --log-every 1`, initial val `14.2516`, best val `12.3500`, adapter saved, `10.2s`.
+- `IsParityReady` remains `false`: real-checkpoint parity/eval evidence and broader case matrix still required before flipping.
 
 ## 5. Evidence and commands
 
@@ -82,8 +86,8 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 
 - **D2a not release-ready:** `SilkLlamaLoRATrainer.IsParityReady == false`; parity evidence is synthetic + small real smoke, not full release certification.
 - **Parity scope:** tolerances tightened but still need justification over broader cases; no large real-checkpoint parity matrix.
-- **Adapter format:** Silk trainer bundle is `nivara-lora-sft-adapters-v1` compatible with sample bundle; convergence with core `LoraAdapterSerializer` metadata/shape naming may still be needed.
-- **CPU/Silk report:** ft-lora/ft-eval need structured report artifact (params, device, memory, parity status, before/after metrics).
+- **Adapter format:** Converged on shared `LoraSftAdapterBundle` (`nivara-lora-sft-adapters-v1`) between CPU and Silk; loaders validate rank/alpha/count/shapes. Core `LoraAdapterSerializer` (`nivara-lora-adapter-v1`, single-adapter) remains distinct by design; bridge not added (deliberate; multi-adapter bundle is a different contract).
+- **CPU/Silk report:** Structured JSON report now emitted (`ft-lora-report.json`, `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, parity status, before/after metrics. Memory footprint estimate still approximate.
 - **Tests:** generator determinism/split/provenance/evaluator unit tests still needed (#1416/#1421). Full suite not run.
 - **Docs:** `docs/plan/LORA.md` is now reshaped; other docs/DocsCoveragePins updates may be needed when #1421 lands.
 - **No false iGPU claim:** docs/CLI must keep D2a status honest until parity is release-certified.

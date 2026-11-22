@@ -450,7 +450,7 @@ Reports base vs LoRA-adapted metrics: valid structure, ticket, hours, date, mult
 
 ### Adapter format
 
-Saved as `lora_adapters.json` with format `nivara-lora-sft-adapters-v1` (base64-encoded A/B matrices plus rank/alpha/targets/template/baseModelId metadata). Loaded with shape/rank/count validation.
+Saved as `lora_adapters.json` / `lora-adapter.json` with format `nivara-lora-sft-adapters-v1` (base64-encoded A/B matrices plus rank/alpha/targets/template/baseModelId metadata). Loaded with shape/rank/count validation. Both the CPU and Silk (`--silk`) paths now share one bundle schema (`LoraSftAdapterBundle`) and each `ft-lora`/`ft-eval` run writes a structured JSON report (`ft-lora-report.json` / `ft-eval-report.json`) with device, params, losses, elapsed, adapter path + SHA256, and honest D2a parity status. Silk path remains not release-parity-certified.
 
 ### Defaults / memory guard
 
