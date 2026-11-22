@@ -876,9 +876,7 @@ static class Program
 
         if (cli.Silk)
         {
-            Console.Error.WriteLine("ERROR: --silk LoRA SFT training is not yet wired in this branch. CPU reference is available; Silk D2a parity path is being implemented.");
-            Console.Error.WriteLine("Run without --silk for CPU reference, or wait for the D2a Silk trainer commit.");
-            return 1;
+            return RunFtLoraSilk(cli, modelDir, trainData, valData, outDir);
         }
 
         bool qwen = IsQwenModelDir(modelDir, cli.Template);
@@ -919,6 +917,147 @@ static class Program
         if (result.AdapterPath is not null)
             Console.WriteLine($"Adapter: {result.AdapterPath}");
         return 0;
+    }
+
+    static int RunFtLoraSilk(CliArgs cli, string modelDir, string trainData, string valData, string outDir)
+    {
+        bool qwen = IsQwenModelDir(modelDir, cli.Template);
+        Console.WriteLine($"Silk D2a parity status: IsParityReady=false (initial forward/loss/grad parity tests pass on synthetic fixture; release readiness still requires expanded parity).");
+
+        SilkRuntime runtime;
+        try { runtime = new SilkRuntime(); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"ERROR: OpenCL/Silk unavailable: {ex.Message}");
+            Console.Error.WriteLine("No CPU fallback for --silk. Run without --silk for CPU reference.");
+            return 1;
+        }
+
+        using (runtime)
+        {
+            Console.WriteLine($"OpenCL device: {runtime.DeviceName}");
+            Directory.CreateDirectory(outDir);
+            var (_, tokenizer) = qwen
+                ? LlamaLoader.LoadQwenConfigAndTokenizer(modelDir)
+                : LlamaLoader.LoadSmolLMConfigAndTokenizer(modelDir);
+            var trainRows = WorklogSftDataset.LoadJsonl(trainData);
+            var valRows = File.Exists(valData) ? WorklogSftDataset.LoadJsonl(valData) : new List<WorklogSftExample>();
+
+            if (cli.MaxExamples > 0) trainRows = trainRows.Take(cli.MaxExamples).ToList();
+            int maxVal = cli.MaxExamples > 0 ? Math.Max(1, cli.MaxExamples / 4) : valRows.Count;
+            if (maxVal > 0 && valRows.Count > maxVal) valRows = valRows.Take(maxVal).ToList();
+
+            var trainExamples = WorklogSftDataset.Tokenize(trainRows, tokenizer, cli.Template, cli.MaxLen);
+            var valExamples = WorklogSftDataset.Tokenize(valRows, tokenizer, cli.Template, cli.MaxLen);
+            Console.WriteLine($"Train examples: {trainExamples.Count}, Val examples: {valExamples.Count}");
+            if (trainExamples.Count == 0)
+            {
+                Console.Error.WriteLine("ERROR: no training examples after tokenization.");
+                return 1;
+            }
+
+            var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+            var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
+            var targets = ParseSilkTargets(cli.Targets);
+            using var trainer = new SilkLlamaLoRATrainer(runtime, new SilkLlamaLoRATrainer.Options(
+                VocabSize: config.VocabSize,
+                HiddenDim: config.HiddenSize,
+                IntermediateDim: config.IntermediateSize,
+                NumLayers: config.NumHiddenLayers,
+                NumHeads: config.NumAttentionHeads,
+                NumKvHeads: config.NumKeyValueHeads,
+                MaxSeqLen: cli.MaxLen,
+                RmsNormEps: config.RmsNormEps,
+                RopeTheta: config.RopeTheta,
+                Rank: cli.Rank,
+                Alpha: cli.Alpha,
+                Targets: targets));
+            trainer.UploadBaseWeights(tensors);
+
+            float bestVal = EvaluateSilk(trainer, valExamples);
+            Console.WriteLine($"Initial val loss: {bestVal:F4}");
+            int bestEpoch = 0;
+            string? adapterPath = null;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            for (int epoch = 1; epoch <= cli.Epochs; epoch++)
+            {
+                var order = Enumerable.Range(0, trainExamples.Count).ToArray();
+                Shuffle(order, cli.Seed + epoch);
+                float epochLoss = 0f;
+                for (int i = 0; i < order.Length; i++)
+                {
+                    var ex = trainExamples[order[i]];
+                    float loss = trainer.TrainStep(ex.InputIds, ex.Labels, cli.Lr);
+                    epochLoss += loss;
+                    if ((i + 1) % Math.Max(1, cli.LogEvery) == 0)
+                        Console.WriteLine($"epoch {epoch}/{cli.Epochs} step {i + 1}/{order.Length} loss={loss:F4}");
+                }
+                epochLoss /= order.Length;
+                float valLoss = EvaluateSilk(trainer, valExamples);
+                Console.WriteLine($"epoch {epoch} train_loss={epochLoss:F4} val_loss={valLoss:F4}");
+                if (valLoss <= bestVal)
+                {
+                    bestVal = valLoss;
+                    bestEpoch = epoch;
+                    adapterPath = Path.Combine(outDir, "lora-adapter.json");
+                    trainer.SaveAdapterBundle(adapterPath, qwen ? "qwen2.5-0.5b-instruct" : "smollm-135m-instruct", cli.Template);
+                }
+            }
+
+            sw.Stop();
+            Console.WriteLine();
+            Console.WriteLine("=== LoRA SFT Result (Silk) ===");
+            Console.WriteLine($"Train examples: {trainExamples.Count}, Val examples: {valExamples.Count}");
+            Console.WriteLine($"Best val loss: {bestVal:F4} (epoch {bestEpoch})");
+            Console.WriteLine($"Elapsed: {sw.ElapsedMilliseconds / 1000.0:F1}s");
+            if (adapterPath is not null) Console.WriteLine($"Adapter: {adapterPath}");
+            Console.WriteLine("NOTE: Silk D2a path is functional in this branch but not yet release-parity-certified; expanded parity/CI evidence is still required.");
+            return 0;
+        }
+    }
+
+    static float EvaluateSilk(SilkLlamaLoRATrainer trainer, IReadOnlyList<WorklogTokenizedExample> examples)
+    {
+        if (examples.Count == 0) return float.PositiveInfinity;
+        float sum = 0f;
+        for (int i = 0; i < examples.Count; i++)
+        {
+            var ex = examples[i];
+            trainer.Forward(ex.InputIds);
+            var (loss, _) = trainer.BackwardPromptMaskedCrossEntropy(ex.Labels, ex.InputIds.Length);
+            sum += loss;
+        }
+        return sum / examples.Count;
+    }
+
+    static SilkLlamaLoRATarget ParseSilkTargets(string targets)
+    {
+        var result = SilkLlamaLoRATarget.None;
+        foreach (var part in targets.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            result |= part.ToLowerInvariant() switch
+            {
+                "q" => SilkLlamaLoRATarget.Q,
+                "k" => SilkLlamaLoRATarget.K,
+                "v" => SilkLlamaLoRATarget.V,
+                "o" => SilkLlamaLoRATarget.O,
+                "ffn" => SilkLlamaLoRATarget.FFN,
+                _ => throw new ArgumentException($"Unknown LoRA target '{part}'. Expected q,k,v,o,ffn.")
+            };
+        }
+        if (result == SilkLlamaLoRATarget.None) result = SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V;
+        return result;
+    }
+
+    static void Shuffle(int[] values, int seed)
+    {
+        var rng = new Random(seed);
+        for (int i = values.Length - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (values[i], values[j]) = (values[j], values[i]);
+        }
     }
 
     static int RunFtEval(CliArgs cli)

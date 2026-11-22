@@ -238,4 +238,105 @@ public sealed class SilkLlamaLoRATrainerParityTests
         for (int i = 0; i < a.Length; i++) m = MathF.Max(m, MathF.Abs(a[i]));
         return m;
     }
+
+    [Test]
+    public void TrainStep_LoraQv_AdamStepMatchesCpu()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk Llama LoRA parity verification."); }
+
+        var (tensors, config) = Nivara.Tests.Qwen.QwenTestWeights.Synthesize(seed: 1234);
+        int[] input = [1, 2, 3, 4, 5, 6];
+        int[] labels = [-100, -100, -100, 4, 5, 6];
+        const int rank = 4;
+        const float alpha = 8f;
+        const float lr = 1e-3f;
+
+        var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
+        var cpuAdapters = cpuModel.AttachLora(LlamaLoRATarget.Q | LlamaLoRATarget.V, rank, alpha);
+        var opt = new Nivara.AutoDiff.Optimizer.AdamW<float>(lr);
+        foreach (var a in cpuAdapters) opt.AddParameterGroup(new[] { a.A, a.B });
+
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
+        CopyCpuLoraToSilk(cpuModel, silk, config.NumHiddenLayers);
+
+        // CPU one step
+        float cpuLoss;
+        var lossFn = new CrossEntropyLoss<float>();
+        using (GradientUtils.Grad())
+        {
+            var logits = cpuModel.Forward(input);
+            var logits2d = logits;
+            if (logits2d.Shape.Length == 3) logits2d.Reshape(input.Length, config.VocabSize);
+            var loss = lossFn.Forward(logits2d, labels, ignoreIndex: -100);
+            opt.ZeroGrad();
+            loss.Backward();
+            opt.Step();
+            cpuLoss = loss.Data.ToArray()[0];
+        }
+
+        float silkLoss = silk.TrainStep(input, labels, lr);
+
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)),
+            $"Loss mismatch: cpu={cpuLoss}, silk={silkLoss}");
+
+        // Compare updated LoRA weights
+        var cpuLayers = GetCpuLayers(cpuModel);
+        int li = 0;
+        foreach (var cpuLayer in cpuLayers)
+        {
+            var attn = cpuLayer.GetType().GetProperty("Attention")!.GetValue(cpuLayer)!;
+            CompareAdapterData(attn, "QAdapter", silk, li, SilkLlamaLoRATarget.Q);
+            CompareAdapterData(attn, "VAdapter", silk, li, SilkLlamaLoRATarget.V);
+            li++;
+        }
+    }
+
+    static void CompareAdapterData(object attn, string prop, SilkLlamaLoRATrainer silk, int layer, SilkLlamaLoRATarget target)
+    {
+        var adapter = attn.GetType().GetProperty(prop)!.GetValue(attn);
+        if (adapter is null) return;
+        var (aData, bData) = GetAdapterData(adapter);
+        var (silkA, silkB) = silk.DownloadLoraWeights(layer, target);
+        float aRel = MaxAbsDiff(aData, silkA) / (MaxAbs(aData) + 1e-6f);
+        float bRel = MaxAbsDiff(bData, silkB) / (MaxAbs(bData) + 1e-6f);
+        Assert.That(aRel, Is.LessThanOrEqualTo(5e-2f), $"Layer {layer} {target} A rel diff {aRel}");
+        Assert.That(bRel, Is.LessThanOrEqualTo(5e-2f), $"Layer {layer} {target} B rel diff {bRel}");
+    }
+
+    [Test]
+    public void AdapterBundle_RoundTrip_PreservesWeights()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk Llama LoRA parity verification."); }
+
+        var (tensors, config) = Nivara.Tests.Qwen.QwenTestWeights.Synthesize(seed: 1234);
+        const int rank = 4;
+        const float alpha = 8f;
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
+        using var silk2 = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
+
+        // Make weights non-default
+        int inF = config.HiddenSize;
+        int outF = config.HiddenSize;
+        var a = Enumerable.Range(0, inF * rank).Select(i => (i % 13 - 6) * 0.01f).ToArray();
+        var b = Enumerable.Range(0, rank * outF).Select(i => (i % 7 - 3) * 0.02f).ToArray();
+        silk.SetLoraWeights(0, SilkLlamaLoRATarget.Q, a, b);
+
+        var path = Path.Combine(Path.GetTempPath(), $"nivara-lora-bundle-{Guid.NewGuid():N}.json");
+        try
+        {
+            silk.SaveAdapterBundle(path, "qwen2.5-0.5b-instruct", "qwen");
+            silk2.LoadAdapterBundle(path);
+            var (a2, b2) = silk2.DownloadLoraWeights(0, SilkLlamaLoRATarget.Q);
+            Assert.That(MaxAbsDiff(a, a2), Is.EqualTo(0f));
+            Assert.That(MaxAbsDiff(b, b2), Is.EqualTo(0f));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 }

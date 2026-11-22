@@ -1,4 +1,6 @@
 using Nivara.AutoDiff.Nn;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 
 namespace Nivara.Silk;
 
@@ -159,6 +161,116 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
 
     public bool IsParityReady => false;
     public int MaxSeqLen => options.MaxSeqLen;
+
+    public void SetLoraWeights(int layerIndex, SilkLlamaLoRATarget target, float[] aData, float[] bData)
+    {
+        ThrowIfDisposed();
+        var layer = layers[layerIndex];
+        var pair = GetLoraPair(layer, target) ?? throw new ArgumentException($"No LoRA for {target} on layer {layerIndex}.");
+        if (aData.Length != pair.InFeatures * options.Rank) throw new ArgumentException("A size mismatch.", nameof(aData));
+        if (bData.Length != options.Rank * pair.OutFeatures) throw new ArgumentException("B size mismatch.", nameof(bData));
+        runtime.Upload(pair.A, aData);
+        runtime.Upload(pair.B, bData);
+    }
+
+    public (float[] A, float[] B) DownloadLoraWeights(int layerIndex, SilkLlamaLoRATarget target)
+    {
+        ThrowIfDisposed();
+        var layer = layers[layerIndex];
+        var pair = GetLoraPair(layer, target) ?? throw new ArgumentException($"No LoRA for {target} on layer {layerIndex}.");
+        return (runtime.Download(pair.A, pair.InFeatures * options.Rank), runtime.Download(pair.B, options.Rank * pair.OutFeatures));
+    }
+
+    public (float[] GradA, float[] GradB) DownloadLoraGrads(int layerIndex, SilkLlamaLoRATarget target)
+    {
+        ThrowIfDisposed();
+        var layer = layers[layerIndex];
+        var pair = GetLoraPair(layer, target) ?? throw new ArgumentException($"No LoRA for {target} on layer {layerIndex}.");
+        return (runtime.Download(pair.GradA, pair.InFeatures * options.Rank), runtime.Download(pair.GradB, options.Rank * pair.OutFeatures));
+    }
+
+    public void SaveAdapterBundle(string path, string baseModelId, string template)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var adapters = EnumerateLoraPairs().Select((p, i) => new
+        {
+            index = i,
+            layer = p.LayerIndex,
+            target = p.Target,
+            aShape = new[] { p.Pair.InFeatures, options.Rank },
+            bShape = new[] { options.Rank, p.Pair.OutFeatures },
+            a = Convert.ToBase64String(MemoryMarshal.AsBytes(runtime.Download(p.Pair.A, p.Pair.InFeatures * options.Rank).AsSpan())),
+            b = Convert.ToBase64String(MemoryMarshal.AsBytes(runtime.Download(p.Pair.B, options.Rank * p.Pair.OutFeatures).AsSpan())),
+        }).ToArray();
+
+        var payload = new
+        {
+            format = "nivara-lora-sft-adapters-v1",
+            baseModelId,
+            template,
+            rank = options.Rank,
+            alpha = options.Alpha,
+            targets = options.Targets.ToString(),
+            adapters
+        };
+        File.WriteAllText(path, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    public void LoadAdapterBundle(string path)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var root = doc.RootElement;
+        if (root.GetProperty("format").GetString() != "nivara-lora-sft-adapters-v1")
+            throw new InvalidOperationException("Unsupported adapter bundle format.");
+        if (root.GetProperty("rank").GetInt32() != options.Rank)
+            throw new InvalidOperationException("Rank mismatch.");
+
+        var adapters = EnumerateLoraPairs().ToList();
+        var entries = root.GetProperty("adapters").EnumerateArray().ToList();
+        if (entries.Count != adapters.Count)
+            throw new InvalidOperationException($"Adapter count mismatch: file has {entries.Count}, trainer has {adapters.Count}.");
+
+        for (int i = 0; i < adapters.Count; i++)
+        {
+            var entry = entries[i];
+            var pair = adapters[i].Pair;
+            var aBytes = Convert.FromBase64String(entry.GetProperty("a").GetString()!);
+            var bBytes = Convert.FromBase64String(entry.GetProperty("b").GetString()!);
+            var a = MemoryMarshal.Cast<byte, float>(aBytes).ToArray();
+            var b = MemoryMarshal.Cast<byte, float>(bBytes).ToArray();
+            if (a.Length != pair.InFeatures * options.Rank || b.Length != options.Rank * pair.OutFeatures)
+                throw new InvalidOperationException($"Adapter {i} shape mismatch.");
+            runtime.Upload(pair.A, a);
+            runtime.Upload(pair.B, b);
+        }
+    }
+
+    IEnumerable<(int LayerIndex, string Target, LoraPair Pair)> EnumerateLoraPairs()
+    {
+        for (int i = 0; i < options.NumLayers; i++)
+        {
+            var layer = layers[i];
+            if (layer.QLora is not null) yield return (i, "Q", layer.QLora);
+            if (layer.KLora is not null) yield return (i, "K", layer.KLora);
+            if (layer.VLora is not null) yield return (i, "V", layer.VLora);
+            if (layer.OLora is not null) yield return (i, "O", layer.OLora);
+            if (layer.GateLora is not null) yield return (i, "Gate", layer.GateLora);
+            if (layer.UpLora is not null) yield return (i, "Up", layer.UpLora);
+            if (layer.DownLora is not null) yield return (i, "Down", layer.DownLora);
+        }
+    }
+
+    static LoraPair? GetLoraPair(LayerWeights layer, SilkLlamaLoRATarget target) => target switch
+    {
+        SilkLlamaLoRATarget.Q => layer.QLora,
+        SilkLlamaLoRATarget.K => layer.KLora,
+        SilkLlamaLoRATarget.V => layer.VLora,
+        SilkLlamaLoRATarget.O => layer.OLora,
+        _ => throw new ArgumentException($"Single target expected, got {target}.", nameof(target)),
+    };
 
     public void UploadBaseWeights(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
