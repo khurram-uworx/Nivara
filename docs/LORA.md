@@ -46,8 +46,8 @@ Two distinct formats, do not conflate:
 
 - CPU path: `--adapter <path>` / `--merge-adapter <path>` load a bundle into Qwen/SmolLM
   before prompting. Rank, alpha, targets read from bundle header.
-- Silk inference does not yet consume bundles; passing `--adapter`/`--merge-adapter` with
-  `--silk` errors clearly (no silent fallback) — tracked separately.
+- Silk inference supports `--adapter <path>` for Qwen/SmolLM bundle consumption; `--merge-adapter`
+  with `--silk` errors clearly (no silent fallback).
 
 ## Key commands
 

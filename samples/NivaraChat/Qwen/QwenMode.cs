@@ -395,8 +395,8 @@ public static class QwenMode
         QwenOptions options)
         where T : struct, IFloatingPointIeee754<T>
     {
-        if (!string.IsNullOrWhiteSpace(options.AdapterPath) || !string.IsNullOrWhiteSpace(options.MergeAdapterPath))
-            throw new NotSupportedException("Silk Qwen inference does not yet consume LoRA adapter bundles; use the CPU path (omit --silk) for adapter demos.");
+        if (!string.IsNullOrWhiteSpace(options.MergeAdapterPath))
+            throw new NotSupportedException("Silk Qwen inference does not yet support --merge-adapter; use --adapter on Silk, or use the CPU path for merge-adapter.");
 
         var silkConfig = new QwenSilkConfig
         {
@@ -414,6 +414,20 @@ public static class QwenMode
         if (typeof(T) != typeof(float) && typeof(T) != typeof(BFloat16))
             throw new NotSupportedException($"Silk Qwen chat does not support compute type {typeof(T).Name}.");
         SilkQwenSession session = SilkQwenSession.Open(silkConfig, (dynamic)tensors);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(options.AdapterPath))
+            {
+                Console.WriteLine($"Applying LoRA adapter from {options.AdapterPath}...");
+                session.LoadAdapterBundle(options.AdapterPath);
+                Console.WriteLine("  Adapter applied.");
+            }
+        }
+        catch
+        {
+            session.Dispose();
+            throw;
+        }
 
         if (options.Mode == "tools-weather")
         {
@@ -563,8 +577,8 @@ public static class QwenMode
               --text <string>        Single-shot prompt (skips REPL)
               --silk                 Use Silk/OpenCL backend for generation (plain/chat/tools)
               --adapter <path>       Optional LoRA adapter bundle (nivara-lora-sft-adapters-v1) to apply
-                                     (CPU path only; FT showcase touchpoint, not RAG-vs-FT)
-              --merge-adapter <path> Load adapter then merge into base weights (deployment path)
+                                     (CPU and Silk paths; FT showcase touchpoint, not RAG-vs-FT)
+              --merge-adapter <path> Load adapter then merge into base weights (deployment path, CPU only)
               -h, --help             Show this help
             """);
     }

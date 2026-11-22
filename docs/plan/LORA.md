@@ -111,7 +111,7 @@ Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for sm
 2. **#1420 report polish:** landed on `khurram/1420` — JSON + markdown reports, param breakdown, advisory memory budget, per-epoch loss curve, base/adapted eval integration, SmolLM verification command path. Parity remains not release-certified.
 3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, evaluator metric unit tests.
 4. **#1421 tests/docs/gates:** done on `khurram/1421` — `docs/LORA.md` added, plan updated, DocsCoveragePins adjusted; targeted tests + docs gates to be run.
-5. **#1419 done:** NivaraChat adapter consumption demo (`--adapter <path>` on `--qwen`/`--smollm`, CPU path) — additive, no RAG regression. Silk inference does not yet consume bundles (explicit error).
+5. **#1419/#1429 done:** NivaraChat adapter consumption demo (`--adapter <path>` on `--qwen`/`--smollm`, CPU and Silk paths) — additive, no RAG regression. `--merge-adapter` remains CPU-only on Silk with an explicit error.
 6. **G2 + PR:** branch-vs-plan review, docs gates, push/create PR with confirmation; no `docs/TODO.md` in final PR.
 
 **#1414 done on branch:** `docs/plan/LORA.md` reshaped for D1-D5/D2a; `docs/TODO.md` removed. Keep this file as handoff.
