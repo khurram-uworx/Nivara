@@ -318,6 +318,20 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.Rotary, rows * numHeads * halfDim);
     }
 
+    public static void RotaryBackward(
+        SilkRuntime runtime, nint dy, nint posIds, nint cos, nint sin, nint dx, int rows, int numHeads, int headDim, int halfDim)
+    {
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 0, dy);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 1, posIds);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 2, cos);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 3, sin);
+        runtime.SetBuffer(SilkKernels.RotaryBackward, 4, dx);
+        runtime.SetUInt32(SilkKernels.RotaryBackward, 5, (uint)rows);
+        runtime.SetUInt32(SilkKernels.RotaryBackward, 6, (uint)numHeads);
+        runtime.SetUInt32(SilkKernels.RotaryBackward, 7, (uint)headDim);
+        Linear(runtime, SilkKernels.RotaryBackward, rows * numHeads * halfDim);
+    }
+
     public static void GeGlu(SilkRuntime runtime, nint src, nint y, int rows, int intermediate)
     {
         runtime.SetBuffer(SilkKernels.GeGlu, 0, src);
@@ -354,6 +368,18 @@ internal static class SilkLauncher
         runtime.SetUInt32(SilkKernels.SwiGlu, 3, (uint)rows);
         runtime.SetUInt32(SilkKernels.SwiGlu, 4, (uint)intermediate);
         Linear(runtime, SilkKernels.SwiGlu, rows * intermediate);
+    }
+
+    public static void SwiGluBackward(SilkRuntime runtime, nint dy, nint gate, nint up, nint dGate, nint dUp, int rows, int intermediate)
+    {
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 0, dy);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 1, gate);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 2, up);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 3, dGate);
+        runtime.SetBuffer(SilkKernels.SwiGluBackward, 4, dUp);
+        runtime.SetUInt32(SilkKernels.SwiGluBackward, 5, (uint)rows);
+        runtime.SetUInt32(SilkKernels.SwiGluBackward, 6, (uint)intermediate);
+        Linear(runtime, SilkKernels.SwiGluBackward, rows * intermediate);
     }
 
     public static void CausalGqaAttention(

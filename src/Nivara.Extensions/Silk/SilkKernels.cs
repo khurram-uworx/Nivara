@@ -98,6 +98,7 @@ internal static class SilkKernels
     public const string AttentionBf16Act = "batched_attention_bf16_act";
     public const string SplitColumns = "split_columns";
     public const string Rotary = "rotary";
+    public const string RotaryBackward = "rotary_backward";
     public const string GeGlu = "geglu";
     public const string Gemm = "gemm_row4"; public const string GemmBf16 = "gemm_row4_bf16"; public const string GemmF16 = "gemm_row4_f16";
     public const string GemmBias = "gemm_row4_bias";
@@ -133,6 +134,7 @@ internal static class SilkKernels
     public const string RmsNormGemvBf16 = "rms_norm_gemv_bf16";
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
+    public const string SwiGluBackward = "swiglu_backward";
     public const string CausalGqaAttention = "causal_gqa_attention";
     public const string DecodeGqaAttention = "decode_gqa_attention";
 
@@ -216,7 +218,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
@@ -484,6 +486,34 @@ internal static class SilkKernels
             float x1 = x[b + i + pair];
             y[b + i] = x0 * c - x1 * s;
             y[b + i + pair] = x0 * s + x1 * c;
+        }
+
+        /* Backward through half-split RoPE: inverse rotation. */
+        __kernel void rotary_backward(
+            __global const float* dy,
+            __global const int* posIds,
+            __global const float* cosTab,
+            __global const float* sinTab,
+            __global float* dx,
+            const uint rows,
+            const uint numHeads,
+            const uint headDim)
+        {
+            uint pair = headDim / 2u;
+            uint idx = get_global_id(0);
+            if (idx >= rows * numHeads * pair) return;
+            uint i = idx % pair;
+            uint rem = idx / pair;
+            uint h = rem % numHeads;
+            uint row = rem / numHeads;
+            uint t = (uint)posIds[row] * pair + i;
+            float c = cosTab[t];
+            float s = sinTab[t];
+            uint b = row * (numHeads * headDim) + h * headDim;
+            float dy0 = dy[b + i];
+            float dy1 = dy[b + i + pair];
+            dx[b + i] = dy0 * c + dy1 * s;
+            dx[b + i + pair] = -dy0 * s + dy1 * c;
         }
 
         /* First half is the GELU, second half is the gate. Reversing them still looks plausible. */
@@ -1612,6 +1642,27 @@ internal static class SilkKernels
             float g = gate[idx];
             float siluGate = g / (1.0f + exp(-g));
             y[idx] = siluGate * up[idx];
+        }
+
+        /* SwiGLU backward: y = silu(gate) * up. */
+        __kernel void swiglu_backward(
+            __global const float* dy,
+            __global const float* gate,
+            __global const float* up,
+            __global float* dGate,
+            __global float* dUp,
+            const uint rows,
+            const uint intermediate)
+        {
+            uint idx = get_global_id(0);
+            if (idx >= rows * intermediate) return;
+            float g = gate[idx];
+            float sig = 1.0f / (1.0f + exp(-g));
+            float siluGate = g * sig;
+            float dSilu = sig * (1.0f + g * (1.0f - sig));
+            float dOut = dy[idx];
+            dGate[idx] = dOut * up[idx] * dSilu;
+            dUp[idx] = dOut * siluGate;
         }
 
         /* Causal GQA attention. q: [seq, numHeads*headDim], k/v: [seq, numKvHeads*headDim].
