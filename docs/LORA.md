@@ -11,9 +11,12 @@ with a behavioral/domain-adaptation scenario (worklog -> structured `LogTime`).
 - **CPU reference path is implemented and tested** (unit tests + trainer tests).
 - **Silk/iGPU path exists** (`SilkLlamaLoRATrainer`) and has synthetic + small real smoke
   evidence, but **is not release-parity-certified**. `IsParityReady` remains `false`.
+- **#1438 in progress:** real-checkpoint parity matrix is defined (G1 defaults) and
+  `[Explicit, Category("Gpu")]` real-checkpoint smoke tests are scaffolded; certification
+  flip is blocked until real-checkpoint evidence is captured on a capable OpenCL machine.
 - No false iGPU claim: docs and CLI report parity status honestly as "not
   release-parity-certified" until broader real-checkpoint evidence justifies a flip.
-- See `docs/plan/LORA.md` for the full handoff, decisions, and evidence.
+- See `docs/plan/LORA.md` for the full handoff, decisions, evidence, and matrix.
 
 ## Headline model
 

@@ -1,6 +1,6 @@
 # LoRA SLM iGPU Fine-Tuning Showcase
 
-Status: **landed on main** (core LoRA showcase merged via PR #1422; follow-up PRs landed through #1436). D2a is functional but **not release-parity-certified** (`IsParityReady=false`). This document is the implementation handoff/active-gap tracker; see `docs/LORA.md` for the stable user-facing guide.
+Status: **landed on main** (core LoRA showcase merged via PR #1422; follow-up PRs landed through #1436). D2a is functional but **not release-parity-certified** (`IsParityReady=false`) — #1438 is in progress to define/execute the real-checkpoint parity matrix and flip certification only with evidence. This document is the implementation handoff/active-gap tracker; see `docs/LORA.md` for the stable user-facing guide.
 
 ## 1. Goal
 
@@ -82,13 +82,33 @@ dotnet run --project samples/NivaraFineTuning/NivaraFineTuning.csproj -c Release
 
 Note: CPU 0.5B first backward can be slow; use small max-examples/max-len for smoke.
 
+### Parity matrix (#1438, G1 agreed defaults)
+
+Certification requires real-checkpoint CPU/Silk parity evidence (not synthetic-only). Matrix cases (minimum):
+
+| Case | What | Headline Qwen smoke | SmolLM smoke |
+|---|---|---|---|
+| A | Forward logits / last-token argmax | required (real-checkpoint smoke) | required (real-checkpoint smoke) |
+| B | Prompt-masked CE loss (`ignoreIndex=-100`) | required (real-checkpoint smoke) | required (real-checkpoint smoke) |
+| C | LoRA grad parity per target | synthetic GPU parity (real-checkpoint CPU backward too slow) | synthetic GPU parity |
+| D | 1-step TrainStep/Adam weight parity | synthetic GPU parity | synthetic GPU parity |
+| E | Adapter bundle round-trip + CPU<->Silk interop | synthetic GPU parity + bundle contract | synthetic GPU parity |
+
+Config defaults (G1): fixed seed, small maxLen (16 for real-checkpoint smoke), rank=4 alpha=8, Q/V targets minimum; deterministic fixed token inputs/labels; record device, commit, tolerances, max abs/rel deltas. Real checkpoints: `samples/data/qwen2.5-0.5b-instruct` (headline), `samples/data/smollm-135m` or `smollm-135m-instruct` if present (smoke). Tests skip cleanly when OpenCL or model dir missing; real-checkpoint tests are `[Explicit, Category("Gpu")]`.
+
+Tolerances start at existing synthetic bounds: forward/loss 1.5e-3/2e-3, grad/weight rel 3e-2/5e-2 (SmolLM 5e-2). Any widening requires documented rationale in evidence.
+
+Pragmatic note (per user direction): CPU AutoDiff backward/TrainStep on 0.5B-class real checkpoints is too slow for routine smoke; real-checkpoint smoke confirms forward+loss parity on real weights, while grad/step/bundle parity remains covered by synthetic GPU-gated tests that pass on capable machines.
+
+Evidence artifacts: machine-readable JSON + short markdown summary (command, device, commit, seed, config, observed deltas, pass/fail). Do not flip `IsParityReady`/CLI/docs to certified without evidence.
+
 ## 6. Known gaps / red flags (open)
 
 ### Tracked issues
 
 | Issue | Gap | Notes |
 |---|---|---|
-| #1438 | D2a Silk causal-LM training parity certification | `SilkLlamaLoRATrainer.IsParityReady == false` (`src/Nivara.Extensions/Silk/SilkLlamaLoRATrainer.cs:165`); synthetic/small smoke evidence only; needs real-checkpoint parity matrix and consistent docs/CLI flip only when justified. |
+| #1438 | D2a Silk causal-LM training parity certification | In progress on `khurram/1438`. Matrix defined (G1 defaults) and real-checkpoint `[Explicit, Category("Gpu")]` smoke tests scaffolded; certification flip remains blocked until real-checkpoint evidence is captured on a capable OpenCL machine. `IsParityReady` remains `false`. |
 | #1439 | Silk path for causal-LM `ft-eval` | `RunFtEval` is CPU-only, hardcodes `Backend="cpu"`/`Device="cpu"` (`samples/NivaraFineTuning/Program.cs:1362+`). No Silk eval path yet. |
 | #1437 | Generation base-vs-adapted eval in Silk `ft-lora` | Silk `ft-lora` reports loss/val-loss but lacks integrated generation eval parity with CPU path. |
 | #1440 (G1) | Stale plan handoff after main merge | This doc needed refresh for main-landed state and current issue list (this edit addresses the immediate staleness; keep maintained). |
