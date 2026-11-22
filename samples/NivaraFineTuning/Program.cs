@@ -966,6 +966,35 @@ static class Program
         Console.WriteLine($"Elapsed: {result.ElapsedMs / 1000.0:F1}s");
         if (result.AdapterPath is not null)
             Console.WriteLine($"Adapter: {result.AdapterPath}");
+
+        var cpuReport = new LoraSftRunReport
+        {
+            Mode = "ft-lora",
+            Backend = "cpu",
+            Device = "cpu",
+            Model = qwen ? "qwen2.5-0.5b-instruct" : "smollm",
+            Template = cli.Template,
+            Rank = cli.Rank,
+            Alpha = cli.Alpha,
+            Targets = cli.Targets,
+            MaxLen = cli.MaxLen,
+            MaxExamples = cli.MaxExamples,
+            Seed = cli.Seed,
+            TrainExamples = result.TrainExamples,
+            ValExamples = result.ValExamples,
+            BaseParams = result.BaseParams,
+            TrainableParams = result.TrainableParams,
+            InitialValLoss = result.InitialValLoss,
+            BestValLoss = result.BestValLoss,
+            BestEpoch = result.BestEpoch,
+            ElapsedMs = result.ElapsedMs,
+            AdapterPath = result.AdapterPath,
+            AdapterFormat = result.AdapterPath is null ? null : "nivara-lora-sft-adapters-v1",
+            AdapterSha256 = LoraSftRunReport.Sha256File(result.AdapterPath),
+        };
+        var cpuReportPath = Path.Combine(outDir, "ft-lora-report.json");
+        cpuReport.Save(cpuReportPath);
+        Console.WriteLine($"Report: {cpuReportPath}");
         return 0;
     }
 
@@ -1007,6 +1036,8 @@ static class Program
             }
 
             var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+            if (config.MaxPositionEmbeddings > 0 && cli.MaxLen > config.MaxPositionEmbeddings)
+                throw new ArgumentOutOfRangeException(nameof(cli.MaxLen), $"MaxLen {cli.MaxLen} exceeds model MaxPositionEmbeddings {config.MaxPositionEmbeddings}.");
             var tensors = SafeTensorsLoader.Read<float>(Path.Combine(modelDir, "model.safetensors"));
             var targets = ParseSilkTargets(cli.Targets);
             using var trainer = new SilkLlamaLoRATrainer(runtime, new SilkLlamaLoRATrainer.Options(
@@ -1063,6 +1094,33 @@ static class Program
             Console.WriteLine($"Elapsed: {sw.ElapsedMilliseconds / 1000.0:F1}s");
             if (adapterPath is not null) Console.WriteLine($"Adapter: {adapterPath}");
             Console.WriteLine("NOTE: Silk D2a path is functional in this branch but not yet release-parity-certified; expanded parity/CI evidence is still required.");
+
+            var silkReport = new LoraSftRunReport
+            {
+                Mode = "ft-lora",
+                Backend = "silk",
+                Device = runtime.DeviceName,
+                Model = qwen ? "qwen2.5-0.5b-instruct" : "smollm",
+                Template = cli.Template,
+                Rank = cli.Rank,
+                Alpha = cli.Alpha,
+                Targets = cli.Targets,
+                MaxLen = cli.MaxLen,
+                MaxExamples = cli.MaxExamples,
+                Seed = cli.Seed,
+                TrainExamples = trainExamples.Count,
+                ValExamples = valExamples.Count,
+                InitialValLoss = bestVal,
+                BestValLoss = bestVal,
+                BestEpoch = bestEpoch,
+                ElapsedMs = sw.ElapsedMilliseconds,
+                AdapterPath = adapterPath,
+                AdapterFormat = adapterPath is null ? null : "nivara-lora-sft-adapters-v1",
+                AdapterSha256 = LoraSftRunReport.Sha256File(adapterPath),
+            };
+            var silkReportPath = Path.Combine(outDir, "ft-lora-report.json");
+            silkReport.Save(silkReportPath);
+            Console.WriteLine($"Report: {silkReportPath}");
             return 0;
         }
     }
@@ -1203,11 +1261,12 @@ static class Program
         var baseMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
         Console.WriteLine(baseMetrics.ToReport("Base"));
 
+        WorklogEvalMetrics? adaptedMetrics = null;
         if (!string.IsNullOrWhiteSpace(cli.AdapterPath))
         {
             var adapters = model.AttachLora(ParseTargets(cli.Targets), cli.Rank, cli.Alpha);
             LoadCpuAdapterBundle(cli.AdapterPath, adapters);
-            var adaptedMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+            adaptedMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
             Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted"));
             Console.WriteLine($"Delta valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}");
             Console.WriteLine($"Delta ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}");
@@ -1216,6 +1275,30 @@ static class Program
             Console.WriteLine($"Delta convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}");
         }
 
+        var evalReport = new LoraSftRunReport
+        {
+            Mode = "ft-eval",
+            Backend = "cpu",
+            Device = "cpu",
+            Model = qwen ? "qwen2.5-0.5b-instruct" : "smollm",
+            Template = cli.Template,
+            Rank = cli.Rank,
+            Alpha = cli.Alpha,
+            Targets = cli.Targets,
+            MaxLen = cli.MaxLen,
+            MaxExamples = cli.MaxExamples,
+            Seed = cli.Seed,
+            TrainExamples = 0,
+            ValExamples = testRows.Count,
+            AdapterPath = string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : cli.AdapterPath,
+            AdapterFormat = string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : "nivara-lora-sft-adapters-v1",
+            AdapterSha256 = LoraSftRunReport.Sha256File(string.IsNullOrWhiteSpace(cli.AdapterPath) ? null : cli.AdapterPath),
+            BaseMetrics = baseMetrics.ToReport("Base").Trim(),
+            AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
+        };
+        var evalReportPath = Path.Combine(string.IsNullOrWhiteSpace(cli.OutDir) ? Path.GetDirectoryName(cli.AdapterPath) ?? "." : cli.OutDir, "ft-eval-report.json");
+        try { evalReport.Save(evalReportPath); Console.WriteLine($"Report: {evalReportPath}"); }
+        catch (Exception ex) { Console.WriteLine($"Report write skipped: {ex.Message}"); }
         return 0;
     }
 
