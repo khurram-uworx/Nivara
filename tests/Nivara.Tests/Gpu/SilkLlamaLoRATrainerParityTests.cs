@@ -41,7 +41,7 @@ public sealed class SilkLlamaLoRATrainerParityTests
 
         float maxAbs = MaxAbsDiff(cpuLogits, silkLogits);
         float scale = MaxAbs(cpuLogits) + 1f;
-        Assert.That(maxAbs / scale, Is.LessThanOrEqualTo(2e-3f),
+        Assert.That(maxAbs / scale, Is.LessThanOrEqualTo(1.5e-3f),
             $"Max abs diff {maxAbs}, scale {scale}, rel {maxAbs / scale}");
     }
 
@@ -83,7 +83,7 @@ public sealed class SilkLlamaLoRATrainerParityTests
         silk.BackwardTransformerBlocks(input.Length);
 
         Assert.That(valid, Is.EqualTo(3));
-        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)),
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(1.5e-3f * (MathF.Abs(cpuLoss) + 1f)),
             $"Loss mismatch: cpu={cpuLoss}, silk={silkLoss}");
 
         AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers);
@@ -108,7 +108,7 @@ public sealed class SilkLlamaLoRATrainerParityTests
         return silk;
     }
 
-    static void AssertLoraGradsMatch(LlamaForCausalLM<float, float> cpu, SilkLlamaLoRATrainer silk, int layers, float relTol = 5e-2f)
+    static void AssertLoraGradsMatch(LlamaForCausalLM<float, float> cpu, SilkLlamaLoRATrainer silk, int layers, float relTol = 3e-2f)
     {
         var cpuLayers = GetCpuLayers(cpu);
         int li = 0;
@@ -290,7 +290,7 @@ public sealed class SilkLlamaLoRATrainerParityTests
 
         float silkLoss = silk.TrainStep(input, labels, lr);
 
-        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)),
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(1.5e-3f * (MathF.Abs(cpuLoss) + 1f)),
             $"Loss mismatch: cpu={cpuLoss}, silk={silkLoss}");
 
         // Compare updated LoRA weights
@@ -313,8 +313,8 @@ public sealed class SilkLlamaLoRATrainerParityTests
         var (silkA, silkB) = silk.DownloadLoraWeights(layer, target);
         float aRel = MaxAbsDiff(aData, silkA) / (MaxAbs(aData) + 1e-6f);
         float bRel = MaxAbsDiff(bData, silkB) / (MaxAbs(bData) + 1e-6f);
-        Assert.That(aRel, Is.LessThanOrEqualTo(5e-2f), $"Layer {layer} {target} A rel diff {aRel}");
-        Assert.That(bRel, Is.LessThanOrEqualTo(5e-2f), $"Layer {layer} {target} B rel diff {bRel}");
+        Assert.That(aRel, Is.LessThanOrEqualTo(3e-2f), $"Layer {layer} {target} A rel diff {aRel}");
+        Assert.That(bRel, Is.LessThanOrEqualTo(3e-2f), $"Layer {layer} {target} B rel diff {bRel}");
     }
 
     [Test]
@@ -394,7 +394,7 @@ public sealed class SilkLlamaLoRATrainerParityTests
         var silkLogits = silk.Forward(input);
         Assert.That(ArgMaxLast(silkLogits, input.Length, config.VocabSize),
             Is.EqualTo(ArgMaxLast(cpuLogits, input.Length, config.VocabSize)));
-        Assert.That(MaxAbsDiff(cpuLogits, silkLogits) / (MaxAbs(cpuLogits) + 1f), Is.LessThanOrEqualTo(3e-3f));
+        Assert.That(MaxAbsDiff(cpuLogits, silkLogits) / (MaxAbs(cpuLogits) + 1f), Is.LessThanOrEqualTo(2e-3f));
 
         float cpuLoss;
         var lossFn = new CrossEntropyLoss<float>();
@@ -412,7 +412,7 @@ public sealed class SilkLlamaLoRATrainerParityTests
         var (silkLoss, _) = silk.BackwardPromptMaskedCrossEntropy(labels, input.Length);
         silk.BackwardTransformerBlocks(input.Length);
 
-        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(3e-3f * (MathF.Abs(cpuLoss) + 1f)));
-        AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers, relTol: 8e-2f);
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(2e-3f * (MathF.Abs(cpuLoss) + 1f)));
+        AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers, relTol: 5e-2f);
     }
 }
