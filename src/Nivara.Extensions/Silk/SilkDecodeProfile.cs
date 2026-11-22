@@ -27,6 +27,9 @@ public readonly record struct SilkDecodeProfile(
     /// <summary>Average profiled milliseconds per token, or 0 when no tokens were profiled.</summary>
     public double MsPerToken => TokenCount > 0 ? TotalMs / TokenCount : 0d;
 
+    /// <summary>Average profiled decode throughput in tokens/second, or 0 when no tokens were profiled.</summary>
+    public double TokPerSec => MsPerToken > 0 ? 1000.0 / MsPerToken : 0d;
+
     /// <summary>Average kernel dispatches per token, or 0 when no tokens were profiled.</summary>
     public double DispatchesPerToken => TokenCount > 0 ? (double)KernelDispatches / TokenCount : 0d;
 }

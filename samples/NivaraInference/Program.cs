@@ -3858,7 +3858,7 @@ class Program
             const int MaxNewTokens = 32;
             var warmup = RunSmolLMGenerationSilk(session, promptIds, config, MaxNewTokens);
             double warmupDecodeTokS = warmup.DecodeMs > 0 ? warmup.Generated * 1000.0 / warmup.DecodeMs : 0;
-            Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms, {warmupDecodeTokS:F2} tok/s)");
+            Console.WriteLine($"Steady-state warmup (no per-phase sync): {warmupDecodeTokS:F2} tok/s, {warmup.Generated * 1000.0 / Math.Max(1, warmup.DecodeMs):F2} ms/token decode, {warmup.Milliseconds} ms total ({warmup.Generated} tokens, prefill {warmup.PrefillMs} ms, decode {warmup.DecodeMs} ms)");
 
             session.ProfilingEnabled = true;
             session.ResetDecodeProfile();
@@ -3867,9 +3867,7 @@ class Program
             session.ProfilingEnabled = false;
 
             double decodeTokS = timing.DecodeMs > 0 ? timing.Generated * 1000.0 / timing.DecodeMs : 0;
-            Console.WriteLine($"Profile run: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
-                              $"{timing.Generated * 1000.0 / Math.Max(1, timing.Milliseconds):F2} tok/s, " +
-                              $"prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms, {decodeTokS:F2} tok/s)");
+            Console.WriteLine($"Profiled run (per-phase Finish sync, attribution only): {decodeTokS:F2} tok/s, {1000.0 / Math.Max(0.001, decodeTokS):F2} ms/token decode, {timing.Milliseconds} ms total ({timing.Generated} tokens, prefill {timing.PrefillMs} ms, decode {timing.DecodeMs} ms)");
             PrintSilkDecodeProfile(profile);
             return 0;
         }
@@ -3890,11 +3888,12 @@ class Program
     static void PrintSilkDecodeProfile(Nivara.Silk.SilkDecodeProfile profile)
     {
         Console.WriteLine();
-        Console.WriteLine("Decode profile (cached decode tokens only):");
+        Console.WriteLine("Decode profile (cached decode tokens only, per-phase Finish sync):");
+        Console.WriteLine($"  Throughput: {profile.TokPerSec:F2} tok/s ({profile.MsPerToken:F2} ms/token, profiled)");
         Console.WriteLine($"  Tokens: {profile.TokenCount}");
         Console.WriteLine($"  Kernel dispatches: {profile.KernelDispatches} ({profile.DispatchesPerToken:F2}/token)");
         Console.WriteLine($"  Queue copies: {profile.QueueCopies}");
-        Console.WriteLine($"  Total profiled: {profile.TotalMs:F2} ms ({profile.MsPerToken:F2} ms/token)");
+        Console.WriteLine($"  Total profiled: {profile.TotalMs:F2} ms");
         PrintProfilePhase("Embed", profile.EmbedMs, profile.TokenCount);
         PrintProfilePhase("QKV norm+proj", profile.QkvMs, profile.TokenCount);
         PrintProfilePhase("Rotary", profile.RotaryMs, profile.TokenCount);
