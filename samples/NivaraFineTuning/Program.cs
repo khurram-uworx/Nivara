@@ -968,7 +968,10 @@ static class Program
             MinDelta = cli.MinDelta,
             GradientAccumulationSteps = cli.GradAccum,
             SaveAdapter = true,
-            BaseModelId = qwen ? "qwen2.5-0.5b-instruct" : "smollm-135m-instruct"
+            BaseModelId = qwen ? "qwen2.5-0.5b-instruct" : "smollm-135m-instruct",
+            ComputeWorklogEvalMetrics = cli.Eval,
+            EvalMaxNewTokens = cli.MaxNewTokens,
+            MaxEvalExamples = cli.MaxExamples > 0 ? Math.Max(1, cli.MaxExamples / 4) : 0,
         };
 
         WorklogLoraSftResult result;
@@ -989,9 +992,9 @@ static class Program
 
         // Eval integration (base vs adapted) when enabled.
         WorklogEvalMetrics? baseMetrics = null;
-        WorklogEvalMetrics? adaptedMetrics = null;
+        WorklogEvalMetrics? adaptedMetrics = result.BestValMetrics;
         string? evalDeltas = null;
-        int evalExamples = 0;
+        int evalExamples = result.EvalExamples;
         if (cli.Eval)
         {
             try
@@ -1002,15 +1005,22 @@ static class Program
                 var testRows = WorklogSftDataset.LoadJsonl(valData);
                 if (cli.MaxExamples > 0 && testRows.Count > cli.MaxExamples)
                     testRows = testRows.Take(Math.Max(1, cli.MaxExamples / 4)).ToList();
+                evalExamples = testRows.Count;
+
                 var (model, _, _) = LlamaLoader.LoadModel<float, float>(modelDir, qwen: qwen, requiresGrad: false);
                 model.Eval();
-                var stopIds = GetStopTokenIds(tokenizer, cli.Template);
-                baseMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
-                if (!string.IsNullOrWhiteSpace(result.AdapterPath))
+                var stopIds = WorklogSftGeneration.GetStopTokenIds(tokenizer, cli.Template);
+                baseMetrics = WorklogSftGeneration.Evaluate(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+
+                if (adaptedMetrics is null && !string.IsNullOrWhiteSpace(result.AdapterPath))
                 {
                     var adapters = model.AttachLora(ParseTargets(cli.Targets), cli.Rank, cli.Alpha);
                     LoadCpuAdapterBundle(result.AdapterPath, adapters);
-                    adaptedMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+                    adaptedMetrics = WorklogSftGeneration.Evaluate(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+                }
+
+                if (adaptedMetrics is not null)
+                {
                     evalDeltas =
                         $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
                         $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
@@ -1018,7 +1028,7 @@ static class Program
                         $"date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}\n" +
                         $"convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}";
                 }
-                evalExamples = testRows.Count;
+
                 Console.WriteLine(baseMetrics.ToReport("Base (ft-lora eval)"));
                 if (adaptedMetrics is not null)
                 {
@@ -1029,6 +1039,11 @@ static class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Eval integration skipped: {ex.Message}");
+                if (adaptedMetrics is not null)
+                {
+                    evalExamples = result.EvalExamples;
+                    Console.WriteLine(adaptedMetrics.ToReport("Best-checkpoint val eval (trainer)"));
+                }
             }
         }
 
@@ -1069,12 +1084,15 @@ static class Program
             MemoryBudgetBytes = cli.MaxMemory > 0 ? cli.MaxMemory : null,
             MemoryBudgetMode = cli.MaxMemory > 0 ? "advisory" : "unspecified",
             LossCurve = lossCurve,
-            EvalRan = baseMetrics is not null,
-            EvalSplit = baseMetrics is not null ? "val" : null,
+            EvalRan = baseMetrics is not null || adaptedMetrics is not null,
+            EvalSplit = baseMetrics is not null || adaptedMetrics is not null ? "val" : null,
             EvalExamples = evalExamples,
             BaseMetrics = baseMetrics?.ToReport("Base").Trim(),
             AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
             EvalDeltas = evalDeltas,
+            BaseWorklogMetrics = baseMetrics,
+            AdaptedWorklogMetrics = adaptedMetrics,
+            EvalElapsedMs = result.EvalElapsedMs,
         };
         var cpuReportPath = Path.Combine(outDir, "ft-lora-report.json");
         cpuReport.Save(cpuReportPath);
@@ -1365,8 +1383,8 @@ static class Program
         var (model, config, _) = LlamaLoader.LoadModel<float, float>(modelDir, qwen: qwen, requiresGrad: false);
         model.Eval();
 
-        var stopIds = GetStopTokenIds(tokenizer, cli.Template);
-        var baseMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+        var stopIds = WorklogSftGeneration.GetStopTokenIds(tokenizer, cli.Template);
+        var baseMetrics = WorklogSftGeneration.Evaluate(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
         Console.WriteLine(baseMetrics.ToReport("Base"));
 
         WorklogEvalMetrics? adaptedMetrics = null;
@@ -1374,7 +1392,7 @@ static class Program
         {
             var adapters = model.AttachLora(ParseTargets(cli.Targets), cli.Rank, cli.Alpha);
             LoadCpuAdapterBundle(cli.AdapterPath, adapters);
-            adaptedMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+            adaptedMetrics = WorklogSftGeneration.Evaluate(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
             Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted"));
             Console.WriteLine($"Delta valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}");
             Console.WriteLine($"Delta ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}");
@@ -1408,6 +1426,8 @@ static class Program
             EvalExamples = testRows.Count,
             BaseMetrics = baseMetrics.ToReport("Base").Trim(),
             AdaptedMetrics = adaptedMetrics?.ToReport("LoRA-adapted").Trim(),
+            BaseWorklogMetrics = baseMetrics,
+            AdaptedWorklogMetrics = adaptedMetrics,
             EvalDeltas = adaptedMetrics is null ? null :
                 $"valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}\n" +
                 $"ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}\n" +
@@ -1424,90 +1444,6 @@ static class Program
         return 0;
     }
 
-    static WorklogEvalMetrics EvaluateWorklogSft(
-        LlamaForCausalLM<float, float> model,
-        Gpt2BpeTokenizer tokenizer,
-        IReadOnlyList<WorklogSftExample> examples,
-        string template,
-        int maxNewTokens,
-        int[] stopIds)
-    {
-        return WorklogSftEvaluator.Evaluate(examples, ex =>
-        {
-            var promptMessages = ex.Messages.TakeWhile(m => !string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)).ToList();
-            var promptText = RenderEvalPrompt(promptMessages, template);
-            var promptIds = tokenizer.Encode(promptText).ToArray();
-            var genIds = GenerateGreedy(model, promptIds, maxNewTokens, stopIds);
-            return tokenizer.Decode(genIds);
-        });
-    }
-
-    static string RenderEvalPrompt(IReadOnlyList<WorklogMessage> messages, string template)
-    {
-        var chatMessages = messages.Select(m => new Microsoft.Extensions.AI.ChatMessage(
-            m.Role.ToLowerInvariant() switch
-            {
-                "system" => Microsoft.Extensions.AI.ChatRole.System,
-                "user" => Microsoft.Extensions.AI.ChatRole.User,
-                "assistant" => Microsoft.Extensions.AI.ChatRole.Assistant,
-                "tool" => Microsoft.Extensions.AI.ChatRole.Tool,
-                _ => Microsoft.Extensions.AI.ChatRole.User
-            },
-            m.Content ?? string.Empty)).ToList();
-
-        return template.ToLowerInvariant() switch
-        {
-            "qwen" => QwenChatTemplate.Render(chatMessages, addGenerationPrompt: true),
-            "smollm" => SmollmChatTemplate.Render(chatMessages, addGenerationPrompt: true),
-            _ => throw new ArgumentException($"Unknown template '{template}'.", nameof(template))
-        };
-    }
-
-    static int[] GenerateGreedy(LlamaForCausalLM<float, float> model, int[] promptIds, int maxNewTokens, int[] stopIds)
-    {
-        var stop = new HashSet<int>(stopIds);
-        var gen = new List<int>(maxNewTokens);
-        var logits = model.Forward(promptIds);
-        int vocab = logits.Shape[^1];
-        for (int t = 0; t < maxNewTokens; t++)
-        {
-            int next = ArgMaxLastRow(logits.Data.ToArray(), vocab);
-            if (stop.Contains(next)) break;
-            gen.Add(next);
-            var seq = new int[promptIds.Length + gen.Count];
-            Array.Copy(promptIds, seq, promptIds.Length);
-            for (int i = 0; i < gen.Count; i++) seq[promptIds.Length + i] = gen[i];
-            logits = model.Forward(seq);
-        }
-        return gen.ToArray();
-    }
-
-    static int ArgMaxLastRow(float[] data, int vocab)
-    {
-        int off = Math.Max(0, data.Length - vocab);
-        int best = 0;
-        float bestVal = data[off];
-        for (int i = 1; i < vocab; i++)
-        {
-            float v = data[off + i];
-            if (v > bestVal) { bestVal = v; best = i; }
-        }
-        return best;
-    }
-
-    static int[] GetStopTokenIds(Gpt2BpeTokenizer tokenizer, string template)
-    {
-        var stops = new List<int>();
-        void Add(string token)
-        {
-            int id = tokenizer.TokenId(token);
-            if (id >= 0 && !stops.Contains(id)) stops.Add(id);
-        }
-        Add("<|im_end|>");
-        Add("<|endoftext|>");
-        Add("<|eot_id|>");
-        return stops.ToArray();
-    }
 
     static void LoadCpuAdapterBundle(string path, IReadOnlyList<LoRALinear<float, float>> adapters)
     {

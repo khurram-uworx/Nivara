@@ -13,15 +13,6 @@ public sealed class WorklogLoraSftTrainerTests
     static LlamaForCausalLM<float, float> TinyModel() =>
         new(vocabSize: 16, hiddenSize: 8, numHiddenLayers: 1, numHeads: 2, numKeyValueHeads: 2, intermediateSize: 16, maxPositionEmbeddings: 32);
 
-    static WorklogTokenizedExample TinyExample(int seed)
-    {
-        // prompt (2 tokens) masked, answer (2 tokens) kept
-        var rng = new Random(seed);
-        var ids = new[] { rng.Next(16), rng.Next(16), rng.Next(16), rng.Next(16) };
-        var labels = new[] { -100, -100, ids[2], ids[3] };
-        return new WorklogTokenizedExample(ids, labels, 2, 2);
-    }
-
     [Test]
     public void Train_BaseWeightsUnchanged_AfterTraining()
     {
@@ -166,5 +157,181 @@ public sealed class WorklogLoraSftTrainerTests
         var result = WorklogLoraSftTrainer.Train(options, model, null, trainTok, valTok);
         Assert.That(result.TrainableParams, Is.GreaterThan(0));
         Assert.That(result.BaseParams, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void Train_ComputeWorklogEvalMetricsDisabled_ReturnsNullMetrics()
+    {
+        var model = TinyModel();
+        var trainTok = new List<WorklogTokenizedExample> { TinyExample(1) };
+        var valTok = new List<WorklogTokenizedExample> { TinyExample(2) };
+        var options = new WorklogLoraSftOptions
+        {
+            ModelDir = Path.GetTempPath(),
+            TrainPath = "x",
+            ValPath = "y",
+            Rank = 2,
+            Alpha = 4f,
+            Epochs = 1,
+            MaxLen = 32,
+            Seed = 1,
+            LogEvery = 0,
+            SaveAdapter = false,
+            ComputeWorklogEvalMetrics = false,
+        };
+
+        var result = WorklogLoraSftTrainer.Train(options, model, null, trainTok, valTok);
+
+        Assert.That(result.BestValMetrics, Is.Null);
+        Assert.That(result.EvalExamples, Is.EqualTo(0));
+        Assert.That(result.EvalElapsedMs, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Train_ComputeWorklogEvalMetricsWithoutTokenizer_Throws()
+    {
+        var model = TinyModel();
+        var trainTok = new List<WorklogTokenizedExample> { TinyExample(1) };
+        var valTok = new List<WorklogTokenizedExample> { TinyExample(2) };
+        var valExamples = new List<WorklogSftExample> { EvalExample("log 1h on DB-42 today", "ok") };
+        var options = new WorklogLoraSftOptions
+        {
+            ModelDir = Path.GetTempPath(),
+            TrainPath = "x",
+            ValPath = "y",
+            Rank = 2,
+            Alpha = 4f,
+            Epochs = 1,
+            MaxLen = 32,
+            Seed = 1,
+            LogEvery = 0,
+            SaveAdapter = false,
+            ComputeWorklogEvalMetrics = true,
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            WorklogLoraSftTrainer.Train(options, model, null, trainTok, valTok, valExamples));
+        Assert.That(ex!.Message, Does.Contain("Tokenizer is required"));
+    }
+
+    [Test]
+    public void Train_ComputeWorklogEvalMetricsWithoutValExamples_Throws()
+    {
+        var model = TinyModel();
+        var trainTok = new List<WorklogTokenizedExample> { TinyExample(1) };
+        var valTok = new List<WorklogTokenizedExample> { TinyExample(2) };
+        var tokenizer = CreateByteLevelTokenizer();
+        var options = new WorklogLoraSftOptions
+        {
+            ModelDir = Path.GetTempPath(),
+            TrainPath = "x",
+            ValPath = "y",
+            Rank = 2,
+            Alpha = 4f,
+            Epochs = 1,
+            MaxLen = 32,
+            Seed = 1,
+            LogEvery = 0,
+            SaveAdapter = false,
+            ComputeWorklogEvalMetrics = true,
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            WorklogLoraSftTrainer.Train(options, model, tokenizer, trainTok, valTok));
+        Assert.That(ex!.Message, Does.Contain("Val examples are required"));
+    }
+
+    [Test]
+    public void Train_ComputeWorklogEvalMetrics_ReturnsMetrics()
+    {
+        var model = new LlamaForCausalLM<float, float>(vocabSize: 300, hiddenSize: 8, numHiddenLayers: 1, numHeads: 2, numKeyValueHeads: 2, intermediateSize: 16, maxPositionEmbeddings: 512);
+        var tokenizer = CreateByteLevelTokenizer();
+        var trainTok = new List<WorklogTokenizedExample> { TinyExample(1, vocab: 300) };
+        var valTok = new List<WorklogTokenizedExample> { TinyExample(2, vocab: 300) };
+        var valExamples = new List<WorklogSftExample>
+        {
+            EvalExample("log 1 hour to DB-42 on 2026-07-19", "<tool_call><function>LogTime</function><parameter=ticket>DB-42</parameter><parameter=hours>1</parameter><parameter=date>2026-07-19</parameter></tool_call>")
+        };
+
+        var options = new WorklogLoraSftOptions
+        {
+            ModelDir = Path.GetTempPath(),
+            TrainPath = "x",
+            ValPath = "y",
+            Rank = 2,
+            Alpha = 4f,
+            Epochs = 1,
+            MaxLen = 64,
+            Seed = 1,
+            LogEvery = 0,
+            SaveAdapter = false,
+            ComputeWorklogEvalMetrics = true,
+            EvalMaxNewTokens = 8,
+            MaxEvalExamples = 1,
+        };
+
+        var result = WorklogLoraSftTrainer.Train(options, model, tokenizer, trainTok, valTok, valExamples);
+
+        Assert.That(result.BestValMetrics, Is.Not.Null);
+        Assert.That(result.EvalExamples, Is.EqualTo(1));
+        Assert.That(result.EvalElapsedMs, Is.GreaterThanOrEqualTo(0));
+        Assert.That(result.BestValMetrics!.Total, Is.EqualTo(1));
+    }
+
+    static WorklogSftExample EvalExample(string user, string assistant) => new([
+        new WorklogMessage("user", user),
+        new WorklogMessage("assistant", assistant)
+    ]);
+
+    static WorklogTokenizedExample TinyExample(int seed, int vocab = 16)
+    {
+        var rng = new Random(seed);
+        var ids = new[] { rng.Next(vocab), rng.Next(vocab), rng.Next(vocab), rng.Next(vocab) };
+        var labels = new[] { -100, -100, ids[2], ids[3] };
+        return new WorklogTokenizedExample(ids, labels, 2, 2);
+    }
+
+    static Nivara.AI.Gpt2BpeTokenizer CreateByteLevelTokenizer()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "nivara-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var vocab = BuildByteLevelBaseVocab();
+        string[] specials = ["<|im_start|>", "<|im_end|>", "<|endoftext|>", "system", "user", "assistant", "tool"];
+        foreach (var token in specials)
+        {
+            if (!vocab.ContainsKey(token))
+                vocab[token] = vocab.Count;
+        }
+
+        var json = "{\"model\":{\"vocab\":" + System.Text.Json.JsonSerializer.Serialize(vocab)
+            + ",\"merges\":[]},\"pre_tokenizer\":{\"type\":\"ByteLevel\",\"add_prefix_space\":false,\"use_regex\":false},\"added_tokens\":[]}";
+        var path = Path.Combine(tempDir, "tokenizer.json");
+        File.WriteAllText(path, json);
+        return Nivara.AI.Gpt2BpeTokenizer.LoadFromTokenizerJson(path, "<|endoftext|>", normalizeNfc: false);
+    }
+
+    static Dictionary<string, int> BuildByteLevelBaseVocab()
+    {
+        var bs = new List<int>();
+        for (int i = '!'; i <= '~'; i++) bs.Add(i);
+        for (int i = 0xA1; i <= 0xAC; i++) bs.Add(i);
+        for (int i = 0xAE; i <= 0xFF; i++) bs.Add(i);
+        var bsSet = new HashSet<int>(bs);
+        var cs = new List<int>(bs);
+        int n = 0;
+        for (int b = 0; b < 256; b++)
+        {
+            if (!bsSet.Contains(b))
+            {
+                bs.Add(b);
+                cs.Add(256 + n);
+                n++;
+            }
+        }
+
+        var vocab = new Dictionary<string, int>(512);
+        for (int i = 0; i < bs.Count; i++)
+            vocab[((char)cs[i]).ToString()] = i;
+        return vocab;
     }
 }

@@ -112,6 +112,15 @@ public sealed class LoraSftRunReport
     [JsonPropertyName("evalDeltas")]
     public string? EvalDeltas { get; set; }
 
+    [JsonPropertyName("baseWorklogMetrics")]
+    public WorklogEvalMetrics? BaseWorklogMetrics { get; set; }
+
+    [JsonPropertyName("adaptedWorklogMetrics")]
+    public WorklogEvalMetrics? AdaptedWorklogMetrics { get; set; }
+
+    [JsonPropertyName("evalElapsedMs")]
+    public long EvalElapsedMs { get; set; }
+
     public static JsonSerializerOptions SerializerOptions { get; } = new() { WriteIndented = true };
 
     public void Save(string path)
@@ -191,6 +200,8 @@ public sealed class LoraSftRunReport
         {
             sb.AppendLine($"- **Split:** {EvalSplit}");
             sb.AppendLine($"- **Examples:** {EvalExamples}");
+            if (EvalElapsedMs > 0)
+                sb.AppendLine($"- **Eval elapsed (ms):** {EvalElapsedMs}");
         }
         if (!string.IsNullOrWhiteSpace(BaseMetrics))
         {

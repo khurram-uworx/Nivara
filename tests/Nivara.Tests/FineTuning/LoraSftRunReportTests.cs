@@ -44,6 +44,9 @@ public sealed class LoraSftRunReportTests
             BaseMetrics = "Base\ntotal=8",
             AdaptedMetrics = "LoRA-adapted\ntotal=8",
             EvalDeltas = "ticket: +10.0%",
+            BaseWorklogMetrics = new WorklogEvalMetrics(8, 6, 5, 5, 5, 1, 2, 1, 1, 1, 1),
+            AdaptedWorklogMetrics = new WorklogEvalMetrics(8, 8, 7, 7, 7, 2, 2, 1, 1, 1, 1),
+            EvalElapsedMs = 456,
             LossCurve =
             {
                 new LoraSftEpochLoss(1, 2.4f, 2.1f),
@@ -70,6 +73,12 @@ public sealed class LoraSftRunReportTests
         Assert.That(loaded.LossCurve[0].TrainLoss, Is.EqualTo(2.4f));
         Assert.That(loaded.LossCurve[0].ValLoss, Is.EqualTo(2.1f));
         Assert.That(loaded.EvalDeltas, Does.Contain("ticket"));
+        Assert.That(loaded.BaseWorklogMetrics, Is.Not.Null);
+        Assert.That(loaded.BaseWorklogMetrics!.Total, Is.EqualTo(8));
+        Assert.That(loaded.BaseWorklogMetrics.ValidStructure, Is.EqualTo(6));
+        Assert.That(loaded.AdaptedWorklogMetrics, Is.Not.Null);
+        Assert.That(loaded.AdaptedWorklogMetrics!.TicketCorrect, Is.EqualTo(7));
+        Assert.That(loaded.EvalElapsedMs, Is.EqualTo(456));
 
         File.Delete(path);
     }
