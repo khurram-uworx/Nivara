@@ -15,7 +15,7 @@ with Nivara.
 - **[BERT-TUNING.md](BERT-TUNING.md)** — DistilBERT/SST-2 track: ML concepts for .NET
   developers, architecture, dataset, setup, usage, expected results, performance
   benchmarks, scope of validation, Python reference, key APIs, core library improvements.
-- **[LLAMA-TUNING.md](LLAMA-TUNING.md)** — LoRA SFT track: generic Llama-family LoRA
+- **[LORA-TUNING.md](LORA-TUNING.md)** — LoRA SFT track: generic Llama-family LoRA
   trainer (CPU + Silk), CLI, SmolLM verification, report artifacts, adapter format, D2a
   parity status.
 
@@ -66,7 +66,7 @@ LoRA track (core additions in `src/Nivara`):
 ## Setup
 
 See [BERT-TUNING.md](BERT-TUNING.md) for DistilBERT/SST-2 prerequisites and downloads,
-and [LLAMA-TUNING.md](LLAMA-TUNING.md) for LoRA SLM prerequisites (model dirs + worklog data).
+and [LORA-TUNING.md](LORA-TUNING.md) for LoRA SLM prerequisites (model dirs + worklog data).
 
 > **Always run with `-c Release`.** Debug builds run the numeric kernels unoptimized.
 
