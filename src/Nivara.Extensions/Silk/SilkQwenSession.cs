@@ -39,6 +39,7 @@ public sealed class SilkQwenSession : IDisposable
     public float[] ForwardCached(int tokenId, int position) => runner.ForwardCached(tokenId, position);
     public int ForwardCachedArgmax(int tokenId, int position) => runner.ForwardCachedArgmax(tokenId, position);
     public void ResetCache() => runner.ResetCache();
+    public void LoadAdapterBundle(string adapterPath) => runner.LoadAdapterBundle(adapterPath);
     public void Dispose()
     {
         if (disposed) return;
