@@ -150,13 +150,23 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 
 - [ ] #1414 — Plan/grounding: reshape `docs/plan/LORA.md` for Qwen2.5-0.5B Silk FT headline
 - [x] #1415 — Reconcile untracked ft-data artifacts (removed untracked `FtDataBuilder.cs`/`FtDataModels.cs`; doc-QA oriented, no references, conflicts with behavioral SFT pivot)
-- [~] #1416 — Behavioral worklog SFT dataset and deterministic generator (seed data copied; loader/tokenizer/prompt-masking implemented; deterministic generator/eval metrics still pending)
-- [~] #1417 — Generic Llama-family CPU SFT trainer (Qwen headline, SmolLM verify) (CPU trainer + CLI scaffold implemented; smoke test/eval metrics/Silk parity pending)
-- [~] #1418 — Silk iGPU causal-LM LoRA training with CPU/Silk parity (D2a) (GQA backward kernels added; forward/loss/grad/TrainStep parity + adapter bundle round-trip pass for Qwen-shaped Q/V and SmolLM-shaped Q/K/V/O/FFN synthetic fixtures with loose tolerances; CLI `ft-lora --silk` wired with honest D2a parity warning; tighter tolerances, real-checkpoint smoke, adapter format convergence, docs/pins still pending)
-- [ ] #1420 — NivaraFineTuning CLI and report for SLM LoRA showcase
+- [~] #1416 — Behavioral worklog SFT dataset and deterministic generator (seed data copied; loader/tokenizer/prompt-masking done; deterministic `ft-generate` + provenance.json + overwrite guard done; `WorklogSftEvaluator` metrics added; remaining: deterministic generator unit tests, split/format/provenance tests, integration into ft-lora report)
+- [~] #1417 — Generic Llama-family CPU SFT trainer (Qwen headline, SmolLM verify) (CPU trainer + CLI + adapter bundle save/load done; CPU smoke previously slow on 0.5B first backward, now has granular step logs; remaining: small CPU smoke confirmation, eval metrics in report, SmolLM generic smoke evidence)
+- [~] #1418 — Silk iGPU causal-LM LoRA training with CPU/Silk parity (D2a) (GQA backward kernels, forward/loss/grad/TrainStep parity + adapter round-trip pass on synthetic Qwen-shaped Q/V and SmolLM-shaped Q/K/V/O/FFN fixtures; tolerances tightened and 5/5 GPU parity tests pass; real Qwen2.5-0.5B Silk `ft-lora` smoke passed on Intel iGPU: 4 train/1 val, 1 epoch, val loss 14.2516->12.3500, adapter saved, 10.2s; CLI wired with honest `IsParityReady=false` warning; remaining: more real-checkpoint parity evidence, adapter format convergence with core serializer, ft-eval before/after on Silk adapter, memory guard/reporting, set IsParityReady only with justified evidence)
+- [~] #1420 — NivaraFineTuning CLI and report for SLM LoRA showcase (`ft-generate`/`ft-lora`/`ft-eval` modes added; Silk ft-lora smoke works; remaining: report JSON/markdown artifact, before/after metrics in ft-lora flow, memory/param/device/parity status report, SmolLM verification command path)
 - [ ] #1421 — Tests, docs, and DocsCoveragePins for SLM iGPU FT showcase
 - [ ] #1419 — Optional NivaraChat adapter consumption demo
-- [ ] (to be created) G2 review + PR tracking
+- [ ] G2 review + PR tracking (before PR merge: branch review + TODO reconciliation, docs gates/DocsCoveragePins if docs changed)
+
+## Next session pick list (clear handoff)
+
+1. **#1418 hardening (recommended first):** run CPU smoke with new granular logs (or 2-4 examples) to confirm CPU reference; run `ft-eval` on Silk-produced adapter for before/after metrics; add real-checkpoint smoke evidence note; consider adapter bundle convergence with `LoraAdapterSerializer` naming; keep `IsParityReady=false` until evidence supports flip.
+2. **#1420 report polish:** emit ft-lora/ft-eval JSON report (base/adapted metrics, param counts, device, elapsed, parity status, adapter path); add SmolLM verification command in README/help.
+3. **#1416 tests:** deterministic generator tests, split/provenance/hash stability, overwrite guard, eval parser/metric unit tests.
+4. **#1414 docs/plan reshape:** update `docs/plan/LORA.md` to cleared D1-D5/D2a direction; no external path refs; check DocsCoveragePins/citations.
+5. **#1421 docs/tests/gates:** targeted tests, docs updates, DocsCoveragePins if docs/citations changed; run doc snippet gate when docs touched.
+6. **#1419 optional:** only if time remains; keep additive, no RAG regression.
+7. **G2 + PR:** after 1418/1420/1416 minimum, run branch-vs-TODO review, then push/create PR with confirmation.
 
 ## G1 grounding checklist (to complete before asking for clearance)
 
