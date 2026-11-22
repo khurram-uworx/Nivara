@@ -152,7 +152,7 @@ Issues to create after G1 clearance (use TASKS-TEMPLATE style in issue bodies wh
 - [x] #1415 — Reconcile untracked ft-data artifacts (removed untracked `FtDataBuilder.cs`/`FtDataModels.cs`; doc-QA oriented, no references, conflicts with behavioral SFT pivot)
 - [~] #1416 — Behavioral worklog SFT dataset and deterministic generator (seed data copied; loader/tokenizer/prompt-masking implemented; deterministic generator/eval metrics still pending)
 - [~] #1417 — Generic Llama-family CPU SFT trainer (Qwen headline, SmolLM verify) (CPU trainer + CLI scaffold implemented; smoke test/eval metrics/Silk parity pending)
-- [~] #1418 — Silk iGPU causal-LM LoRA training with CPU/Silk parity (D2a) (`rms_norm_backward`/`rotary_backward`/`swiglu_backward`/`scale` kernels added; `SilkLlamaLoRATrainer` forward pass with LoRA q/v/k/o/ffn implemented; backward, prompt-masked CE, LoRA Adam, parity tests, CLI --silk wiring still pending)
+- [~] #1418 — Silk iGPU causal-LM LoRA training with CPU/Silk parity (D2a) (`rms_norm_backward`/`rotary_backward`/`swiglu_backward`/`scale` kernels added; `SilkLlamaLoRATrainer` forward + prompt-masked CE/backward through LM head+final RMSNorm implemented; transformer-block backward, LoRA grad accumulation, Adam, parity tests, CLI --silk wiring still pending)
 - [ ] #1420 — NivaraFineTuning CLI and report for SLM LoRA showcase
 - [ ] #1421 — Tests, docs, and DocsCoveragePins for SLM iGPU FT showcase
 - [ ] #1419 — Optional NivaraChat adapter consumption demo

@@ -105,14 +105,19 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
     nint finalNormW;
     nint xBuf;
     nint normedBuf;
+    nint finalNormInputBuf;
     nint logitsBuf;
     nint dLogitsBuf;
+    nint dCurBuf;
+    nint dTmpBuf;
+    nint dLnAccBuf; // [maxSeqLen, hiddenDim] for dgamma accumulation
     nint targetIdsBuf;
     nint cosBuf;
     nint sinBuf;
     nint posIdsBuf;
     nint loraTmpBuf; // [maxSeqLen, rank]
     nint loraOutBuf; // [maxSeqLen, max(outDim)]
+    nint loraDxBuf;  // [maxSeqLen, max(inDim)] scratch for LoRA backward
     int ropeTableRows;
     int[]? posIdHost;
 
@@ -200,12 +205,70 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         return last;
     }
 
+    /// <summary>
+    /// Computes prompt-masked cross-entropy loss and runs backward through LM head
+    /// and final RMSNorm. Returns (loss, validTokenCount). dCurBuf holds dX at finalNorm input.
+    /// </summary>
+    public (float Loss, int ValidCount) BackwardPromptMaskedCrossEntropy(int[] labels, int seqLen)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(labels);
+        if (seqLen <= 0 || seqLen > options.MaxSeqLen) throw new ArgumentOutOfRangeException(nameof(seqLen));
+        if (labels.Length < seqLen) throw new ArgumentException("labels too short.", nameof(labels));
+
+        int valid = 0;
+        for (int i = 0; i < seqLen; i++)
+            if (labels[i] != -100) valid++;
+        if (valid == 0) throw new ArgumentException("No valid labels (all -100).", nameof(labels));
+
+        // Loss on host (logits already in logitsBuf from forward)
+        var logits = runtime.Download(logitsBuf, seqLen * options.VocabSize);
+        float loss = ComputeMaskedCrossEntropy(logits, labels, seqLen, options.VocabSize);
+
+        float scale = 1f / valid;
+        runtime.Upload(targetIdsBuf, labels.AsSpan(0, seqLen));
+        // dLogits = softmax(logits) - onehot(labels), scaled, with ignoreIndex
+        SilkLauncher.SoftmaxCrossEntropyBackward(runtime, logitsBuf, targetIdsBuf, dLogitsBuf,
+            seqLen, options.VocabSize, scale, -100);
+
+        // LM head backward: logits = normed @ tokEmbTransposed
+        // dNormed = dLogits @ tokEmb  (tokEmb is [vocab, hidden])
+        SilkLauncher.Gemm(runtime, dLogitsBuf, tokEmb, dTmpBuf, seqLen, options.VocabSize, options.HiddenDim);
+
+        // Final RMSNorm backward: dTmpBuf is dNormed, finalNormInputBuf is x, finalNormW is gamma
+        // dCurBuf = dX, dLnAccBuf = dGammaAcc (ignored; base frozen)
+        SilkLauncher.RmsNormBackward(runtime, dTmpBuf, finalNormInputBuf, finalNormW, dCurBuf, dLnAccBuf,
+            seqLen, options.HiddenDim, options.RmsNormEps);
+
+        return (loss, valid);
+    }
+
     public float TrainStep(int[] inputIds, int[] labels, float learningRate)
     {
         ThrowIfDisposed();
         throw new NotImplementedException(
             "D2a Silk Llama LoRA backward/parity path is scaffolded but not complete yet. " +
             "CPU reference is available; Silk parity is required before release readiness.");
+    }
+
+    static float ComputeMaskedCrossEntropy(float[] logits, int[] labels, int seqLen, int vocab)
+    {
+        float sum = 0;
+        int valid = 0;
+        for (int t = 0; t < seqLen; t++)
+        {
+            int label = labels[t];
+            if (label < 0 || label >= vocab) continue;
+            float max = float.NegativeInfinity;
+            int off = t * vocab;
+            for (int v = 0; v < vocab; v++) max = MathF.Max(max, logits[off + v]);
+            float s = 0;
+            for (int v = 0; v < vocab; v++) s += MathF.Exp(logits[off + v] - max);
+            float logp = logits[off + label] - max - MathF.Log(s);
+            sum += -logp;
+            valid++;
+        }
+        return valid == 0 ? 0f : sum / valid;
     }
 
     public void Dispose()
@@ -267,6 +330,7 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
             SilkLauncher.Add(runtime, xBuf, act.AttnProj, xBuf, seqLen * options.HiddenDim);
         }
 
+        runtime.CopyBuffer(xBuf, finalNormInputBuf, 0, 0, seqLen * options.HiddenDim);
         SilkLauncher.RmsNorm(runtime, xBuf, finalNormW, normedBuf, seqLen, options.HiddenDim, options.RmsNormEps);
         SilkLauncher.Gemm(runtime, normedBuf, tokEmbTransposed, logitsBuf, seqLen, options.HiddenDim, options.VocabSize);
     }
@@ -289,8 +353,12 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         int v = options.VocabSize;
         xBuf = Alloc(cap * h);
         normedBuf = Alloc(cap * h);
+        finalNormInputBuf = Alloc(cap * h);
         logitsBuf = Alloc(cap * v);
         dLogitsBuf = Alloc(cap * v);
+        dCurBuf = Alloc(cap * h);
+        dTmpBuf = Alloc(cap * h);
+        dLnAccBuf = Alloc(cap * h);
         targetIdsBuf = Alloc(cap);
         posIdsBuf = Alloc(cap);
         cosBuf = Alloc(cap * headDim / 2);
@@ -298,6 +366,7 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         loraTmpBuf = Alloc(cap * options.Rank);
         int maxOut = Math.Max(h, Math.Max(qDim, Math.Max(kvDim, options.IntermediateDim)));
         loraOutBuf = Alloc(cap * maxOut);
+        loraDxBuf = Alloc(cap * maxOut);
     }
 
     void AllocateLayerActivations()
