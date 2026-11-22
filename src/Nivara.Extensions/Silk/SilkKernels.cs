@@ -185,6 +185,7 @@ internal static class SilkKernels
     public const string GeluBackwardBf16Act = "gelu_backward_bf16_act";
     public const string LayerNormBackward = "layer_norm_backward";
     public const string LayerNormBackwardBf16Act = "layer_norm_backward_bf16_act";
+    public const string RmsNormBackward = "rms_norm_backward";
     public const string ColSum = "col_sum";
     public const string ColSumBf16Act = "col_sum_bf16_act";
     public const string Fill = "fill";
@@ -219,7 +220,7 @@ internal static class SilkKernels
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
-        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, ColSum, ColSumBf16Act, Fill,
+        GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, RmsNormBackward, ColSum, ColSumBf16Act, Fill,
         SoftmaxCrossEntropyBackward,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
@@ -2372,6 +2373,45 @@ internal static class SilkKernels
             meanDNorm /= (float)cols;
 
             dx[idx] = (gamma[col] * invStd) * (d[idx] - meanD - normalized * meanDNorm);
+        }
+
+        /* rms_norm_backward: backward through RMSNorm (no mean, no beta). Inputs: d (grad of
+           normed output), x (pre-norm input), gamma. Outputs: dx (grad input), dgammaAcc
+           (per-element products to be reduced with col_sum). */
+        __kernel void rms_norm_backward(
+            __global const float* d,
+            __global const float* x,
+            __global const float* gamma,
+            __global float* dx,
+            __global float* dgammaAcc,
+            const uint rows,
+            const uint cols,
+            const float eps)
+        {
+            uint idx = get_global_id(0);
+            uint total = rows * cols;
+            if (idx >= total) return;
+            uint row = idx / cols;
+            uint col = idx % cols;
+            uint base = row * cols;
+
+            float sumSq = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+            {
+                float v = x[base + c];
+                sumSq += v * v;
+            }
+            float invRms = 1.0f / sqrt(sumSq / (float)cols + eps);
+
+            float normalized = x[idx] * invRms;
+            dgammaAcc[idx] = d[idx] * normalized;
+
+            float dot = 0.0f;
+            for (uint c = 0; c < cols; ++c)
+                dot += d[base + c] * gamma[c] * x[base + c];
+
+            float invRms3 = invRms * invRms * invRms;
+            dx[idx] = invRms * d[idx] * gamma[col] - x[idx] * invRms3 * dot / (float)cols;
         }
 
         /* y[j] = scale * sum_i x[i*cols + j] — FC bias gradients. The scale is applied once at

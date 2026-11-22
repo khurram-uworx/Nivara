@@ -1062,6 +1062,19 @@ internal static class SilkLauncher
         runtime.Run(SilkKernels.LayerNormBackwardBf16Act, [(nuint)SilkKernels.LinearGlobal(rows * cols)], [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void RmsNormBackward(SilkRuntime runtime, nint d, nint x, nint gamma, nint dx, nint dgammaAcc, int rows, int cols, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 0, d);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 1, x);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 2, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 3, dx);
+        runtime.SetBuffer(SilkKernels.RmsNormBackward, 4, dgammaAcc);
+        runtime.SetUInt32(SilkKernels.RmsNormBackward, 5, (uint)rows);
+        runtime.SetUInt32(SilkKernels.RmsNormBackward, 6, (uint)cols);
+        runtime.SetFloat32(SilkKernels.RmsNormBackward, 7, eps);
+        runtime.Run(SilkKernels.RmsNormBackward, [(nuint)SilkKernels.LinearGlobal(rows * cols)], [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     public static void ColSumBf16Act(SilkRuntime runtime, nint x, nint y, int rows, int cols, float scale)
     {
         runtime.SetBuffer(SilkKernels.ColSumBf16Act, 0, x);
