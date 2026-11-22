@@ -270,6 +270,7 @@ public static class WorklogLoraSftTrainer
             rank = options.Rank,
             alpha = options.Alpha,
             targets = options.Targets.ToString(),
+            trainableParams = adapters.Sum(a => a.A.Tensor.Length + a.B.Tensor.Length),
             adapters = adapters.Select((a, i) => new
             {
                 index = i,

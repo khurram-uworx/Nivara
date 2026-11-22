@@ -1284,19 +1284,45 @@ static class Program
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         var root = doc.RootElement;
-        if (root.GetProperty("format").GetString() != "nivara-lora-sft-adapters-v1")
+        if (root.TryGetProperty("format", out var formatProp) && formatProp.GetString() != "nivara-lora-sft-adapters-v1")
             throw new InvalidOperationException("Unsupported adapter bundle format.");
-        var entries = root.GetProperty("adapters").EnumerateArray().ToList();
+        if (!root.TryGetProperty("adapters", out var adaptersProp))
+            throw new InvalidOperationException("Adapter bundle missing 'adapters' array.");
+        var entries = adaptersProp.EnumerateArray().ToList();
         if (entries.Count != adapters.Count)
             throw new InvalidOperationException($"Adapter count mismatch: file has {entries.Count}, model has {adapters.Count}.");
+
+        // Best-effort metadata validation when present (older bundles may omit these).
+        if (root.TryGetProperty("rank", out var rankProp) && rankProp.TryGetInt32(out var fileRank))
+        {
+            if (adapters.Count > 0 && fileRank != adapters[0].Rank)
+                throw new InvalidOperationException($"Adapter rank mismatch: file rank={fileRank}, model rank={adapters[0].Rank}.");
+        }
 
         for (int i = 0; i < adapters.Count; i++)
         {
             var entry = entries[i];
+            if (entry.TryGetProperty("index", out var idxProp) && idxProp.TryGetInt32(out var idx) && idx != i)
+                throw new InvalidOperationException($"Adapter index mismatch at position {i}: file index={idx}.");
+            if (entry.TryGetProperty("aShape", out var aShapeProp))
+            {
+                var shape = aShapeProp.EnumerateArray().Select(x => x.GetInt32()).ToArray();
+                if (shape.Length != 2 || shape[0] != adapters[i].A.Tensor.Shape[0] || shape[1] != adapters[i].A.Tensor.Shape[1])
+                    throw new InvalidOperationException($"Adapter {i} A shape mismatch.");
+            }
+            if (entry.TryGetProperty("bShape", out var bShapeProp))
+            {
+                var shape = bShapeProp.EnumerateArray().Select(x => x.GetInt32()).ToArray();
+                if (shape.Length != 2 || shape[0] != adapters[i].B.Tensor.Shape[0] || shape[1] != adapters[i].B.Tensor.Shape[1])
+                    throw new InvalidOperationException($"Adapter {i} B shape mismatch.");
+            }
+
             var aBytes = Convert.FromBase64String(entry.GetProperty("a").GetString()!);
             var bBytes = Convert.FromBase64String(entry.GetProperty("b").GetString()!);
             var a = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(aBytes).ToArray();
             var b = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bBytes).ToArray();
+            if (a.Length != adapters[i].A.Tensor.Length || b.Length != adapters[i].B.Tensor.Length)
+                throw new InvalidOperationException($"Adapter {i} data length mismatch.");
             adapters[i].A.Tensor = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(a, adapters[i].A.Tensor.Shape[0], adapters[i].A.Tensor.Shape[1], requiresGrad: true);
             adapters[i].B.Tensor = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(b, adapters[i].B.Tensor.Shape[0], adapters[i].B.Tensor.Shape[1], requiresGrad: true);
         }
