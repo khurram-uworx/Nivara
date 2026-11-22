@@ -83,6 +83,7 @@ public static class WorklogLoraSftTrainer
         if (trainTok.Count == 0) throw new InvalidOperationException("No train examples after tokenization.");
         if (valTok.Count == 0) throw new InvalidOperationException("No val examples after tokenization.");
         Console.WriteLine($"  Tokenized train={trainTok.Count}, val={valTok.Count}");
+        Console.WriteLine("  Running initial validation...");
 
         var optimizer = new AdamW<TModel>(TModel.CreateChecked(options.LearningRate));
         foreach (var adapter in adapters)
@@ -111,10 +112,14 @@ public static class WorklogLoraSftTrainer
             for (int i = 0; i < trainTok.Count; i++)
             {
                 var ex = trainTok[i];
+                if (options.LogEvery > 0 && (i + 1) % options.LogEvery == 0)
+                    Console.WriteLine($"  epoch {epoch}/{options.Epochs} step {i + 1}/{trainTok.Count}: forward...");
                 using (Nivara.AutoDiff.Utilities.GradientUtils.Grad())
                 {
                     var logits = model.Forward(ex.InputIds); // [L, vocab]
                     var loss = lossFn.Forward(logits, ex.Labels, -100);
+                    if (options.LogEvery > 0 && (i + 1) % options.LogEvery == 0)
+                        Console.WriteLine($"  epoch {epoch}/{options.Epochs} step {i + 1}/{trainTok.Count}: backward (loss={float.CreateChecked(loss.Data[0]):F4})...");
                     loss.Backward();
                     optimizer.Step();
                     optimizer.ZeroGrad();

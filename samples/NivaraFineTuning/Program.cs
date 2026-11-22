@@ -1,7 +1,9 @@
 using Microsoft.ML.Tokenizers;
 using Nivara;
 using Nivara.AI;
+using System.Text.Json;
 using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
@@ -41,6 +43,7 @@ sealed record CliArgs
     public int Seed { get; init; } = 42;
     public int LogEvery { get; init; } = 10;
     public bool Force { get; init; }
+    public int MaxNewTokens { get; init; } = 128;
 
     public static CliArgs Parse(string[] args)
     {
@@ -69,6 +72,7 @@ sealed record CliArgs
         int seed = 42;
         int logEvery = 10;
         bool force = false;
+        int maxNewTokens = 128;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -147,6 +151,9 @@ sealed record CliArgs
                 case "--force":
                     force = true;
                     break;
+                case "--max-new-tokens" when i + 1 < args.Length:
+                    maxNewTokens = int.Parse(args[++i]);
+                    break;
                 case "--help":
                 case "-h":
                     PrintHelp();
@@ -186,7 +193,8 @@ sealed record CliArgs
             Targets = targets,
             Seed = seed,
             LogEvery = logEvery,
-            Force = force
+            Force = force,
+            MaxNewTokens = maxNewTokens
         };
     }
 
@@ -196,10 +204,10 @@ sealed record CliArgs
 NivaraFineTuning - DistilBERT fine-tuning and Llama-family LoRA SFT showcase
 
 Usage:
-  NivaraFineTuning --mode <train|eval|predict|ft-lora|ft-eval> [options]
+  NivaraFineTuning --mode <train|eval|predict|ft-lora|ft-eval|ft-generate> [options]
 
 DistilBERT options:
-  --mode          train|eval|predict|ft-lora|ft-eval (default: train)
+  --mode          train|eval|predict|ft-lora|ft-eval|ft-generate (default: train)
   --epochs        Number of training epochs (default: 3)
   --lr            Learning rate
   --batch-size    Batch size for training/eval (default: 4)
@@ -225,9 +233,11 @@ LoRA SFT options:
   --seed          Random seed (default: 42)
   --log-every     Training log interval (default: 10)
   --force         Overwrite outputs
+  --max-new-tokens  Max tokens to generate during ft-eval (default: 128)
 
 Examples:
   NivaraFineTuning --mode train --epochs 3 --batch-size 4
+  NivaraFineTuning --mode ft-generate --out-dir samples/data/worklog --seed 42 --max-examples 350 --force
   NivaraFineTuning --mode ft-lora --model-dir samples/data/qwen2.5-0.5b-instruct --train-data samples/data/worklog/train.jsonl --val-data samples/data/worklog/test.jsonl --template qwen --epochs 1 --max-examples 32 --max-len 256 --out-dir out/worklog-lora
 """);
     }
@@ -246,6 +256,7 @@ static class Program
             "predict" => RunPredict(cli),
             "ft-lora" => RunFtLora(cli),
             "ft-eval" => RunFtEval(cli),
+            "ft-generate" => RunFtGenerate(cli),
             _ => throw new ArgumentException($"Unknown mode '{cli.Mode}'. Use --help for usage.")
         };
     }
@@ -1060,10 +1071,203 @@ static class Program
         }
     }
 
+    static int RunFtGenerate(CliArgs cli)
+    {
+        int total = cli.MaxExamples > 0 ? cli.MaxExamples : 450;
+        int seed = cli.Seed;
+        string outDir = string.IsNullOrWhiteSpace(cli.OutDir)
+            ? Path.Combine(FindDefaultPath("data"), "worklog")
+            : cli.OutDir;
+        Directory.CreateDirectory(outDir);
+
+        var trainPath = Path.Combine(outDir, "train.jsonl");
+        var testPath = Path.Combine(outDir, "test.jsonl");
+        var metaPath = Path.Combine(outDir, "provenance.json");
+
+        if (!cli.Force && (File.Exists(trainPath) || File.Exists(testPath) || File.Exists(metaPath)))
+        {
+            Console.Error.WriteLine($"ERROR: Output files already exist in '{outDir}'. Use --force to overwrite.");
+            return 1;
+        }
+
+        Console.WriteLine($"Generating deterministic worklog SFT dataset: total={total}, seed={seed}");
+        var all = WorklogSftDataset.GenerateSynthetic(total, seed);
+        var split = WorklogSftDataset.SplitDeterministic(all, seed, trainRatio: 0.78, valRatio: 0.0);
+        // SplitDeterministic with valRatio 0 puts remainder in test; adjust to match 350/100 style
+        var train = split.Train;
+        var test = split.Test;
+        if (split.Validation.Count > 0) { test.AddRange(split.Validation); }
+
+        WorklogSftDataset.SaveJsonl(trainPath, train, force: cli.Force);
+        WorklogSftDataset.SaveJsonl(testPath, test, force: cli.Force);
+
+        var meta = new
+        {
+            format = "nivara-worklog-sft-v1",
+            seed,
+            total,
+            train = train.Count,
+            test = test.Count,
+            provenanceHash = split.ProvenanceHash,
+            generator = "NivaraFineTuning.WorklogSftDataset.GenerateSynthetic"
+        };
+        File.WriteAllText(metaPath, System.Text.Json.JsonSerializer.Serialize(meta, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+
+        Console.WriteLine($"Wrote {trainPath} ({train.Count})");
+        Console.WriteLine($"Wrote {testPath} ({test.Count})");
+        Console.WriteLine($"Provenance: {split.ProvenanceHash}");
+        return 0;
+    }
+
     static int RunFtEval(CliArgs cli)
     {
-        Console.Error.WriteLine("ft-eval is not implemented yet in this branch; planned in #1420/#1421.");
-        return 1;
+        var modelDir = ResolveModelDir(cli.ModelDir);
+        var testData = ResolveDataPath(cli.TestData, cli.DataDir, "test.jsonl");
+        bool qwen = IsQwenModelDir(modelDir, cli.Template);
+
+        Console.WriteLine("=== Nivara LoRA SFT Eval ===");
+        Console.WriteLine($"Model: {modelDir}");
+        Console.WriteLine($"Test:  {testData}");
+        Console.WriteLine($"Template: {cli.Template}, maxNewTokens={cli.MaxNewTokens}, maxExamples={cli.MaxExamples}");
+        if (!string.IsNullOrWhiteSpace(cli.AdapterPath))
+            Console.WriteLine($"Adapter: {cli.AdapterPath}");
+
+        var (_, tokenizer) = qwen
+            ? LlamaLoader.LoadQwenConfigAndTokenizer(modelDir)
+            : LlamaLoader.LoadSmolLMConfigAndTokenizer(modelDir);
+        var testRows = WorklogSftDataset.LoadJsonl(testData);
+        if (cli.MaxExamples > 0 && testRows.Count > cli.MaxExamples)
+            testRows = testRows.Take(cli.MaxExamples).ToList();
+
+        Console.WriteLine($"Loading model...");
+        var (model, config, _) = LlamaLoader.LoadModel<float, float>(modelDir, qwen: qwen, requiresGrad: false);
+        model.Eval();
+
+        var stopIds = GetStopTokenIds(tokenizer, cli.Template);
+        var baseMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+        Console.WriteLine(baseMetrics.ToReport("Base"));
+
+        if (!string.IsNullOrWhiteSpace(cli.AdapterPath))
+        {
+            var adapters = model.AttachLora(ParseTargets(cli.Targets), cli.Rank, cli.Alpha);
+            LoadCpuAdapterBundle(cli.AdapterPath, adapters);
+            var adaptedMetrics = EvaluateWorklogSft(model, tokenizer, testRows, cli.Template, cli.MaxNewTokens, stopIds);
+            Console.WriteLine(adaptedMetrics.ToReport("LoRA-adapted"));
+            Console.WriteLine($"Delta valid_structure: {adaptedMetrics.ValidStructureRate - baseMetrics.ValidStructureRate:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta ticket:          {adaptedMetrics.TicketAccuracy - baseMetrics.TicketAccuracy:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta hours:           {adaptedMetrics.HoursAccuracy - baseMetrics.HoursAccuracy:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta date:            {adaptedMetrics.DateAccuracy - baseMetrics.DateAccuracy:+0.0%;-0.0%;0%}");
+            Console.WriteLine($"Delta convention:      {adaptedMetrics.ConventionAccuracy - baseMetrics.ConventionAccuracy:+0.0%;-0.0%;0%}");
+        }
+
+        return 0;
+    }
+
+    static WorklogEvalMetrics EvaluateWorklogSft(
+        LlamaForCausalLM<float, float> model,
+        Gpt2BpeTokenizer tokenizer,
+        IReadOnlyList<WorklogSftExample> examples,
+        string template,
+        int maxNewTokens,
+        int[] stopIds)
+    {
+        return WorklogSftEvaluator.Evaluate(examples, ex =>
+        {
+            var promptMessages = ex.Messages.TakeWhile(m => !string.Equals(m.Role, "assistant", StringComparison.OrdinalIgnoreCase)).ToList();
+            var promptText = RenderEvalPrompt(promptMessages, template);
+            var promptIds = tokenizer.Encode(promptText).ToArray();
+            var genIds = GenerateGreedy(model, promptIds, maxNewTokens, stopIds);
+            return tokenizer.Decode(genIds);
+        });
+    }
+
+    static string RenderEvalPrompt(IReadOnlyList<WorklogMessage> messages, string template)
+    {
+        var chatMessages = messages.Select(m => new Microsoft.Extensions.AI.ChatMessage(
+            m.Role.ToLowerInvariant() switch
+            {
+                "system" => Microsoft.Extensions.AI.ChatRole.System,
+                "user" => Microsoft.Extensions.AI.ChatRole.User,
+                "assistant" => Microsoft.Extensions.AI.ChatRole.Assistant,
+                "tool" => Microsoft.Extensions.AI.ChatRole.Tool,
+                _ => Microsoft.Extensions.AI.ChatRole.User
+            },
+            m.Content ?? string.Empty)).ToList();
+
+        return template.ToLowerInvariant() switch
+        {
+            "qwen" => QwenChatTemplate.Render(chatMessages, addGenerationPrompt: true),
+            "smollm" => SmollmChatTemplate.Render(chatMessages, addGenerationPrompt: true),
+            _ => throw new ArgumentException($"Unknown template '{template}'.", nameof(template))
+        };
+    }
+
+    static int[] GenerateGreedy(LlamaForCausalLM<float, float> model, int[] promptIds, int maxNewTokens, int[] stopIds)
+    {
+        var stop = new HashSet<int>(stopIds);
+        var gen = new List<int>(maxNewTokens);
+        var logits = model.Forward(promptIds);
+        int vocab = logits.Shape[^1];
+        for (int t = 0; t < maxNewTokens; t++)
+        {
+            int next = ArgMaxLastRow(logits.Data.ToArray(), vocab);
+            if (stop.Contains(next)) break;
+            gen.Add(next);
+            var seq = new int[promptIds.Length + gen.Count];
+            Array.Copy(promptIds, seq, promptIds.Length);
+            for (int i = 0; i < gen.Count; i++) seq[promptIds.Length + i] = gen[i];
+            logits = model.Forward(seq);
+        }
+        return gen.ToArray();
+    }
+
+    static int ArgMaxLastRow(float[] data, int vocab)
+    {
+        int off = Math.Max(0, data.Length - vocab);
+        int best = 0;
+        float bestVal = data[off];
+        for (int i = 1; i < vocab; i++)
+        {
+            float v = data[off + i];
+            if (v > bestVal) { bestVal = v; best = i; }
+        }
+        return best;
+    }
+
+    static int[] GetStopTokenIds(Gpt2BpeTokenizer tokenizer, string template)
+    {
+        var stops = new List<int>();
+        void Add(string token)
+        {
+            int id = tokenizer.TokenId(token);
+            if (id >= 0 && !stops.Contains(id)) stops.Add(id);
+        }
+        Add("<|im_end|>");
+        Add("<|endoftext|>");
+        Add("<|eot_id|>");
+        return stops.ToArray();
+    }
+
+    static void LoadCpuAdapterBundle(string path, IReadOnlyList<LoRALinear<float, float>> adapters)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var root = doc.RootElement;
+        if (root.GetProperty("format").GetString() != "nivara-lora-sft-adapters-v1")
+            throw new InvalidOperationException("Unsupported adapter bundle format.");
+        var entries = root.GetProperty("adapters").EnumerateArray().ToList();
+        if (entries.Count != adapters.Count)
+            throw new InvalidOperationException($"Adapter count mismatch: file has {entries.Count}, model has {adapters.Count}.");
+
+        for (int i = 0; i < adapters.Count; i++)
+        {
+            var entry = entries[i];
+            var aBytes = Convert.FromBase64String(entry.GetProperty("a").GetString()!);
+            var bBytes = Convert.FromBase64String(entry.GetProperty("b").GetString()!);
+            var a = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(aBytes).ToArray();
+            var b = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(bBytes).ToArray();
+            adapters[i].A.Tensor = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(a, adapters[i].A.Tensor.Shape[0], adapters[i].A.Tensor.Shape[1], requiresGrad: true);
+            adapters[i].B.Tensor = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(b, adapters[i].B.Tensor.Shape[0], adapters[i].B.Tensor.Shape[1], requiresGrad: true);
+        }
     }
 
     static string ResolveModelDir(string modelDir)

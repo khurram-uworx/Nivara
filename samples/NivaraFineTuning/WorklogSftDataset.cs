@@ -223,4 +223,96 @@ public static class WorklogSftDataset
             _ => throw new ArgumentException($"Unknown template '{template}'. Expected qwen or smollm.", nameof(template))
         };
     }
+
+    public static List<WorklogSftExample> GenerateSynthetic(int count, int seed = 42)
+    {
+        if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
+        var rng = new Random(seed);
+        var tickets = new[] { "POS-100", "AUTH-7", "API-314", "DB-42", "WEB-250", "MOB-8", "OPS-19", "INFRA-5", "UI-77", "PAY-12" };
+        var dates = Enumerable.Range(0, 30).Select(i => new DateTime(2026, 7, 1).AddDays(i).ToString("yyyy-MM-dd")).ToArray();
+        const string system = "You are a worklog assistant. When the user describes their work, call the LogTime tool with:\n- ticket: the ticket ID (e.g. POS-100, AUTH-7, API-314)\n- hours: decimal hours worked\n- date: ISO date string (use today's date if not specified)\n\nOffice hours rules:\n- The standard office day is 8 hours.\n- If the user says all day or full day, that means 8 hours.\n- Half day means 4 hours.\n- If the user mentions a specific duration, use that number.\n- Never interpret all day as 24 hours.\n\nIf the user mentions multiple tickets in one message, make a separate tool call for each ticket.\nIf the input is ambiguous, ask for clarification rather than guessing.";
+
+        var examples = new List<WorklogSftExample>(count);
+        for (int i = 0; i < count; i++)
+        {
+            int kind = rng.Next(6); // 0:explicit,1:all-day,2:half-day,3:multi,4:clarification,5:explicit-decimal
+            string date = dates[rng.Next(dates.Length)];
+            string ticket = tickets[rng.Next(tickets.Length)];
+            string ticket2 = tickets[(Array.IndexOf(tickets, ticket) + 1 + rng.Next(tickets.Length - 1)) % tickets.Length];
+
+            (string user, string assistant) = kind switch
+            {
+                0 => ($"I worked {Pick(rng, "2 hours", "3 hours", "6 hours")} on {ticket} on {date}.",
+                      ToolCall(ticket, kind == 0 ? ParseHoursFromUser(rng, 2, 3, 6) : 2m, date)),
+                1 => ($"I spent {Pick(rng, "all day", "the full day")} on {ticket} on {date}.",
+                      ToolCall(ticket, 8m, date)),
+                2 => ($"I did a {Pick(rng, "half day", "half-day")} on {ticket} on {date}.",
+                      ToolCall(ticket, 4m, date)),
+                3 => MultiTicketExample(rng, ticket, ticket2, date),
+                4 => ClarificationExample(rng),
+                _ => DecimalExample(rng, ticket, date),
+            };
+
+            // Fix kind 0 hours to match text
+            if (kind == 0)
+            {
+                decimal h = user.Contains("2 hours") ? 2m : user.Contains("3 hours") ? 3m : 6m;
+                assistant = ToolCall(ticket, h, date);
+            }
+
+            examples.Add(new WorklogSftExample([
+                new WorklogMessage("system", system),
+                new WorklogMessage("user", user),
+                new WorklogMessage("assistant", assistant),
+            ]));
+        }
+
+        return examples;
+    }
+
+    static (string user, string assistant) MultiTicketExample(Random rng, string t1, string t2, string date)
+    {
+        if (rng.Next(2) == 0)
+        {
+            return ($"4 hours on {t1} and 4 hours on {t2} on {date}.",
+                ToolCall(t1, 4m, date) + "\n" + ToolCall(t2, 4m, date));
+        }
+        return ($"I split the day between {t1} and {t2} on {date}, half day each.",
+            ToolCall(t1, 4m, date) + "\n" + ToolCall(t2, 4m, date));
+    }
+
+    static (string user, string assistant) DecimalExample(Random rng, string ticket, string date)
+    {
+        var options = new (string text, decimal hours)[] { ("2.5 hours", 2.5m), ("1.5 hours", 1.5m), ("0.5 hours", 0.5m), ("20 minutes", 0.33m) };
+        var pick = options[rng.Next(options.Length)];
+        return ($"I spent {pick.text} on {ticket} on {date}.", ToolCall(ticket, pick.hours, date));
+    }
+
+    static (string user, string assistant) ClarificationExample(Random rng)
+    {
+        string[] prompts = [
+            "I worked on stuff today.",
+            "Log my time please.",
+            "I was busy all day.",
+            "Worked on the ticket for a bit.",
+        ];
+        string[] replies = [
+            "Could you clarify which ticket you worked on and how many hours to log?",
+            "Which ticket should I log, and for how many hours? Please also provide the date if not today.",
+            "Could you clarify which ticket you worked on? If you meant all day, I can log 8 hours once you specify the ticket and date.",
+            "Could you specify the ticket ID and the number of hours you worked?",
+        ];
+        int i = rng.Next(prompts.Length);
+        return (prompts[i], replies[i]);
+    }
+
+    static decimal ParseHoursFromUser(Random rng, params int[] choices) => choices[rng.Next(choices.Length)];
+
+    static string Pick(Random rng, params string[] choices) => choices[rng.Next(choices.Length)];
+
+    static string ToolCall(string ticket, decimal hours, string date)
+    {
+        string hoursText = hours % 1 == 0 ? ((int)hours).ToString(System.Globalization.CultureInfo.InvariantCulture) : hours.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return $"<tool_call>\n<function>LogTime</function>\n<parameter=ticket>{ticket}</parameter>\n<parameter=hours>{hoursText}</parameter>\n<parameter=date>{date}</parameter>\n</tool_call>";
+    }
 }
