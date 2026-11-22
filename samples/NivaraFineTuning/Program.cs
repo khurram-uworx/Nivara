@@ -43,6 +43,9 @@ sealed record CliArgs
     public string Targets { get; init; } = "q,v";
     public int Seed { get; init; } = 42;
     public int LogEvery { get; init; } = 10;
+    public int Patience { get; init; } = 0;
+    public float MinDelta { get; init; } = 0f;
+    public int GradAccum { get; init; } = 1;
     public bool Force { get; init; }
     public int MaxNewTokens { get; init; } = 128;
     public double ValRatio { get; init; } = 0.0;
@@ -74,6 +77,9 @@ sealed record CliArgs
         string targets = "q,v";
         int seed = 42;
         int logEvery = 10;
+        int patience = 0;
+        float minDelta = 0f;
+        int gradAccum = 1;
         bool force = false;
         int maxNewTokens = 128;
         double valRatio = 0.0;
@@ -153,6 +159,15 @@ sealed record CliArgs
                 case "--log-every" when i + 1 < args.Length:
                     logEvery = int.Parse(args[++i]);
                     break;
+                case "--patience" when i + 1 < args.Length:
+                    patience = int.Parse(args[++i]);
+                    break;
+                case "--min-delta" when i + 1 < args.Length:
+                    minDelta = float.Parse(args[++i], CultureInfo.InvariantCulture);
+                    break;
+                case "--grad-accum" when i + 1 < args.Length:
+                    gradAccum = int.Parse(args[++i]);
+                    break;
                 case "--force":
                     force = true;
                     break;
@@ -204,6 +219,9 @@ sealed record CliArgs
             Targets = targets,
             Seed = seed,
             LogEvery = logEvery,
+            Patience = patience,
+            MinDelta = minDelta,
+            GradAccum = gradAccum,
             Force = force,
             MaxNewTokens = maxNewTokens,
             ValRatio = valRatio,
@@ -923,6 +941,9 @@ static class Program
             MaxValExamples = cli.MaxExamples > 0 ? Math.Max(1, cli.MaxExamples / 4) : 0,
             Seed = cli.Seed,
             LogEvery = cli.LogEvery,
+            Patience = cli.Patience,
+            MinDelta = cli.MinDelta,
+            GradientAccumulationSteps = cli.GradAccum,
             SaveAdapter = true,
             BaseModelId = qwen ? "qwen2.5-0.5b-instruct" : "smollm-135m-instruct"
         };
