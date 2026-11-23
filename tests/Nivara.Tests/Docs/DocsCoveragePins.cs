@@ -32,7 +32,8 @@ internal static class DocsCoveragePins
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// 527 baseline (#1440/#1444 refresh) + 0 net from #1444 consolidation (deleted
     /// docs/plan/LORA.md, rewrote docs/LORA.md as single public guide, avoided generated-report
-    /// .md false positives) = 527.
+    /// .md false positives) + 2 net from #1473 (docs/SILK.md gained references to
+    /// tests/Nivara.PerformanceTests/README.md and docs/QWEN.md) = 529.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 527;
+    internal const int ExpectedDocumentReferenceCount = 529;
 }
