@@ -111,6 +111,7 @@ internal static class SilkKernelsGate
                 legs.AddRange(MeasureModernBertPorts(silk, buffers));
                 legs.AddRange(MeasureSmolLMKernels(silk, buffers));
                 MeasureDecodeShapeAb(silk, buffers);
+                MeasureCopyBandwidth(silk, buffers);
                 return Report(legs);
             }
             finally
@@ -1335,20 +1336,31 @@ internal static class SilkKernelsGate
     {
         Console.WriteLine();
         Console.WriteLine("=== decode-shape kernel geometry A/B: rms_norm_lm_head (tile, aRows=1) vs rms_norm_gemv (flat, one slot) (#682) ===");
+        Console.WriteLine("    GB/s is logical bytes-moved: (x + gamma + weight + output) / elapsed. See docs/SILK.md 'Decode GEMV GB/s measurement'.");
         Console.WriteLine();
 
         const float eps = 1e-5f;
         const int warmups = 5;
         const int rounds = 10;
 
-        (int hidden, int width)[] shapes =
+        // Reproducible SmolLM/Qwen decode GEMV shapes: (hidden, width).
+        // Qwen2.5-0.5B: hidden=896, heads=14, kvHeads=2, headDim=64, intermediate=4864, vocab=151936.
+        // SmolLM-135M: hidden=576, heads=9, kvHeads=3, headDim=64, intermediate=1536, vocab=49152.
+        (int hidden, int width, string label)[] shapes =
         [
-            (896, 151936),
-            (896, 96),
-            (896, 24),
+            (896, 151936, "qwen lm-head/vocab"),
+            (896, 1152, "qwen qkv"),
+            (896, 4864, "qwen gate/up"),
+            (896, 896, "qwen o/down"),
+            (576, 49152, "smollm lm-head/vocab"),
+            (576, 960, "smollm qkv"),
+            (576, 1536, "smollm gate/up"),
+            (576, 576, "smollm o/down"),
+            (896, 96, "qwen small"),
+            (896, 24, "qwen tiny"),
         ];
 
-        foreach (var (hidden, width) in shapes)
+        foreach (var (hidden, width, label) in shapes)
         {
             var x = new float[hidden];
             var gamma = new float[hidden];
@@ -1413,10 +1425,56 @@ internal static class SilkKernelsGate
             double medianTileMs = Median(tileTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             double medianFlatMs = Median(flatTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
-            Console.WriteLine($"  hidden={hidden} width={width}: median tile/flat ratio = {medianRatio:F3}  " +
+            // Logical bytes moved (no-bias A/B): x + gamma + weight + output, float32.
+            long bytes = (long)(hidden + hidden + (long)hidden * width + width) * sizeof(float);
+            double tileGBs = bytes / (medianTileMs / 1000.0) / 1e9;
+            double flatGBs = bytes / (medianFlatMs / 1000.0) / 1e9;
+
+            Console.WriteLine($"  hidden={hidden} width={width} ({label}):");
+            Console.WriteLine($"      median tile/flat ratio = {medianRatio:F3}  " +
                               $"(tile {medianTileMs:F3} ms, flat {medianFlatMs:F3} ms)");
+            Console.WriteLine($"      logical bytes moved = {bytes}  " +
+                              $"(tile {tileGBs:F2} GB/s, flat {flatGBs:F2} GB/s)");
         }
 
+        Console.WriteLine();
+    }
+
+    static void MeasureCopyBandwidth(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== device copy-bandwidth probe: clEnqueueCopyBuffer (device-to-device) ===");
+        Console.WriteLine("    Proxy upper-bound reference for decode GEMV comparison; not kernel-achieved DRAM bandwidth.");
+        Console.WriteLine();
+
+        const int warmups = 5;
+        const int rounds = 10;
+        const int elements = 16 * 1024 * 1024; // 64 MiB float buffer
+        const long bytes = (long)elements * sizeof(float);
+
+        nint src = silk.Allocate(elements); buffers.Add(src);
+        nint dst = silk.Allocate(elements); buffers.Add(dst);
+
+        Action run = () =>
+        {
+            silk.CopyBuffer(src, dst, 0, 0, elements);
+            silk.Finish();
+        };
+
+        for (int wu = 0; wu < warmups; wu++) run();
+
+        var ticks = new double[rounds];
+        for (int r = 0; r < rounds; r++)
+        {
+            ticks[r] = Time(() => run());
+        }
+        double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        double minMs = ticks.Min() * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        double maxMs = ticks.Max() * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        double medianGBs = bytes / (medianMs / 1000.0) / 1e9;
+
+        Console.WriteLine($"  buffer size = {bytes} bytes ({elements} floats, {bytes / (1024 * 1024)} MiB)");
+        Console.WriteLine($"  median = {medianMs:F3} ms  ({medianGBs:F2} GB/s)  min = {minMs:F3} ms  max = {maxMs:F3} ms  rounds = {rounds}");
         Console.WriteLine();
     }
 
