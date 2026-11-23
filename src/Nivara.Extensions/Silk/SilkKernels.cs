@@ -283,6 +283,7 @@ internal static class SilkKernels
         #define ATTNGROUP 64
         #define GEMVLANES 32
         #define GEMVCOLS 128
+        #define STAGED_NORM_MAX 4096
         #define BF16_TO_F32(x) as_float(((uint)(x)) << 16)
         #define F32_TO_BF16(x) ((ushort)(as_uint(x) >> 16))
         #define F16_TO_F32(x) (float)as_half((ushort)(x))
@@ -3512,7 +3513,9 @@ internal static class SilkKernels
            buffers. hasBias == 0 stores the plain accumulator: a zero bias with hasBias != 0 would
            be acc + 0.0f, which canonicalizes -0.0f and is a different store.
 
-           No barrier appears here, so the early returns below cannot deadlock a group. */
+           The staged path (aCols <= STAGED_NORM_MAX) uses a barrier; its early return is
+           placed after the barrier so every thread participates. The fallback path has no
+           barrier and keeps the original early-return discipline. */
         __kernel void rms_norm_gemv(
             __global const float* x,
             __global const float* gamma,
@@ -3567,8 +3570,7 @@ internal static class SilkKernels
             }
 
             uint col = colBase + get_local_id(0) * BLOCK;
-            if (col >= bCols)
-                return;
+            uint lid = get_local_id(0);
 
             float ssq = 0.0f;
             for (uint k = 0; k < aCols; ++k)
@@ -3578,50 +3580,119 @@ internal static class SilkKernels
             }
             float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
 
-            /* A lane's last columns run past bCols when the width is not a whole number of
-               BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
-            uint avail = bCols - col;
-
-            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-            if (avail >= 4u)
+            if (aCols <= STAGED_NORM_MAX)
             {
-                for (uint k = 0; k < aCols; ++k)
+                /* Stage normed[k] in local memory so the 32 lanes share one normalized
+                   vector instead of re-reading x/gamma per lane in the dot loop. Every
+                   thread participates in the cooperative fill and the barrier, including
+                   lanes whose col >= bCols, so the barrier cannot deadlock. */
+                __local float normed[STAGED_NORM_MAX];
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= bCols)
+                    return;
+
+                /* A lane's last columns run past bCols when the width is not a whole number of
+                   BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+                uint avail = bCols - col;
+
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
                 {
-                    float av = x[k] * normScale * gamma[k];
-                    uint bBase = k * bCols + col;
-                    float4 bv = vload4(0, b + bBase);
-                    a0 += av * bv.s0;
-                    a1 += av * bv.s1;
-                    a2 += av * bv.s2;
-                    a3 += av * bv.s3;
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        float4 bv = vload4(0, b + bBase);
+                        a0 += av * bv.s0;
+                        a1 += av * bv.s1;
+                        a2 += av * bv.s2;
+                        a3 += av * bv.s3;
+                    }
                 }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * b[bBase];
+                        if (avail > 1u) a1 += av * b[bBase + 1u];
+                        if (avail > 2u) a2 += av * b[bBase + 2u];
+                        if (avail > 3u) a3 += av * b[bBase + 3u];
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+                return;
             }
             else
             {
-                for (uint k = 0; k < aCols; ++k)
+                /* Fallback (aCols > STAGED_NORM_MAX): current non-staged computation, no barrier. */
+                if (col >= bCols)
+                    return;
+
+                /* A lane's last columns run past bCols when the width is not a whole number of
+                   BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+                uint avail = bCols - col;
+
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
                 {
-                    float av = x[k] * normScale * gamma[k];
-                    uint bBase = k * bCols + col;
-                    a0 += av * b[bBase];
-                    if (avail > 1u) a1 += av * b[bBase + 1u];
-                    if (avail > 2u) a2 += av * b[bBase + 2u];
-                    if (avail > 3u) a3 += av * b[bBase + 3u];
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        float4 bv = vload4(0, b + bBase);
+                        a0 += av * bv.s0;
+                        a1 += av * bv.s1;
+                        a2 += av * bv.s2;
+                        a3 += av * bv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * b[bBase];
+                        if (avail > 1u) a1 += av * b[bBase + 1u];
+                        if (avail > 2u) a2 += av * b[bBase + 2u];
+                        if (avail > 3u) a3 += av * b[bBase + 3u];
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
                 }
             }
-
-            if (hasBias != 0u)
-            {
-                c[col] = a0 + bias[col];
-                if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
-                if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
-                if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
-            }
-            else
-            {
-                c[col] = a0;
-                if (avail > 1u) c[col + 1u] = a1;
-                if (avail > 2u) c[col + 2u] = a2;
-                if (avail > 3u) c[col + 3u] = a3;
             }
         }
 
@@ -4235,8 +4306,7 @@ internal static class SilkKernels
                     }
 
                     uint col = colBase + get_local_id(0) * BLOCK;
-                    if (col >= bCols)
-                        return;
+                    uint lid = get_local_id(0);
 
                     float ssq = 0.0f;
                     for (uint k = 0; k < aCols; ++k)
@@ -4246,51 +4316,121 @@ internal static class SilkKernels
                     }
                     float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
 
-                    /* A lane's last columns run past bCols when the width is not a whole number of
-                       BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
-                    uint avail = bCols - col;
-
-                    float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-                    if (avail >= 4u)
+                    if (aCols <= STAGED_NORM_MAX)
                     {
-                        for (uint k = 0; k < aCols; ++k)
+                        /* Stage normed[k] in local memory so the 32 lanes share one normalized
+                           vector instead of re-reading x/gamma per lane in the dot loop. Every
+                           thread participates in the cooperative fill and the barrier, including
+                           lanes whose col >= bCols, so the barrier cannot deadlock. */
+                        __local float normed[STAGED_NORM_MAX];
+                        for (uint k = lid; k < aCols; k += GEMVLANES)
+                            normed[k] = x[k] * normScale * gamma[k];
+                        barrier(CLK_LOCAL_MEM_FENCE);
+
+                        if (col >= bCols)
+                            return;
+
+                        /* A lane's last columns run past bCols when the width is not a whole number of
+                           BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+                        uint avail = bCols - col;
+
+                        float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                        if (avail >= 4u)
                         {
-                            float av = x[k] * normScale * gamma[k];
-                            uint bBase = k * bCols + col;
-                            ushort4 bv4 = vload4(0, b + bBase);
-                            a0 += av * BF16_TO_F32(bv4.s0);
-                            a1 += av * BF16_TO_F32(bv4.s1);
-                            a2 += av * BF16_TO_F32(bv4.s2);
-                            a3 += av * BF16_TO_F32(bv4.s3);
+                            for (uint k = 0; k < aCols; ++k)
+                            {
+                                float av = normed[k];
+                                uint bBase = k * bCols + col;
+                                ushort4 bv4 = vload4(0, b + bBase);
+                                a0 += av * BF16_TO_F32(bv4.s0);
+                                a1 += av * BF16_TO_F32(bv4.s1);
+                                a2 += av * BF16_TO_F32(bv4.s2);
+                                a3 += av * BF16_TO_F32(bv4.s3);
+                            }
                         }
+                        else
+                        {
+                            for (uint k = 0; k < aCols; ++k)
+                            {
+                                float av = normed[k];
+                                uint bBase = k * bCols + col;
+                                a0 += av * BF16_TO_F32(b[bBase]);
+                                if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                                if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                                if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                            }
+                        }
+
+                        if (hasBias != 0u)
+                        {
+                            c[col] = a0 + bias[col];
+                            if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                            if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                            if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                        }
+                        else
+                        {
+                            c[col] = a0;
+                            if (avail > 1u) c[col + 1u] = a1;
+                            if (avail > 2u) c[col + 2u] = a2;
+                            if (avail > 3u) c[col + 3u] = a3;
+                        }
+                        return;
                     }
                     else
                     {
-                        for (uint k = 0; k < aCols; ++k)
+                        /* Fallback (aCols > STAGED_NORM_MAX): current non-staged computation, no barrier. */
+                        if (col >= bCols)
+                            return;
+
+                        /* A lane's last columns run past bCols when the width is not a whole number of
+                           BLOCK-wide lanes, which is what bounds every b and c access below to [col, bCols). */
+                        uint avail = bCols - col;
+
+                        float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                        if (avail >= 4u)
                         {
-                            float av = x[k] * normScale * gamma[k];
-                            uint bBase = k * bCols + col;
-                            a0 += av * BF16_TO_F32(b[bBase]);
-                            if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
-                            if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
-                            if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                            for (uint k = 0; k < aCols; ++k)
+                            {
+                                float av = x[k] * normScale * gamma[k];
+                                uint bBase = k * bCols + col;
+                                ushort4 bv4 = vload4(0, b + bBase);
+                                a0 += av * BF16_TO_F32(bv4.s0);
+                                a1 += av * BF16_TO_F32(bv4.s1);
+                                a2 += av * BF16_TO_F32(bv4.s2);
+                                a3 += av * BF16_TO_F32(bv4.s3);
+                            }
+                        }
+                        else
+                        {
+                            for (uint k = 0; k < aCols; ++k)
+                            {
+                                float av = x[k] * normScale * gamma[k];
+                                uint bBase = k * bCols + col;
+                                a0 += av * BF16_TO_F32(b[bBase]);
+                                if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                                if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                                if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                            }
+                        }
+
+                        if (hasBias != 0u)
+                        {
+                            c[col] = a0 + bias[col];
+                            if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                            if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                            if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                        }
+                        else
+                        {
+                            c[col] = a0;
+                            if (avail > 1u) c[col + 1u] = a1;
+                            if (avail > 2u) c[col + 2u] = a2;
+                            if (avail > 3u) c[col + 3u] = a3;
                         }
                     }
-
-                    if (hasBias != 0u)
-                    {
-                        c[col] = a0 + bias[col];
-                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
-                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
-                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
-                    }
-                    else
-                    {
-                        c[col] = a0;
-                        if (avail > 1u) c[col + 1u] = a1;
-                        if (avail > 2u) c[col + 2u] = a2;
-                        if (avail > 3u) c[col + 3u] = a3;
-                    }
+                }
+                }
                 }
 
                 /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
