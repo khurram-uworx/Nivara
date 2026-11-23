@@ -112,6 +112,7 @@ internal static class SilkKernelsGate
                 legs.AddRange(MeasureSmolLMKernels(silk, buffers));
                 MeasureDecodeShapeAb(silk, buffers);
                 MeasureDecodeShapeAbBf16(silk, buffers);
+                MeasureDecodeShapeGemvAddF32(silk, buffers);
                 MeasureCopyBandwidth(silk, buffers);
                 return Report(legs);
             }
@@ -1609,6 +1610,76 @@ internal static class SilkKernelsGate
             double gbs = bytes / (medianMs / 1000.0) / 1e9;
 
             Console.WriteLine($"  hidden={h} intermediate={inter} ({mlabel}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})  [single-WG fused]");
+        }
+
+        Console.WriteLine();
+    }
+
+    static void MeasureDecodeShapeGemvAddF32(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== decode-shape kernel GB/s: F32 gemm_gemv_add (cached-decode O-projection) (#1480) ===");
+        Console.WriteLine("    GB/s is logical bytes-moved: x(F32)+weight(F32)+residual(F32)+output(F32).");
+        Console.WriteLine("    Base (non-subgroup) variant; compare against the BF16 section above and the copy-bandwidth probe.");
+        Console.WriteLine();
+
+        const int warmups = 5;
+        const int rounds = 10;
+
+        (int hidden, int width, string label)[] shapes =
+        [
+            (896, 151936, "qwen lm-head/vocab"),
+            (896, 1152, "qwen qkv"),
+            (896, 4864, "qwen gate/up"),
+            (896, 896, "qwen o/down"),
+            (576, 49152, "smollm lm-head/vocab"),
+            (576, 960, "smollm qkv"),
+            (576, 1536, "smollm gate/up"),
+            (576, 576, "smollm o/down"),
+            (896, 96, "qwen small"),
+            (896, 24, "qwen tiny"),
+        ];
+
+        foreach (var (hidden, width, label) in shapes)
+        {
+            int aCols = hidden;
+            int bCols = width;
+
+            var a = new float[aCols];
+            var b = new float[(long)aCols * bCols];
+            var residual = new float[bCols];
+            uint seed = 0x14800001u;
+            for (int i = 0; i < a.Length; i++) a[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < b.Length; i++) b[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
+
+            nint sa = silk.Allocate(aCols); buffers.Add(sa);
+            nint sb = silk.Allocate(b.Length); buffers.Add(sb);
+            nint sres = silk.Allocate(bCols); buffers.Add(sres);
+            nint sout = silk.Allocate(bCols); buffers.Add(sout);
+            silk.Upload(sa, a);
+            silk.Upload(sb, b);
+            silk.Upload(sres, residual);
+
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.GemmGemvAdd(silk, sa, sb, sout, sres, aCols, bCols);
+                silk.Finish();
+            };
+
+            for (int wu = 0; wu < warmups; wu++) run();
+
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long bytes = (long)aCols * sizeof(float)
+                       + (long)aCols * bCols * sizeof(float)
+                       + (long)bCols * sizeof(float)
+                       + (long)bCols * sizeof(float);
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
+
+            Console.WriteLine($"  aCols={aCols} bCols={bCols} ({label}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})");
         }
 
         Console.WriteLine();
