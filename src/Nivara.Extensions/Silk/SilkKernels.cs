@@ -3693,7 +3693,6 @@ internal static class SilkKernels
                     if (avail > 3u) c[col + 3u] = a3;
                 }
             }
-            }
         }
 
         /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
@@ -4429,7 +4428,6 @@ internal static class SilkKernels
                             if (avail > 3u) c[col + 3u] = a3;
                         }
                     }
-                }
                 }
 
                 /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
