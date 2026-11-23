@@ -4431,7 +4431,6 @@ internal static class SilkKernels
                     }
                 }
                 }
-                }
 
                 /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
                    a is [aCols], b is [aCols * bCols] row-major (B[k, outCol]), result c[outCol] =
