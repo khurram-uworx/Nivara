@@ -81,8 +81,18 @@ public sealed unsafe class SilkRuntime : IDisposable
     /// no OpenCL GPU is reachable, so a run on a machine without a driver fails
     /// with the reason instead of quietly measuring the host.
     /// </summary>
-    public SilkRuntime()
+    /// <param name="enableSubgroups">When false, subgroup support is reported as unavailable even
+    /// on devices that advertise it, forcing the scalar/vector fallback paths. Used for testing
+    /// and benchmarking both capability paths on one device. Also overridable via the
+    /// <c>NIVARA_SILK_SUBGROUPS=0</c> environment variable.</param>
+    public SilkRuntime(bool enableSubgroups = true)
     {
+        if (enableSubgroups)
+        {
+            string? env = Environment.GetEnvironmentVariable("NIVARA_SILK_SUBGROUPS");
+            if (env is not null && (env == "0" || env.Equals("false", StringComparison.OrdinalIgnoreCase)))
+                enableSubgroups = false;
+        }
         cl = CL.GetApi();
         try
         {
@@ -110,7 +120,7 @@ public sealed unsafe class SilkRuntime : IDisposable
             string extensions = DeviceInfoString(cl, dev, DeviceInfo.Extensions);
             bool intelSubgroups = extensions.Contains("cl_intel_subgroups", StringComparison.OrdinalIgnoreCase);
             bool khrSubgroups = extensions.Contains("cl_khr_subgroups", StringComparison.OrdinalIgnoreCase);
-            SupportsSubgroups = intelSubgroups || khrSubgroups;
+            SupportsSubgroups = enableSubgroups && (intelSubgroups || khrSubgroups);
             SubgroupIntel = intelSubgroups;
             SubgroupKhr = khrSubgroups;
 

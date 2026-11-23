@@ -615,6 +615,34 @@ against the host formula instead.
 - **Cleanup:** kernels → program → command queue → context, reverse of construction. A failed
   partial construction disposes what it built (`catch { Dispose(); throw; }`).
 
+### Subgroup capability (#1472, #1484)
+
+- **Detection:** `SilkRuntime` queries `CL_DEVICE_EXTENSIONS` and reports `SupportsSubgroups`
+  (true only when `cl_khr_subgroups` or `cl_intel_subgroups` is advertised). The constructor
+  accepts `enableSubgroups` (default `true`) and honours `NIVARA_SILK_SUBGROUPS=0` to force the
+  fallback path on a capable device for testing/benchmarking.
+- **Build gating:** when supported, the program is built with `-D SILK_SUBGROUPS=1` (plus
+  `-D SILK_SUBGROUP_INTEL=1` / `-D SILK_SUBGROUP_KHR=1`), which compiles the `*_subgroup`
+  kernels in `SilkKernels.Source`. Those kernels are absent from the program otherwise, and
+  `SilkRuntime.HasKernel(name)` reports that.
+- **Launchers:** `SilkLauncher.*Subgroup*` dispatch the subgroup variant and fall back to the
+  base kernel when `SupportsSubgroups` is false, so callers always work on any device.
+- **Parity policy:** base kernels are bit-identical to the prior reference. The subgroup
+  `rms_norm_gemv` variant reduces the RMS-norm sum of squares in strided order, so the scale
+  may differ by a few ULP — callers/tests use a `1e-5` relative tolerance with that
+  justification. The `gemm_gemv_add_subgroup` variant is functionally identical (no cross-lane
+  reduction opportunity in the per-thread-full-K shape) and is bit-identical.
+- **Default policy (decision, 2026):** measured on Intel(R) Graphics (BFloat16, 32 generated
+  tokens): subgroup ON is ~19% slower on SmolLM-135M (16.56 vs 20.62 tok/s) and ~2% faster on
+  Qwen2.5-0.5B (29.06 vs 28.47 tok/s). Therefore **SmolLM uses the base (non-subgroup) launchers
+  and Qwen uses the subgroup launchers**, both routed through the capability-gated `*Subgroup*`
+  entry points (which fall back to base on devices without subgroup support). Only these two models
+  target Silk today; per-model selection lives in each runner.
+- **Local memory:** the `__local normed[STAGED_NORM_MAX]` staging array must be declared at
+  kernel outermost scope (OpenCL rule), so it is allocated for every rms-norm-gemv launch,
+  including the `aCols > STAGED_NORM_MAX` fallback path where it is unused (~16 KB/group).
+  `SilkRuntime.LocalMemorySize` can be checked against this on smaller iGPUs.
+
 ## 13. The runner (`SilkBertEncoderRunner`)
 
 The constructor takes a **`BertGpuNaming`** (`DistilBert` or `Bert`) — the parameter that lets
