@@ -111,6 +111,7 @@ internal static class SilkKernelsGate
                 legs.AddRange(MeasureModernBertPorts(silk, buffers));
                 legs.AddRange(MeasureSmolLMKernels(silk, buffers));
                 MeasureDecodeShapeAb(silk, buffers);
+                MeasureDecodeShapeMultiSlotRmsNormGemv(silk, buffers);
                 MeasureDecodeShapeAbBf16(silk, buffers);
                 MeasureDecodeShapeGemvAddF32(silk, buffers);
                 MeasureCopyBandwidth(silk, buffers);
@@ -1437,6 +1438,104 @@ internal static class SilkKernelsGate
                               $"(tile {medianTileMs:F3} ms, flat {medianFlatMs:F3} ms)");
             Console.WriteLine($"      logical bytes moved = {bytes}  " +
                               $"(tile {tileGBs:F2} GB/s, flat {flatGBs:F2} GB/s)");
+        }
+
+        Console.WriteLine();
+    }
+
+    static void MeasureDecodeShapeMultiSlotRmsNormGemv(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== decode-shape kernel GB/s: F32 rms_norm_gemv multi-slot (biased/bias-free) (#1481) ===");
+        Console.WriteLine("    GB/s is logical bytes-moved: x(F32)+gamma(F32)+sum over slots [weight(F32)+output(F32)+bias(F32 if hasBias)].");
+        Console.WriteLine("    Real cached-decode shapes: Qwen biased QKV (3 slots), SmolLM bias-free QKV (3 slots), SmolLM bias-free gate/up (2 slots).");
+        Console.WriteLine("    hasBias is a single flag for all slots (SilkLauncher.RmsNormGemv contract).");
+        Console.WriteLine();
+
+        const float eps = 1e-5f;
+        const int warmups = 5;
+        const int rounds = 10;
+
+        // (hidden, slotCols[], hasBias, label)
+        (int hidden, int[] slotCols, bool hasBias, string label)[] cases =
+        [
+            (896, [896, 128, 128], true, "qwen qkv (biased)"),
+            (576, [576, 192, 192], false, "smollm qkv (bias-free)"),
+            (576, [1536, 1536], false, "smollm gate/up (bias-free)"),
+        ];
+
+        foreach (var (hidden, slotCols, hasBias, label) in cases)
+        {
+            var x = new float[hidden];
+            var gamma = new float[hidden];
+            uint seed = 0x14810001u;
+            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+
+            nint sx = silk.Allocate(hidden); buffers.Add(sx);
+            nint sg = silk.Allocate(hidden); buffers.Add(sg);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+
+            var weights = new nint[slotCols.Length];
+            var biases = new nint[slotCols.Length];
+            var outputs = new nint[slotCols.Length];
+            for (int i = 0; i < slotCols.Length; i++)
+            {
+                int cols = slotCols[i];
+                var w = new float[(long)hidden * cols];
+                for (int j = 0; j < w.Length; j++) w[j] = GemmBenchmark.NextUniformF(ref seed);
+                weights[i] = silk.Allocate(w.Length); buffers.Add(weights[i]);
+                silk.Upload(weights[i], w);
+
+                if (hasBias)
+                {
+                    var b = new float[cols];
+                    for (int j = 0; j < b.Length; j++) b[j] = GemmBenchmark.NextUniformF(ref seed);
+                    biases[i] = silk.Allocate(b.Length); buffers.Add(biases[i]);
+                    silk.Upload(biases[i], b);
+                }
+                else
+                {
+                    biases[i] = 0;
+                }
+
+                outputs[i] = silk.Allocate(cols); buffers.Add(outputs[i]);
+            }
+
+            var slots = new Nivara.Silk.SilkLauncher.GemvSlot[slotCols.Length];
+            for (int i = 0; i < slotCols.Length; i++)
+            {
+                slots[i] = new Nivara.Silk.SilkLauncher.GemvSlot(weights[i], biases[i], outputs[i], slotCols[i]);
+            }
+
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.RmsNormGemv(
+                    silk, sx, sg, slots, hasBias, aRows: 1, aCols: hidden, eps: eps);
+                silk.Finish();
+            };
+
+            for (int wu = 0; wu < warmups; wu++) run();
+
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+            // Logical bytes moved: x + gamma + sum(weight + output + bias if hasBias).
+            long bytes = (long)hidden * sizeof(float)
+                       + (long)hidden * sizeof(float);
+            foreach (int cols in slotCols)
+            {
+                bytes += (long)hidden * cols * sizeof(float);
+                bytes += (long)cols * sizeof(float);
+                if (hasBias) bytes += (long)cols * sizeof(float);
+            }
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
+
+            string slotDesc = string.Join("/", slotCols);
+            Console.WriteLine($"  hidden={hidden} slots={slotDesc} hasBias={hasBias} ({label}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})");
         }
 
         Console.WriteLine();
