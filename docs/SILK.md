@@ -632,6 +632,12 @@ against the host formula instead.
   may differ by a few ULP — callers/tests use a `1e-5` relative tolerance with that
   justification. The `gemm_gemv_add_subgroup` variant is functionally identical (no cross-lane
   reduction opportunity in the per-thread-full-K shape) and is bit-identical.
+- **Default policy (decision, 2026):** measured on Intel(R) Graphics (BFloat16, 32 generated
+  tokens): subgroup ON is ~19% slower on SmolLM-135M (16.56 vs 20.62 tok/s) and ~2% faster on
+  Qwen2.5-0.5B (29.06 vs 28.47 tok/s). Therefore **SmolLM uses the base (non-subgroup) launchers
+  and Qwen uses the subgroup launchers**, both routed through the capability-gated `*Subgroup*`
+  entry points (which fall back to base on devices without subgroup support). Only these two models
+  target Silk today; per-model selection lives in each runner.
 - **Local memory:** the `__local normed[STAGED_NORM_MAX]` staging array must be declared at
   kernel outermost scope (OpenCL rule), so it is allocated for every rms-norm-gemv launch,
   including the `aCols > STAGED_NORM_MAX` fallback path where it is unused (~16 KB/group).
