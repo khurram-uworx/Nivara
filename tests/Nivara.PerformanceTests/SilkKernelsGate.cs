@@ -1442,20 +1442,20 @@ internal static class SilkKernelsGate
     }
 
     static void MeasureDecodeShapeAbBf16(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
-     {
-         Console.WriteLine();
-         Console.WriteLine("=== decode-shape kernel GB/s: BF16 weight transport (rms_norm_gemv_bf16 / gemm_gemv_add_bf16) (#1479) ===");
-         Console.WriteLine("    GB/s is logical bytes-moved: x(F32)+gamma(F32)+weight(BF16, sizeof(ushort))+output(F32) [residual for gemm_gemv_add].");
-         Console.WriteLine("    BF16 weight paths halve weight bytes vs F32; compare against the F32 section above and the copy-bandwidth probe.");
-         Console.WriteLine();
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== decode-shape kernel GB/s: BF16 weight transport (rms_norm_gemv_bf16 / gemm_gemv_add_bf16) (#1479) ===");
+        Console.WriteLine("    GB/s is logical bytes-moved: x(F32)+gamma(F32)+weight(BF16, sizeof(ushort))+output(F32) [residual for gemm_gemv_add].");
+        Console.WriteLine("    BF16 weight paths halve weight bytes vs F32; compare against the F32 section above and the copy-bandwidth probe.");
+        Console.WriteLine();
 
-         const float eps = 1e-5f;
-         const int warmups = 5;
-         const int rounds = 10;
+        const float eps = 1e-5f;
+        const int warmups = 5;
+        const int rounds = 10;
 
-         (int hidden, int width, string label)[] shapes =
-         [
-             (896, 151936, "qwen lm-head/vocab"),
+        (int hidden, int width, string label)[] shapes =
+        [
+            (896, 151936, "qwen lm-head/vocab"),
              (896, 1152, "qwen qkv"),
              (896, 4864, "qwen gate/up"),
              (896, 896, "qwen o/down"),
@@ -1467,154 +1467,154 @@ internal static class SilkKernelsGate
              (896, 24, "qwen tiny"),
          ];
 
-         Console.WriteLine("  -- rms_norm_gemv_bf16 (single slot, hasBias=false) --");
-         foreach (var (hidden, width, label) in shapes)
-         {
-             var x = new float[hidden];
-             var gamma = new float[hidden];
-             uint seed = 0x14790001u;
-             for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
-             for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+        Console.WriteLine("  -- rms_norm_gemv_bf16 (single slot, hasBias=false) --");
+        foreach (var (hidden, width, label) in shapes)
+        {
+            var x = new float[hidden];
+            var gamma = new float[hidden];
+            uint seed = 0x14790001u;
+            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
 
-             var w = new ushort[(long)hidden * width];
-             for (int i = 0; i < w.Length; i++) w[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            var w = new ushort[(long)hidden * width];
+            for (int i = 0; i < w.Length; i++) w[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
 
-             nint sx = silk.Allocate(hidden); buffers.Add(sx);
-             nint sg = silk.Allocate(hidden); buffers.Add(sg);
-             nint sw = silk.Allocate(w.Length); buffers.Add(sw);
-             nint sout = silk.Allocate(width); buffers.Add(sout);
-             silk.Upload(sx, x);
-             silk.Upload(sg, gamma);
-             silk.Upload(sw, w);
+            nint sx = silk.Allocate(hidden); buffers.Add(sx);
+            nint sg = silk.Allocate(hidden); buffers.Add(sg);
+            nint sw = silk.Allocate(w.Length); buffers.Add(sw);
+            nint sout = silk.Allocate(width); buffers.Add(sout);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(sw, w);
 
-             Action run = () =>
-             {
-                 Nivara.Silk.SilkLauncher.RmsNormGemvBf16(
-                     silk, sx, sg,
-                     [new Nivara.Silk.SilkLauncher.GemvSlot(sw, 0, sout, width)],
-                     hasBias: false, aRows: 1, aCols: hidden, eps: eps);
-                 silk.Finish();
-             };
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.RmsNormGemvBf16(
+                    silk, sx, sg,
+                    [new Nivara.Silk.SilkLauncher.GemvSlot(sw, 0, sout, width)],
+                    hasBias: false, aRows: 1, aCols: hidden, eps: eps);
+                silk.Finish();
+            };
 
-             for (int wu = 0; wu < warmups; wu++) run();
+            for (int wu = 0; wu < warmups; wu++) run();
 
-             var ticks = new double[rounds];
-             for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
 
-             double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-             long bytes = (long)hidden * sizeof(float) + (long)hidden * sizeof(float)
-                        + (long)hidden * width * sizeof(ushort) + (long)width * sizeof(float);
-             double gbs = bytes / (medianMs / 1000.0) / 1e9;
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long bytes = (long)hidden * sizeof(float) + (long)hidden * sizeof(float)
+                       + (long)hidden * width * sizeof(ushort) + (long)width * sizeof(float);
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
 
-             Console.WriteLine($"  hidden={hidden} width={width} ({label}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})");
-         }
+            Console.WriteLine($"  hidden={hidden} width={width} ({label}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})");
+        }
 
-         Console.WriteLine();
-         Console.WriteLine("  -- gemm_gemv_add_bf16 (aCols x bCols, BF16 weights) --");
-         foreach (var (hidden, width, label) in shapes)
-         {
-             int aCols = hidden;
-             int bCols = width;
+        Console.WriteLine();
+        Console.WriteLine("  -- gemm_gemv_add_bf16 (aCols x bCols, BF16 weights) --");
+        foreach (var (hidden, width, label) in shapes)
+        {
+            int aCols = hidden;
+            int bCols = width;
 
-             var a = new float[aCols];
-             var b = new ushort[(long)aCols * bCols];
-             var residual = new float[bCols];
-             uint seed = 0x14790002u;
-             for (int i = 0; i < a.Length; i++) a[i] = GemmBenchmark.NextUniformF(ref seed);
-             for (int i = 0; i < b.Length; i++) b[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-             for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
+            var a = new float[aCols];
+            var b = new ushort[(long)aCols * bCols];
+            var residual = new float[bCols];
+            uint seed = 0x14790002u;
+            for (int i = 0; i < a.Length; i++) a[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < b.Length; i++) b[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
 
-             nint sa = silk.Allocate(aCols); buffers.Add(sa);
-             nint sb = silk.Allocate(b.Length); buffers.Add(sb);
-             nint sres = silk.Allocate(bCols); buffers.Add(sres);
-             nint sout = silk.Allocate(bCols); buffers.Add(sout);
-             silk.Upload(sa, a);
-             silk.Upload(sb, b);
-             silk.Upload(sres, residual);
+            nint sa = silk.Allocate(aCols); buffers.Add(sa);
+            nint sb = silk.Allocate(b.Length); buffers.Add(sb);
+            nint sres = silk.Allocate(bCols); buffers.Add(sres);
+            nint sout = silk.Allocate(bCols); buffers.Add(sout);
+            silk.Upload(sa, a);
+            silk.Upload(sb, b);
+            silk.Upload(sres, residual);
 
-             Action run = () =>
-             {
-                 Nivara.Silk.SilkLauncher.GemmGemvAddBf16(silk, sa, sb, sout, sres, aCols, bCols);
-                 silk.Finish();
-             };
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.GemmGemvAddBf16(silk, sa, sb, sout, sres, aCols, bCols);
+                silk.Finish();
+            };
 
-             for (int wu = 0; wu < warmups; wu++) run();
+            for (int wu = 0; wu < warmups; wu++) run();
 
-             var ticks = new double[rounds];
-             for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
 
-             double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-             long bytes = (long)aCols * sizeof(float)
-                        + (long)aCols * bCols * sizeof(ushort)
-                        + (long)bCols * sizeof(float)
-                        + (long)bCols * sizeof(float);
-             double gbs = bytes / (medianMs / 1000.0) / 1e9;
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long bytes = (long)aCols * sizeof(float)
+                       + (long)aCols * bCols * sizeof(ushort)
+                       + (long)bCols * sizeof(float)
+                       + (long)bCols * sizeof(float);
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
 
-             Console.WriteLine($"  aCols={aCols} bCols={bCols} ({label}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})");
-         }
+            Console.WriteLine($"  aCols={aCols} bCols={bCols} ({label}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})");
+        }
 
-         Console.WriteLine();
-         Console.WriteLine("  -- mlp_block_bf16 (OPTIONAL, single-WG fused; P1/#1453 serialization caveat) --");
-         (int h, int inter, string mlabel)[] mlpShapes =
-         [
-             (896, 4864, "qwen gate/up"),
+        Console.WriteLine();
+        Console.WriteLine("  -- mlp_block_bf16 (OPTIONAL, single-WG fused; P1/#1453 serialization caveat) --");
+        (int h, int inter, string mlabel)[] mlpShapes =
+        [
+            (896, 4864, "qwen gate/up"),
              (576, 1536, "smollm gate/up"),
          ];
-         foreach (var (h, inter, mlabel) in mlpShapes)
-         {
-             var x = new float[h];
-             var gamma = new float[h];
-             var wg = new ushort[(long)h * inter];
-             var wu = new ushort[(long)h * inter];
-             var wd = new ushort[(long)inter * h];
-             var residual = new float[h];
-             uint seed = 0x14790003u;
-             for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
-             for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
-             for (int i = 0; i < wg.Length; i++) wg[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-             for (int i = 0; i < wu.Length; i++) wu[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-             for (int i = 0; i < wd.Length; i++) wd[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-             for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
+        foreach (var (h, inter, mlabel) in mlpShapes)
+        {
+            var x = new float[h];
+            var gamma = new float[h];
+            var wg = new ushort[(long)h * inter];
+            var wu = new ushort[(long)h * inter];
+            var wd = new ushort[(long)inter * h];
+            var residual = new float[h];
+            uint seed = 0x14790003u;
+            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < wg.Length; i++) wg[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < wu.Length; i++) wu[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < wd.Length; i++) wd[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
 
-             nint sx = silk.Allocate(h); buffers.Add(sx);
-             nint sg = silk.Allocate(h); buffers.Add(sg);
-             nint swg = silk.Allocate(wg.Length); buffers.Add(swg);
-             nint swu = silk.Allocate(wu.Length); buffers.Add(swu);
-             nint swd = silk.Allocate(wd.Length); buffers.Add(swd);
-             nint sout = silk.Allocate(h); buffers.Add(sout);
-             nint sres = silk.Allocate(h); buffers.Add(sres);
-             silk.Upload(sx, x);
-             silk.Upload(sg, gamma);
-             silk.Upload(swg, wg);
-             silk.Upload(swu, wu);
-             silk.Upload(swd, wd);
-             silk.Upload(sres, residual);
+            nint sx = silk.Allocate(h); buffers.Add(sx);
+            nint sg = silk.Allocate(h); buffers.Add(sg);
+            nint swg = silk.Allocate(wg.Length); buffers.Add(swg);
+            nint swu = silk.Allocate(wu.Length); buffers.Add(swu);
+            nint swd = silk.Allocate(wd.Length); buffers.Add(swd);
+            nint sout = silk.Allocate(h); buffers.Add(sout);
+            nint sres = silk.Allocate(h); buffers.Add(sres);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(swg, wg);
+            silk.Upload(swu, wu);
+            silk.Upload(swd, wd);
+            silk.Upload(sres, residual);
 
-             Action run = () =>
-             {
-                 Nivara.Silk.SilkLauncher.MlpBlockBf16(silk, sx, sg, swg, swu, swd, sout, sres, h, inter, eps);
-                 silk.Finish();
-             };
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.MlpBlockBf16(silk, sx, sg, swg, swu, swd, sout, sres, h, inter, eps);
+                silk.Finish();
+            };
 
-             for (int wu2 = 0; wu2 < warmups; wu2++) run();
+            for (int wu2 = 0; wu2 < warmups; wu2++) run();
 
-             var ticks = new double[rounds];
-             for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
 
-             double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-             long bytes = (long)h * sizeof(float) + (long)h * sizeof(float)
-                        + (long)h * inter * sizeof(ushort) * 3
-                        + (long)h * sizeof(float)
-                        + (long)h * sizeof(float);
-             double gbs = bytes / (medianMs / 1000.0) / 1e9;
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long bytes = (long)h * sizeof(float) + (long)h * sizeof(float)
+                       + (long)h * inter * sizeof(ushort) * 3
+                       + (long)h * sizeof(float)
+                       + (long)h * sizeof(float);
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
 
-             Console.WriteLine($"  hidden={h} intermediate={inter} ({mlabel}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})  [single-WG fused]");
-         }
+            Console.WriteLine($"  hidden={h} intermediate={inter} ({mlabel}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})  [single-WG fused]");
+        }
 
-         Console.WriteLine();
-     }
+        Console.WriteLine();
+    }
 
-     static void MeasureCopyBandwidth(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    static void MeasureCopyBandwidth(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
     {
         Console.WriteLine();
         Console.WriteLine("=== device copy-bandwidth probe: clEnqueueCopyBuffer (device-to-device) ===");
