@@ -765,8 +765,8 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     }
     void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, bool hasBias, int aRows, int aCols, float eps)
     {
-        if (bf16Weights) SilkLauncher.RmsNormGemvBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
-        else SilkLauncher.RmsNormGemv(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+        if (bf16Weights) SilkLauncher.RmsNormGemvSubgroupBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+        else SilkLauncher.RmsNormGemvSubgroup(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
     }
 
     void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, ReadOnlySpan<LoraPair?> loras, bool hasBias, int aRows, int aCols, float eps)
@@ -806,19 +806,19 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             // kernel which serialized decode on iGPUs (P1, #1453).
             if (bf16Weights)
             {
-                SilkLauncher.RmsNormGemvBf16(runtime, x, gamma,
+                SilkLauncher.RmsNormGemvSubgroupBf16(runtime, x, gamma,
                     [new(wg, 0, gate.Handle, inter), new(wu, 0, up.Handle, inter)],
                     hasBias: false, aRows: 1, aCols: hidden, eps: eps2);
                 SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, inter);
-                SilkLauncher.GemmGemvAddBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
+                SilkLauncher.GemmGemvAddSubgroupBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
             else
             {
-                SilkLauncher.RmsNormGemv(runtime, x, gamma,
+                SilkLauncher.RmsNormGemvSubgroup(runtime, x, gamma,
                     [new(wg, 0, gate.Handle, inter), new(wu, 0, up.Handle, inter)],
                     hasBias: false, aRows: 1, aCols: hidden, eps: eps2);
                 SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, inter);
-                SilkLauncher.GemmGemvAdd(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
+                SilkLauncher.GemmGemvAddSubgroup(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
             return;
         }
@@ -843,7 +843,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             if (bf16Weights)
             {
                 SilkLauncher.DecodeGqaAttention(runtime, q, kCache, vCache, contextScratch, kvLen, numHeads2, numKvHeads2, headDim2, scale2);
-                SilkLauncher.GemmGemvAddBf16(runtime, contextScratch, wo, outBuf, residual, qDim2, hiddenDim2);
+                SilkLauncher.GemmGemvAddSubgroupBf16(runtime, contextScratch, wo, outBuf, residual, qDim2, hiddenDim2);
             }
             else
             {
