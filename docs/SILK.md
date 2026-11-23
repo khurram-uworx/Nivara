@@ -1283,6 +1283,48 @@ Caveats (in addition to the #1473/#1479 caveats): `gemm_gemv_add` reads `a` once
 once per output column; the formula counts each once. Keep the formula stable across
 before/after runs; changing it invalidates the comparison.
 
+### F32 rms_norm_gemv multi-slot decode GB/s measurement (#1481)
+
+Follow-up to #1473/#1479/#1480. Real cached decode uses the fused multi-slot
+`rms_norm_gemv` (2 or 3 slots, `hasBias`), not the single-slot no-bias shape measured above.
+The `--silk-kernels` gate now also reports achieved GB/s for the real multi-slot biased and
+bias-free decode projection shapes:
+
+| Label | hidden | slots (cols) | hasBias | Source |
+|---|---:|---|---:|---|
+| qwen qkv (biased) | 896 | 896 / 128 / 128 | true | Qwen decode QKV (`SilkQwenGpuRunner`), `QwenSilkConfig` (heads 14, kvHeads 2, headDim 64) |
+| smollm qkv (bias-free) | 576 | 576 / 192 / 192 | false | SmolLM decode QKV (`SilkSmolLMGpuRunner`), `SmolLMConfig.AttentionBias=false` |
+| smollm gate/up (bias-free) | 576 | 1536 / 1536 | false | SmolLM decode MLP decomposition (gate+up), `SmolLMConfig` (intermediate 1536) |
+
+Command (same as #1473):
+
+```bat
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels
+```
+
+#### Bytes-moved model (logical, F32, multi-slot)
+
+```
+bytes = x_bytes + gamma_bytes + sum over slots (weight_bytes + output_bytes + bias_bytes if hasBias)
+      = hidden*sizeof(float)
+      + hidden*sizeof(float)
+      + sum_i(hidden*cols_i*sizeof(float))
+      + sum_i(cols_i*sizeof(float))
+      + (hasBias ? sum_i(cols_i*sizeof(float)) : 0)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+Caveats (in addition to the #1473/#1479 caveats):
+
+- `rms_norm_gemv` reads `x` **twice** internally (sum-of-squares + compute pass) and `gamma` once;
+  the formula counts `x` and `gamma` once, same as the single-slot case.
+- `hasBias` is a **single flag for all slots** in `SilkLauncher.RmsNormGemv` — biased and
+  bias-free slots cannot be mixed in one launch. The biased QKV case therefore counts bias bytes
+  for every slot.
+- Optional bias is included only when `hasBias: true`; bias-free slots pass a zero bias handle and
+  contribute no bias bytes.
+- Keep the formula stable across before/after runs; changing it invalidates the comparison.
+
 ### Device copy-bandwidth probe
 
 `MeasureCopyBandwidth` allocates two 64 MiB device buffers and times `clEnqueueCopyBuffer`
