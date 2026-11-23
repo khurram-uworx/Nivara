@@ -106,7 +106,7 @@ Design choice: compile-time `__local float normed[STAGED_NORM_MAX]` (no SilkRunt
 
 ## GitHub issues log
 
-- [ ] #1471 — Silk: stage normed-x in local memory for decode GEMV (this work)
+- [x] #1471 — Silk: stage normed-x in local memory for decode GEMV (this work)
 
 ## Reminder
 
