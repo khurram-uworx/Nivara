@@ -1192,6 +1192,72 @@ Caveats (keep these in mind when comparing numbers):
 - BF16 weight paths (`rms_norm_gemv_bf16`, `gemm_gemv_add_bf16`) halve weight bytes; report them separately with the same formula applied to the packed-BF16 transport.
 - Keep the formula stable across before/after runs; changing it invalidates the comparison.
 
+### BF16 decode GEMV GB/s measurement (#1479)
+
+Follow-up to #1473. The `--silk-kernels` gate now also reports achieved GB/s for the BF16
+decode weight-transport path that SmolLM and Qwen default to (`rms_norm_gemv_bf16`,
+`gemm_gemv_add_bf16`, and, optionally, the single-WG fused `mlp_block_bf16`), using the same
+logical bytes-moved model but with BF16 weight bytes (`sizeof(ushort)` = 2).
+
+Command (same as #1473):
+
+```bat
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels
+```
+
+#### Kernels measured
+
+| Kernel | Launch shape | Weight element size |
+|---|---|---:|
+| `rms_norm_gemv_bf16` | single slot, `hasBias=false`, `aRows=1` | `ushort` (BF16) |
+| `gemm_gemv_add_bf16` | `aCols x bCols` + residual add | `ushort` (BF16) |
+| `mlp_block_bf16` (optional) | single-WG fused, hidden x intermediate | `ushort` (BF16) |
+
+Shapes are the same SmolLM/Qwen table above (LM-head/vocab, QKV, gate/up, O/down, plus the
+small/tiny projections). `mlp_block_bf16` is measured on the two gate/up shapes only.
+
+#### Bytes-moved model (logical, BF16)
+
+For `rms_norm_gemv_bf16` (one slot, no bias):
+
+```
+bytes = x_bytes(F32) + gamma_bytes(F32) + weight_bytes(BF16) + output_bytes(F32)
+      = hidden*sizeof(float) + hidden*sizeof(float) + hidden*width*sizeof(ushort) + width*sizeof(float)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+For `gemm_gemv_add_bf16`:
+
+```
+bytes = a_bytes(F32) + weight_bytes(BF16) + output_bytes(F32) + residual_bytes(F32)
+      = aCols*sizeof(float) + aCols*bCols*sizeof(ushort) + bCols*sizeof(float) + bCols*sizeof(float)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+For `mlp_block_bf16` (fused, 3 weight matrices):
+
+```
+bytes = x(F32) + gamma(F32) + 3*hidden*intermediate*sizeof(ushort) + out(F32) + residual(F32)
+```
+
+Caveats (in addition to the #1473 caveats):
+
+- `rms_norm_gemv_bf16` reads `x` **twice** internally (sum-of-squares + compute pass); the
+  formula counts `x` once, same as the F32 case.
+- `mlp_block_bf16` is a **single-work-group fused** launch (`SilkLauncher.MlpBlockBf16`,
+  256/256). It is reported separately and with a `[single-WG fused]` tag because the
+  decomposed path (`RmsNormGemvBf16` + `SwiGlu` + `GemmGemvAddBf16`) replaced it on iGPUs
+  (P1, #1453) to avoid serialization. Its GB/s is **not** a promotion criterion on its own;
+  promoting it back into the inference runners requires same-device iGPU decode evidence
+  showing no end-to-end regression.
+- The Qwen runner uses the **subgroup-gated** variants (`RmsNormGemvSubgroupBf16`,
+  `GemmGemvAddSubgroupBf16`); the gate measures the base (non-subgroup) variants for a
+  stable reference. Subgroup variants are expected to be within the timing band.
+- Optional bias is excluded in the gate's no-bias A/B (the runners use `hasBias: false` on
+  these decode paths); include `bias_bytes` when measuring biased paths.
+- BF16 weight bytes are `sizeof(ushort)` (2), not `sizeof(BFloat16)`/`sizeof(Half)` (also 2
+  here, but the convention is the packed transport width).
+
 ### Device copy-bandwidth probe
 
 `MeasureCopyBandwidth` allocates two 64 MiB device buffers and times `clEnqueueCopyBuffer`
