@@ -735,6 +735,31 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemvGroupSize]);
     }
 
+    /// <summary>Capability-gated variant of <see cref="GemmGemvAdd"/> using subgroup reductions
+    /// where available; falls back to <see cref="GemmGemvAdd"/> otherwise.</summary>
+    public static void GemmGemvAddSubgroup(
+        SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aCols, int bCols)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.GemmGemvAddSubgroup))
+        {
+            GemmGemvAdd(runtime, a, b, c, residual, aCols, bCols);
+            return;
+        }
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroup, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroup, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroup, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroup, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroup, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroup, 5, (uint)bCols);
+        int t = SilkKernels.GemvGlobalCols(bCols);
+        runtime.Run(
+            SilkKernels.GemmGemvAddSubgroup,
+            [(nuint)t],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
     /// <summary>Fused single-token MLP block for cached decode (#672, Stage B): RMSNorm(x) feeds
     /// gate/up, SwiGLU, down-projection, plus the residual add, in one launch. Single row only.</summary>
     public static void MlpBlock(
@@ -814,6 +839,64 @@ internal static class SilkLauncher
             + SilkKernels.GemvGlobalCols(s2.Cols);
         runtime.Run(
             SilkKernels.RmsNormGemv,
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    /// <summary>Capability-gated variant of <see cref="RmsNormGemv"/> using subgroup reductions
+    /// where available; falls back to <see cref="RmsNormGemv"/> otherwise.</summary>
+    public static void RmsNormGemvSubgroup(
+        SilkRuntime runtime,
+        nint x,
+        nint gamma,
+        ReadOnlySpan<GemvSlot> slots,
+        bool hasBias,
+        int aRows,
+        int aCols,
+        float eps)
+    {
+        if (aRows != 1)
+            throw new ArgumentOutOfRangeException(nameof(aRows), aRows, "rms_norm_gemv is the single-row decode shape");
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        GemvSlot s0 = slots[0];
+        GemvSlot s1 = slots.Length > 1 ? slots[1] : default;
+        GemvSlot s2 = slots.Length > 2 ? slots[2] : default;
+        if (s0.Cols <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s1.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s2.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.RmsNormGemvSubgroup))
+        {
+            RmsNormGemv(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+            return;
+        }
+
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 2, s0.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 3, s0.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 4, s0.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 5, s1.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 6, s1.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 7, s1.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 8, s2.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 9, s2.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroup, 10, s2.Output);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroup, 11, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroup, 12, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroup, 13, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroup, 14, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroup, 15, hasBias ? 1u : 0u);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSubgroup, 16, eps);
+
+        int threads =
+            SilkKernels.GemvGlobalCols(s0.Cols)
+            + SilkKernels.GemvGlobalCols(s1.Cols)
+            + SilkKernels.GemvGlobalCols(s2.Cols);
+        runtime.Run(
+            SilkKernels.RmsNormGemvSubgroup,
             [(nuint)threads],
             [(nuint)SilkKernels.GemvGroupSize]);
     }
@@ -963,6 +1046,31 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemvGroupSize]);
     }
 
+    /// <summary>Capability-gated variant of <see cref="GemmGemvAddBf16"/> using subgroup reductions
+    /// where available; falls back to <see cref="GemmGemvAddBf16"/> otherwise.</summary>
+    public static void GemmGemvAddSubgroupBf16(
+        SilkRuntime runtime, nint a, nint b, nint c, nint residual, int aCols, int bCols)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.GemmGemvAddSubgroupBf16))
+        {
+            GemmGemvAddBf16(runtime, a, b, c, residual, aCols, bCols);
+            return;
+        }
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupBf16, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupBf16, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupBf16, 2, c);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupBf16, 3, residual);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupBf16, 4, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupBf16, 5, (uint)bCols);
+        int t = SilkKernels.GemvGlobalCols(bCols);
+        runtime.Run(
+            SilkKernels.GemmGemvAddSubgroupBf16,
+            [(nuint)t],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
     public static void MlpBlockBf16(
         SilkRuntime runtime, nint x, nint gamma, nint Wgate, nint Wup, nint Wdown,
         nint outBuf, nint residual, int hidden, int intermediate, float eps)
@@ -1032,6 +1140,64 @@ internal static class SilkLauncher
             + SilkKernels.GemvGlobalCols(s2.Cols);
         runtime.Run(
             SilkKernels.RmsNormGemvBf16,
+            [(nuint)threads],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    /// <summary>Capability-gated variant of <see cref="RmsNormGemvBf16"/> using subgroup reductions
+    /// where available; falls back to <see cref="RmsNormGemvBf16"/> otherwise.</summary>
+    public static void RmsNormGemvSubgroupBf16(
+        SilkRuntime runtime,
+        nint x,
+        nint gamma,
+        ReadOnlySpan<GemvSlot> slots,
+        bool hasBias,
+        int aRows,
+        int aCols,
+        float eps)
+    {
+        if (aRows != 1)
+            throw new ArgumentOutOfRangeException(nameof(aRows), aRows, "rms_norm_gemv is the single-row decode shape");
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        GemvSlot s0 = slots[0];
+        GemvSlot s1 = slots.Length > 1 ? slots[1] : default;
+        GemvSlot s2 = slots.Length > 2 ? slots[2] : default;
+        if (s0.Cols <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s1.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+        if (s2.Cols < 0) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.RmsNormGemvSubgroupBf16))
+        {
+            RmsNormGemvBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+            return;
+        }
+
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 2, s0.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 3, s0.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 4, s0.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 5, s1.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 6, s1.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 7, s1.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 8, s2.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 9, s2.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupBf16, 10, s2.Output);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupBf16, 11, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupBf16, 12, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupBf16, 13, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupBf16, 14, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupBf16, 15, hasBias ? 1u : 0u);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSubgroupBf16, 16, eps);
+
+        int threads =
+            SilkKernels.GemvGlobalCols(s0.Cols)
+            + SilkKernels.GemvGlobalCols(s1.Cols)
+            + SilkKernels.GemvGlobalCols(s2.Cols);
+        runtime.Run(
+            SilkKernels.RmsNormGemvSubgroupBf16,
             [(nuint)threads],
             [(nuint)SilkKernels.GemvGroupSize]);
     }

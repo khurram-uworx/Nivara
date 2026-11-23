@@ -45,6 +45,18 @@ public sealed unsafe class SilkRuntime : IDisposable
     public ulong MaxWorkGroupSize { get; }
     public ulong LocalMemorySize { get; }
 
+    /// <summary>Whether the selected device advertises an OpenCL subgroup extension
+    /// (<c>cl_khr_subgroups</c> / <c>cl_intel_subgroups</c> / ...). Gates the subgroup-reduction
+    /// kernel variants in <see cref="SilkKernels"/>; when false the scalar/vector base kernels
+    /// are used instead.</summary>
+    public bool SupportsSubgroups { get; }
+
+    /// <summary>Whether <c>cl_intel_subgroups</c> is advertised.</summary>
+    public bool SubgroupIntel { get; }
+
+    /// <summary>Whether <c>cl_khr_subgroups</c> is advertised.</summary>
+    public bool SubgroupKhr { get; }
+
     /// <summary>Number of kernel dispatches enqueued through <see cref="Run"/> since construction
     /// or the last <see cref="ResetKernelDispatchCount"/>. Counts kernel enqueues only; buffer
     /// copies/uploads/downloads are not included.</summary>
@@ -92,6 +104,16 @@ public sealed unsafe class SilkRuntime : IDisposable
             MaxWorkGroupSize = maxWorkGroupSize;
             LocalMemorySize = localMemorySize;
 
+            // Capability detection: subgroup support is advertised through the device extension
+            // string as cl_khr_subgroups / cl_intel_subgroups. Used to gate the subgroup-reduction
+            // kernel variants below.
+            string extensions = DeviceInfoString(cl, dev, DeviceInfo.Extensions);
+            bool intelSubgroups = extensions.Contains("cl_intel_subgroups", StringComparison.OrdinalIgnoreCase);
+            bool khrSubgroups = extensions.Contains("cl_khr_subgroups", StringComparison.OrdinalIgnoreCase);
+            SupportsSubgroups = intelSubgroups || khrSubgroups;
+            SubgroupIntel = intelSubgroups;
+            SubgroupKhr = khrSubgroups;
+
             int err = 0;
             context = cl.CreateContext(null, 1, &dev, null, null, out err);
             if (err != 0 || context == 0)
@@ -101,13 +123,30 @@ public sealed unsafe class SilkRuntime : IDisposable
             if (err != 0 || queue == 0)
                 throw new InvalidOperationException($"Silk clCreateCommandQueue failed ({err}).");
 
-            program = BuildProgram();
+            string? buildOptions = null;
+            if (SupportsSubgroups)
+            {
+                buildOptions = "-D SILK_SUBGROUPS=1";
+                if (SubgroupIntel) buildOptions += " -D SILK_SUBGROUP_INTEL=1";
+                if (SubgroupKhr) buildOptions += " -D SILK_SUBGROUP_KHR=1";
+            }
+            program = BuildProgram(buildOptions);
             foreach (string kernelName in SilkKernels.KernelNames)
             {
                 nint kernel = cl.CreateKernel(program, kernelName, out err);
                 if (err != 0 || kernel == 0)
                     throw new InvalidOperationException($"Silk clCreateKernel('{kernelName}') failed ({err}).");
                 kernels[kernelName] = kernel;
+            }
+            if (SupportsSubgroups)
+            {
+                foreach (string kernelName in SilkKernels.SubgroupKernelNames)
+                {
+                    nint kernel = cl.CreateKernel(program, kernelName, out err);
+                    if (err != 0 || kernel == 0)
+                        throw new InvalidOperationException($"Silk clCreateKernel('{kernelName}') failed ({err}).");
+                    kernels[kernelName] = kernel;
+                }
             }
         }
         catch
@@ -118,7 +157,11 @@ public sealed unsafe class SilkRuntime : IDisposable
     }
 
     public string Describe()
-        => $"{DeviceName} ({Vendor}) | driver {DriverVersion} | max WG {MaxWorkGroupSize} | local {LocalMemorySize} B";
+        => $"{DeviceName} ({Vendor}) | driver {DriverVersion} | max WG {MaxWorkGroupSize} | local {LocalMemorySize} B | subgroups {(SupportsSubgroups ? "yes" : "no")}";
+
+    /// <summary>Whether <paramref name="kernelName"/> was compiled and registered (subgroup variants
+    /// are only present when <see cref="SupportsSubgroups"/> is true).</summary>
+    public bool HasKernel(string kernelName) => kernels.ContainsKey(kernelName);
 
     /// <summary>
     /// Rejects a head dimension the fused attention tile cannot hold (it mirrors
@@ -469,8 +512,9 @@ public sealed unsafe class SilkRuntime : IDisposable
             : throw new InvalidOperationException($"Silk has no kernel named '{name}'.");
 
     /// <summary>Compiles <see cref="SilkKernels.Source"/> in-process; on failure the driver's
-    /// build log is decoded (the single most useful diagnostics for Intel/AMD drivers).</summary>
-    nint BuildProgram()
+    /// build log is decoded (the single most useful diagnostics for Intel/AMD drivers).
+    /// <paramref name="options"/> is passed to <c>clBuildProgram</c> (e.g. <c>-D SILK_SUBGROUPS=1</c>).</summary>
+    nint BuildProgram(string? options = null)
     {
         int err = 0;
         nint built = cl.CreateProgramWithSource(context, 1, [SilkKernels.Source], null, out err);
@@ -478,7 +522,7 @@ public sealed unsafe class SilkRuntime : IDisposable
             throw new InvalidOperationException($"Silk clCreateProgramWithSource failed ({err}).");
 
         // num_devices = 0 means "every device in the context" — the one device asked for.
-        if (cl.BuildProgram(built, 0, null, (string?)null, null, null) == 0)
+        if (cl.BuildProgram(built, 0, null, options, null, null) == 0)
             return built;
 
         string log = BuildLog(built);
