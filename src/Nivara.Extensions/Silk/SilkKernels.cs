@@ -237,6 +237,22 @@ internal static class SilkKernels
         EmbeddingGatherPool, EmbeddingGatherInput, EmbeddingBackwardPool, EmbeddingBackwardInput,
     ];
 
+    /// <summary>Kernel names that only exist when the device supports OpenCL subgroups
+    /// (compiled under <c>SILK_SUBGROUPS</c>). Created by <see cref="SilkRuntime"/> only when
+    /// <see cref="SilkRuntime.SupportsSubgroups"/> is true.</summary>
+    public static readonly string[] SubgroupKernelNames =
+    [
+        RmsNormGemvSubgroup,
+        RmsNormGemvSubgroupBf16,
+        GemmGemvAddSubgroup,
+        GemmGemvAddSubgroupBf16,
+    ];
+
+    public const string RmsNormGemvSubgroup = "rms_norm_gemv_subgroup";
+    public const string RmsNormGemvSubgroupBf16 = "rms_norm_gemv_subgroup_bf16";
+    public const string GemmGemvAddSubgroup = "gemm_gemv_add_subgroup";
+    public const string GemmGemvAddSubgroupBf16 = "gemm_gemv_add_subgroup_bf16";
+
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
     public static int GemmGlobalRows(int aRows) => RoundUp(aRows, GemmTileSize);
 
@@ -274,6 +290,14 @@ internal static class SilkKernels
     public const string Source = """
         #pragma OPENCL FP_CONTRACT OFF
         #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+        #ifdef SILK_SUBGROUPS
+        #ifdef SILK_SUBGROUP_INTEL
+        #pragma OPENCL EXTENSION cl_intel_subgroups : enable
+        #endif
+        #ifdef SILK_SUBGROUP_KHR
+        #pragma OPENCL EXTENSION cl_khr_subgroups : enable
+        #endif
+        #endif
 
         #define TILE 16
         #define BLOCK 4
@@ -5065,6 +5089,428 @@ internal static class SilkKernels
                 if (c3 < bCols) c[qkv_dest(c3, outRow, aRows, blockWidth)] = (ushort)(as_uint(a3 + b3) >> 16);
             }
         }
+
+        #ifdef SILK_SUBGROUPS
+        /* Subgroup-reduction variant of rms_norm_gemv: the RMS-norm sum of squares is computed
+           as strided partial sums across the subgroup followed by sub_group_reduce_add, instead of
+           every lane redundantly summing the whole vector. The per-lane dot accumulation over k
+           is unchanged, so only the scale may differ by a few ULP vs. the base kernel. */
+        __kernel void rms_norm_gemv_subgroup(
+            __global const float* x,
+            __global const float* gamma,
+            __global const float* w0,
+            __global const float* bias0,
+            __global float* out0,
+            __global const float* w1,
+            __global const float* bias1,
+            __global float* out1,
+            __global const float* w2,
+            __global const float* bias2,
+            __global float* out2,
+            const uint aCols,
+            const uint cols0,
+            const uint cols1,
+            const uint cols2,
+            const uint hasBias,
+            const float eps)
+        {
+            uint g = get_group_id(0);
+            uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
+            uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+
+            __global const float* b;
+            __global const float* bias;
+            __global float* c;
+            uint bCols;
+            uint colBase;
+            if (g < groups0)
+            {
+                b = w0; bias = bias0; c = out0; bCols = cols0; colBase = g * GEMVCOLS;
+            }
+            else if (g < groups0 + groups1)
+            {
+                b = w1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * GEMVCOLS;
+            }
+            else
+            {
+                b = w2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * GEMVCOLS;
+            }
+
+            uint col = colBase + get_local_id(0) * BLOCK;
+            uint lid = get_local_id(0);
+
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
+            float partial = 0.0f;
+            for (uint k = sgLocal; k < aCols; k += sgSize)
+            {
+                float v = x[k];
+                partial += v * v;
+            }
+            float ssq = sub_group_reduce_add(partial);
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                __local float normed[STAGED_NORM_MAX];
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= bCols)
+                    return;
+
+                uint avail = bCols - col;
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        float4 bv = vload4(0, b + bBase);
+                        a0 += av * bv.s0;
+                        a1 += av * bv.s1;
+                        a2 += av * bv.s2;
+                        a3 += av * bv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * b[bBase];
+                        if (avail > 1u) a1 += av * b[bBase + 1u];
+                        if (avail > 2u) a2 += av * b[bBase + 2u];
+                        if (avail > 3u) a3 += av * b[bBase + 3u];
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+                return;
+            }
+            else
+            {
+                if (col >= bCols)
+                    return;
+
+                uint avail = bCols - col;
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        float4 bv = vload4(0, b + bBase);
+                        a0 += av * bv.s0;
+                        a1 += av * bv.s1;
+                        a2 += av * bv.s2;
+                        a3 += av * bv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * b[bBase];
+                        if (avail > 1u) a1 += av * b[bBase + 1u];
+                        if (avail > 2u) a2 += av * b[bBase + 2u];
+                        if (avail > 3u) a3 += av * b[bBase + 3u];
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+            }
+        }
+
+        __kernel void rms_norm_gemv_subgroup_bf16(
+            __global const float* x,
+            __global const float* gamma,
+            __global const ushort* w0,
+            __global const float* bias0,
+            __global float* out0,
+            __global const ushort* w1,
+            __global const float* bias1,
+            __global float* out1,
+            __global const ushort* w2,
+            __global const float* bias2,
+            __global float* out2,
+            const uint aCols,
+            const uint cols0,
+            const uint cols1,
+            const uint cols2,
+            const uint hasBias,
+            const float eps)
+        {
+            uint g = get_group_id(0);
+            uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
+            uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+
+            __global const ushort* b;
+            __global const float* bias;
+            __global float* c;
+            uint bCols;
+            uint colBase;
+            if (g < groups0)
+            {
+                b = w0; bias = bias0; c = out0; bCols = cols0; colBase = g * GEMVCOLS;
+            }
+            else if (g < groups0 + groups1)
+            {
+                b = w1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * GEMVCOLS;
+            }
+            else
+            {
+                b = w2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * GEMVCOLS;
+            }
+
+            uint col = colBase + get_local_id(0) * BLOCK;
+            uint lid = get_local_id(0);
+
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
+            float partial = 0.0f;
+            for (uint k = sgLocal; k < aCols; k += sgSize)
+            {
+                float v = x[k];
+                partial += v * v;
+            }
+            float ssq = sub_group_reduce_add(partial);
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                __local float normed[STAGED_NORM_MAX];
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= bCols)
+                    return;
+
+                uint avail = bCols - col;
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        ushort4 bv4 = vload4(0, b + bBase);
+                        a0 += av * BF16_TO_F32(bv4.s0);
+                        a1 += av * BF16_TO_F32(bv4.s1);
+                        a2 += av * BF16_TO_F32(bv4.s2);
+                        a3 += av * BF16_TO_F32(bv4.s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+                return;
+            }
+            else
+            {
+                if (col >= bCols)
+                    return;
+
+                uint avail = bCols - col;
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        ushort4 bv4 = vload4(0, b + bBase);
+                        a0 += av * BF16_TO_F32(bv4.s0);
+                        a1 += av * BF16_TO_F32(bv4.s1);
+                        a2 += av * BF16_TO_F32(bv4.s2);
+                        a3 += av * BF16_TO_F32(bv4.s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        a0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+            }
+        }
+
+        /* Subgroup-gated variant of gemm_gemv_add. gemm_gemv_add has no cross-lane reduction
+           (each lane accumulates its own output columns over k), so this variant is functionally
+           identical to the base kernel; the subgroup intrinsic reference below exists only to
+           gate compilation on devices that advertise subgroup support. */
+        __kernel void gemm_gemv_add_subgroup(
+            __global const float* a,
+            __global const float* b,
+            __global float* c,
+            __global const float* residual,
+            const uint aCols,
+            const uint bCols)
+        {
+            if (get_sub_group_size() == 0u) return;
+            uint col = get_global_id(0) * BLOCK;
+            if (col >= bCols) return;
+
+            uint avail = bCols - col;
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            if (avail >= 4u)
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    float4 bv = vload4(0, b + bBase);
+                    a0 += av * bv.s0;
+                    a1 += av * bv.s1;
+                    a2 += av * bv.s2;
+                    a3 += av * bv.s3;
+                }
+            }
+            else
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    a0 += av * b[bBase];
+                    if (avail > 1u) a1 += av * b[bBase + 1u];
+                    if (avail > 2u) a2 += av * b[bBase + 2u];
+                    if (avail > 3u) a3 += av * b[bBase + 3u];
+                }
+            }
+
+            c[col] = a0 + residual[col];
+            if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+            if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+            if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+        }
+
+        __kernel void gemm_gemv_add_subgroup_bf16(
+            __global const float* a,
+            __global const ushort* b,
+            __global float* c,
+            __global const float* residual,
+            const uint aCols,
+            const uint bCols)
+        {
+            if (get_sub_group_size() == 0u) return;
+            uint col = get_global_id(0) * BLOCK;
+            if (col >= bCols) return;
+
+            uint avail = bCols - col;
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            if (avail >= 4u)
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    ushort4 bv4 = vload4(0, b + bBase);
+                    a0 += av * BF16_TO_F32(bv4.s0);
+                    a1 += av * BF16_TO_F32(bv4.s1);
+                    a2 += av * BF16_TO_F32(bv4.s2);
+                    a3 += av * BF16_TO_F32(bv4.s3);
+                }
+            }
+            else
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    a0 += av * BF16_TO_F32(b[bBase]);
+                    if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                    if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                    if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                }
+            }
+
+            c[col] = a0 + residual[col];
+            if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+            if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+            if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+        }
+        #endif
 
         """;
 }
