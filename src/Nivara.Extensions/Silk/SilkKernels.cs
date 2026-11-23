@@ -3583,14 +3583,30 @@ internal static class SilkKernels
             uint avail = bCols - col;
 
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-            for (uint k = 0; k < aCols; ++k)
+            if (avail >= 4u)
             {
-                float av = x[k] * normScale * gamma[k];
-                uint bBase = k * bCols + col;
-                a0 += av * b[bBase];
-                if (avail > 1u) a1 += av * b[bBase + 1u];
-                if (avail > 2u) a2 += av * b[bBase + 2u];
-                if (avail > 3u) a3 += av * b[bBase + 3u];
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = x[k] * normScale * gamma[k];
+                    uint bBase = k * bCols + col;
+                    float4 bv = vload4(0, b + bBase);
+                    a0 += av * bv.s0;
+                    a1 += av * bv.s1;
+                    a2 += av * bv.s2;
+                    a3 += av * bv.s3;
+                }
+            }
+            else
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = x[k] * normScale * gamma[k];
+                    uint bBase = k * bCols + col;
+                    a0 += av * b[bBase];
+                    if (avail > 1u) a1 += av * b[bBase + 1u];
+                    if (avail > 2u) a2 += av * b[bBase + 2u];
+                    if (avail > 3u) a3 += av * b[bBase + 3u];
+                }
             }
 
             if (hasBias != 0u)
@@ -3627,14 +3643,30 @@ internal static class SilkKernels
             uint avail = bCols - col;
 
             float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-            for (uint k = 0; k < aCols; ++k)
+            if (avail >= 4u)
             {
-                float av = a[k];
-                uint bBase = k * bCols + col;
-                a0 += av * b[bBase];
-                if (avail > 1u) a1 += av * b[bBase + 1u];
-                if (avail > 2u) a2 += av * b[bBase + 2u];
-                if (avail > 3u) a3 += av * b[bBase + 3u];
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    float4 bv = vload4(0, b + bBase);
+                    a0 += av * bv.s0;
+                    a1 += av * bv.s1;
+                    a2 += av * bv.s2;
+                    a3 += av * bv.s3;
+                }
+            }
+            else
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    a0 += av * b[bBase];
+                    if (avail > 1u) a1 += av * b[bBase + 1u];
+                    if (avail > 2u) a2 += av * b[bBase + 2u];
+                    if (avail > 3u) a3 += av * b[bBase + 3u];
+                }
             }
 
             c[col] = a0 + residual[col];
@@ -4113,14 +4145,30 @@ internal static class SilkKernels
                     uint avail = bCols - col;
 
                     float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-                    for (uint k = 0; k < aCols; ++k)
+                    if (avail >= 4u)
                     {
-                        float av = a[k];
-                        uint bBase = k * bCols + col;
-                        a0 += av * BF16_TO_F32(b[bBase]);
-                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
-                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
-                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                        for (uint k = 0; k < aCols; ++k)
+                        {
+                            float av = a[k];
+                            uint bBase = k * bCols + col;
+                            ushort4 bv4 = vload4(0, b + bBase);
+                            a0 += av * BF16_TO_F32(bv4.s0);
+                            a1 += av * BF16_TO_F32(bv4.s1);
+                            a2 += av * BF16_TO_F32(bv4.s2);
+                            a3 += av * BF16_TO_F32(bv4.s3);
+                        }
+                    }
+                    else
+                    {
+                        for (uint k = 0; k < aCols; ++k)
+                        {
+                            float av = a[k];
+                            uint bBase = k * bCols + col;
+                            a0 += av * BF16_TO_F32(b[bBase]);
+                            if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                            if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                            if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                        }
                     }
 
                     c[col] = a0 + residual[col];
@@ -4203,14 +4251,30 @@ internal static class SilkKernels
                     uint avail = bCols - col;
 
                     float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
-                    for (uint k = 0; k < aCols; ++k)
+                    if (avail >= 4u)
                     {
-                        float av = x[k] * normScale * gamma[k];
-                        uint bBase = k * bCols + col;
-                        a0 += av * BF16_TO_F32(b[bBase]);
-                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
-                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
-                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                        for (uint k = 0; k < aCols; ++k)
+                        {
+                            float av = x[k] * normScale * gamma[k];
+                            uint bBase = k * bCols + col;
+                            ushort4 bv4 = vload4(0, b + bBase);
+                            a0 += av * BF16_TO_F32(bv4.s0);
+                            a1 += av * BF16_TO_F32(bv4.s1);
+                            a2 += av * BF16_TO_F32(bv4.s2);
+                            a3 += av * BF16_TO_F32(bv4.s3);
+                        }
+                    }
+                    else
+                    {
+                        for (uint k = 0; k < aCols; ++k)
+                        {
+                            float av = x[k] * normScale * gamma[k];
+                            uint bBase = k * bCols + col;
+                            a0 += av * BF16_TO_F32(b[bBase]);
+                            if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
+                            if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
+                            if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                        }
                     }
 
                     if (hasBias != 0u)
