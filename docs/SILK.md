@@ -1258,6 +1258,31 @@ Caveats (in addition to the #1473 caveats):
 - BF16 weight bytes are `sizeof(ushort)` (2), not `sizeof(BFloat16)`/`sizeof(Half)` (also 2
   here, but the convention is the packed transport width).
 
+### F32 gemm_gemv_add decode GB/s measurement (#1480)
+
+Follow-up to #1473/#1479. The `--silk-kernels` gate now also reports achieved GB/s for the
+F32 cached-decode O-projection GEMV (`gemm_gemv_add`, `SilkLauncher.GemmGemvAdd`), using the
+same logical bytes-moved model with F32 weight bytes. The base (non-subgroup) variant is
+measured for a stable reference; subgroup variants are expected to be within the timing band.
+
+Kernels measured: `gemm_gemv_add` (aCols x bCols + residual add), base variant.
+
+Shapes are the same SmolLM/Qwen decode table above (LM-head/vocab, QKV, gate/up, O/down, plus
+the small/tiny projections). The requested O/down shapes are `(896, 896)` (Qwen) and
+`(576, 576)` (SmolLM).
+
+#### Bytes-moved model (logical, F32)
+
+```
+bytes = a_bytes(F32) + weight_bytes(F32) + output_bytes(F32) + residual_bytes(F32)
+      = aCols*sizeof(float) + aCols*bCols*sizeof(float) + bCols*sizeof(float) + bCols*sizeof(float)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+Caveats (in addition to the #1473/#1479 caveats): `gemm_gemv_add` reads `a` once and `b`
+once per output column; the formula counts each once. Keep the formula stable across
+before/after runs; changing it invalidates the comparison.
+
 ### Device copy-bandwidth probe
 
 `MeasureCopyBandwidth` allocates two 64 MiB device buffers and times `clEnqueueCopyBuffer`
