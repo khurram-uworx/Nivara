@@ -1111,6 +1111,74 @@ dotnet run -c Release --project samples/NivaraInference -- qwen --synthetic-weig
   CPU/Silk synthetic parity tests. Before/after benchmark numbers should be captured with the
   commands above and recorded in the #1453 PR/issue.
 
+## 14a. Decode GEMV GB/s measurement (#1473)
+
+Follow-up to #1466. The decode GEMV efficiency pass needs a reproducible way to measure achieved
+GB/s versus a device copy/bandwidth probe. The `--silk-kernels` perf gate
+(`tests/Nivara.PerformanceTests/SilkKernelsGate.cs`) now prints both, using the methodology below so
+before/after numbers stay comparable.
+
+### Command
+
+```bat
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels
+```
+
+(Human-run, GPU required; see `tests/Nivara.PerformanceTests/README.md` for the full gate protocol.)
+
+### Decode GEMV shapes measured
+
+Reproducible SmolLM/Qwen decode GEMV shapes `(hidden, width)` exercised by `MeasureDecodeShapeAb`:
+
+| Model | (hidden, width) | Meaning |
+|---|---:|---|
+| Qwen2.5-0.5B | (896, 151936) | LM head / vocab projection |
+| Qwen2.5-0.5B | (896, 1152) | QKV out (14 heads, 2 kv heads, headDim 64) |
+| Qwen2.5-0.5B | (896, 4864) | gate/up intermediate projection |
+| Qwen2.5-0.5B | (896, 896) | O / down hidden projection |
+| SmolLM-135M | (576, 49152) | LM head / vocab projection |
+| SmolLM-135M | (576, 960) | QKV out (9 heads, 3 kv heads, headDim 64) |
+| SmolLM-135M | (576, 1536) | gate/up intermediate projection |
+| SmolLM-135M | (576, 576) | O / down hidden projection |
+| Qwen2.5-0.5B | (896, 96) | small projection |
+| Qwen2.5-0.5B | (896, 24) | tiny projection |
+
+Config sources: `SmolLMConfig` (`src/Nivara.Extensions/Silk/SilkSmolLMGpuRunner.cs`),
+`QwenSilkConfig` (`src/Nivara.Extensions/Silk/SilkQwenGpuRunner.cs`), `docs/QWEN.md`.
+
+### Bytes-moved model (logical)
+
+For the one-slot, no-bias `rms_norm_gemv` A/B (the gate uses `hasBias: false`):
+
+```
+bytes = x_bytes + gamma_bytes + weight_bytes + output_bytes
+      = (hidden + hidden + hidden*width + width) * sizeof(float)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+Caveats (keep these in mind when comparing numbers):
+
+- **Logical lower-bound model for comparability**, not a measurement of actual DRAM traffic.
+- `rms_norm_gemv` reads `x` **twice** internally (sum-of-squares pass, then compute pass) and `gamma` once in the compute pass; the formula above counts `x` and `gamma` once. Cache effects can reduce actual traffic.
+- Optional bias read/write is excluded in this A/B (no bias); include `bias_bytes` when measuring biased paths (`hasBias: true`).
+- BF16 weight paths (`rms_norm_gemv_bf16`, `gemm_gemv_add_bf16`) halve weight bytes; report them separately with the same formula applied to the packed-BF16 transport.
+- Keep the formula stable across before/after runs; changing it invalidates the comparison.
+
+### Device copy-bandwidth probe
+
+`MeasureCopyBandwidth` allocates two 64 MiB device buffers and times `clEnqueueCopyBuffer`
+(device-to-device) + `Finish()` over 5 warmups and 10 interleaved rounds, reporting median/min/max
+GB/s. This is a **proxy upper bound**, not kernel-achieved DRAM bandwidth: the driver may optimize
+the copy path differently from a compute kernel's access pattern. Use it as a reference ceiling when
+judging whether a decode GEMV is bandwidth-saturated.
+
+### Comparability rules
+
+- Same device, same driver, same power state (`GemmBenchmark.PrintPowerState()` is printed by the gate).
+- Release build only (`dotnet run -c Release`); Debug compares an unoptimized host against optimized driver code.
+- Median of N rounds with warmups; interleaved A/B ordering so load drift does not systematically penalize one route.
+- Record the exact command, device, and driver alongside any published number.
+
 ## References
 
 - [Silk.NET OpenCL](https://github.com/dotnet/Silk.NET)
