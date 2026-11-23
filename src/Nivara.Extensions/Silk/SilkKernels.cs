@@ -3604,13 +3604,15 @@ internal static class SilkKernels
             }
             float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
 
+            __local float normed[STAGED_NORM_MAX];
+
+
             if (aCols <= STAGED_NORM_MAX)
             {
                 /* Stage normed[k] in local memory so the 32 lanes share one normalized
                    vector instead of re-reading x/gamma per lane in the dot loop. Every
                    thread participates in the cooperative fill and the barrier, including
                    lanes whose col >= bCols, so the barrier cannot deadlock. */
-                __local float normed[STAGED_NORM_MAX];
                 for (uint k = lid; k < aCols; k += GEMVLANES)
                     normed[k] = x[k] * normScale * gamma[k];
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -4339,13 +4341,15 @@ internal static class SilkKernels
                     }
                     float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
 
+                    __local float normed[STAGED_NORM_MAX];
+
+
                     if (aCols <= STAGED_NORM_MAX)
                     {
                         /* Stage normed[k] in local memory so the 32 lanes share one normalized
                            vector instead of re-reading x/gamma per lane in the dot loop. Every
                            thread participates in the cooperative fill and the barrier, including
                            lanes whose col >= bCols, so the barrier cannot deadlock. */
-                        __local float normed[STAGED_NORM_MAX];
                         for (uint k = lid; k < aCols; k += GEMVLANES)
                             normed[k] = x[k] * normScale * gamma[k];
                         barrier(CLK_LOCAL_MEM_FENCE);
@@ -5150,9 +5154,11 @@ internal static class SilkKernels
             float ssq = sub_group_reduce_add(partial);
             float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
 
+            __local float normed[STAGED_NORM_MAX];
+
+
             if (aCols <= STAGED_NORM_MAX)
             {
-                __local float normed[STAGED_NORM_MAX];
                 for (uint k = lid; k < aCols; k += GEMVLANES)
                     normed[k] = x[k] * normScale * gamma[k];
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -5309,9 +5315,11 @@ internal static class SilkKernels
             float ssq = sub_group_reduce_add(partial);
             float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
 
+            __local float normed[STAGED_NORM_MAX];
+
+
             if (aCols <= STAGED_NORM_MAX)
             {
-                __local float normed[STAGED_NORM_MAX];
                 for (uint k = lid; k < aCols; k += GEMVLANES)
                     normed[k] = x[k] * normScale * gamma[k];
                 barrier(CLK_LOCAL_MEM_FENCE);
