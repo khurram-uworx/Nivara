@@ -4,12 +4,13 @@ using NUnit.Framework;
 namespace Nivara.Tests.Gpu;
 
 /// <summary>
-/// Capability-gated parity for the subgroup-reduction decode GEMV variant (#1472).
-/// On devices with subgroup support both the base and subgroup kernels are available;
-/// this fixture runs both and compares outputs. The subgroup path reduces the RMS-norm
-/// sum of squares in strided order, so the scale may differ by a few ULP - a tolerance
-/// is used with that justification. On devices without subgroup support the subgroup
-/// launcher falls back to the base kernel and the comparison is trivially exact.
+/// Capability-gated parity for the K-split subgroup decode GEMV variant (#1486).
+/// The K-split variant splits both the RMS-norm sum of squares and the per-output-column
+/// contraction over k across subgroup lanes and reduces via sub_group_reduce_add, which
+/// changes accumulation order (strided partial sums), so results differ from the base
+/// kernel by a few ULP - a tolerance is used with that justification. On devices
+/// without subgroup support the subgroup launcher falls back to the base kernel and the
+/// comparison is trivially exact.
 /// </summary>
 [Category("Gpu")]
 public sealed class SilkRmsNormGemvSubgroupTests
@@ -115,7 +116,7 @@ public sealed class SilkRmsNormGemvSubgroupTests
         for (int i = 0; i < expected.Length; i++)
         {
             float diff = MathF.Abs(expected[i] - actual[i]);
-            float tol = 1e-5f * MathF.Max(1f, MathF.Abs(expected[i]));
+            float tol = 1e-4f * MathF.Max(1f, MathF.Abs(expected[i]));
             if (diff > tol)
                 Assert.Fail($"{label}: element {i} differs by {diff} (tol {tol}): {expected[i]:R} vs {actual[i]:R}");
         }

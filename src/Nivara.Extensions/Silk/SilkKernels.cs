@@ -279,6 +279,11 @@ internal static class SilkKernels
     /// the slot column counts is the same arithmetic.</summary>
     public static int GemvGlobalCols(int cols) => RoundUp(cols, GemvGroupCols) / GemvBlockCols;
 
+    /// <summary>Global work size (thread count) for the K-split decode GEMV geometry
+    /// (#1486): one subgroup (GEMVLANES threads) per BLOCK (4) output columns, so
+    /// <c>ceil(cols / 4) * GEMVLANES</c> threads. Used by the subgroup (K-split) variants only.</summary>
+    public static int GemvKSplitGlobalCols(int cols) => cols <= 0 ? 0 : ((cols + 3) / 4) * GemvGroupSize;
+
     /// <summary>Global work size for a flat 1-D launch guarded by an <c>idx &gt;= n</c> early return.</summary>
     public static int LinearGlobal(int total) => RoundUp(Math.Max(1, total), LinearGroupSize);
 
@@ -5095,10 +5100,12 @@ internal static class SilkKernels
         }
 
         #ifdef SILK_SUBGROUPS
-        /* Subgroup-reduction variant of rms_norm_gemv: the RMS-norm sum of squares is computed
-           as strided partial sums across the subgroup followed by sub_group_reduce_add, instead of
-           every lane redundantly summing the whole vector. The per-lane dot accumulation over k
-           is unchanged, so only the scale may differ by a few ULP vs. the base kernel. */
+        /* K-split subgroup variant of rms_norm_gemv (#1486): the RMS-norm sum of squares is
+           reduced across the subgroup (as before), AND the per-output-column contraction over k
+           is split across subgroup lanes (k = sgLocal; k += sgSize) with partial dot products
+           combined via sub_group_reduce_add. Accumulation order is strided, so results differ
+           from the base kernel by a few ULP; parity is tolerance-based. Geometry: one subgroup
+           per BLOCK (4) output columns, so the launch uses GemvKSplitGlobalCols. */
         __kernel void rms_norm_gemv_subgroup(
             __global const float* x,
             __global const float* gamma,
@@ -5119,8 +5126,8 @@ internal static class SilkKernels
             const float eps)
         {
             uint g = get_group_id(0);
-            uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
-            uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+            uint groups0 = (cols0 + 3u) / 4u;
+            uint groups1 = (cols1 + 3u) / 4u;
 
             __global const float* b;
             __global const float* bias;
@@ -5129,18 +5136,18 @@ internal static class SilkKernels
             uint colBase;
             if (g < groups0)
             {
-                b = w0; bias = bias0; c = out0; bCols = cols0; colBase = g * GEMVCOLS;
+                b = w0; bias = bias0; c = out0; bCols = cols0; colBase = g * 4u;
             }
             else if (g < groups0 + groups1)
             {
-                b = w1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * GEMVCOLS;
+                b = w1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * 4u;
             }
             else
             {
-                b = w2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * GEMVCOLS;
+                b = w2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * 4u;
             }
 
-            uint col = colBase + get_local_id(0) * BLOCK;
+            uint col = colBase;
             uint lid = get_local_id(0);
 
             uint sgSize = get_sub_group_size();
@@ -5156,7 +5163,6 @@ internal static class SilkKernels
 
             __local float normed[STAGED_NORM_MAX];
 
-
             if (aCols <= STAGED_NORM_MAX)
             {
                 for (uint k = lid; k < aCols; k += GEMVLANES)
@@ -5167,46 +5173,53 @@ internal static class SilkKernels
                     return;
 
                 uint avail = bCols - col;
-                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
                 if (avail >= 4u)
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = normed[k];
                         uint bBase = k * bCols + col;
                         float4 bv = vload4(0, b + bBase);
-                        a0 += av * bv.s0;
-                        a1 += av * bv.s1;
-                        a2 += av * bv.s2;
-                        a3 += av * bv.s3;
+                        pa0 += av * bv.s0;
+                        pa1 += av * bv.s1;
+                        pa2 += av * bv.s2;
+                        pa3 += av * bv.s3;
                     }
                 }
                 else
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = normed[k];
                         uint bBase = k * bCols + col;
-                        a0 += av * b[bBase];
-                        if (avail > 1u) a1 += av * b[bBase + 1u];
-                        if (avail > 2u) a2 += av * b[bBase + 2u];
-                        if (avail > 3u) a3 += av * b[bBase + 3u];
+                        pa0 += av * b[bBase];
+                        if (avail > 1u) pa1 += av * b[bBase + 1u];
+                        if (avail > 2u) pa2 += av * b[bBase + 2u];
+                        if (avail > 3u) pa3 += av * b[bBase + 3u];
                     }
                 }
+                float a0 = sub_group_reduce_add(pa0);
+                float a1 = sub_group_reduce_add(pa1);
+                float a2 = sub_group_reduce_add(pa2);
+                float a3 = sub_group_reduce_add(pa3);
 
-                if (hasBias != 0u)
+                if (sgLocal == 0u)
                 {
-                    c[col] = a0 + bias[col];
-                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
-                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
-                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
-                }
-                else
-                {
-                    c[col] = a0;
-                    if (avail > 1u) c[col + 1u] = a1;
-                    if (avail > 2u) c[col + 2u] = a2;
-                    if (avail > 3u) c[col + 3u] = a3;
+                    if (hasBias != 0u)
+                    {
+                        c[col] = a0 + bias[col];
+                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                    }
+                    else
+                    {
+                        c[col] = a0;
+                        if (avail > 1u) c[col + 1u] = a1;
+                        if (avail > 2u) c[col + 2u] = a2;
+                        if (avail > 3u) c[col + 3u] = a3;
+                    }
                 }
                 return;
             }
@@ -5216,46 +5229,53 @@ internal static class SilkKernels
                     return;
 
                 uint avail = bCols - col;
-                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
                 if (avail >= 4u)
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * bCols + col;
                         float4 bv = vload4(0, b + bBase);
-                        a0 += av * bv.s0;
-                        a1 += av * bv.s1;
-                        a2 += av * bv.s2;
-                        a3 += av * bv.s3;
+                        pa0 += av * bv.s0;
+                        pa1 += av * bv.s1;
+                        pa2 += av * bv.s2;
+                        pa3 += av * bv.s3;
                     }
                 }
                 else
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * bCols + col;
-                        a0 += av * b[bBase];
-                        if (avail > 1u) a1 += av * b[bBase + 1u];
-                        if (avail > 2u) a2 += av * b[bBase + 2u];
-                        if (avail > 3u) a3 += av * b[bBase + 3u];
+                        pa0 += av * b[bBase];
+                        if (avail > 1u) pa1 += av * b[bBase + 1u];
+                        if (avail > 2u) pa2 += av * b[bBase + 2u];
+                        if (avail > 3u) pa3 += av * b[bBase + 3u];
                     }
                 }
+                float a0 = sub_group_reduce_add(pa0);
+                float a1 = sub_group_reduce_add(pa1);
+                float a2 = sub_group_reduce_add(pa2);
+                float a3 = sub_group_reduce_add(pa3);
 
-                if (hasBias != 0u)
+                if (sgLocal == 0u)
                 {
-                    c[col] = a0 + bias[col];
-                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
-                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
-                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
-                }
-                else
-                {
-                    c[col] = a0;
-                    if (avail > 1u) c[col + 1u] = a1;
-                    if (avail > 2u) c[col + 2u] = a2;
-                    if (avail > 3u) c[col + 3u] = a3;
+                    if (hasBias != 0u)
+                    {
+                        c[col] = a0 + bias[col];
+                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                    }
+                    else
+                    {
+                        c[col] = a0;
+                        if (avail > 1u) c[col + 1u] = a1;
+                        if (avail > 2u) c[col + 2u] = a2;
+                        if (avail > 3u) c[col + 3u] = a3;
+                    }
                 }
             }
         }
@@ -5280,8 +5300,8 @@ internal static class SilkKernels
             const float eps)
         {
             uint g = get_group_id(0);
-            uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
-            uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+            uint groups0 = (cols0 + 3u) / 4u;
+            uint groups1 = (cols1 + 3u) / 4u;
 
             __global const ushort* b;
             __global const float* bias;
@@ -5290,18 +5310,18 @@ internal static class SilkKernels
             uint colBase;
             if (g < groups0)
             {
-                b = w0; bias = bias0; c = out0; bCols = cols0; colBase = g * GEMVCOLS;
+                b = w0; bias = bias0; c = out0; bCols = cols0; colBase = g * 4u;
             }
             else if (g < groups0 + groups1)
             {
-                b = w1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * GEMVCOLS;
+                b = w1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * 4u;
             }
             else
             {
-                b = w2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * GEMVCOLS;
+                b = w2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * 4u;
             }
 
-            uint col = colBase + get_local_id(0) * BLOCK;
+            uint col = colBase;
             uint lid = get_local_id(0);
 
             uint sgSize = get_sub_group_size();
@@ -5317,7 +5337,6 @@ internal static class SilkKernels
 
             __local float normed[STAGED_NORM_MAX];
 
-
             if (aCols <= STAGED_NORM_MAX)
             {
                 for (uint k = lid; k < aCols; k += GEMVLANES)
@@ -5328,46 +5347,53 @@ internal static class SilkKernels
                     return;
 
                 uint avail = bCols - col;
-                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
                 if (avail >= 4u)
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = normed[k];
                         uint bBase = k * bCols + col;
                         ushort4 bv4 = vload4(0, b + bBase);
-                        a0 += av * BF16_TO_F32(bv4.s0);
-                        a1 += av * BF16_TO_F32(bv4.s1);
-                        a2 += av * BF16_TO_F32(bv4.s2);
-                        a3 += av * BF16_TO_F32(bv4.s3);
+                        pa0 += av * BF16_TO_F32(bv4.s0);
+                        pa1 += av * BF16_TO_F32(bv4.s1);
+                        pa2 += av * BF16_TO_F32(bv4.s2);
+                        pa3 += av * BF16_TO_F32(bv4.s3);
                     }
                 }
                 else
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = normed[k];
                         uint bBase = k * bCols + col;
-                        a0 += av * BF16_TO_F32(b[bBase]);
-                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
-                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
-                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                        pa0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) pa1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) pa2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) pa3 += av * BF16_TO_F32(b[bBase + 3u]);
                     }
                 }
+                float a0 = sub_group_reduce_add(pa0);
+                float a1 = sub_group_reduce_add(pa1);
+                float a2 = sub_group_reduce_add(pa2);
+                float a3 = sub_group_reduce_add(pa3);
 
-                if (hasBias != 0u)
+                if (sgLocal == 0u)
                 {
-                    c[col] = a0 + bias[col];
-                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
-                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
-                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
-                }
-                else
-                {
-                    c[col] = a0;
-                    if (avail > 1u) c[col + 1u] = a1;
-                    if (avail > 2u) c[col + 2u] = a2;
-                    if (avail > 3u) c[col + 3u] = a3;
+                    if (hasBias != 0u)
+                    {
+                        c[col] = a0 + bias[col];
+                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                    }
+                    else
+                    {
+                        c[col] = a0;
+                        if (avail > 1u) c[col + 1u] = a1;
+                        if (avail > 2u) c[col + 2u] = a2;
+                        if (avail > 3u) c[col + 3u] = a3;
+                    }
                 }
                 return;
             }
@@ -5377,54 +5403,62 @@ internal static class SilkKernels
                     return;
 
                 uint avail = bCols - col;
-                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
                 if (avail >= 4u)
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * bCols + col;
                         ushort4 bv4 = vload4(0, b + bBase);
-                        a0 += av * BF16_TO_F32(bv4.s0);
-                        a1 += av * BF16_TO_F32(bv4.s1);
-                        a2 += av * BF16_TO_F32(bv4.s2);
-                        a3 += av * BF16_TO_F32(bv4.s3);
+                        pa0 += av * BF16_TO_F32(bv4.s0);
+                        pa1 += av * BF16_TO_F32(bv4.s1);
+                        pa2 += av * BF16_TO_F32(bv4.s2);
+                        pa3 += av * BF16_TO_F32(bv4.s3);
                     }
                 }
                 else
                 {
-                    for (uint k = 0; k < aCols; ++k)
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * bCols + col;
-                        a0 += av * BF16_TO_F32(b[bBase]);
-                        if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
-                        if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
-                        if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                        pa0 += av * BF16_TO_F32(b[bBase]);
+                        if (avail > 1u) pa1 += av * BF16_TO_F32(b[bBase + 1u]);
+                        if (avail > 2u) pa2 += av * BF16_TO_F32(b[bBase + 2u]);
+                        if (avail > 3u) pa3 += av * BF16_TO_F32(b[bBase + 3u]);
                     }
                 }
+                float a0 = sub_group_reduce_add(pa0);
+                float a1 = sub_group_reduce_add(pa1);
+                float a2 = sub_group_reduce_add(pa2);
+                float a3 = sub_group_reduce_add(pa3);
 
-                if (hasBias != 0u)
+                if (sgLocal == 0u)
                 {
-                    c[col] = a0 + bias[col];
-                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
-                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
-                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
-                }
-                else
-                {
-                    c[col] = a0;
-                    if (avail > 1u) c[col + 1u] = a1;
-                    if (avail > 2u) c[col + 2u] = a2;
-                    if (avail > 3u) c[col + 3u] = a3;
+                    if (hasBias != 0u)
+                    {
+                        c[col] = a0 + bias[col];
+                        if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                        if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                        if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                    }
+                    else
+                    {
+                        c[col] = a0;
+                        if (avail > 1u) c[col + 1u] = a1;
+                        if (avail > 2u) c[col + 2u] = a2;
+                        if (avail > 3u) c[col + 3u] = a3;
+                    }
                 }
             }
         }
 
-        /* Subgroup-gated variant of gemm_gemv_add. gemm_gemv_add has no cross-lane reduction
-           (each lane accumulates its own output columns over k), so this variant is functionally
-           identical to the base kernel; the subgroup intrinsic reference below exists only to
-           gate compilation on devices that advertise subgroup support. */
+        /* K-split subgroup variant of gemm_gemv_add (#1486): the contraction over k is split
+           across subgroup lanes (k = sgLocal; k += sgSize) with partial dot products combined
+           via sub_group_reduce_add. Accumulation order is strided, so results differ from the
+           base kernel by a few ULP; parity is tolerance-based. Geometry: one subgroup per BLOCK
+           (4) output columns. */
         __kernel void gemm_gemv_add_subgroup(
             __global const float* a,
             __global const float* b,
@@ -5433,43 +5467,51 @@ internal static class SilkKernels
             const uint aCols,
             const uint bCols)
         {
-            if (get_sub_group_size() == 0u) return;
-            uint col = get_global_id(0) * BLOCK;
+            uint col = get_group_id(0) * 4u;
             if (col >= bCols) return;
 
             uint avail = bCols - col;
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
 
-            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
             if (avail >= 4u)
             {
-                for (uint k = 0; k < aCols; ++k)
+                for (uint k = sgLocal; k < aCols; k += sgSize)
                 {
                     float av = a[k];
                     uint bBase = k * bCols + col;
                     float4 bv = vload4(0, b + bBase);
-                    a0 += av * bv.s0;
-                    a1 += av * bv.s1;
-                    a2 += av * bv.s2;
-                    a3 += av * bv.s3;
+                    pa0 += av * bv.s0;
+                    pa1 += av * bv.s1;
+                    pa2 += av * bv.s2;
+                    pa3 += av * bv.s3;
                 }
             }
             else
             {
-                for (uint k = 0; k < aCols; ++k)
+                for (uint k = sgLocal; k < aCols; k += sgSize)
                 {
                     float av = a[k];
                     uint bBase = k * bCols + col;
-                    a0 += av * b[bBase];
-                    if (avail > 1u) a1 += av * b[bBase + 1u];
-                    if (avail > 2u) a2 += av * b[bBase + 2u];
-                    if (avail > 3u) a3 += av * b[bBase + 3u];
+                    pa0 += av * b[bBase];
+                    if (avail > 1u) pa1 += av * b[bBase + 1u];
+                    if (avail > 2u) pa2 += av * b[bBase + 2u];
+                    if (avail > 3u) pa3 += av * b[bBase + 3u];
                 }
             }
+            float a0 = sub_group_reduce_add(pa0);
+            float a1 = sub_group_reduce_add(pa1);
+            float a2 = sub_group_reduce_add(pa2);
+            float a3 = sub_group_reduce_add(pa3);
 
-            c[col] = a0 + residual[col];
-            if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
-            if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
-            if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+            if (sgLocal == 0u)
+            {
+                c[col] = a0 + residual[col];
+                if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+                if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+                if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+            }
         }
 
         __kernel void gemm_gemv_add_subgroup_bf16(
@@ -5480,43 +5522,51 @@ internal static class SilkKernels
             const uint aCols,
             const uint bCols)
         {
-            if (get_sub_group_size() == 0u) return;
-            uint col = get_global_id(0) * BLOCK;
+            uint col = get_group_id(0) * 4u;
             if (col >= bCols) return;
 
             uint avail = bCols - col;
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
 
-            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
             if (avail >= 4u)
             {
-                for (uint k = 0; k < aCols; ++k)
+                for (uint k = sgLocal; k < aCols; k += sgSize)
                 {
                     float av = a[k];
                     uint bBase = k * bCols + col;
                     ushort4 bv4 = vload4(0, b + bBase);
-                    a0 += av * BF16_TO_F32(bv4.s0);
-                    a1 += av * BF16_TO_F32(bv4.s1);
-                    a2 += av * BF16_TO_F32(bv4.s2);
-                    a3 += av * BF16_TO_F32(bv4.s3);
+                    pa0 += av * BF16_TO_F32(bv4.s0);
+                    pa1 += av * BF16_TO_F32(bv4.s1);
+                    pa2 += av * BF16_TO_F32(bv4.s2);
+                    pa3 += av * BF16_TO_F32(bv4.s3);
                 }
             }
             else
             {
-                for (uint k = 0; k < aCols; ++k)
+                for (uint k = sgLocal; k < aCols; k += sgSize)
                 {
                     float av = a[k];
                     uint bBase = k * bCols + col;
-                    a0 += av * BF16_TO_F32(b[bBase]);
-                    if (avail > 1u) a1 += av * BF16_TO_F32(b[bBase + 1u]);
-                    if (avail > 2u) a2 += av * BF16_TO_F32(b[bBase + 2u]);
-                    if (avail > 3u) a3 += av * BF16_TO_F32(b[bBase + 3u]);
+                    pa0 += av * BF16_TO_F32(b[bBase]);
+                    if (avail > 1u) pa1 += av * BF16_TO_F32(b[bBase + 1u]);
+                    if (avail > 2u) pa2 += av * BF16_TO_F32(b[bBase + 2u]);
+                    if (avail > 3u) pa3 += av * BF16_TO_F32(b[bBase + 3u]);
                 }
             }
+            float a0 = sub_group_reduce_add(pa0);
+            float a1 = sub_group_reduce_add(pa1);
+            float a2 = sub_group_reduce_add(pa2);
+            float a3 = sub_group_reduce_add(pa3);
 
-            c[col] = a0 + residual[col];
-            if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
-            if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
-            if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+            if (sgLocal == 0u)
+            {
+                c[col] = a0 + residual[col];
+                if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+                if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+                if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+            }
         }
         #endif
 

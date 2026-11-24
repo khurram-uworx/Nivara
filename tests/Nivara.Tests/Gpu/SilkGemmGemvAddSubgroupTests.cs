@@ -4,9 +4,12 @@ using NUnit.Framework;
 namespace Nivara.Tests.Gpu;
 
 /// <summary>
-/// Capability-gated parity for the subgroup-gated decode GEMV (gemm_gemv_add) variant (#1472).
-/// The gemm_gemv_add kernel has no cross-lane reduction, so the subgroup variant is
-/// functionally identical and must reproduce the base kernel bit for bit.
+/// Capability-gated parity for the K-split subgroup decode GEMV (gemm_gemv_add) variant (#1486).
+/// The K-split variant distributes the contraction over k across subgroup lanes and reduces
+/// partial dot products via sub_group_reduce_add, which changes accumulation order (strided
+/// partial sums), so results differ from the base kernel by a few ULP - a tolerance is used
+/// with that justification. On devices without subgroup support the subgroup launcher falls
+/// back to the base kernel and that path is bit-identical (see SilkSubgroupForceFallbackTests).
 /// </summary>
 [Category("Gpu")]
 public sealed class SilkGemmGemvAddSubgroupTests
@@ -14,7 +17,7 @@ public sealed class SilkGemmGemvAddSubgroupTests
     const int ACols = 40;
 
     [Test]
-    public void GemmGemvAddSubgroup_MatchesBaseKernel_BitForBit()
+    public void GemmGemvAddSubgroup_MatchesBaseKernel_WithinTolerance()
     {
         using var silk = Device();
         uint seed = 0x14720001u;
@@ -43,9 +46,10 @@ public sealed class SilkGemmGemvAddSubgroupTests
 
             for (int i = 0; i < bCols; i++)
             {
-                int want = BitConverter.SingleToInt32Bits(baseOut[i]);
-                int got = BitConverter.SingleToInt32Bits(subOut[i]);
-                Assert.That(got, Is.EqualTo(want), $"bCols={bCols} element {i}: 0x{want:X8} vs 0x{got:X8}");
+                float diff = MathF.Abs(baseOut[i] - subOut[i]);
+                float tol = 1e-4f * MathF.Max(1f, MathF.Abs(baseOut[i]));
+                if (diff > tol)
+                    Assert.Fail($"bCols={bCols} element {i} differs by {diff} (tol {tol}): {baseOut[i]:R} vs {subOut[i]:R}");
             }
 
             silk.Release(sa); silk.Release(sb); silk.Release(sres);

@@ -753,7 +753,7 @@ internal static class SilkLauncher
         runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroup, 3, residual);
         runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroup, 4, (uint)aCols);
         runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroup, 5, (uint)bCols);
-        int t = SilkKernels.GemvGlobalCols(bCols);
+        int t = SilkKernels.GemvKSplitGlobalCols(bCols);
         runtime.Run(
             SilkKernels.GemmGemvAddSubgroup,
             [(nuint)t],
@@ -892,9 +892,9 @@ internal static class SilkLauncher
         runtime.SetFloat32(SilkKernels.RmsNormGemvSubgroup, 16, eps);
 
         int threads =
-            SilkKernels.GemvGlobalCols(s0.Cols)
-            + SilkKernels.GemvGlobalCols(s1.Cols)
-            + SilkKernels.GemvGlobalCols(s2.Cols);
+            SilkKernels.GemvKSplitGlobalCols(s0.Cols)
+            + SilkKernels.GemvKSplitGlobalCols(s1.Cols)
+            + SilkKernels.GemvKSplitGlobalCols(s2.Cols);
         runtime.Run(
             SilkKernels.RmsNormGemvSubgroup,
             [(nuint)threads],
@@ -1064,7 +1064,7 @@ internal static class SilkLauncher
         runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupBf16, 3, residual);
         runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupBf16, 4, (uint)aCols);
         runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupBf16, 5, (uint)bCols);
-        int t = SilkKernels.GemvGlobalCols(bCols);
+        int t = SilkKernels.GemvKSplitGlobalCols(bCols);
         runtime.Run(
             SilkKernels.GemmGemvAddSubgroupBf16,
             [(nuint)t],
@@ -1193,9 +1193,9 @@ internal static class SilkLauncher
         runtime.SetFloat32(SilkKernels.RmsNormGemvSubgroupBf16, 16, eps);
 
         int threads =
-            SilkKernels.GemvGlobalCols(s0.Cols)
-            + SilkKernels.GemvGlobalCols(s1.Cols)
-            + SilkKernels.GemvGlobalCols(s2.Cols);
+            SilkKernels.GemvKSplitGlobalCols(s0.Cols)
+            + SilkKernels.GemvKSplitGlobalCols(s1.Cols)
+            + SilkKernels.GemvKSplitGlobalCols(s2.Cols);
         runtime.Run(
             SilkKernels.RmsNormGemvSubgroupBf16,
             [(nuint)threads],
