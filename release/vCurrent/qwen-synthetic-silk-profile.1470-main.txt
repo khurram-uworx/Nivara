@@ -1,0 +1,24 @@
+=== Nivara HuggingFace Inference ===
+
+=== Qwen2.5-0.5B-Instruct (synthetic weights): decode profile -- Silk ===
+Precision: BFloat16 storage / F32 compute
+Device: Intel(R) Iris(R) Xe Graphics  Vocab: 151936
+Model build: 4091 ms
+
+Steady-state warmup (no per-phase sync): 5.24 tok/s, 190.94 ms/token decode, 6860 ms total (32 tokens, prefill 750 ms, decode 6110 ms)
+Profiled run (per-phase Finish sync, attribution only): 4.77 tok/s, 209.47 ms/token decode, 7136 ms total (32 tokens, prefill 433 ms, decode 6703 ms)
+
+Decode profile (cached decode tokens only, per-phase Finish sync):
+  Throughput: 4.77 tok/s (209.47 ms/token, profiled)
+  Tokens: 32
+  Kernel dispatches: 5472 (171.00/token)
+  Queue copies: 1536
+  Total profiled: 6703.13 ms
+  Embed                    6.41 ms     0.200 ms/token
+  QKV norm+proj          602.42 ms    18.825 ms/token
+  Rotary                 152.18 ms     4.755 ms/token
+  Cache copy             111.98 ms     3.499 ms/token
+  Attention+O proj       392.91 ms    12.278 ms/token
+  MLP                   3689.35 ms   115.292 ms/token
+  Final norm+LM head    1735.61 ms    54.238 ms/token
+  Argmax                  12.29 ms     0.384 ms/token
