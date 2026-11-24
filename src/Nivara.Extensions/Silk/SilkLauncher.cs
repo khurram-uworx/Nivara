@@ -1202,6 +1202,101 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.GemvGroupSize]);
     }
 
+    /// <summary>Fused single-row RMSNorm + gate/up GEMV + SwiGLU for cached decode (#1470, Option B).
+    /// Writes only intermediate: outInter[col] = silu(dot(normed,Wgate[:,col])) * dot(normed,Wup[:,col]).</summary>
+    public static void RmsNormGemvSwiGlu(
+        SilkRuntime runtime, nint x, nint gamma, nint wGate, nint wUp, nint outInter,
+        int aCols, int interCols, float eps)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (interCols <= 0) throw new ArgumentOutOfRangeException(nameof(interCols));
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGlu, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGlu, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGlu, 2, wGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGlu, 3, wUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGlu, 4, outInter);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGlu, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGlu, 6, (uint)interCols);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSwiGlu, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormGemvSwiGlu,
+            [(nuint)SilkKernels.GemvGlobalCols(interCols)],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    /// <summary>Capability-gated subgroup variant of <see cref="RmsNormGemvSwiGlu"/> (#1470).</summary>
+    public static void RmsNormGemvSwiGluSubgroup(
+        SilkRuntime runtime, nint x, nint gamma, nint wGate, nint wUp, nint outInter,
+        int aCols, int interCols, float eps)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (interCols <= 0) throw new ArgumentOutOfRangeException(nameof(interCols));
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.RmsNormGemvSwiGluSubgroup))
+        {
+            RmsNormGemvSwiGlu(runtime, x, gamma, wGate, wUp, outInter, aCols, interCols, eps);
+            return;
+        }
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroup, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroup, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroup, 2, wGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroup, 3, wUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroup, 4, outInter);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroup, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroup, 6, (uint)interCols);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSwiGluSubgroup, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormGemvSwiGluSubgroup,
+            [(nuint)SilkKernels.GemvKSplitGlobalCols(interCols)],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    /// <summary>BF16 variant of <see cref="RmsNormGemvSwiGlu"/> (#1470, Option B).</summary>
+    public static void RmsNormGemvSwiGluBf16(
+        SilkRuntime runtime, nint x, nint gamma, nint wGate, nint wUp, nint outInter,
+        int aCols, int interCols, float eps)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (interCols <= 0) throw new ArgumentOutOfRangeException(nameof(interCols));
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluBf16, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluBf16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluBf16, 2, wGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluBf16, 3, wUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluBf16, 4, outInter);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluBf16, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluBf16, 6, (uint)interCols);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSwiGluBf16, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormGemvSwiGluBf16,
+            [(nuint)SilkKernels.GemvGlobalCols(interCols)],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    /// <summary>Capability-gated subgroup BF16 variant of <see cref="RmsNormGemvSwiGluBf16"/> (#1470).</summary>
+    public static void RmsNormGemvSwiGluSubgroupBf16(
+        SilkRuntime runtime, nint x, nint gamma, nint wGate, nint wUp, nint outInter,
+        int aCols, int interCols, float eps)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (interCols <= 0) throw new ArgumentOutOfRangeException(nameof(interCols));
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.RmsNormGemvSwiGluSubgroupBf16))
+        {
+            RmsNormGemvSwiGluBf16(runtime, x, gamma, wGate, wUp, outInter, aCols, interCols, eps);
+            return;
+        }
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 2, wGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 3, wUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 4, outInter);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 6, (uint)interCols);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSwiGluSubgroupBf16, 7, eps);
+        runtime.Run(
+            SilkKernels.RmsNormGemvSwiGluSubgroupBf16,
+            [(nuint)SilkKernels.GemvKSplitGlobalCols(interCols)],
+            [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
     /// <summary><c>C[M,N] = A[M,K]·Bᵀ</c> where B is stored row-major <c>[N,K]</c> — the
     /// transposed-B backward GEMM (<c>dH = dZ·W2ᵀ</c>, <c>dPooled = dH·W1ᵀ</c>).</summary>
     public static void GemmNt(SilkRuntime runtime, nint a, nint b, nint c, int aRows, int aCols, int bCols)

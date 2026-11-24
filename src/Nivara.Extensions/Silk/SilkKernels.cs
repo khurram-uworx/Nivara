@@ -133,6 +133,9 @@ internal static class SilkKernels
     public const string RmsNormLmHeadF16 = "rms_norm_lm_head_f16";
     public const string RmsNormGemv = "rms_norm_gemv";
     public const string RmsNormGemvBf16 = "rms_norm_gemv_bf16";
+    // Fused decode MLP dispatch 1 (Option B, #1470): RMSNorm + gate+up + SwiGLU -> intermediate.
+    public const string RmsNormGemvSwiGlu = "rms_norm_gemv_swiglu";
+    public const string RmsNormGemvSwiGluBf16 = "rms_norm_gemv_swiglu_bf16";
     public const string Silu = "silu";
     public const string SwiGlu = "swiglu";
     public const string SwiGluBackward = "swiglu_backward";
@@ -223,7 +226,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, RotaryQk, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, RotaryQk, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, RmsNormGemvSwiGlu, RmsNormGemvSwiGluBf16, GemmBf16,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
@@ -244,12 +247,16 @@ internal static class SilkKernels
     [
         RmsNormGemvSubgroup,
         RmsNormGemvSubgroupBf16,
+        RmsNormGemvSwiGluSubgroup,
+        RmsNormGemvSwiGluSubgroupBf16,
         GemmGemvAddSubgroup,
         GemmGemvAddSubgroupBf16,
     ];
 
     public const string RmsNormGemvSubgroup = "rms_norm_gemv_subgroup";
     public const string RmsNormGemvSubgroupBf16 = "rms_norm_gemv_subgroup_bf16";
+    public const string RmsNormGemvSwiGluSubgroup = "rms_norm_gemv_swiglu_subgroup";
+    public const string RmsNormGemvSwiGluSubgroupBf16 = "rms_norm_gemv_swiglu_subgroup_bf16";
     public const string GemmGemvAddSubgroup = "gemm_gemv_add_subgroup";
     public const string GemmGemvAddSubgroupBf16 = "gemm_gemv_add_subgroup_bf16";
 
@@ -3726,6 +3733,118 @@ internal static class SilkKernels
             }
         }
 
+        /* Fused single-row RMSNorm + gate/up GEMV + SwiGLU for cached decode (#1470, Option B).
+           Computes normed = RMSNorm(x,gamma), then for each intermediate column computes
+           gate = dot(normed, Wgate[:,col]), up = dot(normed, Wup[:,col]), out[col] = silu(gate)*up.
+           Single output (intermediate), no bias, no multi-slot. Same GEMVCOLS/GEMVLANES/BLOCK
+           tiling and staged-norm path as rms_norm_gemv. */
+        __kernel void rms_norm_gemv_swiglu(
+            __global const float* x,
+            __global const float* gamma,
+            __global const float* wGate,
+            __global const float* wUp,
+            __global float* outInter,
+            const uint aCols,
+            const uint interCols,
+            const float eps)
+        {
+            uint colBase = get_group_id(0) * GEMVCOLS;
+            uint col = colBase + get_local_id(0) * BLOCK;
+            uint lid = get_local_id(0);
+
+            float ssq = 0.0f;
+            for (uint k = 0; k < aCols; ++k)
+            {
+                float v = x[k];
+                ssq += v * v;
+            }
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= interCols)
+                    return;
+
+                uint avail = interCols - col;
+                float g0 = 0.0f, g1 = 0.0f, g2 = 0.0f, g3 = 0.0f;
+                float u0 = 0.0f, u1 = 0.0f, u2 = 0.0f, u3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        float4 gv = vload4(0, wGate + bBase);
+                        float4 uv = vload4(0, wUp + bBase);
+                        g0 += av * gv.s0; g1 += av * gv.s1; g2 += av * gv.s2; g3 += av * gv.s3;
+                        u0 += av * uv.s0; u1 += av * uv.s1; u2 += av * uv.s2; u3 += av * uv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        g0 += av * wGate[bBase]; u0 += av * wUp[bBase];
+                        if (avail > 1u) { g1 += av * wGate[bBase + 1u]; u1 += av * wUp[bBase + 1u]; }
+                        if (avail > 2u) { g2 += av * wGate[bBase + 2u]; u2 += av * wUp[bBase + 2u]; }
+                        if (avail > 3u) { g3 += av * wGate[bBase + 3u]; u3 += av * wUp[bBase + 3u]; }
+                    }
+                }
+
+                outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+                return;
+            }
+            else
+            {
+                if (col >= interCols)
+                    return;
+
+                uint avail = interCols - col;
+                float g0 = 0.0f, g1 = 0.0f, g2 = 0.0f, g3 = 0.0f;
+                float u0 = 0.0f, u1 = 0.0f, u2 = 0.0f, u3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        float4 gv = vload4(0, wGate + bBase);
+                        float4 uv = vload4(0, wUp + bBase);
+                        g0 += av * gv.s0; g1 += av * gv.s1; g2 += av * gv.s2; g3 += av * gv.s3;
+                        u0 += av * uv.s0; u1 += av * uv.s1; u2 += av * uv.s2; u3 += av * uv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        g0 += av * wGate[bBase]; u0 += av * wUp[bBase];
+                        if (avail > 1u) { g1 += av * wGate[bBase + 1u]; u1 += av * wUp[bBase + 1u]; }
+                        if (avail > 2u) { g2 += av * wGate[bBase + 2u]; u2 += av * wUp[bBase + 2u]; }
+                        if (avail > 3u) { g3 += av * wGate[bBase + 3u]; u3 += av * wUp[bBase + 3u]; }
+                    }
+                }
+
+                outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+            }
+        }
+
         /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
            a is [aCols], b is [aCols * bCols] row-major (B[k, outCol]), result c[outCol] =
            sum_k a[k]*b[k*bCols+outCol] + residual[outCol]. One work item per BLOCK output
@@ -4462,6 +4581,114 @@ internal static class SilkKernels
                         }
                     }
                 }
+
+        /* Fused single-row RMSNorm + gate/up GEMV + SwiGLU for cached decode (#1470, Option B), BF16 weights. */
+        __kernel void rms_norm_gemv_swiglu_bf16(
+            __global const float* x,
+            __global const float* gamma,
+            __global const ushort* wGate,
+            __global const ushort* wUp,
+            __global float* outInter,
+            const uint aCols,
+            const uint interCols,
+            const float eps)
+        {
+            uint colBase = get_group_id(0) * GEMVCOLS;
+            uint col = colBase + get_local_id(0) * BLOCK;
+            uint lid = get_local_id(0);
+
+            float ssq = 0.0f;
+            for (uint k = 0; k < aCols; ++k)
+            {
+                float v = x[k];
+                ssq += v * v;
+            }
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= interCols)
+                    return;
+
+                uint avail = interCols - col;
+                float g0 = 0.0f, g1 = 0.0f, g2 = 0.0f, g3 = 0.0f;
+                float u0 = 0.0f, u1 = 0.0f, u2 = 0.0f, u3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        ushort4 gv4 = vload4(0, wGate + bBase);
+                        ushort4 uv4 = vload4(0, wUp + bBase);
+                        g0 += av * BF16_TO_F32(gv4.s0); g1 += av * BF16_TO_F32(gv4.s1); g2 += av * BF16_TO_F32(gv4.s2); g3 += av * BF16_TO_F32(gv4.s3);
+                        u0 += av * BF16_TO_F32(uv4.s0); u1 += av * BF16_TO_F32(uv4.s1); u2 += av * BF16_TO_F32(uv4.s2); u3 += av * BF16_TO_F32(uv4.s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        g0 += av * BF16_TO_F32(wGate[bBase]); u0 += av * BF16_TO_F32(wUp[bBase]);
+                        if (avail > 1u) { g1 += av * BF16_TO_F32(wGate[bBase + 1u]); u1 += av * BF16_TO_F32(wUp[bBase + 1u]); }
+                        if (avail > 2u) { g2 += av * BF16_TO_F32(wGate[bBase + 2u]); u2 += av * BF16_TO_F32(wUp[bBase + 2u]); }
+                        if (avail > 3u) { g3 += av * BF16_TO_F32(wGate[bBase + 3u]); u3 += av * BF16_TO_F32(wUp[bBase + 3u]); }
+                    }
+                }
+
+                outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+                return;
+            }
+            else
+            {
+                if (col >= interCols)
+                    return;
+
+                uint avail = interCols - col;
+                float g0 = 0.0f, g1 = 0.0f, g2 = 0.0f, g3 = 0.0f;
+                float u0 = 0.0f, u1 = 0.0f, u2 = 0.0f, u3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        ushort4 gv4 = vload4(0, wGate + bBase);
+                        ushort4 uv4 = vload4(0, wUp + bBase);
+                        g0 += av * BF16_TO_F32(gv4.s0); g1 += av * BF16_TO_F32(gv4.s1); g2 += av * BF16_TO_F32(gv4.s2); g3 += av * BF16_TO_F32(gv4.s3);
+                        u0 += av * BF16_TO_F32(uv4.s0); u1 += av * BF16_TO_F32(uv4.s1); u2 += av * BF16_TO_F32(uv4.s2); u3 += av * BF16_TO_F32(uv4.s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        g0 += av * BF16_TO_F32(wGate[bBase]); u0 += av * BF16_TO_F32(wUp[bBase]);
+                        if (avail > 1u) { g1 += av * BF16_TO_F32(wGate[bBase + 1u]); u1 += av * BF16_TO_F32(wUp[bBase + 1u]); }
+                        if (avail > 2u) { g2 += av * BF16_TO_F32(wGate[bBase + 2u]); u2 += av * BF16_TO_F32(wUp[bBase + 2u]); }
+                        if (avail > 3u) { g3 += av * BF16_TO_F32(wGate[bBase + 3u]); u3 += av * BF16_TO_F32(wUp[bBase + 3u]); }
+                    }
+                }
+
+                outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+            }
+        }
 
                 /* Flat single-row GEMV + residual add for cached-decode O-projection (#672, Stage A1).
                    a is [aCols], b is [aCols * bCols] row-major (B[k, outCol]), result c[outCol] =
@@ -5280,6 +5507,122 @@ internal static class SilkKernels
             }
         }
 
+        __kernel void rms_norm_gemv_swiglu_subgroup(
+            __global const float* x,
+            __global const float* gamma,
+            __global const float* wGate,
+            __global const float* wUp,
+            __global float* outInter,
+            const uint aCols,
+            const uint interCols,
+            const float eps)
+        {
+            uint col = get_group_id(0) * 4u;
+            uint lid = get_local_id(0);
+
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
+            float partial = 0.0f;
+            for (uint k = sgLocal; k < aCols; k += sgSize)
+            {
+                float v = x[k];
+                partial += v * v;
+            }
+            float ssq = sub_group_reduce_add(partial);
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= interCols)
+                    return;
+
+                uint avail = interCols - col;
+                float pg0 = 0.0f, pg1 = 0.0f, pg2 = 0.0f, pg3 = 0.0f;
+                float pu0 = 0.0f, pu1 = 0.0f, pu2 = 0.0f, pu3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        float4 gv = vload4(0, wGate + bBase);
+                        float4 uv = vload4(0, wUp + bBase);
+                        pg0 += av * gv.s0; pg1 += av * gv.s1; pg2 += av * gv.s2; pg3 += av * gv.s3;
+                        pu0 += av * uv.s0; pu1 += av * uv.s1; pu2 += av * uv.s2; pu3 += av * uv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        pg0 += av * wGate[bBase]; pu0 += av * wUp[bBase];
+                        if (avail > 1u) { pg1 += av * wGate[bBase + 1u]; pu1 += av * wUp[bBase + 1u]; }
+                        if (avail > 2u) { pg2 += av * wGate[bBase + 2u]; pu2 += av * wUp[bBase + 2u]; }
+                        if (avail > 3u) { pg3 += av * wGate[bBase + 3u]; pu3 += av * wUp[bBase + 3u]; }
+                    }
+                }
+                float g0 = sub_group_reduce_add(pg0); float g1 = sub_group_reduce_add(pg1); float g2 = sub_group_reduce_add(pg2); float g3 = sub_group_reduce_add(pg3);
+                float u0 = sub_group_reduce_add(pu0); float u1 = sub_group_reduce_add(pu1); float u2 = sub_group_reduce_add(pu2); float u3 = sub_group_reduce_add(pu3);
+                if (sgLocal == 0u)
+                {
+                    outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                    if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                    if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                    if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+                }
+                return;
+            }
+            else
+            {
+                if (col >= interCols)
+                    return;
+                uint avail = interCols - col;
+                float pg0 = 0.0f, pg1 = 0.0f, pg2 = 0.0f, pg3 = 0.0f;
+                float pu0 = 0.0f, pu1 = 0.0f, pu2 = 0.0f, pu3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        float4 gv = vload4(0, wGate + bBase);
+                        float4 uv = vload4(0, wUp + bBase);
+                        pg0 += av * gv.s0; pg1 += av * gv.s1; pg2 += av * gv.s2; pg3 += av * gv.s3;
+                        pu0 += av * uv.s0; pu1 += av * uv.s1; pu2 += av * uv.s2; pu3 += av * uv.s3;
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        pg0 += av * wGate[bBase]; pu0 += av * wUp[bBase];
+                        if (avail > 1u) { pg1 += av * wGate[bBase + 1u]; pu1 += av * wUp[bBase + 1u]; }
+                        if (avail > 2u) { pg2 += av * wGate[bBase + 2u]; pu2 += av * wUp[bBase + 2u]; }
+                        if (avail > 3u) { pg3 += av * wGate[bBase + 3u]; pu3 += av * wUp[bBase + 3u]; }
+                    }
+                }
+                float g0 = sub_group_reduce_add(pg0); float g1 = sub_group_reduce_add(pg1); float g2 = sub_group_reduce_add(pg2); float g3 = sub_group_reduce_add(pg3);
+                float u0 = sub_group_reduce_add(pu0); float u1 = sub_group_reduce_add(pu1); float u2 = sub_group_reduce_add(pu2); float u3 = sub_group_reduce_add(pu3);
+                if (sgLocal == 0u)
+                {
+                    outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                    if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                    if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                    if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+                }
+            }
+        }
+
         __kernel void rms_norm_gemv_subgroup_bf16(
             __global const float* x,
             __global const float* gamma,
@@ -5450,6 +5793,123 @@ internal static class SilkKernels
                         if (avail > 2u) c[col + 2u] = a2;
                         if (avail > 3u) c[col + 3u] = a3;
                     }
+                }
+            }
+        }
+
+        /* Fused single-row RMSNorm + gate/up GEMV + SwiGLU for cached decode (#1470, Option B), BF16 subgroup. */
+        __kernel void rms_norm_gemv_swiglu_subgroup_bf16(
+            __global const float* x,
+            __global const float* gamma,
+            __global const ushort* wGate,
+            __global const ushort* wUp,
+            __global float* outInter,
+            const uint aCols,
+            const uint interCols,
+            const float eps)
+        {
+            uint col = get_group_id(0) * 4u;
+            uint lid = get_local_id(0);
+
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
+            float partial = 0.0f;
+            for (uint k = sgLocal; k < aCols; k += sgSize)
+            {
+                float v = x[k];
+                partial += v * v;
+            }
+            float ssq = sub_group_reduce_add(partial);
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= interCols)
+                    return;
+
+                uint avail = interCols - col;
+                float pg0 = 0.0f, pg1 = 0.0f, pg2 = 0.0f, pg3 = 0.0f;
+                float pu0 = 0.0f, pu1 = 0.0f, pu2 = 0.0f, pu3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        ushort4 gv4 = vload4(0, wGate + bBase);
+                        ushort4 uv4 = vload4(0, wUp + bBase);
+                        pg0 += av * BF16_TO_F32(gv4.s0); pg1 += av * BF16_TO_F32(gv4.s1); pg2 += av * BF16_TO_F32(gv4.s2); pg3 += av * BF16_TO_F32(gv4.s3);
+                        pu0 += av * BF16_TO_F32(uv4.s0); pu1 += av * BF16_TO_F32(uv4.s1); pu2 += av * BF16_TO_F32(uv4.s2); pu3 += av * BF16_TO_F32(uv4.s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        pg0 += av * BF16_TO_F32(wGate[bBase]); pu0 += av * BF16_TO_F32(wUp[bBase]);
+                        if (avail > 1u) { pg1 += av * BF16_TO_F32(wGate[bBase + 1u]); pu1 += av * BF16_TO_F32(wUp[bBase + 1u]); }
+                        if (avail > 2u) { pg2 += av * BF16_TO_F32(wGate[bBase + 2u]); pu2 += av * BF16_TO_F32(wUp[bBase + 2u]); }
+                        if (avail > 3u) { pg3 += av * BF16_TO_F32(wGate[bBase + 3u]); pu3 += av * BF16_TO_F32(wUp[bBase + 3u]); }
+                    }
+                }
+                float g0 = sub_group_reduce_add(pg0); float g1 = sub_group_reduce_add(pg1); float g2 = sub_group_reduce_add(pg2); float g3 = sub_group_reduce_add(pg3);
+                float u0 = sub_group_reduce_add(pu0); float u1 = sub_group_reduce_add(pu1); float u2 = sub_group_reduce_add(pu2); float u3 = sub_group_reduce_add(pu3);
+                if (sgLocal == 0u)
+                {
+                    outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                    if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                    if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                    if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
+                }
+                return;
+            }
+            else
+            {
+                if (col >= interCols)
+                    return;
+                uint avail = interCols - col;
+                float pg0 = 0.0f, pg1 = 0.0f, pg2 = 0.0f, pg3 = 0.0f;
+                float pu0 = 0.0f, pu1 = 0.0f, pu2 = 0.0f, pu3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        ushort4 gv4 = vload4(0, wGate + bBase);
+                        ushort4 uv4 = vload4(0, wUp + bBase);
+                        pg0 += av * BF16_TO_F32(gv4.s0); pg1 += av * BF16_TO_F32(gv4.s1); pg2 += av * BF16_TO_F32(gv4.s2); pg3 += av * BF16_TO_F32(gv4.s3);
+                        pu0 += av * BF16_TO_F32(uv4.s0); pu1 += av * BF16_TO_F32(uv4.s1); pu2 += av * BF16_TO_F32(uv4.s2); pu3 += av * BF16_TO_F32(uv4.s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        pg0 += av * BF16_TO_F32(wGate[bBase]); pu0 += av * BF16_TO_F32(wUp[bBase]);
+                        if (avail > 1u) { pg1 += av * BF16_TO_F32(wGate[bBase + 1u]); pu1 += av * BF16_TO_F32(wUp[bBase + 1u]); }
+                        if (avail > 2u) { pg2 += av * BF16_TO_F32(wGate[bBase + 2u]); pu2 += av * BF16_TO_F32(wUp[bBase + 2u]); }
+                        if (avail > 3u) { pg3 += av * BF16_TO_F32(wGate[bBase + 3u]); pu3 += av * BF16_TO_F32(wUp[bBase + 3u]); }
+                    }
+                }
+                float g0 = sub_group_reduce_add(pg0); float g1 = sub_group_reduce_add(pg1); float g2 = sub_group_reduce_add(pg2); float g3 = sub_group_reduce_add(pg3);
+                float u0 = sub_group_reduce_add(pu0); float u1 = sub_group_reduce_add(pu1); float u2 = sub_group_reduce_add(pu2); float u3 = sub_group_reduce_add(pu3);
+                if (sgLocal == 0u)
+                {
+                    outInter[col] = (g0 / (1.0f + exp(-g0))) * u0;
+                    if (avail > 1u) outInter[col + 1u] = (g1 / (1.0f + exp(-g1))) * u1;
+                    if (avail > 2u) outInter[col + 2u] = (g2 / (1.0f + exp(-g2))) * u2;
+                    if (avail > 3u) outInter[col + 3u] = (g3 / (1.0f + exp(-g3))) * u3;
                 }
             }
         }
