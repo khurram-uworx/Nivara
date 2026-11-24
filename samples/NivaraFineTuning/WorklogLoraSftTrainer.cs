@@ -1,14 +1,12 @@
-using System.Diagnostics;
-using System.Numerics;
-using System.Text.Json;
 using Nivara.AI;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
-using Nivara.Silk;
 using Nivara.AutoDiff.Optimizer;
-using Nivara.AutoDiff.Serialization;
 using Nivara.Samples;
+using Nivara.Silk;
+using System.Diagnostics;
+using System.Numerics;
 
 namespace NivaraFineTuning;
 

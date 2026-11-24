@@ -1,10 +1,10 @@
+using Nivara.AI;
+using Nivara.Samples;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Nivara.AI;
-using Nivara.Samples;
 
 namespace NivaraFineTuning;
 

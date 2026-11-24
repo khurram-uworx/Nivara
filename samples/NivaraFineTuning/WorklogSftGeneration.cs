@@ -1,7 +1,7 @@
-using System.Numerics;
 using Microsoft.Extensions.AI;
 using Nivara.AI;
 using Nivara.Samples;
+using System.Numerics;
 
 namespace NivaraFineTuning;
 

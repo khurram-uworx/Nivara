@@ -4,7 +4,6 @@ using Nivara.Samples;
 using Nivara.Silk;
 using NivaraChat.Helpers;
 using NUnit.Framework;
-using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace Nivara.Tests.NivaraChat;

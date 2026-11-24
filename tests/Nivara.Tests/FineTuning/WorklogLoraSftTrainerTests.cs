@@ -1,9 +1,6 @@
 using Nivara.Samples;
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
 using NivaraFineTuning;
 using NUnit.Framework;
-using System.Numerics;
 
 namespace Nivara.Tests.FineTuning;
 

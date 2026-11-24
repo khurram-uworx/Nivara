@@ -1,6 +1,5 @@
 using Nivara.AutoDiff.Nn;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 
 namespace Nivara.Silk;
 

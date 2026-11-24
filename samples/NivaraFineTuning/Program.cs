@@ -1,8 +1,6 @@
 using Microsoft.ML.Tokenizers;
 using Nivara;
 using Nivara.AI;
-using System.Globalization;
-using System.Text.Json;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
@@ -12,7 +10,9 @@ using Nivara.AutoDiff.Utilities;
 using Nivara.Metrics;
 using Nivara.Samples;
 using Nivara.Silk;
+using System.Globalization;
 using System.Numerics;
+using System.Text.Json;
 
 namespace NivaraFineTuning;
 
