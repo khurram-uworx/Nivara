@@ -6040,21 +6040,21 @@ internal static class SilkKernels
             }
         }
         /* INT8 block-32 quantized decode kernels (issue #1469). Symmetric, no zero point, one F32
-           scale per 32 input rows per output column. Weight storage is signed char (int8); dequant
+           scale per 32 input rows per output column. Weight storage is char (int8); dequant
            happens in registers: (float)weight * scale. F32 accumulators. */
 
         __kernel void rms_norm_gemv_int8(
             __global const float* x,
             __global const float* gamma,
-            __global const signed char* w0,
+            __global const char* w0,
             __global const float* scale0,
             __global const float* bias0,
             __global float* out0,
-            __global const signed char* w1,
+            __global const char* w1,
             __global const float* scale1,
             __global const float* bias1,
             __global float* out1,
-            __global const signed char* w2,
+            __global const char* w2,
             __global const float* scale2,
             __global const float* bias2,
             __global float* out2,
@@ -6070,7 +6070,7 @@ internal static class SilkKernels
             uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
             uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
 
-            __global const signed char* b;
+            __global const char* b;
             __global const float* sc;
             __global const float* bias;
             __global float* c;
@@ -6120,7 +6120,7 @@ internal static class SilkKernels
                     {
                         float av = normed[k];
                         uint bBase = k * bCols + col;
-                        signed char4 cv4 = vload4(0, b + bBase);
+                        char4 cv4 = vload4(0, b + bBase);
                         uint bi = k >> 5;
                         float s0v = sc[col * numBlocks + bi];
                         float s1v = sc[(col + 1u) * numBlocks + bi];
@@ -6176,7 +6176,7 @@ internal static class SilkKernels
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * bCols + col;
-                        signed char4 cv4 = vload4(0, b + bBase);
+                        char4 cv4 = vload4(0, b + bBase);
                         uint bi = k >> 5;
                         float s0v = sc[col * numBlocks + bi];
                         float s1v = sc[(col + 1u) * numBlocks + bi];
@@ -6222,7 +6222,7 @@ internal static class SilkKernels
         /* INT8 gemm_gemv_add: a (F32) x b (INT8, dequanted) + residual. */
         __kernel void gemm_gemv_add_int8(
             __global const float* a,
-            __global const signed char* b,
+            __global const char* b,
             __global const float* bscale,
             __global float* c,
             __global const float* residual,
@@ -6241,7 +6241,7 @@ internal static class SilkKernels
                 {
                     float av = a[k];
                     uint bBase = k * bCols + col;
-                    signed char4 cv4 = vload4(0, b + bBase);
+                    char4 cv4 = vload4(0, b + bBase);
                     uint bi = k >> 5;
                     float s0 = bscale[col * numBlocks + bi];
                     float s1 = bscale[(col + 1u) * numBlocks + bi];
@@ -6276,7 +6276,7 @@ internal static class SilkKernels
         /* INT8 subgroup gemm_gemv_add */
         __kernel void gemm_gemv_add_subgroup_int8(
             __global const float* a,
-            __global const signed char* b,
+            __global const char* b,
             __global const float* bscale,
             __global float* c,
             __global const float* residual,
@@ -6299,7 +6299,7 @@ internal static class SilkKernels
                 {
                     float av = a[k];
                     uint bBase = k * bCols + sgCol;
-                    signed char4 cv4 = vload4(0, b + bBase);
+                    char4 cv4 = vload4(0, b + bBase);
                     uint bi = k >> 5;
                     float s0 = bscale[sgCol * numBlocks + bi];
                     float s1 = bscale[(sgCol + 1u) * numBlocks + bi];
@@ -6342,9 +6342,9 @@ internal static class SilkKernels
         __kernel void rms_norm_gemv_swiglu_int8(
             __global const float* x,
             __global const float* gamma,
-            __global const signed char* wGate,
+            __global const char* wGate,
             __global const float* scaleGate,
-            __global const signed char* wUp,
+            __global const char* wUp,
             __global const float* scaleUp,
             __global float* outInter,
             const uint aCols,
@@ -6380,8 +6380,8 @@ internal static class SilkKernels
                     {
                         float av = normed[k];
                         uint bBase = k * interCols + col;
-                        signed char4 gv = vload4(0, wGate + bBase);
-                        signed char4 uv = vload4(0, wUp + bBase);
+                        char4 gv = vload4(0, wGate + bBase);
+                        char4 uv = vload4(0, wUp + bBase);
                         uint bi = k >> 5;
                         float sg0 = scaleGate[col * numBlocks + bi];
                         float sg1 = scaleGate[(col+1u)*numBlocks + bi];
@@ -6429,8 +6429,8 @@ internal static class SilkKernels
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * interCols + col;
-                        signed char4 gv = vload4(0, wGate + bBase);
-                        signed char4 uv = vload4(0, wUp + bBase);
+                        char4 gv = vload4(0, wGate + bBase);
+                        char4 uv = vload4(0, wUp + bBase);
                         uint bi = k >> 5;
                         float sg0 = scaleGate[col * numBlocks + bi];
                         float sg1 = scaleGate[(col+1u)*numBlocks + bi];
@@ -6490,7 +6490,7 @@ internal static class SilkKernels
         __kernel void rms_norm_lm_head_int8(
             __global const float* x,
             __global const float* gamma,
-            __global const signed char* w,
+            __global const char* w,
             __global const float* wscale,
             __global float* logits,
             const uint aCols,
@@ -6513,7 +6513,7 @@ internal static class SilkKernels
                 {
                     float av = x[k] * normScale * gamma[k];
                     uint bBase = k * bCols + col;
-                    signed char4 cv4 = vload4(0, w + bBase);
+                    char4 cv4 = vload4(0, w + bBase);
                     uint bi = k >> 5;
                     float s0 = wscale[col * numBlocks + bi];
                     float s1 = wscale[(col+1u)*numBlocks + bi];
@@ -6548,15 +6548,15 @@ internal static class SilkKernels
         __kernel void rms_norm_gemv_subgroup_int8(
             __global const float* x,
             __global const float* gamma,
-            __global const signed char* w0,
+            __global const char* w0,
             __global const float* scale0,
             __global const float* bias0,
             __global float* out0,
-            __global const signed char* w1,
+            __global const char* w1,
             __global const float* scale1,
             __global const float* bias1,
             __global float* out1,
-            __global const signed char* w2,
+            __global const char* w2,
             __global const float* scale2,
             __global const float* bias2,
             __global float* out2,
@@ -6572,7 +6572,7 @@ internal static class SilkKernels
             uint groups0 = (cols0 + 3u) / 4u;
             uint groups1 = (cols1 + 3u) / 4u;
 
-            __global const signed char* b;
+            __global const char* b;
             __global const float* sc;
             __global const float* bias;
             __global float* c;
@@ -6611,7 +6611,7 @@ internal static class SilkKernels
                     {
                         float av = normed[k];
                         uint bBase = k * bCols + col;
-                        signed char4 cv4 = vload4(0, b + bBase);
+                        char4 cv4 = vload4(0, b + bBase);
                         uint bi = k >> 5;
                         float s0 = sc[col * numBlocks + bi];
                         float s1 = sc[(col+1u)*numBlocks + bi];
@@ -6645,7 +6645,7 @@ internal static class SilkKernels
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * bCols + col;
-                        signed char4 cv4 = vload4(0, b + bBase);
+                        char4 cv4 = vload4(0, b + bBase);
                         uint bi = k >> 5;
                         float s0 = sc[col * numBlocks + bi];
                         float s1 = sc[(col+1u)*numBlocks + bi];
@@ -6700,9 +6700,9 @@ internal static class SilkKernels
         __kernel void rms_norm_gemv_swiglu_subgroup_int8(
             __global const float* x,
             __global const float* gamma,
-            __global const signed char* wGate,
+            __global const char* wGate,
             __global const float* scaleGate,
-            __global const signed char* wUp,
+            __global const char* wUp,
             __global const float* scaleUp,
             __global float* outInter,
             const uint aCols,
@@ -6738,8 +6738,8 @@ internal static class SilkKernels
                     {
                         float av = normed[k];
                         uint bBase = k * interCols + sgCol;
-                        signed char4 gv = vload4(0, wGate + bBase);
-                        signed char4 uv = vload4(0, wUp + bBase);
+                        char4 gv = vload4(0, wGate + bBase);
+                        char4 uv = vload4(0, wUp + bBase);
                         uint bi = k >> 5;
                         float sg0 = scaleGate[sgCol * numBlocks + bi];
                         float sg1 = scaleGate[(sgCol+1u)*numBlocks + bi];
@@ -6785,8 +6785,8 @@ internal static class SilkKernels
                     {
                         float av = x[k] * normScale * gamma[k];
                         uint bBase = k * interCols + sgCol;
-                        signed char4 gv = vload4(0, wGate + bBase);
-                        signed char4 uv = vload4(0, wUp + bBase);
+                        char4 gv = vload4(0, wGate + bBase);
+                        char4 uv = vload4(0, wUp + bBase);
                         uint bi = k >> 5;
                         float sg0 = scaleGate[sgCol * numBlocks + bi];
                         float sg1 = scaleGate[(sgCol+1u)*numBlocks + bi];

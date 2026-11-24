@@ -178,6 +178,11 @@ static class QwenToolParser
 /// </summary>
 public static class Qwen
 {
+    public static bool IsInt8Env()
+    {
+        string? env = Environment.GetEnvironmentVariable("NIVARA_SILK_INT8");
+        return env is not null && (env == "1" || env.Equals("true", StringComparison.OrdinalIgnoreCase));
+    }
     const int FeatureDim = 4096;
     const int MaxNewTokens = 160;
     /// <summary>Decode cap for the synthetic benchmark: with random weights the argmax never hits
@@ -425,7 +430,7 @@ public static class Qwen
     {
         string prec = typeof(T) == typeof(BFloat16) ? "BFloat16 storage / F32 compute" : "F32";
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Native Function Calling (getWeather) -- Silk ===");
-        Console.WriteLine($"Device: GPU (Silk)  Precision: {prec}  KV cache: {(useKvCache ? "on" : "off")}");
+        Console.WriteLine($"Device: GPU (Silk)  Precision: {(Qwen.IsInt8Env() ? "INT8 block-32" : prec)}  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
 
         var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
@@ -550,7 +555,7 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark -- Silk ===");
         var config = QwenSyntheticConfig;
-        string precisionName = bf16 ? "BFloat16 storage / F32 compute" : "F32";
+        string precisionName = IsInt8Env() ? "INT8 block-32 storage / F32 compute" : (bf16 ? "BFloat16 storage / F32 compute" : "F32");
         Console.WriteLine($"Precision: {precisionName}");
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         SilkQwenSession session;
@@ -632,7 +637,7 @@ public static class Qwen
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): decode profile -- Silk ===");
         var config = QwenSyntheticConfig;
-        string precisionName = bf16 ? "BFloat16 storage / F32 compute" : "F32";
+        string precisionName = IsInt8Env() ? "INT8 block-32 storage / F32 compute" : (bf16 ? "BFloat16 storage / F32 compute" : "F32");
         Console.WriteLine($"Precision: {precisionName}");
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         SilkQwenSession session;
@@ -1095,7 +1100,7 @@ public static class Qwen
         where T : struct, IFloatingPointIeee754<T>
     {
         string prec = typeof(T) == typeof(BFloat16) ? "BFloat16" : "F32";
-        PrintDistillHeader($"Device: GPU (Silk)  Precision: {prec} (BF16-upcast)  KV cache: on");
+        PrintDistillHeader($"Device: GPU (Silk)  Precision: {(Qwen.IsInt8Env() ? "INT8 block-32" : prec + " (BF16-upcast)")}  KV cache: on");
 
         var (config, tokenizer) = LlamaLoader.LoadConfigAndTokenizer(modelDir);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
