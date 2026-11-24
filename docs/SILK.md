@@ -1333,6 +1333,79 @@ GB/s. This is a **proxy upper bound**, not kernel-achieved DRAM bandwidth: the d
 the copy path differently from a compute kernel's access pattern. Use it as a reference ceiling when
 judging whether a decode GEMV is bandwidth-saturated.
 
+### Fused MLP block decode GB/s measurement (#1483)
+
+Follow-up to #1473/#1479. The fused single-token MLP block (`mlp_block` / `mlp_block_bf16`) is a
+cached-decode hot path (RMSNorm + gate/up + SwiGLU + down-projection + residual) but had no F32 GB/s
+measurement; the BF16 one previously lived as an optional subsection of `MeasureDecodeShapeAbBf16`.
+The `--silk-kernels` gate now reports both variants in a single dedicated section
+(`MeasureDecodeShapeMlpBlock`), using the model below so before/after numbers stay comparable.
+
+Command (same as #1473):
+
+```bat
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels
+```
+
+#### Kernels measured
+
+| Kernel | Launch shape | Weight element size |
+|---|---|---:|
+| `mlp_block` | single-WG fused, hidden x intermediate | `float` (F32) |
+| `mlp_block_bf16` | single-WG fused, hidden x intermediate | `ushort` (BF16 packed) |
+
+Shapes (real cached-decode gate/up projections):
+
+| Model | (hidden, intermediate) | Meaning |
+|---|---:|---|
+| Qwen2.5-0.5B | (896, 4864) | gate/up intermediate projection |
+| SmolLM-135M | (576, 1536) | gate/up intermediate projection |
+
+#### Bytes-moved model (logical)
+
+For `mlp_block` (F32, 3 weight matrices):
+
+```
+bytes = x(F32) + gamma(F32) + Wgate(F32) + Wup(F32) + Wdown(F32) + out(F32) + residual(F32)
+      = hidden*sizeof(float) + hidden*sizeof(float)
+        + hidden*intermediate*sizeof(float) + hidden*intermediate*sizeof(float)
+        + intermediate*hidden*sizeof(float)
+        + hidden*sizeof(float) + hidden*sizeof(float)
+      = (4*hidden + 3*hidden*intermediate) * sizeof(float)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+For `mlp_block_bf16` (BF16 packed weights):
+
+```
+bytes = x(F32) + gamma(F32) + 3*hidden*intermediate*sizeof(ushort) + out(F32) + residual(F32)
+      = hidden*sizeof(float) + hidden*sizeof(float)
+        + 3*hidden*intermediate*sizeof(ushort)
+        + hidden*sizeof(float) + hidden*sizeof(float)
+GB/s  = bytes / elapsed_seconds / 1e9
+```
+
+#### Assumptions and caveats
+
+- **Logical lower-bound model for comparability**, not a measurement of actual DRAM traffic.
+- **`x` is read twice internally** (sum-of-squares pass for the norm scale, then the phase-1
+  gate/up compute pass re-reads `x[k]`); `gamma` is read once in the formula but accessed repeatedly
+  across intermediate iterations. The formula counts `x` and `gamma` once, matching the `rms_norm_gemv`
+  convention (#1473/#1479). Cache effects may reduce actual traffic; the redundant read may increase it.
+- **`swiglu[intermediate]` is `__local` shared memory** (`MLP_MAX_INTERMEDIATE = 5120`); not counted
+  as DRAM traffic. The model assumes the intermediate stays on-chip.
+- **`residual` is read, `out` is written** (separate buffers; `out[j] = acc + residual[j]`). The issue
+  text's "residual read+write" is equivalent in total byte count (2 * hidden * 4).
+- **Single-work-group fused launch** (`SilkLauncher.MlpBlock` / `MlpBlockBf16`, 256/256). This is the
+  serialization-sensitive fused shape on iGPUs (P1, #1453); its GB/s is **not** a promotion criterion
+  on its own. Promoting it back into the inference runners requires same-device iGPU decode evidence
+  showing no end-to-end regression. Output is tagged `[single-WG fused]`.
+- No bias term in this kernel.
+- Keep the formula stable across before/after runs; changing it invalidates the comparison.
+
+This supersedes the optional `mlp_block_bf16` subsection previously reported inside
+`MeasureDecodeShapeAbBf16` (#1479); both variants are now reported in `MeasureDecodeShapeMlpBlock`.
+
 ### Comparability rules
 
 - Same device, same driver, same power state (`GemmBenchmark.PrintPowerState()` is printed by the gate).
