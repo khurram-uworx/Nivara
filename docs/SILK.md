@@ -633,12 +633,15 @@ against the host formula instead.
   sum-of-squares reduction), which changes accumulation order (strided partial sums), so results
   differ from the base kernel by a few ULP — callers/tests use a `1e-4` relative tolerance with
   that justification. The non-subgroup (fallback) path remains bit-identical.
-- **Default policy (decision, 2026):** measured on Intel(R) Graphics (BFloat16, 32 generated
-  tokens): subgroup ON is ~19% slower on SmolLM-135M (16.56 vs 20.62 tok/s) and ~2% faster on
-  Qwen2.5-0.5B (29.06 vs 28.47 tok/s). Therefore **SmolLM uses the base (non-subgroup) launchers
-  and Qwen uses the subgroup launchers**, both routed through the capability-gated `*Subgroup*`
-  entry points (which fall back to base on devices without subgroup support). Only these two models
-  target Silk today; per-model selection lives in each runner.
+- **Default policy (decision, 2026-11, #1486 K-split):** measured on Intel(R) Graphics
+  (BFloat16, 32 generated tokens, two independent runs per path):
+  - SmolLM-135M: base ~21 tok/s vs K-split subgroup ~51-57 tok/s (~2.5x faster).
+  - Qwen2.5-0.5B: base ~28-31 tok/s vs K-split subgroup ~55-59 tok/s (~2x faster).
+  K-split (splitting the contraction over k across subgroup lanes) turns the previously-slower
+  subgroup path into a clear win on both models. Therefore **both SmolLM and Qwen use the subgroup
+  (K-split) launchers**, routed through the capability-gated `*Subgroup*` entry points (which fall
+  back to base on devices without subgroup support). Only these two models target Silk today;
+  per-model selection lives in each runner.
 - **Local memory:** the `__local normed[STAGED_NORM_MAX]` staging array must be declared at
   kernel outermost scope (OpenCL rule), so it is allocated for every rms-norm-gemv launch,
   including the `aCols > STAGED_NORM_MAX` fallback path where it is unused (~16 KB/group).
