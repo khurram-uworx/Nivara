@@ -8,7 +8,8 @@ public sealed partial class SilkQwenGpuRunner
     public SilkQwenGpuRunner(
         SilkRuntime runtime,
         QwenSilkConfig config,
-        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
+        SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
@@ -16,6 +17,7 @@ public sealed partial class SilkQwenGpuRunner
 
         this.runtime = runtime;
         this.config = config;
+        int8Weights = quantization == SilkWeightQuantization.Int8Block32;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -29,7 +31,7 @@ public sealed partial class SilkQwenGpuRunner
         ropeTheta = config.RopeTheta;
         seqCap = maxPos;
         vocabSize = config.VocabSize;
-        bf16Weights = true;
+        bf16Weights = !int8Weights;
         runtime.EnsureAttentionLocalMemory(headDim);
 
         static float[] Widen(BFloat16[] src)
@@ -57,6 +59,16 @@ public sealed partial class SilkQwenGpuRunner
                     tokTF[c * vocab + r] = tokUs[r * h + c];
             tokEmbTransposed = runtime.AllocateBytes((ulong)tokTF.Length * sizeof(ushort));
             runtime.Upload(tokEmbTransposed, tokTF.AsSpan());
+
+            if (int8Weights)
+            {
+                var (qw, sc) = SilkInt8Quantizer.QuantizeFromBf16(tokTF.AsSpan(), vocab, h);
+                tokEmbInt8 = runtime.Allocate(qw.Length);
+                runtime.Upload(tokEmbInt8, qw.AsSpan());
+                tokEmbInt8Scale = runtime.Allocate(sc.Length);
+                runtime.Upload(tokEmbInt8Scale, sc.AsSpan());
+                tokEmbInt8NumBlocks = (h + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+            }
 
             var fn = WeightLayout.Req(tensors, "model.norm.weight", "Silk");
             finalNormW = runtime.Allocate(fn.Data.Length);

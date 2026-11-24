@@ -7,17 +7,17 @@ public sealed class SilkSmolLMSession : IDisposable
     readonly SilkRuntime runtime;
     readonly SilkSmolLMGpuRunner runner;
 
-    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false, SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
-        try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors); }
+        try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors, quantization); }
         catch { runtime.Dispose(); throw; }
     }
 
-    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false, SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
-        try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors); }
+        try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors, quantization); }
         catch { runtime.Dispose(); throw; }
     }
 

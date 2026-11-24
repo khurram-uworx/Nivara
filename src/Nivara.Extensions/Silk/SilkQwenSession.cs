@@ -7,18 +7,18 @@ public sealed class SilkQwenSession : IDisposable
 
     bool disposed;
 
-    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false, SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
-        try { runner = new SilkQwenGpuRunner(runtime, config, tensors); }
+        try { runner = new SilkQwenGpuRunner(runtime, config, tensors, quantization); }
         catch { runtime.Dispose(); throw; }
     }
 
 
-    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false, SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
-        try { runner = new SilkQwenGpuRunner(runtime, config, tensors); }
+        try { runner = new SilkQwenGpuRunner(runtime, config, tensors, quantization); }
         catch { runtime.Dispose(); throw; }
     }
 
