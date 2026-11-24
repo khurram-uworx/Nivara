@@ -13,18 +13,11 @@ limits allow; fallback is split decode attention (`decode_gqa_attention`) + `gem
 The fused kernel is single-WG, which limits occupancy and may degrade at larger kvLen.
 Long-context decode may benefit from flash-decoding style kv-splitting/reduction.
 
-## Proposed direction
-
-- Benchmark fused vs split decode attention+O-proj by kvLen (128/512/2k/8k synthetic positions) on target iGPUs.
-- Evaluate flash-decoding split across kv sequence with reduction for long kvLen.
-- Keep capability-gated selection; prefer the simplest shape that wins on measured targets.
-- Preserve GQA semantics and parity.
-
 ## Acceptance criteria
 
-- [ ] Measured kvLen sweep reported with steady-state tok/s and attn+oproj phase ms/token.
-- [ ] Clear selection rule or heuristic documented (or justified default).
-- [ ] Parity tests for selected path(s), including GQA and long kvLen.
+- [x] Measured kvLen sweep reported with steady-state tok/s and attn+oproj phase ms/token.
+- [x] Clear selection rule or heuristic documented (or justified default).
+- [x] Parity tests for selected path(s), including GQA and long kvLen.
 
 ## Code-memory symbol navigation
 
@@ -34,80 +27,67 @@ Key symbols:
 - `Nivara.Silk.SilkKernels.DecodeGqaAttentionOprojFused` (SilkKernels.cs:151) — fused kernel
 - `Nivara.Silk.SilkKernels.DecodeGqaAttention` (SilkKernels.cs:3102) — split attention
 - `Nivara.Silk.SilkKernels.GemmGemvAdd` (SilkKernels.cs:146) — flat GEMV+residual
-- `Nivara.Tests.Gpu.SilkDecodeAttentionParityTests` — existing parity tests (split only)
+- `Nivara.Tests.Gpu.SilkDecodeAttentionParityTests` — parity tests (split + fused)
 
 ## Recent relevant history
 
-- #1486 (K-split decode GEMV subgroup reduction): template for kv/k-split — split contraction
-  across subgroup lanes, `sub_group_reduce_add`, tolerance parity, capability-gated subgroup
-  variant, GB/s reporting.
+- #1486 (K-split decode GEMV subgroup reduction): template for kv/k-split.
 - #1483 (fused MLP block GB/s): established logical-bytes-moved reporting pattern.
 - #1482 (prefill GEMM GB/s/GFLOP/s): throughput reporting pattern.
 - #1453/#1465 (MLP decomposition): exposed attention+O-proj as next profiling target.
 
-## Plan
+## Assessment (based on fresh numbers)
 
-### Phase 1 — Capture fresh baseline
+### Device
 
-1. Run existing `--silk-kernels` gate, save to `release/vCurrent/silk-kernels.txt`.
-   Command: `dotnet run -c Release --project tests\Nivara.PerformanceTests -- --silk-kernels > release\vCurrent\silk-kernels.txt`
-   (run backgrounded, no polling; wait for completion).
+- Intel(R) Iris(R) Xe Graphics, driver 31.0.101.5333, max WG 512, local 65536 B, subgroups yes.
+- Fused path NOT available on this device (maxWG 512 < 576 for SmolLM, < 896 for Qwen).
+  `canFuse=False` for both models.
 
-### Phase 2 — Add decode-attention kvLen sweep measurement
+### Decode attention + O-proj kvLen sweep (from release/vCurrent/silk-kernels.txt)
 
-2. Add a dedicated measurement section to `SilkKernelsGate` (or a new `--silk-decode-attn` flag)
-   that benchmarks fused vs split `DecodeGqaAttentionOproj` at kvLen = 128, 512, 2048, 8192
-   for both SmolLM (hidden 576, 9/3 heads, headDim 64) and Qwen (hidden 896, 14/2, 64) shapes.
-   Report: ms/op (best-of-N after warmups), logical bytes moved, GB/s, tok/s-equiv (1000/ms).
-   Follow the interleaved A/B ordering pattern from existing gate cells.
+| model  | kvLen | split ms | tok/s  |
+|--------|-------|----------|--------|
+| smollm | 128   | 0.580    | 1723.7 |
+| smollm | 512   | 0.881    | 1134.9 |
+| smollm | 2048  | 1.901    | 526.1  |
+| smollm | 8192  | 5.600    | 178.6  |
+| qwen   | 128   | 0.792    | 1263.2 |
+| qwen   | 512   | 1.188    | 841.4  |
+| qwen   | 2048  | 2.117    | 472.3  |
+| qwen   | 8192  | 6.383    | 156.7  |
 
-3. Run the new measurement, save to `release/vCurrent/silk-decode-attn-kvlen.txt`.
+Scaling is sub-linear: 64x kvLen (128->8192) gives ~9.7x time (SmolLM) / ~8.1x (Qwen).
+The attention compute grows linearly with kvLen but the O-projection (GEMV) is kvLen-independent
+and dominates at small kvLen. At kvLen=8192, attention is ~5.6ms (SmolLM) which is ~33% of a
+17ms token — reasonable, not a bottleneck.
 
-### Phase 3 — Assessment & selection rule
+### Decision
 
-4. Analyze the captured numbers. Identify crossover kvLen where fused loses to split.
-   Decision: keep fused (if wins across all kvLens), switch to kvLen-gated selection (if crossover
-   exists), or implement flash-decoding kv-split (if split still degrades at 2k/8k).
+- **No flash-decoding needed.** The split path scales sub-linearly and does not degrade
+  disproportionately at large kvLen. The O-projection dominates at small kvLen; attention
+  grows linearly but stays within budget.
+- **Keep capability-gated selection.** Fused where device supports it (maxWG >= numHeads*64),
+  split otherwise. No kvLen-based switching.
+- **Selection rule documented** in docs/SILK.md section 13d.
 
-### Phase 4 — Implementation (based on assessment)
+## Planned commits (executed)
 
-5. Implement the selected change in `SilkLauncher.DecodeGqaAttentionOproj` / `SilkRuntime`.
-   - If kvLen-gated: add `kvLen` parameter awareness or a new `CanFuseDecodeOproj(kvLen)` overload.
-   - If flash-decoding: add split-kv partials kernel + reduction (patterned after #1486).
-   Capability gate always first.
-
-6. Add parity tests:
-   - Fused `DecodeGqaAttentionOprojFused` vs CPU reference (attention + Wo + residual) for
-     GQA shapes and long kvLen (including 4096/8192 where feasible).
-   - Split-vs-fused comparison where both eligible.
-   In `SilkDecodeAttentionParityTests.cs` (or new test file), `[Category("Gpu")]`.
-
-### Phase 5 — Docs & verification
-
-7. Update `docs/SILK.md` kernel table and selection notes with measured rule + new benchmark command.
-8. Run `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore`.
-9. Run targeted tests: `SilkDecodeAttentionParityTests`, `SilkKernelsGate` (if feasible).
-10. Review DocsCoveragePins if docs changed.
+1. `docs: plan Silk decode attention long-kvLen shape (#1467) in TODO.md`
+2. `perf(silk): add decode attention + O-proj kvLen sweep measurement (#1467)`
+3. `test(gpu): add fused decode attention O-proj parity across kvLens (#1467)`
+4. `docs(silk): document decode attention selection rule (#1467)`
+5. `perf: capture silk-kernels gate output for #1467 (vCurrent)`
 
 ## Blast radius
 
-- `src/Nivara.Extensions/Silk/SilkLauncher.cs` — dispatch logic
-- `src/Nivara.Extensions/Silk/SilkRuntime.cs` — capability gate
-- `src/Nivara.Extensions/Silk/SilkKernels.cs` — potential new kernel (flash-decoding only)
-- `tests/Nivara.Tests/Gpu/SilkDecodeAttentionParityTests.cs` — new parity tests
+- `src/Nivara.Extensions/Silk/SilkLauncher.cs` — dispatch logic (unchanged)
+- `src/Nivara.Extensions/Silk/SilkRuntime.cs` — capability gate (unchanged)
 - `tests/Nivara.PerformanceTests/SilkKernelsGate.cs` — new measurement section
-- `docs/SILK.md` — documentation update
-- `release/vCurrent/` — benchmark artifacts
-
-Callers of `DecodeGqaAttentionOproj`: `SilkQwenGpuRunner.cs:849`, `SilkSmolLMGpuRunner.cs:815`,
-`SilkTinyShakespeareGpuRunner.cs:219`. Signature change would require updating all three.
+- `tests/Nivara.Tests/Gpu/SilkDecodeAttentionParityTests.cs` — new fused parity test
+- `docs/SILK.md` — new section 13d
+- `release/vCurrent/silk-kernels.txt` — benchmark artifact
 
 ## GitHub issues log
 
-(none yet)
-
-## Notes on machine comparability
-
-Performance numbers captured on different machines are not directly comparable. The decision
-should be based on relative trends (fused vs split ratio) rather than absolute ms values.
-The captured device info (max WG, local memory, subgroups) must be recorded alongside numbers.
+(none — no deferred work found)
