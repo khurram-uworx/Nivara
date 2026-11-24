@@ -417,7 +417,7 @@ and the unit checks can reach them. Samples no longer pins Silk.NET; it arrives 
 [EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
  Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding,
  RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention, ArgMax,
- GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, GemmBf16,
+ GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, RmsNormGemvSwiGlu, RmsNormGemvSwiGluBf16, GemmBf16,
  DecodeGqaAttentionOprojFused,
  Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
  GroupedHashReducePartial,
@@ -434,8 +434,8 @@ ports (`layer_norm`, `add`, `add_bias`, `split_columns`, `rotary`, `geglu`, `gem
 Qwen/SmolLM decode kernels (`rms_norm`, `rms_norm_lm_head`, `rms_norm_gemv`, `silu`, `swiglu`,
 `causal_gqa_attention`, `decode_gqa_attention`, `argmax`, `gemm_row4_add`) plus their fused and
 measured-candidate derivatives (`gemm_reg2x4`, `gemm_reg4x4`, `batched_attention_sliding`,
-`gemm_gemv_add`, `mlp_block`, `decode_gqa_attention_oproj_fused`) and the packed-BF16 transport
-quartet (`gemm_row4_bf16`, `gemm_gemv_add_bf16`, `rms_norm_gemv_bf16`, `mlp_block_bf16`); the
+`gemm_gemv_add`, `mlp_block`, `decode_gqa_attention_oproj_fused`, `rms_norm_gemv_swiglu`) and the packed-BF16 transport
+kernels (`gemm_row4_bf16`, `gemm_gemv_add_bf16`, `rms_norm_gemv_bf16`, `mlp_block_bf16`, `rms_norm_gemv_swiglu_bf16`); the
 vision kernels (`conv2d`, `batchnorm_eval`, `relu`, `relu6`, `maxpool2d`, `adaptive_avgpool2d`);
 the analytics kernel (`grouped_hash_reduce_partial`); and the classifier-backward family (#900):
 the transposed-operand GEMMs, the elementwise/reduction backward pieces and the fused Adam step.
@@ -485,6 +485,8 @@ ascending K-reduction, same tile geometry where the kernel is tiled, same fused 
 | `gemm_row4_bf16` | `a, b, c, aRows, aCols, bCols` (B packed BF16) | Row4 GEMM with B transported as packed BF16 ushort, widened in-shader; same accumulation core |
 | `gemm_gemv_add_bf16` | `a, b, c, residual, aCols, bCols` | the decode GEMV + residual add over packed-BF16 B |
 | `rms_norm_gemv_bf16` | as `rms_norm_gemv` | the fused decode projections over packed-BF16 weights |
+| `rms_norm_gemv_swiglu` | `x, gamma, wGate, wUp, outInter, aCols, interCols, eps` | fused decode MLP dispatch 1 (Option B, #1470): RMSNorm + gate/up + SwiGLU, writes only intermediate; paired with `gemm_gemv_add` for 2-dispatch decode MLP |
+| `rms_norm_gemv_swiglu_bf16` | as `rms_norm_gemv_swiglu` | BF16-weight variant of Option B dispatch 1 (#1470) |
 | `mlp_block_bf16` | as `mlp_block` | the fused single-token MLP block over packed-BF16 weights |
 | `grouped_hash_reduce_partial` | `serviceIds, statusCodes, durations, partialCounts, partialErrors, partialSums, n, groupCount` | incident analytics: per-work-group partial (count, 5xx errors, duration sum) per service group, merged on the host |
 | `gemm_row4_nt` | `a, b, c, aRows, aCols, bCols` (B stored `[N,K]`) | backward GEMM `A·Bᵀ` with the transpose in the tile load (`dH = dZ·W2ᵀ`, `dPooled = dH·W1ᵀ`); same accumulation core as the forward Row4 GEMMs, so the host replay stays byte-identical (#900) |

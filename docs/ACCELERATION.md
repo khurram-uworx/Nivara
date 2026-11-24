@@ -158,8 +158,8 @@ Kernel-level checks and CLI rejects are covered in §§5–6.
 ```
 EmbedSum, GatherRows, LayerNormResidual, LayerNorm, Add, AddBias, SplitColumns, Rotary, GeGlu,
 Gemm, GemmBias, GemmRelu, GemmGelu, GemmQkv, Attention,
-RmsNorm, RmsNormLmHead, RmsNormGemv, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention,
-ArgMax, GemmAdd, GemmGemvAdd, MlpBlock, DecodeGqaAttentionOprojFused,
+RmsNorm, RmsNormLmHead, RmsNormGemv, RmsNormGemvSwiGlu, Silu, SwiGlu, CausalGqaAttention, DecodeGqaAttention,
+ArgMax, GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, RmsNormGemvSwiGluBf16, DecodeGqaAttentionOprojFused,
 Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d
 ```
 

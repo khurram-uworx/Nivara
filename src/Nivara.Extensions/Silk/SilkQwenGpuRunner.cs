@@ -816,23 +816,17 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     {
         if (gateLora is null && upLora is null && downLora is null)
         {
-            // Decode MLP decomposition: RmsNormGemv (gate+up, multi-WG) + SwiGlu (multi-WG) +
-            // GemmGemvAdd (down+residual, multi-WG). Replaces the single-WG fused mlp_block
-            // kernel which serialized decode on iGPUs (P1, #1453).
+            // Decode MLP Option B (#1470): RmsNormGemvSwiGlu (norm+gate+up+swiglu, multi-WG) +
+            // GemmGemvAdd (down+residual, multi-WG). Replaces 3-dispatch Option A (#1453) to
+            // avoid writing gate/up to global and one dispatch. Option A remains as reference/fallback.
             if (bf16Weights)
             {
-                SilkLauncher.RmsNormGemvSubgroupBf16(runtime, x, gamma,
-                    [new(wg, 0, gate.Handle, inter), new(wu, 0, up.Handle, inter)],
-                    hasBias: false, aRows: 1, aCols: hidden, eps: eps2);
-                SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, inter);
+                SilkLauncher.RmsNormGemvSwiGluSubgroupBf16(runtime, x, gamma, wg, wu, mlp.Handle, hidden, inter, eps2);
                 SilkLauncher.GemmGemvAddSubgroupBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
             else
             {
-                SilkLauncher.RmsNormGemvSubgroup(runtime, x, gamma,
-                    [new(wg, 0, gate.Handle, inter), new(wu, 0, up.Handle, inter)],
-                    hasBias: false, aRows: 1, aCols: hidden, eps: eps2);
-                SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, 1, inter);
+                SilkLauncher.RmsNormGemvSwiGluSubgroup(runtime, x, gamma, wg, wu, mlp.Handle, hidden, inter, eps2);
                 SilkLauncher.GemmGemvAddSubgroup(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
             return;
