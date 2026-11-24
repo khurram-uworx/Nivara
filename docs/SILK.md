@@ -627,11 +627,12 @@ against the host formula instead.
   `SilkRuntime.HasKernel(name)` reports that.
 - **Launchers:** `SilkLauncher.*Subgroup*` dispatch the subgroup variant and fall back to the
   base kernel when `SupportsSubgroups` is false, so callers always work on any device.
-- **Parity policy:** base kernels are bit-identical to the prior reference. The subgroup
-  `rms_norm_gemv` variant reduces the RMS-norm sum of squares in strided order, so the scale
-  may differ by a few ULP — callers/tests use a `1e-5` relative tolerance with that
-  justification. The `gemm_gemv_add_subgroup` variant is functionally identical (no cross-lane
-  reduction opportunity in the per-thread-full-K shape) and is bit-identical.
+- **Parity policy (#1486):** base kernels are bit-identical to the prior reference. The subgroup
+  `rms_norm_gemv` and `gemm_gemv_add` variants now split the contraction over k across subgroup
+  lanes and reduce partial dot products via `sub_group_reduce_add` (in addition to the RMS-norm
+  sum-of-squares reduction), which changes accumulation order (strided partial sums), so results
+  differ from the base kernel by a few ULP — callers/tests use a `1e-4` relative tolerance with
+  that justification. The non-subgroup (fallback) path remains bit-identical.
 - **Default policy (decision, 2026):** measured on Intel(R) Graphics (BFloat16, 32 generated
   tokens): subgroup ON is ~19% slower on SmolLM-135M (16.56 vs 20.62 tok/s) and ~2% faster on
   Qwen2.5-0.5B (29.06 vs 28.47 tok/s). Therefore **SmolLM uses the base (non-subgroup) launchers
