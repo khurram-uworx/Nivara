@@ -1566,3 +1566,19 @@ Silk BERT-family inference is opt-in narrow precision, never the default:
   - `layer_norm_backward`: 1024x768 - 22.63 ms (F32) vs 26.50 ms (BF16), 0.85x (compute-bound;
     the BF16 variant is slower here because the reduction dominates and the in-register widen adds
     overhead, so it is not a win for this kernel).
+
+
+## INT8 block-quantized decode weights (issue #1469)
+
+Format: `SilkInt8Block32 v1`. Symmetric per-block quantization, no zero point.
+
+- Weight storage: `sbyte` (INT8), block size 32 along the reduction (input) dimension.
+- Scale: one `float` per 32-element block per output column. Storage layout: scales `[outCols, numBlocks]`
+  so a fixed output column has contiguous scales.
+- Weights stay in the existing device layout `[inCols, outCols]` (transposed from checkpoint `[out, in]`).
+- Activations: F32. Accumulation: F32. Dequantization is fused in-kernel: `(float)weight * scale`,
+  never materializing a full F32 weight tensor.
+- Selection: opt-in via `SilkWeightQuantization.Int8Block32` passed to the runner/session constructors.
+  Default remains F32/BF16 storage.
+- Scope: decode weights only (QKV, O-proj, gate/up/down, LM head). Embeddings, norms, biases and KV
+  cache stay F32. INT4 is deferred to a follow-up.
