@@ -1,0 +1,25 @@
+C:\Program Files\dotnet\sdk\11.0.100\NuGet.Build.Tasks.Pack.targets(232,5): warning NU5104: A stable release of a package should not have a prerelease dependency. Either modify the version spec of dependency "Parquet.Net [6.1.1-pre.1, )" or update the version field in the nuspec. [E:\khurram-uworx\Nivara\src\Nivara.Extensions\Nivara.Extensions.csproj]
+=== Nivara HuggingFace Inference ===
+
+=== SmolLM-135M (synthetic weights): decode profile -- Silk ===
+Device: Silk  Precision: BFloat16 storage / F32 compute
+Device: Intel(R) Iris(R) Xe Graphics  Vocab: 49152
+Model build: 1345 ms
+
+Steady-state warmup (no per-phase sync): 14.65 tok/s, 14.65 ms/token decode, 2435 ms total (32 tokens, prefill 251 ms, decode 2184 ms)
+Profiled run (per-phase Finish sync, attribution only): 10.95 tok/s, 91.31 ms/token decode, 3112 ms total (32 tokens, prefill 190 ms, decode 2922 ms)
+
+Decode profile (cached decode tokens only, per-phase Finish sync):
+  Throughput: 10.95 tok/s (91.30 ms/token, profiled)
+  Tokens: 32
+  Kernel dispatches: 5856 (183.00/token)
+  Queue copies: 1920
+  Total profiled: 2921.50 ms
+  Embed                    5.26 ms     0.164 ms/token
+  QKV norm+proj          648.47 ms    20.265 ms/token
+  Rotary                 180.95 ms     5.655 ms/token
+  Cache copy             135.29 ms     4.228 ms/token
+  Attention+O proj       540.51 ms    16.891 ms/token
+  MLP                   1239.45 ms    38.733 ms/token
+  Final norm+LM head     161.74 ms     5.054 ms/token
+  Argmax                   9.84 ms     0.307 ms/token
