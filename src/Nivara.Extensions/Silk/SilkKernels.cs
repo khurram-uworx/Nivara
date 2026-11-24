@@ -148,6 +148,11 @@ internal static class SilkKernels
     // Flat single-row GEMV + residual for cached decode O-projection (#672, Stage A1).
     public const string GemmGemvAdd = "gemm_gemv_add";
     public const string GemmGemvAddBf16 = "gemm_gemv_add_bf16";
+    // INT8 block-32 quantized decode kernels (issue #1469): in-kernel dequant, F32 accumulators.
+    public const string RmsNormGemvInt8 = "rms_norm_gemv_int8";
+    public const string RmsNormGemvSwiGluInt8 = "rms_norm_gemv_swiglu_int8";
+    public const string GemmGemvAddInt8 = "gemm_gemv_add_int8";
+    public const string RmsNormLmHeadInt8 = "rms_norm_lm_head_int8";
 
     // True single-work-group fused decode attention + O-projection (#691). Only usable
     // when the device exposes at least numHeads * AttentionGroupSize work-items per group.
@@ -226,7 +231,7 @@ internal static class SilkKernels
     /// <summary>Every kernel the translation unit defines, in build order.</summary>
     public static readonly string[] KernelNames =
     [
-         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, RotaryQk, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, RmsNormGemvSwiGlu, RmsNormGemvSwiGluBf16, GemmBf16,
+         EmbedSum, GatherRows, GatherRowsBf16, GatherRowsF16, GatherRowsBf16Act, LayerNormResidual, LayerNorm, LayerNormBf16Act, Add, AddBias, AddBf16Act, AddBiasBf16Act, SplitColumns, Rotary, RotaryBackward, RotaryQk, GeGlu,        Gemm, GemmF16, GemmBias, GemmBiasBf16, GemmBiasF16, GemmBiasBf16Act, GemmRelu, GemmReluBf16, GemmReluF16, GemmReluBf16Act, GemmGelu, GemmGeluBf16, GemmGeluF16, GemmGeluBf16Act, GemmQkv, GemmQkvBf16, GemmQkvF16, GemmQkvBf16Act, GemmReg2x4, GemmReg4x4, Attention, AttentionSliding, AttentionBf16Act,        RmsNorm, RmsNormLmHead, RmsNormLmHeadBf16, RmsNormLmHeadF16, RmsNormGemv, Silu, SwiGlu, SwiGluBackward, CausalGqaAttention, DecodeGqaAttention, ArgMax,        GemmAdd, GemmGemvAdd, GemmGemvAddBf16, GemmGemvAddInt8, MlpBlock, MlpBlockBf16, RmsNormGemvBf16, RmsNormGemvInt8, RmsNormGemvSwiGlu, RmsNormGemvSwiGluBf16, RmsNormGemvSwiGluInt8, GemmBf16, RmsNormLmHeadInt8,
         DecodeGqaAttentionOprojFused,
         Conv2d, BatchNormEval, Relu, Relu6, MaxPool2d, AdaptiveAvgPool2d,
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
@@ -247,10 +252,13 @@ internal static class SilkKernels
     [
         RmsNormGemvSubgroup,
         RmsNormGemvSubgroupBf16,
+        RmsNormGemvSubgroupInt8,
         RmsNormGemvSwiGluSubgroup,
         RmsNormGemvSwiGluSubgroupBf16,
+        RmsNormGemvSwiGluSubgroupInt8,
         GemmGemvAddSubgroup,
         GemmGemvAddSubgroupBf16,
+        GemmGemvAddSubgroupInt8,
     ];
 
     public const string RmsNormGemvSubgroup = "rms_norm_gemv_subgroup";
@@ -259,6 +267,9 @@ internal static class SilkKernels
     public const string RmsNormGemvSwiGluSubgroupBf16 = "rms_norm_gemv_swiglu_subgroup_bf16";
     public const string GemmGemvAddSubgroup = "gemm_gemv_add_subgroup";
     public const string GemmGemvAddSubgroupBf16 = "gemm_gemv_add_subgroup_bf16";
+    public const string RmsNormGemvSubgroupInt8 = "rms_norm_gemv_subgroup_int8";
+    public const string RmsNormGemvSwiGluSubgroupInt8 = "rms_norm_gemv_swiglu_subgroup_int8";
+    public const string GemmGemvAddSubgroupInt8 = "gemm_gemv_add_subgroup_int8";
 
     /// <summary>Global work size (dim 0) for a GEMM producing <paramref name="aRows"/> rows.</summary>
     public static int GemmGlobalRows(int aRows) => RoundUp(aRows, GemmTileSize);
@@ -6028,6 +6039,810 @@ internal static class SilkKernels
                 if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
             }
         }
+        /* INT8 block-32 quantized decode kernels (issue #1469). Symmetric, no zero point, one F32
+           scale per 32 input rows per output column. Weight storage is signed char (int8); dequant
+           happens in registers: (float)weight * scale. F32 accumulators. */
+
+        __kernel void rms_norm_gemv_int8(
+            __global const float* x,
+            __global const float* gamma,
+            __global const signed char* w0,
+            __global const float* scale0,
+            __global const float* bias0,
+            __global float* out0,
+            __global const signed char* w1,
+            __global const float* scale1,
+            __global const float* bias1,
+            __global float* out1,
+            __global const signed char* w2,
+            __global const float* scale2,
+            __global const float* bias2,
+            __global float* out2,
+            const uint aCols,
+            const uint cols0,
+            const uint cols1,
+            const uint cols2,
+            const uint hasBias,
+            const uint numBlocks,
+            const float eps)
+        {
+            uint g = get_group_id(0);
+            uint groups0 = (cols0 + GEMVCOLS - 1) / GEMVCOLS;
+            uint groups1 = (cols1 + GEMVCOLS - 1) / GEMVCOLS;
+
+            __global const signed char* b;
+            __global const float* sc;
+            __global const float* bias;
+            __global float* c;
+            uint bCols;
+            uint colBase;
+            if (g < groups0)
+            {
+                b = w0; sc = scale0; bias = bias0; c = out0; bCols = cols0; colBase = g * GEMVCOLS;
+            }
+            else if (g < groups0 + groups1)
+            {
+                b = w1; sc = scale1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * GEMVCOLS;
+            }
+            else
+            {
+                b = w2; sc = scale2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * GEMVCOLS;
+            }
+
+            uint col = colBase + get_local_id(0) * BLOCK;
+            uint lid = get_local_id(0);
+
+            float ssq = 0.0f;
+            for (uint k = 0; k < aCols; ++k)
+            {
+                float v = x[k];
+                ssq += v * v;
+            }
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES)
+                    normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (col >= bCols)
+                    return;
+
+                uint avail = bCols - col;
+
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        signed char4 cv4 = vload4(0, b + bBase);
+                        uint bi = k >> 5;
+                        float s0v = sc[col * numBlocks + bi];
+                        float s1v = sc[(col + 1u) * numBlocks + bi];
+                        float s2v = sc[(col + 2u) * numBlocks + bi];
+                        float s3v = sc[(col + 3u) * numBlocks + bi];
+                        a0 += av * ((float)cv4.s0 * s0v);
+                        a1 += av * ((float)cv4.s1 * s1v);
+                        a2 += av * ((float)cv4.s2 * s2v);
+                        a3 += av * ((float)cv4.s3 * s3v);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        uint bi = k >> 5;
+                        a0 += av * ((float)b[bBase] * sc[col * numBlocks + bi]);
+                        if (avail > 1u) a1 += av * ((float)b[bBase + 1u] * sc[(col + 1u) * numBlocks + bi]);
+                        if (avail > 2u) a2 += av * ((float)b[bBase + 2u] * sc[(col + 2u) * numBlocks + bi]);
+                        if (avail > 3u) a3 += av * ((float)b[bBase + 3u] * sc[(col + 3u) * numBlocks + bi]);
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+                return;
+            }
+            else
+            {
+                if (col >= bCols)
+                    return;
+
+                uint avail = bCols - col;
+
+                float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        signed char4 cv4 = vload4(0, b + bBase);
+                        uint bi = k >> 5;
+                        float s0v = sc[col * numBlocks + bi];
+                        float s1v = sc[(col + 1u) * numBlocks + bi];
+                        float s2v = sc[(col + 2u) * numBlocks + bi];
+                        float s3v = sc[(col + 3u) * numBlocks + bi];
+                        a0 += av * ((float)cv4.s0 * s0v);
+                        a1 += av * ((float)cv4.s1 * s1v);
+                        a2 += av * ((float)cv4.s2 * s2v);
+                        a3 += av * ((float)cv4.s3 * s3v);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        uint bi = k >> 5;
+                        a0 += av * ((float)b[bBase] * sc[col * numBlocks + bi]);
+                        if (avail > 1u) a1 += av * ((float)b[bBase + 1u] * sc[(col + 1u) * numBlocks + bi]);
+                        if (avail > 2u) a2 += av * ((float)b[bBase + 2u] * sc[(col + 2u) * numBlocks + bi]);
+                        if (avail > 3u) a3 += av * ((float)b[bBase + 3u] * sc[(col + 3u) * numBlocks + bi]);
+                    }
+                }
+
+                if (hasBias != 0u)
+                {
+                    c[col] = a0 + bias[col];
+                    if (avail > 1u) c[col + 1u] = a1 + bias[col + 1u];
+                    if (avail > 2u) c[col + 2u] = a2 + bias[col + 2u];
+                    if (avail > 3u) c[col + 3u] = a3 + bias[col + 3u];
+                }
+                else
+                {
+                    c[col] = a0;
+                    if (avail > 1u) c[col + 1u] = a1;
+                    if (avail > 2u) c[col + 2u] = a2;
+                    if (avail > 3u) c[col + 3u] = a3;
+                }
+            }
+        }
+
+        /* INT8 gemm_gemv_add: a (F32) x b (INT8, dequanted) + residual. */
+        __kernel void gemm_gemv_add_int8(
+            __global const float* a,
+            __global const signed char* b,
+            __global const float* bscale,
+            __global float* c,
+            __global const float* residual,
+            const uint aCols,
+            const uint bCols,
+            const uint numBlocks)
+        {
+            uint col = get_global_id(0) * BLOCK;
+            if (col >= bCols) return;
+            uint avail = bCols - col;
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            if (avail >= 4u)
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    signed char4 cv4 = vload4(0, b + bBase);
+                    uint bi = k >> 5;
+                    float s0 = bscale[col * numBlocks + bi];
+                    float s1 = bscale[(col + 1u) * numBlocks + bi];
+                    float s2 = bscale[(col + 2u) * numBlocks + bi];
+                    float s3 = bscale[(col + 3u) * numBlocks + bi];
+                    a0 += av * ((float)cv4.s0 * s0);
+                    a1 += av * ((float)cv4.s1 * s1);
+                    a2 += av * ((float)cv4.s2 * s2);
+                    a3 += av * ((float)cv4.s3 * s3);
+                }
+            }
+            else
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + col;
+                    uint bi = k >> 5;
+                    a0 += av * ((float)b[bBase] * bscale[col * numBlocks + bi]);
+                    if (avail > 1u) a1 += av * ((float)b[bBase + 1u] * bscale[(col + 1u) * numBlocks + bi]);
+                    if (avail > 2u) a2 += av * ((float)b[bBase + 2u] * bscale[(col + 2u) * numBlocks + bi]);
+                    if (avail > 3u) a3 += av * ((float)b[bBase + 3u] * bscale[(col + 3u) * numBlocks + bi]);
+                }
+            }
+
+            c[col] = a0 + residual[col];
+            if (avail > 1u) c[col + 1u] = a1 + residual[col + 1u];
+            if (avail > 2u) c[col + 2u] = a2 + residual[col + 2u];
+            if (avail > 3u) c[col + 3u] = a3 + residual[col + 3u];
+        }
+
+        /* INT8 subgroup gemm_gemv_add */
+        __kernel void gemm_gemv_add_subgroup_int8(
+            __global const float* a,
+            __global const signed char* b,
+            __global const float* bscale,
+            __global float* c,
+            __global const float* residual,
+            const uint aCols,
+            const uint bCols,
+            const uint numBlocks)
+        {
+            uint col = get_global_id(0) * BLOCK; // not used; subgroup per 4 cols
+            // subgroup variant: one subgroup per 4 output cols
+            uint sgCol = (get_group_id(0)) * 4u;
+            if (sgCol >= bCols) return;
+            uint avail = bCols - sgCol;
+            uint sgLocal = get_sub_group_local_id();
+            uint sgSize = get_sub_group_size();
+
+            float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
+            if (avail >= 4u)
+            {
+                for (uint k = sgLocal; k < aCols; k += sgSize)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + sgCol;
+                    signed char4 cv4 = vload4(0, b + bBase);
+                    uint bi = k >> 5;
+                    float s0 = bscale[sgCol * numBlocks + bi];
+                    float s1 = bscale[(sgCol + 1u) * numBlocks + bi];
+                    float s2 = bscale[(sgCol + 2u) * numBlocks + bi];
+                    float s3 = bscale[(sgCol + 3u) * numBlocks + bi];
+                    pa0 += av * ((float)cv4.s0 * s0);
+                    pa1 += av * ((float)cv4.s1 * s1);
+                    pa2 += av * ((float)cv4.s2 * s2);
+                    pa3 += av * ((float)cv4.s3 * s3);
+                }
+            }
+            else
+            {
+                for (uint k = sgLocal; k < aCols; k += sgSize)
+                {
+                    float av = a[k];
+                    uint bBase = k * bCols + sgCol;
+                    uint bi = k >> 5;
+                    pa0 += av * ((float)b[bBase] * bscale[sgCol * numBlocks + bi]);
+                    if (avail > 1u) pa1 += av * ((float)b[bBase + 1u] * bscale[(sgCol + 1u) * numBlocks + bi]);
+                    if (avail > 2u) pa2 += av * ((float)b[bBase + 2u] * bscale[(sgCol + 2u) * numBlocks + bi]);
+                    if (avail > 3u) pa3 += av * ((float)b[bBase + 3u] * bscale[(sgCol + 3u) * numBlocks + bi]);
+                }
+            }
+            float a0r = sub_group_reduce_add(pa0);
+            float a1r = sub_group_reduce_add(pa1);
+            float a2r = sub_group_reduce_add(pa2);
+            float a3r = sub_group_reduce_add(pa3);
+
+            if (sgLocal == 0u)
+            {
+                c[sgCol] = a0r + residual[sgCol];
+                if (avail > 1u) c[sgCol + 1u] = a1r + residual[sgCol + 1u];
+                if (avail > 2u) c[sgCol + 2u] = a2r + residual[sgCol + 2u];
+                if (avail > 3u) c[sgCol + 3u] = a3r + residual[sgCol + 3u];
+            }
+        }
+
+        /* INT8 rms_norm_gemv_swiglu: norm + gate + up + swiglu, fused, INT8 weights. */
+        __kernel void rms_norm_gemv_swiglu_int8(
+            __global const float* x,
+            __global const float* gamma,
+            __global const signed char* wGate,
+            __global const float* scaleGate,
+            __global const signed char* wUp,
+            __global const float* scaleUp,
+            __global float* outInter,
+            const uint aCols,
+            const uint interCols,
+            const uint numBlocks,
+            const float eps)
+        {
+            uint colBase = get_group_id(0) * GEMVCOLS;
+            uint col = colBase + get_local_id(0) * BLOCK;
+            uint lid = get_local_id(0);
+
+            float ssq = 0.0f;
+            for (uint k = 0; k < aCols; ++k) { float v = x[k]; ssq += v * v; }
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES) normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            if (col >= interCols) return;
+            uint avail = interCols - col;
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            float u0 = 0.0f, u1 = 0.0f, u2 = 0.0f, u3 = 0.0f;
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        signed char4 gv = vload4(0, wGate + bBase);
+                        signed char4 uv = vload4(0, wUp + bBase);
+                        uint bi = k >> 5;
+                        float sg0 = scaleGate[col * numBlocks + bi];
+                        float sg1 = scaleGate[(col+1u)*numBlocks + bi];
+                        float sg2 = scaleGate[(col+2u)*numBlocks + bi];
+                        float sg3 = scaleGate[(col+3u)*numBlocks + bi];
+                        float su0 = scaleUp[col * numBlocks + bi];
+                        float su1 = scaleUp[(col+1u)*numBlocks + bi];
+                        float su2 = scaleUp[(col+2u)*numBlocks + bi];
+                        float su3 = scaleUp[(col+3u)*numBlocks + bi];
+                        a0 += av * ((float)gv.s0 * sg0);
+                        a1 += av * ((float)gv.s1 * sg1);
+                        a2 += av * ((float)gv.s2 * sg2);
+                        a3 += av * ((float)gv.s3 * sg3);
+                        u0 += av * ((float)uv.s0 * su0);
+                        u1 += av * ((float)uv.s1 * su1);
+                        u2 += av * ((float)uv.s2 * su2);
+                        u3 += av * ((float)uv.s3 * su3);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + col;
+                        uint bi = k >> 5;
+                        a0 += av * ((float)wGate[bBase] * scaleGate[col * numBlocks + bi]);
+                        if (avail > 1u) a1 += av * ((float)wGate[bBase+1u] * scaleGate[(col+1u)*numBlocks + bi]);
+                        if (avail > 2u) a2 += av * ((float)wGate[bBase+2u] * scaleGate[(col+2u)*numBlocks + bi]);
+                        if (avail > 3u) a3 += av * ((float)wGate[bBase+3u] * scaleGate[(col+3u)*numBlocks + bi]);
+                        u0 += av * ((float)wUp[bBase] * scaleUp[col * numBlocks + bi]);
+                        if (avail > 1u) u1 += av * ((float)wUp[bBase+1u] * scaleUp[(col+1u)*numBlocks + bi]);
+                        if (avail > 2u) u2 += av * ((float)wUp[bBase+2u] * scaleUp[(col+2u)*numBlocks + bi]);
+                        if (avail > 3u) u3 += av * ((float)wUp[bBase+3u] * scaleUp[(col+3u)*numBlocks + bi]);
+                    }
+                }
+            }
+            else
+            {
+                if (col >= interCols) return;
+                avail = interCols - col;
+                if (avail >= 4u)
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        signed char4 gv = vload4(0, wGate + bBase);
+                        signed char4 uv = vload4(0, wUp + bBase);
+                        uint bi = k >> 5;
+                        float sg0 = scaleGate[col * numBlocks + bi];
+                        float sg1 = scaleGate[(col+1u)*numBlocks + bi];
+                        float sg2 = scaleGate[(col+2u)*numBlocks + bi];
+                        float sg3 = scaleGate[(col+3u)*numBlocks + bi];
+                        float su0 = scaleUp[col * numBlocks + bi];
+                        float su1 = scaleUp[(col+1u)*numBlocks + bi];
+                        float su2 = scaleUp[(col+2u)*numBlocks + bi];
+                        float su3 = scaleUp[(col+3u)*numBlocks + bi];
+                        a0 += av * ((float)gv.s0 * sg0);
+                        a1 += av * ((float)gv.s1 * sg1);
+                        a2 += av * ((float)gv.s2 * sg2);
+                        a3 += av * ((float)gv.s3 * sg3);
+                        u0 += av * ((float)uv.s0 * su0);
+                        u1 += av * ((float)uv.s1 * su1);
+                        u2 += av * ((float)uv.s2 * su2);
+                        u3 += av * ((float)uv.s3 * su3);
+                    }
+                }
+                else
+                {
+                    for (uint k = 0; k < aCols; ++k)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + col;
+                        uint bi = k >> 5;
+                        a0 += av * ((float)wGate[bBase] * scaleGate[col * numBlocks + bi]);
+                        if (avail > 1u) a1 += av * ((float)wGate[bBase+1u] * scaleGate[(col+1u)*numBlocks + bi]);
+                        if (avail > 2u) a2 += av * ((float)wGate[bBase+2u] * scaleGate[(col+2u)*numBlocks + bi]);
+                        if (avail > 3u) a3 += av * ((float)wGate[bBase+3u] * scaleGate[(col+3u)*numBlocks + bi]);
+                        u0 += av * ((float)wUp[bBase] * scaleUp[col * numBlocks + bi]);
+                        if (avail > 1u) u1 += av * ((float)wUp[bBase+1u] * scaleUp[(col+1u)*numBlocks + bi]);
+                        if (avail > 2u) u2 += av * ((float)wUp[bBase+2u] * scaleUp[(col+2u)*numBlocks + bi]);
+                        if (avail > 3u) u3 += av * ((float)wUp[bBase+3u] * scaleUp[(col+3u)*numBlocks + bi]);
+                    }
+                }
+            }
+
+            // swiglu: silu(gate)*up
+            auto_silu0: ;
+            float s0g = 1.0f / (1.0f + exp(-a0));
+            float r0 = a0 * s0g * u0;
+            float s1g = 1.0f / (1.0f + exp(-a1));
+            float r1 = a1 * s1g * u1;
+            float s2g = 1.0f / (1.0f + exp(-a2));
+            float r2 = a2 * s2g * u2;
+            float s3g = 1.0f / (1.0f + exp(-a3));
+            float r3 = a3 * s3g * u3;
+
+            outInter[col] = r0;
+            if (avail > 1u) outInter[col+1u] = r1;
+            if (avail > 2u) outInter[col+2u] = r2;
+            if (avail > 3u) outInter[col+3u] = r3;
+        }
+
+        /* INT8 rms_norm_lm_head: fused norm + matvec (vocab), INT8 weights. Single slot. */
+        __kernel void rms_norm_lm_head_int8(
+            __global const float* x,
+            __global const float* gamma,
+            __global const signed char* w,
+            __global const float* wscale,
+            __global float* logits,
+            const uint aCols,
+            const uint bCols,
+            const uint numBlocks,
+            const float eps)
+        {
+            uint col = get_global_id(0) * BLOCK;
+            if (col >= bCols) return;
+            uint avail = bCols - col;
+
+            float ssq = 0.0f;
+            for (uint k = 0; k < aCols; ++k) { float v = x[k]; ssq += v * v; }
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+            if (avail >= 4u)
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = x[k] * normScale * gamma[k];
+                    uint bBase = k * bCols + col;
+                    signed char4 cv4 = vload4(0, w + bBase);
+                    uint bi = k >> 5;
+                    float s0 = wscale[col * numBlocks + bi];
+                    float s1 = wscale[(col+1u)*numBlocks + bi];
+                    float s2 = wscale[(col+2u)*numBlocks + bi];
+                    float s3 = wscale[(col+3u)*numBlocks + bi];
+                    a0 += av * ((float)cv4.s0 * s0);
+                    a1 += av * ((float)cv4.s1 * s1);
+                    a2 += av * ((float)cv4.s2 * s2);
+                    a3 += av * ((float)cv4.s3 * s3);
+                }
+            }
+            else
+            {
+                for (uint k = 0; k < aCols; ++k)
+                {
+                    float av = x[k] * normScale * gamma[k];
+                    uint bBase = k * bCols + col;
+                    uint bi = k >> 5;
+                    a0 += av * ((float)w[bBase] * wscale[col * numBlocks + bi]);
+                    if (avail > 1u) a1 += av * ((float)w[bBase+1u] * wscale[(col+1u)*numBlocks + bi]);
+                    if (avail > 2u) a2 += av * ((float)w[bBase+2u] * wscale[(col+2u)*numBlocks + bi]);
+                    if (avail > 3u) a3 += av * ((float)w[bBase+3u] * wscale[(col+3u)*numBlocks + bi]);
+                }
+            }
+            logits[col] = a0;
+            if (avail > 1u) logits[col+1u] = a1;
+            if (avail > 2u) logits[col+2u] = a2;
+            if (avail > 3u) logits[col+3u] = a3;
+        }
+
+        /* INT8 subgroup rms_norm_gemv */
+        __kernel void rms_norm_gemv_subgroup_int8(
+            __global const float* x,
+            __global const float* gamma,
+            __global const signed char* w0,
+            __global const float* scale0,
+            __global const float* bias0,
+            __global float* out0,
+            __global const signed char* w1,
+            __global const float* scale1,
+            __global const float* bias1,
+            __global float* out1,
+            __global const signed char* w2,
+            __global const float* scale2,
+            __global const float* bias2,
+            __global float* out2,
+            const uint aCols,
+            const uint cols0,
+            const uint cols1,
+            const uint cols2,
+            const uint hasBias,
+            const uint numBlocks,
+            const float eps)
+        {
+            uint g = get_group_id(0);
+            uint groups0 = (cols0 + 3u) / 4u;
+            uint groups1 = (cols1 + 3u) / 4u;
+
+            __global const signed char* b;
+            __global const float* sc;
+            __global const float* bias;
+            __global float* c;
+            uint bCols;
+            uint colBase;
+            if (g < groups0) { b = w0; sc = scale0; bias = bias0; c = out0; bCols = cols0; colBase = g * 4u; }
+            else if (g < groups0 + groups1) { b = w1; sc = scale1; bias = bias1; c = out1; bCols = cols1; colBase = (g - groups0) * 4u; }
+            else { b = w2; sc = scale2; bias = bias2; c = out2; bCols = cols2; colBase = (g - groups0 - groups1) * 4u; }
+
+            uint col = colBase;
+            uint lid = get_local_id(0);
+            uint sgSize = get_sub_group_size();
+            uint sgLocal = get_sub_group_local_id();
+
+            float partial = 0.0f;
+            for (uint k = sgLocal; k < aCols; k += sgSize) { float v = x[k]; partial += v * v; }
+            float ssq = sub_group_reduce_add(partial);
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES) normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            if (col >= bCols) return;
+            uint avail = bCols - col;
+
+            float pa0 = 0.0f, pa1 = 0.0f, pa2 = 0.0f, pa3 = 0.0f;
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        signed char4 cv4 = vload4(0, b + bBase);
+                        uint bi = k >> 5;
+                        float s0 = sc[col * numBlocks + bi];
+                        float s1 = sc[(col+1u)*numBlocks + bi];
+                        float s2 = sc[(col+2u)*numBlocks + bi];
+                        float s3 = sc[(col+3u)*numBlocks + bi];
+                        pa0 += av * ((float)cv4.s0 * s0);
+                        pa1 += av * ((float)cv4.s1 * s1);
+                        pa2 += av * ((float)cv4.s2 * s2);
+                        pa3 += av * ((float)cv4.s3 * s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * bCols + col;
+                        uint bi = k >> 5;
+                        pa0 += av * ((float)b[bBase] * sc[col * numBlocks + bi]);
+                        if (avail > 1u) pa1 += av * ((float)b[bBase+1u] * sc[(col+1u)*numBlocks + bi]);
+                        if (avail > 2u) pa2 += av * ((float)b[bBase+2u] * sc[(col+2u)*numBlocks + bi]);
+                        if (avail > 3u) pa3 += av * ((float)b[bBase+3u] * sc[(col+3u)*numBlocks + bi]);
+                    }
+                }
+            }
+            else
+            {
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        signed char4 cv4 = vload4(0, b + bBase);
+                        uint bi = k >> 5;
+                        float s0 = sc[col * numBlocks + bi];
+                        float s1 = sc[(col+1u)*numBlocks + bi];
+                        float s2 = sc[(col+2u)*numBlocks + bi];
+                        float s3 = sc[(col+3u)*numBlocks + bi];
+                        pa0 += av * ((float)cv4.s0 * s0);
+                        pa1 += av * ((float)cv4.s1 * s1);
+                        pa2 += av * ((float)cv4.s2 * s2);
+                        pa3 += av * ((float)cv4.s3 * s3);
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * bCols + col;
+                        uint bi = k >> 5;
+                        pa0 += av * ((float)b[bBase] * sc[col * numBlocks + bi]);
+                        if (avail > 1u) pa1 += av * ((float)b[bBase+1u] * sc[(col+1u)*numBlocks + bi]);
+                        if (avail > 2u) pa2 += av * ((float)b[bBase+2u] * sc[(col+2u)*numBlocks + bi]);
+                        if (avail > 3u) pa3 += av * ((float)b[bBase+3u] * sc[(col+3u)*numBlocks + bi]);
+                    }
+                }
+            }
+
+            float a0r = sub_group_reduce_add(pa0);
+            float a1r = sub_group_reduce_add(pa1);
+            float a2r = sub_group_reduce_add(pa2);
+            float a3r = sub_group_reduce_add(pa3);
+
+            if (sgLocal == 0u)
+            {
+                if (hasBias != 0u)
+                {
+                    c[col] = a0r + bias[col];
+                    if (avail > 1u) c[col+1u] = a1r + bias[col+1u];
+                    if (avail > 2u) c[col+2u] = a2r + bias[col+2u];
+                    if (avail > 3u) c[col+3u] = a3r + bias[col+3u];
+                }
+                else
+                {
+                    c[col] = a0r;
+                    if (avail > 1u) c[col+1u] = a1r;
+                    if (avail > 2u) c[col+2u] = a2r;
+                    if (avail > 3u) c[col+3u] = a3r;
+                }
+            }
+        }
+
+        /* INT8 subgroup rms_norm_gemv_swiglu */
+        __kernel void rms_norm_gemv_swiglu_subgroup_int8(
+            __global const float* x,
+            __global const float* gamma,
+            __global const signed char* wGate,
+            __global const float* scaleGate,
+            __global const signed char* wUp,
+            __global const float* scaleUp,
+            __global float* outInter,
+            const uint aCols,
+            const uint interCols,
+            const uint numBlocks,
+            const float eps)
+        {
+            uint sgCol = get_group_id(0) * 4u;
+            if (sgCol >= interCols) return;
+            uint avail = interCols - sgCol;
+            uint sgLocal = get_sub_group_local_id();
+            uint sgSize = get_sub_group_size();
+            uint lid = get_local_id(0);
+
+            float partial = 0.0f;
+            for (uint k = sgLocal; k < aCols; k += sgSize) { float v = x[k]; partial += v * v; }
+            float ssq = sub_group_reduce_add(partial);
+            float normScale = 1.0f / sqrt(ssq / (float)aCols + eps);
+
+            __local float normed[STAGED_NORM_MAX];
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                for (uint k = lid; k < aCols; k += GEMVLANES) normed[k] = x[k] * normScale * gamma[k];
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            float pa0=0,pa1=0,pa2=0,pa3=0, pu0=0,pu1=0,pu2=0,pu3=0;
+            if (aCols <= STAGED_NORM_MAX)
+            {
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + sgCol;
+                        signed char4 gv = vload4(0, wGate + bBase);
+                        signed char4 uv = vload4(0, wUp + bBase);
+                        uint bi = k >> 5;
+                        float sg0 = scaleGate[sgCol * numBlocks + bi];
+                        float sg1 = scaleGate[(sgCol+1u)*numBlocks + bi];
+                        float sg2 = scaleGate[(sgCol+2u)*numBlocks + bi];
+                        float sg3 = scaleGate[(sgCol+3u)*numBlocks + bi];
+                        float su0 = scaleUp[sgCol * numBlocks + bi];
+                        float su1 = scaleUp[(sgCol+1u)*numBlocks + bi];
+                        float su2 = scaleUp[(sgCol+2u)*numBlocks + bi];
+                        float su3 = scaleUp[(sgCol+3u)*numBlocks + bi];
+                        pa0 += av * ((float)gv.s0 * sg0);
+                        pa1 += av * ((float)gv.s1 * sg1);
+                        pa2 += av * ((float)gv.s2 * sg2);
+                        pa3 += av * ((float)gv.s3 * sg3);
+                        pu0 += av * ((float)uv.s0 * su0);
+                        pu1 += av * ((float)uv.s1 * su1);
+                        pu2 += av * ((float)uv.s2 * su2);
+                        pu3 += av * ((float)uv.s3 * su3);
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = normed[k];
+                        uint bBase = k * interCols + sgCol;
+                        uint bi = k >> 5;
+                        pa0 += av * ((float)wGate[bBase] * scaleGate[sgCol * numBlocks + bi]);
+                        if (avail > 1u) pa1 += av * ((float)wGate[bBase+1u] * scaleGate[(sgCol+1u)*numBlocks + bi]);
+                        if (avail > 2u) pa2 += av * ((float)wGate[bBase+2u] * scaleGate[(sgCol+2u)*numBlocks + bi]);
+                        if (avail > 3u) pa3 += av * ((float)wGate[bBase+3u] * scaleGate[(sgCol+3u)*numBlocks + bi]);
+                        pu0 += av * ((float)wUp[bBase] * scaleUp[sgCol * numBlocks + bi]);
+                        if (avail > 1u) pu1 += av * ((float)wUp[bBase+1u] * scaleUp[(sgCol+1u)*numBlocks + bi]);
+                        if (avail > 2u) pu2 += av * ((float)wUp[bBase+2u] * scaleUp[(sgCol+2u)*numBlocks + bi]);
+                        if (avail > 3u) pu3 += av * ((float)wUp[bBase+3u] * scaleUp[(sgCol+3u)*numBlocks + bi]);
+                    }
+                }
+            }
+            else
+            {
+                if (avail >= 4u)
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + sgCol;
+                        signed char4 gv = vload4(0, wGate + bBase);
+                        signed char4 uv = vload4(0, wUp + bBase);
+                        uint bi = k >> 5;
+                        float sg0 = scaleGate[sgCol * numBlocks + bi];
+                        float sg1 = scaleGate[(sgCol+1u)*numBlocks + bi];
+                        float sg2 = scaleGate[(sgCol+2u)*numBlocks + bi];
+                        float sg3 = scaleGate[(sgCol+3u)*numBlocks + bi];
+                        float su0 = scaleUp[sgCol * numBlocks + bi];
+                        float su1 = scaleUp[(sgCol+1u)*numBlocks + bi];
+                        float su2 = scaleUp[(sgCol+2u)*numBlocks + bi];
+                        float su3 = scaleUp[(sgCol+3u)*numBlocks + bi];
+                        pa0 += av * ((float)gv.s0 * sg0);
+                        pa1 += av * ((float)gv.s1 * sg1);
+                        pa2 += av * ((float)gv.s2 * sg2);
+                        pa3 += av * ((float)gv.s3 * sg3);
+                        pu0 += av * ((float)uv.s0 * su0);
+                        pu1 += av * ((float)uv.s1 * su1);
+                        pu2 += av * ((float)uv.s2 * su2);
+                        pu3 += av * ((float)uv.s3 * su3);
+                    }
+                }
+                else
+                {
+                    for (uint k = sgLocal; k < aCols; k += sgSize)
+                    {
+                        float av = x[k] * normScale * gamma[k];
+                        uint bBase = k * interCols + sgCol;
+                        uint bi = k >> 5;
+                        pa0 += av * ((float)wGate[bBase] * scaleGate[sgCol * numBlocks + bi]);
+                        if (avail > 1u) pa1 += av * ((float)wGate[bBase+1u] * scaleGate[(sgCol+1u)*numBlocks + bi]);
+                        if (avail > 2u) pa2 += av * ((float)wGate[bBase+2u] * scaleGate[(sgCol+2u)*numBlocks + bi]);
+                        if (avail > 3u) pa3 += av * ((float)wGate[bBase+3u] * scaleGate[(sgCol+3u)*numBlocks + bi]);
+                        pu0 += av * ((float)wUp[bBase] * scaleUp[sgCol * numBlocks + bi]);
+                        if (avail > 1u) pu1 += av * ((float)wUp[bBase+1u] * scaleUp[(sgCol+1u)*numBlocks + bi]);
+                        if (avail > 2u) pu2 += av * ((float)wUp[bBase+2u] * scaleUp[(sgCol+2u)*numBlocks + bi]);
+                        if (avail > 3u) pu3 += av * ((float)wUp[bBase+3u] * scaleUp[(sgCol+3u)*numBlocks + bi]);
+                    }
+                }
+            }
+
+            float g0 = sub_group_reduce_add(pa0);
+            float g1 = sub_group_reduce_add(pa1);
+            float g2 = sub_group_reduce_add(pa2);
+            float g3 = sub_group_reduce_add(pa3);
+            float u0r = sub_group_reduce_add(pu0);
+            float u1r = sub_group_reduce_add(pu1);
+            float u2r = sub_group_reduce_add(pu2);
+            float u3r = sub_group_reduce_add(pu3);
+
+            if (sgLocal == 0u)
+            {
+                float s0g = 1.0f/(1.0f+exp(-g0)); outInter[sgCol] = g0*s0g*u0r;
+                if (avail > 1u) { float s1g = 1.0f/(1.0f+exp(-g1)); outInter[sgCol+1u] = g1*s1g*u1r; }
+                if (avail > 2u) { float s2g = 1.0f/(1.0f+exp(-g2)); outInter[sgCol+2u] = g2*s2g*u2r; }
+                if (avail > 3u) { float s3g = 1.0f/(1.0f+exp(-g3)); outInter[sgCol+3u] = g3*s3g*u3r; }
+            }
+        }
+
         #endif
 
         """;
