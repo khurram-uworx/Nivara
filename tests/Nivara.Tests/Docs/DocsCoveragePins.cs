@@ -36,5 +36,5 @@ internal static class DocsCoveragePins
     /// tests/Nivara.PerformanceTests/README.md and docs/QWEN.md) + 2 net from #1468
     /// (runner XML comments reference docs/SILK.md) = 531.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 531;
+    internal const int ExpectedDocumentReferenceCount = 536;
 }

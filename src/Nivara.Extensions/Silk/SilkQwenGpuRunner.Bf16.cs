@@ -8,7 +8,8 @@ public sealed partial class SilkQwenGpuRunner
     public SilkQwenGpuRunner(
         SilkRuntime runtime,
         QwenSilkConfig config,
-        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
+        SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
@@ -16,6 +17,7 @@ public sealed partial class SilkQwenGpuRunner
 
         this.runtime = runtime;
         this.config = config;
+        int8Weights = quantization == SilkWeightQuantization.Int8Block32;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -29,7 +31,7 @@ public sealed partial class SilkQwenGpuRunner
         ropeTheta = config.RopeTheta;
         seqCap = maxPos;
         vocabSize = config.VocabSize;
-        bf16Weights = true;
+        bf16Weights = !int8Weights;
         runtime.EnsureAttentionLocalMemory(headDim);
 
         static float[] Widen(BFloat16[] src)
@@ -47,16 +49,52 @@ public sealed partial class SilkQwenGpuRunner
             // BFloat16 and ushort share an identical 2-byte layout, so this is a
             // bit-preserving reinterpretation (no conversion) for device storage.
             var tokUs = System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(tok.Data.AsSpan()).ToArray();
-            tokEmb = runtime.AllocateBytes((ulong)tokUs.Length * sizeof(ushort));
-            runtime.Upload(tokEmb, tokUs.AsSpan());
+            if (int8Weights)
+            {
+                var tokF = new float[tokUs.Length];
+                for (int i = 0; i < tokF.Length; i++) tokF[i] = (float)tok.Data[i];
+                tokEmb = runtime.Allocate(tokF.Length);
+                runtime.Upload(tokEmb, tokF);
+            }
+            else
+            {
+                tokEmb = runtime.AllocateBytes((ulong)tokUs.Length * sizeof(ushort));
+                runtime.Upload(tokEmb, tokUs.AsSpan());
+            }
 
             int vocab = config.VocabSize;
-            var tokTF = new ushort[vocab * h];
-            for (int r = 0; r < vocab; r++)
-                for (int c = 0; c < h; c++)
-                    tokTF[c * vocab + r] = tokUs[r * h + c];
-            tokEmbTransposed = runtime.AllocateBytes((ulong)tokTF.Length * sizeof(ushort));
-            runtime.Upload(tokEmbTransposed, tokTF.AsSpan());
+            if (int8Weights)
+            {
+                var tokTF = new float[vocab * h];
+                for (int r = 0; r < vocab; r++)
+                    for (int c = 0; c < h; c++)
+                        tokTF[c * vocab + r] = (float)tok.Data[r * h + c];
+                tokEmbTransposed = runtime.Allocate(tokTF.Length);
+                runtime.Upload(tokEmbTransposed, tokTF);
+            }
+            else
+            {
+                var tokTF = new ushort[vocab * h];
+                for (int r = 0; r < vocab; r++)
+                    for (int c = 0; c < h; c++)
+                        tokTF[c * vocab + r] = tokUs[r * h + c];
+                tokEmbTransposed = runtime.AllocateBytes((ulong)tokTF.Length * sizeof(ushort));
+                runtime.Upload(tokEmbTransposed, tokTF.AsSpan());
+            }
+
+            if (int8Weights)
+            {
+                var tokTFf = new float[vocab * h];
+                for (int r = 0; r < vocab; r++)
+                    for (int c = 0; c < h; c++)
+                        tokTFf[c * vocab + r] = (float)tok.Data[r * h + c];
+                var (qw, sc) = SilkInt8Quantizer.Quantize(tokTFf.AsSpan(), h, vocab);
+                tokEmbInt8 = runtime.Allocate(qw.Length);
+                runtime.Upload(tokEmbInt8, qw.AsSpan());
+                tokEmbInt8Scale = runtime.Allocate(sc.Length);
+                runtime.Upload(tokEmbInt8Scale, sc.AsSpan());
+                tokEmbInt8NumBlocks = (h + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+            }
 
             var fn = WeightLayout.Req(tensors, "model.norm.weight", "Silk");
             finalNormW = runtime.Allocate(fn.Data.Length);

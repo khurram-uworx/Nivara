@@ -409,3 +409,18 @@ Notes:
 - Speedup figures measure **cache vs. full re-forward inside Nivara**, not vs. PyTorch. PyTorch numbers are the distance-to-library reference only.
 - **CPU viability fallback.** Real-checkpoint Qwen CPU runs can be too slow for interactive smoke use on typical dev machines. When CPU is impractical, use synthetic-weight CPU/Silk parity as the deterministic confidence gate: fixed seed/shape, argmax equality, and bounded logits tolerance (`maxAbs <= 1e-3 * (1 + max|cpu|)`) on prefill and cached decode. SmolLM-135M is the smaller diagnostic path; `samples/NivaraInference` reports prefill/decode split and decode throughput (`tok/s`) for SmolLM CPU and Silk runs to localize bottlenecks before attempting a real checkpoint.
 
+
+## INT8 block-quantized decode (issue #1469)
+
+Silk decode can optionally store decode weights as INT8 (`SilkInt8Block32 v1`, symmetric per-block-32, F32 scale) with in-kernel dequant, keeping F32 activations/accumulators. This is opt-in and defaults to BF16 storage / F32 compute.
+
+Enable via environment variable (no CLI flag needed):
+
+```powershell
+$env:NIVARA_SILK_INT8 = "1"
+dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark
+```
+
+The display line will report `Precision: INT8 block-32`. Measured synthetic-weight decode on Intel Xe: ~9.43 tok/s (INT8) vs ~5.64 tok/s (BF16), ~1.54x. Real-checkpoint numbers pending human run.
+
+See `docs/SILK.md` "INT8 block-quantized decode weights" for the full format. INT4 is deferred.

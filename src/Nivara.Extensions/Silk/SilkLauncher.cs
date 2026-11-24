@@ -11,7 +11,7 @@ internal static class SilkLauncher
     /// <summary>One output slot of <see cref="RmsNormGemv"/>: its weight matrix, an optional bias
     /// row, its destination, and its output width. Trailing slots are omitted rather than passed as
     /// four zeros, so a call site cannot wire a slot's width to another slot's buffer.</summary>
-    public readonly record struct GemvSlot(nint Weight, nint Bias, nint Output, int Cols);
+    public readonly record struct GemvSlot(nint Weight, nint Bias, nint Output, int Cols, nint Scale = 0);
 
     public static void Gather(SilkRuntime runtime, nint table, nint ids, nint y, int n, int hidden)
     {
@@ -1660,4 +1660,192 @@ internal static class SilkLauncher
         Linear(runtime, SilkKernels.ScatterRows, embedDim);
     }
 
+    public static void RmsNormGemvInt8(
+        SilkRuntime runtime,
+        nint x,
+        nint gamma,
+        ReadOnlySpan<GemvSlot> slots,
+        bool hasBias,
+        int aRows,
+        int aCols,
+        int numBlocks,
+        float eps)
+    {
+        if (aRows != 1) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        GemvSlot s0 = slots[0];
+        GemvSlot s1 = slots.Length > 1 ? slots[1] : default;
+        GemvSlot s2 = slots.Length > 2 ? slots[2] : default;
+        if (s0.Cols <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 2, s0.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 3, s0.Scale);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 4, s0.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 5, s0.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 6, s1.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 7, s1.Scale);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 8, s1.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 9, s1.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 10, s2.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 11, s2.Scale);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 12, s2.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvInt8, 13, s2.Output);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvInt8, 14, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvInt8, 15, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvInt8, 16, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvInt8, 17, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvInt8, 18, hasBias ? 1u : 0u);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvInt8, 19, (uint)numBlocks);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvInt8, 20, eps);
+
+        int threads = SilkKernels.GemvGlobalCols(s0.Cols) + SilkKernels.GemvGlobalCols(s1.Cols) + SilkKernels.GemvGlobalCols(s2.Cols);
+        runtime.Run(SilkKernels.RmsNormGemvInt8, [(nuint)threads], [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void RmsNormGemvSubgroupInt8(
+        SilkRuntime runtime,
+        nint x,
+        nint gamma,
+        ReadOnlySpan<GemvSlot> slots,
+        bool hasBias,
+        int aRows,
+        int aCols,
+        int numBlocks,
+        float eps)
+    {
+        if (aRows != 1) throw new ArgumentOutOfRangeException(nameof(aRows));
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (slots.Length is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        GemvSlot s0 = slots[0];
+        GemvSlot s1 = slots.Length > 1 ? slots[1] : default;
+        GemvSlot s2 = slots.Length > 2 ? slots[2] : default;
+        if (s0.Cols <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
+
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.RmsNormGemvSubgroupInt8))
+        {
+            RmsNormGemvInt8(runtime, x, gamma, slots, hasBias, aRows, aCols, numBlocks, eps);
+            return;
+        }
+
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 2, s0.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 3, s0.Scale);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 4, s0.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 5, s0.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 6, s1.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 7, s1.Scale);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 8, s1.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 9, s1.Output);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 10, s2.Weight);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 11, s2.Scale);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 12, s2.Bias);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSubgroupInt8, 13, s2.Output);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupInt8, 14, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupInt8, 15, (uint)s0.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupInt8, 16, (uint)s1.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupInt8, 17, (uint)s2.Cols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupInt8, 18, hasBias ? 1u : 0u);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSubgroupInt8, 19, (uint)numBlocks);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSubgroupInt8, 20, eps);
+
+        int t = SilkKernels.GemvKSplitGlobalCols(s0.Cols) + SilkKernels.GemvKSplitGlobalCols(s1.Cols) + SilkKernels.GemvKSplitGlobalCols(s2.Cols);
+        runtime.Run(SilkKernels.RmsNormGemvSubgroupInt8, [(nuint)t], [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void GemmGemvAddInt8(SilkRuntime runtime, nint a, nint b, nint bscale, nint c, nint residual, int aCols, int bCols, int numBlocks)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        runtime.SetBuffer(SilkKernels.GemmGemvAddInt8, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddInt8, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddInt8, 2, bscale);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddInt8, 3, c);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddInt8, 4, residual);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddInt8, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddInt8, 6, (uint)bCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddInt8, 7, (uint)numBlocks);
+        int threads = SilkKernels.GemvGlobalCols(bCols);
+        runtime.Run(SilkKernels.GemmGemvAddInt8, [(nuint)threads], [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void GemmGemvAddSubgroupInt8(SilkRuntime runtime, nint a, nint b, nint bscale, nint c, nint residual, int aCols, int bCols, int numBlocks)
+    {
+        if (aCols <= 0) throw new ArgumentOutOfRangeException(nameof(aCols));
+        if (bCols <= 0) throw new ArgumentOutOfRangeException(nameof(bCols));
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.GemmGemvAddSubgroupInt8))
+        {
+            GemmGemvAddInt8(runtime, a, b, bscale, c, residual, aCols, bCols, numBlocks);
+            return;
+        }
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupInt8, 0, a);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupInt8, 1, b);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupInt8, 2, bscale);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupInt8, 3, c);
+        runtime.SetBuffer(SilkKernels.GemmGemvAddSubgroupInt8, 4, residual);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupInt8, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupInt8, 6, (uint)bCols);
+        runtime.SetUInt32(SilkKernels.GemmGemvAddSubgroupInt8, 7, (uint)numBlocks);
+        int t = SilkKernels.GemvKSplitGlobalCols(bCols);
+        runtime.Run(SilkKernels.GemmGemvAddSubgroupInt8, [(nuint)t], [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void RmsNormGemvSwiGluInt8(SilkRuntime runtime, nint x, nint gamma, nint wGate, nint scaleGate, nint wUp, nint scaleUp, nint outInter, int aCols, int interCols, int numBlocks, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 2, wGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 3, scaleGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 4, wUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 5, scaleUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluInt8, 6, outInter);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluInt8, 7, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluInt8, 8, (uint)interCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluInt8, 9, (uint)numBlocks);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSwiGluInt8, 10, eps);
+        int threads = SilkKernels.GemvGlobalCols(interCols);
+        runtime.Run(SilkKernels.RmsNormGemvSwiGluInt8, [(nuint)threads], [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void RmsNormGemvSwiGluSubgroupInt8(SilkRuntime runtime, nint x, nint gamma, nint wGate, nint scaleGate, nint wUp, nint scaleUp, nint outInter, int aCols, int interCols, int numBlocks, float eps)
+    {
+        if (!runtime.SupportsSubgroups || !runtime.HasKernel(SilkKernels.RmsNormGemvSwiGluSubgroupInt8))
+        {
+            RmsNormGemvSwiGluInt8(runtime, x, gamma, wGate, scaleGate, wUp, scaleUp, outInter, aCols, interCols, numBlocks, eps);
+            return;
+        }
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 2, wGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 3, scaleGate);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 4, wUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 5, scaleUp);
+        runtime.SetBuffer(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 6, outInter);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 7, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 8, (uint)interCols);
+        runtime.SetUInt32(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 9, (uint)numBlocks);
+        runtime.SetFloat32(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, 10, eps);
+        int threads = SilkKernels.GemvKSplitGlobalCols(interCols);
+        runtime.Run(SilkKernels.RmsNormGemvSwiGluSubgroupInt8, [(nuint)threads], [(nuint)SilkKernels.GemvGroupSize]);
+    }
+
+    public static void RmsNormLmHeadInt8(SilkRuntime runtime, nint x, nint gamma, nint w, nint wscale, nint logits, int aCols, int bCols, int numBlocks, float eps)
+    {
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadInt8, 0, x);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadInt8, 1, gamma);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadInt8, 2, w);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadInt8, 3, wscale);
+        runtime.SetBuffer(SilkKernels.RmsNormLmHeadInt8, 4, logits);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadInt8, 5, (uint)aCols);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadInt8, 6, (uint)bCols);
+        runtime.SetUInt32(SilkKernels.RmsNormLmHeadInt8, 7, (uint)numBlocks);
+        runtime.SetFloat32(SilkKernels.RmsNormLmHeadInt8, 8, eps);
+        int threads = SilkKernels.GemvGlobalCols(bCols);
+        runtime.Run(SilkKernels.RmsNormLmHeadInt8, [(nuint)threads], [(nuint)SilkKernels.GemvGroupSize]);
+    }
 }

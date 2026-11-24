@@ -381,6 +381,13 @@ public sealed unsafe class SilkRuntime : IDisposable
             WriteRaw(buffer, p, (ulong)data.Length * sizeof(int));
     }
 
+    /// <summary>Blocking write of exactly <paramref name="data"/>.Length INT8 (sbyte) elements.</summary>
+    public void Upload(nint buffer, ReadOnlySpan<sbyte> data)
+    {
+        fixed (sbyte* p = data)
+            WriteRaw(buffer, p, (ulong)data.Length * sizeof(sbyte));
+    }
+
     /// <summary>Blocking read of <paramref name="count"/> floats.</summary>
     public float[] Download(nint buffer, int count)
     {

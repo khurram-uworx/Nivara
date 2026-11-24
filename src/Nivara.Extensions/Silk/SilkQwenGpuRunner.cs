@@ -29,6 +29,10 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
     readonly nint tokEmb;
     readonly bool bf16Weights;
+    nint tokEmbInt8;
+    nint tokEmbInt8Scale;
+    int tokEmbInt8NumBlocks;
+    readonly bool int8Weights;
     readonly nint finalNormW;
     readonly LayerWeights[] layers;
 
@@ -124,7 +128,8 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     public SilkQwenGpuRunner(
         SilkRuntime runtime,
         QwenSilkConfig config,
-        Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        SilkWeightQuantization quantization = SilkWeightQuantization.None)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(config);
@@ -132,7 +137,8 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
         this.runtime = runtime;
         this.config = config;
-        this.bf16Weights = false;
+        int8Weights = quantization == SilkWeightQuantization.Int8Block32;
+        this.bf16Weights = false && !int8Weights;
         hiddenDim = config.HiddenSize;
         intermediateDim = config.IntermediateSize;
         numHeads = config.NumAttentionHeads;
@@ -154,6 +160,15 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             var tokEmbT = WeightLayout.Transposed(tensors, "model.embed_tokens.weight", "Silk");
             tokEmbTransposed = runtime.Allocate(tokEmbT.Length);
             runtime.Upload(tokEmbTransposed, tokEmbT);
+            if (int8Weights)
+            {
+                var (qw, sc) = SilkInt8Quantizer.Quantize(tokEmbT.AsSpan(), hiddenDim, vocabSize);
+                tokEmbInt8 = runtime.Allocate(qw.Length);
+                runtime.Upload(tokEmbInt8, qw.AsSpan());
+                tokEmbInt8Scale = runtime.Allocate(sc.Length);
+                runtime.Upload(tokEmbInt8Scale, sc.AsSpan());
+                tokEmbInt8NumBlocks = (hiddenDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+            }
             finalNormW = UploadPlain(tensors, "model.norm.weight");
 
             layers = new LayerWeights[config.NumHiddenLayers];
@@ -212,11 +227,11 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
             // Q/K/V
-            GemmWithLora(normed.Handle, w.Wq, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
+            GemmWithLora(normed.Handle, w.WqPrefill, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
-            GemmWithLora(normed.Handle, w.Wk, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WkPrefill, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
-            GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WvPrefill, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
             // RoPE in place
@@ -226,21 +241,21 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
             // O proj + residual
-            GemmWithLora(context.Handle, w.Wo, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
+            GemmWithLora(context.Handle, w.WoPrefill, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             // post norm
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
             // gate/up
-            GemmWithLora(normed.Handle, w.Wgate, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            GemmWithLora(normed.Handle, w.Wup, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WgatePrefill, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WupPrefill, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             // swiglu -> mlp (intermediate)
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
             // down + residual
-            GemmWithLora(mlp.Handle, w.Wdown, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            GemmWithLora(mlp.Handle, w.WdownPrefill, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -300,28 +315,28 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            GemmWithLora(normed.Handle, w.Wq, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
+            GemmWithLora(normed.Handle, w.WqPrefill, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
-            GemmWithLora(normed.Handle, w.Wk, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WkPrefill, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
-            GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WvPrefill, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
             SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
-            GemmWithLora(context.Handle, w.Wo, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
+            GemmWithLora(context.Handle, w.WoPrefill, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            GemmWithLora(normed.Handle, w.Wgate, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            GemmWithLora(normed.Handle, w.Wup, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WgatePrefill, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WupPrefill, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
-            GemmWithLora(mlp.Handle, w.Wdown, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            GemmWithLora(mlp.Handle, w.WdownPrefill, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -359,11 +374,11 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            GemmWithLora(normed.Handle, w.Wq, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
+            GemmWithLora(normed.Handle, w.WqPrefill, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
-            GemmWithLora(normed.Handle, w.Wk, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WkPrefill, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
-            GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WvPrefill, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
             SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
@@ -373,17 +388,17 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
-            GemmWithLora(context.Handle, w.Wo, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
+            GemmWithLora(context.Handle, w.WoPrefill, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            GemmWithLora(normed.Handle, w.Wgate, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            GemmWithLora(normed.Handle, w.Wup, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WgatePrefill, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WupPrefill, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
-            GemmWithLora(mlp.Handle, w.Wdown, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            GemmWithLora(mlp.Handle, w.WdownPrefill, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -435,9 +450,9 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             RmsNormGemv(x.Handle, w.InputNormW,
                 [
-                    new(w.Wq, w.QBias, q.Handle, qDim),
-                    new(w.Wk, w.KBias, k.Handle, kvDim),
-                    new(w.Wv, w.VBias, v.Handle, kvDim),
+                    new(w.Wq, w.QBias, q.Handle, qDim, w.WqScale),
+                    new(w.Wk, w.KBias, k.Handle, kvDim, w.WkScale),
+                    new(w.Wv, w.VBias, v.Handle, kvDim, w.WvScale),
                 ],
                 [w.QLora, w.KLora, w.VLora],
                 hasBias: true, aRows: 1, aCols: hiddenDim, eps: eps);
@@ -452,19 +467,46 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             if (profile) { runtime.Finish(); profileCacheCopyMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
             int kvLen = position + 1;
-            DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
-                w.Wo, w.OLora, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
+            if (int8Weights && w.OLora is null)
+            {
+                SilkLauncher.DecodeGqaAttention(runtime, q.Handle, kCache[li], vCache[li], context.Handle, kvLen, numHeads, numKvHeads, headDim, scale);
+                int nbQ = (qDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+                SilkLauncher.GemmGemvAddSubgroupInt8(runtime, context.Handle, w.Wo, w.WoScale, x.Handle, x.Handle, qDim, hiddenDim, nbQ);
+            }
+            else
+            {
+                DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
+                    w.Wo, w.OLora, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
+            }
             if (profile) { runtime.Finish(); profileAttentionOProjMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
-            MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.GateLora, w.Wup, w.UpLora, w.Wdown, w.DownLora,
-                x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
+            if (int8Weights && w.GateLora is null && w.UpLora is null && w.DownLora is null)
+            {
+                int nbH = (hiddenDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+                int nbI = (intermediateDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+                SilkLauncher.RmsNormGemvSwiGluSubgroupInt8(runtime, x.Handle, w.PostNormW, w.Wgate, w.WgateScale, w.Wup, w.WupScale, mlp.Handle, hiddenDim, intermediateDim, nbH, eps);
+                SilkLauncher.GemmGemvAddSubgroupInt8(runtime, mlp.Handle, w.Wdown, w.WdownScale, x.Handle, x.Handle, intermediateDim, hiddenDim, nbI);
+            }
+            else
+            {
+                MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.GateLora, w.Wup, w.UpLora, w.Wdown, w.DownLora,
+                    x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
+            }
             if (profile) { runtime.Finish(); profileMlpMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
         }
 
         logitsBuf = runtime.Ensure(logitsBuf, vocabSize);
-        RmsNormGemv(x.Handle, finalNormW,
-            [new(tokEmbTransposed, 0, logitsBuf.Handle, vocabSize)],
-            hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+        if (int8Weights)
+        {
+            int nbH = (hiddenDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+            SilkLauncher.RmsNormLmHeadInt8(runtime, x.Handle, finalNormW, tokEmbInt8, tokEmbInt8Scale, logitsBuf.Handle, hiddenDim, vocabSize, nbH, eps);
+        }
+        else
+        {
+            RmsNormGemv(x.Handle, finalNormW,
+                [new(tokEmbTransposed, 0, logitsBuf.Handle, vocabSize)],
+                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+        }
         if (profile) { runtime.Finish(); profileFinalNormLmHeadMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
         int argmax = ArgMaxDevice(logitsBuf.Handle, vocabSize);
@@ -601,11 +643,11 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.InputNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            GemmWithLora(normed.Handle, w.Wq, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
+            GemmWithLora(normed.Handle, w.WqPrefill, w.QLora, q.Handle, seqLen, hiddenDim, qDim);
             SilkLauncher.AddBias(runtime, q.Handle, w.QBias, q.Handle, seqLen, qDim);
-            GemmWithLora(normed.Handle, w.Wk, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WkPrefill, w.KLora, k.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, k.Handle, w.KBias, k.Handle, seqLen, kvDim);
-            GemmWithLora(normed.Handle, w.Wv, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
+            GemmWithLora(normed.Handle, w.WvPrefill, w.VLora, v.Handle, seqLen, hiddenDim, kvDim);
             SilkLauncher.AddBias(runtime, v.Handle, w.VBias, v.Handle, seqLen, kvDim);
 
             SilkLauncher.RotaryQk(runtime, q.Handle, k.Handle, posIdsBuf.Handle, cosBuf.Handle, sinBuf.Handle, seqLen, numHeads, numKvHeads, headDim, headDim / 2);
@@ -616,17 +658,17 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             SilkLauncher.CausalGqaAttention(runtime, q.Handle, k.Handle, v.Handle, context.Handle, seqLen, numHeads, numKvHeads, headDim, scale);
 
-            GemmWithLora(context.Handle, w.Wo, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
+            GemmWithLora(context.Handle, w.WoPrefill, w.OLora, projected.Handle, seqLen, qDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
 
             SilkLauncher.RmsNorm(runtime, x.Handle, w.PostNormW, normed.Handle, seqLen, hiddenDim, eps);
 
-            GemmWithLora(normed.Handle, w.Wgate, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
-            GemmWithLora(normed.Handle, w.Wup, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WgatePrefill, w.GateLora, gate.Handle, seqLen, hiddenDim, intermediateDim);
+            GemmWithLora(normed.Handle, w.WupPrefill, w.UpLora, up.Handle, seqLen, hiddenDim, intermediateDim);
 
             SilkLauncher.SwiGlu(runtime, gate.Handle, up.Handle, mlp.Handle, seqLen, intermediateDim);
 
-            GemmWithLora(mlp.Handle, w.Wdown, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
+            GemmWithLora(mlp.Handle, w.WdownPrefill, w.DownLora, projected.Handle, seqLen, intermediateDim, hiddenDim);
             SilkLauncher.Add(runtime, x.Handle, projected.Handle, x.Handle, seqLen * hiddenDim);
         }
 
@@ -670,9 +712,9 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
             RmsNormGemv(x.Handle, w.InputNormW,
                 [
-                    new(w.Wq, w.QBias, q.Handle, qDim),
-                    new(w.Wk, w.KBias, k.Handle, kvDim),
-                    new(w.Wv, w.VBias, v.Handle, kvDim),
+                    new(w.Wq, w.QBias, q.Handle, qDim, w.WqScale),
+                    new(w.Wk, w.KBias, k.Handle, kvDim, w.WkScale),
+                    new(w.Wv, w.VBias, v.Handle, kvDim, w.WvScale),
                 ],
                 [w.QLora, w.KLora, w.VLora],
                 hasBias: true, aRows: 1, aCols: hiddenDim, eps: eps);
@@ -686,17 +728,44 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             runtime.CopyBuffer(v.Handle, vCache[li], 0, position * kvDim, kvDim);
 
             int kvLen = position + 1;
-            DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
-                w.Wo, w.OLora, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
+            if (int8Weights && w.OLora is null)
+            {
+                SilkLauncher.DecodeGqaAttention(runtime, q.Handle, kCache[li], vCache[li], context.Handle, kvLen, numHeads, numKvHeads, headDim, scale);
+                int nbQ = (qDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+                SilkLauncher.GemmGemvAddSubgroupInt8(runtime, context.Handle, w.Wo, w.WoScale, x.Handle, x.Handle, qDim, hiddenDim, nbQ);
+            }
+            else
+            {
+                DecodeOproj(q.Handle, kCache[li], vCache[li], context.Handle,
+                    w.Wo, w.OLora, x.Handle, x.Handle, kvLen, numHeads, numKvHeads, headDim, qDim, hiddenDim, scale);
+            }
 
-            MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.GateLora, w.Wup, w.UpLora, w.Wdown, w.DownLora,
-                x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
+            if (int8Weights && w.GateLora is null && w.UpLora is null && w.DownLora is null)
+            {
+                int nbH = (hiddenDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+                int nbI = (intermediateDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+                SilkLauncher.RmsNormGemvSwiGluSubgroupInt8(runtime, x.Handle, w.PostNormW, w.Wgate, w.WgateScale, w.Wup, w.WupScale, mlp.Handle, hiddenDim, intermediateDim, nbH, eps);
+                SilkLauncher.GemmGemvAddSubgroupInt8(runtime, mlp.Handle, w.Wdown, w.WdownScale, x.Handle, x.Handle, intermediateDim, hiddenDim, nbI);
+            }
+            else
+            {
+                MlpBlock(x.Handle, w.PostNormW, w.Wgate, w.GateLora, w.Wup, w.UpLora, w.Wdown, w.DownLora,
+                    x.Handle, x.Handle, hiddenDim, intermediateDim, eps);
+            }
         }
 
         nint logitsBuf = runtime.Allocate(vocabSize);
-        RmsNormGemv(x.Handle, finalNormW,
-            [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
-            hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+        if (int8Weights)
+        {
+            int nbH = (hiddenDim + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+            SilkLauncher.RmsNormLmHeadInt8(runtime, x.Handle, finalNormW, tokEmbInt8, tokEmbInt8Scale, logitsBuf, hiddenDim, vocabSize, nbH, eps);
+        }
+        else
+        {
+            RmsNormGemv(x.Handle, finalNormW,
+                [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
+                hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
+        }
         var logits = runtime.Download(logitsBuf, vocabSize);
         runtime.Release(logitsBuf);
 
@@ -780,6 +849,12 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     }
     void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, bool hasBias, int aRows, int aCols, float eps)
     {
+        if (int8Weights)
+        {
+            int numBlocks = (aCols + SilkInt8Quantizer.BlockSize - 1) / SilkInt8Quantizer.BlockSize;
+            SilkLauncher.RmsNormGemvSubgroupInt8(runtime, x, gamma, slots, hasBias, aRows, aCols, numBlocks, eps);
+            return;
+        }
         if (bf16Weights) SilkLauncher.RmsNormGemvSubgroupBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
         else SilkLauncher.RmsNormGemvSubgroup(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
     }
@@ -824,7 +899,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
                 SilkLauncher.RmsNormGemvSwiGluSubgroupBf16(runtime, x, gamma, wg, wu, mlp.Handle, hidden, inter, eps2);
                 SilkLauncher.GemmGemvAddSubgroupBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
-            else
+            else if (!int8Weights)
             {
                 SilkLauncher.RmsNormGemvSwiGluSubgroup(runtime, x, gamma, wg, wu, mlp.Handle, hidden, inter, eps2);
                 SilkLauncher.GemmGemvAddSubgroup(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
@@ -878,6 +953,8 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         runtime.Release(tokEmb);
         runtime.Release(finalNormW);
         if (tokEmbTransposed != 0) runtime.Release(tokEmbTransposed);
+        if (tokEmbInt8 != 0) runtime.Release(tokEmbInt8);
+        if (tokEmbInt8Scale != 0) runtime.Release(tokEmbInt8Scale);
         if (partialArgmaxIdx != 0) runtime.Release(partialArgmaxIdx);
         if (partialArgmaxVal != 0) runtime.Release(partialArgmaxVal);
         if (logitsBuf.Handle != 0) runtime.Release(logitsBuf.Handle);
@@ -899,28 +976,67 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
 
     sealed class LayerWeights
     {
+        public readonly bool Int8;
         public nint InputNormW;
         public nint PostNormW;
         public nint Wq, Wk, Wv, Wo;
+        public nint WqScale, WkScale, WvScale, WoScale;
+        public nint WqF32, WkF32, WvF32, WoF32;
         public nint QBias, KBias, VBias;
         public nint Wgate, Wup, Wdown;
+        public nint WgateScale, WupScale, WdownScale;
+        public nint WgateF32, WupF32, WdownF32;
+        public nint WqPrefill => Int8 ? WqF32 : Wq;
+        public nint WkPrefill => Int8 ? WkF32 : Wk;
+        public nint WvPrefill => Int8 ? WvF32 : Wv;
+        public nint WoPrefill => Int8 ? WoF32 : Wo;
+        public nint WgatePrefill => Int8 ? WgateF32 : Wgate;
+        public nint WupPrefill => Int8 ? WupF32 : Wup;
+        public nint WdownPrefill => Int8 ? WdownF32 : Wdown;
         public LoraPair? QLora, KLora, VLora, OLora, GateLora, UpLora, DownLora;
 
         public LayerWeights(SilkQwenGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, int i)
         {
+            Int8 = owner.int8Weights;
             string p = $"model.layers.{i}";
             InputNormW = Upload(owner, tensors, $"{p}.input_layernorm.weight");
             PostNormW = Upload(owner, tensors, $"{p}.post_attention_layernorm.weight");
-            Wq = UploadT(owner, tensors, $"{p}.self_attn.q_proj.weight");
-            Wk = UploadT(owner, tensors, $"{p}.self_attn.k_proj.weight");
-            Wv = UploadT(owner, tensors, $"{p}.self_attn.v_proj.weight");
-            Wo = UploadT(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            if (owner.int8Weights)
+            {
+                var (wq, sq) = UploadTInt8(owner, tensors, $"{p}.self_attn.q_proj.weight", owner.hiddenDim);
+                Wq = wq; WqScale = sq; WqF32 = UploadT(owner, tensors, $"{p}.self_attn.q_proj.weight");
+                var (wk, sk) = UploadTInt8(owner, tensors, $"{p}.self_attn.k_proj.weight", owner.hiddenDim);
+                Wk = wk; WkScale = sk; WkF32 = UploadT(owner, tensors, $"{p}.self_attn.k_proj.weight");
+                var (wv, sv) = UploadTInt8(owner, tensors, $"{p}.self_attn.v_proj.weight", owner.hiddenDim);
+                Wv = wv; WvScale = sv; WvF32 = UploadT(owner, tensors, $"{p}.self_attn.v_proj.weight");
+                var (wo, so) = UploadTInt8(owner, tensors, $"{p}.self_attn.o_proj.weight", owner.hiddenDim);
+                Wo = wo; WoScale = so; WoF32 = UploadT(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            }
+            else
+            {
+                Wq = UploadT(owner, tensors, $"{p}.self_attn.q_proj.weight");
+                Wk = UploadT(owner, tensors, $"{p}.self_attn.k_proj.weight");
+                Wv = UploadT(owner, tensors, $"{p}.self_attn.v_proj.weight");
+                Wo = UploadT(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            }
             QBias = UploadBias(owner, tensors, $"{p}.self_attn.q_proj.bias");
             KBias = UploadBias(owner, tensors, $"{p}.self_attn.k_proj.bias");
             VBias = UploadBias(owner, tensors, $"{p}.self_attn.v_proj.bias");
-            Wgate = UploadT(owner, tensors, $"{p}.mlp.gate_proj.weight");
-            Wup = UploadT(owner, tensors, $"{p}.mlp.up_proj.weight");
-            Wdown = UploadT(owner, tensors, $"{p}.mlp.down_proj.weight");
+            if (owner.int8Weights)
+            {
+                var (wg, sg) = UploadTInt8(owner, tensors, $"{p}.mlp.gate_proj.weight", owner.hiddenDim);
+                Wgate = wg; WgateScale = sg; WgateF32 = UploadT(owner, tensors, $"{p}.mlp.gate_proj.weight");
+                var (wu, su) = UploadTInt8(owner, tensors, $"{p}.mlp.up_proj.weight", owner.hiddenDim);
+                Wup = wu; WupScale = su; WupF32 = UploadT(owner, tensors, $"{p}.mlp.up_proj.weight");
+                var (wd, sd) = UploadTInt8(owner, tensors, $"{p}.mlp.down_proj.weight", owner.intermediateDim);
+                Wdown = wd; WdownScale = sd; WdownF32 = UploadT(owner, tensors, $"{p}.mlp.down_proj.weight");
+            }
+            else
+            {
+                Wgate = UploadT(owner, tensors, $"{p}.mlp.gate_proj.weight");
+                Wup = UploadT(owner, tensors, $"{p}.mlp.up_proj.weight");
+                Wdown = UploadT(owner, tensors, $"{p}.mlp.down_proj.weight");
+            }
         }
 
         static nint UploadBias(SilkQwenGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
@@ -947,24 +1063,87 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             return buf;
         }
 
+        static (nint, nint) UploadTInt8(SilkQwenGpuRunner owner, Dictionary<string, (float[] Data, int[] Shape)> tensors, string key, int inDim)
+        {
+            var data = WeightLayout.Transposed(tensors, key, "Silk");
+            int outDim = data.Length / inDim;
+            var (qw, sc) = SilkInt8Quantizer.Quantize(data.AsSpan(), inDim, outDim);
+            nint wbuf = owner.runtime.Allocate(qw.Length);
+            owner.runtime.Upload(wbuf, qw.AsSpan());
+            nint sbuf = owner.runtime.Allocate(sc.Length);
+            owner.runtime.Upload(sbuf, sc.AsSpan());
+            return (wbuf, sbuf);
+        }
+
+        static (nint, nint) UploadTBf16Int8(SilkQwenGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key, int inDim)
+        {
+            var data = WeightLayout.Transposed(tensors, key, "Silk");
+            int outDim = data.Length / inDim;
+            var (qw, sc) = SilkInt8Quantizer.QuantizeFromBf16(
+                System.Runtime.InteropServices.MemoryMarshal.Cast<System.Numerics.BFloat16, ushort>(data.AsSpan()),
+                outDim, inDim);
+            nint wbuf = owner.runtime.Allocate(qw.Length);
+            owner.runtime.Upload(wbuf, qw.AsSpan());
+            nint sbuf = owner.runtime.Allocate(sc.Length);
+            owner.runtime.Upload(sbuf, sc.AsSpan());
+            return (wbuf, sbuf);
+        }
+
+        static nint UploadTBf16AsF32(SilkQwenGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key)
+        {
+            var data = WeightLayout.Transposed(tensors, key, "Silk");
+            var f = new float[data.Length];
+            for (int i = 0; i < f.Length; i++) f[i] = (float)data[i];
+            nint buf = owner.runtime.Allocate(f.Length);
+            owner.runtime.Upload(buf, f);
+            return buf;
+        }
+
         static float Widen(System.Numerics.BFloat16 b) => (float)b;
         // helper not needed beyond below
 
         public LayerWeights(SilkQwenGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, int i)
         {
+            Int8 = owner.int8Weights;
             string p = $"model.layers.{i}";
             InputNormW = UploadFloat(owner, tensors, $"{p}.input_layernorm.weight");
             PostNormW = UploadFloat(owner, tensors, $"{p}.post_attention_layernorm.weight");
-            Wq = UploadTBf16(owner, tensors, $"{p}.self_attn.q_proj.weight");
-            Wk = UploadTBf16(owner, tensors, $"{p}.self_attn.k_proj.weight");
-            Wv = UploadTBf16(owner, tensors, $"{p}.self_attn.v_proj.weight");
-            Wo = UploadTBf16(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            if (owner.int8Weights)
+            {
+                var (wq, sq) = UploadTBf16Int8(owner, tensors, $"{p}.self_attn.q_proj.weight", owner.hiddenDim);
+                Wq = wq; WqScale = sq; WqF32 = UploadTBf16AsF32(owner, tensors, $"{p}.self_attn.q_proj.weight");
+                var (wk, sk) = UploadTBf16Int8(owner, tensors, $"{p}.self_attn.k_proj.weight", owner.hiddenDim);
+                Wk = wk; WkScale = sk; WkF32 = UploadTBf16AsF32(owner, tensors, $"{p}.self_attn.k_proj.weight");
+                var (wv, sv) = UploadTBf16Int8(owner, tensors, $"{p}.self_attn.v_proj.weight", owner.hiddenDim);
+                Wv = wv; WvScale = sv; WvF32 = UploadTBf16AsF32(owner, tensors, $"{p}.self_attn.v_proj.weight");
+                var (wo, so) = UploadTBf16Int8(owner, tensors, $"{p}.self_attn.o_proj.weight", owner.hiddenDim);
+                Wo = wo; WoScale = so; WoF32 = UploadTBf16AsF32(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            }
+            else
+            {
+                Wq = UploadTBf16(owner, tensors, $"{p}.self_attn.q_proj.weight");
+                Wk = UploadTBf16(owner, tensors, $"{p}.self_attn.k_proj.weight");
+                Wv = UploadTBf16(owner, tensors, $"{p}.self_attn.v_proj.weight");
+                Wo = UploadTBf16(owner, tensors, $"{p}.self_attn.o_proj.weight");
+            }
             QBias = UploadBiasFloat(owner, tensors, $"{p}.self_attn.q_proj.bias");
             KBias = UploadBiasFloat(owner, tensors, $"{p}.self_attn.k_proj.bias");
             VBias = UploadBiasFloat(owner, tensors, $"{p}.self_attn.v_proj.bias");
-            Wgate = UploadTBf16(owner, tensors, $"{p}.mlp.gate_proj.weight");
-            Wup = UploadTBf16(owner, tensors, $"{p}.mlp.up_proj.weight");
-            Wdown = UploadTBf16(owner, tensors, $"{p}.mlp.down_proj.weight");
+            if (owner.int8Weights)
+            {
+                var (wg, sg) = UploadTBf16Int8(owner, tensors, $"{p}.mlp.gate_proj.weight", owner.hiddenDim);
+                Wgate = wg; WgateScale = sg; WgateF32 = UploadTBf16AsF32(owner, tensors, $"{p}.mlp.gate_proj.weight");
+                var (wu, su) = UploadTBf16Int8(owner, tensors, $"{p}.mlp.up_proj.weight", owner.hiddenDim);
+                Wup = wu; WupScale = su; WupF32 = UploadTBf16AsF32(owner, tensors, $"{p}.mlp.up_proj.weight");
+                var (wd, sd) = UploadTBf16Int8(owner, tensors, $"{p}.mlp.down_proj.weight", owner.intermediateDim);
+                Wdown = wd; WdownScale = sd; WdownF32 = UploadTBf16AsF32(owner, tensors, $"{p}.mlp.down_proj.weight");
+            }
+            else
+            {
+                Wgate = UploadTBf16(owner, tensors, $"{p}.mlp.gate_proj.weight");
+                Wup = UploadTBf16(owner, tensors, $"{p}.mlp.up_proj.weight");
+                Wdown = UploadTBf16(owner, tensors, $"{p}.mlp.down_proj.weight");
+            }
         }
 
         static nint UploadFloat(SilkQwenGpuRunner owner, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, string key)
@@ -994,8 +1173,22 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         {
             rt.Release(InputNormW); rt.Release(PostNormW);
             rt.Release(Wq); rt.Release(Wk); rt.Release(Wv); rt.Release(Wo);
+            if (WqScale != 0) rt.Release(WqScale);
+            if (WkScale != 0) rt.Release(WkScale);
+            if (WvScale != 0) rt.Release(WvScale);
+            if (WoScale != 0) rt.Release(WoScale);
+            if (WqF32 != 0) rt.Release(WqF32);
+            if (WkF32 != 0) rt.Release(WkF32);
+            if (WvF32 != 0) rt.Release(WvF32);
+            if (WoF32 != 0) rt.Release(WoF32);
             rt.Release(QBias); rt.Release(KBias); rt.Release(VBias);
             rt.Release(Wgate); rt.Release(Wup); rt.Release(Wdown);
+            if (WgateScale != 0) rt.Release(WgateScale);
+            if (WupScale != 0) rt.Release(WupScale);
+            if (WdownScale != 0) rt.Release(WdownScale);
+            if (WgateF32 != 0) rt.Release(WgateF32);
+            if (WupF32 != 0) rt.Release(WupF32);
+            if (WdownF32 != 0) rt.Release(WdownF32);
             ReleaseLora(rt, QLora); ReleaseLora(rt, KLora); ReleaseLora(rt, VLora); ReleaseLora(rt, OLora);
             ReleaseLora(rt, GateLora); ReleaseLora(rt, UpLora); ReleaseLora(rt, DownLora);
         }
