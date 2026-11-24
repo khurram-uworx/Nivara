@@ -108,6 +108,20 @@ For architecture, verification, performance, and GPU-path details per model:
 | Laya | [docs/LAYA.md](../../docs/LAYA.md) |
 | GPU acceleration (all models) | [docs/ACCELERATION.md](../../docs/ACCELERATION.md) |
 
+
+
+## Silk INT8 quantized decode (issue #1469)
+
+Silk decode can optionally store decode weights as INT8 (`SilkInt8Block32 v1`) with in-kernel dequant, keeping F32 activations/accumulators. Opt-in via environment variable (no CLI flag):
+
+```powershell
+$env:NIVARA_SILK_INT8 = "1"
+dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark
+dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark
+```
+
+The run prints `Precision: INT8 block-32`. Default (unset) remains BF16 storage / F32 compute. Synthetic-weight result on Intel Xe: ~9.43 tok/s (INT8) vs ~5.64 tok/s (BF16). See docs/SILK.md and docs/QWEN.md.
+
 ## TypeSafe decision-model demo (`typesafe`)
 
 `typesafe` loads no weights. It is an HTTP client for the **TypeSafe "System One"** decision-model

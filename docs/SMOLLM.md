@@ -214,3 +214,15 @@ where supported).
 - Decode profile (#1453): `smollm --synthetic-weights profile` / `smollm --synthetic-weights --silk profile` reports per-phase cached-decode dispatch/timing on Silk (CPU reports timing only).
 - Tests: `InferenceCliArgumentTests` pins the CLI scope; bias gating is shared with
   Qwen via `SynthesizeTensors<T>`.
+
+
+## INT8 block-quantized decode (issue #1469)
+
+Silk decode can optionally store decode weights as INT8 (`SilkInt8Block32 v1`, symmetric per-block-32, F32 scale) with in-kernel dequant. Opt-in via environment variable:
+
+```powershell
+$env:NIVARA_SILK_INT8 = "1"
+dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark
+```
+
+The display line will report `Precision: INT8 block-32`. See `docs/SILK.md` "INT8 block-quantized decode weights" for the full format. INT4 is deferred to a follow-up.
