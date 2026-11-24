@@ -407,6 +407,11 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
         return argmax;
     }
 
+    /// <summary>
+    /// Steady-state cached decode: no <see cref="SilkRuntime.Finish"/> is issued unless profiling
+    /// is enabled. See docs/SILK.md "Steady-state decode sync contract (#1468)" for the remaining
+    /// per-token sync points (token/pos uploads, argmax partial readback) and their justification.
+    /// </summary>
     public int ForwardCachedArgmax(int tokenId, int position)
     {
         if (position < 0) throw new ArgumentOutOfRangeException(nameof(position));

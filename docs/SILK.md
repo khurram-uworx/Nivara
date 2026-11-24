@@ -1149,6 +1149,20 @@ root-cause analysis of dispatch/occupancy-bound decode on small Llama-family sha
   read `GetDecodeProfile()` (`SilkDecodeProfile`). Phase timings use `Stopwatch` +
   `SilkRuntime.Finish()` boundaries only when profiling is enabled: embed, QKV norm+proj, rotary,
   cache copy, attention+O proj, MLP, final norm+LM head, argmax. Normal decode path is unchanged.
+- **Steady-state decode sync contract (#1468):** with `ProfilingEnabled == false`,
+  `ForwardCachedArgmax` issues **no** `SilkRuntime.Finish()`. The remaining host sync points per
+  token are deliberate and are kept minimal:
+  - two blocking uploads (`idsBuf`, `posIdsBuf`) for the token id and position; host buffers are
+    reused to avoid per-token allocation;
+  - two blocking downloads in `ArgMaxDevice` (partial argmax indices/values, `argmaxGroups`
+    elements) to reduce device results on the host;
+  - all kernel dispatches (`Run`) and KV-cache appends (`CopyBuffer`) are non-blocking enqueues;
+  - RoPE tables are pre-sized to `seqCap` on first growth so decode no longer reallocates or
+    re-uploads one row per token;
+  - the logits buffer is reused across tokens instead of Allocate/Release per token.
+  Optional device-side timing is available via the opt-in `SilkRuntime(enableQueueProfiling: true)`
+  diagnostic mode (queue created with `CL_QUEUE_PROFILING_ENABLE`); it is diagnostic-only and adds
+  overhead, so it is never enabled in the steady-state path.
 - **Synthetic diagnostic commands (human-run, GPU required for Silk):**
 
 ```bat
