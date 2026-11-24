@@ -38,6 +38,8 @@ public sealed unsafe class SilkRuntime : IDisposable
     bool disposed;
     int kernelDispatchCount;
     int queueCopyCount;
+    readonly bool queueProfilingEnabled;
+    nint lastKernelEvent;
 
     public string DeviceName { get; }
     public string Vendor { get; }
@@ -67,6 +69,17 @@ public sealed unsafe class SilkRuntime : IDisposable
     /// <see cref="ResetKernelDispatchCount"/>.</summary>
     public int QueueCopyCount => queueCopyCount;
 
+    /// <summary>Whether the command queue was created with <c>CL_QUEUE_PROFILING_ENABLE</c>
+    /// (diagnostic mode). When true, <see cref="Run"/> captures the dispatch event so callers
+    /// can read device-side timing via <see cref="TryGetEventDurationMs"/> after
+    /// <see cref="Finish"/>. Diagnostic only: adds overhead, never enabled in steady-state decode.
+    /// </summary>
+    public bool QueueProfilingEnabled => queueProfilingEnabled;
+
+    /// <summary>Event handle captured by the most recent <see cref="Run"/> when
+    /// <see cref="QueueProfilingEnabled"/> is true; 0 otherwise.</summary>
+    public nint LastKernelEvent => lastKernelEvent;
+
     /// <summary>Resets <see cref="KernelDispatchCount"/> and <see cref="QueueCopyCount"/> to zero
     /// for a profiling window.</summary>
     public void ResetProfilingCounters()
@@ -85,7 +98,7 @@ public sealed unsafe class SilkRuntime : IDisposable
     /// on devices that advertise it, forcing the scalar/vector fallback paths. Used for testing
     /// and benchmarking both capability paths on one device. Also overridable via the
     /// <c>NIVARA_SILK_SUBGROUPS=0</c> environment variable.</param>
-    public SilkRuntime(bool enableSubgroups = true)
+    public SilkRuntime(bool enableSubgroups = true, bool enableQueueProfiling = false)
     {
         if (enableSubgroups)
         {
@@ -93,6 +106,7 @@ public sealed unsafe class SilkRuntime : IDisposable
             if (env is not null && (env == "0" || env.Equals("false", StringComparison.OrdinalIgnoreCase)))
                 enableSubgroups = false;
         }
+        queueProfilingEnabled = enableQueueProfiling;
         cl = CL.GetApi();
         try
         {
@@ -129,7 +143,10 @@ public sealed unsafe class SilkRuntime : IDisposable
             if (err != 0 || context == 0)
                 throw new InvalidOperationException($"Silk clCreateContext failed ({err}).");
 
-            queue = cl.CreateCommandQueue(context, device, CommandQueueProperties.None, out err);
+            var queueProps = enableQueueProfiling
+                ? CommandQueueProperties.ProfilingEnable
+                : CommandQueueProperties.None;
+            queue = cl.CreateCommandQueue(context, device, queueProps, out err);
             if (err != 0 || queue == 0)
                 throw new InvalidOperationException($"Silk clCreateCommandQueue failed ({err}).");
 
@@ -481,13 +498,20 @@ public sealed unsafe class SilkRuntime : IDisposable
             throw new ArgumentException("global and local work sizes must have the same rank.", nameof(local));
 
         nuint offset = 0;
+        nint evt = 0;
         fixed (nuint* g = global)
         fixed (nuint* l = local)
         {
             int err = cl.EnqueueNdrangeKernel(
-                queue, Kernel(kernelName), (uint)global.Length, &offset, g, l, 0, null, null);
+                queue, Kernel(kernelName), (uint)global.Length, &offset, g, l, 0, null,
+                queueProfilingEnabled ? &evt : null);
             if (err != 0)
                 throw new InvalidOperationException($"Silk dispatch of '{kernelName}' failed ({err}).");
+        }
+        if (queueProfilingEnabled)
+        {
+            if (lastKernelEvent != 0) cl.ReleaseEvent(lastKernelEvent);
+            lastKernelEvent = evt;
         }
         kernelDispatchCount++;
     }
@@ -501,6 +525,35 @@ public sealed unsafe class SilkRuntime : IDisposable
         int status = cl.Finish(queue);
         if (status != 0)
             throw new InvalidOperationException($"Silk clFinish failed ({status}).");
+    }
+
+    /// <summary>
+    /// Returns the device-side duration (in milliseconds) of the kernel recorded by
+    /// <paramref name="eventHandle"/> using <c>CL_PROFILING_COMMAND_START/END</c>. Returns
+    /// false when profiling info is unavailable (e.g. queue not profiling-enabled or the event
+    /// has not completed). Diagnostic only.
+    /// </summary>
+    public bool TryGetEventDurationMs(nint eventHandle, out double durationMs)
+    {
+        durationMs = 0;
+        if (eventHandle == 0) return false;
+        try
+        {
+            ulong start = 0;
+            ulong end = 0;
+            nuint ret = 0;
+            int e1 = cl.GetEventProfilingInfo(eventHandle, ProfilingInfo.Start,
+                (nuint)sizeof(ulong), &start, out ret);
+            int e2 = cl.GetEventProfilingInfo(eventHandle, ProfilingInfo.End,
+                (nuint)sizeof(ulong), &end, out ret);
+            if (e1 != 0 || e2 != 0) return false;
+            durationMs = (end - start) / 1_000_000.0;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>A device buffer plus the float capacity it was allocated for. <see cref="Handle"/> 0 is empty.</summary>
@@ -566,6 +619,11 @@ public sealed unsafe class SilkRuntime : IDisposable
         {
             cl.ReleaseProgram(program);
             program = 0;
+        }
+        if (lastKernelEvent != 0)
+        {
+            cl.ReleaseEvent(lastKernelEvent);
+            lastKernelEvent = 0;
         }
         if (queue != 0)
         {
