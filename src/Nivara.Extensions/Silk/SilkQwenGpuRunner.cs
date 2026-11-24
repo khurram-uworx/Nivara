@@ -719,7 +719,9 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     void EnsureRopeTables(int seqLen)
     {
         if (ropeTableRows >= seqLen) return;
-        int rows = seqLen;
+        // Pre-size to seqCap on first growth so decode does not reallocate/re-upload
+        // one row per token (see issue #1468). seqLen <= seqCap by construction.
+        int rows = seqCap;
         int half = headDim / 2;
         var cos = new float[rows * half];
         var sin = new float[rows * half];
