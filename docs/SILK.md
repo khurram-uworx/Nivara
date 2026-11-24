@@ -711,7 +711,29 @@ Vision is F32-only: these runners have no BF16/FP16 lane (the apparent BF16 cons
 widening shims and have been removed, see issue #1282). `--precision bf16`/`fp16` is rejected for
 the vision models.
 
-## 13c. Text classifiers (NivaraClassifier sample)
+### 13d. Decode attention selection rule (#1467)
+
+`SilkLauncher.DecodeGqaAttentionOproj` selects between two decode paths:
+
+- **Fused** (`decode_gqa_attention_oproj_fused`): true single-work-group fused decode attention +
+  O-projection. Only available when `SilkRuntime.CanFuseDecodeOproj(numHeads, headDim)` is true,
+  i.e. `MaxWorkGroupSize >= numHeads * AttentionGroupSize` (576 for SmolLM, 896 for Qwen) and
+  sufficient local memory. Advantages: avoids the context scratch buffer write/read and the extra
+  O-projection kernel launch. Disadvantage: single work-group limits occupancy.
+- **Split** (`decode_gqa_attention` + `gemm_gemv_add`): one work-group per query head for attention,
+  then a flat GEMV for O-projection. Better head-parallelism; always available.
+
+**Selection:** capability-gated. Fused is used when the device supports it (high-end iGPUs with
+large max work-group size); otherwise split is used. No kvLen-based switching is applied because
+the split path's per-head work-group already distributes across compute units, and flash-decoding
+(splitting kvLen across multiple work-groups per head with a reduction pass) has not been shown
+to improve steady-state throughput on the tested iGPU targets. If future measurements on
+long-context workloads show degradation, flash-decoding may be revisited.
+
+**Benchmark:** `dotnet run -c Release --project tests\Nivara.PerformanceTests -- --silk-kernels`
+includes a `decode attention + O-proj by kvLen` section (#1467) measuring both paths at
+kvLen = 128/512/2048/8192 for SmolLM and Qwen shapes, reporting ms/op, tok/s, and fused-vs-split
+parity.
 
 `GpuTextConvClassifier` (`src/Nivara.Extensions/Silk/GpuTextConvClassifier.cs`) trains the
 `ConvTextClassifierModel` (three Conv1d branches k=3/5/7 → concat → FC1 → ReLU → FC2) end to end
