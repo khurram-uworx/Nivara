@@ -119,6 +119,7 @@ internal static class SilkKernelsGate
                 MeasureDecodeShapeAbBf16(silk, buffers);
                 MeasureDecodeShapeGemvAddF32(silk, buffers);
                 MeasureDecodeShapeMlpBlock(silk, buffers);
+                MeasureDecodeAttentionKvLen(silk, buffers);
                 MeasureCopyBandwidth(silk, buffers);
                 return Report(legs);
             }
@@ -1869,6 +1870,128 @@ internal static class SilkKernelsGate
         }
 
         Console.WriteLine();
+    }
+
+    static void MeasureDecodeAttentionKvLen(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== decode attention + O-proj by kvLen (#1467) ===");
+        Console.WriteLine("    Fused = decode_gqa_attention_oproj_fused (single WG); Split = decode_gqa_attention + gemm_gemv_add.");
+        Console.WriteLine("    ms/op is best-of-10 after 5 warmups; tok/s = 1000/ms. Parity = fused vs split maxAbsDiff.");
+        Console.WriteLine();
+
+        const int warmups = 5;
+        const int rounds = 10;
+        int[] kvLens = [128, 512, 2048, 8192];
+
+        (string name, int numHeads, int numKvHeads, int headDim, int hiddenDim)[] shapes =
+        [
+            ("smollm", 9, 3, 64, 576),
+            ("qwen", 14, 2, 64, 896),
+        ];
+
+        foreach (var (shapeName, numHeads, numKvHeads, headDim, hiddenDim) in shapes)
+        {
+            int qDim = numHeads * headDim;
+            bool canFuse = silk.CanFuseDecodeOproj(numHeads, headDim);
+            Console.WriteLine($"  {shapeName}: heads={numHeads} kvHeads={numKvHeads} headDim={headDim} hidden={hiddenDim} canFuse={canFuse}");
+
+            foreach (int kvLen in kvLens)
+            {
+                int kvWidth = numKvHeads * headDim;
+                var rng = new Random(42 + kvLen);
+                var q = new float[qDim];
+                var kCache = new float[kvLen * kvWidth];
+                var vCache = new float[kvLen * kvWidth];
+                var Wo = new float[qDim * hiddenDim];
+                var residual = new float[hiddenDim];
+                for (int i = 0; i < q.Length; i++) q[i] = (float)(rng.NextDouble() - 0.5) * 0.1f;
+                for (int i = 0; i < kCache.Length; i++) kCache[i] = (float)(rng.NextDouble() - 0.5) * 0.1f;
+                for (int i = 0; i < vCache.Length; i++) vCache[i] = (float)(rng.NextDouble() - 0.5) * 0.1f;
+                for (int i = 0; i < Wo.Length; i++) Wo[i] = (float)(rng.NextDouble() - 0.5) * 0.1f;
+                for (int i = 0; i < residual.Length; i++) residual[i] = (float)(rng.NextDouble() - 0.5) * 0.1f;
+
+                nint qBuf = silk.Allocate(q.Length); buffers.Add(qBuf);
+                nint kBuf = silk.Allocate(kCache.Length); buffers.Add(kBuf);
+                nint vBuf = silk.Allocate(vCache.Length); buffers.Add(vBuf);
+                nint wBuf = silk.Allocate(Wo.Length); buffers.Add(wBuf);
+                nint resBuf = silk.Allocate(residual.Length); buffers.Add(resBuf);
+                nint ctxBuf = silk.Allocate(qDim); buffers.Add(ctxBuf);
+                nint outFused = silk.Allocate(hiddenDim); buffers.Add(outFused);
+                nint outSplit = silk.Allocate(hiddenDim); buffers.Add(outSplit);
+                silk.Upload(qBuf, q);
+                silk.Upload(kBuf, kCache);
+                silk.Upload(vBuf, vCache);
+                silk.Upload(wBuf, Wo);
+                silk.Upload(resBuf, residual);
+
+                float scale = 1f / MathF.Sqrt(headDim);
+
+                Action runFused = () =>
+                {
+                    Nivara.Silk.SilkLauncher.DecodeGqaAttentionOprojFused(silk, qBuf, kBuf, vBuf, wBuf, resBuf, outFused, kvLen, numHeads, numKvHeads, headDim, hiddenDim, scale);
+                    silk.Finish();
+                };
+                Action runSplit = () =>
+                {
+                    Nivara.Silk.SilkLauncher.DecodeGqaAttention(silk, qBuf, kBuf, vBuf, ctxBuf, kvLen, numHeads, numKvHeads, headDim, scale);
+                    Nivara.Silk.SilkLauncher.GemmGemvAdd(silk, ctxBuf, wBuf, outSplit, resBuf, qDim, hiddenDim);
+                    silk.Finish();
+                };
+
+                for (int wu = 0; wu < warmups; wu++)
+                {
+                    runSplit();
+                    if (canFuse) runFused();
+                }
+
+                var splitTicks = new double[rounds];
+                var fusedTicks = new double[rounds];
+                for (int r = 0; r < rounds; r++)
+                {
+                    if (r % 2 == 0)
+                    {
+                        splitTicks[r] = Time(() => runSplit());
+                        if (canFuse) fusedTicks[r] = Time(() => runFused());
+                    }
+                    else
+                    {
+                        if (canFuse) fusedTicks[r] = Time(() => runFused());
+                        splitTicks[r] = Time(() => runSplit());
+                    }
+                }
+
+                double medianSplitMs = Median(splitTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                double splitToks = medianSplitMs > 0 ? 1000.0 / medianSplitMs : 0;
+                Console.Write($"    kvLen={kvLen,5}: split {medianSplitMs,8:F3} ms ({splitToks,7:F1} tok/s)");
+
+                if (canFuse)
+                {
+                    double medianFusedMs = Median(fusedTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    double fusedToks = medianFusedMs > 0 ? 1000.0 / medianFusedMs : 0;
+                    double ratio = medianSplitMs > 0 ? medianFusedMs / medianSplitMs : 0;
+                    Console.Write($"  fused {medianFusedMs,8:F3} ms ({fusedToks,7:F1} tok/s)  ratio={ratio:F3}");
+                }
+                else
+                {
+                    Console.Write("  (fused n/a)");
+                }
+                Console.WriteLine();
+
+                if (canFuse)
+                {
+                    runFused();
+                    var fusedOut = silk.Download(outFused, hiddenDim);
+                    runSplit();
+                    var splitOut = silk.Download(outSplit, hiddenDim);
+                    float maxDiff = 0f;
+                    for (int i = 0; i < hiddenDim; i++)
+                        maxDiff = MathF.Max(maxDiff, MathF.Abs(fusedOut[i] - splitOut[i]));
+                    Console.WriteLine($"             parity fused vs split: maxAbsDiff={maxDiff:E3}");
+                }
+            }
+            Console.WriteLine();
+        }
     }
 
     static void MeasureCopyBandwidth(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
