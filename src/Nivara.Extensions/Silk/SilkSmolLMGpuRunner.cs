@@ -822,8 +822,8 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
                 SilkLauncher.RmsNormGemvInt8(runtime, x, gamma, slots, hasBias, aRows, aCols, numBlocks, eps);
             return;
         }
-        if (bf16Weights) SilkLauncher.RmsNormGemvBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
-        else SilkLauncher.RmsNormGemv(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+        if (bf16Weights) SilkLauncher.RmsNormGemvSubgroupBf16(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
+        else SilkLauncher.RmsNormGemvSubgroup(runtime, x, gamma, slots, hasBias, aRows, aCols, eps);
     }
 
     void RmsNormGemv(nint x, nint gamma, ReadOnlySpan<SilkLauncher.GemvSlot> slots, ReadOnlySpan<LoraPair?> loras, bool hasBias, int aRows, int aCols, float eps)
@@ -864,12 +864,12 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
             if (bf16Weights)
             {
                 SilkLauncher.RmsNormGemvSwiGluBf16(runtime, x, gamma, wg, wu, mlp.Handle, hidden, inter, eps2);
-                SilkLauncher.GemmGemvAddBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
+                SilkLauncher.GemmGemvAddSubgroupBf16(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
             else
             {
                 SilkLauncher.RmsNormGemvSwiGlu(runtime, x, gamma, wg, wu, mlp.Handle, hidden, inter, eps2);
-                SilkLauncher.GemmGemvAdd(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
+                SilkLauncher.GemmGemvAddSubgroup(runtime, mlp.Handle, wd, outBuf, residual, inter, hidden);
             }
             return;
         }
@@ -894,7 +894,7 @@ public sealed partial class SilkSmolLMGpuRunner : IDisposable
             if (bf16Weights)
             {
                 SilkLauncher.DecodeGqaAttention(runtime, q, kCache, vCache, contextScratch, kvLen, numHeads2, numKvHeads2, headDim2, scale2);
-                SilkLauncher.GemmGemvAddBf16(runtime, contextScratch, wo, outBuf, residual, qDim2, hiddenDim2);
+                SilkLauncher.GemmGemvAddSubgroupBf16(runtime, contextScratch, wo, outBuf, residual, qDim2, hiddenDim2);
             }
             else
             {
