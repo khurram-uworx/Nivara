@@ -66,6 +66,10 @@ internal static class SilkKernelsGate
         public required float[] Actual { get; init; }
         public double ReferenceUs { get; init; }
         public double SilkUs { get; init; }
+        /// <summary>Logical bytes moved (A + B + C [+ bias]) for throughput reporting; 0 when not applicable.</summary>
+        public long LogicalBytes { get; init; }
+        /// <summary>Logical FLOPs (2*M*N*K for GEMM) for throughput reporting; 0 when not applicable.</summary>
+        public long Flops { get; init; }
     }
 
     public static int Run(string[] args)
@@ -114,6 +118,7 @@ internal static class SilkKernelsGate
                 MeasureDecodeShapeMultiSlotRmsNormGemv(silk, buffers);
                 MeasureDecodeShapeAbBf16(silk, buffers);
                 MeasureDecodeShapeGemvAddF32(silk, buffers);
+                MeasureDecodeShapeMlpBlock(silk, buffers);
                 MeasureCopyBandwidth(silk, buffers);
                 return Report(legs);
             }
@@ -149,6 +154,9 @@ internal static class SilkKernelsGate
 
             int elements = aRows * bCols;
 
+            long flops = 2L * aRows * bCols * aCols;
+            long logicalBytes = ((long)aRows * aCols + (long)aCols * bCols + (long)aRows * bCols + bCols) * sizeof(float);
+
             nint sa = silk.Allocate(a.Length); buffers.Add(sa);
             nint sb = silk.Allocate(bt.Length); buffers.Add(sb);
             nint sc = silk.Allocate(elements); buffers.Add(sc);
@@ -178,7 +186,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmBias, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmBias, cell, true, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmBias, cell, true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
 
             // relu
@@ -203,7 +211,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmRelu, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmRelu, cell, true, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmRelu, cell, true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
 
             // gelu
@@ -227,7 +235,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmGelu, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmGelu, cell, false, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmGelu, cell, false, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
 
             // qkv
@@ -253,7 +261,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmQkv, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmQkv, cell, true, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmQkv, cell, true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
         }
 
@@ -660,6 +668,8 @@ internal static class SilkKernelsGate
             for (int i = 0; i < bt.Length; i++) bt[i] = GemmBenchmark.NextUniformF(ref seed);
 
             int elements = aRows * bCols;
+            long flops = 2L * aRows * bCols * aCols;
+            long logicalBytes = ((long)aRows * aCols + (long)aCols * bCols + (long)aRows * bCols) * sizeof(float);
             nint sa = silk.Allocate(a.Length); buffers.Add(sa);
             nint sb = silk.Allocate(bt.Length); buffers.Add(sb);
             nint sc = silk.Allocate(elements); buffers.Add(sc);
@@ -692,7 +702,7 @@ internal static class SilkKernelsGate
             };
             Func<float[]> readSilk = () => silk.Download(sc, elements);
 
-            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.Gemm, $"modernbert {name}", true, runCpu, readCpu, runSilk, readSilk));
+            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.Gemm, $"modernbert {name}", true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
         }
 
         return legs;
@@ -1298,8 +1308,10 @@ internal static class SilkKernelsGate
         Action runCpu,
         Func<float[]> readCpu,
         Action runSilk,
-        Func<float[]> readSilk)
-        => MeasureCpuReference(kernel, shape, false, runCpu, readCpu, runSilk, readSilk);
+        Func<float[]> readSilk,
+        long logicalBytes = 0,
+        long flops = 0)
+        => MeasureCpuReference(kernel, shape, false, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops);
 
     static Leg MeasureCpuReference(
         string kernel,
@@ -1308,7 +1320,9 @@ internal static class SilkKernelsGate
         Action runCpu,
         Func<float[]> readCpu,
         Action runSilk,
-        Func<float[]> readSilk)
+        Func<float[]> readSilk,
+        long logicalBytes = 0,
+        long flops = 0)
     {
         runCpu();
         runSilk();
@@ -1323,6 +1337,8 @@ internal static class SilkKernelsGate
             Actual = readSilk(),
             ReferenceUs = cpuUs,
             SilkUs = silkUs,
+            LogicalBytes = logicalBytes,
+            Flops = flops,
         };
     }
 
@@ -1654,63 +1670,7 @@ internal static class SilkKernelsGate
         }
 
         Console.WriteLine();
-        Console.WriteLine("  -- mlp_block_bf16 (OPTIONAL, single-WG fused; P1/#1453 serialization caveat) --");
-        (int h, int inter, string mlabel)[] mlpShapes =
-        [
-            (896, 4864, "qwen gate/up"),
-             (576, 1536, "smollm gate/up"),
-         ];
-        foreach (var (h, inter, mlabel) in mlpShapes)
-        {
-            var x = new float[h];
-            var gamma = new float[h];
-            var wg = new ushort[(long)h * inter];
-            var wu = new ushort[(long)h * inter];
-            var wd = new ushort[(long)inter * h];
-            var residual = new float[h];
-            uint seed = 0x14790003u;
-            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
-            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
-            for (int i = 0; i < wg.Length; i++) wg[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-            for (int i = 0; i < wu.Length; i++) wu[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-            for (int i = 0; i < wd.Length; i++) wd[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
-            for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
-
-            nint sx = silk.Allocate(h); buffers.Add(sx);
-            nint sg = silk.Allocate(h); buffers.Add(sg);
-            nint swg = silk.Allocate(wg.Length); buffers.Add(swg);
-            nint swu = silk.Allocate(wu.Length); buffers.Add(swu);
-            nint swd = silk.Allocate(wd.Length); buffers.Add(swd);
-            nint sout = silk.Allocate(h); buffers.Add(sout);
-            nint sres = silk.Allocate(h); buffers.Add(sres);
-            silk.Upload(sx, x);
-            silk.Upload(sg, gamma);
-            silk.Upload(swg, wg);
-            silk.Upload(swu, wu);
-            silk.Upload(swd, wd);
-            silk.Upload(sres, residual);
-
-            Action run = () =>
-            {
-                Nivara.Silk.SilkLauncher.MlpBlockBf16(silk, sx, sg, swg, swu, swd, sout, sres, h, inter, eps);
-                silk.Finish();
-            };
-
-            for (int wu2 = 0; wu2 < warmups; wu2++) run();
-
-            var ticks = new double[rounds];
-            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
-
-            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            long bytes = (long)h * sizeof(float) + (long)h * sizeof(float)
-                       + (long)h * inter * sizeof(ushort) * 3
-                       + (long)h * sizeof(float)
-                       + (long)h * sizeof(float);
-            double gbs = bytes / (medianMs / 1000.0) / 1e9;
-
-            Console.WriteLine($"  hidden={h} intermediate={inter} ({mlabel}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})  [single-WG fused]");
-        }
-
+        Console.WriteLine("  (mlp_block_bf16 GB/s moved to MeasureDecodeShapeMlpBlock below, #1483.)");
         Console.WriteLine();
     }
 
@@ -1784,6 +1744,133 @@ internal static class SilkKernelsGate
         Console.WriteLine();
     }
 
+    static void MeasureDecodeShapeMlpBlock(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== decode-shape kernel GB/s: fused mlp_block (F32 + BF16) (#1483) ===");
+        Console.WriteLine("    GB/s is logical bytes-moved: x(F32)+gamma(F32)+3*hidden*intermediate*(F32 or BF16)+out(F32)+residual(F32).");
+        Console.WriteLine("    Single-WG fused launch (LinearGroupSize/256). Intermediate (swiglu) is __local shared memory, not counted.");
+        Console.WriteLine("    x is read twice internally (norm SSQ + compute pass); counted once (matches #1473 convention).");
+        Console.WriteLine();
+
+        const float eps = 1e-5f;
+        const int warmups = 5;
+        const int rounds = 10;
+
+        (int h, int inter, string mlabel)[] mlpShapes =
+        [
+            (896, 4864, "qwen gate/up"),
+            (576, 1536, "smollm gate/up"),
+        ];
+
+        Console.WriteLine("  -- mlp_block (F32 weights) --");
+        foreach (var (h, inter, mlabel) in mlpShapes)
+        {
+            var x = new float[h];
+            var gamma = new float[h];
+            var wg = new float[(long)h * inter];
+            var wu = new float[(long)h * inter];
+            var wd = new float[(long)inter * h];
+            var residual = new float[h];
+            uint seed = 0x14830001u;
+            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < wg.Length; i++) wg[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < wu.Length; i++) wu[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < wd.Length; i++) wd[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
+
+            nint sx = silk.Allocate(h); buffers.Add(sx);
+            nint sg = silk.Allocate(h); buffers.Add(sg);
+            nint swg = silk.Allocate(wg.Length); buffers.Add(swg);
+            nint swu = silk.Allocate(wu.Length); buffers.Add(swu);
+            nint swd = silk.Allocate(wd.Length); buffers.Add(swd);
+            nint sout = silk.Allocate(h); buffers.Add(sout);
+            nint sres = silk.Allocate(h); buffers.Add(sres);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(swg, wg);
+            silk.Upload(swu, wu);
+            silk.Upload(swd, wd);
+            silk.Upload(sres, residual);
+
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.MlpBlock(silk, sx, sg, swg, swu, swd, sout, sres, h, inter, eps);
+                silk.Finish();
+            };
+
+            for (int wu2 = 0; wu2 < warmups; wu2++) run();
+
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long bytes = (long)h * sizeof(float) + (long)h * sizeof(float)
+                       + (long)h * inter * sizeof(float) * 3
+                       + (long)h * sizeof(float)
+                       + (long)h * sizeof(float);
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
+
+            Console.WriteLine($"  hidden={h} intermediate={inter} ({mlabel}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})  [single-WG fused, F32]");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("  -- mlp_block_bf16 (BF16 packed weights) --");
+        foreach (var (h, inter, mlabel) in mlpShapes)
+        {
+            var x = new float[h];
+            var gamma = new float[h];
+            var wg = new ushort[(long)h * inter];
+            var wu = new ushort[(long)h * inter];
+            var wd = new ushort[(long)inter * h];
+            var residual = new float[h];
+            uint seed = 0x14830002u;
+            for (int i = 0; i < x.Length; i++) x[i] = GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < gamma.Length; i++) gamma[i] = 1f + 0.5f * GemmBenchmark.NextUniformF(ref seed);
+            for (int i = 0; i < wg.Length; i++) wg[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < wu.Length; i++) wu[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < wd.Length; i++) wd[i] = (ushort)(BitConverter.SingleToInt32Bits(GemmBenchmark.NextUniformF(ref seed)) >> 16);
+            for (int i = 0; i < residual.Length; i++) residual[i] = GemmBenchmark.NextUniformF(ref seed);
+
+            nint sx = silk.Allocate(h); buffers.Add(sx);
+            nint sg = silk.Allocate(h); buffers.Add(sg);
+            nint swg = silk.Allocate(wg.Length); buffers.Add(swg);
+            nint swu = silk.Allocate(wu.Length); buffers.Add(swu);
+            nint swd = silk.Allocate(wd.Length); buffers.Add(swd);
+            nint sout = silk.Allocate(h); buffers.Add(sout);
+            nint sres = silk.Allocate(h); buffers.Add(sres);
+            silk.Upload(sx, x);
+            silk.Upload(sg, gamma);
+            silk.Upload(swg, wg);
+            silk.Upload(swu, wu);
+            silk.Upload(swd, wd);
+            silk.Upload(sres, residual);
+
+            Action run = () =>
+            {
+                Nivara.Silk.SilkLauncher.MlpBlockBf16(silk, sx, sg, swg, swu, swd, sout, sres, h, inter, eps);
+                silk.Finish();
+            };
+
+            for (int wu2 = 0; wu2 < warmups; wu2++) run();
+
+            var ticks = new double[rounds];
+            for (int r = 0; r < rounds; r++) ticks[r] = Time(() => run());
+
+            double medianMs = Median(ticks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long bytes = (long)h * sizeof(float) + (long)h * sizeof(float)
+                       + (long)h * inter * sizeof(ushort) * 3
+                       + (long)h * sizeof(float)
+                       + (long)h * sizeof(float);
+            double gbs = bytes / (medianMs / 1000.0) / 1e9;
+
+            Console.WriteLine($"  hidden={h} intermediate={inter} ({mlabel}): median {medianMs:F3} ms  {gbs:F2} GB/s  (bytes={bytes})  [single-WG fused]");
+        }
+
+        Console.WriteLine();
+    }
+
     static void MeasureCopyBandwidth(Nivara.Silk.SilkRuntime silk, List<nint> buffers)
     {
         Console.WriteLine();
@@ -1840,8 +1927,8 @@ internal static class SilkKernelsGate
     static int Report(List<Leg> legs)
     {
         Console.WriteLine();
-        Console.WriteLine($"{"kernel",-20} {"shape",-26} {"bytes",-12} {"%bound",-9} {"cpu us",-9} {"silk us",-9} {"x",-6}");
-        Console.WriteLine(new string('-', 102));
+        Console.WriteLine($"{"kernel",-20} {"shape",-26} {"bytes",-12} {"%bound",-9} {"cpu us",-9} {"silk us",-9} {"GB/s",-8} {"GF/s",-8} {"x",-6}");
+        Console.WriteLine(new string('-', 120));
 
         int failures = 0;
         int outOfBand = 0;
@@ -1863,9 +1950,15 @@ internal static class SilkKernelsGate
             string bytes = byteOk
                 ? (leg.RequireBytes ? "IDENTICAL" : "identical")
                 : $"{byteDiffs} diff";
+            string gbs = leg.LogicalBytes > 0
+                ? (leg.SilkUs > 0 ? $"{leg.LogicalBytes / leg.SilkUs / 1000.0:F2}" : "-")
+                : "-";
+            string gflops = leg.Flops > 0
+                ? (leg.SilkUs > 0 ? $"{leg.Flops / leg.SilkUs / 1000.0:F2}" : "-")
+                : "-";
             Console.WriteLine(
                 $"{leg.Kernel,-20} {leg.Shape,-26} {bytes,-12} {worstRatio * 100.0,-9:F3} " +
-                $"{leg.ReferenceUs,-9:F1} {leg.SilkUs,-9:F1} {ratio,-6:F2}{(failed ? "  FAIL" : "")}{(band ? "  OUT-OF-BAND" : "")}");
+                $"{leg.ReferenceUs,-9:F1} {leg.SilkUs,-9:F1} {gbs,-8} {gflops,-8} {ratio,-6:F2}{(failed ? "  FAIL" : "")}{(band ? "  OUT-OF-BAND" : "")}");
         }
 
         Console.WriteLine(new string('-', 102));
