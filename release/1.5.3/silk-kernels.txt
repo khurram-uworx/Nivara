@@ -1,0 +1,179 @@
+Power  : AC line ΓÇö GMAC/s valid
+Silk.NET OpenCL BERT-family kernel gate: Silk kernels vs CPU reference
+  Numeric bound : |silk - cpu| <= 1E-003 * (1 + |cpu|)   (exp ulp diverger)
+  Byte-identity : REQUIRED for gemm_row4, gemm_row4_bias, gemm_row4_qkv, gemm_row4_relu,
+                  gather_rows, add, add_bias, split_columns, rotary
+  Timing        : best-of-10 after 3 warmups; NOT a verdict (x0.8..x1.2 is a red flag only)
+
+  Silk  : Intel(R) Graphics (Intel(R) Corporation) | driver 32.0.101.8826 | max WG 1024 | local 65536 B | subgroups yes
+
+
+=== decode-shape kernel geometry A/B: rms_norm_lm_head (tile, aRows=1) vs rms_norm_gemv (flat, one slot) (#682) ===
+    GB/s is logical bytes-moved: (x + gamma + weight + output) / elapsed. See docs/SILK.md 'Decode GEMV GB/s measurement'.
+
+  hidden=896 width=151936 (qwen lm-head/vocab):
+      median tile/flat ratio = 1.326  (tile 23.540 ms, flat 17.980 ms)
+      logical bytes moved = 545153536  (tile 23.16 GB/s, flat 30.32 GB/s)
+  hidden=896 width=1152 (qwen qkv):
+      median tile/flat ratio = 0.503  (tile 0.240 ms, flat 0.478 ms)
+      logical bytes moved = 4140544  (tile 17.27 GB/s, flat 8.67 GB/s)
+  hidden=896 width=4864 (qwen gate/up):
+      median tile/flat ratio = 1.373  (tile 0.770 ms, flat 0.551 ms)
+      logical bytes moved = 17459200  (tile 22.67 GB/s, flat 31.71 GB/s)
+  hidden=896 width=896 (qwen o/down):
+      median tile/flat ratio = 0.413  (tile 0.188 ms, flat 0.457 ms)
+      logical bytes moved = 3222016  (tile 17.12 GB/s, flat 7.05 GB/s)
+  hidden=576 width=49152 (smollm lm-head/vocab):
+      median tile/flat ratio = 1.109  (tile 3.859 ms, flat 3.403 ms)
+      logical bytes moved = 113447424  (tile 29.40 GB/s, flat 33.34 GB/s)
+  hidden=576 width=960 (smollm qkv):
+      median tile/flat ratio = 0.438  (tile 0.133 ms, flat 0.302 ms)
+      logical bytes moved = 2220288  (tile 16.67 GB/s, flat 7.36 GB/s)
+  hidden=576 width=1536 (smollm gate/up):
+      median tile/flat ratio = 0.537  (tile 0.174 ms, flat 0.314 ms)
+      logical bytes moved = 3549696  (tile 20.45 GB/s, flat 11.32 GB/s)
+  hidden=576 width=576 (smollm o/down):
+      median tile/flat ratio = 0.418  (tile 0.124 ms, flat 0.297 ms)
+      logical bytes moved = 1334016  (tile 10.75 GB/s, flat 4.49 GB/s)
+  hidden=896 width=96 (qwen small):
+      median tile/flat ratio = 0.351  (tile 0.147 ms, flat 0.417 ms)
+      logical bytes moved = 351616  (tile 2.40 GB/s, flat 0.84 GB/s)
+  hidden=896 width=24 (qwen tiny):
+      median tile/flat ratio = 0.361  (tile 0.144 ms, flat 0.398 ms)
+      logical bytes moved = 93280  (tile 0.65 GB/s, flat 0.23 GB/s)
+
+
+=== decode-shape kernel GB/s: F32 rms_norm_gemv multi-slot (biased/bias-free) (#1481) ===
+    GB/s is logical bytes-moved: x(F32)+gamma(F32)+sum over slots [weight(F32)+output(F32)+bias(F32 if hasBias)].
+    Real cached-decode shapes: Qwen biased QKV (3 slots), SmolLM bias-free QKV (3 slots), SmolLM bias-free gate/up (2 slots).
+    hasBias is a single flag for all slots (SilkLauncher.RmsNormGemv contract).
+
+  hidden=896 slots=896/128/128 hasBias=True (qwen qkv (biased)): median 0.455 ms  9.12 GB/s  (bytes=4145152)
+  hidden=576 slots=576/192/192 hasBias=False (smollm qkv (bias-free)): median 0.282 ms  7.88 GB/s  (bytes=2220288)
+  hidden=576 slots=1536/1536 hasBias=False (smollm gate/up (bias-free)): median 0.292 ms  24.29 GB/s  (bytes=7094784)
+
+
+=== decode-shape kernel GB/s: BF16 weight transport (rms_norm_gemv_bf16 / gemm_gemv_add_bf16) (#1479) ===
+    GB/s is logical bytes-moved: x(F32)+gamma(F32)+weight(BF16, sizeof(ushort))+output(F32) [residual for gemm_gemv_add].
+    BF16 weight paths halve weight bytes vs F32; compare against the F32 section above and the copy-bandwidth probe.
+
+  -- rms_norm_gemv_bf16 (single slot, hasBias=false) --
+  hidden=896 width=151936 (qwen lm-head/vocab): median 9.486 ms  28.77 GB/s  (bytes=272884224)
+  hidden=896 width=1152 (qwen qkv): median 0.445 ms  4.66 GB/s  (bytes=2076160)
+  hidden=896 width=4864 (qwen gate/up): median 0.459 ms  19.06 GB/s  (bytes=8742912)
+  hidden=896 width=896 (qwen o/down): median 0.444 ms  3.64 GB/s  (bytes=1616384)
+  hidden=576 width=49152 (smollm lm-head/vocab): median 2.125 ms  26.74 GB/s  (bytes=56824320)
+  hidden=576 width=960 (smollm qkv): median 0.311 ms  3.58 GB/s  (bytes=1114368)
+  hidden=576 width=1536 (smollm gate/up): median 0.311 ms  5.72 GB/s  (bytes=1780224)
+  hidden=576 width=576 (smollm o/down): median 0.311 ms  2.16 GB/s  (bytes=670464)
+  hidden=896 width=96 (qwen small): median 0.476 ms  0.38 GB/s  (bytes=179584)
+  hidden=896 width=24 (qwen tiny): median 0.376 ms  0.13 GB/s  (bytes=50272)
+
+  -- gemm_gemv_add_bf16 (aCols x bCols, BF16 weights) --
+  aCols=896 bCols=151936 (qwen lm-head/vocab): median 7.336 ms  37.28 GB/s  (bytes=273488384)
+  aCols=896 bCols=1152 (qwen qkv): median 0.370 ms  5.62 GB/s  (bytes=2077184)
+  aCols=896 bCols=4864 (qwen gate/up): median 0.393 ms  22.30 GB/s  (bytes=8758784)
+  aCols=896 bCols=896 (qwen o/down): median 0.345 ms  4.68 GB/s  (bytes=1616384)
+  aCols=576 bCols=49152 (smollm lm-head/vocab): median 1.530 ms  37.27 GB/s  (bytes=57018624)
+  aCols=576 bCols=960 (smollm qkv): median 0.239 ms  4.66 GB/s  (bytes=1115904)
+  aCols=576 bCols=1536 (smollm gate/up): median 0.251 ms  7.10 GB/s  (bytes=1784064)
+  aCols=576 bCols=576 (smollm o/down): median 0.241 ms  2.78 GB/s  (bytes=670464)
+  aCols=896 bCols=96 (qwen small): median 0.361 ms  0.49 GB/s  (bytes=176384)
+  aCols=896 bCols=24 (qwen tiny): median 0.290 ms  0.16 GB/s  (bytes=46784)
+
+  (mlp_block_bf16 GB/s moved to MeasureDecodeShapeMlpBlock below, #1483.)
+
+
+=== decode-shape kernel GB/s: F32 gemm_gemv_add (cached-decode O-projection) (#1480) ===
+    GB/s is logical bytes-moved: x(F32)+weight(F32)+residual(F32)+output(F32).
+    Base (non-subgroup) variant; compare against the BF16 section above and the copy-bandwidth probe.
+
+  aCols=896 bCols=151936 (qwen lm-head/vocab): median 13.891 ms  39.29 GB/s  (bytes=545757696)
+  aCols=896 bCols=1152 (qwen qkv): median 0.369 ms  11.22 GB/s  (bytes=4141568)
+  aCols=896 bCols=4864 (qwen gate/up): median 0.425 ms  41.10 GB/s  (bytes=17475072)
+  aCols=896 bCols=896 (qwen o/down): median 0.357 ms  9.02 GB/s  (bytes=3222016)
+  aCols=576 bCols=49152 (smollm lm-head/vocab): median 2.866 ms  39.64 GB/s  (bytes=113641728)
+  aCols=576 bCols=960 (smollm qkv): median 0.257 ms  8.63 GB/s  (bytes=2221824)
+  aCols=576 bCols=1536 (smollm gate/up): median 0.250 ms  14.19 GB/s  (bytes=3553536)
+  aCols=576 bCols=576 (smollm o/down): median 0.252 ms  5.30 GB/s  (bytes=1334016)
+  aCols=896 bCols=96 (qwen small): median 0.349 ms  1.00 GB/s  (bytes=348416)
+  aCols=896 bCols=24 (qwen tiny): median 0.338 ms  0.27 GB/s  (bytes=89792)
+
+
+=== decode-shape kernel GB/s: fused mlp_block (F32 + BF16) (#1483) ===
+    GB/s is logical bytes-moved: x(F32)+gamma(F32)+3*hidden*intermediate*(F32 or BF16)+out(F32)+residual(F32).
+    Single-WG fused launch (LinearGroupSize/256). Intermediate (swiglu) is __local shared memory, not counted.
+    x is read twice internally (norm SSQ + compute pass); counted once (matches #1473 convention).
+
+  -- mlp_block (F32 weights) --
+  hidden=896 intermediate=4864 (qwen gate/up): median 13.260 ms  3.94 GB/s  (bytes=52312064)  [single-WG fused, F32]
+  hidden=576 intermediate=1536 (smollm gate/up): median 3.251 ms  3.27 GB/s  (bytes=10626048)  [single-WG fused, F32]
+
+  -- mlp_block_bf16 (BF16 packed weights) --
+  hidden=896 intermediate=4864 (qwen gate/up): median 15.920 ms  1.64 GB/s  (bytes=26163200)  [single-WG fused]
+  hidden=576 intermediate=1536 (smollm gate/up): median 2.851 ms  1.87 GB/s  (bytes=5317632)  [single-WG fused]
+
+
+=== device copy-bandwidth probe: clEnqueueCopyBuffer (device-to-device) ===
+    Proxy upper-bound reference for decode GEMV comparison; not kernel-achieved DRAM bandwidth.
+
+  buffer size = 67108864 bytes (16777216 floats, 64 MiB)
+  median = 3.913 ms  (17.15 GB/s)  min = 3.893 ms  max = 4.042 ms  rounds = 10
+
+
+kernel               shape                      bytes        %bound    cpu us    silk us   GB/s     GF/s     x     
+------------------------------------------------------------------------------------------------------------------------
+gemm_row4_bias       minilm qkv                 IDENTICAL    0.000     47667.9   235.7     10.86    480.47   0.00    OUT-OF-BAND
+gemm_row4_relu       minilm qkv                 IDENTICAL    0.000     46531.9   250.9     10.21    451.36   0.01    OUT-OF-BAND
+gemm_row4_gelu       minilm qkv                 8006 diff    0.012     47120.9   222.1     11.53    509.89   0.00    OUT-OF-BAND
+gemm_row4_qkv        minilm qkv                 IDENTICAL    0.000     45212.8   215.5     11.88    525.50   0.00    OUT-OF-BAND
+gemm_row4_bias       minilm o/fc2               IDENTICAL    0.000     13082.5   91.5      10.76    412.55   0.01    OUT-OF-BAND
+gemm_row4_relu       minilm o/fc2               IDENTICAL    0.000     13568.2   93.8      10.50    402.44   0.01    OUT-OF-BAND
+gemm_row4_gelu       minilm o/fc2               2608 diff    0.012     13936.0   102.0     9.65     370.09   0.01    OUT-OF-BAND
+gemm_row4_qkv        minilm o/fc2               IDENTICAL    0.000     13174.6   93.7      10.51    402.87   0.01    OUT-OF-BAND
+gemm_row4_bias       minilm fc1                 IDENTICAL    0.000     65214.0   284.5     11.77    530.74   0.00    OUT-OF-BAND
+gemm_row4_relu       minilm fc1                 IDENTICAL    0.000     65925.1   281.0     11.92    537.35   0.00    OUT-OF-BAND
+gemm_row4_gelu       minilm fc1                 10784 diff   0.011     68887.6   281.0     11.92    537.35   0.00    OUT-OF-BAND
+gemm_row4_qkv        minilm fc1                 IDENTICAL    0.000     66876.6   291.7     11.48    517.64   0.00    OUT-OF-BAND
+batched_attention    minilm b2 s128 h12 d32     38487 diff   0.007     15362.2   922.7     -        -        0.06    OUT-OF-BAND
+layer_norm_residual  minilm r128 c384           11363 diff   0.023     99.7      197.9     -        -        1.98    OUT-OF-BAND
+embed_sum            minilm r128 h384           identical    0.000     71.7      24.2      -        -        0.34    OUT-OF-BAND
+gather_rows          minilm r8 h384             IDENTICAL    0.000     8.6       7.0       -        -        0.81  
+gemm_row4_bias       distilbert qkv             IDENTICAL    0.000     202211.6  776.0     11.16    583.74   0.00    OUT-OF-BAND
+gemm_row4_relu       distilbert qkv             IDENTICAL    0.000     199894.5  777.6     11.14    582.54   0.00    OUT-OF-BAND
+gemm_row4_gelu       distilbert qkv             11386 diff   0.011     204332.7  770.2     11.24    588.14   0.00    OUT-OF-BAND
+gemm_row4_qkv        distilbert qkv             IDENTICAL    0.000     197804.0  773.5     11.20    585.63   0.00    OUT-OF-BAND
+gemm_row4_bias       distilbert o/fc2           IDENTICAL    0.000     64189.2   270.9     11.62    557.38   0.00    OUT-OF-BAND
+gemm_row4_relu       distilbert o/fc2           IDENTICAL    0.000     62052.6   274.2     11.48    550.67   0.00    OUT-OF-BAND
+gemm_row4_gelu       distilbert o/fc2           3719 diff    0.010     61211.9   273.9     11.50    551.28   0.00    OUT-OF-BAND
+gemm_row4_qkv        distilbert o/fc2           IDENTICAL    0.000     61668.4   295.0     10.67    511.85   0.00    OUT-OF-BAND
+gemm_row4_bias       distilbert fc1             IDENTICAL    0.000     362269.0  1024.4    11.14    589.59   0.00    OUT-OF-BAND
+gemm_row4_relu       distilbert fc1             IDENTICAL    0.000     354820.5  1033.6    11.04    584.35   0.00    OUT-OF-BAND
+gemm_row4_gelu       distilbert fc1             15128 diff   0.011     359659.7  1026.0    11.13    588.67   0.00    OUT-OF-BAND
+gemm_row4_qkv        distilbert fc1             IDENTICAL    0.000     350204.4  1026.7    11.12    588.27   0.00    OUT-OF-BAND
+batched_attention    distilbert b2 s128 h12 d64 77840 diff   0.009     33168.3   1805.0    -        -        0.05    OUT-OF-BAND
+layer_norm_residual  distilbert r128 c768       20829 diff   0.025     184.6     396.6     -        -        2.15    OUT-OF-BAND
+embed_sum            distilbert r128 h768       identical    0.000     137.1     38.7      -        -        0.28    OUT-OF-BAND
+gather_rows          distilbert r8 h768         IDENTICAL    0.000     32.2      8.8       -        -        0.27    OUT-OF-BAND
+batched_attention    modernbert band64 s128     102177 diff  0.011     34030.2   3981.3    -        -        0.12    OUT-OF-BAND
+gemm_row4            modernbert qkv             IDENTICAL    0.000     721520.9  1330.5    11.03    605.27   0.00    OUT-OF-BAND
+gemm_row4            modernbert o               IDENTICAL    0.000     191369.9  435.1     12.05    616.95   0.00    OUT-OF-BAND
+gemm_row4            modernbert wi              IDENTICAL    0.000     724348.6  2245.3    11.00    612.72   0.00    OUT-OF-BAND
+gemm_row4            modernbert wo              IDENTICAL    0.000     811012.4  1077.1    11.71    638.63   0.00    OUT-OF-BAND
+add                  modernbert n131072         IDENTICAL    0.000     83.3      45.0      -        -        0.54    OUT-OF-BAND
+add_bias             modernbert r128 c1024      IDENTICAL    0.000     164.3     31.5      -        -        0.19    OUT-OF-BAND
+split_columns        modernbert part1           IDENTICAL    0.000     167.4     31.3      -        -        0.19    OUT-OF-BAND
+layer_norm           modernbert r128 c1024      23936 diff   0.022     206.8     375.6     -        -        1.82    OUT-OF-BAND
+rotary               modernbert h16 d64         IDENTICAL    0.000     343.2     35.0      -        -        0.10    OUT-OF-BAND
+geglu                modernbert i2624           109498 diff  0.009     2942.4    104.7     -        -        0.04    OUT-OF-BAND
+rms_norm             smollm r128 c576           60182 diff   0.042     161.1     163.3     -        -        1.01  
+silu                 smollm n196608             65843 diff   0.008     4627.3    48.8      -        -        0.01    OUT-OF-BAND
+swiglu               smollm r128 i1536          61809 diff   0.008     4690.2    62.7      -        -        0.01    OUT-OF-BAND
+causal_gqa_attention smollm s32 h9/3 d64        15084 diff   0.014     3575.8    757.7     -        -        0.21    OUT-OF-BAND
+rms_norm_gemv        qkv h576 q576 kv192 biased 819 diff     0.470     448.3     278.6     -        -        0.62    OUT-OF-BAND
+rms_norm_gemv        gate-up h576 i1536         2718 diff    0.440     1999.4    281.9     -        -        0.14    OUT-OF-BAND
+gemm_gemv_add        o-proj a576 b576           identical    0.000     235.0     228.9     -        -        0.97  
+------------------------------------------------------------------------------------------------------
+  31 of 50 kernel outputs are bit-identical to CPU; 47 of 50 outside the x0.8..x1.2 timing band.
+  A timing ratio outside the band is a red flag to report, not a failure ΓÇö this gate's exit code is correctness only.
+Gate PASS ΓÇö all 50 cells met their criterion (byte-identity where required, otherwise 1E-003 * (1 + |cpu|)).
