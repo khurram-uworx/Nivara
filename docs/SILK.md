@@ -1340,6 +1340,62 @@ judging whether a decode GEMV is bandwidth-saturated.
 - Median of N rounds with warmups; interleaved A/B ordering so load drift does not systematically penalize one route.
 - Record the exact command, device, and driver alongside any published number.
 
+### Prefill GEMM GB/s and GFLOP/s reporting (#1482)
+
+Follow-up to #1473/#1479/#1480/#1481. The `--silk-kernels` gate's Leg table (the byte-identity / timing table covering the prefill GEMM family) now also reports achieved GB/s and GFLOP/s, so bandwidth- vs compute-bound classification is falsifiable instead of assumed.
+
+Command (same as #1473):
+
+```bat
+dotnet run -c Release --project tests/Nivara.PerformanceTests -- --silk-kernels
+```
+
+#### Prefill GEMM kernels measured
+
+| Kernel | Epilogue | Source |
+|---|---|---|
+| `gemm_row4_bias` | `+ bias[j]` | `MeasureGemms` (MiniLM / DistilBERT prefill shapes) |
+| `gemm_row4_relu` | `+ bias[j]` then ReLU | `MeasureGemms` |
+| `gemm_row4_gelu` | `+ bias[j]` then GELU | `MeasureGemms` (exp ulp diverger; numeric bound, not byte-identity) |
+| `gemm_row4_qkv` | `+ bias[j]` with QKV scatter | `MeasureGemms` |
+| `gemm_row4` | none (bias-free store) | `MeasurePlainGemm` (ModernBERT prefill shapes) |
+
+Shapes: MiniLM and DistilBERT `(seq, hidden, intermediate)` from `ModelShape.Gemms` (e.g. `qkv`, `o/fc2`, `fc1`), and ModernBERT `qkv/o/wi/wo` (`seq x hidden x (3*hidden/hidden/2*intermediate/hidden)`).
+
+The Leg table columns are `kernel, shape, bytes, %bound, cpu us, silk us, GB/s, GF/s, x`. The `bytes` column retains its byte-identity status (`IDENTICAL` / `identical` / `N diff`); `GB/s` and `GF/s` are additive throughput reporting. Correctness criteria, pass/fail, and exit code are unchanged.
+
+#### Bytes-moved model (logical)
+
+For the biased prefill GEMMs (`gemm_row4_bias`, `gemm_row4_relu`, `gemm_row4_gelu`, `gemm_row4_qkv`), with `M=aRows`, `K=aCols`, `N=bCols`:
+
+```
+bytes = A_read + B_read + C_write + bias_read
+      = (M*K + K*N + M*N + N) * sizeof(float)
+GFLOP/s = 2 * M * N * K / elapsed_seconds / 1e9
+GB/s    = bytes / elapsed_seconds / 1e9
+```
+
+For the bias-free prefill GEMM (`gemm_row4`):
+
+```
+bytes = A_read + B_read + C_write
+      = (M*K + K*N + M*N) * sizeof(float)
+GFLOP/s = 2 * M * N * K / elapsed_seconds / 1e9
+GB/s    = bytes / elapsed_seconds / 1e9
+```
+
+#### Timing basis
+
+Throughput is computed from the same `SilkUs` value already stored on the `Leg` (best-of-`Rounds` after `Warmups` warmups, via `GemmBenchmark.TimeBest`), so the GB/s/GFLOP/s columns stay consistent with the `cpu us` / `silk us` / `x` columns in the same row. Decode GB/s sections (see above) use the median of rounds; this is a deliberate divergence kept additive and internally consistent within the prefill Leg table.
+
+#### Caveats
+
+- **Logical bytes-moved model for comparability**, not a measurement of actual DRAM traffic. The device copy-bandwidth probe (`MeasureCopyBandwidth`) remains the reference ceiling.
+- `gemm_row4_qkv` has the same memory footprint and bias read as `gemm_row4_bias`; the FLOP count uses the same `2*M*N*K` (the QKV scatter is an index remap, not additional arithmetic).
+- `gemm_row4_gelu` is a numeric-bound cell (exp ulp diverger), not byte-identity; its GB/s/GFLOP/s are still reported.
+- Keep the formula stable across before/after runs; changing it invalidates the comparison.
+- Same comparability rules as the decode GB/s sections (same device, Release build, record command/device/driver).
+
 ## References
 
 - [Silk.NET OpenCL](https://github.com/dotnet/Silk.NET)
