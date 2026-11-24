@@ -51,7 +51,10 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     SilkRuntime.SilkBuffer posIdsBuf;
 
     int[]? posIdHost;
+    int[]? tokenIdHost;
 
+    // Reused logits device buffer for ForwardCachedArgmax (avoids per-token Allocate/Release).
+    SilkRuntime.SilkBuffer logitsBuf;
     // KV cache (device, per layer). Capacity = seqCap positions.
     readonly nint[] kCache;
     readonly nint[] vCache;
@@ -395,6 +398,11 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         return argmax;
     }
 
+    /// <summary>
+    /// Steady-state cached decode: no <see cref="SilkRuntime.Finish"/> is issued unless profiling
+    /// is enabled. See docs/SILK.md "Steady-state decode sync contract (#1468)" for the remaining
+    /// per-token sync points (token/pos uploads, argmax partial readback) and their justification.
+    /// </summary>
     public int ForwardCachedArgmax(int tokenId, int position)
     {
         if (position < 0) throw new ArgumentOutOfRangeException(nameof(position));
@@ -406,7 +414,11 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             posIdHost = new int[1];
         posIdHost[0] = position;
 
-        runtime.Upload(idsBuf.Handle, new int[] { tokenId });
+        if (tokenIdHost is null || tokenIdHost.Length < 1)
+            tokenIdHost = new int[1];
+        tokenIdHost[0] = tokenId;
+
+        runtime.Upload(idsBuf.Handle, tokenIdHost.AsSpan(0, 1));
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
 
         bool profile = ProfilingEnabled;
@@ -449,16 +461,14 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             if (profile) { runtime.Finish(); profileMlpMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
         }
 
-        nint logitsBuf = runtime.Allocate(vocabSize);
+        logitsBuf = runtime.Ensure(logitsBuf, vocabSize);
         RmsNormGemv(x.Handle, finalNormW,
-            [new(tokEmbTransposed, 0, logitsBuf, vocabSize)],
+            [new(tokEmbTransposed, 0, logitsBuf.Handle, vocabSize)],
             hasBias: false, aRows: 1, aCols: hiddenDim, eps: eps);
         if (profile) { runtime.Finish(); profileFinalNormLmHeadMs += sw!.Elapsed.TotalMilliseconds; sw.Restart(); }
 
-        int argmax = ArgMaxDevice(logitsBuf, vocabSize);
+        int argmax = ArgMaxDevice(logitsBuf.Handle, vocabSize);
         if (profile) { runtime.Finish(); profileArgmaxMs += sw!.Elapsed.TotalMilliseconds; }
-
-        runtime.Release(logitsBuf);
 
         if (profile)
         {
@@ -644,7 +654,11 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
             posIdHost = new int[1];
         posIdHost[0] = position;
 
-        runtime.Upload(idsBuf.Handle, new int[] { tokenId });
+        if (tokenIdHost is null || tokenIdHost.Length < 1)
+            tokenIdHost = new int[1];
+        tokenIdHost[0] = tokenId;
+
+        runtime.Upload(idsBuf.Handle, tokenIdHost.AsSpan(0, 1));
         runtime.Upload(posIdsBuf.Handle, posIdHost.AsSpan(0, 1));
 
         // gather embedding -> x (single row)
@@ -710,7 +724,9 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
     void EnsureRopeTables(int seqLen)
     {
         if (ropeTableRows >= seqLen) return;
-        int rows = seqLen;
+        // Pre-size to seqCap on first growth so decode does not reallocate/re-upload
+        // one row per token (see issue #1468). seqLen <= seqCap by construction.
+        int rows = seqCap;
         int half = headDim / 2;
         var cos = new float[rows * half];
         var sin = new float[rows * half];
@@ -870,6 +886,7 @@ public sealed partial class SilkQwenGpuRunner : IDisposable
         if (tokEmbTransposed != 0) runtime.Release(tokEmbTransposed);
         if (partialArgmaxIdx != 0) runtime.Release(partialArgmaxIdx);
         if (partialArgmaxVal != 0) runtime.Release(partialArgmaxVal);
+        if (logitsBuf.Handle != 0) runtime.Release(logitsBuf.Handle);
         if (loraTmpBuf != 0) runtime.Release(loraTmpBuf);
         if (loraOutBuf != 0) runtime.Release(loraOutBuf);
         // workspace buffers released by runtime dispose (owned by runner? they are allocated via Ensure -> Allocate, not tracked). Release best-effort:

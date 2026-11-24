@@ -7,25 +7,25 @@ public sealed class SilkSmolLMSession : IDisposable
     readonly SilkRuntime runtime;
     readonly SilkSmolLMGpuRunner runner;
 
-    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
     {
-        runtime = new SilkRuntime();
+        runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
         try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors); }
         catch { runtime.Dispose(); throw; }
     }
 
-    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+    public SilkSmolLMSession(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
     {
-        runtime = new SilkRuntime();
+        runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
         try { runner = new SilkSmolLMGpuRunner(runtime, config, tensors); }
         catch { runtime.Dispose(); throw; }
     }
 
-    public static SilkSmolLMSession Open(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => new SilkSmolLMSession(config, tensors);
+    public static SilkSmolLMSession Open(SmolLMConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+        => new SilkSmolLMSession(config, tensors, enableQueueProfiling);
 
-    public static SilkSmolLMSession Open(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
-        => new SilkSmolLMSession(config, tensors);
+    public static SilkSmolLMSession Open(SmolLMConfig config, Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+        => new SilkSmolLMSession(config, tensors, enableQueueProfiling);
 
     public string DeviceName => runtime.DeviceName;
 
@@ -35,6 +35,10 @@ public sealed class SilkSmolLMSession : IDisposable
         get => runner.ProfilingEnabled;
         set => runner.ProfilingEnabled = value;
     }
+
+    /// <summary>Whether the underlying <see cref="SilkRuntime"/> command queue was created with
+    /// <c>CL_QUEUE_PROFILING_ENABLE</c> (diagnostic mode, opt-in at construction).</summary>
+    public bool QueueProfilingEnabled => runtime.QueueProfilingEnabled;
 
     /// <summary>Clears accumulated cached-decode profiling counters.</summary>
     public void ResetDecodeProfile() => runner.ResetDecodeProfile();

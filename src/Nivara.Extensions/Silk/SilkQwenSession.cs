@@ -7,27 +7,27 @@ public sealed class SilkQwenSession : IDisposable
 
     bool disposed;
 
-    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
     {
-        runtime = new SilkRuntime();
+        runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
         try { runner = new SilkQwenGpuRunner(runtime, config, tensors); }
         catch { runtime.Dispose(); throw; }
     }
 
 
-    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors)
+    public SilkQwenSession(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
     {
-        runtime = new SilkRuntime();
+        runtime = new SilkRuntime(enableQueueProfiling: enableQueueProfiling);
         try { runner = new SilkQwenGpuRunner(runtime, config, tensors); }
         catch { runtime.Dispose(); throw; }
     }
 
 
-    public static SilkQwenSession Open(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => new SilkQwenSession(config, tensors);
+    public static SilkQwenSession Open(QwenSilkConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+        => new SilkQwenSession(config, tensors, enableQueueProfiling);
 
-    public static SilkQwenSession Open(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors)
-        => new SilkQwenSession(config, tensors);
+    public static SilkQwenSession Open(QwenSilkConfig config, Dictionary<string, (System.Numerics.BFloat16[] Data, int[] Shape)> tensors, bool enableQueueProfiling = false)
+        => new SilkQwenSession(config, tensors, enableQueueProfiling);
 
     public string DeviceName => runtime.DeviceName;
 
@@ -37,6 +37,10 @@ public sealed class SilkQwenSession : IDisposable
         get => runner.ProfilingEnabled;
         set => runner.ProfilingEnabled = value;
     }
+
+    /// <summary>Whether the underlying <see cref="SilkRuntime"/> command queue was created with
+    /// <c>CL_QUEUE_PROFILING_ENABLE</c> (diagnostic mode, opt-in at construction).</summary>
+    public bool QueueProfilingEnabled => runtime.QueueProfilingEnabled;
 
     /// <summary>Clears accumulated cached-decode profiling counters.</summary>
     public void ResetDecodeProfile() => runner.ResetDecodeProfile();

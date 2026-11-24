@@ -33,7 +33,8 @@ internal static class DocsCoveragePins
     /// 527 baseline (#1440/#1444 refresh) + 0 net from #1444 consolidation (deleted
     /// docs/plan/LORA.md, rewrote docs/LORA.md as single public guide, avoided generated-report
     /// .md false positives) + 2 net from #1473 (docs/SILK.md gained references to
-    /// tests/Nivara.PerformanceTests/README.md and docs/QWEN.md) = 529.
+    /// tests/Nivara.PerformanceTests/README.md and docs/QWEN.md) + 2 net from #1468
+    /// (runner XML comments reference docs/SILK.md) = 531.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 529;
+    internal const int ExpectedDocumentReferenceCount = 531;
 }
