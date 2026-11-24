@@ -66,6 +66,10 @@ internal static class SilkKernelsGate
         public required float[] Actual { get; init; }
         public double ReferenceUs { get; init; }
         public double SilkUs { get; init; }
+        /// <summary>Logical bytes moved (A + B + C [+ bias]) for throughput reporting; 0 when not applicable.</summary>
+        public long LogicalBytes { get; init; }
+        /// <summary>Logical FLOPs (2*M*N*K for GEMM) for throughput reporting; 0 when not applicable.</summary>
+        public long Flops { get; init; }
     }
 
     public static int Run(string[] args)
@@ -149,6 +153,9 @@ internal static class SilkKernelsGate
 
             int elements = aRows * bCols;
 
+            long flops = 2L * aRows * bCols * aCols;
+            long logicalBytes = ((long)aRows * aCols + (long)aCols * bCols + (long)aRows * bCols + bCols) * sizeof(float);
+
             nint sa = silk.Allocate(a.Length); buffers.Add(sa);
             nint sb = silk.Allocate(bt.Length); buffers.Add(sb);
             nint sc = silk.Allocate(elements); buffers.Add(sc);
@@ -178,7 +185,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmBias, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmBias, cell, true, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmBias, cell, true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
 
             // relu
@@ -203,7 +210,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmRelu, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmRelu, cell, true, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmRelu, cell, true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
 
             // gelu
@@ -227,7 +234,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmGelu, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmGelu, cell, false, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmGelu, cell, false, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
 
             // qkv
@@ -253,7 +260,7 @@ internal static class SilkKernelsGate
                     RunGemm(silk, Nivara.Silk.SilkKernels.GemmQkv, aRows, bCols);
                 };
                 Func<float[]> readSilk = () => silk.Download(sc, elements);
-                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmQkv, cell, true, runCpu, readCpu, runSilk, readSilk));
+                legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.GemmQkv, cell, true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
             }
         }
 
@@ -660,6 +667,8 @@ internal static class SilkKernelsGate
             for (int i = 0; i < bt.Length; i++) bt[i] = GemmBenchmark.NextUniformF(ref seed);
 
             int elements = aRows * bCols;
+            long flops = 2L * aRows * bCols * aCols;
+            long logicalBytes = ((long)aRows * aCols + (long)aCols * bCols + (long)aRows * bCols) * sizeof(float);
             nint sa = silk.Allocate(a.Length); buffers.Add(sa);
             nint sb = silk.Allocate(bt.Length); buffers.Add(sb);
             nint sc = silk.Allocate(elements); buffers.Add(sc);
@@ -692,7 +701,7 @@ internal static class SilkKernelsGate
             };
             Func<float[]> readSilk = () => silk.Download(sc, elements);
 
-            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.Gemm, $"modernbert {name}", true, runCpu, readCpu, runSilk, readSilk));
+            legs.Add(MeasureCpuReference(Nivara.Silk.SilkKernels.Gemm, $"modernbert {name}", true, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops));
         }
 
         return legs;
@@ -1298,8 +1307,10 @@ internal static class SilkKernelsGate
         Action runCpu,
         Func<float[]> readCpu,
         Action runSilk,
-        Func<float[]> readSilk)
-        => MeasureCpuReference(kernel, shape, false, runCpu, readCpu, runSilk, readSilk);
+        Func<float[]> readSilk,
+        long logicalBytes = 0,
+        long flops = 0)
+        => MeasureCpuReference(kernel, shape, false, runCpu, readCpu, runSilk, readSilk, logicalBytes, flops);
 
     static Leg MeasureCpuReference(
         string kernel,
@@ -1308,7 +1319,9 @@ internal static class SilkKernelsGate
         Action runCpu,
         Func<float[]> readCpu,
         Action runSilk,
-        Func<float[]> readSilk)
+        Func<float[]> readSilk,
+        long logicalBytes = 0,
+        long flops = 0)
     {
         runCpu();
         runSilk();
@@ -1323,6 +1336,8 @@ internal static class SilkKernelsGate
             Actual = readSilk(),
             ReferenceUs = cpuUs,
             SilkUs = silkUs,
+            LogicalBytes = logicalBytes,
+            Flops = flops,
         };
     }
 
@@ -1840,8 +1855,8 @@ internal static class SilkKernelsGate
     static int Report(List<Leg> legs)
     {
         Console.WriteLine();
-        Console.WriteLine($"{"kernel",-20} {"shape",-26} {"bytes",-12} {"%bound",-9} {"cpu us",-9} {"silk us",-9} {"x",-6}");
-        Console.WriteLine(new string('-', 102));
+        Console.WriteLine($"{"kernel",-20} {"shape",-26} {"bytes",-12} {"%bound",-9} {"cpu us",-9} {"silk us",-9} {"GB/s",-8} {"GF/s",-8} {"x",-6}");
+        Console.WriteLine(new string('-', 120));
 
         int failures = 0;
         int outOfBand = 0;
@@ -1863,9 +1878,15 @@ internal static class SilkKernelsGate
             string bytes = byteOk
                 ? (leg.RequireBytes ? "IDENTICAL" : "identical")
                 : $"{byteDiffs} diff";
+            string gbs = leg.LogicalBytes > 0
+                ? (leg.SilkUs > 0 ? $"{leg.LogicalBytes / leg.SilkUs / 1000.0:F2}" : "-")
+                : "-";
+            string gflops = leg.Flops > 0
+                ? (leg.SilkUs > 0 ? $"{leg.Flops / leg.SilkUs / 1000.0:F2}" : "-")
+                : "-";
             Console.WriteLine(
                 $"{leg.Kernel,-20} {leg.Shape,-26} {bytes,-12} {worstRatio * 100.0,-9:F3} " +
-                $"{leg.ReferenceUs,-9:F1} {leg.SilkUs,-9:F1} {ratio,-6:F2}{(failed ? "  FAIL" : "")}{(band ? "  OUT-OF-BAND" : "")}");
+                $"{leg.ReferenceUs,-9:F1} {leg.SilkUs,-9:F1} {gbs,-8} {gflops,-8} {ratio,-6:F2}{(failed ? "  FAIL" : "")}{(band ? "  OUT-OF-BAND" : "")}");
         }
 
         Console.WriteLine(new string('-', 102));
