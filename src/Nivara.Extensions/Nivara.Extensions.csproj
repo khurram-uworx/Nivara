@@ -10,7 +10,7 @@
     <PackageId>Nivara.Extensions</PackageId>
     <PackageVersion>1.5.4</PackageVersion>
     <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, the BERT-family model layer, and the Silk OpenCL GPU backend for Nivara</Description>
-    <PackageReleaseNotes>v1.5.4: Silk/OpenCL decode performance (subgroup GEMV, K-split, vload4, Option B MLP fusion, quantized INT4/INT8 block-32 decode weights), LoRA/SLM fine-tuning showcase (Qwen2.5/SmolLM causal-LM LoRA training on CPU and Silk iGPU), autodiff freeze mechanism, plus docs consolidation. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.5.4: Silk/OpenCL decode performance (subgroup GEMV, K-split, vload4, Option B MLP fusion, quantized INT8 block-32 decode weights), LoRA/SLM fine-tuning showcase (Qwen2.5/SmolLM causal-LM LoRA training on CPU and Silk iGPU), autodiff freeze mechanism, plus docs consolidation. Full changelog in CHANGELOG.md.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>
