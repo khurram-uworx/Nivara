@@ -4,12 +4,59 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ## [Unreleased]
 
+## [1.5.4] - 2026-11-25
+
 ### Added
 
-- `LoraAdapterSerializer` for adapter-only LoRA persistence: saves/loads trainable `A`/`B`
-  tensors plus versioned metadata (format, type, base model id, rank, alpha, targets) without
-  base weights, validates format/base model/rank/alpha/shapes on load, and rejects merged
-  adapters on save.
+- LoRA / SLM fine-tuning showcase: minimal `LoRALinear<T>` module with gradient check,
+  mixed-dtype `LoRALinear<TModel, TWeight>` for a frozen Llama base, adapter injection
+  into `LlamaForCausalLM` (q/v/k/o/ffn targets) with merge, adapter-only save/load
+  (`LoraAdapterSerializer`), generic Llama-family CPU SFT trainer, Silk (OpenCL) iGPU
+  causal-LM LoRA training with CPU/Silk parity, LoRA adapter bundles in Silk Qwen/SmolLM
+  inference, and `ft-eval`/`ft-lora` CLI plus reports.
+- Autodiff freeze mechanism for base weights (`RequiresGrad = false` propagation).
+- `Nivara.Samples` helpers: SmolLM/Qwen causal-LM loading and chat templates promoted
+  out of the sample projects.
+- Silk quantized decode: INT4/INT8 block-32 decode weights with in-kernel dequant for the
+  Qwen and SmolLM runners (gated by `NIVARA_SILK_INT8`).
+- Silk decode performance: subgroup reductions for decode GEMV, K-split decode GEMV,
+  vload4 weight-load vectorization, normed-x staging in local memory, Option B two-dispatch
+  MLP decode fusion, decode MLP decomposition for multi-WG occupancy, QK rotary fusion, and
+  host/pipeline overhead reductions (buffer reuse, RoPE table pre-sizing).
+- Silk long-kvLen decode attention shape and O-projection fusion measurement.
+- NivaraInference: Laya decision-head CPU training path; `--silk --precision fp16`
+  exposure; opt-in `--blas` for NivaraIncident (parity with `--silk`).
+- NivaraFineTuning: BF16 training on CPU and Silk.
+- Nivara.SimdProbe: `--blas` A/B (managed vs OpenBLAS GEMM/GEMV).
+- Documentation: consolidated LoRA guide (`docs/LORA.md`), generic Silk trainer design note,
+  and SILK.md sections for decode attention, host/pipeline overhead, fused MLP block bytes,
+  and INT8 block-32 format.
+
+### Changed
+
+- Silk decode measurement/reporting: achieved GB/s guidance for decode GEMV, BF16 decode
+  GEMV GB/s, `gemm_gemv_add` O-projection GB/s, multi-slot `rms_norm_gemv` GB/s, prefill
+  GEMM GB/s and GFLOP/s, and fused MLP block GB/s with a documented bytes-moved model.
+- NivaraChat: adaptive-eval parity now states compared components; per-component backend
+  reporting matrix; shared causal-LM generator across Qwen/SmolLM/Batched clients.
+- NivaraInference: Qwen synthetic CPU/Silk benchmark reporting aligned; SmolLM CPU/Silk
+  diagnostics and synthetic parity fallback.
+- Documentation: retired NIVARACHAT-SILK-GAPS.md and the stale NivaraInference Silk gaps
+  umbrella plan; corrected stale `--silk --precision fp16` rejection claims; aligned
+  `--silk`/`--blas`/CPU reporting in NivaraIncident; removed vision Silk BF16 runner
+  shims that only widened to float.
+- `SilkDistilBertTrainer` `Backward`/`AdamUpdateAll`/`ExportGradients` promoted to public;
+  `ZeroGradients` added to `SilkLayaHeadTrainer`; TinyShakespeare Silk CLI help updated.
+
+### Fixed
+
+- Silk runtime lifetime across head training (avoid dispose crash); deferred Silk
+  head-training probe until after index builds.
+- Gather row counts in the Silk TinyShakespeare runner; `maxBatch`/`maxSeqLen` OOM guard
+  enforced in `SilkTinyShakespeareTrainer`; `trainableLayerCount` (partial/frozen training).
+- Context-window growth in the non-cached path and cache-overflow handling.
+- Silk subgroup follow-ups: force-fallback hook and docs.
+- Mixed-dtype LoRA adapter round-trip coverage; SFT prompt-masking cross-entropy loss.
 
 ## [1.5.3] - 2026-11-20
 
