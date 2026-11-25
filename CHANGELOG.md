@@ -17,7 +17,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 - Autodiff freeze mechanism for base weights (`RequiresGrad = false` propagation).
 - `Nivara.Samples` helpers: SmolLM/Qwen causal-LM loading and chat templates promoted
   out of the sample projects.
-- Silk quantized decode: INT4/INT8 block-32 decode weights with in-kernel dequant for the
+- Silk quantized decode: INT8 block-32 decode weights with in-kernel dequant for the
   Qwen and SmolLM runners (gated by `NIVARA_SILK_INT8`).
 - Silk decode performance: subgroup reductions for decode GEMV, K-split decode GEMV,
   vload4 weight-load vectorization, normed-x staging in local memory, Option B two-dispatch
