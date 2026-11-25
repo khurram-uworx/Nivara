@@ -1582,3 +1582,7 @@ Format: `SilkInt8Block32 v1`. Symmetric per-block quantization, no zero point.
   Default remains F32/BF16 storage.
 - Scope: decode weights only (QKV, O-proj, gate/up/down, LM head). Embeddings, norms, biases and KV
   cache stay F32. INT4 is deferred to a follow-up.
+- CPU parity: the same `SilkInt8Block32 v1` format is now consumable by the managed CPU decode path
+  (`LlamaForCausalLM` / `LlamaDecoderBlock` fused decode) via `Int8Block32Weight` + `Int8Block32Kernels`
+  (core, `src/Nivara/AutoDiff/Nn/`). Opt-in via the `NIVARA_QUANT_INT8` environment variable (replaces
+  the former `NIVARA_SILK_INT8`), which enables INT8 on both CPU and Silk paths; `--silk` selects the backend.

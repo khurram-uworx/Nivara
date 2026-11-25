@@ -221,7 +221,7 @@ where supported).
 Silk decode can optionally store decode weights as INT8 (`SilkInt8Block32 v1`, symmetric per-block-32, F32 scale) with in-kernel dequant. Opt-in via environment variable:
 
 ```powershell
-$env:NIVARA_SILK_INT8 = "1"
+$env:NIVARA_QUANT_INT8 = "1"
 dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark
 ```
 

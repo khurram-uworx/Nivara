@@ -36,9 +36,7 @@ These must be resolved during G1 grounding (microsoft-learn MCP + code-memory + 
 4. **Scope**: decode weights only (Q/K/V/O, gate/up/down, LM head) mirroring Silk; embeddings/norms/biases/KV cache remain F32. LoRA/adapters/Grad-enabled training fall back to dense path. Prefill: include if it shares the same fused CPU path; confirm.
 5. **ISA dispatch**: #1469 comment recommends `Vector128/256/512`, `System.Runtime.Intrinsics`, AVX2/AVX-512/VNNI where available, portable scalar fallback; `TensorPrimitives` may be insufficient for fused dequant+accum control. Decide minimum v1 dispatch (scalar + AVX2? scalar only?) and runtime dispatch mechanism.
 6. **Parity contract**: define numeric parity target vs dense F32 reference and vs Silk INT8 where comparable. FP accumulation order may differ with SIMD; prefer exact where deterministic, otherwise record justified tolerance (max abs/cosine/argmax agreement).
-7. **Public/API surface**: how users opt in (env var like Silk, constructor arg, config, loader option?). Keep default unchanged.
-
-## Proposed changes
+7. **Public/API surface**: opt-in via renamed env var `NIVARA_QUANT_INT8` (same name for both CPU and Silk; `--silk` selects backend). Replaces `NIVARA_SILK_INT8`. Keep default unchanged.## Proposed changes
 
 ### A. Format & quantizer (shared, versioned)
 
@@ -70,7 +68,7 @@ public sealed class Int8Block32Weight
 
 - `LlamaDecoderBlock<TModel,TWeight>` / `LlamaForCausalLM<TModel,TWeight>`: carry optional INT8 weight payloads for eligible projections. Only active when `!GradientUtils.IsGradEnabled`, no LoRA/adapter on projection, and quantized weights present.
 - `ForwardCachedFused` / `ForwardPrefillFused` / tied LM head: dispatch to INT8 GEMV when eligible.
-- Loader/model construction: add opt-in path to quantize loaded dense weights or load prequantized weights (decision after G1). `NivaraInference` gets env/config toggle parallel to `NIVARA_SILK_INT8`.
+- Loader/model construction: add opt-in path to quantize loaded dense weights or load prequantized weights (decision after G1). `NivaraInference` gets env/config toggle via `NIVARA_QUANT_INT8`.
 
 ### D. Tests & docs
 

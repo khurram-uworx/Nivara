@@ -417,7 +417,7 @@ Silk decode can optionally store decode weights as INT8 (`SilkInt8Block32 v1`, s
 Enable via environment variable (no CLI flag needed):
 
 ```powershell
-$env:NIVARA_SILK_INT8 = "1"
+$env:NIVARA_QUANT_INT8 = "1"
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark
 ```
 

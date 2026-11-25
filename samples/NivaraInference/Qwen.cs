@@ -180,8 +180,17 @@ public static class Qwen
 {
     public static bool IsInt8Env()
     {
-        string? env = Environment.GetEnvironmentVariable("NIVARA_SILK_INT8");
+        string? env = Environment.GetEnvironmentVariable("NIVARA_QUANT_INT8");
         return env is not null && (env == "1" || env.Equals("true", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static void MaybeQuantizeToInt8<TModel, TWeight>(LlamaForCausalLM<TModel, TWeight> model)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        if (!IsInt8Env()) return;
+        if (typeof(TModel) != typeof(float)) return;
+        model.QuantizeWeightsToInt8();
     }
     const int FeatureDim = 4096;
     const int MaxNewTokens = 160;
@@ -621,6 +630,7 @@ public static class Qwen
         var tensors = SynthesizeTensors<TWeight>(QwenSyntheticConfig);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(QwenSyntheticConfig, tensors);
+        MaybeQuantizeToInt8(model);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
         Console.WriteLine();
@@ -779,6 +789,7 @@ public static class Qwen
         Console.WriteLine();
 
         var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
+        MaybeQuantizeToInt8(model);
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, vocab={config.VocabSize}");
         Console.WriteLine();
@@ -906,6 +917,7 @@ public static class Qwen
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark ===");
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
         var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
+        MaybeQuantizeToInt8(model);
 
         string toolJson = QwenChatTemplate.ToolJson(
             WeatherToolName, WeatherToolDesc, [("city", "string", CityParamDesc, true)]);
@@ -926,6 +938,7 @@ public static class Qwen
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain-prompt KV-cache decode benchmark ===");
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
         var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
+        MaybeQuantizeToInt8(model);
 
         var promptIds = tokenizer.Encode(QwenChatTemplate.RenderPlain(PlainPrompt));
         return NarrowWidenScope<TModel>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens, "the plain prompt"));
@@ -941,6 +954,7 @@ public static class Qwen
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) ===");
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<TModel, TWeight>()}");
         var (model, config, tokenizer) = LlamaLoader.LoadModel<TModel, TWeight>(tensors, modelDir);
+        MaybeQuantizeToInt8(model);
 
         var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
         var promptIds = tokenizer.Encode(prompt).ToList();
@@ -975,6 +989,7 @@ public static class Qwen
         long mb = tensors.Values.Sum(t => (long)t.Data.Length) * System.Runtime.InteropServices.Marshal.SizeOf<TWeight>() / (1024 * 1024);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(QwenSyntheticConfig, tensors);
+        MaybeQuantizeToInt8(model);
         buildSw.Stop();
         Console.WriteLine($"  Model build ({syntheticPrecision}): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB storage pool)");
         Console.WriteLine();
@@ -1084,6 +1099,7 @@ public static class Qwen
     {
         PrintDistillHeader($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
         var (model, config, tokenizer) = LlamaLoader.LoadModel<float, float>(tensors, modelDir);
+        MaybeQuantizeToInt8(model);
         return RunDistillCore(config, modelDir, teacherExamples, force, seed,
             sentence => RunTeacherClassify(model, config, tokenizer, sentence));
     }
