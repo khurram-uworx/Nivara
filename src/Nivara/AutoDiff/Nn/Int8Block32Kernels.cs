@@ -1,5 +1,3 @@
-using System.Numerics.Tensors;
-
 namespace Nivara.AutoDiff.Nn;
 
 /// <summary>
