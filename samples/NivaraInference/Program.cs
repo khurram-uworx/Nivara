@@ -3631,6 +3631,7 @@ class Program
 
             var buildSw = Stopwatch.StartNew();
             var model = LlamaLoader.Load<TModel, TWeight>(SmolLMSyntheticConfig, tensors);
+            Qwen.MaybeQuantizeToInt8(model);
             buildSw.Stop();
             Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
             Console.WriteLine();
@@ -4133,6 +4134,7 @@ class Program
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
+        Qwen.MaybeQuantizeToInt8(model);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -4198,6 +4200,7 @@ class Program
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<T, T>(config, tensors);
+        Qwen.MaybeQuantizeToInt8(model);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
@@ -4335,6 +4338,7 @@ class Program
 
         var buildSw = Stopwatch.StartNew();
         var model = LlamaLoader.Load<TModel, TWeight>(config, tensors);
+        Qwen.MaybeQuantizeToInt8(model);
         buildSw.Stop();
         Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
                           $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +

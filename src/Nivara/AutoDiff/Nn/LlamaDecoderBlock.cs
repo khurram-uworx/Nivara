@@ -3,6 +3,7 @@ using Nivara.AutoDiff.Utilities;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -42,6 +43,10 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
     public Linear<TModel, TWeight> UpProj { get; }
     /// <summary>Gets the down-projection linear.</summary>
     public Linear<TModel, TWeight> DownProj { get; }
+
+    public Int8Block32Weight? GateProjInt8 { get; set; }
+    public Int8Block32Weight? UpProjInt8 { get; set; }
+    public Int8Block32Weight? DownProjInt8 { get; set; }
     /// <summary>Gets or sets the LoRA adapter module for the feed-forward gate projection; null routes to the plain gate projection.</summary>
     public Module<TModel>? GateAdapter { get; set; }
     /// <summary>Gets or sets the LoRA adapter module for the feed-forward up projection; null routes to the plain up projection.</summary>
@@ -283,9 +288,9 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         TensorPrimitives.Multiply(normBuf.AsSpan(0, hiddenSize), iGamma, normBuf.AsSpan(0, hiddenSize));
 
         // Q/K/V projections (B = W^TModel for a 1-row a is the GEMV fast path) plus bias.
-        GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.QProj.Weight), qBuf, 1, hiddenSize, qWidth);
-        GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.KProj.Weight), kBuf, 1, hiddenSize, kvWidth);
-        GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.VProj.Weight), vBuf, 1, hiddenSize, kvWidth);
+        if (typeof(TModel) == typeof(float) && Attention.QProjInt8 is { } qW && Attention.QAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(normBuf.AsSpan(0, hiddenSize)), qW, MemoryMarshal.Cast<TModel, float>(qBuf.AsSpan()), 1, hiddenSize, qWidth); else GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.QProj.Weight), qBuf, 1, hiddenSize, qWidth);
+        if (typeof(TModel) == typeof(float) && Attention.KProjInt8 is { } kW && Attention.KAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(normBuf.AsSpan(0, hiddenSize)), kW, MemoryMarshal.Cast<TModel, float>(kBuf.AsSpan()), 1, hiddenSize, kvWidth); else GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.KProj.Weight), kBuf, 1, hiddenSize, kvWidth);
+        if (typeof(TModel) == typeof(float) && Attention.VProjInt8 is { } vW && Attention.VAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(normBuf.AsSpan(0, hiddenSize)), vW, MemoryMarshal.Cast<TModel, float>(vBuf.AsSpan()), 1, hiddenSize, kvWidth); else GradKernels.MixedMatMulTransposedB(normBuf.AsSpan(0, hiddenSize), ParamSpan(Attention.VProj.Weight), vBuf, 1, hiddenSize, kvWidth);
         if (Attention.QProj.Bias is { } qBiasParam)
         {
             var qBias = ParamSpan(qBiasParam);
@@ -314,7 +319,7 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
 
         // Output projection into h, then the attention residual in place; the residual is also
         // preserved for the final output add because PostNorm below writes h in place.
-        GradKernels.MixedMatMulTransposedB(attnBuf.AsSpan(0, qWidth), ParamSpan(Attention.OProj.Weight), hBuf, 1, qWidth, hiddenSize);
+        if (typeof(TModel) == typeof(float) && Attention.OProjInt8 is { } oW && Attention.OAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(attnBuf.AsSpan(0, qWidth)), oW, MemoryMarshal.Cast<TModel, float>(hBuf.AsSpan()), 1, qWidth, hiddenSize); else GradKernels.MixedMatMulTransposedB(attnBuf.AsSpan(0, qWidth), ParamSpan(Attention.OProj.Weight), hBuf, 1, qWidth, hiddenSize);
         TensorPrimitives.Add(input, hBuf.AsSpan(0, hiddenSize), hBuf.AsSpan(0, hiddenSize));
         if (residual is not null) hBuf.AsSpan(0, hiddenSize).CopyTo(residual);
 
@@ -323,14 +328,14 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
         var pGamma = ParamSpan(PostNorm.Weight);
         TensorPrimitives.Multiply(hBuf.AsSpan(0, hiddenSize), pGamma, hBuf.AsSpan(0, hiddenSize));
 
-        GradKernels.MixedMatMulTransposedB(hBuf.AsSpan(0, hiddenSize), ParamSpan(GateProj.Weight), gateBuf, 1, hiddenSize, intermediateSize);
+        if (typeof(TModel) == typeof(float) && GateProjInt8 is { } gW && GateAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(hBuf.AsSpan(0, hiddenSize)), gW, MemoryMarshal.Cast<TModel, float>(gateBuf.AsSpan()), 1, hiddenSize, intermediateSize); else GradKernels.MixedMatMulTransposedB(hBuf.AsSpan(0, hiddenSize), ParamSpan(GateProj.Weight), gateBuf, 1, hiddenSize, intermediateSize);
         GradKernels.Silu(gateBuf.AsSpan(0, intermediateSize), gateOutBuf.AsSpan(0, intermediateSize));
-        GradKernels.MixedMatMulTransposedB(hBuf.AsSpan(0, hiddenSize), ParamSpan(UpProj.Weight), upBuf, 1, hiddenSize, intermediateSize);
+        if (typeof(TModel) == typeof(float) && UpProjInt8 is { } uW && UpAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(hBuf.AsSpan(0, hiddenSize)), uW, MemoryMarshal.Cast<TModel, float>(upBuf.AsSpan()), 1, hiddenSize, intermediateSize); else GradKernels.MixedMatMulTransposedB(hBuf.AsSpan(0, hiddenSize), ParamSpan(UpProj.Weight), upBuf, 1, hiddenSize, intermediateSize);
         TensorPrimitives.Multiply(gateOutBuf.AsSpan(0, intermediateSize), upBuf.AsSpan(0, intermediateSize), upBuf.AsSpan(0, intermediateSize));
 
         // Down projection (into the spent attn buffer) + residual from the preserved buffer into
         // the caller's output.
-        GradKernels.MixedMatMulTransposedB(upBuf.AsSpan(0, intermediateSize), ParamSpan(DownProj.Weight), attnBuf, 1, intermediateSize, hiddenSize);
+        if (typeof(TModel) == typeof(float) && DownProjInt8 is { } dW && DownAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(upBuf.AsSpan(0, intermediateSize)), dW, MemoryMarshal.Cast<TModel, float>(attnBuf.AsSpan()), 1, intermediateSize, hiddenSize); else GradKernels.MixedMatMulTransposedB(upBuf.AsSpan(0, intermediateSize), ParamSpan(DownProj.Weight), attnBuf, 1, intermediateSize, hiddenSize);
         TensorPrimitives.Add(residual!.AsSpan(0, hiddenSize), attnBuf.AsSpan(0, hiddenSize), output);
     }
 
@@ -398,9 +403,9 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
 
             // Q/K/V projections + per-row bias broadcast.
             var rowSpan = normArr.AsSpan(0, qLen * hiddenSize);
-            GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.QProj.Weight), qArr, qLen, hiddenSize, qWidth);
-            GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.KProj.Weight), kArr, qLen, hiddenSize, kvWidth);
-            GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.VProj.Weight), vArr, qLen, hiddenSize, kvWidth);
+            if (typeof(TModel) == typeof(float) && Attention.QProjInt8 is { } qW && Attention.QAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(rowSpan), qW, MemoryMarshal.Cast<TModel, float>(qArr.AsSpan()), qLen, hiddenSize, qWidth); else GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.QProj.Weight), qArr, qLen, hiddenSize, qWidth);
+            if (typeof(TModel) == typeof(float) && Attention.KProjInt8 is { } kW && Attention.KAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(rowSpan), kW, MemoryMarshal.Cast<TModel, float>(kArr.AsSpan()), qLen, hiddenSize, kvWidth); else GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.KProj.Weight), kArr, qLen, hiddenSize, kvWidth);
+            if (typeof(TModel) == typeof(float) && Attention.VProjInt8 is { } vW && Attention.VAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(rowSpan), vW, MemoryMarshal.Cast<TModel, float>(vArr.AsSpan()), qLen, hiddenSize, kvWidth); else GradKernels.MixedMatMulTransposedB(rowSpan, ParamSpan(Attention.VProj.Weight), vArr, qLen, hiddenSize, kvWidth);
             if (Attention.QProj.Bias is { } qBiasParam)
             {
                 var qBias = ParamSpan(qBiasParam);
@@ -436,7 +441,7 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
                 kCache.AsSpan(positionOffset * kvWidth, rowBytes),
                 vCache.AsSpan(positionOffset * kvWidth, rowBytes),
                 attnArr.AsSpan(0, qLen * qWidth), qLen, numHeads, numKvHeads, headDim, scale);
-            GradKernels.MixedMatMulTransposedB(attnArr.AsSpan(0, qLen * qWidth), ParamSpan(Attention.OProj.Weight), hArr, qLen, qWidth, hiddenSize);
+            if (typeof(TModel) == typeof(float) && Attention.OProjInt8 is { } oW && Attention.OAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(attnArr.AsSpan(0, qLen * qWidth)), oW, MemoryMarshal.Cast<TModel, float>(hArr.AsSpan()), qLen, qWidth, hiddenSize); else GradKernels.MixedMatMulTransposedB(attnArr.AsSpan(0, qLen * qWidth), ParamSpan(Attention.OProj.Weight), hArr, qLen, qWidth, hiddenSize);
             TensorPrimitives.Add(input, hArr.AsSpan(0, qLen * hiddenSize), hArr.AsSpan(0, qLen * hiddenSize));
             // Preserve the residual for the final output add (PostNorm below writes hArr in place).
             hArr.AsSpan(0, qLen * hiddenSize).CopyTo(residualArr);
@@ -448,14 +453,14 @@ public class LlamaDecoderBlock<TModel, TWeight> : Module<TModel> where TModel : 
                 TensorPrimitives.Multiply(hArr.AsSpan(r * hiddenSize, hiddenSize), pGamma, hArr.AsSpan(r * hiddenSize, hiddenSize));
 
             var hSpan = hArr.AsSpan(0, qLen * hiddenSize);
-            GradKernels.MixedMatMulTransposedB(hSpan, ParamSpan(GateProj.Weight), gateArr, qLen, hiddenSize, intermediateSize);
+            if (typeof(TModel) == typeof(float) && GateProjInt8 is { } gW && GateAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(hSpan), gW, MemoryMarshal.Cast<TModel, float>(gateArr.AsSpan()), qLen, hiddenSize, intermediateSize); else GradKernels.MixedMatMulTransposedB(hSpan, ParamSpan(GateProj.Weight), gateArr, qLen, hiddenSize, intermediateSize);
             GradKernels.Silu(gateArr.AsSpan(0, qLen * intermediateSize), gateOutArr.AsSpan(0, qLen * intermediateSize));
-            GradKernels.MixedMatMulTransposedB(hSpan, ParamSpan(UpProj.Weight), upArr, qLen, hiddenSize, intermediateSize);
+            if (typeof(TModel) == typeof(float) && UpProjInt8 is { } uW && UpAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(hSpan), uW, MemoryMarshal.Cast<TModel, float>(upArr.AsSpan()), qLen, hiddenSize, intermediateSize); else GradKernels.MixedMatMulTransposedB(hSpan, ParamSpan(UpProj.Weight), upArr, qLen, hiddenSize, intermediateSize);
             TensorPrimitives.Multiply(gateOutArr.AsSpan(0, qLen * intermediateSize), upArr.AsSpan(0, qLen * intermediateSize), upArr.AsSpan(0, qLen * intermediateSize));
 
             // Down projection into the spent attn buffer + residual from the preserved buffer into
             // the caller's output.
-            GradKernels.MixedMatMulTransposedB(upArr.AsSpan(0, qLen * intermediateSize), ParamSpan(DownProj.Weight), mlpArr, qLen, intermediateSize, hiddenSize);
+            if (typeof(TModel) == typeof(float) && DownProjInt8 is { } dW && DownAdapter is null && !GradientUtils.IsGradEnabled) Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(upArr.AsSpan(0, qLen * intermediateSize)), dW, MemoryMarshal.Cast<TModel, float>(mlpArr.AsSpan()), qLen, intermediateSize, hiddenSize); else GradKernels.MixedMatMulTransposedB(upArr.AsSpan(0, qLen * intermediateSize), ParamSpan(DownProj.Weight), mlpArr, qLen, intermediateSize, hiddenSize);
             TensorPrimitives.Add(residualArr.AsSpan(0, qLen * hiddenSize), mlpArr.AsSpan(0, qLen * hiddenSize), output);
         }
         finally

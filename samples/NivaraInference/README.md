@@ -115,7 +115,7 @@ For architecture, verification, performance, and GPU-path details per model:
 Silk decode can optionally store decode weights as INT8 (`SilkInt8Block32 v1`) with in-kernel dequant, keeping F32 activations/accumulators. Opt-in via environment variable (no CLI flag):
 
 ```powershell
-$env:NIVARA_SILK_INT8 = "1"
+$env:NIVARA_QUANT_INT8 = "1"
 dotnet run --project samples/NivaraInference -c Release -- qwen --silk benchmark
 dotnet run --project samples/NivaraInference -c Release -- smollm --silk benchmark
 ```
