@@ -11,7 +11,7 @@ public sealed class SilkSmolLMSession : IDisposable
     {
         if (quantization == SilkWeightQuantization.None)
         {
-            string? env = Environment.GetEnvironmentVariable("NIVARA_SILK_INT8");
+            string? env = Environment.GetEnvironmentVariable("NIVARA_QUANT_INT8");
             if (env is not null && (env == "1" || env.Equals("true", StringComparison.OrdinalIgnoreCase)))
                 quantization = SilkWeightQuantization.Int8Block32;
         }
@@ -24,7 +24,7 @@ public sealed class SilkSmolLMSession : IDisposable
     {
         if (quantization == SilkWeightQuantization.None)
         {
-            string? env = Environment.GetEnvironmentVariable("NIVARA_SILK_INT8");
+            string? env = Environment.GetEnvironmentVariable("NIVARA_QUANT_INT8");
             if (env is not null && (env == "1" || env.Equals("true", StringComparison.OrdinalIgnoreCase)))
                 quantization = SilkWeightQuantization.Int8Block32;
         }

@@ -27,6 +27,11 @@ public class LlamaCausalAttention<TModel, TWeight> : Module<TModel> where TModel
     public Linear<TModel, TWeight> VProj { get; }
     /// <summary>Gets the output projection linear.</summary>
     public Linear<TModel, TWeight> OProj { get; }
+
+    public Int8Block32Weight? QProjInt8 { get; set; }
+    public Int8Block32Weight? KProjInt8 { get; set; }
+    public Int8Block32Weight? VProjInt8 { get; set; }
+    public Int8Block32Weight? OProjInt8 { get; set; }
     /// <summary>Gets or sets the LoRA adapter module for the query projection; null routes to the plain QProj.</summary>
     public Module<TModel>? QAdapter { get; set; }
     /// <summary>Gets or sets the LoRA adapter module for the key projection; null routes to the plain KProj.</summary>

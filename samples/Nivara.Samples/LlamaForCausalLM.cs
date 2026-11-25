@@ -39,6 +39,9 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
 
     /// <summary>Gets the token embedding table (reused as the tied LM head).</summary>
     public Embedding<TModel, TWeight> Embed { get; }
+
+    /// <summary>Optional INT8 block-32 quantized embedding/LM-head weights (decode path).</summary>
+    public Int8Block32Weight? EmbedInt8 { get; set; }
     internal readonly LlamaDecoderBlock<TModel, TWeight>[] layers;
     internal readonly RMSNorm<TModel> finalNorm;
     internal readonly int vocabSize;
@@ -393,6 +396,74 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
         return ReverseGradTensor<TModel>.FromMatrix(logits, rowCount, vocabSize, requiresGrad: false);
     }
 
+    /// <summary>
+    /// Quantizes all decode projections (and the tied embedding/LM head) to INT8 block-32 and
+    /// attaches them for the fused decode path. Dense weights are retained for fallback/Grad.
+    /// Supports F32 and BF16 storage weights. No-op-friendly: call only when INT8 is desired.
+    /// </summary>
+    public void QuantizeWeightsToInt8()
+    {
+        for (int i = 0; i < layers.Length; i++)
+        {
+            var layer = layers[i];
+            layer.Attention.QProjInt8 = QuantizeLinear(layer.Attention.QProj);
+            layer.Attention.KProjInt8 = QuantizeLinear(layer.Attention.KProj);
+            layer.Attention.VProjInt8 = QuantizeLinear(layer.Attention.VProj);
+            layer.Attention.OProjInt8 = QuantizeLinear(layer.Attention.OProj);
+            layer.GateProjInt8 = QuantizeLinear(layer.GateProj);
+            layer.UpProjInt8 = QuantizeLinear(layer.UpProj);
+            layer.DownProjInt8 = QuantizeLinear(layer.DownProj);
+        }
+        EmbedInt8 = QuantizeEmbedding();
+    }
+
+    Int8Block32Weight? QuantizeLinear(Linear<TModel, TWeight> linear)
+    {
+        if (linear.Weight is null) return null;
+        if (!linear.Weight.Tensor.Data.TryGetSpan(out var span)) return null;
+        int outF = linear.OutFeatures;
+        int inF = linear.InFeatures;
+        // weights stored [outF, inF] (checkpoint layout); quantizer transposes to [inF, outF].
+        if (typeof(TWeight) == typeof(float))
+        {
+            var fspan = MemoryMarshal.Cast<TWeight, float>(span);
+            var (w, s) = Int8Block32Quantizer.QuantizeFromCheckpoint(fspan, outF, inF);
+            return Int8Block32Quantizer.ToWeight(w, s, inF, outF);
+        }
+        if (typeof(TWeight) == typeof(BFloat16))
+        {
+            var bspan = MemoryMarshal.Cast<TWeight, BFloat16>(span);
+            var f = new float[bspan.Length];
+            for (int i = 0; i < f.Length; i++) f[i] = (float)bspan[i];
+            var (w, s) = Int8Block32Quantizer.QuantizeFromCheckpoint(f, outF, inF);
+            return Int8Block32Quantizer.ToWeight(w, s, inF, outF);
+        }
+        return null;
+    }
+
+    Int8Block32Weight? QuantizeEmbedding()
+    {
+        if (Embed.Weight is null) return null;
+        if (!Embed.Weight.Tensor.Data.TryGetSpan(out var span)) return null;
+        int vocab = vocabSize;
+        int hidden = Embed.EmbeddingDim;
+        if (typeof(TWeight) == typeof(float))
+        {
+            var fspan = MemoryMarshal.Cast<TWeight, float>(span);
+            var (w, s) = Int8Block32Quantizer.QuantizeFromCheckpoint(fspan, vocab, hidden);
+            return Int8Block32Quantizer.ToWeight(w, s, hidden, vocab);
+        }
+        if (typeof(TWeight) == typeof(BFloat16))
+        {
+            var bspan = MemoryMarshal.Cast<TWeight, BFloat16>(span);
+            var f = new float[bspan.Length];
+            for (int i = 0; i < f.Length; i++) f[i] = (float)bspan[i];
+            var (w, s) = Int8Block32Quantizer.QuantizeFromCheckpoint(f, vocab, hidden);
+            return Int8Block32Quantizer.ToWeight(w, s, hidden, vocab);
+        }
+        return null;
+    }
+
     void ThrowIfMixedDtypeTraining()
     {
         if (GradientUtils.IsGradEnabled && typeof(TModel) != typeof(TWeight) && !IsFrozen)
@@ -447,7 +518,10 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
         finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
         LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, 1, hidden, double.CreateChecked(finalNorm.Eps));
         var logits = new TModel[vocabSize];
-        LlamaFusedKernels.MixedMatMulTransposedB(cur, embedSpan, logits, 1, hidden, vocabSize);
+        if (typeof(TModel) == typeof(float) && EmbedInt8 is { } embW && !GradientUtils.IsGradEnabled)
+            Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(cur.AsSpan()), embW, MemoryMarshal.Cast<TModel, float>(logits.AsSpan()), 1, hidden, vocabSize);
+        else
+            LlamaFusedKernels.MixedMatMulTransposedB(cur, embedSpan, logits, 1, hidden, vocabSize);
         return ReverseGradTensor<TModel>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
     }
 
@@ -478,7 +552,10 @@ public class LlamaForCausalLM<TModel, TWeight> : Module<TModel>
             finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
             LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, L, hidden, double.CreateChecked(finalNorm.Eps));
             var logits = new TModel[vocabSize];
-            LlamaFusedKernels.MixedMatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
+            if (typeof(TModel) == typeof(float) && EmbedInt8 is { } embW && !GradientUtils.IsGradEnabled)
+                Int8Block32Kernels.MatMulTransposedB(MemoryMarshal.Cast<TModel, float>(cur.AsSpan((L - 1) * hidden, hidden)), embW, MemoryMarshal.Cast<TModel, float>(logits.AsSpan()), 1, hidden, vocabSize);
+            else
+                LlamaFusedKernels.MixedMatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
             return ReverseGradTensor<TModel>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
         }
         finally
