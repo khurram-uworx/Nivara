@@ -1,0 +1,155 @@
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 99 ms (104 tensors)
+
+=== MiniLM Silk Benchmark ===
+Device: Intel(R) Graphics
+
+Model build: 297 ms
+Parameters: 22,713,728
+Weights: 86.6 MB
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 13.5 ms
+  Min:     12 ms
+  Max:     14 ms
+
+Last pass embedding L2 norm: 1.000000
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 286 ms (105 tensors)
+
+=== DistilBERT Silk Benchmark ===
+Device: Intel(R) Graphics
+Model build: 393 ms
+Parameters: 66,985,530
+Weights: 255.5 MB
+
+Input text length: 25 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 35.4 ms
+  Min:     35 ms
+  Max:     39 ms
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 298 ms (104 tensors)
+
+=== DistilBERT SST-2 Silk Benchmark ===
+Device: Intel(R) Graphics
+Model build: 393 ms
+Parameters: 66,955,010
+Weights: 255.4 MB
+
+Input text length: 26 words
+Input tokens: 128
+
+Warmup (3 passes)...
+Benchmarking (10 passes)...
+  Average: 34.9 ms
+  Min:     33 ms
+  Max:     39 ms
+
+Last pass sentiment: NEGATIVE (99.3%)
+
+=== Nivara HuggingFace Inference ===
+
+Loading weights (native) from model.safetensors...
+  SafeTensors parse (Half): 878 ms (206 tensors)
+
+=== Laya Benchmark (GPU) ===
+Encoder: ModernBERT-large, 28 layers, d=1024, 16 heads, intermediate 2624
+Head: 2 layers, 16 heads, max_len 512, head_max_len 192
+Temperature per type: 1.6369, 1.2514, 1.9834
+
+Device: Intel(R) Graphics, precision Half
+GPU model build: 3339 ms
+
+Parameters: 421,293,830 (803.6 MB as Half)
+
+1 warmup + 3 timed passes at max_len 512, median reported.
+
+  question   valid markers     median      min      max
+  choice2       40       2     1048 ms   1048 ms   1048 ms
+  choice13     119      13     1093 ms   1067 ms   1107 ms
+  score4        48       4     1068 ms   1050 ms   1081 ms
+  noul          39       2     1048 ms   1048 ms   1050 ms
+
+Encoder plus head, one pass each, no KV cache — cost scales with the padded
+sequence length, not with tokens generated. Run 'laya benchmark' for the CPU table.
+=== Nivara HuggingFace Inference ===
+
+Loading weights (f32) from model.safetensors...
+  SafeTensors parse (F32): 1525 ms (173 tensors)
+
+=== ModernBERT-large Benchmark (GPU) ===
+Config: dim=1024, layers=28, heads=16, headDim=64, intermediate=2624, vocab=50368
+Attention: 10 full + 18 sliding, local_attention=128 (inclusive band 64), rope theta 160000 full / 10000 sliding
+Norm: bias-free LayerNorm, eps=1E-05, activation=gelu
+
+
+Device: Intel(R) Graphics, precision F32
+GPU model build: 3046 ms
+
+1 warmup + 3 timed passes, median reported.
+Not the 3 + 10 the DistilBERT/MiniLM GPU benchmarks use, and those report an average where
+this table reports a median, so the rows are not directly comparable to those tables.
+
+seq= 128 (valid  26)  median    233.7 ms  min    232.2 ms      111.3 tok/s  ~8.35 ms/layer
+seq= 512 (valid  26)  median    953.2 ms  min    952.4 ms       27.3 tok/s  ~34.04 ms/layer
+seq=2048 (valid  26)  median   9103.1 ms  min   8881.9 ms        2.9 tok/s  ~325.11 ms/layer
+seq=4096 (valid  26)  median  29628.5 ms  min  29519.4 ms        0.9 tok/s  ~1058.16 ms/layer
+
+Each pass encodes the full padded sequence — this mode has no KV cache, so cost scales with sequence length, not with tokens generated.
+=== Nivara HuggingFace Inference ===
+
+Loading weights (native) from model.safetensors...
+  SafeTensors parse (BFloat16): 995 ms (290 tensors)
+
+=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===
+Device: Intel(R) Graphics  Vocab: 151936
+Model build: 3261 ms
+Prompt tokens: 36; decode cap 32
+  run 1: 7 tokens in 0.58s (82 ms/token)
+  run 2: 7 tokens in 0.56s (79 ms/token)
+  run 3: 7 tokens in 0.56s (80 ms/token)
+Median: 560 ms total (57.14 tok/s synthetic ceiling)
+=== Nivara HuggingFace Inference ===
+
+Loading weights (native) from model.safetensors...
+  SafeTensors parse (BFloat16): 845 ms (290 tensors)
+
+=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark -- Silk ===
+Device: Intel(R) Graphics  Vocab: 151936
+Model build: 2577 ms
+Prompt tokens: 36; decode cap 32
+  run 1: 7 tokens in 0.51s (72 ms/token)
+  run 2: 7 tokens in 0.50s (71 ms/token)
+  run 3: 7 tokens in 0.50s (71 ms/token)
+Median: 498 ms total (64.26 tok/s synthetic ceiling)
+=== Nivara HuggingFace Inference ===
+
+Loading weights (native) from model.safetensors...
+  SafeTensors parse (BFloat16): 309 ms (272 tensors)
+
+=== SmolLM-135M Benchmark (BFloat16, Silk) ===
+Device: Intel(R) Graphics
+Model build: 636 ms
+
+Warmup: 709 ms (32 tokens, prefill 36 ms, decode 673 ms, 47.55 tok/s)
+Run 1: 694 ms (32 tokens, 46.11 tok/s, prefill 29 ms, decode 665 ms, 48.12 tok/s)
+Run 2: 689 ms (32 tokens, 46.44 tok/s, prefill 25 ms, decode 664 ms, 48.19 tok/s)
+Run 3: 690 ms (32 tokens, 46.38 tok/s, prefill 28 ms, decode 662 ms, 48.34 tok/s)
+
+Median: 690 ms (32 tokens, 46.38 tok/s, prefill 28 ms, decode 662 ms, 48.34 tok/s)

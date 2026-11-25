@@ -20,7 +20,7 @@ internal static class DocsCoveragePins
     /// Documents in scope: the <c>*.md</c> files at the repository root plus the reader-facing
     /// documents under <c>docs/</c>.
     /// </summary>
-    internal const int ExpectedDocumentCount = 63;
+    internal const int ExpectedDocumentCount = 64;
 
     /// <summary>
     /// Source citations discovered across the narrowed markdown scope, in both forms: the
@@ -30,11 +30,8 @@ internal static class DocsCoveragePins
     /// <summary>
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
-    /// 527 baseline (#1440/#1444 refresh) + 0 net from #1444 consolidation (deleted
-    /// docs/plan/LORA.md, rewrote docs/LORA.md as single public guide, avoided generated-report
-    /// .md false positives) + 2 net from #1473 (docs/SILK.md gained references to
-    /// tests/Nivara.PerformanceTests/README.md and docs/QWEN.md) + 2 net from #1468
-    /// (runner XML comments reference docs/SILK.md) = 531.
+    /// 536 baseline (post-1.5.3) + 1 net from 1.5.4 changelog (docs/LORA.md) +
+    /// 10 net from 1.5.4 review doc = 547.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 536;
+    internal const int ExpectedDocumentReferenceCount = 547;
 }
