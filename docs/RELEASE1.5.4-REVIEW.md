@@ -46,13 +46,15 @@ tagging to catch any user-visible item missed.
 
 ### 5. Benchmarks
 
-Benchmarks were **not** run in this preparation session. Per RELEASING.md Step 5 and the
-AGENTS.md benchmark policy, long-running benchmarks require explicit human approval and
-AC power for the Silk/OpenCL legs; they are launched via the canonical runner
-`release/run-benchmarks.cmd 1.5.4` in the background with no timeout. The runner writes
-to `release/v1.5.4/` and prints `status.txt` on completion. Until that run completes,
-README perf tables are carried forward from v1.5.3 and recorded as `(carried)` rather
-than refreshed.
+Benchmarks were run with explicit human approval via the canonical runner
+`release/run-benchmarks.cmd 1.5.4` in the background with no timeout, writing to
+`release/v1.5.4/`. The run completed with exit code 0 and wrote `status.txt` (DONE).
+Artefacts captured: `core.txt` + `nivara-perf-v1.5.4.json` (57 scenarios),
+`nivaraincident-v1.5.4.txt`, `nivarainference-cpu/silk/blas-v1.5.4.txt`,
+PyTorch reference captures (`pytorch-*-v1.5.4.txt`), and
+`nivarafinetuning-v1.5.4.txt`. README perf tables should be refreshed from these
+artefacts (tracked separately); the runner exit code and artefact set are recorded
+here as evidence that measurements were actually taken.
 
 ### 6. CI / local verification during prep
 
