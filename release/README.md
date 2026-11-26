@@ -22,6 +22,8 @@ captures to `release\<version>\`:
 
 - `nivara-perf-v<version>.json` — core perf harness (canonical evidence).
 - `nivaraincident-v<version>.txt`
+- `nivaraincident-1m-nivara-v<version>.txt` — Nivara side of the 1M Nivara vs Polars comparison (requires 1M dataset)
+- `nivaraincident-1m-polars-v<version>.txt` — Polars side of the 1M comparison (requires Python/Polars + 1M dataset)
 - `nivarainference-cpu/silk/blas-v<version>.txt`
 - `pytorch-*-v<version>.txt`
 - `nivarafinetuning-v<version>.txt`

@@ -29,6 +29,8 @@ Refresh benchmark README tables once using committed artefacts from `release/v<X
 - [ ] `release/v<X.Y.Z>/status.txt`
 - [ ] `release/v<X.Y.Z>/nivara-perf-v<X.Y.Z>.json`
 - [ ] `release/v<X.Y.Z>/nivaraincident-v<X.Y.Z>.txt`
+- [ ] `release/v<X.Y.Z>/nivaraincident-1m-nivara-v<X.Y.Z>.txt` (if 1M dataset available)
+- [ ] `release/v<X.Y.Z>/nivaraincident-1m-polars-v<X.Y.Z>.txt` (if Python/Polars + 1M dataset available)
 - [ ] `release/v<X.Y.Z>/nivarainference-cpu-v<X.Y.Z>.txt`
 - [ ] `release/v<X.Y.Z>/nivarainference-silk-v<X.Y.Z>.txt`
 - [ ] `release/v<X.Y.Z>/nivarainference-blas-v<X.Y.Z>.txt`
