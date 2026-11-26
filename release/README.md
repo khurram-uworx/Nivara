@@ -5,7 +5,7 @@ This folder holds:
 1. **Canonical benchmark runner** — `run-benchmarks.cmd <version>`.
 2. **Helper scripts** — `wrap-table.py` (hidden-tag wrapping) and the per-sample
    `regen_*_perf_table.py` scripts under `samples/*/Python/`.
-3. **Task template** — `TASK-TEMPLATE-BENCHMARKS.md` for 1506-like benchmark README refresh issues.
+3. **Task templates** — `TASK-TEMPLATE-BENCHMARKS.md` for 1506-like benchmark README refresh issues, and `TASK-TEMPLATE-DOCS.md` for per-release docs refresh issues (Step 2/Step 6, see #1507).
 4. **Committed evidence** — `release/<version>/` subfolders with captured benchmark
    output (see `RELEASING.md` "Benchmark artefact policy").
 
