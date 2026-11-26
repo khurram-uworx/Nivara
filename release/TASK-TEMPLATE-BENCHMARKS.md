@@ -71,7 +71,7 @@ Refresh benchmark README tables once using committed artefacts from `release/v<X
 - [ ] `dotnet format Nivara.slnx whitespace --verify-no-changes --no-restore` (if doc/code formatting scope requires)
 - [ ] Targeted doc/gate tests as needed
 - [ ] Manual markdown/table rendering sanity check
-``` 
+```
 
 ## Notes
 
