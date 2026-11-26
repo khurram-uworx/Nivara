@@ -212,10 +212,10 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 By default fine-tuning runs in managed C# on CPU. Pass `--silk` to run forward,
 backward and AdamW on the OpenCL device (F32-only; exits 1 when OpenCL is
 unavailable). For `--max-examples 100 --batch-size 2 --epochs 1 -c Release` on CPU,
-the v1.5.2 capture measured **1.238 s/batch** steady-state (see
+the v1.5.4 capture measured **1.859 s/batch** steady-state (see
 [Performance benchmarks](#performance-benchmarks)); a full 33,674-batch epoch
-extrapolates to **~11.6 hours**. With `--silk` the same shape ran at
-**0.247 s/batch** (**~2.3 hours per epoch**) on the integrated GPU. Keep
+extrapolates to **~17.4 hours**. With `--silk` the same shape ran at
+**0.253 s/batch** (**~2.4 hours per epoch**) on the integrated GPU. Keep
 `--max-len` at the default 128 and use `--max-examples` to validate the pipeline
 before committing to a full run.
 
@@ -233,13 +233,17 @@ warmup) batch. `--seed 0` fixes the training shuffle. The runner did not record
 the OpenCL driver version, so none is quoted. Run-to-run variance is ~±10% per
 `tests/Nivara.PerformanceTests/README.md`.
 
-Recorded **2026-11-18** on Python 3.12.10, PyTorch 2.13.0+cpu,
-`torch_threads=16`, .NET 11.0.0, AC power. All three columns come from the same
-capture: PyTorch **338.4 ms/batch**, Nivara CPU **1238.1 ms/batch**, Nivara Silk
-**247.0 ms/batch**. The Silk path is **~1.4x faster than PyTorch CPU** at this
-shape, while the CPU Nivara path remains **~3.7x slower** than PyTorch.
+Recorded **2026-11-25** on Python 3.12.10, PyTorch 2.13.0+cpu,
+`torch_threads=16`, .NET 11.0.0, AC power, `Intel(R) Graphics` OpenCL device.
+All three columns come from the same capture (source:
+`release/v1.5.4/nivarafinetuning-v1.5.4.txt`): PyTorch **410.2 ms/batch**,
+Nivara CPU **1858.7 ms/batch**, Nivara Silk **253.1 ms/batch**. The Silk path
+is **~1.6x faster than PyTorch CPU** at this shape, while the CPU Nivara path
+remains **~4.5x slower** than PyTorch.
 
 ### Paired CPU vs Silk (issue #1003)
+
+*Not refreshed in v1.5.4: `release/v1.5.4/nivarafinetuning-v1.5.4.txt` captures only the 100-example B=2 L=128 run; this B=2/4/8 matrix was not recaptured. Carried with original capture metadata; do not treat as v1.5.4 evidence (see #1506).*
 
 Measured on the same machine (Intel Core Ultra 7 255H, Windows 11, .NET 10,
 Release, Server GC + Tiered PGO) with `--mode train --epochs 1 --max-len 128
@@ -264,12 +268,9 @@ so the absolute figures vary ~±10% run-to-run (per `tests/Nivara.PerformanceTes
 
 | Config | PyTorch (CPU) | Nivara (.NET 11) | Nivara (Silk/OpenCL) | Slowdown (CPU) | Slowdown (Silk) |
 |--------|---------------|-------------------|----------------------|----------------|-----------------|
-| Fine-tune B=2, L=128, 100 examples | 338.4 ms/batch | 1238.1 ms/batch | 247.0 ms/batch | **~3.7x** | **0.73x (1.4x faster)** |
+| Fine-tune B=2, L=128, 100 examples | 410.2 ms/batch | 1858.7 ms/batch | 253.1 ms/batch | **~4.5x** | **0.62x (1.6x faster)** |
 
-The ~3× gap is consistent with prior measurements on different hardware: at batch
-size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward
-pass through 67M params, not by BLAS peak throughput, so the CPU SIMD kernels and
-memory management keep Nivara within ~3× of PyTorch's MKL.
+The ~4.5× CPU gap on this v1.5.4 capture is wider than the earlier 100-example measurement on this hardware; run-to-run variance, thermal/load conditions, and runtime/library differences can move the absolute ms/batch. At batch size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward pass through 67M params, not by BLAS peak throughput.
 
 **Caveats (Silk / integrated GPU).** The Silk path is expected to be competitive
 only at larger batch sizes or decode-style workloads. The small-batch (B=2..4)
@@ -281,18 +282,18 @@ ms/batch (first batch excluded, as printed by `RunTrainSilk`).
 ### Estimated full-run wall-clock (approximate)
 
 > **Disclaimer:** the figures below are **estimates, not measurements.** They
-> extrapolate the 100-example per-batch numbers from the 2026-11-18 capture to
+> extrapolate the 100-example per-batch numbers from the 2026-11-25 v1.5.4 capture to
 > the full 33,674 batches of a 67,349-example epoch and assume per-batch cost is
 > constant — which is approximate. Real runs drift with machine load, GC
 > pressure, and thermals; treat them as ballpark planning figures (±30%).
 
 | Config | Framework | 1 epoch (est.) | 3 epochs (est.) |
 |--------|-----------|----------------|-----------------|
-| B=2, L=128 | PyTorch (CPU) | ~3.2 h | ~9.5 h |
-| B=2, L=128 | Nivara (.NET 11) | ~11.6 h | ~34.7 h |
-| B=2, L=128 | Nivara (Silk/OpenCL) | ~2.3 h | ~6.9 h |
+| B=2, L=128 | PyTorch (CPU) | ~3.8 h | ~11.5 h |
+| B=2, L=128 | Nivara (.NET 11) | ~17.4 h | ~52.2 h |
+| B=2, L=128 | Nivara (Silk/OpenCL) | ~2.4 h | ~7.1 h |
 
-B=4 was not captured in this session; its previous derived rows were removed
+B=4 was not captured in the v1.5.4 artefact; its previous derived rows were removed
 rather than carried forward as if they were fresh measurements.
 
 ### Re-running
