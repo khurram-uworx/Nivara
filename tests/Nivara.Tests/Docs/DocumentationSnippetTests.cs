@@ -8,6 +8,7 @@ namespace Nivara.Tests.Docs;
 /// discovers by scanning the repository, so a green run cannot hide reduced coverage.
 /// </summary>
 [TestFixture]
+[Category("ReleaseReadiness")]
 public class DocumentationSnippetTests
 {
     const string ExcludedSlug = "streamix-aspnetcore";

@@ -11,6 +11,7 @@ namespace Nivara.Tests.Docs;
 /// than passes quietly.
 /// </summary>
 [TestFixture]
+[Category("ReleaseReadiness")]
 public class DocReferenceTests
 {
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenReferences.md";

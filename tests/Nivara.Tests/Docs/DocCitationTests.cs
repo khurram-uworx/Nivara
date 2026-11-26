@@ -9,6 +9,7 @@ namespace Nivara.Tests.Docs;
 /// shown inline; this catches drift in the file references pointing at that code.
 /// </summary>
 [TestFixture]
+[Category("ReleaseReadiness")]
 public class DocCitationTests
 {
     const string NegativeControl = "tests/Nivara.Tests/Docs/Fixtures/BrokenCitations.md";

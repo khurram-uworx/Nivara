@@ -3,6 +3,7 @@ using NUnit.Framework;
 namespace Nivara.Tests.Docs;
 
 [TestFixture]
+[Category("ReleaseReadiness")]
 public class DocsCoverageTests
 {
     [Test]
