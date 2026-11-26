@@ -32,6 +32,7 @@ internal static class DocsCoveragePins
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// Baseline adjusted after removing retired <c>docs/RELEASE1.5.*-REVIEW.md</c> files.
     /// +1 for #1506: RELEASING.md and release/README.md reference release/TASK-TEMPLATE-BENCHMARKS.md.
+    /// +1 for #1507: release/README.md references TASK-TEMPLATE-DOCS.md.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 521;
+    internal const int ExpectedDocumentReferenceCount = 522;
 }
