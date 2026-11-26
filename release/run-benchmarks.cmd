@@ -19,7 +19,13 @@ echo === Core perf harness ===
 dotnet run --project tests\Nivara.PerformanceTests -c Release -- --json "%OUT%\nivara-perf-v%VERSION%.json" --runs 3 > "%OUT%\core.txt" 2>&1
 
 echo === NivaraIncident ===
-dotnet run --project samples\NivaraIncident -c Release -- analyze --quick --dataset samples\data\incident-lab --scenario A > "%OUT%\nivaraincident-v%VERSION%.txt" 2>&1
+dotnet run --project samples\NivaraIncident -c Release -- analyze --benchmark --dataset samples\data\incident-lab --scenario A > "%OUT%\nivaraincident-v%VERSION%.txt" 2>&1
+
+echo === NivaraIncident Nivara vs Polars (requires 1M dataset + Python/Polars) ===
+dotnet run --project samples\NivaraIncident -c Release -- analyze --benchmark --dataset samples\data\benchmark-1m --scenario A > "%OUT%\nivaraincident-1m-nivara-v%VERSION%.txt" 2>&1
+pushd samples\NivaraIncident\Python
+python benchmark.py --dataset ..\..\..\samples\data\benchmark-1m > "%ROOT%\%OUT%\nivaraincident-1m-polars-v%VERSION%.txt" 2>&1
+popd
 
 echo === NivaraInference (CPU) ===
 dotnet run --project samples\NivaraInference -c Release -- mobilenet_v2 benchmark > "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
@@ -28,6 +34,7 @@ dotnet run --project samples\NivaraInference -c Release -- minilm benchmark >> "
 dotnet run --project samples\NivaraInference -c Release -- distilbert benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
 dotnet run --project samples\NivaraInference -c Release -- distilbert_sst benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
 dotnet run --project samples\NivaraInference -c Release -- smollm benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
+dotnet run --project samples\NivaraInference -c Release -- smollm --precision f32 benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
 dotnet run --project samples\NivaraInference -c Release -- smollm --precision bf16 benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
 dotnet run --project samples\NivaraInference -c Release -- qwen benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1
 dotnet run --project samples\NivaraInference -c Release -- modernbert benchmark >> "%OUT%\nivarainference-cpu-v%VERSION%.txt" 2>&1

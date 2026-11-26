@@ -1,11 +1,12 @@
 # Release tooling and artefacts
 
-This folder holds two kinds of content:
+This folder holds:
 
 1. **Canonical benchmark runner** — `run-benchmarks.cmd <version>`.
 2. **Helper scripts** — `wrap-table.py` (hidden-tag wrapping) and the per-sample
    `regen_*_perf_table.py` scripts under `samples/*/Python/`.
-3. **Committed evidence** — `release/<version>/` subfolders with captured benchmark
+3. **Task template** — `TASK-TEMPLATE-BENCHMARKS.md` for 1506-like benchmark README refresh issues.
+4. **Committed evidence** — `release/<version>/` subfolders with captured benchmark
    output (see `RELEASING.md` "Benchmark artefact policy").
 
 ## Running all benchmarks
@@ -21,6 +22,8 @@ captures to `release\<version>\`:
 
 - `nivara-perf-v<version>.json` — core perf harness (canonical evidence).
 - `nivaraincident-v<version>.txt`
+- `nivaraincident-1m-nivara-v<version>.txt` — Nivara side of the 1M Nivara vs Polars comparison (requires 1M dataset)
+- `nivaraincident-1m-polars-v<version>.txt` — Polars side of the 1M comparison (requires Python/Polars + 1M dataset)
 - `nivarainference-cpu/silk/blas-v<version>.txt`
 - `pytorch-*-v<version>.txt`
 - `nivarafinetuning-v<version>.txt`

@@ -345,14 +345,14 @@ the default and is the baseline in every CPU column.
 
 | Analysis | Prev (ms) | Current (ms) | Ratio (Current/Prev) | Δ% | Notes |
 |----------|-----------|--------------|----------------------|----|-------|
-| Degradation ordering | 9291.3 | 14839.8 | 1.60x | +59.7% | Filter → Sort → RollingMean → Shift |
-| Deployment correlation | 14456.5 | 26141.0 | 1.81x | +80.8% | Filter → Sort → manual join |
-| Saturation ordering | 91.8 | 145.3 | 1.58x | +58.3% | Filter → Sort → RollingMax (fixed: instances now span timeline) |
-| Regional partitioning | 14725.1 | 26300.2 | 1.79x | +78.6% | Filter → Collect → typed LINQ GroupBy → rank |
-| Grouped aggregation (manual) | 7049.2 | 10772.7 | 1.53x | +52.8% | Collect → dictionary loop |
-| Typed LINQ grouped aggregation | — | 20415.9 | — | — | `NivaraQuery<T>.GroupBy().Select()`; no prior same-machine reading |
+| Degradation ordering | 14839.8 | 15790.8 | 1.06x | +6.4% | Filter → Sort → RollingMean → Shift |
+| Deployment correlation | 26141.0 | 28572.9 | 1.09x | +9.3% | Filter → Sort → manual join |
+| Saturation ordering | 145.3 | 142.2 | 0.98x | -2.1% | Filter → Sort → RollingMax (fixed: instances now span timeline) |
+| Regional partitioning | 26300.2 | 28585.1 | 1.09x | +8.7% | Filter → Collect → typed LINQ GroupBy → rank |
+| Grouped aggregation (manual) | 10772.7 | 12533.2 | 1.16x | +16.3% | Collect → dictionary loop |
+| Typed LINQ grouped aggregation | 20415.9 | 27022.1 | 1.32x | +32.4% | `NivaraQuery<T>.GroupBy().Select()`; no prior same-machine reading |
 
-*Recorded 2026-11-18 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0, Windows 11, 6,666,665 rows, scenario A (quick single pass, `--benchmark --iterations 1`). Prev baseline recorded 2026-11-07 on the same machine. Run-to-run variance is ~±10% per `tests/Nivara.PerformanceTests/README.md`; the +53–81% shifts are larger than that floor, but no code change was isolated in this capture.*
+*Recorded 2026-11-25 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0, Windows 11, 6,666,665 rows, scenario A (1 iteration, median, `--benchmark`). Prev is the 2026-11-18 same-machine reading. Source: `release/v1.5.4/nivaraincident-v1.5.4.txt`. Run-to-run variance is ~±10% per `tests/Nivara.PerformanceTests/README.md`.*
 
 
 ## Performance: Nivara vs Polars
@@ -387,7 +387,7 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 | Grouped Aggregation | 798 ms | 16 ms | ~50× |
 | **Total** | **5051 ms** | **178 ms** | **~28×** |
 
-*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, Polars 1.43.2, 1M records, scenario A.*
+*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, Polars 1.43.2, 1M records, scenario A. Not refreshed in v1.5.4: no `release/v1.5.4/nivaraincident-1m-nivara-v1.5.4.txt` / `nivaraincident-1m-polars-v1.5.4.txt` artefacts were captured; Polars rerun is out of scope for this one-time refresh and will be captured on the original benchmark machine later (see #1506).*
 
 This table covers the five analyses that were benchmarked on that date. `analyze` now also runs a
 sixth — the typed LINQ grouped aggregation — which is **not** in this table: `Python/benchmark.py`

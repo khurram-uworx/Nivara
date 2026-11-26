@@ -81,7 +81,7 @@ but unused, etc.).
 > description and leave the existing numbers in place — do not fake or carry forward
 > stale numbers as if they were fresh.
 
-**Always create a GitHub issue** to track benchmark table refresh work for the release (use `gh issue create --repo khurram-uworx/Nivara`). Title it clearly, e.g. `[release vX.Y.Z] Refresh benchmark README tables from release/vX.Y.Z artefacts`, and include links/paths to the committed evidence under `release/vX.Y.Z/`. If tables are fully refreshed before opening the PR, still create the issue and close it with a note (or reference it in the PR) so the release process always produces this tracking issue.
+**Always create a GitHub issue** to track benchmark table refresh work for the release (use `gh issue create --repo khurram-uworx/Nivara`). Use `release/TASK-TEMPLATE-BENCHMARKS.md` as the canonical issue body/checklist template so the scope, artefact inventory, carry-forward rules, and verification are consistent. Title it clearly, e.g. `[release vX.Y.Z] Refresh benchmark README tables from release/vX.Y.Z artefacts`, and include links/paths to the committed evidence under `release/vX.Y.Z/`. If tables are fully refreshed before opening the PR, still create the issue and close it with a note (or reference it in the PR) so the release process always produces this tracking issue.
 
 Each benchmark has a `## Release Benchmark` section in its README with exact commands,
 prerequisites, and table-update instructions. Run them in order:

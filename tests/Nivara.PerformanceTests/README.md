@@ -907,61 +907,61 @@ folder are qwen-only gates).
 
 ## Results
 
-*Recorded 2026-11-18 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0 (Release). Medians of 3 child processes (`--runs 3`).*
+*Recorded 2026-11-25 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0 (Release). Medians of 3 child processes (`--runs 3`). Source: `release/v1.5.4/nivara-perf-v1.5.4.json`.*
 
 Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Release). Medians of 3 child processes (`--runs 3`).
 
 | Scenario | Prev | Current | Δ% | B/op | gen0/op |
 |---|---|---|---|---|---|
-| ColumnAdd 1M x float | 1,214 | 1,465 | +20.7% | 4,000,200 | 0.24 |
-| ColumnSigmoid 1M x float | 851 | 986 | +15.9% | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 760 | 896 | +17.9% | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 308 | 311 | +1.0% | 12,000,440 | 0.34 |
-| Fused chain 1M x (Salary\*1.1)+1000-Tax | 279 | 260 | -6.9% | 16,005,616 | 0.34 |
-| Fused chain chunked 1M x 64k rows | 211 | 242 | +14.6% | 16,005,616 | 0.34 |
-| Fused single-op TP 1M x (Salary\*1.1) | 621 | 651 | +4.8% | 8,003,106 | 0.24 |
-| Column mul-scalar 1M (wrapper) | 618 | 589 | -4.8% | 8,000,280 | 0.22 |
-| Linear forward [32x256] -> [32x256] | 430 | 425 | -1.1% | 68,079 | 0.00 |
-| Linear forward+backward [32x256] | 149 | 148 | -0.9% | 929,094 | 0.10 |
-| TransformerBlock forward [32x64, 4 heads] | 282 | 268 | -5.1% | 184,825 | 0.00 |
-| Attn per-seq forward [B16 L128 D64 H4] | 59 | 86 | +45.5% | 2,128,003 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 290 | 369 | +27.1% | 528,801 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 15 | 22 | +46.7% | 8,988,322 | 0.58 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 87 | 108 | +23.8% | 8,925,260 | 0.25 |
-| RowScore per-row copy+dot [10k x 128] | 83 | 141 | +69.4% | 2 | 0.00 |
-| Frame RowDot [10k x 128] | 222 | 295 | +33.1% | 51,714 | 0.00 |
-| Frame Slice [10k x 128] | 6,898 | 15,882 | +130.2% | 98,368 | 0.01 |
-| RowDot kernel raw [10k x 128] | 588 | 861 | +46.4% | 1 | 0.00 |
-| RowCosineSimilarity kernel raw [10k x 128] | 255 | 228 | -10.6% | 1 | 0.00 |
-| RollingSum null-free 1M x int (w10) | 262 | 427 | +63.1% | 5,000,145 | 0.08 |
-| RollingSum nulls 1M x int (w10) | 60 | 94 | +57.2% | 22,000,241 | 0.24 |
-| RankKernel RowNumber 100k x int | 19 | 32 | +69.4% | 1,700,484 | 0.04 |
-| GroupBy 1M rows x 1000 keys (typed) | 17 | 25 | +47.4% | 8,906,938 | 0.70 |
-| GroupBy 1M rows x 100 string keys (typed) | 10 | 18 | +81.5% | 69,188,498 | 5.50 |
-| PartitionedWindow RollingSum 1M x 100 parts | 8 | 15 | +81.6% | 92,217,804 | 6.70 |
-| Row.Where nullable-element GetValue 100k | 80 | 80 | +0.0% | 9,336,034 | 0.55 |
-| Streaming cancel mid-stream 200k x 10k chunk | 6,152 | 5,365 | -12.8% | 5,722 | 0.00 |
-| AutoDiff Pow(2.5) fwd+bwd 1M x float | 43 | 86 | +99.5% | 8,001,866 | 0.00 |
-| AutoDiff Pow(2.5) scalar baseline 1M x float | 17 | 32 | +90.7% | 2 | 0.00 |
-| AutoDiff RMSNorm fwd+bwd 1M x float | 344 | 416 | +20.9% | 8,002,186 | 0.10 |
-| AutoDiff RMSNorm scalar baseline 1M x float | 389 | 731 | +87.8% | 2 | 0.00 |
-| Qwen LM head matmul [1x896 @ 151936x896] | 24 | 31 | +28.2% | 5 | 0.00 |
-| Qwen FFN gate/up/down x3 | 272 | 411 | +51.3% | 1 | 0.00 |
-| Qwen attn Q/K/V/O proj | 2,494 | 5,313 | +113.0% | 1 | 0.00 |
-| Qwen Linear fwd [1x896 -> 2688] | 1,800 | 3,617 | +100.9% | 22,369 | 0.00 |
-| Qwen LM head fwd [1x896 -> 151936] | 24 | 34 | +42.3% | 608,157 | 0.00 |
-| Qwen decode-attn fwd [1x896 @ kvLen=64] | 1,460 | 4,393 | +200.9% | 25,129 | 0.00 |
-| Qwen decode-attn fwd [1x896 @ kvLen=128] | 2,335 | 3,264 | +39.8% | 25,129 | 0.00 |
-| Qwen decode-attn fwd [1x896 @ kvLen=256] | 1,783 | 2,679 | +50.3% | 25,130 | 0.00 |
-| Qwen prefill seed [8 tok] | 0.7 | 1 | +69.0% | 860,520 | 0.00 |
-| Qwen prefill seed [16 tok] | 0.6 | 0.7 | +24.5% | 860,545 | 0.00 |
-| Qwen prefill seed [64 tok] | 0.4 | 0.5 | +35.9% | 957,851 | 0.00 |
-| Qwen prefill seed [256 tok] | 0.3 | 0.4 | +28.1% | 2,402,589 | 0.17 |
-| Qwen full fwd [64 tok] | 0.2 | 0.3 | +36.0% | 414,024,048 | 0.50 |
-| Qwen full fwd [256 tok] | 0.1 | 0.2 | +115.6% | 1,126,480,544 | 0.83 |
-| AutoDiff RMSNormModule fwd+bwd 1M x float | — | 109 | — | 29,428,266 | 0.45 |
-| Qwen decode block [1x896 @ kvLen=64] | — | 297 | — | 1 | 0.00 |
-| Qwen decode fwd [1 step] | — | 9 | — | 608,023 | 0.00 |
+| ColumnAdd 1M x float | 1,465 | 1,353 | -7.6% | 4,000,200 | 0.24 |
+| ColumnSigmoid 1M x float | 986 | 806 | -18.3% | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 896 | 1,050 | +17.2% | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 311 | 364 | +17.0% | 12,000,440 | 0.34 |
+| Fused chain 1M x (Salary\*1.1)+1000-Tax | 260 | 280 | +7.6% | 16,005,616 | 0.34 |
+| Fused chain chunked 1M x 64k rows | 242 | 232 | -4.3% | 16,005,616 | 0.34 |
+| Fused single-op TP 1M x (Salary\*1.1) | 651 | 696 | +6.9% | 8,003,106 | 0.24 |
+| Column mul-scalar 1M (wrapper) | 589 | 667 | +13.3% | 8,000,280 | 0.22 |
+| Linear forward [32x256] -> [32x256] | 425 | 422 | -0.6% | 68,055 | 0.00 |
+| Linear forward+backward [32x256] | 148 | 141 | -4.5% | 929,250 | 0.10 |
+| TransformerBlock forward [32x64, 4 heads] | 268 | 304 | +13.5% | 184,825 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | 86 | 93 | +8.3% | 2,128,003 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 369 | 445 | +20.5% | 528,601 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 22 | 15 | -32.4% | 8,988,358 | 0.58 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 108 | 95 | -12.2% | 8,924,849 | 0.25 |
+| RowScore per-row copy+dot [10k x 128] | 141 | 92 | -35.0% | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 295 | 216 | -26.8% | 51,714 | 0.00 |
+| Frame Slice [10k x 128] | 15,882 | 3,824 | -75.9% | 98,372 | 0.02 |
+| RowDot kernel raw [10k x 128] | 861 | 1,160 | +34.7% | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 228 | 252 | +10.6% | 1 | 0.00 |
+| RollingSum null-free 1M x int (w10) | 427 | 293 | -31.3% | 5,000,145 | 0.06 |
+| RollingSum nulls 1M x int (w10) | 94 | 58 | -38.0% | 22,000,241 | 0.22 |
+| RankKernel RowNumber 100k x int | 32 | 20 | -36.3% | 1,700,509 | 0.04 |
+| GroupBy 1M rows x 1000 keys (typed) | 25 | 17 | -31.7% | 8,906,938 | 0.70 |
+| GroupBy 1M rows x 100 string keys (typed) | 18 | 11 | -38.7% | 69,188,500 | 5.50 |
+| PartitionedWindow RollingSum 1M x 100 parts | 15 | 9.4 | -37.3% | 92,217,803 | 6.75 |
+| Row.Where nullable-element GetValue 100k | 80 | 69 | -13.5% | 9,336,034 | 0.50 |
+| Streaming cancel mid-stream 200k x 10k chunk | 5,365 | 2,899 | -46.0% | 5,722 | 0.00 |
+| AutoDiff Pow(2.5) fwd+bwd 1M x float | 86 | 45 | -47.6% | 8,001,866 | 0.15 |
+| AutoDiff Pow(2.5) scalar baseline 1M x float | 32 | 19 | -41.6% | 2 | 0.00 |
+| AutoDiff RMSNorm fwd+bwd 1M x float | 416 | 236 | -43.2% | 8,002,186 | 0.15 |
+| AutoDiff RMSNorm scalar baseline 1M x float | 731 | 411 | -43.8% | 2 | 0.00 |
+| Qwen LM head matmul [1x896 @ 151936x896] | 31 | 24 | -22.5% | 5 | 0.00 |
+| Qwen FFN gate/up/down x3 | 411 | 332 | -19.2% | 1 | 0.00 |
+| Qwen attn Q/K/V/O proj | 5,313 | 2,577 | -51.5% | 1 | 0.00 |
+| Qwen Linear fwd [1x896 -> 2688] | 3,617 | 4,959 | +37.1% | 22,369 | 0.00 |
+| Qwen LM head fwd [1x896 -> 151936] | 34 | 29 | -15.0% | 608,157 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=64] | 4,393 | 2,514 | -42.8% | 25,129 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=128] | 3,264 | 1,984 | -39.2% | 25,129 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=256] | 2,679 | 1,679 | -37.3% | 25,130 | 0.00 |
+| Qwen prefill seed [8 tok] | 1.0 | 1.1 | +11.0% | 860,503 | 0.00 |
+| Qwen prefill seed [16 tok] | 0.7 | 0.7 | +2.7% | 860,503 | 0.00 |
+| Qwen prefill seed [64 tok] | 0.5 | 0.5 | -8.9% | 956,311 | 0.00 |
+| Qwen prefill seed [256 tok] | 0.4 | 0.4 | -1.8% | 2,424,829 | 0.17 |
+| Qwen full fwd [64 tok] | 0.3 | 0.2 | -16.9% | 240,658,251 | 0.33 |
+| Qwen full fwd [256 tok] | 0.2 | 0.2 | -4.9% | 1,494,013,965 | 0.50 |
+| AutoDiff RMSNormModule fwd+bwd 1M x float | 109 | 84 | -23.1% | 29,428,266 | 0.40 |
+| Qwen decode block [1x896 @ kvLen=64] | 297 | 255 | -14.1% | 1 | 0.00 |
+| Qwen decode fwd [1 step] | 9.0 | 7.0 | -22.5% | 608,023 | 0.00 |
 ### Notes
 
 - **Qwen decode rows added 2026-09-07 with P0-2 (single-row GEMV fast path).** Prev holds
@@ -994,9 +994,10 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   unchanged-code `model.Forward` rows and are flat (B/op byte-identical; the [64] row's
   gen0 0.33 → 0.50 is GC-scheduling noise — ops/s and B/op are flat).
 - **This table is the current-machine rolling history.** The Prev column
-  carries the numbers recorded 2026-08-21 on .NET 10.0.11; the Current column
-  carries the re-measured numbers recorded 2026-08-30 on .NET 11.0.0. B/op
-  values are stable across runs (allocation-driven), confirming no regressions.
+  carries the 2026-11-18 (v1.5.2) readings; the Current column carries the
+  2026-11-25 v1.5.4 readings from `release/v1.5.4/nivara-perf-v1.5.4.json`
+  (same machine class, .NET 11.0.0, 3 child processes). B/op values are stable
+  across runs (allocation-driven), confirming no regressions.
 - **This refresh spans a runtime change (net10.0.11 → net11.0).** The Δ%
   compares across runtimes and is **indicative only** — same policy as
   cross-machine comparisons. Notable shifts (Frame Slice −52.7%,
