@@ -1,9 +1,0 @@
-=== Nivara HuggingFace Inference ===
-
-=== Qwen2.5-0.5B-Instruct (synthetic weights): decode profile ===
-Device: CPU (Intel64 Family 6 Model 140 Stepping 1, GenuineIntel ┬╖ 8 logical processors)  Runtime: .NET 11.0.0  Precision: F32 (synthetic)
-Note: kernel-dispatch profiling is Silk-only; reporting CPU decode timing.
-Model build: 32505 ms
-
-Profile run: 2158495 ms (32 tokens, prefill 2071233 ms, decode 2726.92 ms/token, 0.37 tok/s)
-CPU dispatch profile: N/A (Silk-only)

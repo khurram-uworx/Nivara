@@ -81,6 +81,8 @@ but unused, etc.).
 > description and leave the existing numbers in place — do not fake or carry forward
 > stale numbers as if they were fresh.
 
+**Always create a GitHub issue** to track benchmark table refresh work for the release (use `gh issue create --repo khurram-uworx/Nivara`). Title it clearly, e.g. `[release vX.Y.Z] Refresh benchmark README tables from release/vX.Y.Z artefacts`, and include links/paths to the committed evidence under `release/vX.Y.Z/`. If tables are fully refreshed before opening the PR, still create the issue and close it with a note (or reference it in the PR) so the release process always produces this tracking issue.
+
 Each benchmark has a `## Release Benchmark` section in its README with exact commands,
 prerequisites, and table-update instructions. Run them in order:
 
@@ -216,9 +218,14 @@ gh pr create --repo khurram-uworx/Nivara --base main \
   --title "chore: prepare vX.Y.Z release" --body-file pr-body.md
 ```
 
+**Always create a GitHub issue** to track docs refresh for the release (use `gh issue create --repo khurram-uworx/Nivara`). Title it clearly, e.g. `[release vX.Y.Z] Docs refresh (Step 2/Step 6)`, listing the required review set and named owners in the issue body; link it from the PR.
+
+Write the release retrospective/review as `release/vX.Y.Z/RELEASE-REVIEW.md` (not under `docs/`) so it does not churn `DocsCoveragePins` / doc-coverage tests. Commit that file with the release prep when applicable.
+
 The PR description must include:
 - A checklist confirming which benchmarks were actually run (with paths to saved JSON
   output where applicable).
+- Links to the tracking issues created for **benchmark README table refresh** (Step 5) and **docs refresh** (this step), with status noted.
 - Paths to the committed benchmark evidence under `release/<version>/` (canonical,
   permanent) and, optionally, the PR attachments used for review.
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
@@ -290,3 +297,4 @@ other steps (build, test, pack, push) are identical.
   `release/<version>/` folder (canonical, permanent artefact path) so reviewers can
   verify measurements were actually taken, not carried forward from a different
   machine or codebase version. PR attachments are an optional review snapshot.
+- Release retrospectives/reviews are written to `release/vX.Y.Z/RELEASE-REVIEW.md` (not under `docs/`) to avoid doc coverage pin churn.

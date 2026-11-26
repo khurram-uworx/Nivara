@@ -132,6 +132,7 @@ static class AdrIndex
 /// </para>
 /// </remarks>
 [TestFixture]
+[Category("ReleaseReadiness")]
 public class AdrIndexTests
 {
     [Test]
