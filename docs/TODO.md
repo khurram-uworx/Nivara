@@ -12,12 +12,23 @@ Issue: `khurram-uworx/Nivara#1457` (OPEN, milestone 1.5.5). Deferred from #1453.
 
 For Qwen vocab ~152k, `MaxSeqLen * vocab * 4 bytes` per buffer is too large (two buffers = full logits + dLogits). The issue asks for chunked linear + cross-entropy: compute loss/grad in vocab chunks without materializing the full logits tensor.
 
-## Grounding / constraints (G1, to be completed after plan commit)
+## Grounding / constraints (G1)
 
-- **microsoft-learn MCP grounding:** verify OpenCL buffer/sub-buffer patterns and any relevant .NET tensor/memory guidance before implementation; record findings here. (Pending G1.)
-- **Code-memory navigation:** used to map symbols/relationships/callers before planning.
-- **Runtime reality:** `SilkRuntime.CreateSubview(parent, elementOffset, elementCount, readOnly)` exists and is used by `SilkBertEncoderRunner`, `SilkDistilBertTrainer`, `GpuTextConvClassifier`, etc.; sub-buffers must be released. `SilkLauncher.GemmNt` computes `C[M,N] = A[M,K]·Bᵀ` with B row-major `[N,K]` — allows logits chunk via `normed[seq,hidden] @ tokEmb[vStart:vStart+chunk, hidden]^T` using contiguous row slice of `tokEmb`. Normal `Gemm`/`GemmAdd` can accumulate `dNormed += dLogitsChunk[seq,chunk] @ tokEmbChunk[chunk,hidden]`.
+- **microsoft-learn MCP grounding:** queried for OpenCL sub-buffer/buffer-offset and numerically-stable chunked softmax. Results were not directly relevant to Silk/OpenCL.NET internals (mostly C runtime buffer APIs, DirectML/MPS/TensorPrimitives softmax docs). No conflicting Microsoft guidance found; the implementation is in Silk/OpenCL kernels, not BCL tensor APIs. `TensorPrimitives.SoftMax` exists in .NET but is not applicable to device-resident logits.
+- **Code-memory navigation:** mapped `SilkLlamaLoRATrainer`, `SilkLoss`, `SilkKernels`, `SilkLauncher`, call sites, and relationships. Confirmed `BackwardPromptMaskedCrossEntropy` callers: trainer `TrainStep`, `samples/NivaraFineTuning/Program.cs:1359`, and `SilkLlamaLoRATrainerParityTests`.
+- **Runtime facts verified in source:**
+  - `SilkRuntime.CreateSubview(parent, elementOffset, elementCount, readOnly)` exists (`SilkRuntime.cs:329`) and is used by `SilkBertEncoderRunner`, `SilkDistilBertTrainer`, `GpuTextConvClassifier`, etc.; sub-buffers are separate CL objects and must be released.
+  - `GemmNt`: `C[M,N] = A[M,K]·Bᵀ`, B row-major `[N,K]` (`SilkLauncher.cs:1302`). Forward chunk fits as `normed[seq,hidden] @ tokEmb[vStart:vStart+chunk, hidden]^T` via contiguous row-slice sub-buffer of `tokEmb[vocab,hidden]`.
+  - `Gemm` overwrites C; `GemmAdd` computes `C=A*B+residual` (`SilkLauncher.cs:698`) and can accumulate dNormed across chunks.
+  - Existing `softmax_cross_entropy_backward` kernel does 3 sequential passes over full vocab per row (max, sumexp, grad) with global max (`SilkKernels.cs:2898-2932`).
 - **Blast radius:** see section below. No public signature removal planned; `Forward()` keeps returning full logits (materialized on host by chunk download, not as a persistent full device logits buffer). `BackwardPromptMaskedCrossEntropy` keeps signature/semantics.
+
+## G1 decisions / red flags (need human clearance before implementation)
+
+1. **Pass count / FP numeric order (recommended: 2-pass, accept tolerance):** Chunked CE needs global max and sumexp before dLogits. A 2-pass design (pass 1 max+sumexp with online merge across chunks; pass 2 recompute logits chunk, emit dLogits + loss, accumulate dNormed) means 2x LM-head GEMM per training step. It is numerically stable but floating-point accumulation order differs slightly from the current single-kernel 3-pass-full-vocab scan. Existing parity tests allow tolerance (loss 1.5e-3 rel, grads 3e-2 rel); I expect to stay within tolerance, but it is a numeric-order change. Alternative: 3-pass (max, sumexp, grad) gives closer-to-identical numerics but 3x LM-head GEMM. **Recommendation:** 2-pass, verify parity within existing tolerances; escalate if any parity test fails beyond tolerance.
+2. **`Forward()` host materialization:** `Forward()` currently downloads full logits from a persistent device buffer. Plan keeps API but builds the host `float[seq*vocab]` by chunked download; no persistent full device logits buffer. Host still allocates full array - acceptable given issue states "without materializing the full logits tensor" (device). Confirm.
+3. **`Options.ChunkVocab` default:** Add `int ChunkVocab = 8192` to `SilkLlamaLoRATrainer.Options` record (source-compatible default). Used for chunk buffer sizing and chunk loop; `effective = Min(ChunkVocab, VocabSize)`. Exposed for tests/tuning. Confirm.
+4. **Sub-buffer lifecycle:** Create/release tokEmb sub-buffer views per chunk per pass. Small overhead vs GEMM; simple and safe. Alternative is caching sub-buffers for fixed chunk layout - can defer. Confirm.
 
 ## Proposed changes
 
