@@ -4,6 +4,13 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ## [Unreleased]
 
+### Added
+
+- Silk Llama LoRA training (#1457): chunked LM-head projection + prompt-masked cross-entropy
+  in `SilkLlamaLoRATrainer` avoids persistent full `[seq, vocab]` device logits/dLogits
+  buffers (Qwen ~152k vocab). Two-pass vocab-chunk CE (max/sumexp merge, then dLogits/dNormed
+  accumulation) with configurable `ChunkVocab` (default 8192) and chunk-boundary parity tests.
+
 ## [1.5.4] - 2026-11-25
 
 ### Added
