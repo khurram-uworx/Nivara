@@ -231,7 +231,7 @@ The PR description must include:
 - Paths to the committed benchmark evidence under `release/<version>/` (canonical,
   permanent) and, optionally, the PR attachments used for review.
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
-- The CD test results (3200+ tests passing).
+- The CD test results (all required CI tests passing; include the CI-reported test count).
 - A doc-refresh confirmation listing each of README.md, GETTING-STARTED.md,
   ARCHITECTURE.md, docs/AUTODIFF.md, EXAMPLES.md, samples/README.md, AGENTS.md,
   RELEASING.md and the docs/adr/ records as reviewed or explicitly out of scope,
