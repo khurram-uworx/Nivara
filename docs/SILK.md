@@ -1043,6 +1043,28 @@ is requested, reusing the existing kernels rather than a new model runner:
   held-out comparison; both `--loss listwise` and `--loss pairwise` run fully on the device via
   `SilkRetrievalTrainer` (pairwise accumulates grade-ordered pair gradients).
 
+## 13h. Chunked LoRA LM-head CE (#1457)
+
+`SilkLlamaLoRATrainer` (`src/Nivara.Extensions/Silk/SilkLlamaLoRATrainer.cs`) trains LoRA
+adapters on Llama-family causal models (SmolLM/Qwen shapes) with prompt-masked cross-entropy.
+For large vocabularies (Qwen ~152k), full `[seq, vocab]` logits and dLogits buffers are too
+large, so the training path chunks the LM head over vocabulary:
+
+- **No persistent full device logits tensor.** The trainer allocates `logitsChunkBuf/dLogitsChunkBuf`
+  sized by `MaxSeqLen * min(ChunkVocab, VocabSize)` plus small per-row CE accumulators, instead of
+  full `MaxSeqLen * VocabSize` logits buffers.
+- **Chunked forward projection.** `Forward()`/`ForwardLastLogits()` project `normedBuf` to host
+  logits by iterating vocab chunks via `GemmNt` against `tokEmb` row-slice sub-buffers; the public
+  API still returns full host logits.
+- **Two-pass chunked CE backward.** `BackwardPromptMaskedCrossEntropy` runs pass 1 (global max/sumexp
+  merge across vocab chunks) and pass 2 (recompute logits chunk, emit dLogits chunk and per-row loss,
+  accumulate `dNormed += dLogitsChunk @ tokEmbChunk` via `Gemm`/`GemmAdd`). This trades 2x LM-head
+  GEMM per training step for bounded device memory.
+- **Configurable chunk size.** `SilkLlamaLoRATrainer.Options.ChunkVocab` defaults to 8192
+  (source-compatible record parameter).
+- **Parity.** Synthetic and real-checkpoint parity tests remain green, including chunk-boundary
+  coverage with small non-aligned `ChunkVocab`.
+
 ## 13d. Wiring coverage (user-facing entry points)
 
 Silk (`--silk`) is honoured by the following user-facing entry points as of this release:

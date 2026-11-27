@@ -608,6 +608,49 @@ internal static class SilkLauncher
             [(nuint)SilkKernels.LinearGroupSize]);
     }
 
+    public static void ChunkedCrossEntropyMaxSumExp(
+        SilkRuntime runtime, nint logitsChunk, nint labels, nint rowMax, nint rowSumExp,
+        int n, int chunkSize, int ignoreIndex = -1)
+    {
+        if (n <= 0) throw new ArgumentOutOfRangeException(nameof(n));
+        if (chunkSize <= 0) throw new ArgumentOutOfRangeException(nameof(chunkSize));
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyMaxSumExp, 0, logitsChunk);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyMaxSumExp, 1, labels);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyMaxSumExp, 2, rowMax);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyMaxSumExp, 3, rowSumExp);
+        runtime.SetUInt32(SilkKernels.ChunkedCrossEntropyMaxSumExp, 4, (uint)n);
+        runtime.SetUInt32(SilkKernels.ChunkedCrossEntropyMaxSumExp, 5, (uint)chunkSize);
+        runtime.SetInt32(SilkKernels.ChunkedCrossEntropyMaxSumExp, 6, ignoreIndex);
+        runtime.Run(
+            SilkKernels.ChunkedCrossEntropyMaxSumExp,
+            [(nuint)SilkKernels.LinearGlobal(n)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
+    public static void ChunkedCrossEntropyBackwardChunk(
+        SilkRuntime runtime, nint logitsChunk, nint labels, nint dLogitsChunk, nint rowMax, nint rowSumExp, nint rowLoss,
+        int n, int chunkStart, int chunkSize, float scale, int ignoreIndex = -1)
+    {
+        if (n <= 0) throw new ArgumentOutOfRangeException(nameof(n));
+        if (chunkStart < 0) throw new ArgumentOutOfRangeException(nameof(chunkStart));
+        if (chunkSize <= 0) throw new ArgumentOutOfRangeException(nameof(chunkSize));
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyBackwardChunk, 0, logitsChunk);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyBackwardChunk, 1, labels);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyBackwardChunk, 2, dLogitsChunk);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyBackwardChunk, 3, rowMax);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyBackwardChunk, 4, rowSumExp);
+        runtime.SetBuffer(SilkKernels.ChunkedCrossEntropyBackwardChunk, 5, rowLoss);
+        runtime.SetUInt32(SilkKernels.ChunkedCrossEntropyBackwardChunk, 6, (uint)n);
+        runtime.SetUInt32(SilkKernels.ChunkedCrossEntropyBackwardChunk, 7, (uint)chunkStart);
+        runtime.SetUInt32(SilkKernels.ChunkedCrossEntropyBackwardChunk, 8, (uint)chunkSize);
+        runtime.SetFloat32(SilkKernels.ChunkedCrossEntropyBackwardChunk, 9, scale);
+        runtime.SetInt32(SilkKernels.ChunkedCrossEntropyBackwardChunk, 10, ignoreIndex);
+        runtime.Run(
+            SilkKernels.ChunkedCrossEntropyBackwardChunk,
+            [(nuint)SilkKernels.LinearGlobal(n)],
+            [(nuint)SilkKernels.LinearGroupSize]);
+    }
+
     public static void Scale(SilkRuntime runtime, nint x, nint y, float s, int n)
     {
         runtime.SetBuffer(SilkKernels.Scale, 0, x);

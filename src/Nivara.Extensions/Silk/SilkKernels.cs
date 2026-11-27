@@ -206,6 +206,8 @@ internal static class SilkKernels
     public const string AdamUpdate = "adam_update";
     public const string AdamUpdateBf16 = "adam_update_bf16";
     public const string SoftmaxCrossEntropyBackward = "softmax_cross_entropy_backward";
+    public const string ChunkedCrossEntropyMaxSumExp = "chunked_cross_entropy_max_sumexp";
+    public const string ChunkedCrossEntropyBackwardChunk = "chunked_cross_entropy_backward_chunk";
     public const string Scale = "scale";
 
     // Rag-learn fused late-fusion helpers (#915 follow-up).
@@ -237,6 +239,8 @@ internal static class SilkKernels
         GroupedHashReducePartial, GroupedMultiStatReducePartial, RollingMean, RollingMax, RollingMin,
         GemmNt, GemmNtBf16, GemmNtResidual, GemmNtResidualBf16, GemmTn, GemmTnBf16, ReluBackward, GeluBackward, GeluBackwardBf16Act, LayerNormBackward, LayerNormBackwardBf16Act, RmsNormBackward, ColSum, ColSumBf16Act, Fill,
         SoftmaxCrossEntropyBackward,
+        ChunkedCrossEntropyMaxSumExp,
+        ChunkedCrossEntropyBackwardChunk,
         Scale,
         Conv2dBackwardWeight, Conv2dBackwardInput, Conv2dBackwardBias, AdamUpdate, AdamUpdateBf16,
         FusionForward, FusionWgrad,
@@ -2929,6 +2933,84 @@ internal static class SilkKernels
                 float onehot = (c == (uint)label) ? 1.0f : 0.0f;
                 dZ[base + c] = (p - onehot) * scale;
             }
+        }
+
+        /* Chunked cross-entropy pass 1: merge this vocab chunk's local max/sumexp into per-row
+           global accumulators (online log-sum-exp merge). Caller initializes rowMax to -INFINITY
+           and rowSumExp to 0 before the first chunk. One work item per sample row. */
+        __kernel void chunked_cross_entropy_max_sumexp(
+            __global const float* logitsChunk,
+            __global const int* labels,
+            __global float* rowMax,
+            __global float* rowSumExp,
+            const uint n,
+            const uint chunkSize,
+            const int ignoreIndex)
+        {
+            uint i = get_global_id(0);
+            if (i >= n) return;
+            int label = labels[i];
+            if (label == ignoreIndex) return;
+            uint base = i * chunkSize;
+
+            float localMax = -INFINITY;
+            for (uint c = 0u; c < chunkSize; ++c)
+                localMax = fmax(localMax, logitsChunk[base + c]);
+
+            float localSum = 0.0f;
+            for (uint c = 0u; c < chunkSize; ++c)
+                localSum += exp(logitsChunk[base + c] - localMax);
+
+            float globalMax = rowMax[i];
+            float globalSum = rowSumExp[i];
+            float newMax = fmax(globalMax, localMax);
+            float merged = globalSum * exp(globalMax - newMax) + localSum * exp(localMax - newMax);
+            rowMax[i] = newMax;
+            rowSumExp[i] = merged;
+        }
+
+        /* Chunked cross-entropy pass 2: write dZ chunk and the per-row loss contribution using
+           finalized global max/sumexp. Only the chunk containing the label writes rowLoss[i].
+           Ignored rows get zero dZ and zero loss. One work item per sample row. */
+        __kernel void chunked_cross_entropy_backward_chunk(
+            __global const float* logitsChunk,
+            __global const int* labels,
+            __global float* dZChunk,
+            __global const float* rowMax,
+            __global const float* rowSumExp,
+            __global float* rowLoss,
+            const uint n,
+            const uint chunkStart,
+            const uint chunkSize,
+            const float scale,
+            const int ignoreIndex)
+        {
+            uint i = get_global_id(0);
+            if (i >= n) return;
+            uint base = i * chunkSize;
+            int label = labels[i];
+            if (label == ignoreIndex)
+            {
+                for (uint c = 0u; c < chunkSize; ++c)
+                    dZChunk[base + c] = 0.0f;
+                rowLoss[i] = 0.0f;
+                return;
+            }
+
+            float mx = rowMax[i];
+            float sum = rowSumExp[i];
+            int labelInChunk = (label >= (int)chunkStart && label < (int)(chunkStart + chunkSize)) ? 1 : 0;
+            uint labelOffset = (uint)(label - (int)chunkStart);
+
+            for (uint c = 0u; c < chunkSize; ++c)
+            {
+                float p = exp(logitsChunk[base + c] - mx) / sum;
+                float onehot = (labelInChunk == 1 && c == labelOffset) ? 1.0f : 0.0f;
+                dZChunk[base + c] = (p - onehot) * scale;
+            }
+
+            if (labelInChunk == 1)
+                rowLoss[i] = -(logitsChunk[base + labelOffset] - mx - log(sum));
         }
 
         /* dW[oc, ic, kh, kw] = sum over (n, oh, ow) of dA[n, oc, oh, ow] * X[n, ic, ih, iw],
