@@ -27,9 +27,9 @@ Potential test/gate impact if `docs/` changes: `Nivara.Tests.Docs` suite, snippe
 ## Grounding (G1 - required before implementation)
 
 - [x] Branch confirmed/created: `khurram/1518` (user-confirmed).
-- [ ] Ground plan via microsoft-learn MCP (relevant .NET/docs/tooling claims) and code-memory MCP (symbols/relationships for docs-gate enforcement: `DocsCoveragePins`, `DocSnippetExtractor`, doc tests).
-- [ ] Verify source-of-truth claims called out by #1518: `.github/workflows/*`, `*.csproj`, current test/build artifacts where applicable.
-- [ ] Identify any decision/red flag/assumption needing human input; stop and ask before implementation if found.
+- [x] Code-memory MCP grounding: located doc-gate symbols `Nivara.Tests.Docs.DocsCoveragePins` (`tests/Nivara.Tests/Docs/DocsCoveragePins.cs`), `DocsCoverageTests`, `DocSnippetExtractor`, `DocSnippetCompiler` via `sql_query`. Confirmed docs gate/test coupling in AGENTS.
+- [x] Source-of-truth checks (initial): `.github/workflows/ci.yml` (ubuntu-latest, .NET 11.0.x, whitespace format verify, build Release, test filter `Category!=Performance&Category!=ReleaseReadiness&Category!=Gpu`, TRX artifact, coverage upload), `.github/workflows/cd.yml` (tag `v*`/workflow_dispatch, .NET 11.0.x, build Release, test filter `Category!=Performance&Category!=Gpu`, pack/push Nivara + Nivara.Extensions + snupkg via NuGet OIDC login), `.github/workflows/release-readiness.yml` (workflow_dispatch, ReleaseReadiness category). `src/Nivara/Nivara.csproj` and `src/Nivara.Extensions/Nivara.Extensions.csproj` target `net11.0`, `PackageVersion` 1.5.5-preview; Extensions deps exact-pinned (Streamix 1.2.3, System.Numerics.Tensors 11.0.0, Apache.Arrow 23.0.0, CsvHelper 34.1.0, Microsoft.ML 6.0.0, Microsoft.ML.Tokenizers 3.0.0, Silk.NET.OpenCL 2.23.0, Parquet.Net 6.1.1-pre.1, Google.Protobuf 3.36.2, Grpc.Tools 2.85.0, Microsoft.Extensions.AI.Abstractions 11.0.1, SourceLink 11.0.100).
+- [x] Drift signals identified: `RELEASING.md` contains stale hardcoded "3200+ tests passing" PR-description requirement (line ~234); sample inventory in `samples/README.md` should be checked against actual `samples/` directories; docs should be reviewed for stale measured/version claims. No blocking product decision/red flag requiring human input before docs review; any ambiguous claim will be verified against source or called out explicitly.
 
 ## Proposed changes
 
