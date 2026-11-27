@@ -37,7 +37,8 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         float RopeTheta = 10000f,
         int Rank = 8,
         float Alpha = 16f,
-        SilkLlamaLoRATarget Targets = SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V);
+        SilkLlamaLoRATarget Targets = SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V,
+        int ChunkVocab = 8192);
 
     sealed class LoraPair
     {
@@ -100,6 +101,7 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
     readonly int kvDim;
     readonly float loraScale;
     readonly float attnScale;
+    readonly int effectiveChunkVocab;
     readonly List<nint> ownedBuffers = new();
     readonly LayerWeights[] layers;
     readonly LayerActivations[] activations;
@@ -111,8 +113,11 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
     nint xBuf;
     nint normedBuf;
     nint finalNormInputBuf;
-    nint logitsBuf;
-    nint dLogitsBuf;
+    nint logitsChunkBuf;
+    nint dLogitsChunkBuf;
+    nint ceRowMaxBuf;
+    nint ceRowSumBuf;
+    nint ceRowLossBuf;
     nint dCurBuf;
     nint dTmpBuf;
     nint dLnAccBuf; // [maxSeqLen, hiddenDim] for dgamma accumulation
@@ -145,6 +150,7 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(options);
         if (options.Rank <= 0) throw new ArgumentOutOfRangeException(nameof(options.Rank));
+        if (options.ChunkVocab <= 0) throw new ArgumentOutOfRangeException(nameof(options.ChunkVocab));
         this.runtime = runtime;
         this.options = options;
         headDim = options.HiddenDim / options.NumHeads;
@@ -152,6 +158,7 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         kvDim = options.NumKvHeads * headDim;
         loraScale = options.Alpha / options.Rank;
         attnScale = 1f / MathF.Sqrt(headDim);
+        effectiveChunkVocab = Math.Min(options.ChunkVocab, options.VocabSize);
         rotary = new RotaryEmbedding<float>(headDim, options.MaxSeqLen, options.RopeTheta);
         layers = new LayerWeights[options.NumLayers];
         activations = new LayerActivations[options.NumLayers];
@@ -320,17 +327,78 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
             throw new ArgumentOutOfRangeException(nameof(tokenIds), $"seqLen {seqLen} exceeds MaxSeqLen {options.MaxSeqLen}.");
 
         ForwardDevice(tokenIds, seqLen);
-        return runtime.Download(logitsBuf, seqLen * options.VocabSize);
+        return ProjectLogitsToHost(seqLen);
     }
 
     /// <summary>Runs forward pass and returns last-token logits [vocabSize].</summary>
     public float[] ForwardLastLogits(int[] tokenIds)
     {
-        var all = Forward(tokenIds);
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(tokenIds);
         int seqLen = tokenIds.Length;
-        var last = new float[options.VocabSize];
-        Array.Copy(all, (seqLen - 1) * options.VocabSize, last, 0, options.VocabSize);
-        return last;
+        if (seqLen <= 0) throw new ArgumentOutOfRangeException(nameof(tokenIds));
+        if (seqLen > options.MaxSeqLen)
+            throw new ArgumentOutOfRangeException(nameof(tokenIds), $"seqLen {seqLen} exceeds MaxSeqLen {options.MaxSeqLen}.");
+
+        ForwardDevice(tokenIds, seqLen);
+        return ProjectLastLogitsToHost(seqLen);
+    }
+
+    float[] ProjectLogitsToHost(int seqLen)
+    {
+        int vocab = options.VocabSize;
+        int hidden = options.HiddenDim;
+        var logits = new float[seqLen * vocab];
+        for (int vStart = 0; vStart < vocab; vStart += effectiveChunkVocab)
+        {
+            int chunkSize = Math.Min(effectiveChunkVocab, vocab - vStart);
+            nint tokEmbChunk = runtime.CreateSubview(tokEmb, vStart * hidden, chunkSize * hidden, readOnly: true);
+            try
+            {
+                SilkLauncher.GemmNt(runtime, normedBuf, tokEmbChunk, logitsChunkBuf, seqLen, hidden, chunkSize);
+                var chunk = runtime.Download(logitsChunkBuf, seqLen * chunkSize);
+                for (int r = 0; r < seqLen; r++)
+                    Array.Copy(chunk, r * chunkSize, logits, r * vocab + vStart, chunkSize);
+            }
+            finally
+            {
+                runtime.Release(tokEmbChunk);
+            }
+        }
+
+        return logits;
+    }
+
+    float[] ProjectLastLogitsToHost(int seqLen)
+    {
+        int vocab = options.VocabSize;
+        int hidden = options.HiddenDim;
+        var logits = new float[vocab];
+        nint normedRow = runtime.CreateSubview(normedBuf, (seqLen - 1) * hidden, hidden, readOnly: true);
+        try
+        {
+            for (int vStart = 0; vStart < vocab; vStart += effectiveChunkVocab)
+            {
+                int chunkSize = Math.Min(effectiveChunkVocab, vocab - vStart);
+                nint tokEmbChunk = runtime.CreateSubview(tokEmb, vStart * hidden, chunkSize * hidden, readOnly: true);
+                try
+                {
+                    SilkLauncher.GemmNt(runtime, normedRow, tokEmbChunk, logitsChunkBuf, 1, hidden, chunkSize);
+                    var chunk = runtime.Download(logitsChunkBuf, chunkSize);
+                    Array.Copy(chunk, 0, logits, vStart, chunkSize);
+                }
+                finally
+                {
+                    runtime.Release(tokEmbChunk);
+                }
+            }
+        }
+        finally
+        {
+            runtime.Release(normedRow);
+        }
+
+        return logits;
     }
 
     /// <summary>
@@ -349,19 +417,64 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
             if (labels[i] != -100) valid++;
         if (valid == 0) throw new ArgumentException("No valid labels (all -100).", nameof(labels));
 
-        // Loss on host (logits already in logitsBuf from forward)
-        var logits = runtime.Download(logitsBuf, seqLen * options.VocabSize);
-        float loss = ComputeMaskedCrossEntropy(logits, labels, seqLen, options.VocabSize);
-
         float scale = 1f / valid;
         runtime.Upload(targetIdsBuf, labels.AsSpan(0, seqLen));
-        // dLogits = softmax(logits) - onehot(labels), scaled, with ignoreIndex
-        SilkLauncher.SoftmaxCrossEntropyBackward(runtime, logitsBuf, targetIdsBuf, dLogitsBuf,
-            seqLen, options.VocabSize, scale, -100);
+        SilkLauncher.Fill(runtime, ceRowMaxBuf, float.NegativeInfinity, seqLen);
+        SilkLauncher.Fill(runtime, ceRowSumBuf, 0f, seqLen);
+        SilkLauncher.Fill(runtime, ceRowLossBuf, 0f, seqLen);
 
-        // LM head backward: logits = normed @ tokEmbTransposed
-        // dNormed = dLogits @ tokEmb  (tokEmb is [vocab, hidden])
-        SilkLauncher.Gemm(runtime, dLogitsBuf, tokEmb, dTmpBuf, seqLen, options.VocabSize, options.HiddenDim);
+        int vocab = options.VocabSize;
+        int hidden = options.HiddenDim;
+
+        // Pass 1: global max/sumexp over vocab chunks (online merge).
+        for (int vStart = 0; vStart < vocab; vStart += effectiveChunkVocab)
+        {
+            int chunkSize = Math.Min(effectiveChunkVocab, vocab - vStart);
+            nint tokEmbChunk = runtime.CreateSubview(tokEmb, vStart * hidden, chunkSize * hidden, readOnly: true);
+            try
+            {
+                SilkLauncher.GemmNt(runtime, normedBuf, tokEmbChunk, logitsChunkBuf, seqLen, hidden, chunkSize);
+                SilkLauncher.ChunkedCrossEntropyMaxSumExp(runtime, logitsChunkBuf, targetIdsBuf, ceRowMaxBuf, ceRowSumBuf, seqLen, chunkSize, -100);
+            }
+            finally
+            {
+                runtime.Release(tokEmbChunk);
+            }
+        }
+
+        // Pass 2: recompute logits chunks, emit dLogits/loss, accumulate dNormed = dLogits @ tokEmb.
+        bool firstChunk = true;
+        for (int vStart = 0; vStart < vocab; vStart += effectiveChunkVocab)
+        {
+            int chunkSize = Math.Min(effectiveChunkVocab, vocab - vStart);
+            nint tokEmbChunk = runtime.CreateSubview(tokEmb, vStart * hidden, chunkSize * hidden, readOnly: true);
+            try
+            {
+                SilkLauncher.GemmNt(runtime, normedBuf, tokEmbChunk, logitsChunkBuf, seqLen, hidden, chunkSize);
+                SilkLauncher.ChunkedCrossEntropyBackwardChunk(runtime, logitsChunkBuf, targetIdsBuf, dLogitsChunkBuf,
+                    ceRowMaxBuf, ceRowSumBuf, ceRowLossBuf, seqLen, vStart, chunkSize, scale, -100);
+
+                if (firstChunk)
+                {
+                    SilkLauncher.Gemm(runtime, dLogitsChunkBuf, tokEmbChunk, dTmpBuf, seqLen, chunkSize, hidden);
+                    firstChunk = false;
+                }
+                else
+                {
+                    SilkLauncher.GemmAdd(runtime, dLogitsChunkBuf, tokEmbChunk, dTmpBuf, dTmpBuf, seqLen, chunkSize, hidden);
+                }
+            }
+            finally
+            {
+                runtime.Release(tokEmbChunk);
+            }
+        }
+
+        var rowLoss = runtime.Download(ceRowLossBuf, seqLen);
+        float loss = 0f;
+        for (int i = 0; i < seqLen; i++)
+            loss += rowLoss[i];
+        loss /= valid;
 
         // Final RMSNorm backward: dTmpBuf is dNormed, finalNormInputBuf is x, finalNormW is gamma
         // dCurBuf = dX, dLnAccBuf = dGammaAcc (ignored; base frozen)
@@ -536,26 +649,6 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
         SilkLauncher.AdamUpdate(runtime, p.B, p.GradB, p.MB, p.VB, lr, c1, c2, 1e-8f, weightDecay, options.Rank * p.OutFeatures);
     }
 
-    static float ComputeMaskedCrossEntropy(float[] logits, int[] labels, int seqLen, int vocab)
-    {
-        float sum = 0;
-        int valid = 0;
-        for (int t = 0; t < seqLen; t++)
-        {
-            int label = labels[t];
-            if (label < 0 || label >= vocab) continue;
-            float max = float.NegativeInfinity;
-            int off = t * vocab;
-            for (int v = 0; v < vocab; v++) max = MathF.Max(max, logits[off + v]);
-            float s = 0;
-            for (int v = 0; v < vocab; v++) s += MathF.Exp(logits[off + v] - max);
-            float logp = logits[off + label] - max - MathF.Log(s);
-            sum += -logp;
-            valid++;
-        }
-        return valid == 0 ? 0f : sum / valid;
-    }
-
     public void Dispose()
     {
         if (disposed) return;
@@ -617,7 +710,6 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
 
         runtime.CopyBuffer(xBuf, finalNormInputBuf, 0, 0, seqLen * options.HiddenDim);
         SilkLauncher.RmsNorm(runtime, xBuf, finalNormW, normedBuf, seqLen, options.HiddenDim, options.RmsNormEps);
-        SilkLauncher.Gemm(runtime, normedBuf, tokEmbTransposed, logitsBuf, seqLen, options.HiddenDim, options.VocabSize);
     }
 
     void GemmWithLora(nint input, nint baseWeight, LoraPair? lora, nint output, int rows, int inFeatures, int outFeatures)
@@ -635,12 +727,14 @@ public sealed class SilkLlamaLoRATrainer : IDisposable
     {
         int cap = options.MaxSeqLen;
         int h = options.HiddenDim;
-        int v = options.VocabSize;
         xBuf = Alloc(cap * h);
         normedBuf = Alloc(cap * h);
         finalNormInputBuf = Alloc(cap * h);
-        logitsBuf = Alloc(cap * v);
-        dLogitsBuf = Alloc(cap * v);
+        logitsChunkBuf = Alloc(cap * effectiveChunkVocab);
+        dLogitsChunkBuf = Alloc(cap * effectiveChunkVocab);
+        ceRowMaxBuf = Alloc(cap);
+        ceRowSumBuf = Alloc(cap);
+        ceRowLossBuf = Alloc(cap);
         dCurBuf = Alloc(cap * h);
         dTmpBuf = Alloc(cap * h);
         dLnAccBuf = Alloc(cap * h);

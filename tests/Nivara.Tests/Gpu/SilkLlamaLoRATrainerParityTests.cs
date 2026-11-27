@@ -90,7 +90,60 @@ public sealed class SilkLlamaLoRATrainerParityTests
         AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers);
     }
 
-    static SilkLlamaLoRATrainer CreateSilkTrainer(SilkRuntime runtime, LlamaConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int rank, float alpha, SilkLlamaLoRATarget targets)
+    [Test]
+    public void ForwardAndBackward_SmallChunkVocab_MatchesCpu()
+    {
+        try { using var probe = new SilkRuntime(); }
+        catch { Assert.Ignore("No OpenCL GPU available; skipping Silk Llama LoRA parity verification."); }
+
+        var (tensors, config) = Nivara.Tests.Qwen.QwenTestWeights.Synthesize(seed: 1234);
+        int[] input = [1, 2, 3, 4, 5, 6];
+        int[] labels = [-100, -100, -100, 4, 5, 6];
+        const int rank = 4;
+        const float alpha = 8f;
+        int chunkVocab = Math.Max(1, config.VocabSize / 3) | 1; // odd, not aligned to vocab
+
+        var cpuModel = LlamaLoader.Load<float, float>(config, tensors);
+        cpuModel.AttachLora(LlamaLoRATarget.Q | LlamaLoRATarget.V, rank, alpha);
+
+        using var runtime = new SilkRuntime();
+        using var silk = CreateSilkTrainer(runtime, config, tensors, rank, alpha, SilkLlamaLoRATarget.Q | SilkLlamaLoRATarget.V, chunkVocab: chunkVocab);
+        CopyCpuLoraToSilk(cpuModel, silk, config.NumHiddenLayers);
+        ZeroCpuLoraGrads(cpuModel);
+        silk.ZeroLoraGradients();
+
+        var cpuLogits = cpuModel.Forward(input).Data.ToArray();
+        var silkLogits = silk.Forward(input);
+        Assert.That(ArgMaxLast(silkLogits, input.Length, config.VocabSize),
+            Is.EqualTo(ArgMaxLast(cpuLogits, input.Length, config.VocabSize)), "Last-token argmax mismatch");
+        float maxAbs = MaxAbsDiff(cpuLogits, silkLogits);
+        float scale = MaxAbs(cpuLogits) + 1f;
+        Assert.That(maxAbs / scale, Is.LessThanOrEqualTo(1.5e-3f),
+            $"Max abs diff {maxAbs}, scale {scale}, rel {maxAbs / scale}");
+
+        float cpuLoss;
+        var lossFn = new CrossEntropyLoss<float>();
+        using (GradientUtils.Grad())
+        {
+            var logits = cpuModel.Forward(input);
+            var logits2d = logits;
+            if (logits2d.Shape.Length == 3) logits2d.Reshape(input.Length, config.VocabSize);
+            var loss = lossFn.Forward(logits2d, labels, ignoreIndex: -100);
+            loss.Backward();
+            cpuLoss = loss.Data.ToArray()[0];
+        }
+
+        silk.Forward(input);
+        var (silkLoss, valid) = silk.BackwardPromptMaskedCrossEntropy(labels, input.Length);
+        silk.BackwardTransformerBlocks(input.Length);
+
+        Assert.That(valid, Is.EqualTo(3));
+        Assert.That(silkLoss, Is.EqualTo(cpuLoss).Within(1.5e-3f * (MathF.Abs(cpuLoss) + 1f)),
+            $"Loss mismatch: cpu={cpuLoss}, silk={silkLoss}");
+        AssertLoraGradsMatch(cpuModel, silk, config.NumHiddenLayers);
+    }
+
+    static SilkLlamaLoRATrainer CreateSilkTrainer(SilkRuntime runtime, LlamaConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int rank, float alpha, SilkLlamaLoRATarget targets, int maxSeqLen = 16, int chunkVocab = 8192)
     {
         var silk = new SilkLlamaLoRATrainer(runtime, new SilkLlamaLoRATrainer.Options(
             VocabSize: config.VocabSize,
@@ -99,12 +152,13 @@ public sealed class SilkLlamaLoRATrainerParityTests
             NumLayers: config.NumHiddenLayers,
             NumHeads: config.NumAttentionHeads,
             NumKvHeads: config.NumKeyValueHeads,
-            MaxSeqLen: 16,
+            MaxSeqLen: maxSeqLen,
             RmsNormEps: config.RmsNormEps,
             RopeTheta: config.RopeTheta,
             Rank: rank,
             Alpha: alpha,
-            Targets: targets));
+            Targets: targets,
+            ChunkVocab: chunkVocab));
         silk.UploadBaseWeights(tensors);
         return silk;
     }
@@ -593,22 +647,4 @@ public sealed class SilkLlamaLoRATrainerParityTests
         return (config, tensors);
     }
 
-    static SilkLlamaLoRATrainer CreateSilkTrainer(SilkRuntime runtime, LlamaConfig config, Dictionary<string, (float[] Data, int[] Shape)> tensors, int rank, float alpha, SilkLlamaLoRATarget targets, int maxSeqLen)
-    {
-        var silk = new SilkLlamaLoRATrainer(runtime, new SilkLlamaLoRATrainer.Options(
-            VocabSize: config.VocabSize,
-            HiddenDim: config.HiddenSize,
-            IntermediateDim: config.IntermediateSize,
-            NumLayers: config.NumHiddenLayers,
-            NumHeads: config.NumAttentionHeads,
-            NumKvHeads: config.NumKeyValueHeads,
-            MaxSeqLen: maxSeqLen,
-            RmsNormEps: config.RmsNormEps,
-            RopeTheta: config.RopeTheta,
-            Rank: rank,
-            Alpha: alpha,
-            Targets: targets));
-        silk.UploadBaseWeights(tensors);
-        return silk;
-    }
 }
