@@ -32,8 +32,11 @@ static partial class DocReferenceExtractor
     /// paths (<c>docs/GUIDE.md</c>, <c>docs/blog/post.md</c>, <c>docs/plan/ROADMAP.md</c>,
     /// <c>docs/plans/EVAL.md</c>) that are not real document references; counting them would inflate
     /// the pin with strings that never resolve.
+    /// <c>release/</c> is process/artefact tooling (benchmark captures, runners, templates, release
+    /// reviews) excluded to avoid mechanical pin churn (#1508). Intentional coverage reduction:
+    /// broken refs/citations inside <c>release/</c> are not caught by this gate.
     /// </summary>
-    static readonly string[] ExcludedPathPrefixes = ["tests/Nivara.Tests/Docs/", "tests/Nivara.Tests/Samples/DocCorpusTests.cs", "samples/data/"];
+    static readonly string[] ExcludedPathPrefixes = ["tests/Nivara.Tests/Docs/", "tests/Nivara.Tests/Samples/DocCorpusTests.cs", "samples/data/", "release/"];
 
     /// <summary>Documents excluded by exact path rather than by directory prefix.</summary>
     static readonly string[] ExcludedDocuments = ["docs/TODO.md"];

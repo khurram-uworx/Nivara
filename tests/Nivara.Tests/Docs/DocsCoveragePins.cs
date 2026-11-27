@@ -31,8 +31,8 @@ internal static class DocsCoveragePins
     /// <c>docs/…md</c> references discovered across the widened scope. Pinned deliberately.
     /// Includes tolerated historical mentions, which are still discovered and counted here.
     /// Baseline adjusted after removing retired <c>docs/RELEASE1.5.*-REVIEW.md</c> files.
-    /// +1 for #1506: RELEASING.md and release/README.md reference release/TASK-TEMPLATE-BENCHMARKS.md.
-    /// +1 for #1507: release/README.md references TASK-TEMPLATE-DOCS.md.
+    /// -3 for #1508: <c>release/</c> excluded from the widened scan as process/artefact tooling;
+    /// intentional coverage reduction removes <c>release/README.md</c> references from this count.
     /// </summary>
-    internal const int ExpectedDocumentReferenceCount = 522;
+    internal const int ExpectedDocumentReferenceCount = 519;
 }
