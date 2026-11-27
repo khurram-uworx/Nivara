@@ -773,7 +773,7 @@ The `Conv1d<T>` kernel mirrors Conv2d's approach in 1D: tiled `Im2Col1DTile` mat
 
 ### Cross-Framework Validation (NivaraTorch)
 
-Nivara's AutoDiff correctness is validated against PyTorch via the `NivaraTorch` test suite (`tests/Nivara.Tests/NivaraTorch/`) — **55 functional tests** asserting forward and backward values against tensors produced by `gen_reference.py`. Layer fixtures cover 21+ layer types (Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, Embedding, TransformerBlock, MultiheadAttention, GELU, pooling, etc.) and are regenerated on demand from Python. A cross-framework parity exercise trained an identical 3-layer MLP in both frameworks and measured **<0.04% relative loss-curve divergence over 50 epochs** (see `samples/README.md`).
+Nivara's AutoDiff correctness is validated against PyTorch via the `NivaraTorch` test suite (`tests/Nivara.Tests/NivaraTorch/`) — **101 functional tests** asserting forward and backward values against tensors produced by `gen_reference.py`. Layer fixtures cover 21+ layer types (Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, Embedding, TransformerBlock, MultiheadAttention, GELU, pooling, etc.) and are regenerated on demand from Python. A cross-framework parity exercise trained an identical 3-layer MLP in both frameworks and measured **<0.04% relative loss-curve divergence over 50 epochs** (see `samples/README.md`).
 
 ### Model Interop (SafeTensors)
 

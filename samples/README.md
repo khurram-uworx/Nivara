@@ -20,7 +20,7 @@ Same task as MicroGpt, but built on Nivara's high-level APIs — `Module<T>`, `T
 
 ## [NivaraClassifier/README.md](NivaraClassifier/README.md) — Word-Level Text Classifier
 
-Trains a sentiment classifier using learned embeddings and an MLP head (or a multi-branch TextCNN). Exercises the full autograd training pipeline: synthetic data generation → tokenization → embedding → pooling → classification loss → training → inference.
+Trains a sentiment classifier using learned embeddings and an MLP head (or a multi-branch TextCNN). Exercises the full autograd training pipeline: synthetic data generation → tokenization → embedding → pooling → classification loss → training → inference. Also folds in the former ONNX export workflow: train, `--save`, `--export-onnx`, and `--command onnx-compare` validates Nivara vs ONNX Runtime parity (within 1e-4); `--load-onnx` runs prediction through ONNX Runtime.
 
 ## [NivaraFineTuning/README.md](NivaraFineTuning/README.md) — DistilBERT Fine-Tuning on GLUE SST-2
 
@@ -46,6 +46,4 @@ Loads pre-trained HuggingFace models and runs forward inference entirely within 
 
 Trains a VAE to learn latent representations of synthetic 2D patterns. Supports both MLP and convolutional (`Conv2d`/`ConvTranspose2d`) architectures. Demonstrates encoder–decoder design, reparameterization trick, and latent space exploration (generation, interpolation, per-dimension walks).
 
-## [NivaraClassifier/README.md](NivaraClassifier/README.md) - ONNX export/deploy (via NivaraClassifier)
 
-NivaraClassifier now folds the former `NivaraOnnxExport` workflow: train, `--save`, `--export-onnx`, and `--command onnx-compare` validates Nivara vs ONNX Runtime parity (within 1e-4); `--load-onnx` runs prediction through ONNX Runtime.
