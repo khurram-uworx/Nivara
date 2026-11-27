@@ -43,6 +43,8 @@ Review these files for anything that changed since the last tag and refresh as n
 
 For `README.md`, `AGENTS.md`, and `RELEASING.md`, explicitly verify claims about tooling, publishing, dependencies, and measured figures against the current source of truth (`.github/workflows/*`, `*.csproj`, and current test/build artifacts) so drift does not carry into the release.
 
+**Always create a GitHub issue** to track docs refresh for the release (use `gh issue create --repo khurram-uworx/Nivara`). Use `release/TASK-TEMPLATE-DOCS.md` as the canonical issue body/checklist template so the full Step 2/Step 6 review set, named owners, source-of-truth checks, and scope justifications are consistent. Title it clearly, e.g. `[release vX.Y.Z] Docs refresh (Step 2/Step 6)`, and link it from the PR. If the full review is completed before opening the PR, still create the issue and close it with a note (or reference it in the PR) so the release process always produces this tracking issue. See #1507 for the standing enforcement policy.
+
 ### Step 3 — Bump package versions
 
 In both `src/Nivara/Nivara.csproj` and `src/Nivara.Extensions/Nivara.Extensions.csproj`:
@@ -218,14 +220,14 @@ gh pr create --repo khurram-uworx/Nivara --base main \
   --title "chore: prepare vX.Y.Z release" --body-file pr-body.md
 ```
 
-**Always create a GitHub issue** to track docs refresh for the release (use `gh issue create --repo khurram-uworx/Nivara`). Title it clearly, e.g. `[release vX.Y.Z] Docs refresh (Step 2/Step 6)`, listing the required review set and named owners in the issue body; link it from the PR.
+**Always create/link the GitHub issue** to track docs refresh for the release (created in Step 2 from `release/TASK-TEMPLATE-DOCS.md`; use `gh issue create --repo khurram-uworx/Nivara` if not already created). Title it clearly, e.g. `[release vX.Y.Z] Docs refresh (Step 2/Step 6)`, listing the required review set and named owners in the issue body; link it from the PR.
 
 Write the release retrospective/review as `release/vX.Y.Z/RELEASE-REVIEW.md` (not under `docs/`) so it does not churn `DocsCoveragePins` / doc-coverage tests. Commit that file with the release prep when applicable.
 
 The PR description must include:
 - A checklist confirming which benchmarks were actually run (with paths to saved JSON
   output where applicable).
-- Links to the tracking issues created for **benchmark README table refresh** (Step 5) and **docs refresh** (this step), with status noted.
+- Links to the tracking issues created for **benchmark README table refresh** (Step 5, from `release/TASK-TEMPLATE-BENCHMARKS.md`) and **docs refresh** (Step 2/Step 6, from `release/TASK-TEMPLATE-DOCS.md`), with status noted.
 - Paths to the committed benchmark evidence under `release/<version>/` (canonical,
   permanent) and, optionally, the PR attachments used for review.
 - Any benchmarks that could not be run and the reason (missing deps, etc.).
